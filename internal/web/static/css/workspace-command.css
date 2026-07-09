@@ -115,6 +115,39 @@
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+.ws-cmd-view-switch {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-view-btn {
+  min-height: 28px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ws-ink-faint);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.ws-cmd-view-btn:hover {
+  color: var(--ws-faction);
+}
+.ws-cmd-view-btn.is-active {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-view-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 .ws-cmd-crest {
   width: 50px;
   height: 50px;
@@ -381,6 +414,755 @@
 .ws-cmd-stat.is-alert .ws-v,
 .ws-cmd-stat.is-alert .ws-l {
   color: var(--ws-alert);
+}
+
+/* ---------- Operations Map mode ---------- */
+.ws-cmd-map-shell {
+  position: relative;
+}
+.ws-cmd-opmap {
+  position: relative;
+  min-height: clamp(560px, 62vh, 780px);
+  overflow: hidden;
+  border: 1px solid var(--ws-line);
+  background:
+    radial-gradient(circle at 28% 28%, rgba(78, 149, 224, 0.14), transparent 28%),
+    radial-gradient(circle at 72% 74%, rgba(232, 181, 75, 0.1), transparent 26%),
+    linear-gradient(rgba(70, 211, 154, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.024) 1px, transparent 1px),
+    linear-gradient(180deg, var(--ws-panel), #0c0d11 78%);
+  background-size:
+    auto,
+    auto,
+    42px 42px,
+    42px 42px,
+    auto;
+  box-shadow: var(--ws-glow);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+}
+.ws-cmd-map-world {
+  min-height: inherit;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 40px 82px 76px 40px;
+  isolation: isolate;
+}
+.ws-cmd-map-floor {
+  position: absolute;
+  inset: 24px;
+  z-index: -1;
+  border: 1px solid rgba(70, 211, 154, 0.13);
+  background:
+    linear-gradient(120deg, transparent 0 44%, rgba(70, 211, 154, 0.1) 45% 46%, transparent 47%),
+    radial-gradient(circle at 50% 46%, rgba(70, 211, 154, 0.1), transparent 42%),
+    repeating-linear-gradient(0deg, transparent 0 37px, rgba(70, 211, 154, 0.045) 38px 39px),
+    repeating-linear-gradient(90deg, transparent 0 37px, rgba(70, 211, 154, 0.04) 38px 39px);
+  clip-path: polygon(3% 0, 100% 0, 100% 92%, 94% 100%, 0 100%, 0 7%);
+}
+.ws-cmd-map-floor::before,
+.ws-cmd-map-floor::after {
+  content: "";
+  position: absolute;
+  border: 1px solid rgba(70, 211, 154, 0.12);
+  pointer-events: none;
+}
+.ws-cmd-map-floor::before {
+  inset: 13%;
+}
+.ws-cmd-map-floor::after {
+  width: 160px;
+  height: 160px;
+  left: calc(50% - 80px);
+  top: calc(50% - 80px);
+  border-radius: 50%;
+}
+.ws-cmd-map-belt {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ws-cmd-map-belt-btn {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+.ws-cmd-map-belt-btn i {
+  font-size: 18px;
+  line-height: 1;
+}
+.ws-cmd-map-belt-btn:hover,
+.ws-cmd-map-belt-btn.is-active {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.1);
+}
+.ws-cmd-map-window-backdrop {
+  position: fixed;
+  inset: clamp(76px, 10vh, 112px) 16px 16px;
+  z-index: 10010;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(2, 3, 6, 0.48);
+  backdrop-filter: blur(2px);
+}
+.ws-cmd-map-window {
+  width: min(780px, 100%);
+  max-height: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--ws-line-bright);
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, #15171c, #0b0c10);
+  background-size:
+    34px 34px,
+    34px 34px,
+    auto;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.5),
+    var(--ws-glow);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+}
+.ws-cmd-map-window-inventory {
+  width: min(980px, 100%);
+}
+.ws-cmd-map-window-inspector {
+  width: min(620px, 100%);
+}
+.ws-cmd-map-window-head {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-map-window-head div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-display);
+  font-size: 17px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-window-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-window-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+.ws-cmd-map-window-close:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-map-window-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+.ws-cmd-map-window-section {
+  min-width: 0;
+}
+.ws-cmd-map-window-section.is-objective .ws-cmd-mission {
+  box-shadow: none;
+}
+.ws-cmd-map-zone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0 12px;
+}
+.ws-cmd-map-zone-head div {
+  min-width: 0;
+}
+.ws-cmd-map-zone-head span {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-zone-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #eef0f3;
+  font-size: 15px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-map-zone-count {
+  min-width: 32px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.06);
+  font-family: var(--ws-font-mono);
+  font-size: 14px;
+}
+.ws-cmd-map-task-list,
+.ws-cmd-map-station-grid,
+.ws-cmd-map-agent-field,
+.ws-cmd-map-inspector-card {
+  padding: 0;
+}
+.ws-cmd-map-task-list {
+  display: grid;
+  gap: 8px;
+}
+.ws-cmd-map-task-row,
+.ws-cmd-map-station,
+.ws-cmd-map-inventory-slot {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.ws-cmd-map-task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+}
+.ws-cmd-map-task-row:hover,
+.ws-cmd-map-station:hover,
+.ws-cmd-map-inventory-slot:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-map-task-row:focus-visible,
+.ws-cmd-map-station:focus-visible,
+.ws-cmd-map-inventory-slot:focus-visible,
+.ws-cmd-map-zone-action:focus-visible,
+.ws-cmd-map-inventory-total:focus-visible,
+.ws-cmd-map-inventory-badge:focus-visible,
+.ws-cmd-map-inventory-group button:focus-visible,
+.ws-cmd-map-agent:focus-visible,
+.ws-cmd-map-belt-btn:focus-visible,
+.ws-cmd-map-window-close:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-task-name,
+.ws-cmd-map-slot-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-task-status,
+.ws-cmd-map-inventory-slot em {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  font-style: normal;
+}
+.ws-cmd-map-task-row.alert .ws-cmd-map-task-status {
+  color: var(--ws-alert);
+}
+.ws-cmd-map-task-row.working .ws-cmd-map-task-status {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-zone-action {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-station-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ws-cmd-map-station {
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 11px;
+}
+.ws-cmd-map-station span {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-map-station strong {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 24px;
+}
+.ws-cmd-map-agent-field {
+  width: min(100%, 980px);
+  min-height: 410px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  align-content: center;
+  justify-content: center;
+  gap: 18px;
+  position: relative;
+}
+.ws-cmd-map-agent {
+  min-width: 0;
+  min-height: 152px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  padding: 12px 10px 10px;
+  border: 1px solid var(--ws-line);
+  background: radial-gradient(circle at 50% 24%, rgba(70, 211, 154, 0.13), rgba(0, 0, 0, 0.16) 62%);
+  color: var(--ws-ink);
+  cursor: pointer;
+  transition:
+    transform 0.22s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+}
+.ws-cmd-map-agent:hover,
+.ws-cmd-map-agent.is-selected {
+  border-color: var(--ws-faction);
+  background: radial-gradient(circle at 50% 24%, rgba(70, 211, 154, 0.23), rgba(0, 0, 0, 0.12) 64%);
+}
+.ws-cmd-map-agent.alert {
+  border-color: rgba(226, 101, 77, 0.52);
+  background: radial-gradient(circle at 50% 24%, rgba(226, 101, 77, 0.2), rgba(0, 0, 0, 0.12) 64%);
+}
+.ws-cmd-map-agent.working {
+  border-color: rgba(70, 211, 154, 0.52);
+}
+.ws-cmd-map-agent.toward-tasks {
+  transform: translateY(-4px);
+}
+.ws-cmd-map-agent.toward-tools {
+  transform: translate(5px, -5px);
+}
+.ws-cmd-map-agent.is-selected {
+  transform: translateY(-7px);
+}
+.ws-cmd-map-agent-path {
+  position: absolute;
+  inset: auto 16px 12px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(70, 211, 154, 0.8), transparent);
+  opacity: 0.32;
+}
+.ws-cmd-map-agent.alert .ws-cmd-map-agent-path {
+  background: linear-gradient(90deg, transparent, rgba(226, 101, 77, 0.9), transparent);
+}
+.ws-cmd-map-agent-copy {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+.ws-cmd-map-agent-copy strong,
+.ws-cmd-map-agent-copy span,
+.ws-cmd-map-agent-copy em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-agent-copy strong {
+  color: #eef0f3;
+  font-size: 13px;
+}
+.ws-cmd-map-agent-copy span {
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+}
+.ws-cmd-map-agent-copy em {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  font-style: normal;
+}
+.ws-cmd-map-agent.alert .ws-cmd-map-agent-copy em {
+  color: var(--ws-alert);
+}
+.ws-cmd-map-inspector-card {
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-map-agent-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-map-agent-sheet-head .ws-cmd-character {
+  width: 74px;
+  height: 74px;
+  flex: 0 0 auto;
+}
+.ws-cmd-map-agent-sheet-head div {
+  min-width: 0;
+}
+.ws-cmd-map-agent-sheet-head span {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-agent-sheet-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #eef0f3;
+  font-family: var(--ws-font-display);
+  font-size: 22px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-map-agent-sheet-head p {
+  margin: 6px 0 0;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-sheet {
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-rpg-status-strip,
+.ws-cmd-rpg-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-rpg-status-strip strong,
+.ws-cmd-rpg-status-strip span:last-child,
+.ws-cmd-rpg-sheet-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-status-strip span:last-child {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-rpg-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.ws-cmd-rpg-stat {
+  min-height: 82px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 5px;
+  border: 1px solid var(--ws-line);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(70, 211, 154, 0.11), transparent 58%),
+    rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-rpg-stat span,
+.ws-cmd-rpg-quest-card span,
+.ws-cmd-rpg-sheet-row span {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-stat strong {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-display);
+  font-size: 27px;
+  line-height: 1;
+}
+.ws-cmd-rpg-quest-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-rpg-quest-card strong {
+  min-width: 0;
+  color: #eef0f3;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-quest-card p {
+  margin: 0;
+  min-width: 0;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-sheet-row {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.ws-cmd-rpg-sheet-row strong {
+  color: var(--ws-ink);
+  font-size: 12px;
+  text-align: right;
+}
+.ws-cmd-rpg-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ws-cmd-rpg-effects span {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 4px 8px;
+}
+.ws-cmd-map-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-cmd-map-inventory-box {
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-map-inventory-summary {
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-map-inventory-total {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.07);
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 10px 12px;
+}
+.ws-cmd-map-inventory-total strong {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 20px;
+}
+.ws-cmd-map-inventory-badges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.ws-cmd-map-inventory-badge {
+  min-width: 0;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  padding: 7px 8px;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-inventory-badge i {
+  color: var(--ws-faction);
+  font-size: 16px;
+}
+.ws-cmd-map-inventory-badge span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-inventory-badge strong {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-inventory-badge.is-active {
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+  color: var(--ws-faction);
+}
+.ws-cmd-map-inventory-drawer {
+  display: grid;
+  gap: 10px;
+}
+.ws-cmd-map-inventory-group {
+  display: none;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.ws-cmd-map-inventory-group.is-active {
+  display: block;
+}
+.ws-cmd-map-inventory-group header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-map-inventory-group header span {
+  display: block;
+  color: var(--ws-ink-faint);
+  font-size: 11px;
+}
+.ws-cmd-map-inventory-group header strong {
+  color: #eef0f3;
+}
+.ws-cmd-map-inventory-group button {
+  border: 1px solid var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 7px 9px;
+}
+.ws-cmd-map-inventory-list {
+  padding: 8px 9px;
+}
+.ws-cmd-map-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 9px;
+}
+.ws-cmd-map-inventory-slot {
+  min-height: 116px;
+  display: grid;
+  grid-template-rows: auto minmax(0, auto) auto;
+  justify-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 10px 8px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(70, 211, 154, 0.09), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-empty {
+  cursor: default;
+  color: var(--ws-ink-faint);
+  border-style: dashed;
+  opacity: 0.68;
+}
+.ws-cmd-map-inventory-slot.is-empty:hover {
+  border-color: var(--ws-line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.ws-cmd-map-slot-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.07);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 18px;
+  line-height: 1;
+}
+.ws-cmd-map-slot-name {
+  width: 100%;
+  color: #eef0f3;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ws-cmd-map-empty {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  color: var(--ws-ink-faint);
+  font-size: 13px;
+}
+.ws-cmd-map-empty strong {
+  color: var(--ws-ink);
 }
 
 /* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
@@ -2526,6 +3308,9 @@
   .ws-cmd-mission.is-empty {
     max-height: none;
   }
+  .ws-cmd-map-world {
+    padding: 34px 76px 72px 34px;
+  }
   .ws-cmd-deck {
     grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr);
   }
@@ -2550,6 +3335,9 @@
   .ws-cmd-topbar {
     align-items: flex-start;
   }
+  .ws-cmd-view-switch {
+    margin-left: 0;
+  }
   .ws-cmd-title {
     flex-basis: calc(100% - 70px);
   }
@@ -2573,6 +3361,12 @@
   .ws-cmd-layout {
     grid-template-columns: 1fr;
   }
+  .ws-cmd-map-world {
+    padding: 28px 72px 72px 28px;
+  }
+  .ws-cmd-map-window-backdrop {
+    padding: 18px;
+  }
   .ws-cmd-mission {
     flex-direction: column;
   }
@@ -2589,6 +3383,16 @@
 @media (max-width: 767px) {
   .ws-cmd-deck {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-map-agent-field {
+    min-height: 0;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
+  .ws-cmd-rpg-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ws-cmd-map-inventory-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   }
   .ws-cmd-agent-stage {
     min-height: 450px;
@@ -2618,6 +3422,61 @@
   .ws-cmd-nav-btn {
     flex: 1 1 calc(50% - 8px);
     justify-content: center;
+  }
+  .ws-cmd-view-switch {
+    flex: 1 1 100%;
+  }
+  .ws-cmd-view-btn {
+    flex: 1 1 0;
+  }
+  .ws-cmd-opmap {
+    min-height: 560px;
+  }
+  .ws-cmd-map-world {
+    padding: 24px 16px 88px;
+  }
+  .ws-cmd-map-floor {
+    inset: 14px;
+  }
+  .ws-cmd-map-belt {
+    left: 50%;
+    right: auto;
+    bottom: 16px;
+    flex-direction: row;
+    transform: translateX(-50%);
+  }
+  .ws-cmd-map-belt-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .ws-cmd-map-window-backdrop {
+    padding: 12px;
+  }
+  .ws-cmd-map-window {
+    max-height: calc(100% - 12px);
+  }
+  .ws-cmd-map-station-grid,
+  .ws-cmd-map-inventory-badges {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-map-task-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-map-inventory-group header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ws-cmd-map-inventory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ws-cmd-map-inventory-slot {
+    min-height: 104px;
+  }
+  .ws-cmd-rpg-sheet-row {
+    display: grid;
+  }
+  .ws-cmd-rpg-sheet-row strong {
+    text-align: left;
   }
   .ws-cmd-crest {
     width: 42px;
@@ -2690,7 +3549,9 @@
   }
   .ws-cmd-mission,
   .ws-cmd-garrison,
-  .ws-cmd-rail {
+  .ws-cmd-rail,
+  .ws-cmd-map-world,
+  .ws-cmd-map-window {
     animation: ws-cmd-rise 0.4s ease both;
     animation-delay: 0.05s;
   }
@@ -2705,5 +3566,11 @@
   }
   .ws-cmd-modal-panel {
     animation: ws-cmd-rise 0.22s ease both;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-cmd-map-agent,
+  .ws-cmd-map-window {
+    transition: none;
   }
 }

@@ -704,6 +704,93 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(mobileGeometry.stageBottom).toBeLessThanOrEqual(mobileGeometry.overviewTop || 0);
     expect(mobileGeometry.pageWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
   });
+
+  test('operations map switches from details, selects agents, and opens inventory', async ({
+    page
+  }) => {
+    await installRosterRoutes(page);
+    await page.addInitScript(() => {
+      window.localStorage.removeItem('oriWorkspaceCommandViewMode');
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/workspaces/roster-ws');
+
+    await page.locator('#workspaceCommandView [data-cmd-view-mode="map"]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-opmap')).toBeVisible();
+    await expect(page.locator('#workspaceCommandView [data-map-zone="mission"]')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView [data-map-zone="tasks"]')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView [data-map-zone="tools"]')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView [data-map-zone="agents"]')).toContainText(
+      'Research Analyst'
+    );
+
+    await page.locator('#workspaceCommandView [data-cmd-map-window="inventory"]').click();
+    const inventoryWindow = page.locator('#workspaceCommandView .ws-cmd-map-window');
+    await expect(inventoryWindow).toBeVisible();
+    await expect(inventoryWindow).toContainText('Inventory');
+    await expect(
+      page.locator(
+        '#workspaceCommandView .ws-cmd-map-inventory-group.is-active .ws-cmd-map-inventory-grid'
+      )
+    ).toBeVisible();
+    await expect(
+      page.locator('#workspaceCommandView .ws-cmd-map-inventory-slot').first()
+    ).toBeVisible();
+    const inventoryGeometry = await inventoryWindow.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        viewportHeight: window.innerHeight
+      };
+    });
+    expect(inventoryGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(inventoryGeometry.bottom).toBeLessThanOrEqual(inventoryGeometry.viewportHeight);
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-inventory-badge')).toContainText([
+      'Notes',
+      'Schedules',
+      'Sessions',
+      'Linked Folders',
+      'Files',
+      'Systems'
+    ]);
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
+
+    await page.locator('#workspaceCommandView [data-cmd-map-window="objectives"]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toContainText(
+      'Plan the work'
+    );
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+
+    await page
+      .locator('#workspaceCommandView .ws-cmd-map-agent')
+      .filter({ hasText: 'Research Analyst' })
+      .click();
+    const inspector = page.locator('#workspaceCommandView .ws-cmd-map-window');
+    await expect(inspector).toContainText('Research Analyst');
+    await expect(inspector).toContainText('Needs input');
+    await expect(inspector).toContainText('Current Quest');
+    await expect(inspector).toContainText('Quests');
+    await expect(inspector).toContainText('Skills');
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileGeometry = await page
+      .locator('#workspaceCommandView .ws-cmd-opmap')
+      .evaluate(() => {
+        return {
+          pageWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth
+        };
+      });
+    expect(mobileGeometry.pageWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
+
+    await page.locator('#workspaceCommandView [data-cmd-view-mode="details"]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-deck')).toBeVisible();
+  });
 });
 
 test.describe('Task Output Contracts', () => {

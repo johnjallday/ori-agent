@@ -8,7 +8,9 @@
  */
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
+const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
 const AGENT_TAB_KEYS = ['overview', 'tasks', 'loadout', 'recent'];
+const COMMAND_VIEW_MODES = ['details', 'map'];
 
 function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -24,7 +26,11 @@ export class WorkspaceCommandView {
     this.page = page || null;
     this.container = document.getElementById('workspaceCommandView');
     this.active = false;
+    this.viewMode = this.readCommandViewModePreference();
     this.activeRailSection = '';
+    this.activeMapWindow = '';
+    this.mapInventoryOpen = false;
+    this.mapInventorySection = '';
     this.statModalSection = '';
     this.statModalEl = null;
     this.statModalTrigger = null;
@@ -58,8 +64,50 @@ export class WorkspaceCommandView {
     this.activate();
   }
 
-  // The Detailed view (and its toggle) is gone: drop the stale localStorage
-  // preference and strip any lingering ?view= param from deep links.
+  normalizeCommandViewMode(mode) {
+    const normalized = String(mode || '')
+      .trim()
+      .toLowerCase();
+    return COMMAND_VIEW_MODES.includes(normalized) ? normalized : 'details';
+  }
+
+  readCommandViewModePreference() {
+    if (typeof localStorage === 'undefined') return 'details';
+    try {
+      return this.normalizeCommandViewMode(localStorage.getItem(VIEW_MODE_STORAGE_KEY));
+    } catch (_error) {
+      return 'details';
+    }
+  }
+
+  persistCommandViewMode(mode) {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, this.normalizeCommandViewMode(mode));
+    } catch (_error) {
+      // Storage is best effort; the current render can continue without persistence.
+    }
+  }
+
+  setCommandViewMode(mode, { focus = true } = {}) {
+    const nextMode = this.normalizeCommandViewMode(mode);
+    if (nextMode === this.viewMode) return;
+    this.viewMode = nextMode;
+    this.persistCommandViewMode(nextMode);
+    this.activeRailSection = '';
+    if (nextMode === 'details') {
+      this.activeMapWindow = '';
+      this.mapInventoryOpen = false;
+      this.mapInventorySection = '';
+    }
+    this.restoreSharedSurfaces();
+    this.render();
+    if (!focus || !this.container || typeof this.container.querySelector !== 'function') return;
+    const btn = this.container.querySelector('[data-cmd-view-mode="' + nextMode + '"]');
+    if (btn && typeof btn.focus === 'function') btn.focus();
+  }
+
+  // Drop the stale preference and URL param from the old deleted Detailed/Command toggle.
   retireLegacyViewPreference() {
     try {
       localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -97,6 +145,16 @@ export class WorkspaceCommandView {
   handleGlobalKeydown(event) {
     if (!this.active || !event || event.key !== 'Escape') return;
     if (this.statModalSection || this.identityEditMode) return;
+    if (this.viewMode === 'map' && this.activeMapWindow) {
+      this.activeMapWindow = '';
+      this.render();
+      return;
+    }
+    if (this.viewMode === 'map' && this.mapInventoryOpen) {
+      this.mapInventoryOpen = false;
+      this.render();
+      return;
+    }
     if (!this.activeRailSection) return;
     this.activeRailSection = '';
     this.render();
@@ -233,6 +291,33 @@ export class WorkspaceCommandView {
     );
   }
 
+  commandViewSwitchHTML() {
+    const modes = [
+      { key: 'details', label: 'Details' },
+      { key: 'map', label: 'Map' }
+    ];
+    return (
+      '<div class="ws-cmd-view-switch" role="group" aria-label="Workspace view">' +
+      modes
+        .map(mode => {
+          const active = this.viewMode === mode.key;
+          return (
+            '<button type="button" class="ws-cmd-view-btn' +
+            (active ? ' is-active' : '') +
+            '" data-cmd-view-mode="' +
+            escapeHtml(mode.key) +
+            '" aria-pressed="' +
+            (active ? 'true' : 'false') +
+            '">' +
+            escapeHtml(mode.label) +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
   isGroupWorkspace() {
     const ws = (this.page && this.page.workspace) || {};
     return (
@@ -308,6 +393,7 @@ export class WorkspaceCommandView {
       '<a class="ws-cmd-nav-btn" href="' +
       escapeHtml(workflowHref) +
       '">Orchestration Skills</a>' +
+      this.commandViewSwitchHTML() +
       '</div>' +
       '<div class="ws-cmd-crest">' +
       '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">' +
@@ -531,25 +617,32 @@ export class WorkspaceCommandView {
     const mode = this.opsModeLabel();
     const stats = this.computeStats();
 
-    this.container.innerHTML =
-      this.commandBarHTML(ws, name, mode, stats) +
-      '<div class="ws-cmd-layout">' +
-      '<main class="ws-cmd-main">' +
-      this.renderMissionPanel() +
-      '<section class="ws-cmd-garrison">' +
-      this.renderGarrison() +
-      '</section>' +
-      '</main>' +
-      '<aside class="ws-cmd-rail">' +
-      this.renderRail() +
-      '</aside>' +
-      '</div>';
+    const body =
+      this.viewMode === 'map'
+        ? this.renderOperationsMap()
+        : '<div class="ws-cmd-layout">' +
+          '<main class="ws-cmd-main">' +
+          this.renderMissionPanel() +
+          '<section class="ws-cmd-garrison">' +
+          this.renderGarrison() +
+          '</section>' +
+          '</main>' +
+          '<aside class="ws-cmd-rail">' +
+          this.renderRail() +
+          '</aside>' +
+          '</div>';
+
+    this.container.innerHTML = this.commandBarHTML(ws, name, mode, stats) + body;
 
     this.bindIdentityControls();
     this.bindReadout();
     this.bindMissionPanel();
-    this.bindGarrison();
-    this.bindRail();
+    if (this.viewMode === 'map') {
+      this.bindOperationsMap();
+    } else {
+      this.bindGarrison();
+      this.bindRail();
+    }
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
@@ -573,6 +666,11 @@ export class WorkspaceCommandView {
     if (!root) return;
 
     root.addEventListener('click', event => {
+      const viewBtn = event.target.closest('[data-cmd-view-mode]');
+      if (viewBtn) {
+        this.setCommandViewMode(viewBtn.getAttribute('data-cmd-view-mode'), { focus: false });
+        return;
+      }
       const editBtn = event.target.closest('[data-cmd-edit-identity]');
       if (editBtn) {
         const field = editBtn.getAttribute('data-cmd-edit-identity');
@@ -2457,6 +2555,792 @@ export class WorkspaceCommandView {
       '</div>' +
       '</div>'
     );
+  }
+
+  // ---------- Operations Map mode ----------
+
+  taskStatusLabel(status) {
+    const normalized = String(status || 'pending')
+      .trim()
+      .replaceAll('_', ' ');
+    return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : 'Pending';
+  }
+
+  taskUpdatedTime(task) {
+    const raw = task?.updated_at || task?.created_at || '';
+    const time = Date.parse(raw);
+    return Number.isFinite(time) ? time : 0;
+  }
+
+  taskHumanLoopState(task) {
+    return String(task?.context?.human_loop?.state || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  isBlockedTask(task) {
+    const status = String(task?.status || '')
+      .trim()
+      .toLowerCase();
+    const humanLoop = this.taskHumanLoopState(task);
+    return status === 'blocked' || humanLoop === 'blocked';
+  }
+
+  isNeedsInputTask(task) {
+    const status = String(task?.status || '')
+      .trim()
+      .toLowerCase();
+    const humanLoop = this.taskHumanLoopState(task);
+    return (
+      status === 'waiting_for_choice' ||
+      humanLoop === 'waiting_for_choice' ||
+      task?.context?.execution_step_waiting === true
+    );
+  }
+
+  isWorkingTask(task) {
+    return (
+      String(task?.status || '')
+        .trim()
+        .toLowerCase() === 'in_progress'
+    );
+  }
+
+  isQueuedTask(task) {
+    return (
+      String(task?.status || '')
+        .trim()
+        .toLowerCase() === 'pending'
+    );
+  }
+
+  taskPriority(task) {
+    if (this.isBlockedTask(task)) return 0;
+    if (this.isNeedsInputTask(task)) return 1;
+    if (this.isWorkingTask(task)) return 2;
+    if (this.isQueuedTask(task)) return 3;
+    return 4;
+  }
+
+  mapAgentStatus(agent) {
+    const tasks = Array.isArray(agent?.tasks) ? agent.tasks : [];
+    if (tasks.some(task => this.isBlockedTask(task))) {
+      return {
+        key: 'blocked',
+        label: 'Blocked',
+        detail: 'Needs attention before work can continue'
+      };
+    }
+    if (tasks.some(task => this.isNeedsInputTask(task))) {
+      return { key: 'needs-input', label: 'Needs input', detail: 'Waiting for user input' };
+    }
+    if (tasks.some(task => this.isWorkingTask(task))) {
+      return { key: 'working', label: 'Working', detail: 'Task in progress' };
+    }
+    if (tasks.some(task => this.isQueuedTask(task))) {
+      return { key: 'waiting', label: 'Waiting', detail: 'Task queued' };
+    }
+    return agent?.status || { key: 'idle', label: 'Idle', detail: 'No active tasks' };
+  }
+
+  mapAgentViewModels() {
+    const groups = this.agentGroups();
+    const selectedGroup = this.selectedAgentGroup(groups.agents);
+    if (!selectedGroup) {
+      this.selectedAgentKey = '';
+      return { agents: [], unassigned: groups.unassigned, selected: null };
+    }
+    const agents = groups.agents
+      .map(group => this.agentViewModel(group))
+      .filter(Boolean)
+      .map(agent => {
+        const status = this.mapAgentStatus(agent);
+        return {
+          ...agent,
+          status,
+          tone: this.statusTone(status.key, status.label),
+          destination: this.agentMapDestination(agent, status)
+        };
+      });
+    const selected = agents.find(agent => agent.key === this.selectedAgentKey) || agents[0] || null;
+    if (selected) this.selectedAgentKey = selected.key;
+    return { agents, unassigned: groups.unassigned, selected };
+  }
+
+  priorityTaskForAgent(agent) {
+    const tasks = Array.isArray(agent?.tasks) ? agent.tasks.slice() : [];
+    if (!tasks.length) return null;
+    return tasks.sort((left, right) => {
+      const priorityDelta = this.taskPriority(left) - this.taskPriority(right);
+      if (priorityDelta !== 0) return priorityDelta;
+      return this.taskUpdatedTime(right) - this.taskUpdatedTime(left);
+    })[0];
+  }
+
+  latestTaskActivity(task) {
+    const taskId = String(task?.id || '');
+    const map = this.page && this.page._taskActivity;
+    if (!taskId || !map || typeof map.get !== 'function') return null;
+    return map.get(taskId) || null;
+  }
+
+  formatRelativeTime(value) {
+    const time = typeof value === 'number' ? value : Date.parse(value || '');
+    if (!Number.isFinite(time) || time <= 0) return '';
+    const diff = Date.now() - time;
+    const abs = Math.abs(diff);
+    const ahead = diff < 0;
+    if (abs < 60000) return 'just now';
+    const mins = Math.round(abs / 60000);
+    if (mins < 60) return ahead ? 'in ' + mins + 'm' : mins + 'm ago';
+    const hours = Math.round(abs / 3600000);
+    if (hours < 24) return ahead ? 'in ' + hours + 'h' : hours + 'h ago';
+    const days = Math.round(abs / 86400000);
+    if (days < 7) return ahead ? 'in ' + days + 'd' : days + 'd ago';
+    return new Date(time).toLocaleDateString();
+  }
+
+  agentActivitySummary(agent) {
+    const task = agent?.currentTask || this.priorityTaskForAgent(agent);
+    if (!task) {
+      const recent = this.recentActivityItems(agent)[0];
+      if (!recent) return null;
+      return {
+        taskLabel: recent.title,
+        statusLabel: recent.status,
+        activityLabel: recent.kind + ' updated',
+        whenLabel: this.formatRelativeTime(recent.time),
+        timestamp: recent.timestamp
+      };
+    }
+    const activity = this.latestTaskActivity(task);
+    const timestamp = activity?.at || this.taskUpdatedTime(task);
+    return {
+      taskLabel: String(task.description || task.name || task.title || 'Untitled task'),
+      statusLabel: this.taskStatusLabel(task.status),
+      activityLabel: activity?.label || this.taskStatusLabel(task.status),
+      whenLabel: this.formatRelativeTime(timestamp),
+      timestamp: task.updated_at || task.created_at || ''
+    };
+  }
+
+  agentMapDestination(agent, status = agent?.status) {
+    const key = String(status?.key || '')
+      .trim()
+      .toLowerCase();
+    if (key === 'blocked' || key === 'needs-input') return 'tasks';
+    if (key === 'working') {
+      const summary = this.agentActivitySummary(agent);
+      return /tool|→/.test(String(summary?.activityLabel || '').toLowerCase()) ? 'tools' : 'tasks';
+    }
+    if (key === 'waiting') return 'hub';
+    return 'hub';
+  }
+
+  openMapTasks() {
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    const terminal = new Set(['completed', 'cancelled', 'timeout']);
+    return tasks
+      .filter(task => !task?.parent_task_id)
+      .filter(task => !terminal.has(String(task?.status || '').toLowerCase()))
+      .sort((left, right) => {
+        const priorityDelta = this.taskPriority(left) - this.taskPriority(right);
+        if (priorityDelta !== 0) return priorityDelta;
+        return this.taskUpdatedTime(right) - this.taskUpdatedTime(left);
+      });
+  }
+
+  mapZoneHeaderHTML(kicker, title, count = '') {
+    return (
+      '<header class="ws-cmd-map-zone-head"><div><span>' +
+      escapeHtml(kicker) +
+      '</span><strong>' +
+      escapeHtml(title) +
+      '</strong></div>' +
+      (count !== '' ? '<span class="ws-cmd-map-zone-count">' + escapeHtml(count) + '</span>' : '') +
+      '</header>'
+    );
+  }
+
+  mapWindowOptions() {
+    return [
+      { key: 'objective', label: 'Workspace Objective', icon: 'bi-bullseye' },
+      { key: 'objectives', label: 'Objectives', icon: 'bi-list-check' },
+      { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
+      { key: 'stations', label: 'Stations', icon: 'bi-cpu' }
+    ];
+  }
+
+  renderMapToolTray() {
+    return (
+      '<nav class="ws-cmd-map-belt" aria-label="Map windows">' +
+      this.mapWindowOptions()
+        .map(item => {
+          const active = this.activeMapWindow === item.key;
+          return (
+            '<button type="button" class="ws-cmd-map-belt-btn' +
+            (active ? ' is-active' : '') +
+            '" data-cmd-map-window="' +
+            escapeHtml(item.key) +
+            '" aria-label="' +
+            escapeHtml(item.label) +
+            '" aria-pressed="' +
+            (active ? 'true' : 'false') +
+            '" title="' +
+            escapeHtml(item.label) +
+            '"><i class="bi ' +
+            escapeHtml(item.icon) +
+            '" aria-hidden="true"></i><span class="sr-only">' +
+            escapeHtml(item.label) +
+            '</span></button>'
+          );
+        })
+        .join('') +
+      '</nav>'
+    );
+  }
+
+  renderMapMissionPanel() {
+    return (
+      '<div class="ws-cmd-map-window-section is-objective">' + this.renderMissionPanel() + '</div>'
+    );
+  }
+
+  renderMapTasksPanel() {
+    const tasks = this.openMapTasks();
+    const shown = tasks.slice(0, 4);
+    const rows = shown.length
+      ? shown
+          .map(task => {
+            const id = String(task.id || '');
+            const label = String(task.description || task.name || task.title || 'Untitled task');
+            const status = String(task.status || 'pending')
+              .trim()
+              .toLowerCase();
+            return (
+              '<button type="button" class="ws-cmd-map-task-row ' +
+              escapeHtml(this.taskTone(status)) +
+              '" data-cmd-open-task="' +
+              escapeHtml(id) +
+              '">' +
+              '<span class="ws-cmd-map-task-name">' +
+              escapeHtml(label) +
+              '</span><span class="ws-cmd-map-task-status">' +
+              escapeHtml(this.taskStatusLabel(status)) +
+              '</span></button>'
+            );
+          })
+          .join('')
+      : '<div class="ws-cmd-map-empty">No open tasks.</div>';
+    return (
+      '<div class="ws-cmd-map-window-section is-objectives">' +
+      this.mapZoneHeaderHTML('Objectives', 'Active Tasks', tasks.length) +
+      '<div class="ws-cmd-map-task-list">' +
+      rows +
+      '</div>' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-map-open-modal="tasks">Open Tasks</button>' +
+      '</div>'
+    );
+  }
+
+  renderMapStationsPanel() {
+    const stats = this.computeStats();
+    const systemsCount = this.systemTabs().length;
+    return (
+      '<div class="ws-cmd-map-window-section is-stations">' +
+      this.mapZoneHeaderHTML('Stations', 'Tools & Systems', stats.tools + systemsCount) +
+      '<div class="ws-cmd-map-station-grid">' +
+      '<button type="button" class="ws-cmd-map-station" data-cmd-map-open-modal="tools"><span>MCP + Skills</span><strong>' +
+      escapeHtml(stats.tools) +
+      '</strong></button>' +
+      '<button type="button" class="ws-cmd-map-station" data-cmd-map-inventory-action="systems"><span>Systems</span><strong>' +
+      escapeHtml(systemsCount) +
+      '</strong></button>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  renderMapAgentUnits(agents) {
+    if (!agents.length) {
+      return (
+        '<div class="ws-cmd-map-empty is-agent-empty">' +
+        '<strong>No agents in this workspace</strong>' +
+        '<span>Add an agent to begin assigning work.</span>' +
+        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Add Agent</button>' +
+        '</div>'
+      );
+    }
+    return agents
+      .map((agent, index) => {
+        const selected = agent.key === this.selectedAgentKey;
+        const destination = agent.destination || 'hub';
+        return (
+          '<button type="button" class="ws-cmd-map-agent ' +
+          escapeHtml(agent.tone) +
+          (selected ? ' is-selected' : '') +
+          ' toward-' +
+          escapeHtml(destination) +
+          '" data-cmd-map-select-agent="' +
+          escapeHtml(agent.encodedName) +
+          '" data-agent-key="' +
+          escapeHtml(agent.key) +
+          '" style="--agent-map-index:' +
+          index +
+          '" aria-pressed="' +
+          (selected ? 'true' : 'false') +
+          '" aria-label="Select ' +
+          escapeHtml(agent.name) +
+          ', ' +
+          escapeHtml(agent.status?.label || 'Idle') +
+          '">' +
+          '<span class="ws-cmd-map-agent-path" aria-hidden="true"></span>' +
+          this.agentCharacterHTML(agent, 'roster') +
+          '<span class="ws-cmd-map-agent-copy"><strong>' +
+          escapeHtml(agent.name) +
+          '</strong><span>' +
+          escapeHtml(agent.role?.label || 'Agent') +
+          '</span><em>' +
+          escapeHtml(agent.status?.label || 'Idle') +
+          '</em></span></button>'
+        );
+      })
+      .join('');
+  }
+
+  renderMapAgentsZone(agents) {
+    return (
+      '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
+      '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
+      '<div class="ws-cmd-map-agent-field">' +
+      this.renderMapAgentUnits(agents) +
+      '</div></section>'
+    );
+  }
+
+  renderMapInspector(agent) {
+    if (!agent) {
+      return '<div class="ws-cmd-map-empty">Select an agent to inspect assignment, activity, and loadout.</div>';
+    }
+    const summary = this.agentActivitySummary(agent);
+    const tasks = Array.isArray(agent.tasks) ? agent.tasks : [];
+    const openTaskCount = tasks.filter(task => {
+      const status = String(task?.status || '').toLowerCase();
+      return !['completed', 'cancelled', 'timeout'].includes(status);
+    }).length;
+    const detailTarget = this.agentDetailTarget(agent);
+    const detailAction = detailTarget
+      ? '<a class="ws-cmd-agent-action" href="' + escapeHtml(detailTarget.href) + '">Open Agent</a>'
+      : '';
+    const statCards = [
+      { label: 'Quests', value: openTaskCount },
+      { label: 'Skills', value: Number(agent.skills?.count || 0) },
+      { label: 'Tools', value: agent.mcpNames.length },
+      { label: 'Units', value: agent.instanceCount }
+    ];
+    const statusEffects = [
+      agent.entry ? 'Entry Agent' : '',
+      agent.status?.label || 'Idle',
+      agent.model?.empty ? '' : agent.model?.label || ''
+    ].filter(Boolean);
+    return (
+      '<div class="ws-cmd-map-inspector-card" aria-label="' +
+      escapeHtml(agent.name) +
+      ' sheet">' +
+      '<div class="ws-cmd-map-agent-sheet-head">' +
+      this.agentCharacterHTML(agent, 'roster') +
+      '<div><span>Unit Sheet</span><strong>' +
+      escapeHtml(agent.name) +
+      '</strong><p>' +
+      escapeHtml(agent.role?.label || 'Agent') +
+      '</p></div></div>' +
+      '<div class="ws-cmd-rpg-sheet">' +
+      '<div class="ws-cmd-rpg-status-strip"><span class="ws-cmd-led ' +
+      escapeHtml(agent.tone) +
+      '"></span><strong>' +
+      escapeHtml(agent.status?.label || 'Idle') +
+      '</strong><span>' +
+      escapeHtml(agent.status?.detail || 'No active tasks') +
+      '</span></div>' +
+      '<div class="ws-cmd-rpg-stat-grid">' +
+      statCards
+        .map(
+          stat =>
+            '<div class="ws-cmd-rpg-stat"><span>' +
+            escapeHtml(stat.label) +
+            '</span><strong>' +
+            escapeHtml(stat.value) +
+            '</strong></div>'
+        )
+        .join('') +
+      '</div>' +
+      '<section class="ws-cmd-rpg-quest-card"><span>Current Quest</span><strong>' +
+      escapeHtml(summary?.taskLabel || 'No task in progress') +
+      '</strong><p>' +
+      escapeHtml(summary?.statusLabel || agent.status?.label || 'Idle') +
+      (summary?.activityLabel ? ' · ' + escapeHtml(summary.activityLabel) : '') +
+      (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
+      '</p></section>' +
+      '<div class="ws-cmd-rpg-sheet-row"><span>Recent Activity</span><strong>' +
+      escapeHtml(summary?.activityLabel || 'No recent activity') +
+      (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
+      '</strong></div>' +
+      '<div class="ws-cmd-rpg-effects">' +
+      statusEffects.map(effect => '<span>' + escapeHtml(effect) + '</span>').join('') +
+      '</div></div>' +
+      '<div class="ws-cmd-map-inspector-actions">' +
+      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-task="' +
+      escapeHtml(agent.encodedName) +
+      '">Give Task</button>' +
+      detailAction +
+      '</div></div>'
+    );
+  }
+
+  mapInventoryGroups() {
+    const page = this.page || {};
+    const folders = this.folderRowData();
+    const files = this.fileRowData();
+    return [
+      {
+        key: 'notes',
+        label: 'Notes',
+        icon: 'bi-journal-text',
+        count: Array.isArray(page.notes) ? page.notes.length : 0,
+        action: 'New Note',
+        empty: 'No notes yet.',
+        items: (Array.isArray(page.notes) ? page.notes : []).map(note => ({
+          label: note.name || note.title || 'Untitled Note',
+          meta: '',
+          section: 'notes',
+          id: String(note.id || '')
+        }))
+      },
+      {
+        key: 'schedules',
+        label: 'Schedules',
+        icon: 'bi-calendar2-week',
+        count: Array.isArray(page.schedules) ? page.schedules.length : 0,
+        action: 'Open Schedules',
+        empty: 'No schedules yet.',
+        items: (Array.isArray(page.schedules) ? page.schedules : []).map(schedule => ({
+          label: schedule.name || schedule.task_description || 'Unnamed Schedule',
+          meta: '',
+          section: 'schedules',
+          id: String(schedule.id || '')
+        }))
+      },
+      {
+        key: 'sessions',
+        label: 'Sessions',
+        icon: 'bi-chat-dots',
+        count: Array.isArray(page.sessions) ? page.sessions.length : 0,
+        action: 'New Session',
+        empty: 'No sessions yet.',
+        items: (Array.isArray(page.sessions) ? page.sessions : []).map(session => ({
+          label: session.title || session.name || 'Untitled Session',
+          meta: session.agent_name || '',
+          section: 'sessions',
+          id: String(session.id || '')
+        }))
+      },
+      {
+        key: 'folders',
+        label: 'Linked Folders',
+        icon: 'bi-folder2-open',
+        count: folders.length,
+        action: 'Link Folder',
+        empty: 'No linked folders yet.',
+        items: folders.map(folder => ({
+          label: folder.title || folder.name || folder.path || 'Unnamed Directory',
+          meta: folder.path || '',
+          section: 'folders',
+          id: String(folder.id || ''),
+          source: String(folder.source || 'reference')
+        }))
+      },
+      {
+        key: 'files',
+        label: 'Files',
+        icon: 'bi-file-earmark-text',
+        count: files.length,
+        action: 'Upload',
+        empty: 'No files yet.',
+        items: files.map(file => ({
+          label: this.fileTitle(file),
+          meta: this.fileMeta(file),
+          section: 'files',
+          id: String(file?.id || file?.file_meta?.name || this.fileTitle(file))
+        }))
+      },
+      {
+        key: 'systems',
+        label: 'Systems',
+        icon: 'bi-cpu',
+        count: this.systemTabs().length,
+        action: 'Open Systems',
+        empty: 'No systems configured.',
+        items: this.systemTabs().map(tab => ({
+          label: tab.label,
+          meta: 'Workspace system',
+          section: 'systems',
+          id: tab.key
+        }))
+      }
+    ];
+  }
+
+  renderMapInventoryItems(group) {
+    const items = Array.isArray(group?.items) ? group.items : [];
+    const visibleItems = items.slice(0, 11);
+    const slotCount = Math.max(
+      8,
+      Math.min(12, visibleItems.length + (visibleItems.length ? 1 : 0))
+    );
+    const slots = visibleItems.map(item => {
+      const attrs =
+        item.section === 'systems'
+          ? 'data-cmd-map-system-tab="' + escapeHtml(item.id) + '"'
+          : 'data-cmd-open-section="' +
+            escapeHtml(item.section) +
+            '" data-cmd-item-id="' +
+            escapeHtml(item.id) +
+            '" data-cmd-item-source="' +
+            escapeHtml(item.source || '') +
+            '"';
+      return (
+        '<button type="button" class="ws-cmd-map-inventory-slot" ' +
+        attrs +
+        ' aria-label="Open ' +
+        escapeHtml(item.label) +
+        '"><span class="ws-cmd-map-slot-icon"><i class="bi ' +
+        escapeHtml(group?.icon || 'bi-box') +
+        '" aria-hidden="true"></i></span><span class="ws-cmd-map-slot-name">' +
+        escapeHtml(item.label) +
+        '</span>' +
+        (item.meta
+          ? '<em>' + escapeHtml(item.meta) + '</em>'
+          : '<em>' + escapeHtml(group?.label || 'Item') + '</em>') +
+        '</button>'
+      );
+    });
+    while (slots.length < slotCount) {
+      slots.push(
+        '<div class="ws-cmd-map-inventory-slot is-empty"><span class="ws-cmd-map-slot-icon">+</span><span class="ws-cmd-map-slot-name">' +
+          escapeHtml(slots.length === 0 ? group?.empty || 'Empty slot' : 'Empty') +
+          '</span></div>'
+      );
+    }
+    return '<div class="ws-cmd-map-inventory-grid">' + slots.join('') + '</div>';
+  }
+
+  renderMapInventory() {
+    const groups = this.mapInventoryGroups();
+    const total = groups.reduce((sum, group) => sum + Number(group.count || 0), 0);
+    const activeKey = this.mapInventorySection || groups[0]?.key || '';
+    if (!this.mapInventorySection) this.mapInventorySection = activeKey;
+    return (
+      '<div class="ws-cmd-map-inventory-box">' +
+      '<div class="ws-cmd-map-inventory-summary">' +
+      '<div class="ws-cmd-map-inventory-total"><span>Items</span><strong>' +
+      escapeHtml(total) +
+      '</strong></div>' +
+      '<div class="ws-cmd-map-inventory-badges">' +
+      groups
+        .map(
+          group =>
+            '<button type="button" class="ws-cmd-map-inventory-badge' +
+            (activeKey === group.key ? ' is-active' : '') +
+            '" data-cmd-map-inventory-section="' +
+            escapeHtml(group.key) +
+            '"><i class="bi ' +
+            escapeHtml(group.icon || 'bi-box') +
+            '" aria-hidden="true"></i><span>' +
+            escapeHtml(group.label) +
+            '</span><strong>' +
+            escapeHtml(group.count) +
+            '</strong></button>'
+        )
+        .join('') +
+      '</div></div>' +
+      '<div class="ws-cmd-map-inventory-drawer">' +
+      groups
+        .map(
+          group =>
+            '<section class="ws-cmd-map-inventory-group' +
+            (activeKey === group.key ? ' is-active' : '') +
+            '">' +
+            '<header><div><span>' +
+            escapeHtml(group.label) +
+            '</span><strong>' +
+            escapeHtml(group.count) +
+            '</strong></div>' +
+            '<button type="button" data-cmd-map-inventory-action="' +
+            escapeHtml(group.key) +
+            '">' +
+            escapeHtml(group.action) +
+            '</button></header>' +
+            '<div class="ws-cmd-map-inventory-list">' +
+            this.renderMapInventoryItems(group) +
+            '</div></section>'
+        )
+        .join('') +
+      '</div></div>'
+    );
+  }
+
+  renderMapWindow(selectedAgent) {
+    const key = String(this.activeMapWindow || '').trim();
+    if (!key) return '';
+    const option =
+      this.mapWindowOptions().find(item => item.key === key) ||
+      (key === 'inspector'
+        ? { key: 'inspector', label: 'Unit Sheet', icon: 'bi-person-vcard' }
+        : null);
+    if (!option) return '';
+    const body = {
+      objective: () => this.renderMapMissionPanel(),
+      objectives: () => this.renderMapTasksPanel(),
+      inventory: () => this.renderMapInventory(),
+      stations: () => this.renderMapStationsPanel(),
+      inspector: () => this.renderMapInspector(selectedAgent)
+    }[key];
+    if (!body) return '';
+    return (
+      '<div class="ws-cmd-map-window-backdrop" data-cmd-map-window-backdrop>' +
+      '<section class="ws-cmd-map-window ws-cmd-map-window-' +
+      escapeHtml(key) +
+      '" role="dialog" aria-modal="true" aria-label="' +
+      escapeHtml(option.label) +
+      '">' +
+      '<header class="ws-cmd-map-window-head"><div><i class="bi ' +
+      escapeHtml(option.icon) +
+      '" aria-hidden="true"></i><span>' +
+      escapeHtml(option.label) +
+      '</span></div>' +
+      '<button type="button" class="ws-cmd-map-window-close" data-cmd-map-window-close aria-label="Close map window">×</button></header>' +
+      '<div class="ws-cmd-map-window-body">' +
+      body() +
+      '</div></section></div>'
+    );
+  }
+
+  renderOperationsMap() {
+    const { agents, selected } = this.mapAgentViewModels();
+    return (
+      '<div class="ws-cmd-map-shell">' +
+      '<div class="ws-cmd-opmap" role="region" aria-label="Workspace operations map">' +
+      this.renderMapAgentsZone(agents) +
+      this.renderMapToolTray() +
+      '</div>' +
+      this.renderMapWindow(selected) +
+      '</div>'
+    );
+  }
+
+  runMapInventoryAction(sectionKey, triggerButton) {
+    const section = String(sectionKey || '').trim();
+    if (section === 'systems') {
+      this.setCommandViewMode('details', { focus: false });
+      this.openSystemTab(this.activeSystemTab || 'memory');
+      return;
+    }
+    this.runRailPrimaryAction(section, triggerButton);
+  }
+
+  bindOperationsMap() {
+    const root = this.container && this.container.querySelector('.ws-cmd-map-shell');
+    if (!root) return;
+    root.addEventListener('click', event => {
+      const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const closeWindow = event.target.closest('[data-cmd-map-window-close]');
+      if (closeWindow) {
+        this.activeMapWindow = '';
+        this.render();
+        return;
+      }
+      const backdrop = event.target.closest('[data-cmd-map-window-backdrop]');
+      if (backdrop && event.target === backdrop) {
+        this.activeMapWindow = '';
+        this.render();
+        return;
+      }
+      const windowBtn = event.target.closest('[data-cmd-map-window]');
+      if (windowBtn) {
+        const nextWindow = windowBtn.getAttribute('data-cmd-map-window');
+        this.activeMapWindow = this.activeMapWindow === nextWindow ? '' : nextWindow;
+        if (this.activeMapWindow === 'inventory' && !this.mapInventorySection) {
+          this.mapInventorySection = 'notes';
+        }
+        this.render();
+        return;
+      }
+      const selectBtn = event.target.closest('[data-cmd-map-select-agent]');
+      if (selectBtn) {
+        this.activeMapWindow = 'inspector';
+        this.selectAgent(selectBtn.getAttribute('data-cmd-map-select-agent'), { focus: false });
+        return;
+      }
+      const addAgentBtn = event.target.closest('[data-cmd-add-agent]');
+      if (addAgentBtn && page && typeof page.openAddAgentModal === 'function') {
+        page.openAddAgentModal();
+        return;
+      }
+      const addTaskBtn = event.target.closest('[data-cmd-add-task]');
+      if (addTaskBtn && page && typeof page.showAddTaskModalForAgent === 'function') {
+        page.showAddTaskModalForAgent(addTaskBtn.getAttribute('data-cmd-add-task'));
+        return;
+      }
+      const openTaskBtn = event.target.closest('[data-cmd-open-task]');
+      if (openTaskBtn && page && typeof page.openTask === 'function') {
+        page.openTask(openTaskBtn.getAttribute('data-cmd-open-task'));
+        return;
+      }
+      const modalBtn = event.target.closest('[data-cmd-map-open-modal]');
+      if (modalBtn) {
+        this.openStatModal(modalBtn.getAttribute('data-cmd-map-open-modal'), modalBtn);
+        return;
+      }
+      const inventoryToggle = event.target.closest('[data-cmd-map-inventory-toggle]');
+      if (inventoryToggle) {
+        this.activeMapWindow = this.activeMapWindow === 'inventory' ? '' : 'inventory';
+        this.mapInventoryOpen = this.activeMapWindow === 'inventory';
+        if (!this.mapInventorySection) this.mapInventorySection = 'notes';
+        this.render();
+        return;
+      }
+      const inventorySection = event.target.closest('[data-cmd-map-inventory-section]');
+      if (inventorySection) {
+        this.activeMapWindow = 'inventory';
+        this.mapInventoryOpen = true;
+        this.mapInventorySection = inventorySection.getAttribute('data-cmd-map-inventory-section');
+        this.render();
+        return;
+      }
+      const inventoryAction = event.target.closest('[data-cmd-map-inventory-action]');
+      if (inventoryAction) {
+        this.runMapInventoryAction(
+          inventoryAction.getAttribute('data-cmd-map-inventory-action'),
+          inventoryAction
+        );
+        return;
+      }
+      const systemTab = event.target.closest('[data-cmd-map-system-tab]');
+      if (systemTab) {
+        this.setCommandViewMode('details', { focus: false });
+        this.openSystemTab(systemTab.getAttribute('data-cmd-map-system-tab'));
+        return;
+      }
+      const itemBtn = event.target.closest('[data-cmd-open-section][data-cmd-item-id]');
+      if (itemBtn) {
+        this.openRailItem(
+          itemBtn.getAttribute('data-cmd-open-section'),
+          itemBtn.getAttribute('data-cmd-item-id'),
+          itemBtn.getAttribute('data-cmd-item-source')
+        );
+      }
+    });
   }
 
   captureAgentDeckViewState() {
