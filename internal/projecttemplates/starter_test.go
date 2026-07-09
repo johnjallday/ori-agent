@@ -33,7 +33,7 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 		}
 	}
 
-	// Scaffold starters keep their files, onboarding, and are flagged builtin.
+	// Scaffold starters keep their files and are flagged builtin.
 	reaper := byID["reaper-song"]
 	if reaper.Name != "Reaper Song" || !reaper.Builtin || !reaper.HasSkeleton {
 		t.Errorf("reaper-song: %+v", reaper)
@@ -41,8 +41,11 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if len(reaper.Tags) != 2 || reaper.Tags[0] != "music" || reaper.Tags[1] != "reaper" {
 		t.Errorf("reaper starter tags not applied: %+v", reaper.Tags)
 	}
-	if !reaper.HasOnboarding() {
-		t.Error("reaper starter should carry template onboarding")
+	if reaper.HasOnboarding() {
+		t.Error("reaper starter must not carry the legacy intake onboarding block")
+	}
+	if len(reaper.StarterTasks) == 0 || !reaper.StarterTasks[0].Setup {
+		t.Errorf("reaper starter should lead with a setup starter task: %+v", reaper.StarterTasks)
 	}
 	if writing := byID["writing-project"]; !writing.Builtin || !writing.HasSkeleton ||
 		len(writing.Tags) != 1 || writing.Tags[0] != "writing" {
