@@ -232,14 +232,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.ShowSidebarToggle = true // Enable sidebar toggle
-	// Opt-in roster/stage redesign (Agents page redesign, G2). Off by default so
-	// the group lands inert; ?view=roster serves the new page. G5 flips the
-	// default once the flow reaches parity.
-	if r.URL.Query().Get("view") == "roster" {
-		s.renderAndWritePage(w, "agents-roster", data)
+	// The roster/stage redesign is now the default Agents page (G5). The classic
+	// dashboard remains reachable at ?view=classic as a fallback.
+	if r.URL.Query().Get("view") == "classic" {
+		s.renderAndWritePage(w, "agents", data)
 		return
 	}
-	s.renderAndWritePage(w, "agents", data)
+	s.renderAndWritePage(w, "agents-roster", data)
 }
 
 // serveActionCenter renders the cross-workspace Action Center page. The page
