@@ -780,6 +780,8 @@ test.describe('Workspace Agent Character Roster', () => {
       .locator('#workspaceCommandView .ws-cmd-map-agent')
       .filter({ hasText: 'Roster Manager' });
     await expect(entryUnit.locator('.ws-cmd-map-entry-badge')).toBeVisible();
+    await expect(entryUnit.locator('.ws-cmd-map-agent-status')).toBeVisible();
+    await expect(entryUnit).toHaveClass(/waiting/);
     await expect(entryUnit).toHaveAttribute('aria-label', /Entry Agent/);
 
     await page.locator('#workspaceCommandView [data-cmd-map-window="inventory"]').click();
@@ -794,6 +796,9 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(
       page.locator('#workspaceCommandView .ws-cmd-map-inventory-slot').first()
     ).toBeVisible();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-slot-type').first()).toContainText(
+      'Note'
+    );
     const inventoryGeometry = await inventoryWindow.evaluate(node => {
       const rect = node.getBoundingClientRect();
       return {
@@ -828,6 +833,8 @@ test.describe('Workspace Agent Character Roster', () => {
     const inspector = page.locator('#workspaceCommandView .ws-cmd-map-window');
     await expect(inspector).toContainText('Research Analyst');
     await expect(inspector).toContainText('Needs input');
+    await expect(inspector).toContainText('Class');
+    await expect(inspector).toContainText('Loadout');
     await expect(inspector).toContainText('Current Quest');
     await expect(inspector).toContainText('Quests');
     await expect(inspector).toContainText('Skills');

@@ -1745,8 +1745,11 @@ export class WorkspaceCommandView {
 
   statusTone(statusKey, statusLabel) {
     const s = (String(statusKey || '') + ' ' + String(statusLabel || '')).toLowerCase();
-    if (/work|run|busy|active|progress/.test(s)) return 'working';
     if (/error|fail|blocked/.test(s)) return 'alert';
+    if (/needs?[-_\s]?input|choice|human/.test(s)) return 'needs-input';
+    if (/work|run|busy|active|progress/.test(s)) return 'working';
+    if (/wait|queue|pending|scheduled/.test(s)) return 'waiting';
+    if (/complete|done|success/.test(s)) return 'done';
     return 'idle';
   }
 
@@ -2803,7 +2806,11 @@ export class WorkspaceCommandView {
 
   renderMapMissionPanel() {
     return (
-      '<div class="ws-cmd-map-window-section is-objective">' + this.renderMissionPanel() + '</div>'
+      '<div class="ws-cmd-map-window-section is-objective">' +
+      '<div class="ws-cmd-map-quest-frame">' +
+      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Objective</strong></div>' +
+      this.renderMissionPanel() +
+      '</div></div>'
     );
   }
 
@@ -2812,19 +2819,22 @@ export class WorkspaceCommandView {
     const shown = tasks.slice(0, 4);
     const rows = shown.length
       ? shown
-          .map(task => {
+          .map((task, index) => {
             const id = String(task.id || '');
             const label = String(task.description || task.name || task.title || 'Untitled task');
             const status = String(task.status || 'pending')
               .trim()
               .toLowerCase();
+            const questNumber = String(index + 1).padStart(2, '0');
             return (
               '<button type="button" class="ws-cmd-map-task-row ' +
               escapeHtml(this.taskTone(status)) +
               '" data-cmd-open-task="' +
               escapeHtml(id) +
               '">' +
-              '<span class="ws-cmd-map-task-name">' +
+              '<span class="ws-cmd-map-task-marker">Quest ' +
+              escapeHtml(questNumber) +
+              '</span><span class="ws-cmd-map-task-name">' +
               escapeHtml(label) +
               '</span><span class="ws-cmd-map-task-status">' +
               escapeHtml(this.taskStatusLabel(status)) +
@@ -2832,7 +2842,7 @@ export class WorkspaceCommandView {
             );
           })
           .join('')
-      : '<div class="ws-cmd-map-empty">No open tasks.</div>';
+      : '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest log clear</strong><span>No active objectives assigned.</span></div>';
     return (
       '<div class="ws-cmd-map-window-section is-objectives">' +
       this.mapZoneHeaderHTML('Objectives', 'Active Tasks', tasks.length) +
@@ -2879,6 +2889,7 @@ export class WorkspaceCommandView {
         const entryBadge = agent.entry
           ? '<span class="ws-cmd-map-entry-badge" title="Entry Agent"><i class="bi bi-star-fill" aria-hidden="true"></i><span>Entry</span></span>'
           : '';
+        const statusLabel = agent.status?.label || 'Idle';
         return (
           '<button type="button" class="ws-cmd-map-agent ' +
           escapeHtml(agent.tone) +
@@ -2897,9 +2908,14 @@ export class WorkspaceCommandView {
           escapeHtml(agent.name) +
           ', ' +
           (agent.entry ? 'Entry Agent, ' : '') +
-          escapeHtml(agent.status?.label || 'Idle') +
+          escapeHtml(statusLabel) +
           '">' +
           '<span class="ws-cmd-map-agent-path" aria-hidden="true"></span>' +
+          '<span class="ws-cmd-map-agent-status" aria-hidden="true" title="' +
+          escapeHtml(statusLabel) +
+          '"><span class="ws-cmd-led ' +
+          escapeHtml(agent.tone) +
+          '"></span></span>' +
           entryBadge +
           this.agentCharacterHTML(agent, 'roster') +
           '<span class="ws-cmd-map-agent-copy"><strong>' +
@@ -2907,7 +2923,7 @@ export class WorkspaceCommandView {
           '</strong><span>' +
           escapeHtml(agent.role?.label || 'Agent') +
           '</span><em>' +
-          escapeHtml(agent.status?.label || 'Idle') +
+          escapeHtml(statusLabel) +
           '</em></span></button>'
         );
       })
@@ -2920,6 +2936,40 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
       '<div class="ws-cmd-map-agent-field">' +
       this.renderMapAgentUnits(agents) +
+      '</div></section>'
+    );
+  }
+
+  renderMapAgentLoadout(agent) {
+    const skills = Array.isArray(agent?.skills?.names) ? agent.skills.names : [];
+    const tools = Array.isArray(agent?.mcpNames) ? agent.mcpNames : [];
+    const chips = [
+      ...skills.map(name => ({ kind: 'Skill', label: name })),
+      ...tools.map(name => ({ kind: 'Tool', label: name }))
+    ];
+    if (!agent?.model?.empty && agent?.model?.label) {
+      chips.unshift({ kind: 'Model', label: agent.model.label });
+    }
+    const shown = chips
+      .map(chip => ({
+        kind: String(chip.kind || '').trim(),
+        label: String(chip.label || '').trim()
+      }))
+      .filter(chip => chip.kind && chip.label)
+      .slice(0, 6);
+    if (!shown.length) {
+      return '<section class="ws-cmd-rpg-loadout is-empty"><span>Loadout</span><strong>No skills or tools configured</strong></section>';
+    }
+    const remaining = Math.max(0, chips.length - shown.length);
+    return (
+      '<section class="ws-cmd-rpg-loadout"><span>Loadout</span><div>' +
+      shown
+        .map(
+          chip =>
+            '<em><small>' + escapeHtml(chip.kind) + '</small>' + escapeHtml(chip.label) + '</em>'
+        )
+        .join('') +
+      (remaining ? '<em><small>More</small>+' + escapeHtml(remaining) + '</em>' : '') +
       '</div></section>'
     );
   }
@@ -2938,6 +2988,8 @@ export class WorkspaceCommandView {
     const detailAction = detailTarget
       ? '<a class="ws-cmd-agent-action" href="' + escapeHtml(detailTarget.href) + '">Open Agent</a>'
       : '';
+    const classLabel = agent.role?.detail || agent.role?.label || 'Agent';
+    const modelLabel = agent.model?.empty ? 'Model not set' : agent.model?.label || 'Model not set';
     const statCards = [
       { label: 'Quests', value: openTaskCount },
       { label: 'Skills', value: Number(agent.skills?.count || 0) },
@@ -2950,17 +3002,27 @@ export class WorkspaceCommandView {
       agent.model?.empty ? '' : agent.model?.label || ''
     ].filter(Boolean);
     return (
-      '<div class="ws-cmd-map-inspector-card" aria-label="' +
+      '<div class="ws-cmd-map-inspector-card ' +
+      escapeHtml(agent.tone) +
+      '" aria-label="' +
       escapeHtml(agent.name) +
       ' sheet">' +
       '<div class="ws-cmd-map-agent-sheet-head">' +
       this.agentCharacterHTML(agent, 'roster') +
-      '<div><span>Unit Sheet</span><strong>' +
+      '<div class="ws-cmd-map-agent-sheet-title"><span>Unit Sheet</span><strong>' +
       escapeHtml(agent.name) +
       '</strong><p>' +
       escapeHtml(agent.role?.label || 'Agent') +
       '</p></div></div>' +
       '<div class="ws-cmd-rpg-sheet">' +
+      '<div class="ws-cmd-rpg-class-grid">' +
+      '<div class="ws-cmd-rpg-class-card"><span>Class</span><strong>' +
+      escapeHtml(classLabel) +
+      '</strong></div>' +
+      '<div class="ws-cmd-rpg-class-card"><span>Model</span><strong>' +
+      escapeHtml(modelLabel) +
+      '</strong></div>' +
+      '</div>' +
       '<div class="ws-cmd-rpg-status-strip"><span class="ws-cmd-led ' +
       escapeHtml(agent.tone) +
       '"></span><strong>' +
@@ -2987,6 +3049,7 @@ export class WorkspaceCommandView {
       (summary?.activityLabel ? ' · ' + escapeHtml(summary.activityLabel) : '') +
       (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
       '</p></section>' +
+      this.renderMapAgentLoadout(agent) +
       '<div class="ws-cmd-rpg-sheet-row"><span>Recent Activity</span><strong>' +
       escapeHtml(summary?.activityLabel || 'No recent activity') +
       (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
@@ -3014,7 +3077,7 @@ export class WorkspaceCommandView {
         icon: 'bi-journal-text',
         count: Array.isArray(page.notes) ? page.notes.length : 0,
         action: 'New Note',
-        empty: 'No notes yet.',
+        slotLabel: 'Note',
         items: (Array.isArray(page.notes) ? page.notes : []).map(note => ({
           label: note.name || note.title || 'Untitled Note',
           meta: '',
@@ -3028,7 +3091,7 @@ export class WorkspaceCommandView {
         icon: 'bi-calendar2-week',
         count: Array.isArray(page.schedules) ? page.schedules.length : 0,
         action: 'Open Schedules',
-        empty: 'No schedules yet.',
+        slotLabel: 'Schedule',
         items: (Array.isArray(page.schedules) ? page.schedules : []).map(schedule => ({
           label: schedule.name || schedule.task_description || 'Unnamed Schedule',
           meta: '',
@@ -3042,7 +3105,7 @@ export class WorkspaceCommandView {
         icon: 'bi-chat-dots',
         count: Array.isArray(page.sessions) ? page.sessions.length : 0,
         action: 'New Session',
-        empty: 'No sessions yet.',
+        slotLabel: 'Session',
         items: (Array.isArray(page.sessions) ? page.sessions : []).map(session => ({
           label: session.title || session.name || 'Untitled Session',
           meta: session.agent_name || '',
@@ -3056,7 +3119,7 @@ export class WorkspaceCommandView {
         icon: 'bi-folder2-open',
         count: folders.length,
         action: 'Link Folder',
-        empty: 'No linked folders yet.',
+        slotLabel: 'Folder',
         items: folders.map(folder => ({
           label: folder.title || folder.name || folder.path || 'Unnamed Directory',
           meta: folder.path || '',
@@ -3071,7 +3134,7 @@ export class WorkspaceCommandView {
         icon: 'bi-file-earmark-text',
         count: files.length,
         action: 'Upload',
-        empty: 'No files yet.',
+        slotLabel: 'File',
         items: files.map(file => ({
           label: this.fileTitle(file),
           meta: this.fileMeta(file),
@@ -3085,7 +3148,7 @@ export class WorkspaceCommandView {
         icon: 'bi-cpu',
         count: this.systemTabs().length,
         action: 'Open Systems',
-        empty: 'No systems configured.',
+        slotLabel: 'System',
         items: this.systemTabs().map(tab => ({
           label: tab.label,
           meta: 'Workspace system',
@@ -3098,6 +3161,10 @@ export class WorkspaceCommandView {
 
   renderMapInventoryItems(group) {
     const items = Array.isArray(group?.items) ? group.items : [];
+    const groupKey = String(group?.key || 'item')
+      .trim()
+      .toLowerCase();
+    const slotType = String(group?.slotLabel || group?.label || 'Item').trim();
     const visibleItems = items.slice(0, 11);
     const slotCount = Math.max(
       8,
@@ -3115,11 +3182,15 @@ export class WorkspaceCommandView {
             escapeHtml(item.source || '') +
             '"';
       return (
-        '<button type="button" class="ws-cmd-map-inventory-slot" ' +
+        '<button type="button" class="ws-cmd-map-inventory-slot is-' +
+        escapeHtml(groupKey) +
+        '" ' +
         attrs +
         ' aria-label="Open ' +
         escapeHtml(item.label) +
-        '"><span class="ws-cmd-map-slot-icon"><i class="bi ' +
+        '"><span class="ws-cmd-map-slot-type">' +
+        escapeHtml(slotType) +
+        '</span><span class="ws-cmd-map-slot-icon"><i class="bi ' +
         escapeHtml(group?.icon || 'bi-box') +
         '" aria-hidden="true"></i></span><span class="ws-cmd-map-slot-name">' +
         escapeHtml(item.label) +
@@ -3131,10 +3202,17 @@ export class WorkspaceCommandView {
       );
     });
     while (slots.length < slotCount) {
+      const emptyLabel = slots.length === 0 ? 'Open Slot' : 'Empty Slot';
       slots.push(
-        '<div class="ws-cmd-map-inventory-slot is-empty"><span class="ws-cmd-map-slot-icon">+</span><span class="ws-cmd-map-slot-name">' +
-          escapeHtml(slots.length === 0 ? group?.empty || 'Empty slot' : 'Empty') +
-          '</span></div>'
+        '<div class="ws-cmd-map-inventory-slot is-empty is-' +
+          escapeHtml(groupKey) +
+          '"><span class="ws-cmd-map-slot-type">' +
+          escapeHtml(slotType) +
+          '</span><span class="ws-cmd-map-slot-icon"><i class="bi bi-plus-lg" aria-hidden="true"></i></span><span class="ws-cmd-map-slot-name">' +
+          escapeHtml(emptyLabel) +
+          '</span><em>' +
+          escapeHtml(group?.label || 'Item') +
+          '</em></div>'
       );
     }
     return '<div class="ws-cmd-map-inventory-grid">' + slots.join('') + '</div>';

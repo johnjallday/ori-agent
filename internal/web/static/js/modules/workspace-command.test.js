@@ -100,6 +100,9 @@ test('statusTone maps an agent status to a visual tone', () => {
   assert.equal(view.statusTone('busy', ''), 'working');
   assert.equal(view.statusTone('error', ''), 'alert');
   assert.equal(view.statusTone('failed', ''), 'alert');
+  assert.equal(view.statusTone('waiting', ''), 'waiting');
+  assert.equal(view.statusTone('needs-input', ''), 'needs-input');
+  assert.equal(view.statusTone('completed', ''), 'done');
   assert.equal(view.statusTone('idle', ''), 'idle');
   assert.equal(view.statusTone('', ''), 'idle');
 });
@@ -2075,6 +2078,8 @@ test('Operations Map controls expose accessible pressed and dialog state', () =>
   assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Inventory"/);
   assert.match(windowHTML, /ws-cmd-map-inventory-grid/);
   assert.match(windowHTML, /ws-cmd-map-inventory-slot is-empty/);
+  assert.match(windowHTML, /ws-cmd-map-slot-type">Note/);
+  assert.match(windowHTML, /Open Slot/);
 });
 
 test('Operations Map renders units first and keeps support panels hidden by default', () => {
@@ -2110,10 +2115,10 @@ test('Operations Map renders units first and keeps support panels hidden by defa
           return name === 'Researcher';
         },
         getAgentSkillSummary() {
-          return { count: 0, names: [] };
+          return { count: 1, names: ['workspace-planning'] };
         },
         getEffectiveWorkspaceMCPServerNames() {
-          return [];
+          return ['filesystem'];
         },
         getAgentModelPresentation() {
           return { model: '', label: 'Model not set', empty: true };
@@ -2148,6 +2153,10 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     commandView.activeMapWindow = 'inspector';
     const agentSheetHTML = commandView.renderOperationsMap();
     assert.match(agentSheetHTML, /Unit Sheet/);
+    assert.match(agentSheetHTML, /Class/);
+    assert.match(agentSheetHTML, /Loadout/);
+    assert.match(agentSheetHTML, /workspace-planning/);
+    assert.match(agentSheetHTML, /filesystem/);
     assert.match(agentSheetHTML, /ws-cmd-rpg-stat-grid/);
     assert.match(agentSheetHTML, /Current Quest/);
   } finally {
