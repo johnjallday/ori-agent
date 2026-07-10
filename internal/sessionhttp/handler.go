@@ -15,7 +15,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -35,7 +34,6 @@ type Handler struct {
 	systemModelReader     SystemModelReader
 	workspaceAllowlist    *workspace.Allowlist
 	eventBus              *workspace.EventBus // optional, for project.created events
-	templateOnboarding    *templateonboarding.Service
 	// applyTemplateTools binds a template's declared default tools onto a newly
 	// created workspace (apply-if-present), returning the applied and skipped
 	// names. Injected by the server, which holds the tool registries and binds
@@ -46,6 +44,11 @@ type Handler struct {
 	// present); MCP servers — which have no per-agent scope — bind at the
 	// workspace level. Injected by the server, which holds the skills manager.
 	applyAgentTools func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)
+	// templateSetupStarter starts a task through the same execution path as the
+	// manual execute endpoint. Injected by the server (backed by the
+	// orchestration task handler); used by the template-setup first-open
+	// auto-start after the consumed marker is stamped.
+	templateSetupStarter func(workspaceID, taskID string) error
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -69,9 +72,6 @@ func New(store session.HybridStore) *Handler {
 // SetWorkspaceStore sets the folder-based workspace store for enhanced workspace operations.
 func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
-	if ws != nil && h.templateOnboarding == nil {
-		h.templateOnboarding = templateonboarding.NewService(templateonboarding.NewStore(ws))
-	}
 }
 
 // SetWorkspaceTaskStore sets the primary workspace store used for task
@@ -122,10 +122,10 @@ func (h *Handler) SetEventBus(bus *workspace.EventBus) {
 	h.eventBus = bus
 }
 
-// SetTemplateOnboardingService sets the service that owns template-authored
-// workspace onboarding sessions.
-func (h *Handler) SetTemplateOnboardingService(service *templateonboarding.Service) {
-	h.templateOnboarding = service
+// SetTemplateSetupTaskStarter injects the function that starts a task through
+// the manual-execution path, used by the template-setup first-open auto-start.
+func (h *Handler) SetTemplateSetupTaskStarter(fn func(workspaceID, taskID string) error) {
+	h.templateSetupStarter = fn
 }
 
 // SetWorkspaceAllowlist sets the per-data-dir allowlist that gates which

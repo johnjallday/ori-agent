@@ -214,7 +214,7 @@ func TestDuplicate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(libDir, "drum-kit-copy", "{{name}}.rpp")); err != nil {
 		t.Errorf("template file not copied: %v", err)
 	}
-	// Tags and onboarding block carry over.
+	// Tags carry over; the legacy onboarding block is stripped by the save.
 	if len(dup.Tags) != 1 || dup.Tags[0] != "music" {
 		t.Errorf("tags not carried, got %v", dup.Tags)
 	}
@@ -222,8 +222,8 @@ func TestDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"onboarding"`) {
-		t.Errorf("onboarding block not carried: %s", data)
+	if strings.Contains(string(data), `"onboarding"`) {
+		t.Errorf("legacy onboarding block should be stripped on save: %s", data)
 	}
 
 	// Explicit new name seeds id and display name.

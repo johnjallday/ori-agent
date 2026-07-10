@@ -4,9 +4,8 @@ A **template** describes how a workspace starts. It is presented as a single **T
 
 - a **name/description** prefill,
 - a default **agent behavior** profile (`general` | `research` | `software_project`),
-- **starter tasks** seeded into the new workspace,
+- **starter tasks** seeded into the new workspace and assigned to the entry agent (at most one may be marked `setup: true` — it auto-starts once, when the workspace is first opened),
 - default **tools** (skills / MCP servers / plugins, applied if present),
-- an **onboarding** intake flow,
 - an **agent roster** — the agents created on the new workspace (entry agent + specialists), and
 - a **project folder skeleton** — a Reaper song, a writing project, a code scaffold, anything.
 
@@ -44,7 +43,7 @@ templates/
     assets/
 ```
 
-- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create actions. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details" }]`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `onboarding` (intake spec), `agents` (agent roster — see below), `builtin`, and `builtin_version` (shipped manifest revision for built-ins — see "Keeping built-ins current"). Unknown keys are preserved untouched.
+- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create actions. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details", "setup" }]`; at most one task may set `setup: true`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `agents` (agent roster — see below), `builtin`, and `builtin_version` (shipped manifest revision for built-ins — see "Keeping built-ins current"). Unknown keys are preserved untouched.
 - A folder containing **only** `template.json` is a valid metadata-only template (it scaffolds no files).
 - `{{name}}` becomes the slugified project name; `{{date}}` becomes `YYYY-MM-DD`. Substitution applies to file and folder **names only**; file contents are byte-copied untouched, so binary files are always safe.
 - Symlinks are skipped during instantiation (they would break portability or reach outside the template).
@@ -117,7 +116,7 @@ Because `project_path` is relative and stored in `workspace.json` (its canonical
 
 The filesystem is the primary management surface — but the app provides a full authoring UI over it:
 
-- **`/templates` page** — the dedicated authoring surface. Per template: edit the Overview (name, description, tags, **icon**, **agent behavior**, **starter tasks**), browse/edit Files, configure Onboarding and Tools, **Duplicate**, **Reveal**, and **Delete**. Built-ins show a read-only badge and disable the mutating controls; **Duplicate to customize** makes an editable copy (the copy is never marked built-in). Mutating a built-in is also rejected server-side with `403` (defense in depth), so the read-only guarantee does not depend on the UI.
+- **`/templates` page** — the dedicated authoring surface. Per template: edit the Overview (name, description, tags, **icon**, **agent behavior**, **starter tasks**), browse/edit Files, configure Tools and Agents, **Duplicate**, **Reveal**, and **Delete**. Built-ins show a read-only badge and disable the mutating controls; **Duplicate to customize** makes an editable copy (the copy is never marked built-in). Mutating a built-in is also rejected server-side with `403` (defense in depth), so the read-only guarantee does not depend on the UI.
 - **Manage modal** (reachable from the create-workspace modal and Settings → Project Templates): a lighter list/import/edit/delete/reveal veneer over the same library.
 - **Settings → Project Templates**: configure `templates_root` (Browse/Save/Clear), open the library folder, and launch the authoring page. Changing the directory materializes the library there, including any absent built-ins.
 - Deleting a built-in lasts until the next server start, which re-adds absent built-ins; duplicate-and-edit instead if you want one gone-but-different.

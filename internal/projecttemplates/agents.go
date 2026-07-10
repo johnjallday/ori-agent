@@ -15,6 +15,12 @@ import (
 // variable outside the closed vocabulary. Callers map it to a client error.
 var ErrInvalidPromptVariable = errors.New("invalid prompt variable")
 
+// ErrRosterRequired reports an attempt to save a template roster with no
+// agents. Every template must declare at least one agent (the first is the
+// entry agent); templates created before this rule surface a load-time warning
+// instead of failing, and workspace creation auto-creates a fallback manager.
+var ErrRosterRequired = errors.New("template must declare at least one agent; the first agent is the entry agent")
+
 // MaxTemplateAgents caps how many agents a single template may declare. Extra
 // entries beyond the cap are dropped during normalization rather than failing
 // the load: a roster this large would slow workspace creation and is an easy
@@ -100,13 +106,22 @@ func ValidateAgentPrompts(specs []AgentSpec) error {
 	return nil
 }
 
-// SetAgents writes (or clears) the `agents` block in a template's template.json,
-// preserving every other key. The roster is normalized first; an empty result
-// clears the key. Like the tools/onboarding writers, this stores agent specs as
-// data and never creates agents.
+// SetAgents writes the `agents` block in a template's template.json, preserving
+// every other key. The roster is normalized first; a roster that normalizes to
+// empty is rejected with ErrRosterRequired — every template must keep at least
+// one agent (the first is the entry agent). Like the tools writer, this stores
+// agent specs as data and never creates agents.
 func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
 	tpl, err := FindLibraryTemplate(libDir, id)
 	if err != nil {
+		return Template{}, err
+	}
+
+	normalized := normalizeAgentSpecs(agents)
+	if len(normalized) == 0 {
+		return Template{}, ErrRosterRequired
+	}
+	if err := ValidateAgentPrompts(normalized); err != nil {
 		return Template{}, err
 	}
 
@@ -118,20 +133,13 @@ func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
 		_ = json.Unmarshal(data, &raw)
 	}
 
-	if normalized := normalizeAgentSpecs(agents); len(normalized) > 0 {
-		if err := ValidateAgentPrompts(normalized); err != nil {
-			return Template{}, err
-		}
-		encoded, err := json.Marshal(normalized)
-		if err != nil {
-			return Template{}, fmt.Errorf("failed to encode agents: %w", err)
-		}
-		var v any
-		_ = json.Unmarshal(encoded, &v)
-		raw["agents"] = v
-	} else {
-		delete(raw, "agents")
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to encode agents: %w", err)
 	}
+	var v any
+	_ = json.Unmarshal(encoded, &v)
+	raw["agents"] = v
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {

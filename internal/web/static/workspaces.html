@@ -505,17 +505,14 @@
                 <button class="close-btn" onclick="closeViewWorkspaceModal()">&times;</button>
             </div>
             <div id="workspace-details"></div>
-            <div id="workspace-template-onboarding" class="template-onboarding-panel" hidden></div>
         </div>
     </div>
 
     <script type="module">
         import { workspaceManager } from '/js/modules/workspace.js';
-        import { TemplateOnboardingPanel } from '/js/modules/template-onboarding.js';
 
         let agents = [];
         let workspaces = [];
-        let templateOnboardingPanel = null;
 
         // Load workspaces on page load
         async function loadWorkspaces() {
@@ -742,15 +739,6 @@
                     ` : ''}
                 `;
 
-                if (templateOnboardingPanel) {
-                    templateOnboardingPanel.destroy();
-                }
-                templateOnboardingPanel = new TemplateOnboardingPanel({
-                    workspaceId,
-                    mount: document.getElementById('workspace-template-onboarding')
-                });
-                await templateOnboardingPanel.init();
-
                 document.getElementById('view-workspace-modal').classList.add('active');
             } catch (error) {
                 console.error('Error loading workspace:', error);
@@ -760,10 +748,6 @@
 
         // Close view workspace modal
         window.closeViewWorkspaceModal = function() {
-            if (templateOnboardingPanel) {
-                templateOnboardingPanel.destroy();
-                templateOnboardingPanel = null;
-            }
             document.getElementById('view-workspace-modal').classList.remove('active');
         };
 

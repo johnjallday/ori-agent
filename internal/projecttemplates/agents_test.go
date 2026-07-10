@@ -171,13 +171,21 @@ func TestSetAgents_RoundTripAndPreservesName(t *testing.T) {
 		t.Fatalf("agents did not persist: %+v", reread.Agents)
 	}
 
-	// An empty roster clears the key but keeps the rest of the manifest.
-	tpl, err = SetAgents(dir, "demo", nil)
-	if err != nil {
-		t.Fatalf("SetAgents(clear): %v", err)
+	// A roster cannot be cleared: every template keeps at least one agent.
+	if _, err = SetAgents(dir, "demo", nil); !errors.Is(err, ErrRosterRequired) {
+		t.Fatalf("expected ErrRosterRequired for empty roster, got %v", err)
 	}
-	if tpl.HasAgents() || tpl.Name != "Demo" {
-		t.Fatalf("expected agents cleared with metadata intact, got %+v", tpl)
+	// A roster that normalizes to empty (blank names) is rejected the same way,
+	// and the rejection leaves the stored roster untouched.
+	if _, err = SetAgents(dir, "demo", []AgentSpec{{Name: "   "}}); !errors.Is(err, ErrRosterRequired) {
+		t.Fatalf("expected ErrRosterRequired for blank-only roster, got %v", err)
+	}
+	reread, err = FindLibraryTemplate(dir, "demo")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if len(reread.Agents) != 2 {
+		t.Fatalf("rejected clear should not modify the roster, got %+v", reread.Agents)
 	}
 }
 

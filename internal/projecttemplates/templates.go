@@ -8,6 +8,7 @@ package projecttemplates
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,38 @@ func NormalizeBehaviorProfile(p string) string {
 type StarterTask struct {
 	Description string `json:"description"`
 	Details     string `json:"details,omitempty"`
+	// Setup marks the template's setup task: seeded like every other starter
+	// task, but auto-started once when the user first opens the workspace. At
+	// most one task per template may set it — the authoring save path rejects
+	// extras, and load-time normalization keeps only the first flag from a
+	// hand-edited manifest.
+	Setup bool `json:"setup,omitempty"`
+}
+
+// ErrInvalidStarterTasks reports a starter-task edit that violates the setup
+// rules (more than one task flagged `setup: true`).
+var ErrInvalidStarterTasks = errors.New("invalid starter tasks")
+
+// validateStarterTasks enforces the at-most-one setup task rule on a raw
+// (pre-normalization) edit, naming the offending tasks. Normalization silently
+// demotes extra flags for resilience on load; this save-path check exists so an
+// author gets an error instead of a silent demotion.
+func validateStarterTasks(tasks []StarterTask) error {
+	var setupTasks []string
+	for _, task := range tasks {
+		if !task.Setup {
+			continue
+		}
+		desc := strings.TrimSpace(task.Description)
+		if desc == "" {
+			desc = "(no description)"
+		}
+		setupTasks = append(setupTasks, fmt.Sprintf("%q", desc))
+	}
+	if len(setupTasks) > 1 {
+		return fmt.Errorf("%w: at most one starter task may set setup: true, got %d (%s)", ErrInvalidStarterTasks, len(setupTasks), strings.Join(setupTasks, ", "))
+	}
+	return nil
 }
 
 // Template describes one instantiable folder skeleton (or, when HasSkeleton is
@@ -85,9 +118,10 @@ type Template struct {
 	HasSkeleton bool `json:"has_skeleton"`
 	// Path is the template folder's absolute path on disk.
 	Path string `json:"-"`
-	// Onboarding is the verbatim `onboarding` block from template.json, if any.
-	// This package only carries the bytes; the templateonboarding package parses
-	// and validates them at workspace-creation time. Excluded from API JSON.
+	// Onboarding is the verbatim legacy `onboarding` block from template.json,
+	// if any. The intake engine that executed it has been removed: the bytes are
+	// carried only so warnings can flag the block and the authoring save path
+	// can strip it. Never parsed or executed. Excluded from API JSON.
 	Onboarding json.RawMessage `json:"-"`
 	// Tools are the default skills/MCP servers/plugins a workspace created from
 	// this template binds (apply-if-present). Names only — bound in the
@@ -98,11 +132,16 @@ type Template struct {
 	// the rest are specialist sub-agents. Carried as data only; agents are
 	// created/attached in the workspace-creation layer (see AgentSpec).
 	Agents []AgentSpec `json:"agents,omitempty"`
+	// Warnings are non-fatal authoring problems computed at load time (legacy
+	// onboarding block, missing agent roster). They surface through the list
+	// API so the /templates UI can flag them; they never block loading or
+	// instantiation.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
-// HasOnboarding reports whether the template carries a non-empty onboarding
-// block. It does not validate the block — ParseSpec/Validate in the
-// templateonboarding package do that.
+// HasOnboarding reports whether the template still carries a legacy intake-era
+// onboarding block (detection only — the block is ignored at runtime and
+// stripped on the next authoring save).
 func (t Template) HasOnboarding() bool {
 	s := bytes.TrimSpace(t.Onboarding)
 	return len(s) > 0 && !bytes.Equal(s, []byte("null"))
@@ -114,10 +153,10 @@ func (t Template) HasAgents() bool {
 }
 
 // manifest is the on-disk shape of template.json. Unknown fields are ignored
-// by design. Display fields (name/description/tags) are metadata only; the
-// optional onboarding block is preserved verbatim as raw JSON and parsed by the
-// templateonboarding package at workspace-creation time. This package never
-// interprets it, so the file-copy engine stays domain-blind.
+// by design. Display fields (name/description/tags) are metadata only; a
+// legacy `onboarding` block is preserved verbatim as raw JSON purely for
+// warning detection and strip-on-save — never interpreted, so the file-copy
+// engine stays domain-blind.
 type manifest struct {
 	Name            string          `json:"name"`
 	Description     string          `json:"description"`
@@ -174,21 +213,44 @@ func newTemplate(path string) Template {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
+	t.Warnings = manifestWarnings(m, t.Agents)
 	return t
 }
 
+// manifestWarnings reports non-fatal authoring problems for a loaded template:
+// a legacy intake-era `onboarding` block (ignored at runtime, stripped on the
+// next authoring save) and a missing agent roster (every template should
+// declare one — workspace creation falls back to auto-creating a
+// "<Workspace Name> Manager" entry agent when it is absent).
+func manifestWarnings(m manifest, agents []AgentSpec) []string {
+	var warnings []string
+	if s := bytes.TrimSpace(m.Onboarding); len(s) > 0 && !bytes.Equal(s, []byte("null")) {
+		warnings = append(warnings, `template.json contains a legacy "onboarding" block; it is ignored and will be removed the next time the template is saved`)
+	}
+	if len(agents) == 0 {
+		warnings = append(warnings, "template declares no agents; add a roster (the first agent is the entry agent) — until then, workspaces created from it get an auto-created manager agent")
+	}
+	return warnings
+}
+
 // normalizeStarterTasks trims each task and drops any without a description.
+// The setup flag survives normalization, but only on the first flagged task —
+// later flags from a hand-edited manifest are demoted so loading never fails
+// and downstream seeding sees at most one setup task.
 func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 	if len(tasks) == 0 {
 		return nil
 	}
 	out := make([]StarterTask, 0, len(tasks))
+	haveSetup := false
 	for _, task := range tasks {
 		desc := strings.TrimSpace(task.Description)
 		if desc == "" {
 			continue
 		}
-		out = append(out, StarterTask{Description: desc, Details: strings.TrimSpace(task.Details)})
+		setup := task.Setup && !haveSetup
+		haveSetup = haveSetup || setup
+		out = append(out, StarterTask{Description: desc, Details: strings.TrimSpace(task.Details), Setup: setup})
 	}
 	if len(out) == 0 {
 		return nil

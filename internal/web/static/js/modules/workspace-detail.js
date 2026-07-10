@@ -14,7 +14,6 @@ import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
-import { TemplateOnboardingPanel } from './template-onboarding.js';
 
 /**
  * Format a date for display
@@ -238,11 +237,6 @@ export class WorkspaceDetailPage {
     this.skillsManager = new WorkspaceSkillsManager(this);
     this.pluginsManager = new WorkspacePluginsManager(this);
     this.memoryManager = new WorkspaceMemoryManager(this);
-    this.templateOnboardingPanel = new TemplateOnboardingPanel({
-      workspaceId: this.workspaceId,
-      mountId: 'workspace-template-onboarding',
-      onRefresh: () => this.loadWorkspace()
-    });
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
     this.workspaceTaskMarkdownStatus = null;
@@ -315,7 +309,6 @@ export class WorkspaceDetailPage {
     this.setupNotesPanelVaultDrop();
     this.setupPageDragAndDrop();
     await this.loadWorkspace();
-    await this.templateOnboardingPanel.init();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
     await Promise.all([
@@ -341,6 +334,9 @@ export class WorkspaceDetailPage {
     }
     if (!restoredBlockedTask && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
+    }
+    if (!restoredBlockedTask) {
+      await this.maybeStartTemplateSetup();
     }
   }
 
@@ -5125,6 +5121,33 @@ export class WorkspaceDetailPage {
     }
 
     open();
+  }
+
+  /**
+   * First-open auto-start for a template's setup task. The server stamps a
+   * once-only consumed marker and starts the task through the same path as
+   * pressing Start on it; repeat opens (reloads, other tabs) no-op
+   * server-side, so this is safe to call on every page init.
+   */
+  async maybeStartTemplateSetup() {
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/template-setup/start`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+      );
+      if (!response.ok) return;
+      const result = await response.json().catch(() => ({}));
+      if (!result?.started || !result?.task_id) return;
+      await this.loadTasks();
+      if (window.Toast) {
+        window.Toast.info('Setup task started — the workspace agent is getting things ready.');
+      }
+      // Land where the setup conversation surfaces: the same execution monitor
+      // a manual Start opens (agent questions arrive via the blocked-task flow).
+      this.startExecutionMonitor(result.task_id);
+    } catch (error) {
+      console.warn('Template setup auto-start check failed:', error);
+    }
   }
 
   async maybePromptForMissingEntryAgent() {

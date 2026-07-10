@@ -3769,13 +3769,6 @@ const sessionManager = {
   async createFolder() {
     if (this.isCreatingFolder) return;
 
-    // Snapshot the picked template's starter tasks now: the post-create
-    // ProjectTemplateCard.reset() re-selects Blank and emits a selection event
-    // that would otherwise clobber this.workspaceTemplate before we seed.
-    const starterTasksToSeed = Array.isArray(this.workspaceTemplate?.starter_tasks)
-      ? this.workspaceTemplate.starter_tasks.slice()
-      : [];
-
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
     const parentSelect = document.getElementById('folderParentSelect');
@@ -4006,24 +3999,9 @@ const sessionManager = {
         }
       }
 
-      // Seed starter tasks from the picked Template (best-effort, non-fatal —
-      // the workspace already exists). Blank / templates without starter tasks
-      // seed nothing. Tasks come from the unified /api/project-templates data.
-      let seededStarterTasks = 0;
-      if (createdWorkspaceId && starterTasksToSeed.length > 0) {
-        for (const task of starterTasksToSeed) {
-          if (!task || !task.description) continue;
-          try {
-            await this.createWorkspaceSeedTask(createdWorkspaceId, {
-              description: task.description,
-              details: task.details || ''
-            });
-            seededStarterTasks += 1;
-          } catch (error) {
-            console.warn('Failed to seed starter task:', task.description, error);
-          }
-        }
-      }
+      // Starter tasks are seeded server-side during workspace creation
+      // (assigned to the entry agent); the create response reports how many.
+      const seededStarterTasks = Number(result?.seeded_starter_tasks) || 0;
 
 
       if (

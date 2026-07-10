@@ -87,38 +87,16 @@ func TestInstantiateSubstitutesNamesAndCopiesBytes(t *testing.T) {
 	}
 }
 
-func TestInstantiateWithFieldsSubstitutesDeclaredFieldTokens(t *testing.T) {
-	date := pinnedDate(t)
-	tplDir := t.TempDir()
-	wsDir := t.TempDir()
-
-	writeFile(t, filepath.Join(tplDir, "{{fields.song_name}}", "{{fields.key}}-{{fields.bpm}}-{{name}}-{{date}}.txt"), "hello")
-
-	rel, err := InstantiateWithFields(tplDir, wsDir, "Song X", map[string]any{
-		"song_name": "Blue Sky!",
-		"key":       "F# Minor",
-		"bpm":       128,
-	})
-	if err != nil {
-		t.Fatalf("InstantiateWithFields: %v", err)
-	}
-	if rel != "song-x" {
-		t.Fatalf("rel = %q, want song-x", rel)
-	}
-
-	want := filepath.Join(wsDir, "song-x", "blue-sky", "f-minor-128-song-x-"+date+".txt")
-	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("field-token file missing: %v", err)
-	}
-}
-
-func TestInstantiateWithFieldsRejectsMissingFieldToken(t *testing.T) {
+// Field-token substitution left with the intake engine: any leftover
+// {{fields.<id>}} token in a template entry name is a clear error instead of a
+// silently-literal folder name.
+func TestInstantiateRejectsFieldTokens(t *testing.T) {
 	tplDir := t.TempDir()
 	wsDir := t.TempDir()
 	writeFile(t, filepath.Join(tplDir, "{{fields.song_name}}.txt"), "hello")
 
-	if _, err := InstantiateWithFields(tplDir, wsDir, "Song X", nil); err == nil {
-		t.Fatal("expected missing field token error")
+	if _, err := Instantiate(tplDir, wsDir, "Song X"); err == nil {
+		t.Fatal("expected unknown field token error")
 	}
 	if _, err := os.Stat(filepath.Join(wsDir, "song-x")); !os.IsNotExist(err) {
 		t.Errorf("partial project folder left behind (err=%v)", err)
@@ -241,13 +219,13 @@ func TestInstantiateRejectsMissingTemplateAndWorkspace(t *testing.T) {
 }
 
 func TestSubstituteRelPathRejectsTraversal(t *testing.T) {
-	if _, err := substituteRelPath("ok/../../escape.txt", "proj", nil); err == nil {
+	if _, err := substituteRelPath("ok/../../escape.txt", "proj"); err == nil {
 		t.Error("expected traversal rejection")
 	}
-	if _, err := substituteRelPath("..", "proj", nil); err == nil {
+	if _, err := substituteRelPath("..", "proj"); err == nil {
 		t.Error("expected .. rejection")
 	}
-	got, err := substituteRelPath("sub/{{name}}.txt", "proj", nil)
+	got, err := substituteRelPath("sub/{{name}}.txt", "proj")
 	if err != nil {
 		t.Fatalf("valid path rejected: %v", err)
 	}
