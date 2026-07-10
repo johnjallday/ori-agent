@@ -584,6 +584,145 @@
 .ws-cmd-map-belt-btn:last-child:focus-visible::after {
   transform: translate(0, 0);
 }
+/* Quick "New Quest" composer: floating dock at the map's bottom-right. */
+.ws-cmd-map-quest-dock {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+}
+.ws-cmd-map-quest-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.2), rgba(15, 59, 48, 0.9));
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+}
+.ws-cmd-map-quest-fab i {
+  font-size: 15px;
+  color: var(--ws-faction);
+}
+.ws-cmd-map-quest-fab:hover,
+.ws-cmd-map-quest-fab.is-open {
+  border-color: var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.3), rgba(15, 59, 48, 0.95));
+}
+.ws-cmd-map-quest-fab:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-quest-composer {
+  width: min(340px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: linear-gradient(180deg, #15171c, #0b0c10);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), var(--ws-glow);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+.ws-cmd-map-quest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--ws-font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--ws-faction);
+}
+.ws-cmd-map-quest-close {
+  border: none;
+  background: none;
+  color: var(--ws-ink-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ws-cmd-map-quest-close:hover {
+  color: var(--ws-ink);
+}
+.ws-cmd-map-quest-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.9);
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ws-cmd-map-quest-input:focus-visible {
+  outline: 1px solid var(--ws-faction);
+  outline-offset: 0;
+  border-color: var(--ws-faction);
+}
+.ws-cmd-map-quest-error {
+  margin: 0;
+  color: var(--ws-alert);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+.ws-cmd-map-quest-actions {
+  display: flex;
+  gap: 8px;
+}
+.ws-cmd-map-quest-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+}
+.ws-cmd-map-quest-btn:hover:not([disabled]) {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-map-quest-btn.is-primary {
+  border-color: var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.22), rgba(15, 59, 48, 0.9));
+  color: var(--ws-ink);
+}
+.ws-cmd-map-quest-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-quest-btn[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.ws-cmd-map-quest-hint {
+  margin: 0;
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
 .ws-cmd-map-window-backdrop {
   position: fixed;
   inset: clamp(76px, 10vh, 112px) 16px 16px;
@@ -3920,6 +4059,18 @@
   .ws-cmd-map-belt-btn {
     width: 44px;
     height: 44px;
+  }
+  .ws-cmd-map-quest-dock {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    align-items: stretch;
+  }
+  .ws-cmd-map-quest-fab {
+    align-self: flex-end;
+  }
+  .ws-cmd-map-quest-composer {
+    width: 100%;
   }
   .ws-cmd-map-window-backdrop {
     padding: 12px;
