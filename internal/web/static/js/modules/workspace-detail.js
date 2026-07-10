@@ -11376,6 +11376,177 @@ export class WorkspaceDetailPage {
     return ids;
   }
 
+  // ---------------------------------------------------------------------------
+  // Shared agent loadout editing (map Unit Sheet + details Loadout tab)
+  //
+  // These reuse the skills/MCP managers' access primitives so both surfaces
+  // agree on the "no access entry = all workspace bindings enabled" convention
+  // and its default-collapse behavior. Synthesized bindings (e.g. the implicit
+  // workspace filesystem server) have no persisted row and are reported locked.
+  // ---------------------------------------------------------------------------
+
+  getAgentWorkspaceSkillLoadout(agentName) {
+    const mgr = this.skillsManager;
+    if (!mgr) return [];
+    const effective = new Set(
+      mgr
+        .getEffectiveWorkspaceSkillBindingsForAgent(agentName)
+        .map(binding => String(binding?.id || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return mgr
+      .getWorkspaceSkillBindings()
+      .map(binding => {
+        const bindingId = String(binding?.id || '').trim();
+        return {
+          bindingId,
+          name: String(binding?.skillName || '').trim(),
+          enabled: effective.has(bindingId.toLowerCase()),
+          locked: binding?.source === 'synthesized'
+        };
+      })
+      .filter(item => item.bindingId && item.name);
+  }
+
+  getAgentWorkspaceMCPLoadout(agentName) {
+    const mgr = this.mcpManager;
+    if (!mgr) return [];
+    const effective = new Set(
+      mgr
+        .getEffectiveWorkspaceMCPBindingsForAgent(agentName)
+        .map(binding => String(binding?.id || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return mgr
+      .getWorkspaceMCPBindings()
+      .map(binding => {
+        const bindingId = String(binding?.id || '').trim();
+        return {
+          bindingId,
+          name: String(binding?.serverName || '').trim(),
+          enabled: effective.has(bindingId.toLowerCase()),
+          locked: binding?.source === 'synthesized'
+        };
+      })
+      .filter(item => item.bindingId && item.name);
+  }
+
+  // Registry capabilities of `kind` ('skill'|'mcp') not yet present as an
+  // enabled workspace binding — the candidates a "bind new" picker should list.
+  async listAgentLoadoutAdditions(kind) {
+    const isMCP = kind === 'mcp';
+    const mgr = isMCP ? this.mcpManager : this.skillsManager;
+    if (!mgr) return [];
+    let registry = [];
+    try {
+      registry = isMCP
+        ? await mgr.loadAvailableMCPServers()
+        : await mgr.loadAvailableSkills();
+    } catch (_error) {
+      registry = [];
+    }
+    const bound = new Set(
+      (isMCP ? mgr.getWorkspaceMCPBindings() : mgr.getWorkspaceSkillBindings())
+        .map(binding => String(isMCP ? binding?.serverName : binding?.skillName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return (Array.isArray(registry) ? registry : [])
+      .map(entry => String(entry?.name || '').trim())
+      .filter(name => name && !bound.has(name.toLowerCase()));
+  }
+
+  async setAgentWorkspaceCapabilityEnabled(kind, agentName, bindingId, enabled) {
+    const id = String(bindingId || '').trim();
+    const name = String(agentName || '').trim();
+    if (!id || !name) return false;
+    const isMCP = kind === 'mcp';
+    const mgr = isMCP ? this.mcpManager : this.skillsManager;
+    if (!mgr) return false;
+
+    const selections = isMCP
+      ? mgr.getWorkspaceMCPAgentAccessSelections(id)
+      : mgr.getWorkspaceSkillAgentAccessSelections(id);
+    const enabledInstanceIds = new Set(
+      selections
+        .filter(selection => selection.checked)
+        .map(selection => String(selection.id || '').trim())
+        .filter(Boolean)
+    );
+    const instanceIds = this.getAgentInstanceIdsForName(name);
+    if (instanceIds.length === 0) return false;
+    instanceIds.forEach(instanceId => {
+      if (enabled) enabledInstanceIds.add(instanceId);
+      else enabledInstanceIds.delete(instanceId);
+    });
+
+    if (isMCP) {
+      await mgr.persistWorkspaceMCPAgentAccess(id, Array.from(enabledInstanceIds));
+    } else {
+      await mgr.persistWorkspaceSkillAgentAccess(id, Array.from(enabledInstanceIds));
+    }
+    await this.loadWorkspace();
+    return true;
+  }
+
+  // Bind a registry capability into the workspace (create or enable), then
+  // enable it for the agent. Mirrors the create-or-enable-then-merge flow used
+  // by agent creation, but scoped to a single agent + capability.
+  async addAgentWorkspaceCapability(kind, agentName, capabilityName) {
+    const name = String(capabilityName || '').trim();
+    const agent = String(agentName || '').trim();
+    if (!name || !agent) return false;
+    const isMCP = kind === 'mcp';
+    const mgr = isMCP ? this.mcpManager : this.skillsManager;
+    if (!mgr) return false;
+
+    const bindingName = binding =>
+      String(isMCP ? binding?.serverName : binding?.skillName || '').trim();
+    const findBinding = () =>
+      (isMCP
+        ? mgr.getWorkspaceMCPBindings({ includeDisabled: true })
+        : mgr.getWorkspaceSkillBindings({ includeDisabled: true })
+      ).find(
+        binding =>
+          binding?.source !== 'synthesized' &&
+          bindingName(binding).toLowerCase() === name.toLowerCase()
+      );
+
+    const collection = isMCP ? 'mcp-bindings' : 'skill-bindings';
+    const base = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/${collection}`;
+    let match = findBinding();
+    let bindingId = match ? String(match.id || '').trim() : '';
+
+    if (!bindingId) {
+      const payload = isMCP
+        ? { server_name: name, enabled: true }
+        : { skill_name: name, enabled: true, config: {} };
+      const response = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error((await response.text()) || `Failed to bind ${name}`);
+      const data = await response.json().catch(() => ({}));
+      bindingId = String(data?.binding?.id || data?.id || '').trim();
+      await this.loadWorkspace();
+      if (!bindingId) {
+        match = findBinding();
+        bindingId = match ? String(match.id || '').trim() : '';
+      }
+    } else if (match && match.enabled === false) {
+      const response = await fetch(`${base}/${encodeURIComponent(bindingId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true })
+      });
+      if (!response.ok) throw new Error((await response.text()) || `Failed to enable ${name}`);
+      await this.loadWorkspace();
+    }
+
+    if (!bindingId) throw new Error(`Could not resolve a workspace binding for ${name}`);
+    return this.setAgentWorkspaceCapabilityEnabled(kind, agent, bindingId, true);
+  }
+
   async loadWorkspaceAgentSnapshots() {
     this.workspaceAgentSnapshots = new Set();
     this.workspaceAgentProfiles = new Map();
