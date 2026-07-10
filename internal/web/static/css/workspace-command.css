@@ -896,6 +896,40 @@
   display: grid;
   gap: 8px;
 }
+.ws-cmd-map-task-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.ws-cmd-map-task-row-wrap .ws-cmd-map-task-row {
+  flex: 1 1 auto;
+}
+.ws-cmd-map-task-start {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  border: 1px solid var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.18), rgba(15, 59, 48, 0.85));
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+}
+.ws-cmd-map-task-start i {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-task-start:hover {
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.28), rgba(15, 59, 48, 0.92));
+}
+.ws-cmd-map-task-start:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 .ws-cmd-map-task-row,
 .ws-cmd-map-station,
 .ws-cmd-map-inventory-slot {

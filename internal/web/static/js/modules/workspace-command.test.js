@@ -2564,3 +2564,92 @@ test('a failed loadout binding surfaces an error and preserves the picker', asyn
     globalThis.window = originalWindow;
   }
 });
+
+test('objectives panel adds a Start action to pending quest rows only', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  view.openMapTasks = () => [
+    { id: 't-pending', status: 'pending', description: 'Draft report' },
+    { id: 't-running', status: 'in_progress', description: 'Compile data' }
+  ];
+
+  const html = view.renderMapTasksPanel();
+
+  assert.match(html, /data-cmd-map-start-task="t-pending"/);
+  assert.match(html, /ws-cmd-map-task-row-wrap/);
+  assert.doesNotMatch(html, /data-cmd-map-start-task="t-running"/);
+  assert.match(html, /data-cmd-open-task="t-pending"/);
+  assert.match(html, /data-cmd-open-task="t-running"/);
+});
+
+test('agent command menu offers Start Quest for a pending priority task', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  view.priorityTaskForAgent = () => ({ id: 'q1', status: 'pending', description: 'Draft' });
+  view.latestAgentSession = () => null;
+  const agent = {
+    skills: { count: 0 },
+    mcpNames: [],
+    encodedName: 'Atlas',
+    status: { label: 'Idle' }
+  };
+
+  const html = view.renderMapAgentCommandMenu(agent, null);
+
+  assert.match(html, /Start Quest/);
+  assert.match(html, /data-cmd-map-start-task="q1"/);
+  assert.doesNotMatch(html, /data-cmd-open-task="q1"/);
+});
+
+test('agent command menu keeps Track Quest (open) for an in-progress task', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  view.priorityTaskForAgent = () => ({ id: 'q2', status: 'in_progress', description: 'Run' });
+  view.latestAgentSession = () => null;
+  const agent = { skills: { count: 0 }, mcpNames: [], encodedName: 'Atlas', status: { label: 'Working' } };
+
+  const html = view.renderMapAgentCommandMenu(agent, null);
+
+  assert.match(html, /data-cmd-open-task="q2"/);
+  assert.doesNotMatch(html, /data-cmd-map-start-task="q2"/);
+});
+
+test('startMapQuest executes a pending task via the page with skipConfirm', async () => {
+  const calls = [];
+  const view = Object.create(WorkspaceCommandView.prototype);
+  view.page = {
+    tasks: [{ id: 'q1', status: 'pending' }],
+    async executeTask(id, options) {
+      calls.push([id, options]);
+    }
+  };
+
+  await view.startMapQuest('q1');
+
+  assert.deepEqual(calls, [['q1', { skipConfirm: true }]]);
+});
+
+test('startMapQuest reports and refreshes when the quest is no longer pending', async () => {
+  const originalWindow = globalThis.window;
+  const infos = [];
+  globalThis.window = { Toast: { info: m => infos.push(m) } };
+  try {
+    let executed = false;
+    let refreshed = false;
+    const view = Object.create(WorkspaceCommandView.prototype);
+    view.page = {
+      tasks: [{ id: 'q1', status: 'in_progress' }],
+      async executeTask() {
+        executed = true;
+      },
+      async loadTasks() {
+        refreshed = true;
+      }
+    };
+
+    await view.startMapQuest('q1');
+
+    assert.equal(executed, false);
+    assert.equal(refreshed, true);
+    assert.match(infos[0], /no longer pending/i);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
