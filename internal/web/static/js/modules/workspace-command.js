@@ -36,6 +36,11 @@ export class WorkspaceCommandView {
     this.statModalTrigger = null;
     this.taskModalShowAll = false;
     this.taskModalBoardMode = false;
+    // Quick "New Quest" composer on the operations map (create task → entry-agent default).
+    this.taskComposerOpen = false;
+    this.taskComposerDraft = '';
+    this.taskComposerError = '';
+    this.taskComposerSubmitting = false;
     this.identityExpanded = false;
     this.identityEditMode = '';
     this.identitySaving = false;
@@ -145,6 +150,10 @@ export class WorkspaceCommandView {
   handleGlobalKeydown(event) {
     if (!this.active || !event || event.key !== 'Escape') return;
     if (this.statModalSection || this.identityEditMode) return;
+    if (this.viewMode === 'map' && this.taskComposerOpen) {
+      this.closeTaskComposer();
+      return;
+    }
     if (this.viewMode === 'map' && this.activeMapWindow) {
       this.activeMapWindow = '';
       this.render();
@@ -3438,9 +3447,126 @@ export class WorkspaceCommandView {
       this.renderMapAgentsZone(agents) +
       this.renderMapToolTray() +
       '</div>' +
+      this.renderMapQuickTask() +
       this.renderMapWindow(selected) +
       '</div>'
     );
+  }
+
+  // Floating "New Quest" button + inline composer. Creating with no assignee lets the
+  // server stamp the task onto the workspace's entry agent (entry_agent_default).
+  renderMapQuickTask() {
+    const open = this.taskComposerOpen;
+    const submitting = this.taskComposerSubmitting;
+    const button =
+      '<button type="button" class="ws-cmd-map-quest-fab' +
+      (open ? ' is-open' : '') +
+      '" data-cmd-map-quest-toggle aria-haspopup="dialog" aria-expanded="' +
+      (open ? 'true' : 'false') +
+      '" aria-label="New quest"><i class="bi bi-plus-lg" aria-hidden="true"></i><span>New Quest</span></button>';
+    if (!open) {
+      return '<div class="ws-cmd-map-quest-dock">' + button + '</div>';
+    }
+    const draft = escapeHtml(this.taskComposerDraft || '');
+    const error = this.taskComposerError
+      ? '<p class="ws-cmd-map-quest-error" role="alert">' +
+        escapeHtml(this.taskComposerError) +
+        '</p>'
+      : '';
+    const disabledAttr = submitting ? ' disabled' : '';
+    return (
+      '<div class="ws-cmd-map-quest-dock is-open">' +
+      button +
+      '<section class="ws-cmd-map-quest-composer" role="dialog" aria-modal="false" aria-label="New quest">' +
+      '<header class="ws-cmd-map-quest-head"><span>New Quest</span>' +
+      '<button type="button" class="ws-cmd-map-quest-close" data-cmd-map-quest-cancel aria-label="Close new quest">×</button></header>' +
+      '<textarea class="ws-cmd-map-quest-input" data-cmd-map-quest-input rows="2" ' +
+      'placeholder="Describe the quest… (assigned to the entry agent)"' +
+      disabledAttr +
+      '>' +
+      draft +
+      '</textarea>' +
+      error +
+      '<div class="ws-cmd-map-quest-actions">' +
+      '<button type="button" class="ws-cmd-map-quest-btn is-primary" data-cmd-map-quest-create' +
+      disabledAttr +
+      '>' +
+      (submitting ? 'Creating…' : 'Create') +
+      '</button>' +
+      '<button type="button" class="ws-cmd-map-quest-btn" data-cmd-map-quest-start' +
+      disabledAttr +
+      '>Create &amp; Start</button>' +
+      '</div>' +
+      '<p class="ws-cmd-map-quest-hint">Enter to create · ⌘/Ctrl+Enter to create &amp; start</p>' +
+      '</section></div>'
+    );
+  }
+
+  openTaskComposer() {
+    this.taskComposerOpen = true;
+    this.taskComposerError = '';
+    this.render();
+  }
+
+  closeTaskComposer({ clearDraft = true } = {}) {
+    this.taskComposerOpen = false;
+    this.taskComposerError = '';
+    this.taskComposerSubmitting = false;
+    if (clearDraft) this.taskComposerDraft = '';
+    this.render();
+  }
+
+  async submitTaskComposer({ start = false } = {}) {
+    if (this.taskComposerSubmitting) return;
+    const description = String(this.taskComposerDraft || '').trim();
+    if (!description) {
+      this.taskComposerError = 'Enter a quest description.';
+      this.render();
+      return;
+    }
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page || typeof page.createTask !== 'function') return;
+
+    this.taskComposerSubmitting = true;
+    this.taskComposerError = '';
+    this.render();
+
+    let created = null;
+    try {
+      // No assignee → server applies the entry-agent default; suppress the generic
+      // "Task created" toast so we can name the resolved assignee instead.
+      created = await page.createTask(description, '', '', { successToast: false });
+    } catch (_error) {
+      created = null;
+    }
+
+    if (!created || !created.id) {
+      this.taskComposerSubmitting = false;
+      this.taskComposerError = 'Could not create the quest. Try again.';
+      this.render();
+      return;
+    }
+
+    const assignee = String(created.to || '').trim();
+    if (start && typeof page.executeTask === 'function') {
+      try {
+        await page.executeTask(created.id, { skipConfirm: true });
+      } catch (_error) {
+        /* execution failures surface via executeTask's own toast */
+      }
+    }
+    if (window.Toast) {
+      const target = assignee || 'the entry agent';
+      window.Toast.success(
+        (start ? 'Quest started · assigned to ' : 'Quest assigned to ') + target
+      );
+    }
+    // loadTasks() (via createTask/executeTask) already refreshed the view; close cleanly.
+    this.taskComposerDraft = '';
+    this.taskComposerOpen = false;
+    this.taskComposerSubmitting = false;
+    this.taskComposerError = '';
+    this.render();
   }
 
   runMapInventoryAction(sectionKey, triggerButton) {
@@ -3458,6 +3584,29 @@ export class WorkspaceCommandView {
     if (!root) return;
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+      const questToggle = event.target.closest('[data-cmd-map-quest-toggle]');
+      if (questToggle) {
+        if (this.taskComposerOpen) this.closeTaskComposer();
+        else this.openTaskComposer();
+        return;
+      }
+      if (event.target.closest('[data-cmd-map-quest-cancel]')) {
+        this.closeTaskComposer();
+        return;
+      }
+      if (event.target.closest('[data-cmd-map-quest-create]')) {
+        this.submitTaskComposer({ start: false });
+        return;
+      }
+      if (event.target.closest('[data-cmd-map-quest-start]')) {
+        this.submitTaskComposer({ start: true });
+        return;
+      }
+      // Click outside the composer (but still on the map) dismisses it, keeping the draft.
+      if (this.taskComposerOpen && !event.target.closest('.ws-cmd-map-quest-dock')) {
+        this.closeTaskComposer({ clearDraft: false });
+        return;
+      }
       const closeWindow = event.target.closest('[data-cmd-map-window-close]');
       if (closeWindow) {
         this.activeMapWindow = '';
@@ -3567,6 +3716,44 @@ export class WorkspaceCommandView {
         );
       }
     });
+    this.bindTaskComposer(root);
+  }
+
+  // Wire the quest composer's textarea: track the draft and handle keyboard submits.
+  // The composer only exists in the DOM while open, so this re-binds on each render.
+  bindTaskComposer(root) {
+    if (!root || !this.taskComposerOpen) return;
+    const input = root.querySelector('[data-cmd-map-quest-input]');
+    if (!input) return;
+    input.addEventListener('input', event => {
+      this.taskComposerDraft = event.target.value;
+      if (this.taskComposerError) this.taskComposerError = '';
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        this.closeTaskComposer();
+        return;
+      }
+      if (event.key === 'Enter') {
+        // Newlines are not needed for a one-line quest; Enter submits.
+        event.preventDefault();
+        this.taskComposerDraft = event.target.value;
+        this.submitTaskComposer({ start: event.metaKey || event.ctrlKey });
+      }
+    });
+    // Restore focus + caret after the re-render that opened/updated the composer.
+    if (!this.taskComposerSubmitting && typeof input.focus === 'function') {
+      input.focus();
+      const end = input.value.length;
+      if (typeof input.setSelectionRange === 'function') {
+        try {
+          input.setSelectionRange(end, end);
+        } catch (_error) {
+          /* setSelectionRange unsupported on some inputs */
+        }
+      }
+    }
   }
 
   captureAgentDeckViewState() {
