@@ -127,12 +127,13 @@ To guide an AI assistant in creating a detailed, step-by-step task list in Markd
 
 1.  **Receive Requirements:** The user provides a feature request, task description, or points to existing documentation
 2.  **Analyze Requirements:** The AI analyzes the functional requirements, user needs, and implementation scope from the provided information
-3.  **Phase 1: Generate Parent Tasks:** Based on the requirements analysis, create the file and generate the main, high-level tasks required to implement the feature. **IMPORTANT: Always include task 0.0 "Create feature branch" as the first task, unless the user specifically requests not to create a branch.** If the user already created a branch, include the task but mark it complete. Use your judgement on how many additional high-level tasks to use. It's likely to be about 5. Present these tasks to the user in the specified format (without sub-tasks yet). Inform the user: "I have generated the high-level tasks based on your requirements. Ready to generate the sub-tasks? Respond with 'Go' to proceed."
+3.  **Phase 1: Generate Parent Tasks:** Based on the requirements analysis, create the file and generate the main, high-level tasks required to implement the feature. Use your judgement on how many high-level tasks to use. It's likely to be about 5. Present these tasks to the user in the specified format (without sub-tasks yet). Inform the user: "I have generated the high-level tasks based on your requirements. Ready to generate the sub-tasks? Respond with 'Go' to proceed."
 4.  **Wait for Confirmation:** Pause and wait for the user to respond with "Go".
 5.  **Phase 2: Generate Sub-Tasks:** Once the user confirms, break down each parent task into smaller, actionable sub-tasks necessary to complete the parent task. Ensure sub-tasks logically follow from the parent task and cover the implementation details implied by the requirements.
 6.  **Identify Relevant Files:** Based on the tasks and requirements, identify potential files that will need to be created or modified. List these under the `Relevant Files` section, including corresponding test files if applicable.
 7.  **Generate Final Output:** Combine the parent tasks, sub-tasks, relevant files, and notes into the final Markdown structure.
 8.  **Save Task List:** Save the generated document in the `/tasks/` directory with the filename `tasks-[feature-name].md`, where `[feature-name]` describes the main feature or task being implemented (e.g., if the request was about user profile editing, the output is `tasks-user-profile-editing.md`).
+9.  **Create Worktree:** Immediately after saving the task list, create the feature's isolated worktree by running `wt start [feature-name]` (the `ori-devflow` agent owns this workflow; see `scripts/wt.sh`). This fetches `origin/dev`, creates the worktree, copies the PRD and this task list into it, and switches into it — **no additional confirmation needed**, this runs right after step 8 without waiting for another "Go". All sub-tasks from 1.1 onward are implemented in that worktree, never in `ori-agent-dev`.
 
 ## Output Format
 
@@ -164,8 +165,6 @@ Update the file after completing each sub-task, not just after completing an ent
 
 ## Tasks
 
-- [ ] 0.0 Create feature branch
-  - [ ] 0.1 Create and checkout a new branch for this feature (e.g., `git checkout -b feature/[feature-name]`)
 - [ ] 1.0 Parent Task Title
   - [ ] 1.1 [Sub-task description 1.1]
   - [ ] 1.2 [Sub-task description 1.2]
@@ -176,7 +175,9 @@ Update the file after completing each sub-task, not just after completing an ent
 
 ## Interaction Model
 
-The process explicitly requires a pause after generating parent tasks to get user confirmation ("Go") before proceeding to generate the detailed sub-tasks. This ensures the high-level plan aligns with user expectations before diving into details.
+The process has exactly one pause: after generating parent tasks, wait for user confirmation ("Go") before generating the detailed sub-tasks. This ensures the high-level plan aligns with user expectations before diving into details.
+
+There is a second checkpoint, but it is **not** a pause: once the sub-tasks are generated and the task list is saved (step 8), immediately proceed to step 9 (`wt start [feature-name]`) without asking again. PRD generation and the full task list (parent + sub-tasks) both happen in the `ori-agent-dev` worktree, which is the single source of truth for planning docs (`tasks/` is gitignored, so it doesn't sync between worktrees on its own). Only after the complete task list is saved does a feature worktree get created — implementation never starts in dev.
 
 ## Target Audience
 
