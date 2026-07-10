@@ -3,7 +3,8 @@
 #
 # Usage:
 #   source scripts/wt.sh    # Load the function (cd works directly)
-#   wt                      # Interactive mode - select worktree to navigate
+#   wt                      # Interactive REPL (type: go, status, start, ...)
+#   wt go                   # One-shot worktree picker (navigate + cd)
 #   wt start [prd]          # Create a worktree from a PRD in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
@@ -328,8 +329,44 @@ JSON
   return 0
 }
 
+function wt_repl {
+  # Persistent prompt: read a line and dispatch it as `wt <words>`. Runs in the
+  # current shell (wt is sourced), so cd/start still change the shell's dir; the
+  # prompt shows the current directory's basename so you can see where you are.
+  wt_color_init
+  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, merge, help  (q to quit)"
+  local line
+  local -a words
+  while true; do
+    if ! read -r "line?${WT_C_BOLD}wt${WT_C_RESET} ${WT_C_CYAN}${PWD:t}${WT_C_RESET}> "; then
+      echo
+      break
+    fi
+    line="${line## }"; line="${line%% }"
+    [[ -z "$line" ]] && continue
+    case "$line" in
+      q|quit|exit) break ;;
+      h|help|'?')  wt_dispatch help; continue ;;
+    esac
+    words=(${(z)line})
+    wt_dispatch "${words[@]}"
+  done
+}
+
 function wt {
+  # No args -> interactive REPL. With args -> one-shot dispatch.
+  if [[ $# -eq 0 ]]; then
+    wt_repl
+    return $?
+  fi
+  wt_dispatch "$@"
+}
+
+function wt_dispatch {
   case "$1" in
+  repl)
+    wt_repl
+    ;;
   start)
     # PRD-driven creation: pick a prd-*.md from the dev worktree's tasks/ folder
     # and fan it (plus its matching tasks- list) out into a dedicated worktree.
@@ -601,7 +638,7 @@ function wt {
       return 1
     fi
     ;;
-  ""|go)
+  go)
     # Interactive mode - show menu of worktrees with status vs $BASE_BRANCH.
     # No gh lookup here so navigation stays network-free; use `wt status` for
     # the squash-merge-aware view.
@@ -805,7 +842,8 @@ function wt {
     ;;
   *)
     echo "Usage: wt [command] [args]"
-    echo "  wt               - Interactive mode (select worktree to navigate)"
+    echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
+    echo "  wt go            - One-shot worktree picker (navigate + cd)"
     echo "  wt start [prd]   - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
