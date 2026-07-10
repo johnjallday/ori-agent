@@ -776,6 +776,49 @@ test.describe('Workspace Agent Character Roster', () => {
           item.labelOverflow === 'hidden'
       )
     ).toBeTruthy();
+    const stationNodes = page.locator('#workspaceCommandView .ws-cmd-map-station-node');
+    await expect(stationNodes).toHaveCount(5);
+    await expect(stationNodes).toContainText([
+      'Objective',
+      'Quests',
+      'Inventory',
+      'Sessions',
+      'Systems'
+    ]);
+    const stationGeometry = await stationNodes.evaluateAll(nodes =>
+      nodes.map(node => {
+        const rect = node.getBoundingClientRect();
+        const mapRect = node.closest('.ws-cmd-opmap')?.getBoundingClientRect();
+        return {
+          bottom: Math.round(rect.bottom),
+          left: Math.round(rect.left),
+          mapBottom: mapRect ? Math.round(mapRect.bottom) : 0,
+          mapLeft: mapRect ? Math.round(mapRect.left) : 0,
+          mapRight: mapRect ? Math.round(mapRect.right) : 0,
+          mapTop: mapRect ? Math.round(mapRect.top) : 0,
+          right: Math.round(rect.right),
+          top: Math.round(rect.top)
+        };
+      })
+    );
+    expect(
+      stationGeometry.every(
+        item =>
+          item.left >= item.mapLeft &&
+          item.top >= item.mapTop &&
+          item.right <= item.mapRight &&
+          item.bottom <= item.mapBottom
+      )
+    ).toBeTruthy();
+    await page.locator('#workspaceCommandView [data-cmd-map-station-key="sessions"]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toContainText(
+      'Inventory'
+    );
+    await expect(
+      page.locator('#workspaceCommandView .ws-cmd-map-inventory-group.is-active')
+    ).toContainText('Sessions');
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
     const entryUnit = page
       .locator('#workspaceCommandView .ws-cmd-map-agent')
       .filter({ hasText: 'Roster Manager' });
@@ -784,19 +827,17 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(entryUnit).toHaveClass(/waiting/);
     await expect(entryUnit).toHaveAttribute('aria-label', /Entry Agent/);
 
-    await page.locator('#workspaceCommandView [data-cmd-map-window="inventory"]').click();
+    await page.locator('#workspaceCommandView [data-cmd-map-station-key="inventory"]').click();
     const inventoryWindow = page.locator('#workspaceCommandView .ws-cmd-map-window');
+    const activeInventoryGroup = page.locator(
+      '#workspaceCommandView .ws-cmd-map-inventory-group.is-active'
+    );
     await expect(inventoryWindow).toBeVisible();
     await expect(inventoryWindow).toContainText('Inventory');
-    await expect(
-      page.locator(
-        '#workspaceCommandView .ws-cmd-map-inventory-group.is-active .ws-cmd-map-inventory-grid'
-      )
-    ).toBeVisible();
-    await expect(
-      page.locator('#workspaceCommandView .ws-cmd-map-inventory-slot').first()
-    ).toBeVisible();
-    await expect(page.locator('#workspaceCommandView .ws-cmd-map-slot-type').first()).toContainText(
+    await expect(activeInventoryGroup).toContainText('Notes');
+    await expect(activeInventoryGroup.locator('.ws-cmd-map-inventory-grid')).toBeVisible();
+    await expect(activeInventoryGroup.locator('.ws-cmd-map-inventory-slot').first()).toBeVisible();
+    await expect(activeInventoryGroup.locator('.ws-cmd-map-slot-type').first()).toContainText(
       'Note'
     );
     const inventoryGeometry = await inventoryWindow.evaluate(node => {
@@ -820,7 +861,9 @@ test.describe('Workspace Agent Character Roster', () => {
     await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
     await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
 
-    await page.locator('#workspaceCommandView [data-cmd-map-window="objectives"]').click();
+    await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt-btn[data-cmd-map-window="objectives"]')
+      .click();
     await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toContainText(
       'Plan the work'
     );

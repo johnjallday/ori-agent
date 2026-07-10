@@ -487,6 +487,111 @@
   top: calc(50% - 80px);
   border-radius: 50%;
 }
+.ws-cmd-map-stations {
+  position: absolute;
+  inset: 72px 42px 42px;
+  z-index: 3;
+  pointer-events: none;
+}
+.ws-cmd-map-station-node {
+  position: absolute;
+  width: 142px;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(70, 211, 154, 0.16);
+  background:
+    linear-gradient(120deg, rgba(70, 211, 154, 0.08), transparent 62%), rgba(5, 7, 10, 0.62);
+  color: var(--ws-ink);
+  cursor: pointer;
+  pointer-events: auto;
+  text-align: left;
+  padding: 8px;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(4px);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+}
+.ws-cmd-map-station-node.is-objective {
+  top: 0;
+  left: 0;
+}
+.ws-cmd-map-station-node.is-quests {
+  bottom: 7%;
+  left: 4%;
+}
+.ws-cmd-map-station-node.is-inventory {
+  top: 70px;
+  right: 0;
+}
+.ws-cmd-map-station-node.is-sessions {
+  right: 5%;
+  bottom: 6%;
+}
+.ws-cmd-map-station-node.is-systems {
+  top: 0;
+  left: calc(50% - 71px);
+}
+.ws-cmd-map-station-node:hover,
+.ws-cmd-map-station-node.is-active {
+  border-color: var(--ws-faction);
+  background:
+    linear-gradient(120deg, rgba(70, 211, 154, 0.14), transparent 62%), rgba(5, 7, 10, 0.76);
+}
+.ws-cmd-map-station-node:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-station-node.has-signal::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 1px solid rgba(70, 211, 154, 0.18);
+  pointer-events: none;
+  animation: ws-cmd-station-signal 1.8s ease-in-out infinite;
+}
+.ws-cmd-map-station-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+  color: var(--ws-faction);
+  font-size: 15px;
+}
+.ws-cmd-map-station-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.ws-cmd-map-station-copy strong,
+.ws-cmd-map-station-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-station-copy strong {
+  color: #eef0f3;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-map-station-copy small {
+  color: var(--ws-ink-faint);
+  font-size: 10px;
+}
+.ws-cmd-map-station-node em {
+  min-width: 24px;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  font-style: normal;
+  text-align: right;
+}
 .ws-cmd-map-belt {
   position: absolute;
   right: 18px;
@@ -3835,6 +3940,12 @@
   .ws-cmd-map-world {
     padding: 28px 72px 72px 28px;
   }
+  .ws-cmd-map-stations {
+    inset: 82px 22px 28px;
+  }
+  .ws-cmd-map-station-node {
+    width: 126px;
+  }
   .ws-cmd-map-window-backdrop {
     padding: 18px;
   }
@@ -3920,6 +4031,39 @@
   .ws-cmd-map-belt-btn {
     width: 44px;
     height: 44px;
+  }
+  .ws-cmd-map-stations {
+    inset: auto 14px 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 6px;
+  }
+  .ws-cmd-map-station-node,
+  .ws-cmd-map-station-node.is-objective,
+  .ws-cmd-map-station-node.is-quests,
+  .ws-cmd-map-station-node.is-inventory,
+  .ws-cmd-map-station-node.is-sessions,
+  .ws-cmd-map-station-node.is-systems {
+    position: static;
+    width: min(106px, calc(33.33vw - 14px));
+    min-height: 46px;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 6px;
+    padding: 7px;
+  }
+  .ws-cmd-map-station-node em,
+  .ws-cmd-map-station-copy small {
+    display: none;
+  }
+  .ws-cmd-map-station-icon {
+    width: 26px;
+    height: 26px;
+    font-size: 13px;
+  }
+  .ws-cmd-map-station-copy strong {
+    font-size: 9px;
   }
   .ws-cmd-map-window-backdrop {
     padding: 12px;
@@ -4017,6 +4161,12 @@
     opacity: 0.58;
   }
 }
+@keyframes ws-cmd-station-signal {
+  50% {
+    opacity: 0.3;
+    transform: scale(1.05);
+  }
+}
 @media (prefers-reduced-motion: no-preference) {
   .ws-cmd-topbar {
     animation: ws-cmd-rise 0.35s ease both;
@@ -4053,5 +4203,8 @@
   .ws-cmd-map-agent,
   .ws-cmd-map-window {
     transition: none;
+  }
+  .ws-cmd-map-station-node.has-signal::after {
+    animation: none;
   }
 }
