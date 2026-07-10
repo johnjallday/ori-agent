@@ -3304,6 +3304,151 @@
   font-size: 10px;
   font-style: italic;
 }
+
+/* Interactive loadout editor (map Unit Sheet + details Loadout tab). */
+.ws-cmd-loadout-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-cmd-loadout-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-cmd-loadout-editor-section header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-cmd-loadout-add-btn {
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ws-cmd-loadout-add-btn:hover,
+.ws-cmd-loadout-add-btn.is-open {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-loadout-add-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-chip.is-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  background: transparent;
+  font-size: 10px;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.ws-cmd-loadout-chip-mark {
+  font-weight: 700;
+}
+.ws-cmd-loadout-chip.is-toggle.is-on {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.1);
+}
+.ws-cmd-loadout-chip.is-toggle.is-off {
+  color: var(--ws-ink-faint);
+  border-color: var(--ws-line);
+}
+.ws-cmd-loadout-chip.is-toggle:hover:not([disabled]) {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-loadout-chip.is-toggle:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-chip.is-toggle.is-busy,
+.ws-cmd-loadout-chip.is-toggle[disabled] {
+  opacity: 0.55;
+  cursor: progress;
+}
+.ws-cmd-loadout-chip.is-locked {
+  color: var(--ws-ink-faint);
+  border-style: dashed;
+}
+.ws-cmd-loadout-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.7);
+}
+.ws-cmd-loadout-picker.is-loading,
+.ws-cmd-loadout-picker.is-empty {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  font-style: italic;
+}
+.ws-cmd-loadout-picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+.ws-cmd-loadout-picker-item i {
+  font-size: 9px;
+  color: var(--ws-faction);
+}
+.ws-cmd-loadout-picker-item:hover:not([disabled]) {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-loadout-picker-item:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-picker-item.is-busy,
+.ws-cmd-loadout-picker-item[disabled] {
+  opacity: 0.55;
+  cursor: progress;
+}
+.ws-cmd-loadout-editor-error {
+  margin: 0;
+  color: var(--ws-alert);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+}
+.ws-cmd-rpg-loadout.is-editable {
+  display: block;
+}
+.ws-cmd-rpg-loadout-model {
+  margin-bottom: 8px;
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+.ws-cmd-rpg-loadout-model small {
+  display: block;
+  color: var(--ws-ink-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ws-cmd-loadout-card.is-editor {
+  display: block;
+}
 .ws-cmd-loadout-prompt {
   display: flex;
   justify-content: space-between;

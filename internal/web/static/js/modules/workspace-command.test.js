@@ -2201,6 +2201,12 @@ test('Operations Map renders units first and keeps support panels hidden by defa
         getEffectiveWorkspaceMCPServerNames() {
           return ['filesystem'];
         },
+        getAgentWorkspaceSkillLoadout() {
+          return [{ bindingId: 'sk-1', name: 'workspace-planning', enabled: true, locked: false }];
+        },
+        getAgentWorkspaceMCPLoadout() {
+          return [{ bindingId: 'mcp-1', name: 'filesystem', enabled: true, locked: false }];
+        },
         getAgentModelPresentation() {
           return { model: '', label: 'Model not set', empty: true };
         },
@@ -2399,4 +2405,162 @@ test('quest composer rejects an empty draft without calling the page', async () 
 
   assert.equal(called, false);
   assert.match(view.taskComposerError, /enter a quest/i);
+});
+
+function makeLoadoutView(overrides = {}) {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(
+    view,
+    {
+      loadoutAddOpen: '',
+      loadoutAddOptions: [],
+      loadoutAddLoading: false,
+      loadoutBusyKey: '',
+      loadoutError: '',
+      renderCalls: 0,
+      render() {
+        this.renderCalls += 1;
+      }
+    },
+    overrides
+  );
+  return view;
+}
+
+test('loadout editor renders interactive toggles, locked chips, and add buttons', () => {
+  const view = makeLoadoutView({
+    page: {
+      getAgentWorkspaceSkillLoadout() {
+        return [
+          { bindingId: 'sk-1', name: 'planner', enabled: true, locked: false },
+          { bindingId: 'sk-2', name: 'writer', enabled: false, locked: false }
+        ];
+      },
+      getAgentWorkspaceMCPLoadout() {
+        return [{ bindingId: 'fs', name: 'filesystem', enabled: true, locked: true }];
+      }
+    }
+  });
+
+  const html = view.renderLoadoutEditor({ name: 'Atlas', encodedName: 'Atlas' });
+  assert.match(html, /data-cmd-loadout-toggle="skill" data-cmd-loadout-binding="sk-1"/);
+  assert.match(html, /aria-checked="true"[^>]*data-cmd-loadout-binding="sk-1"|data-cmd-loadout-binding="sk-1"[^>]*aria-checked="true"/);
+  assert.match(html, /data-cmd-loadout-binding="sk-2"/);
+  assert.match(html, /ws-cmd-loadout-chip is-locked/);
+  assert.doesNotMatch(html, /data-cmd-loadout-toggle="mcp" data-cmd-loadout-binding="fs"/);
+  assert.match(html, /data-cmd-loadout-add="skill"/);
+  assert.match(html, /data-cmd-loadout-add="mcp"/);
+});
+
+test('toggling a loadout chip delegates to the page with decoded agent and inverted state', async () => {
+  const calls = [];
+  const view = makeLoadoutView({
+    page: {
+      async setAgentWorkspaceCapabilityEnabled(kind, agentName, bindingId, enabled) {
+        calls.push([kind, agentName, bindingId, enabled]);
+        return true;
+      }
+    }
+  });
+
+  await view.toggleLoadoutBinding('skill', encodeURIComponent('Atlas Prime'), 'sk-9', false);
+
+  assert.deepEqual(calls, [['skill', 'Atlas Prime', 'sk-9', false]]);
+  assert.equal(view.loadoutBusyKey, '');
+});
+
+test('handleLoadoutClick routes a toggle target to toggleLoadoutBinding', () => {
+  const args = [];
+  const view = makeLoadoutView();
+  view.toggleLoadoutBinding = (...a) => args.push(a);
+  const target = {
+    closest(selector) {
+      if (selector === '[data-cmd-loadout-toggle]') {
+        return {
+          getAttribute(name) {
+            return {
+              'data-cmd-loadout-toggle': 'mcp',
+              'data-cmd-loadout-agent': 'Atlas',
+              'data-cmd-loadout-binding': 'mcp-3',
+              'aria-checked': 'false'
+            }[name];
+          }
+        };
+      }
+      return null;
+    }
+  };
+
+  const handled = view.handleLoadoutClick({ target });
+
+  assert.equal(handled, true);
+  assert.deepEqual(args, [['mcp', 'Atlas', 'mcp-3', true]]);
+});
+
+test('opening a loadout picker loads registry additions; reopening the same kind closes it', async () => {
+  const view = makeLoadoutView({
+    page: {
+      async listAgentLoadoutAdditions(kind) {
+        return kind === 'skill' ? ['reviewer', 'summarizer'] : [];
+      }
+    }
+  });
+
+  await view.openLoadoutPicker('skill', 'Atlas');
+  assert.equal(view.loadoutAddOpen, 'skill');
+  assert.deepEqual(view.loadoutAddOptions, ['reviewer', 'summarizer']);
+  assert.equal(view.loadoutAddLoading, false);
+
+  await view.openLoadoutPicker('skill', 'Atlas');
+  assert.equal(view.loadoutAddOpen, '');
+});
+
+test('binding a loadout capability delegates to the page and closes the picker on success', async () => {
+  const originalWindow = globalThis.window;
+  const toasts = [];
+  globalThis.window = { Toast: { success: m => toasts.push(m), error() {} } };
+  try {
+    const calls = [];
+    const view = makeLoadoutView({
+      loadoutAddOpen: 'mcp',
+      loadoutAddOptions: ['filesystem'],
+      page: {
+        async addAgentWorkspaceCapability(kind, agentName, name) {
+          calls.push([kind, agentName, name]);
+          return true;
+        }
+      }
+    });
+
+    await view.bindLoadoutCapability('mcp', encodeURIComponent('Atlas'), 'filesystem');
+
+    assert.deepEqual(calls, [['mcp', 'Atlas', 'filesystem']]);
+    assert.equal(view.loadoutAddOpen, '');
+    assert.deepEqual(toasts, ['Tool "filesystem" added']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a failed loadout binding surfaces an error and preserves the picker', async () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { Toast: { success() {}, error() {} } };
+  try {
+    const view = makeLoadoutView({
+      loadoutAddOpen: 'skill',
+      page: {
+        async addAgentWorkspaceCapability() {
+          throw new Error('registry offline');
+        }
+      }
+    });
+
+    await view.bindLoadoutCapability('skill', 'Atlas', 'reviewer');
+
+    assert.equal(view.loadoutAddOpen, 'skill');
+    assert.match(view.loadoutError, /could not add reviewer/i);
+    assert.match(view.loadoutError, /registry offline/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });

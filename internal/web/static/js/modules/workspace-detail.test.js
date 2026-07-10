@@ -810,3 +810,99 @@ test('showAddTaskModalForAgent with no agent opens the modal without an assignee
     'no assignment value is forced when no agent is given'
   );
 });
+
+test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding access set', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }, { id: 'inst-B', name: 'Bolt' }] };
+  const persisted = [];
+  page.skillsManager.getWorkspaceSkillAgentAccessSelections = () => [
+    { id: 'inst-A', checked: false },
+    { id: 'inst-B', checked: true }
+  ];
+  page.skillsManager.persistWorkspaceSkillAgentAccess = async (bindingId, ids) => {
+    persisted.push([bindingId, ids]);
+  };
+  page.loadWorkspace = async () => {};
+
+  const ok = await page.setAgentWorkspaceCapabilityEnabled('skill', 'Atlas', 'sk-1', true);
+
+  assert.equal(ok, true);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0][0], 'sk-1');
+  assert.deepEqual([...persisted[0][1]].sort(), ['inst-A', 'inst-B']);
+});
+
+test('setAgentWorkspaceCapabilityEnabled removes the agent when disabling', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }, { id: 'inst-B', name: 'Bolt' }] };
+  const persisted = [];
+  page.mcpManager.getWorkspaceMCPAgentAccessSelections = () => [
+    { id: 'inst-A', checked: true },
+    { id: 'inst-B', checked: true }
+  ];
+  page.mcpManager.persistWorkspaceMCPAgentAccess = async (bindingId, ids) => {
+    persisted.push([bindingId, ids]);
+  };
+  page.loadWorkspace = async () => {};
+
+  await page.setAgentWorkspaceCapabilityEnabled('mcp', 'Atlas', 'mcp-1', false);
+
+  assert.deepEqual(persisted[0][1], ['inst-B']);
+});
+
+test('addAgentWorkspaceCapability creates a workspace MCP binding then enables it for the agent', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }] };
+  page.mcpManager.getWorkspaceMCPBindings = () => [];
+  page.loadWorkspace = async () => {};
+  const enableCalls = [];
+  page.setAgentWorkspaceCapabilityEnabled = async (...a) => {
+    enableCalls.push(a);
+    return true;
+  };
+  const fetchCalls = [];
+  const origFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    fetchCalls.push([url, opts]);
+    return { ok: true, json: async () => ({ binding: { id: 'b1' } }), text: async () => '' };
+  };
+  try {
+    const ok = await page.addAgentWorkspaceCapability('mcp', 'Atlas', 'weather');
+    assert.equal(ok, true);
+  } finally {
+    global.fetch = origFetch;
+  }
+
+  assert.equal(fetchCalls.length, 1);
+  assert.match(fetchCalls[0][0], /\/api\/workspaces\/ws-1\/mcp-bindings$/);
+  assert.equal(fetchCalls[0][1].method, 'POST');
+  assert.deepEqual(JSON.parse(fetchCalls[0][1].body), { server_name: 'weather', enabled: true });
+  assert.deepEqual(enableCalls, [['mcp', 'Atlas', 'b1', true]]);
+});
+
+test('addAgentWorkspaceCapability reuses an existing enabled binding without a POST', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }] };
+  page.skillsManager.getWorkspaceSkillBindings = () => [
+    { id: 'sk-existing', skillName: 'planner', enabled: true }
+  ];
+  const enableCalls = [];
+  page.setAgentWorkspaceCapabilityEnabled = async (...a) => {
+    enableCalls.push(a);
+    return true;
+  };
+  const origFetch = global.fetch;
+  let fetched = false;
+  global.fetch = async () => {
+    fetched = true;
+    return { ok: true, json: async () => ({}), text: async () => '' };
+  };
+  try {
+    await page.addAgentWorkspaceCapability('skill', 'Atlas', 'planner');
+  } finally {
+    global.fetch = origFetch;
+  }
+
+  assert.equal(fetched, false, 'no binding is created when one already exists enabled');
+  assert.deepEqual(enableCalls, [['skill', 'Atlas', 'sk-existing', true]]);
+});
