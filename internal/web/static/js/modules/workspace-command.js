@@ -2814,7 +2814,8 @@ export class WorkspaceCommandView {
               .trim()
               .toLowerCase();
             const questNumber = String(index + 1).padStart(2, '0');
-            return (
+            const startable = this.isQueuedTask(task);
+            const openButton =
               '<button type="button" class="ws-cmd-map-task-row ' +
               escapeHtml(this.taskTone(status)) +
               '" data-cmd-open-task="' +
@@ -2826,7 +2827,16 @@ export class WorkspaceCommandView {
               escapeHtml(label) +
               '</span><span class="ws-cmd-map-task-status">' +
               escapeHtml(this.taskStatusLabel(status)) +
-              '</span></button>'
+              '</span></button>';
+            const startButton = startable
+              ? '<button type="button" class="ws-cmd-map-task-start" data-cmd-map-start-task="' +
+                escapeHtml(id) +
+                '" aria-label="Start ' +
+                escapeHtml(label) +
+                '"><i class="bi bi-play-fill" aria-hidden="true"></i><span>Start</span></button>'
+              : '';
+            return (
+              '<div class="ws-cmd-map-task-row-wrap">' + openButton + startButton + '</div>'
             );
           })
           .join('')
@@ -3193,6 +3203,30 @@ export class WorkspaceCommandView {
     return 'Open Quest';
   }
 
+  // Dispatch a pending quest in place. executeTask owns the live-execution
+  // monitor and already guards against already-running tasks; we add a
+  // deterministic raced-state check so a quest that stopped being pending
+  // (started elsewhere, deleted) reports cleanly and refreshes.
+  async startMapQuest(taskId) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page || typeof page.executeTask !== 'function') return;
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    const task = tasks.find(item => String(item?.id || '') === id);
+    if (!task || !this.isQueuedTask(task)) {
+      if (window.Toast) window.Toast.info('That quest is no longer pending.');
+      if (typeof page.loadTasks === 'function') await page.loadTasks();
+      return;
+    }
+    try {
+      await page.executeTask(id, { skipConfirm: true });
+    } catch (_error) {
+      if (window.Toast) window.Toast.error('Could not start the quest.');
+      if (typeof page.loadTasks === 'function') await page.loadTasks();
+    }
+  }
+
   renderMapAgentCommandMenu(agent, detailTarget) {
     const task = this.priorityTaskForAgent(agent) || agent?.currentTask;
     const taskId = String(task?.id || '').trim();
@@ -3241,15 +3275,29 @@ export class WorkspaceCommandView {
     const actions = [];
     if (taskId) {
       const urgent = this.isBlockedTask(task) || this.isNeedsInputTask(task);
-      actions.push(
-        action({
-          label: taskLabel,
-          detail: taskDetail,
-          icon: urgent ? 'bi-exclamation-triangle' : 'bi-journal-check',
-          className: urgent ? 'is-primary is-' + taskTone : 'is-' + taskTone,
-          attrs: 'data-cmd-open-task="' + escapeHtml(taskId) + '"'
-        })
-      );
+      const startable = this.isQueuedTask(task);
+      if (startable) {
+        // A pending quest can be dispatched in place instead of only opened.
+        actions.push(
+          action({
+            label: 'Start Quest',
+            detail: taskDetail,
+            icon: 'bi-play-fill',
+            className: 'is-primary is-' + taskTone,
+            attrs: 'data-cmd-map-start-task="' + escapeHtml(taskId) + '"'
+          })
+        );
+      } else {
+        actions.push(
+          action({
+            label: taskLabel,
+            detail: taskDetail,
+            icon: urgent ? 'bi-exclamation-triangle' : 'bi-journal-check',
+            className: urgent ? 'is-primary is-' + taskTone : 'is-' + taskTone,
+            attrs: 'data-cmd-open-task="' + escapeHtml(taskId) + '"'
+          })
+        );
+      }
     }
     actions.push(
       action({
@@ -3847,6 +3895,11 @@ export class WorkspaceCommandView {
         } else if (typeof page.createNewSession === 'function') {
           page.createNewSession();
         }
+        return;
+      }
+      const startTaskBtn = event.target.closest('[data-cmd-map-start-task]');
+      if (startTaskBtn) {
+        this.startMapQuest(startTaskBtn.getAttribute('data-cmd-map-start-task'));
         return;
       }
       const openTaskBtn = event.target.closest('[data-cmd-open-task]');
