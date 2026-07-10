@@ -704,6 +704,183 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(mobileGeometry.stageBottom).toBeLessThanOrEqual(mobileGeometry.overviewTop || 0);
     expect(mobileGeometry.pageWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
   });
+
+  test('operations map switches from details, selects agents, and opens inventory', async ({
+    page
+  }) => {
+    await installRosterRoutes(page);
+    await page.addInitScript(() => {
+      window.localStorage.removeItem('oriWorkspaceCommandViewMode');
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/workspaces/roster-ws');
+
+    await page.locator('#workspaceCommandView [data-cmd-view-mode="map"]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-opmap')).toBeVisible();
+    await expect(page.locator('#workspaceCommandView [data-map-zone="mission"]')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView [data-map-zone="tasks"]')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView [data-map-zone="tools"]')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView [data-map-zone="agents"]')).toContainText(
+      'Research Analyst'
+    );
+    const beltGeometry = await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt')
+      .evaluate(node => {
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        const mapRect = node.closest('.ws-cmd-opmap').getBoundingClientRect();
+        return {
+          flexDirection: style.flexDirection,
+          rightGap: Math.round(mapRect.right - rect.right),
+          topGap: Math.round(rect.top - mapRect.top)
+        };
+      });
+    expect(beltGeometry.flexDirection).toBe('row');
+    expect(beltGeometry.rightGap).toBeLessThanOrEqual(24);
+    expect(beltGeometry.topGap).toBeLessThanOrEqual(24);
+    const beltLabelGeometry = await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt-btn')
+      .evaluateAll(buttons =>
+        buttons.map(button => {
+          const label = button.querySelector('.sr-only');
+          const labelStyle = label ? window.getComputedStyle(label) : null;
+          const labelRect = label ? label.getBoundingClientRect() : null;
+          const buttonRect = button.getBoundingClientRect();
+          return {
+            ariaLabel: button.getAttribute('aria-label'),
+            buttonHeight: Math.round(buttonRect.height),
+            buttonWidth: Math.round(buttonRect.width),
+            labelHeight: labelRect ? Math.round(labelRect.height) : 0,
+            labelOverflow: labelStyle?.overflow || '',
+            labelText: label?.textContent?.trim() || '',
+            labelWidth: labelRect ? Math.round(labelRect.width) : 0
+          };
+        })
+      );
+    expect(beltLabelGeometry).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ariaLabel: 'Workspace Objective',
+          labelText: 'Workspace Objective'
+        })
+      ])
+    );
+    expect(
+      beltLabelGeometry.every(
+        item =>
+          item.buttonHeight >= 44 &&
+          item.buttonWidth >= 44 &&
+          item.labelHeight <= 1 &&
+          item.labelWidth <= 1 &&
+          item.labelOverflow === 'hidden'
+      )
+    ).toBeTruthy();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-station-node')).toHaveCount(0);
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-station-route')).toHaveCount(0);
+    const entryUnit = page
+      .locator('#workspaceCommandView .ws-cmd-map-agent')
+      .filter({ hasText: 'Roster Manager' });
+    await expect(entryUnit.locator('.ws-cmd-map-entry-badge')).toBeVisible();
+    await expect(entryUnit.locator('.ws-cmd-map-agent-status')).toBeVisible();
+    await expect(entryUnit).toHaveClass(/waiting/);
+    await expect(entryUnit).toHaveAttribute('aria-label', /Entry Agent/);
+
+    await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt-btn[data-cmd-map-window="inventory"]')
+      .click();
+    const inventoryWindow = page.locator('#workspaceCommandView .ws-cmd-map-window');
+    const activeInventoryGroup = page.locator(
+      '#workspaceCommandView .ws-cmd-map-inventory-group.is-active'
+    );
+    await expect(inventoryWindow).toBeVisible();
+    await expect(inventoryWindow).toContainText('Inventory');
+    await expect(activeInventoryGroup).toContainText('Notes');
+    await expect(activeInventoryGroup.locator('.ws-cmd-map-inventory-grid')).toBeVisible();
+    await expect(activeInventoryGroup.locator('.ws-cmd-map-inventory-slot').first()).toBeVisible();
+    await expect(activeInventoryGroup.locator('.ws-cmd-map-slot-type').first()).toContainText(
+      'Note'
+    );
+    const inventoryGeometry = await inventoryWindow.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        viewportHeight: window.innerHeight
+      };
+    });
+    expect(inventoryGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(inventoryGeometry.bottom).toBeLessThanOrEqual(inventoryGeometry.viewportHeight);
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-inventory-badge')).toContainText([
+      'Notes',
+      'Schedules',
+      'Sessions',
+      'Linked Folders',
+      'Files',
+      'Systems'
+    ]);
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
+
+    await page
+      .locator('#workspaceCommandView .ws-cmd-map-belt-btn[data-cmd-map-window="objectives"]')
+      .click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toContainText(
+      'Plan the work'
+    );
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+
+    await page
+      .locator('#workspaceCommandView .ws-cmd-map-agent')
+      .filter({ hasText: 'Research Analyst' })
+      .click();
+    const inspector = page.locator('#workspaceCommandView .ws-cmd-map-window');
+    await expect(inspector).toContainText('Research Analyst');
+    await expect(inspector).toContainText('Needs input');
+    await expect(inspector).toContainText('Class');
+    await expect(inspector).toContainText('Loadout');
+    await expect(inspector).toContainText('Current Quest');
+    await expect(inspector).toContainText('Command Menu');
+    await expect(inspector).toContainText('Resolve Quest');
+    await expect(inspector).toContainText('Start Session');
+    await expect(inspector).toContainText('Configure Loadout');
+    await expect(inspector).toContainText('Quests');
+    await expect(inspector).toContainText('Skills');
+    const inspectorGeometry = await inspector.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      const body = node.querySelector('.ws-cmd-map-window-body')?.getBoundingClientRect();
+      const menu = node.querySelector('.ws-cmd-rpg-command-panel')?.getBoundingClientRect();
+      return {
+        bottom: Math.round(rect.bottom),
+        bodyBottom: body ? Math.round(body.bottom) : 0,
+        bodyTop: body ? Math.round(body.top) : 0,
+        menuBottom: menu ? Math.round(menu.bottom) : 0,
+        menuTop: menu ? Math.round(menu.top) : 0,
+        top: Math.round(rect.top),
+        viewportHeight: window.innerHeight
+      };
+    });
+    expect(inspectorGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(inspectorGeometry.bottom).toBeLessThanOrEqual(inspectorGeometry.viewportHeight);
+    expect(inspectorGeometry.menuTop).toBeGreaterThanOrEqual(inspectorGeometry.bodyTop);
+    expect(inspectorGeometry.menuBottom).toBeLessThanOrEqual(inspectorGeometry.bodyBottom);
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileGeometry = await page
+      .locator('#workspaceCommandView .ws-cmd-opmap')
+      .evaluate(() => {
+        return {
+          pageWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth
+        };
+      });
+    expect(mobileGeometry.pageWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
+
+    await page.locator('#workspaceCommandView [data-cmd-view-mode="details"]').click();
+    await expect(page.locator('#workspaceCommandView .ws-cmd-deck')).toBeVisible();
+  });
 });
 
 test.describe('Task Output Contracts', () => {

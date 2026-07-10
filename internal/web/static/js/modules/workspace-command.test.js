@@ -7,6 +7,11 @@ import { WorkspaceCommandView } from './workspace-command.js';
 // setup() when there's no container — a null-returning stub is enough to build
 // an instance whose pure format helpers we can exercise.
 globalThis.document = { getElementById: () => null };
+globalThis.localStorage = {
+  getItem: () => null,
+  setItem() {},
+  removeItem() {}
+};
 const view = new WorkspaceCommandView(null);
 
 function makeToggleButton() {
@@ -72,6 +77,20 @@ function makeAttributeClickTarget(attrs) {
           }
         };
       }
+      const matchedAttr = Object.keys(attrs).find(
+        attr =>
+          selector === '[' + attr + ']' ||
+          selector.startsWith('[' + attr + '=') ||
+          selector.includes('][' + attr + ']') ||
+          selector.includes('][' + attr + '=')
+      );
+      if (matchedAttr) {
+        return {
+          getAttribute(name) {
+            return attrs[name] || '';
+          }
+        };
+      }
       if (
         selector.includes('data-cmd-open-section') &&
         selector.includes('data-cmd-item-id') &&
@@ -95,6 +114,9 @@ test('statusTone maps an agent status to a visual tone', () => {
   assert.equal(view.statusTone('busy', ''), 'working');
   assert.equal(view.statusTone('error', ''), 'alert');
   assert.equal(view.statusTone('failed', ''), 'alert');
+  assert.equal(view.statusTone('waiting', ''), 'waiting');
+  assert.equal(view.statusTone('needs-input', ''), 'needs-input');
+  assert.equal(view.statusTone('completed', ''), 'done');
   assert.equal(view.statusTone('idle', ''), 'idle');
   assert.equal(view.statusTone('', ''), 'idle');
 });
@@ -1969,6 +1991,270 @@ test('setup always activates Command view', () => {
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;
+    globalThis.localStorage = originalLocalStorage;
+  }
+});
+
+test('command view mode preference defaults to details and persists map globally', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  const store = new Map();
+  try {
+    globalThis.localStorage = {
+      getItem(key) {
+        return store.has(key) ? store.get(key) : null;
+      },
+      setItem(key, value) {
+        store.set(key, String(value));
+      }
+    };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+
+    assert.equal(commandView.readCommandViewModePreference(), 'details');
+    commandView.persistCommandViewMode('map');
+    assert.equal(store.get('oriWorkspaceCommandViewMode'), 'map');
+    assert.equal(commandView.readCommandViewModePreference(), 'map');
+
+    commandView.persistCommandViewMode('bad-value');
+    assert.equal(commandView.readCommandViewModePreference(), 'details');
+  } finally {
+    globalThis.localStorage = originalLocalStorage;
+  }
+});
+
+test('Operations Map agent status prioritizes attention states before working', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const agent = {
+    status: { key: 'idle', label: 'Idle', detail: 'No active tasks' },
+    tasks: [
+      { id: 'task-1', status: 'in_progress' },
+      { id: 'task-2', status: 'blocked' }
+    ]
+  };
+
+  assert.equal(commandView.mapAgentStatus(agent).key, 'blocked');
+
+  agent.tasks = [
+    { id: 'task-1', status: 'in_progress' },
+    { id: 'task-2', status: 'waiting_for_choice' }
+  ];
+  assert.equal(commandView.mapAgentStatus(agent).key, 'needs-input');
+
+  agent.tasks = [{ id: 'task-1', status: 'in_progress' }];
+  assert.equal(commandView.mapAgentStatus(agent).key, 'working');
+
+  agent.tasks = [{ id: 'task-1', status: 'pending' }];
+  assert.equal(commandView.mapAgentStatus(agent).key, 'waiting');
+});
+
+test('Operations Map inventory derives counts from existing page data', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      notes: [{ id: 'n1', title: 'Note' }],
+      schedules: [{ id: 'sch1', name: 'Daily' }],
+      sessions: [{ id: 's1', title: 'Session' }],
+      directories: [{ id: 'd1', name: 'Project', path: '/tmp/project' }],
+      files: [{ id: 'f1', title: 'Brief.md' }]
+    },
+    activeSystemTab: 'memory'
+  });
+
+  const counts = Object.fromEntries(
+    commandView.mapInventoryGroups().map(group => [group.key, group.count])
+  );
+
+  assert.equal(counts.notes, 1);
+  assert.equal(counts.schedules, 1);
+  assert.equal(counts.sessions, 1);
+  assert.equal(counts.folders, 1);
+  assert.equal(counts.files, 1);
+  assert.equal(counts.systems, 2);
+});
+
+test('Operations Map controls expose accessible pressed and dialog state', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode: 'map',
+    page: { notes: [], schedules: [], sessions: [], directories: [], files: [] },
+    activeMapWindow: 'inventory',
+    mapInventorySection: 'notes',
+    activeSystemTab: 'memory'
+  });
+
+  const switcher = commandView.commandViewSwitchHTML();
+  assert.match(switcher, /role="group" aria-label="Workspace view"/);
+  assert.match(switcher, /data-cmd-view-mode="map" aria-pressed="true"/);
+
+  const tray = commandView.renderMapToolTray();
+  assert.match(tray, /data-cmd-map-window="inventory" aria-label="Inventory" aria-pressed="true"/);
+
+  const windowHTML = commandView.renderMapWindow(null);
+  assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Inventory"/);
+  assert.match(windowHTML, /ws-cmd-map-inventory-grid/);
+  assert.match(windowHTML, /ws-cmd-map-inventory-slot is-empty/);
+  assert.match(windowHTML, /ws-cmd-map-slot-type">Note/);
+  assert.match(windowHTML, /Open Slot/);
+});
+
+test('Operations Map agent command menu delegates to existing workspace flows', () => {
+  const mapRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-map-shell' ? mapRoot : null;
+      }
+    },
+    page: {
+      showAddTaskModalForAgent(encodedName) {
+        calls.push(['add-task', encodedName]);
+      },
+      createNewSessionForAgent(encodedName) {
+        calls.push(['new-session', encodedName]);
+      },
+      openSession(id) {
+        calls.push(['open-session', id]);
+      },
+      openTask(id) {
+        calls.push(['open-task', id]);
+      }
+    },
+    selectAgent(encodedName, options) {
+      calls.push(['select-agent', encodedName, options.focus]);
+    },
+    setCommandViewMode(mode, options) {
+      calls.push(['view-mode', mode, options.focus]);
+    },
+    setActiveAgentTab(tab) {
+      calls.push(['agent-tab', tab]);
+    }
+  });
+
+  commandView.bindOperationsMap();
+
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-add-task': 'Researcher' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-map-new-session': 'Researcher' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-open-session': 'session-1' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-open-task': 'task-1' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({
+      'data-cmd-map-agent-tab': 'loadout',
+      'data-cmd-agent-name': 'Researcher'
+    })
+  });
+
+  assert.deepEqual(calls, [
+    ['add-task', 'Researcher'],
+    ['new-session', 'Researcher'],
+    ['open-session', 'session-1'],
+    ['open-task', 'task-1'],
+    ['select-agent', 'Researcher', false],
+    ['view-mode', 'details', false],
+    ['agent-tab', 'loadout']
+  ]);
+});
+
+test('Operations Map renders units first and keeps support panels hidden by default', () => {
+  const originalLocalStorage = globalThis.localStorage;
+  try {
+    globalThis.localStorage = { getItem: () => null, setItem() {} };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: {
+        workspace: { id: 'ws-1', name: 'Research', mcp_bindings: [], skill_bindings: [] },
+        buildAgentGroups() {
+          return [
+            {
+              key: 'researcher',
+              name: 'Researcher',
+              isWorkspaceAgent: true,
+              instanceCount: 1,
+              roles: ['Agent'],
+              tasks: [
+                {
+                  id: 'task-1',
+                  status: 'in_progress',
+                  description: 'Collect sources'
+                }
+              ]
+            }
+          ];
+        },
+        getAgentRosterStatus() {
+          return { key: 'working', label: 'Working', detail: 'Task in progress' };
+        },
+        isWorkspaceEntryAgent(name) {
+          return name === 'Researcher';
+        },
+        getAgentSkillSummary() {
+          return { count: 1, names: ['workspace-planning'] };
+        },
+        getEffectiveWorkspaceMCPServerNames() {
+          return ['filesystem'];
+        },
+        getAgentModelPresentation() {
+          return { model: '', label: 'Model not set', empty: true };
+        },
+        tasks: [{ id: 'task-1', status: 'in_progress', description: 'Collect sources' }],
+        sessions: [
+          {
+            id: 'session-1',
+            title: 'Research chat',
+            agent_name: 'Researcher',
+            updated_at: '2026-07-09T12:00:00Z'
+          }
+        ]
+      },
+      selectedAgentKey: '',
+      agentSelectionInitialized: true,
+      activeMapWindow: '',
+      mapInventorySection: '',
+      activeSystemTab: 'memory'
+    });
+
+    const html = commandView.renderOperationsMap();
+
+    assert.match(html, /ws-cmd-map-shell/);
+    assert.match(html, /data-map-zone="agents"/);
+    assert.match(html, /data-cmd-map-window="inventory"/);
+    assert.doesNotMatch(html, /ws-cmd-map-stations/);
+    assert.doesNotMatch(html, /ws-cmd-map-station-node/);
+    assert.match(html, /Researcher/);
+    assert.match(html, /ws-cmd-map-entry-badge/);
+    assert.match(html, /Entry Agent/);
+    assert.doesNotMatch(html, /data-map-zone="mission"/);
+    assert.doesNotMatch(html, /data-map-zone="tasks"/);
+    assert.doesNotMatch(html, /data-map-zone="tools"/);
+    assert.doesNotMatch(html, /role="dialog"/);
+
+    commandView.activeMapWindow = 'objectives';
+    const windowHTML = commandView.renderOperationsMap();
+    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Objectives"/);
+    assert.match(windowHTML, /Collect sources/);
+
+    commandView.activeMapWindow = 'inspector';
+    const agentSheetHTML = commandView.renderOperationsMap();
+    assert.match(agentSheetHTML, /Unit Sheet/);
+    assert.match(agentSheetHTML, /Class/);
+    assert.match(agentSheetHTML, /Loadout/);
+    assert.match(agentSheetHTML, /workspace-planning/);
+    assert.match(agentSheetHTML, /filesystem/);
+    assert.match(agentSheetHTML, /ws-cmd-rpg-stat-grid/);
+    assert.match(agentSheetHTML, /Current Quest/);
+    assert.match(agentSheetHTML, /Command Menu/);
+    assert.match(agentSheetHTML, /Track Quest/);
+    assert.match(agentSheetHTML, /Continue Session/);
+    assert.match(agentSheetHTML, /Configure Loadout/);
+  } finally {
     globalThis.localStorage = originalLocalStorage;
   }
 });
