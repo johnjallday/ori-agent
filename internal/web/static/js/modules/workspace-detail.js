@@ -15481,13 +15481,19 @@ export class WorkspaceDetailPage {
   /**
    * Show add task modal
    */
-  showAddTaskModal() {
+  showAddTaskModal(options = {}) {
     // Use existing task modal controller
     if (
       window.taskModalController &&
       typeof window.taskModalController.openForCreate === 'function'
     ) {
-      window.taskModalController.openForCreate(this.workspaceId, '', () => this.loadTasks());
+      const createOptions = options && typeof options === 'object' ? options : {};
+      window.taskModalController.openForCreate(
+        this.workspaceId,
+        '',
+        () => this.loadTasks(),
+        createOptions
+      );
     } else {
       // Fallback to prompt
       const name = prompt('Enter task name:');
@@ -15496,10 +15502,21 @@ export class WorkspaceDetailPage {
   }
 
   showAddTaskModalForAgent(encodedAgentName = '') {
-    // Keep current behavior (workspace task modal), but route from per-agent section actions.
-    // Future enhancement can preselect agent assignment in the task modal.
-    void encodedAgentName;
-    this.showAddTaskModal();
+    // Route from per-agent section actions with the assignee preselected, so a task
+    // given to a specific agent lands on that agent instead of the entry-agent default.
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || '')).trim();
+    } catch (_error) {
+      agentName = String(encodedAgentName || '').trim();
+    }
+    if (!agentName) {
+      this.showAddTaskModal();
+      return;
+    }
+    // The assignment dropdown keys agents as `node:<name>-node-1` (see task modal
+    // populateAgentDropdown); draftAssignmentValue is applied after it populates.
+    this.showAddTaskModal({ draftAssignmentValue: `node:${agentName}-node-1` });
   }
 
   /**

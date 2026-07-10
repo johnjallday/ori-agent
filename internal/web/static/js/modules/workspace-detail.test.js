@@ -768,3 +768,45 @@ test('workspace-local model save posts to the workspace-scoped endpoint', async 
   assert.equal(body.model, 'claude-opus-4');
   assert.equal(body.llm_provider, 'claude');
 });
+
+test('showAddTaskModalForAgent preselects the chosen agent as the task assignee', () => {
+  const page = new WorkspaceDetailPage('ws-7');
+  const calls = [];
+  const originalController = global.window.taskModalController;
+  global.window.taskModalController = {
+    openForCreate(workspaceId, prefill, onSave, options) {
+      calls.push({ workspaceId, prefill, options });
+    }
+  };
+  try {
+    page.showAddTaskModalForAgent(encodeURIComponent('Atlas Prime'));
+  } finally {
+    global.window.taskModalController = originalController;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workspaceId, 'ws-7');
+  assert.equal(calls[0].options.draftAssignmentValue, 'node:Atlas Prime-node-1');
+});
+
+test('showAddTaskModalForAgent with no agent opens the modal without an assignee', () => {
+  const page = new WorkspaceDetailPage('ws-7');
+  const calls = [];
+  const originalController = global.window.taskModalController;
+  global.window.taskModalController = {
+    openForCreate(workspaceId, prefill, onSave, options) {
+      calls.push({ options });
+    }
+  };
+  try {
+    page.showAddTaskModalForAgent('');
+  } finally {
+    global.window.taskModalController = originalController;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.ok(
+    !calls[0].options || !('draftAssignmentValue' in calls[0].options),
+    'no assignment value is forced when no agent is given'
+  );
+});
