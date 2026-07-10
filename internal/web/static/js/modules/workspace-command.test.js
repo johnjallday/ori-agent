@@ -77,6 +77,14 @@ function makeAttributeClickTarget(attrs) {
           }
         };
       }
+      const matchedAttr = Object.keys(attrs).find(attr => selector.includes(attr));
+      if (matchedAttr) {
+        return {
+          getAttribute(name) {
+            return attrs[name] || '';
+          }
+        };
+      }
       if (
         selector.includes('data-cmd-open-section') &&
         selector.includes('data-cmd-item-id') &&
@@ -2082,6 +2090,73 @@ test('Operations Map controls expose accessible pressed and dialog state', () =>
   assert.match(windowHTML, /Open Slot/);
 });
 
+test('Operations Map agent command menu delegates to existing workspace flows', () => {
+  const mapRoot = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector(selector) {
+        return selector === '.ws-cmd-map-shell' ? mapRoot : null;
+      }
+    },
+    page: {
+      showAddTaskModalForAgent(encodedName) {
+        calls.push(['add-task', encodedName]);
+      },
+      createNewSessionForAgent(encodedName) {
+        calls.push(['new-session', encodedName]);
+      },
+      openSession(id) {
+        calls.push(['open-session', id]);
+      },
+      openTask(id) {
+        calls.push(['open-task', id]);
+      }
+    },
+    selectAgent(encodedName, options) {
+      calls.push(['select-agent', encodedName, options.focus]);
+    },
+    setCommandViewMode(mode, options) {
+      calls.push(['view-mode', mode, options.focus]);
+    },
+    setActiveAgentTab(tab) {
+      calls.push(['agent-tab', tab]);
+    }
+  });
+
+  commandView.bindOperationsMap();
+
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-add-task': 'Researcher' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-map-new-session': 'Researcher' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-open-session': 'session-1' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-open-task': 'task-1' })
+  });
+  mapRoot.listener({
+    target: makeAttributeClickTarget({
+      'data-cmd-map-agent-tab': 'loadout',
+      'data-cmd-agent-name': 'Researcher'
+    })
+  });
+
+  assert.deepEqual(calls, [
+    ['add-task', 'Researcher'],
+    ['new-session', 'Researcher'],
+    ['open-session', 'session-1'],
+    ['open-task', 'task-1'],
+    ['select-agent', 'Researcher', false],
+    ['view-mode', 'details', false],
+    ['agent-tab', 'loadout']
+  ]);
+});
+
 test('Operations Map renders units first and keeps support panels hidden by default', () => {
   const originalLocalStorage = globalThis.localStorage;
   try {
@@ -2123,7 +2198,15 @@ test('Operations Map renders units first and keeps support panels hidden by defa
         getAgentModelPresentation() {
           return { model: '', label: 'Model not set', empty: true };
         },
-        tasks: [{ id: 'task-1', status: 'in_progress', description: 'Collect sources' }]
+        tasks: [{ id: 'task-1', status: 'in_progress', description: 'Collect sources' }],
+        sessions: [
+          {
+            id: 'session-1',
+            title: 'Research chat',
+            agent_name: 'Researcher',
+            updated_at: '2026-07-09T12:00:00Z'
+          }
+        ]
       },
       selectedAgentKey: '',
       agentSelectionInitialized: true,
@@ -2159,6 +2242,10 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(agentSheetHTML, /filesystem/);
     assert.match(agentSheetHTML, /ws-cmd-rpg-stat-grid/);
     assert.match(agentSheetHTML, /Current Quest/);
+    assert.match(agentSheetHTML, /Command Menu/);
+    assert.match(agentSheetHTML, /Track Quest/);
+    assert.match(agentSheetHTML, /Continue Session/);
+    assert.match(agentSheetHTML, /Configure Loadout/);
   } finally {
     globalThis.localStorage = originalLocalStorage;
   }

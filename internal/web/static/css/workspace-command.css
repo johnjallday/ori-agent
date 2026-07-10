@@ -589,8 +589,9 @@
   inset: clamp(76px, 10vh, 112px) 16px 16px;
   z-index: 10010;
   display: grid;
-  place-items: center;
+  place-items: start center;
   padding: 28px;
+  overflow: hidden;
   background: rgba(2, 3, 6, 0.48);
   backdrop-filter: blur(2px);
 }
@@ -625,7 +626,7 @@
   width: min(980px, 100%);
 }
 .ws-cmd-map-window-inspector {
-  width: min(620px, 100%);
+  width: min(940px, 100%);
 }
 .ws-cmd-map-window-head {
   min-height: 54px;
@@ -1037,6 +1038,23 @@
   display: grid;
   gap: 12px;
 }
+@media (min-width: 760px) {
+  .ws-cmd-map-window-inspector .ws-cmd-map-inspector-card {
+    grid-template-columns: minmax(0, 1fr) minmax(290px, 0.74fr);
+    align-items: start;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-map-agent-sheet-head {
+    grid-column: 1 / -1;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-rpg-sheet {
+    grid-column: 1;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-rpg-command-panel {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+  }
+}
 .ws-cmd-map-agent-sheet-head {
   display: flex;
   align-items: center;
@@ -1255,6 +1273,123 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.ws-cmd-rpg-command-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(70, 211, 154, 0.18);
+  background:
+    linear-gradient(120deg, rgba(70, 211, 154, 0.08), transparent 58%), rgba(0, 0, 0, 0.18);
+  padding: 12px;
+}
+.ws-cmd-rpg-command-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ws-cmd-rpg-command-panel header span {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-command-panel header strong {
+  min-width: 0;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-rpg-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ws-cmd-rpg-command {
+  width: 100%;
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--ws-line);
+  background: rgba(5, 7, 10, 0.44);
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  padding: 9px;
+}
+.ws-cmd-rpg-command i {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+  color: var(--ws-faction);
+  font-size: 15px;
+}
+.ws-cmd-rpg-command span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.ws-cmd-rpg-command strong,
+.ws-cmd-rpg-command small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-rpg-command strong {
+  color: #eef0f3;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-command small {
+  color: var(--ws-ink-faint);
+  font-size: 11px;
+}
+.ws-cmd-rpg-command:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.07);
+  text-decoration: none;
+}
+.ws-cmd-rpg-command:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-rpg-command.is-primary {
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.12);
+}
+.ws-cmd-rpg-command.is-alert {
+  border-color: rgba(226, 101, 77, 0.55);
+  background: rgba(226, 101, 77, 0.1);
+}
+.ws-cmd-rpg-command.is-alert i {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.48);
+  background: rgba(226, 101, 77, 0.08);
+}
+.ws-cmd-rpg-command.is-needs-input {
+  border-color: rgba(240, 138, 75, 0.58);
+  background: rgba(240, 138, 75, 0.1);
+}
+.ws-cmd-rpg-command.is-needs-input i {
+  color: var(--ws-input);
+  border-color: rgba(240, 138, 75, 0.5);
+  background: rgba(240, 138, 75, 0.08);
 }
 .ws-cmd-map-inventory-box {
   display: grid;
@@ -3794,7 +3929,8 @@
   }
   .ws-cmd-map-station-grid,
   .ws-cmd-map-inventory-badges,
-  .ws-cmd-rpg-class-grid {
+  .ws-cmd-rpg-class-grid,
+  .ws-cmd-rpg-command-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .ws-cmd-map-task-row {

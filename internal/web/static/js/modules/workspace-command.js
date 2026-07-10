@@ -2704,7 +2704,7 @@ export class WorkspaceCommandView {
   }
 
   agentActivitySummary(agent) {
-    const task = agent?.currentTask || this.priorityTaskForAgent(agent);
+    const task = this.priorityTaskForAgent(agent) || agent?.currentTask;
     if (!task) {
       const recent = this.recentActivityItems(agent)[0];
       if (!recent) return null;
@@ -2974,6 +2974,134 @@ export class WorkspaceCommandView {
     );
   }
 
+  latestAgentSession(agent) {
+    return this.recentActivityItems(agent).find(item => item.kind === 'Session') || null;
+  }
+
+  mapTaskCommandLabel(task) {
+    if (!task) return '';
+    const status = String(task?.status || '')
+      .trim()
+      .toLowerCase();
+    if (this.isBlockedTask(task) || this.isNeedsInputTask(task)) return 'Resolve Quest';
+    if (this.isWorkingTask(task)) return 'Track Quest';
+    if (this.isQueuedTask(task)) return 'Open Queue';
+    if (status === 'completed' || status === 'done') return 'Review Output';
+    return 'Open Quest';
+  }
+
+  renderMapAgentCommandMenu(agent, detailTarget) {
+    const task = this.priorityTaskForAgent(agent) || agent?.currentTask;
+    const taskId = String(task?.id || '').trim();
+    const taskLabel = taskId ? this.mapTaskCommandLabel(task) : '';
+    const taskTone = task ? this.taskTone(task.status) : '';
+    const taskDetail = task
+      ? this.taskStatusLabel(task.status || agent?.status?.label || 'pending')
+      : 'No quest selected';
+    const session = this.latestAgentSession(agent);
+    const sessionId = String(session?.id || '').trim();
+    const loadoutDetail =
+      Number(agent?.skills?.count || 0) +
+      ' skills / ' +
+      Number(agent?.mcpNames?.length || 0) +
+      ' tools';
+    const action = ({ label, detail, icon, className = '', attrs = '', href = '' }) => {
+      const content =
+        '<i class="bi ' +
+        escapeHtml(icon) +
+        '" aria-hidden="true"></i><span><strong>' +
+        escapeHtml(label) +
+        '</strong><small>' +
+        escapeHtml(detail) +
+        '</small></span>';
+      if (href) {
+        return (
+          '<a class="ws-cmd-rpg-command ' +
+          escapeHtml(className) +
+          '" href="' +
+          escapeHtml(href) +
+          '">' +
+          content +
+          '</a>'
+        );
+      }
+      return (
+        '<button type="button" class="ws-cmd-rpg-command ' +
+        escapeHtml(className) +
+        '" ' +
+        attrs +
+        '>' +
+        content +
+        '</button>'
+      );
+    };
+    const actions = [];
+    if (taskId) {
+      const urgent = this.isBlockedTask(task) || this.isNeedsInputTask(task);
+      actions.push(
+        action({
+          label: taskLabel,
+          detail: taskDetail,
+          icon: urgent ? 'bi-exclamation-triangle' : 'bi-journal-check',
+          className: urgent ? 'is-primary is-' + taskTone : 'is-' + taskTone,
+          attrs: 'data-cmd-open-task="' + escapeHtml(taskId) + '"'
+        })
+      );
+    }
+    actions.push(
+      action({
+        label: 'Give Task',
+        detail: taskId ? 'New assignment' : 'Assign first quest',
+        icon: 'bi-plus-lg',
+        className: taskId ? '' : 'is-primary',
+        attrs: 'data-cmd-add-task="' + escapeHtml(agent.encodedName) + '"'
+      })
+    );
+    actions.push(
+      sessionId
+        ? action({
+            label: 'Continue Session',
+            detail: session.title || 'Open agent chat',
+            icon: 'bi-chat-dots',
+            attrs: 'data-cmd-open-session="' + escapeHtml(sessionId) + '"'
+          })
+        : action({
+            label: 'Start Session',
+            detail: 'Open agent chat',
+            icon: 'bi-chat-dots',
+            attrs: 'data-cmd-map-new-session="' + escapeHtml(agent.encodedName) + '"'
+          })
+    );
+    actions.push(
+      action({
+        label: 'Configure Loadout',
+        detail: loadoutDetail,
+        icon: 'bi-sliders',
+        attrs:
+          'data-cmd-map-agent-tab="loadout" data-cmd-agent-name="' +
+          escapeHtml(agent.encodedName) +
+          '"'
+      })
+    );
+    if (detailTarget?.href) {
+      actions.push(
+        action({
+          label: 'Open Agent',
+          detail: 'Full profile',
+          icon: 'bi-person-vcard',
+          href: detailTarget.href
+        })
+      );
+    }
+    return (
+      '<section class="ws-cmd-rpg-command-panel"><header><span>Command Menu</span><strong>' +
+      escapeHtml(agent.status?.label || 'Ready') +
+      '</strong></header><div class="ws-cmd-rpg-command-grid">' +
+      actions.join('') +
+      '</div></section>'
+    );
+  }
+
   renderMapInspector(agent) {
     if (!agent) {
       return '<div class="ws-cmd-map-empty">Select an agent to inspect assignment, activity, and loadout.</div>';
@@ -2985,9 +3113,6 @@ export class WorkspaceCommandView {
       return !['completed', 'cancelled', 'timeout'].includes(status);
     }).length;
     const detailTarget = this.agentDetailTarget(agent);
-    const detailAction = detailTarget
-      ? '<a class="ws-cmd-agent-action" href="' + escapeHtml(detailTarget.href) + '">Open Agent</a>'
-      : '';
     const classLabel = agent.role?.detail || agent.role?.label || 'Agent';
     const modelLabel = agent.model?.empty ? 'Model not set' : agent.model?.label || 'Model not set';
     const statCards = [
@@ -3057,12 +3182,8 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-rpg-effects">' +
       statusEffects.map(effect => '<span>' + escapeHtml(effect) + '</span>').join('') +
       '</div></div>' +
-      '<div class="ws-cmd-map-inspector-actions">' +
-      '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-task="' +
-      escapeHtml(agent.encodedName) +
-      '">Give Task</button>' +
-      detailAction +
-      '</div></div>'
+      this.renderMapAgentCommandMenu(agent, detailTarget) +
+      '</div>'
     );
   }
 
@@ -3375,9 +3496,31 @@ export class WorkspaceCommandView {
         page.showAddTaskModalForAgent(addTaskBtn.getAttribute('data-cmd-add-task'));
         return;
       }
+      const newSessionBtn = event.target.closest('[data-cmd-map-new-session]');
+      if (newSessionBtn && page) {
+        if (typeof page.createNewSessionForAgent === 'function') {
+          page.createNewSessionForAgent(newSessionBtn.getAttribute('data-cmd-map-new-session'));
+        } else if (typeof page.createNewSession === 'function') {
+          page.createNewSession();
+        }
+        return;
+      }
       const openTaskBtn = event.target.closest('[data-cmd-open-task]');
       if (openTaskBtn && page && typeof page.openTask === 'function') {
         page.openTask(openTaskBtn.getAttribute('data-cmd-open-task'));
+        return;
+      }
+      const openSessionBtn = event.target.closest('[data-cmd-open-session]');
+      if (openSessionBtn && page && typeof page.openSession === 'function') {
+        page.openSession(openSessionBtn.getAttribute('data-cmd-open-session'));
+        return;
+      }
+      const agentTabBtn = event.target.closest('[data-cmd-map-agent-tab]');
+      if (agentTabBtn) {
+        const encodedName = agentTabBtn.getAttribute('data-cmd-agent-name');
+        if (encodedName) this.selectAgent(encodedName, { focus: false });
+        this.setCommandViewMode('details', { focus: false });
+        this.setActiveAgentTab(agentTabBtn.getAttribute('data-cmd-map-agent-tab'));
         return;
       }
       const modalBtn = event.target.closest('[data-cmd-map-open-modal]');

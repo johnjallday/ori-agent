@@ -836,8 +836,30 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(inspector).toContainText('Class');
     await expect(inspector).toContainText('Loadout');
     await expect(inspector).toContainText('Current Quest');
+    await expect(inspector).toContainText('Command Menu');
+    await expect(inspector).toContainText('Resolve Quest');
+    await expect(inspector).toContainText('Start Session');
+    await expect(inspector).toContainText('Configure Loadout');
     await expect(inspector).toContainText('Quests');
     await expect(inspector).toContainText('Skills');
+    const inspectorGeometry = await inspector.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      const body = node.querySelector('.ws-cmd-map-window-body')?.getBoundingClientRect();
+      const menu = node.querySelector('.ws-cmd-rpg-command-panel')?.getBoundingClientRect();
+      return {
+        bottom: Math.round(rect.bottom),
+        bodyBottom: body ? Math.round(body.bottom) : 0,
+        bodyTop: body ? Math.round(body.top) : 0,
+        menuBottom: menu ? Math.round(menu.bottom) : 0,
+        menuTop: menu ? Math.round(menu.top) : 0,
+        top: Math.round(rect.top),
+        viewportHeight: window.innerHeight
+      };
+    });
+    expect(inspectorGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(inspectorGeometry.bottom).toBeLessThanOrEqual(inspectorGeometry.viewportHeight);
+    expect(inspectorGeometry.menuTop).toBeGreaterThanOrEqual(inspectorGeometry.bodyTop);
+    expect(inspectorGeometry.menuBottom).toBeLessThanOrEqual(inspectorGeometry.bodyBottom);
     await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
     await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
 
