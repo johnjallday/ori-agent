@@ -2804,112 +2804,6 @@ export class WorkspaceCommandView {
     );
   }
 
-  mapStationNodes(agents = []) {
-    const stats = this.computeStats();
-    const groups = this.mapInventoryGroups();
-    const groupCounts = Object.fromEntries(
-      groups.map(group => [group.key, Number(group.count || 0)])
-    );
-    const totalItems = groups.reduce((sum, group) => sum + Number(group.count || 0), 0);
-    const destinations = Array.isArray(agents)
-      ? agents.reduce((map, agent) => {
-          const key = String(agent?.destination || 'hub');
-          map[key] = (map[key] || 0) + 1;
-          return map;
-        }, {})
-      : {};
-    return [
-      {
-        key: 'objective',
-        label: 'Objective',
-        detail: 'Main quest',
-        icon: 'bi-bullseye',
-        count: this.missionSummary().mission ? 'Set' : 'Open',
-        window: 'objective',
-        signal: destinations.hub || 0
-      },
-      {
-        key: 'quests',
-        label: 'Quests',
-        detail: 'Active tasks',
-        icon: 'bi-list-check',
-        count: this.openMapTasks().length,
-        window: 'objectives',
-        signal: destinations.tasks || 0
-      },
-      {
-        key: 'inventory',
-        label: 'Inventory',
-        detail: 'Workspace items',
-        icon: 'bi-box-seam',
-        count: totalItems,
-        window: 'inventory',
-        section: 'notes'
-      },
-      {
-        key: 'sessions',
-        label: 'Sessions',
-        detail: 'Agent chats',
-        icon: 'bi-chat-dots',
-        count: groupCounts.sessions || 0,
-        window: 'inventory',
-        section: 'sessions'
-      },
-      {
-        key: 'systems',
-        label: 'Systems',
-        detail: 'Tools online',
-        icon: 'bi-cpu',
-        count: stats.tools + Number(groupCounts.systems || 0),
-        window: 'stations',
-        signal: destinations.tools || 0
-      }
-    ];
-  }
-
-  renderMapStationNodes(agents = []) {
-    const nodes = this.mapStationNodes(agents);
-    return (
-      '<nav class="ws-cmd-map-stations" aria-label="Map stations">' +
-      nodes
-        .map(node => {
-          const active =
-            this.activeMapWindow === node.window &&
-            (!node.section ||
-              node.window !== 'inventory' ||
-              String(this.mapInventorySection || 'notes') === node.section);
-          const attrs = node.section
-            ? 'data-cmd-map-inventory-section="' + escapeHtml(node.section) + '"'
-            : 'data-cmd-map-window="' + escapeHtml(node.window) + '"';
-          return (
-            '<button type="button" class="ws-cmd-map-station-node is-' +
-            escapeHtml(node.key) +
-            (active ? ' is-active' : '') +
-            (node.signal ? ' has-signal' : '') +
-            '" data-cmd-map-station-key="' +
-            escapeHtml(node.key) +
-            '" ' +
-            attrs +
-            ' aria-label="Open ' +
-            escapeHtml(node.label) +
-            ' station" aria-pressed="' +
-            (active ? 'true' : 'false') +
-            '"><span class="ws-cmd-map-station-icon"><i class="bi ' +
-            escapeHtml(node.icon) +
-            '" aria-hidden="true"></i></span><span class="ws-cmd-map-station-copy"><strong>' +
-            escapeHtml(node.label) +
-            '</strong><small>' +
-            escapeHtml(node.detail) +
-            '</small></span><em>' +
-            escapeHtml(node.count) +
-            '</em></button>'
-          );
-        })
-        .join('') +
-      '</nav>'
-    );
-  }
-
   renderMapMissionPanel() {
     return (
       '<div class="ws-cmd-map-window-section is-objective">' +
@@ -3040,7 +2934,6 @@ export class WorkspaceCommandView {
     return (
       '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
-      this.renderMapStationNodes(agents) +
       '<div class="ws-cmd-map-agent-field">' +
       this.renderMapAgentUnits(agents) +
       '</div></section>'

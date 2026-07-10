@@ -2087,11 +2087,6 @@ test('Operations Map controls expose accessible pressed and dialog state', () =>
 
   const tray = commandView.renderMapToolTray();
   assert.match(tray, /data-cmd-map-window="inventory" aria-label="Inventory" aria-pressed="true"/);
-  const stations = commandView.renderMapStationNodes([]);
-  assert.match(stations, /ws-cmd-map-station-node is-objective/);
-  assert.match(stations, /data-cmd-map-window="objective"/);
-  assert.match(stations, /data-cmd-map-inventory-section="notes"/);
-  assert.match(stations, /data-cmd-map-inventory-section="sessions"/);
 
   const windowHTML = commandView.renderMapWindow(null);
   assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Inventory"/);
@@ -2099,43 +2094,6 @@ test('Operations Map controls expose accessible pressed and dialog state', () =>
   assert.match(windowHTML, /ws-cmd-map-inventory-slot is-empty/);
   assert.match(windowHTML, /ws-cmd-map-slot-type">Note/);
   assert.match(windowHTML, /Open Slot/);
-});
-
-test('Operations Map station nodes open windows and inventory sections', () => {
-  const mapRoot = makeListenerRoot();
-  const calls = [];
-  const commandView = Object.create(WorkspaceCommandView.prototype);
-  Object.assign(commandView, {
-    activeMapWindow: '',
-    mapInventorySection: '',
-    container: {
-      querySelector(selector) {
-        return selector === '.ws-cmd-map-shell' ? mapRoot : null;
-      }
-    },
-    page: {},
-    render() {
-      calls.push([this.activeMapWindow, this.mapInventorySection]);
-    }
-  });
-
-  commandView.bindOperationsMap();
-
-  mapRoot.listener({
-    target: makeAttributeClickTarget({ 'data-cmd-map-window': 'objective' })
-  });
-  mapRoot.listener({
-    target: makeAttributeClickTarget({ 'data-cmd-map-inventory-section': 'sessions' })
-  });
-  mapRoot.listener({
-    target: makeAttributeClickTarget({ 'data-cmd-map-inventory-section': 'notes' })
-  });
-
-  assert.deepEqual(calls, [
-    ['objective', ''],
-    ['inventory', 'sessions'],
-    ['inventory', 'notes']
-  ]);
 });
 
 test('Operations Map agent command menu delegates to existing workspace flows', () => {
@@ -2268,11 +2226,8 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(html, /ws-cmd-map-shell/);
     assert.match(html, /data-map-zone="agents"/);
     assert.match(html, /data-cmd-map-window="inventory"/);
-    assert.match(html, /ws-cmd-map-stations/);
-    assert.match(html, /Objective/);
-    assert.match(html, /Quests/);
-    assert.match(html, /Sessions/);
-    assert.match(html, /Systems/);
+    assert.doesNotMatch(html, /ws-cmd-map-stations/);
+    assert.doesNotMatch(html, /ws-cmd-map-station-node/);
     assert.match(html, /Researcher/);
     assert.match(html, /ws-cmd-map-entry-badge/);
     assert.match(html, /Entry Agent/);
