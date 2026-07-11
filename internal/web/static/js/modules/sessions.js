@@ -237,6 +237,8 @@ const sessionManager = {
       this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
       this.applyTemplateBehavior(template);
       void this.refreshTemplateAgentPlan();
+      // Show the REAPER Setup card only for the Reaper Song template.
+      window.ReaperSetupCard?.showForTemplate?.(template);
     });
 
     document.getElementById('templateAgentReviewToggle')?.addEventListener('change', () => {
@@ -3240,6 +3242,7 @@ const sessionManager = {
     this.workspaceTemplate = null;
     window.ProjectTemplateCard?.reset?.();
     this.resetTemplateAgentReview();
+    window.ReaperSetupCard?.hide?.();
     this.updateBehaviorHint();
   },
 

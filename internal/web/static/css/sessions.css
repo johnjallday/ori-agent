@@ -6927,3 +6927,32 @@ body.task-modal-open {
   font-size: 0.85rem;
   cursor: pointer;
 }
+
+/* REAPER Setup card (Create Workspace) — status uses text + badge, never color
+   alone, so state is legible without relying on hue. */
+.reaper-setup-card .reaper-setup-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.reaper-setup-card .reaper-setup-badge-ready {
+  border-color: #22c55e;
+  color: #16a34a;
+}
+.reaper-setup-card .reaper-setup-badge-disabled,
+.reaper-setup-card .reaper-setup-badge-file-only {
+  border-color: #f59e0b;
+  color: #d97706;
+}
+.reaper-setup-card .reaper-setup-badge-error {
+  border-color: #ef4444;
+  color: #dc2626;
+}
+.reaper-setup-card .reaper-setup-badge-checking {
+  opacity: 0.7;
+}
