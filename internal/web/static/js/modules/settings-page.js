@@ -18,6 +18,29 @@ document.getElementById('toggleOpenaiKey')?.addEventListener('click', function()
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
+// Reset Getting Started (quest-log) progress. Non-destructive: clears
+// completions so the quests show from the beginning. Nothing is deleted.
+document.getElementById('resetGettingStartedBtn')?.addEventListener('click', async function() {
+  const btn = this;
+  const status = document.getElementById('resetGettingStartedStatus');
+  if (!window.confirm('Reset your Getting Started quest progress?\n\nThis clears the quest log and shows the quests from the beginning. Nothing is deleted.')) {
+    return;
+  }
+  btn.disabled = true;
+  if (status) status.textContent = 'Resetting…';
+  try {
+    const res = await fetch('/api/progression/reset', { method: 'POST' });
+    if (!res.ok) throw new Error('reset failed');
+    if (status) status.textContent = 'Done — Getting Started reset.';
+    notify('Getting Started reset', 'success');
+  } catch (e) {
+    if (status) status.textContent = '';
+    notify('Failed to reset Getting Started', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 document.getElementById('toggleAnthropicKey')?.addEventListener('click', function() {
   const input = document.getElementById('anthropicApiKeyInput');
   input.type = input.type === 'password' ? 'text' : 'password';

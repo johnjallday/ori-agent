@@ -166,11 +166,18 @@ func (e *Engine) SetDismissed(dismissed bool) error {
 	return e.persistLocked()
 }
 
-// Reset clears all progression state (dev/test parity with onboarding reset).
+// Reset clears all progression state. It marks the backfill as already
+// consumed (BackfilledAt = now) so an explicit reset is a blank slate that
+// survives restarts — existing workspaces/agents will not silently re-complete
+// quests via the startup backfill. Live events still complete quests going
+// forward.
 func (e *Engine) Reset() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.state = types.ProgressionState{CompletedQuests: map[string]time.Time{}}
+	e.state = types.ProgressionState{
+		CompletedQuests: map[string]time.Time{},
+		BackfilledAt:    e.now(),
+	}
 	return e.persistLocked()
 }
 

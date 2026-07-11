@@ -198,6 +198,27 @@ func TestBackfill_RunsOnce(t *testing.T) {
 	}
 }
 
+func TestReset_SurvivesBackfill(t *testing.T) {
+	store := &fakeStore{}
+	e := New(store)
+	e.HandleEvent(ws.Event{Type: ws.EventMessageSent})
+	if err := e.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if e.Status().CompletedCount != 0 {
+		t.Fatal("reset should clear completions")
+	}
+
+	// A later backfill (e.g. on the next restart) must NOT re-grandfather from
+	// existing state — the explicit reset is a persistent blank slate.
+	if err := e.Backfill(ScannerFunc(func() Snapshot { return Snapshot{Workspaces: 3, Personalized: true} })); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Status().CompletedCount; got != 0 {
+		t.Fatalf("backfill after reset should complete nothing, got %d", got)
+	}
+}
+
 func TestState_PersistsAndReloads(t *testing.T) {
 	store := &fakeStore{}
 	e1 := New(store)

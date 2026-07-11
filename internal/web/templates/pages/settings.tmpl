@@ -1487,6 +1487,19 @@
               <strong style="color: var(--danger-color);">This action cannot be undone.</strong>
             </p>
 
+            <!-- Getting Started (non-destructive; separate from the danger checkboxes) -->
+            <div class="settings-field mb-4 pb-4" style="border-bottom: 1px solid var(--border-color);">
+              <label class="form-check-label mb-1" style="color: var(--text-primary);"><strong>Getting Started</strong></label>
+              <p class="settings-section-description mb-2">
+                Clear your quest-log progress and show the Getting Started quests from the beginning.
+                This only affects the quest log — nothing is deleted.
+              </p>
+              <div class="d-flex align-items-center gap-2">
+                <button id="resetGettingStartedBtn" class="btn btn-sm btn-outline-secondary">Reset Getting Started</button>
+                <span id="resetGettingStartedStatus" style="color: var(--text-secondary); font-size: 0.85rem;"></span>
+              </div>
+            </div>
+
             <!-- Reset Options -->
             <div class="settings-field">
               <div class="form-check mb-2">
