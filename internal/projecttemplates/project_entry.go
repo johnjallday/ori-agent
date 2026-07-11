@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // ProjectEntry identifies the one scaffolded file that represents a template
@@ -30,9 +32,9 @@ type ProjectEntryEdit struct {
 // ErrInvalidProjectEntry reports unsafe or unusable project-entry metadata.
 var ErrInvalidProjectEntry = errors.New("invalid project entry")
 
-// ProjectEntryPathKey is the stable workspace shared_data key containing the
-// resolved entry path relative to project_path.
-const ProjectEntryPathKey = "project_entry_path"
+// ProjectEntryPathKey aliases the canonical workspace shared_data key so older
+// callers importing projecttemplates keep one stable metadata contract.
+const ProjectEntryPathKey = workspace.ProjectEntryPathKey
 
 var projectEntryTokenPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
@@ -177,53 +179,23 @@ func resolveInstantiatedProjectEntry(projectRoot string, entry *ProjectEntry, va
 // empty value clears the key. The map is intentionally supplied by callers so
 // canonical folder and mirrored session metadata use the same implementation.
 func SetProjectEntryPath(sharedData map[string]any, relativePath string) error {
-	relativePath = strings.TrimSpace(relativePath)
-	if relativePath == "" {
-		ClearProjectEntryPath(sharedData)
-		return nil
+	if err := workspace.SetProjectEntryPath(sharedData, relativePath); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidProjectEntry, err)
 	}
-	if sharedData == nil {
-		return fmt.Errorf("%w: workspace shared_data is unavailable", ErrInvalidProjectEntry)
-	}
-	clean, err := validateResolvedProjectEntryPath(relativePath)
-	if err != nil {
-		return err
-	}
-	sharedData[ProjectEntryPathKey] = clean
 	return nil
 }
 
 // GetProjectEntryPath returns a validated resolved path from shared_data. A
 // missing key is not an error; a malformed/wrongly typed stored value is.
 func GetProjectEntryPath(sharedData map[string]any) (string, error) {
-	if sharedData == nil {
-		return "", nil
+	value, err := workspace.GetProjectEntryPath(sharedData)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidProjectEntry, err)
 	}
-	raw, ok := sharedData[ProjectEntryPathKey]
-	if !ok || raw == nil {
-		return "", nil
-	}
-	value, ok := raw.(string)
-	if !ok {
-		return "", fmt.Errorf("%w: stored %s must be a string", ErrInvalidProjectEntry, ProjectEntryPathKey)
-	}
-	return validateResolvedProjectEntryPath(value)
+	return value, nil
 }
 
 // ClearProjectEntryPath removes persisted project-entry metadata.
 func ClearProjectEntryPath(sharedData map[string]any) {
-	if sharedData != nil {
-		delete(sharedData, ProjectEntryPathKey)
-	}
-}
-
-func validateResolvedProjectEntryPath(relativePath string) (string, error) {
-	clean, err := ValidateProjectEntryPath(relativePath)
-	if err != nil {
-		return "", err
-	}
-	if strings.Contains(clean, "{{") || strings.Contains(clean, "}}") {
-		return "", fmt.Errorf("%w: persisted project entry cannot contain template tokens", ErrInvalidProjectEntry)
-	}
-	return clean, nil
+	workspace.ClearProjectEntryPath(sharedData)
 }

@@ -11,14 +11,17 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
-	store         Store
-	orchestrator  *Orchestrator
-	eventBus      *EventBus
-	emailAccounts emailAccountStore
+	store          Store
+	orchestrator   *Orchestrator
+	eventBus       *EventBus
+	emailAccounts  emailAccountStore
+	folderResolver FolderResolver
+	openFile       func(string) error
 	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
 	// Mission-related HTTP endpoints route through it so they share the same
 	// trigger configuration as cadence-driven runs. Optional — handlers
@@ -28,11 +31,16 @@ type HTTPHandler struct {
 
 // NewHTTPHandler creates a new HTTP handler
 func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus) *HTTPHandler {
-	return &HTTPHandler{
+	handler := &HTTPHandler{
 		store:        store,
 		orchestrator: orchestrator,
 		eventBus:     eventBus,
+		openFile:     platform.OpenFile,
 	}
+	if resolver, ok := store.(FolderResolver); ok {
+		handler.folderResolver = resolver
+	}
+	return handler
 }
 
 // SetScheduler wires the task scheduler so mission HTTP endpoints can fire

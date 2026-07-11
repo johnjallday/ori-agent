@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"fmt"
+
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -23,6 +25,15 @@ func NewSyncStore(primary Store, fileSync *FileStore) *SyncStore {
 // FileStore returns the underlying FileStore used for disk sync.
 func (s *SyncStore) FileStore() *FileStore {
 	return s.fileSync
+}
+
+// GetFolderPath exposes the canonical disk folder when SyncStore is used by a
+// runtime handler that needs workspace-root containment rather than files/.
+func (s *SyncStore) GetFolderPath(workspaceID string) (string, error) {
+	if s.fileSync == nil {
+		return "", fmt.Errorf("workspace folder storage is unavailable")
+	}
+	return s.fileSync.GetFolderPath(workspaceID)
 }
 
 // Save persists the workspace.
