@@ -9,7 +9,12 @@ const homeMaxNextStepActions = 4
 
 // buildHomeSystemPrompt is the engineered system prompt for the home harness,
 // the app-scoped analogue of buildTaskSystemPrompt (PRD FR #16).
-func buildHomeSystemPrompt() string {
+//
+// When firstRun is true (a brand-new user with no workspaces yet), a greeting
+// behavior is appended so Ori guides the user toward creating their first
+// workspace — the onboarding progression "first contact" continuation. The
+// gate is the caller's responsibility; once a workspace exists this is off.
+func buildHomeSystemPrompt(firstRun bool) string {
 	var b strings.Builder
 	b.WriteString("You are Ori's home assistant. You answer questions about the user's own Ori app — their agents, workspaces, tasks, sessions, Action Center opportunities, and usage — and you help them navigate the app. ")
 	b.WriteString("You are given a \"Home Snapshot\" of the user's app-wide state and a \"Navigation Catalog\" of the app's pages. ")
@@ -23,6 +28,13 @@ func buildHomeSystemPrompt() string {
 	b.WriteString("These actions always require the user's explicit confirmation before anything happens, so when a user asks you to create or start something, confirm you can and let the confirmation step handle it. ")
 	b.WriteString("When helpful, end with a brief suggestion of a concrete next step. ")
 	b.WriteString("Do not output raw JSON or tool results as your final answer; write a short natural-language summary.")
+	if firstRun {
+		b.WriteString("\n\nThis is a brand-new user who has not created any workspace yet. Treat this as their first contact with Ori. ")
+		b.WriteString("If their message is just a greeting or an unfocused opener, do NOT give a generic \"how can I help\". Instead: (1) in one or two sentences, orient them on what Ori does in outcome terms — it gets real work done by spinning up workspaces, delegating tasks to agents, and automating the repetitive; (2) ask a single question: what are they working on right now (a project, a song, some research — anything); then, based on their answer, (3) offer to create a workspace for it (the create-workspace action, which seeds a couple of starter tasks) and (4) suggest the next step, like opening it or adding an agent. ")
+		b.WriteString("Never assume they already know what a \"workspace\" is — teach by doing it through the conversation. ")
+		b.WriteString("If their very first message is already a concrete request (e.g. \"create a workspace for my thesis\"), skip the question and act on it directly. ")
+		b.WriteString("Keep it warm and brief, not a wall of text.")
+	}
 	return b.String()
 }
 

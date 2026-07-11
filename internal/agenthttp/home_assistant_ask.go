@@ -216,7 +216,10 @@ func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, in
 		return "", err
 	}
 	registry := newHomeToolRegistry(h.Sources)
-	systemPrompt := buildHomeSystemPrompt()
+	// First-run greeting: a user with no workspaces yet is at "first contact".
+	// The behavior naturally turns off once they create their first workspace.
+	firstRun := snapshot.Meta.WorkspaceCount == 0
+	systemPrompt := buildHomeSystemPrompt(firstRun)
 	userPrompt := buildHomeUserPrompt(prompt, intent, snapshot)
 
 	conversation := []llm.Message{
