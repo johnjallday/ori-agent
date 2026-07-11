@@ -28,6 +28,7 @@ func reaperSetupHandler(t *testing.T, plugins []plugin.InstalledPlugin) (*Handle
 	rec := pluginworkspace.New(pm, store)
 	resolver := reapersetup.NewResolver(store, rec)
 	h := New(nil)
+	h.SetWorkspaceTaskStore(store)
 	h.SetReaperSetup(resolver, pm, rec)
 	return h, store
 }
