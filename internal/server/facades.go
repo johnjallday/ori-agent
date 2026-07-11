@@ -27,6 +27,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
+	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -120,6 +121,7 @@ type HandlerFacade struct {
 	AutoClassify     *sessionhttp.AutoClassifyHandler
 	SmartInput       *sessionhttp.SmartInputHandler
 	Note             *notehttp.Handler
+	Progression      *progressionhttp.Handler
 	SessionFiles     *fileshttp.Handler
 	Review           *reviewhttp.Handler
 	Evolution        *evolutionhttp.Handler

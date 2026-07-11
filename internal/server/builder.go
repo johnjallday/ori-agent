@@ -37,6 +37,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
+	"github.com/johnjallday/ori-agent/internal/progression"
+	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
@@ -171,6 +173,10 @@ type ServerBuilder struct {
 
 	// Note generation
 	noteHandler *notehttp.Handler
+
+	// Onboarding progression (quest log)
+	progressionEngine  *progression.Engine
+	progressionHandler *progressionhttp.Handler
 
 	// Session files management
 	sessionFilesStore   *sessionfiles.Store
@@ -383,6 +389,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		AutoClassify:     b.autoClassifyHandler,
 		SmartInput:       b.smartInputHandler,
 		Note:             b.noteHandler,
+		Progression:      b.progressionHandler,
 		SessionFiles:     b.sessionFilesHandler,
 		Review:           b.reviewHandler,
 		Evolution:        b.evolutionHandler,

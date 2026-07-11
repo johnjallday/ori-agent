@@ -326,6 +326,13 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/complete", s.Handlers.Onboarding.Complete)
 	mux.HandleFunc("/api/onboarding/reset", s.Handlers.Onboarding.Reset)
 
+	// Onboarding progression (quest log)
+	if s.Handlers.Progression != nil {
+		mux.HandleFunc("/api/progression", s.Handlers.Progression.GetStatus)
+		mux.HandleFunc("/api/progression/dismiss", s.Handlers.Progression.Dismiss)
+		mux.HandleFunc("/api/progression/reset", s.Handlers.Progression.Reset)
+	}
+
 	// Smart onboarding endpoints (AI-powered profile inference)
 	mux.HandleFunc("/api/onboarding/detect", s.Handlers.SmartOnboarding.Detect)
 	mux.HandleFunc("/api/onboarding/profile", s.Handlers.SmartOnboarding.InferProfile)

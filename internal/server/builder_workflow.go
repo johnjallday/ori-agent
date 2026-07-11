@@ -256,6 +256,9 @@ func (b *ServerBuilder) initializeEventSystem() {
 		}, b.eventBus)
 	}
 
+	// Onboarding progression: engine, event subscription, backfill.
+	b.initializeProgression()
+
 	if b.workspaceStore != nil {
 		syncMgr, err := workspace.NewDirectorySyncManager(b.workspaceStore, b.eventBus, workspace.DefaultDirectorySyncConfig())
 		if err != nil {
