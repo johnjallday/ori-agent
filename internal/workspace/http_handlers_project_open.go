@@ -204,8 +204,8 @@ func inspectProjectRelativePath(root, portablePath string, wantDirectory bool) (
 		}
 		// current is built segment-by-segment from root and re-checked with
 		// isPathWithin on every iteration, and symlinks are rejected below, so
-		// the path cannot escape the workspace root. // #nosec G304
-		info, err := os.Lstat(current) // #nosec G304
+		// the path cannot escape the workspace root.
+		info, err := os.Lstat(current) // #nosec G304 G703
 		if err != nil {
 			if os.IsNotExist(err) {
 				return "", errProjectEntryTargetMissing
