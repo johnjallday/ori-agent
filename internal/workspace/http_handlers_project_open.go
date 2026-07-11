@@ -39,7 +39,11 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	ws, err := h.store.Get(workspaceID)
+	if h.folderResolver == nil || h.folderWorkspaceResolver == nil {
+		orihttp.ServiceUnavailable(w, "Workspace folder storage is unavailable")
+		return
+	}
+	ws, err := h.folderWorkspaceResolver.GetFolderWorkspace(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
 		return
@@ -63,11 +67,6 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 		orihttp.NotFound(w, "Workspace has no project entry to open")
 		return
 	}
-	if h.folderResolver == nil {
-		orihttp.ServiceUnavailable(w, "Workspace folder storage is unavailable")
-		return
-	}
-
 	workspaceRoot, err := h.folderResolver.GetFolderPath(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace folder is unavailable: %v", err))

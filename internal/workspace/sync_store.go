@@ -36,6 +36,15 @@ func (s *SyncStore) GetFolderPath(workspaceID string) (string, error) {
 	return s.fileSync.GetFolderPath(workspaceID)
 }
 
+// GetFolderWorkspace reads the canonical workspace.json record rather than
+// the SQLite-primary mirror returned by Get.
+func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
+	if s.fileSync == nil {
+		return nil, fmt.Errorf("workspace folder storage is unavailable")
+	}
+	return s.fileSync.Get(workspaceID)
+}
+
 // Save persists the workspace.
 //
 // The FileStore runs first because it owns the monotonic Version counter and

@@ -73,6 +73,54 @@ func TestOpenWorkspaceProjectUsesPersistedEntry(t *testing.T) {
 	}
 }
 
+func TestOpenWorkspaceProjectReadsCanonicalFolderMetadata(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileStore, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fileStore.Close() })
+
+	primaryWS := newTestWorkspace("ws-canonical-project-open", "Canonical Project Open")
+	primaryWS.ProjectPath = "stale-project"
+	primaryWS.SharedData[ProjectEntryPathKey] = "stale.rpp"
+	if err := primary.Save(primaryWS); err != nil {
+		t.Fatal(err)
+	}
+
+	canonicalWS := newTestWorkspace(primaryWS.ID, primaryWS.Name)
+	canonicalWS.ProjectPath = "song"
+	canonicalWS.SharedData[ProjectEntryPathKey] = "song.rpp"
+	if err := fileStore.Save(canonicalWS); err != nil {
+		t.Fatal(err)
+	}
+	workspaceRoot, err := fileStore.GetFolderPath(canonicalWS.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := filepath.Join(workspaceRoot, "song")
+	if err := os.MkdirAll(projectRoot, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(projectRoot, "song.rpp")
+	if err := os.WriteFile(wantPath, []byte("project"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewHTTPHandler(NewSyncStore(primary, fileStore), nil, nil)
+	var opened string
+	handler.openFile = func(path string) error { opened = path; return nil }
+	rr := httptest.NewRecorder()
+	handler.OpenWorkspaceProject(rr, localProjectOpenRequest(http.MethodPost, canonicalWS.ID, nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected canonical metadata open to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if filepath.Clean(opened) != filepath.Clean(wantPath) {
+		t.Fatalf("opened %q from stale mirror, want canonical %q", opened, wantPath)
+	}
+}
+
 func TestOpenWorkspaceProjectAllowsIPv6Loopback(t *testing.T) {
 	_, ws, handler, _ := setupProjectOpenTest(t)
 	called := false

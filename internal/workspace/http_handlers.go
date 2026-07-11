@@ -14,14 +14,22 @@ import (
 	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
+// folderWorkspaceResolver loads the canonical workspace.json record for a
+// workspace. It is deliberately separate from Store.Get because production
+// may use a SQLite-primary SyncStore whose row is only a best-effort mirror.
+type folderWorkspaceResolver interface {
+	GetFolderWorkspace(workspaceID string) (*Workspace, error)
+}
+
 // HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
-	store          Store
-	orchestrator   *Orchestrator
-	eventBus       *EventBus
-	emailAccounts  emailAccountStore
-	folderResolver FolderResolver
-	openFile       func(string) error
+	store                   Store
+	orchestrator            *Orchestrator
+	eventBus                *EventBus
+	emailAccounts           emailAccountStore
+	folderResolver          FolderResolver
+	folderWorkspaceResolver folderWorkspaceResolver
+	openFile                func(string) error
 	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
 	// Mission-related HTTP endpoints route through it so they share the same
 	// trigger configuration as cadence-driven runs. Optional — handlers
@@ -39,6 +47,9 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 	}
 	if resolver, ok := store.(FolderResolver); ok {
 		handler.folderResolver = resolver
+	}
+	if resolver, ok := store.(folderWorkspaceResolver); ok {
+		handler.folderWorkspaceResolver = resolver
 	}
 	return handler
 }
