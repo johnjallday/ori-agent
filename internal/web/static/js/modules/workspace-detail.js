@@ -288,6 +288,7 @@ export class WorkspaceDetailPage {
     this.projectTemplates = [];
     this.projectTemplatesRoot = '';
     this.projectTemplateSubmitting = false;
+    this.projectOpenBusy = false;
     this.workspaceTagDraft = [];
     this.workspaceTagsSaving = false;
 
@@ -14388,6 +14389,45 @@ export class WorkspaceDetailPage {
 
   workspaceHasProject() {
     return this.getWorkspaceProjectPath() !== '';
+  }
+
+  hasProjectEntry() {
+    const entryPath = this.workspace?.shared_data?.project_entry_path;
+    return (
+      this.workspaceHasProject() && typeof entryPath === 'string' && entryPath.trim() !== ''
+    );
+  }
+
+  async openProject() {
+    if (this.projectOpenBusy || !this.hasProjectEntry()) return false;
+
+    this.projectOpenBusy = true;
+    window.workspaceCommand?.refresh();
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/project/open`,
+        { method: 'POST' }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || result.message || 'The project open request failed');
+      }
+
+      if (window.Toast?.success) {
+        window.Toast.success('Open request sent to the system default application');
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to open workspace project:', error);
+      const detail = error?.message || 'The project open request failed';
+      if (window.Toast?.error) {
+        window.Toast.error(`Could not open project. ${detail}. Resolve the issue and try again.`);
+      }
+      return false;
+    } finally {
+      this.projectOpenBusy = false;
+      window.workspaceCommand?.refresh();
+    }
   }
 
   getProjectDirectoryId() {

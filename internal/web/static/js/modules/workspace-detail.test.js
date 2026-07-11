@@ -99,6 +99,128 @@ test('workspace detail consumes a scoped project-open failure notice once', () =
   assert.equal(warnings[0].options.title, 'Project not opened');
 });
 
+test('workspace detail detects project entries only from complete persisted metadata', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const cases = [
+    [{}, false],
+    [{ project_path: 'song' }, false],
+    [{ project_path: 'song', shared_data: {} }, false],
+    [{ project_path: 'song', shared_data: { project_entry_path: 42 } }, false],
+    [{ project_path: 'song', shared_data: { project_entry_path: '   ' } }, false],
+    [{ project_path: '', shared_data: { project_entry_path: 'song.rpp' } }, false],
+    [
+      { project_path: 'song', shared_data: { project_entry_path: 'song.rpp' } },
+      true
+    ]
+  ];
+
+  for (const [workspace, expected] of cases) {
+    page.workspace = workspace;
+    assert.equal(page.hasProjectEntry(), expected);
+  }
+});
+
+test('workspace detail sends a bodyless project-open request and reports success', async () => {
+  const page = new WorkspaceDetailPage('workspace / one');
+  page.workspace = {
+    project_path: 'song',
+    shared_data: { project_entry_path: 'secret/song.rpp' }
+  };
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const requests = [];
+  const successes = [];
+  let refreshCount = 0;
+  global.window = {
+    ...originalWindow,
+    Toast: { success: message => successes.push(message), error() {} },
+    workspaceCommand: { refresh: () => (refreshCount += 1) }
+  };
+  global.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return {
+      ok: true,
+      json: async () => ({ message: 'Project open request accepted' })
+    };
+  };
+
+  try {
+    assert.equal(await page.openProject(), true);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+  }
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/workspaces/workspace%20%2F%20one/project/open');
+  assert.deepEqual(requests[0].options, { method: 'POST' });
+  assert.equal(Object.hasOwn(requests[0].options, 'body'), false);
+  assert.equal(requests[0].url.includes('secret'), false);
+  assert.equal(refreshCount, 2);
+  assert.equal(page.projectOpenBusy, false);
+  assert.match(successes[0], /system default application/);
+});
+
+test('workspace detail prevents duplicate project-open requests and remains retryable', async () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    project_path: 'song',
+    shared_data: { project_entry_path: 'song.rpp' }
+  };
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const originalConsoleError = console.error;
+  const errors = [];
+  const successes = [];
+  let refreshCount = 0;
+  let requestCount = 0;
+  let releaseFirst;
+  const firstResponse = new Promise(resolve => {
+    releaseFirst = resolve;
+  });
+  global.window = {
+    ...originalWindow,
+    Toast: {
+      success: message => successes.push(message),
+      error: message => errors.push(message)
+    },
+    workspaceCommand: { refresh: () => (refreshCount += 1) }
+  };
+  console.error = () => {};
+  global.fetch = async () => {
+    requestCount += 1;
+    if (requestCount === 1) return firstResponse;
+    return { ok: true, json: async () => ({}) };
+  };
+
+  try {
+    const firstOpen = page.openProject();
+    assert.equal(page.projectOpenBusy, true);
+    assert.equal(await page.openProject(), false);
+    assert.equal(requestCount, 1);
+
+    releaseFirst({
+      ok: false,
+      json: async () => ({ error: 'Project entry file was not found' })
+    });
+    assert.equal(await firstOpen, false);
+    assert.equal(page.projectOpenBusy, false);
+    assert.equal(await page.openProject(), true);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(requestCount, 2);
+  assert.equal(refreshCount, 4);
+  assert.match(errors[0], /Project entry file was not found/);
+  assert.match(errors[0], /try again/);
+  assert.equal(successes.length, 1);
+});
+
 test('workspace detail renders reference URL task indicators', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const indicator = page.renderTaskReferenceURLIndicator({

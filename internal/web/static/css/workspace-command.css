@@ -118,6 +118,10 @@
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+.ws-cmd-nav-btn:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
 .ws-cmd-view-switch {
   margin-left: auto;
   display: inline-flex;

@@ -2,7 +2,8 @@ import { test, expect } from '@playwright/test';
 
 for (const theme of ['light', 'dark']) {
   test(`workspace detail accessibility (${theme})`, async ({ page }) => {
-    const baseUrl = process.env.BASE_URL || 'http://localhost:8765';
+    const baseUrl =
+      process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.addInitScript(selectedTheme => {
       window.localStorage.setItem('ori-theme', selectedTheme);
@@ -30,10 +31,35 @@ for (const theme of ['light', 'dark']) {
     )?.id;
     expect(workspaceId).toBeTruthy();
 
+    const workspaceActivated = page.waitForResponse(response =>
+      response.url().includes('/api/orchestration/workspace/activate?id=')
+    );
     await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}`, {
       waitUntil: 'domcontentloaded'
     });
     await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();
+    await workspaceActivated;
+    await page.evaluate(() => {
+      window.workspaceDetail.workspace.project_path = '';
+      window.workspaceDetail.workspace.shared_data = {};
+      window.workspaceCommand.refresh();
+    });
+    await expect(page.locator('[data-cmd-open-project]')).toHaveCount(0);
+
+    await page.evaluate(() => {
+      window.workspaceDetail.workspace.project_path = 'accessibility-project';
+      window.workspaceDetail.workspace.shared_data = { project_entry_path: 'project.rpp' };
+      window.workspaceCommand.refresh();
+    });
+    const openProject = page.getByRole('button', {
+      name: 'Open project using the system default application'
+    });
+    await expect(openProject).toBeVisible();
+    await expect(openProject).toHaveAttribute('aria-busy', 'false');
+    await page.getByRole('button', { name: 'Map' }).click();
+    await expect(openProject).toBeVisible();
+    await page.getByRole('button', { name: 'Details' }).click();
+    await expect(openProject).toBeVisible();
     await page.locator('#workspaceCommandView').evaluate(async root => {
       const finiteAnimations = root
         .getAnimations({ subtree: true })
