@@ -131,6 +131,15 @@ func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reaperse
 	h.reaperRepairer = repairer
 }
 
+// ReaperSetupWired reports whether the REAPER readiness resolver, preview lister,
+// and repairer have been injected. Used by build wiring tests to catch the
+// ordering bug where wiring ran before the workspace store existed (which left
+// every REAPER endpoint nil-guarded and the create preview stuck on
+// plugin_missing).
+func (h *Handler) ReaperSetupWired() bool {
+	return h.reaperResolver != nil && h.reaperPluginLister != nil && h.reaperRepairer != nil
+}
+
 // SetTemplatesRootResolver sets the resolver used to locate the project
 // templates library directory.
 func (h *Handler) SetTemplatesRootResolver(fn func() string) {

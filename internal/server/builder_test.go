@@ -101,6 +101,12 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if builder.runBackedTaskHandler == nil {
 		t.Error("run-backed task handler not initialized")
 	}
+	// REAPER readiness/preview/repair must be wired after the workspace store is
+	// created (Phase 18), not during handler init (Phase 17) when the store is
+	// still nil. If this regresses, the create preview is stuck on plugin_missing.
+	if server.Handlers.Session == nil || !server.Handlers.Session.ReaperSetupWired() {
+		t.Error("REAPER setup (resolver/preview/repair) not wired onto the session handler")
+	}
 }
 
 // TestNew_UsesBuilder verifies New() delegates to builder

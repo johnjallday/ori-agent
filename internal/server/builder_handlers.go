@@ -354,16 +354,25 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
 	}
+}
 
-	// Wire the normalized REAPER readiness resolver + shared reconciler so the
-	// workspace UI, pre-create preview, and repair all read one truthful model
-	// backed by the configured plugin manager and synchronized workspace store.
-	if b.sessionHandler != nil && b.pluginHandler != nil && b.workspaceStore != nil {
-		reconciler := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore)
-		resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
-		repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
-		b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
+// wireReaperSetup wires the normalized REAPER readiness resolver, pre-create
+// preview lister, shared reconciler, and repairer onto the session handler so the
+// create modal, workspace UI, and repair all read one truthful model backed by
+// the configured plugin manager and synchronized workspace store.
+//
+// It must be called AFTER the workspace store exists (Phase 18), not during
+// initializeHandlers (Phase 17) where b.workspaceStore is still nil — otherwise
+// every REAPER endpoint stays nil-guarded and the create preview always reports
+// plugin_missing.
+func (b *ServerBuilder) wireReaperSetup() {
+	if b.sessionHandler == nil || b.pluginHandler == nil || b.workspaceStore == nil {
+		return
 	}
+	reconciler := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore)
+	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
+	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
+	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
 }
 
 func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {
