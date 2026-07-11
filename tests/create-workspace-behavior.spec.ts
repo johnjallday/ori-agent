@@ -218,6 +218,30 @@ test('project-open option follows template defaults and resets for non-library f
   await expect(toggle).not.toBeChecked();
 });
 
+test('live Reaper Song defaults to launch, supports keyboard opt-out, and never opens on reload', async ({ page }) => {
+  let openCalls = 0;
+  await page.route('**/api/workspaces/**/project/open', async route => {
+    openCalls += 1;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+
+  const panel = page.locator('#projectTemplateOpenAfterCreate');
+  const toggle = page.locator('#projectTemplateOpenAfterCreateToggle');
+  await expect(panel).toBeVisible();
+  await expect(toggle).toBeChecked();
+
+  await toggle.focus();
+  await page.keyboard.press('Space');
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toBeFocused();
+
+  await page.reload();
+  await expect.poll(() => openCalls).toBe(0);
+});
+
 test('checked project-open option posts exactly once after create and before navigation', async ({ page }) => {
   await routeProjectEntryTemplates(page);
   await openCreateModal(page);

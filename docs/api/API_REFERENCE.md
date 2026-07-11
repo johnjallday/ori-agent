@@ -863,14 +863,18 @@ GET /api/project-templates
     },
     {
       "id": "reaper-song", "name": "Reaper Song", "description": "A minimal REAPER project...",
-      "icon": "🎵", "behavior_profile": "general", "builtin": true, "has_skeleton": true
+      "icon": "🎵", "behavior_profile": "general", "builtin": true, "has_skeleton": true,
+      "project_entry": {
+        "relative_path": "{{name}}.rpp",
+        "open_after_create_default": true
+      }
     }
   ],
   "templates_root": "/path/to/templates"
 }
 ```
 
-The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template. The optional `template.json` carries declarative metadata: `name`, `description`, `tags`, `icon`, `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (each task may set `setup: true`; at most one per template — it auto-starts on the workspace's first open), `tools`, `agents`, and `builtin`. A legacy `onboarding` block from the removed intake engine is ignored, surfaced as a load-time warning, and stripped on the next authoring save. `has_skeleton` is derived (false ⇒ a metadata-only template that scaffolds no project folder). Built-ins (`builtin: true`) are read-only.
+The library directory is configurable via the `templates_root` setting (then the `ORI_TEMPLATES_DIR` environment variable, then `<data dir>/templates`). Every immediate subfolder is a template. The optional `template.json` carries declarative metadata: `name`, `description`, `tags`, `icon`, `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (each task may set `setup: true`; at most one per template — it auto-starts on the workspace's first open), `tools`, `agents`, `project_entry`, `builtin`, and `builtin_version`. `project_entry.relative_path` must be a portable path to a regular scaffold file and may use only `{{name}}` and `{{date}}`; `open_after_create_default` controls the initial Create Workspace checkbox state. Invalid hand-authored entry metadata is warned and omitted from normalized output. A legacy `onboarding` block from the removed intake engine is ignored, surfaced as a load-time warning, and stripped on the next authoring save. `has_skeleton` is derived (false ⇒ a metadata-only template that scaffolds no project folder). Built-ins (`builtin: true`) are read-only.
 
 **Create a workspace with a project** — `POST /api/workspaces` accepts three additional optional fields:
 
@@ -884,7 +888,7 @@ The library directory is configurable via the `templates_root` setting (then the
 }
 ```
 
-The project folder is created inside the workspace folder as a sibling of `files/` and `notes/`, and `project_path` is persisted in `workspace.json` (its canonical store). Instantiation failures are **non-fatal**: the workspace is still created and the response carries a `project_warning` string. Group workspaces reject template fields with `400`. A `project.created` event is published on success.
+The project folder is created inside the workspace folder as a sibling of `files/` and `notes/`, and `project_path` is persisted in `workspace.json` (its canonical store). A verified entry is resolved with the same filename tokens and stored as the portable relative value `shared_data.project_entry_path` in that same canonical workspace record. Instantiation failures are **non-fatal**: the workspace is still created and the response carries a `project_warning` string. An entry-only verification or persistence failure also returns `project_warning` but keeps the successfully scaffolded project. The field is absent when there is no warning. Group workspaces reject template fields with `400`. A `project.created` event is published on success.
 
 **Chat tools** — workspace chats expose `workspace_project_templates` (list) and `workspace_create_project` (`template_id`, optional `name`), which instantiate into the *current* workspace through the same engine. The create tool refuses when the workspace is a group or already has a project.
 
@@ -895,7 +899,17 @@ POST /api/workspaces/:id/project
 { "template_id": "reaper-song", "project_name": "Midnight" }   // or "template_path"
 ```
 
-Responds `201` with `project_path` and the refreshed workspace; `409` when the workspace already has a project, `400` for groups/invalid templates. The created project is also registered as the workspace's primary linked directory.
+Responds `201` with `project_path` and the refreshed workspace; when entry-only verification fails, the successful response also includes `project_warning`. Returns `409` when the workspace already has a project and `400` for groups/invalid templates. The created project is also registered as the workspace's primary linked directory. This endpoint records entry metadata but never launches an application.
+
+**Open the persisted project entry in the system default application:**
+
+```http
+POST /api/workspaces/:id/project/open
+```
+
+The request must come from a direct IPv4 or IPv6 loopback peer and must have no request body or caller-supplied path. Forwarded headers cannot turn a remote request into a local one; a loopback proxy that explicitly identifies a remote client is rejected. The server reads only canonical `project_path` and `shared_data.project_entry_path`, resolves the workspace folder through workspace storage, and immediately revalidates relative paths, containment, regular-file type, and symlink boundaries before invoking the operating-system file opener.
+
+A successful request returns `200` with an acceptance message. Acceptance means the OS open request was issued; it does not prove the target application finished loading or that its automation/control interface is ready. Common errors are `400` for a body or unsafe/malformed persisted metadata, `403` for a non-local peer, `404` for missing workspace/project/entry data or file, `405` for another method, `503` when folder/opening support is unavailable, and `500` when the operating-system opener fails. Errors never mutate or delete the workspace.
 
 **Template setup task (first-open auto-start):**
 
@@ -911,12 +925,12 @@ Called by the workspace detail page on load. Finds the seeded starter task marke
 POST   /api/project-templates                 { "name": "Display Name" }   // create a blank (metadata-only) template
 POST   /api/project-templates/import          { "path": "/any/folder", "name": "Display Name" }
 POST   /api/project-templates/:id/duplicate   { "name": "..." }   // editable copy (a built-in's copy is never builtin)
-PUT    /api/project-templates/:id             { "name", "description", "tags", "icon", "behavior_profile", "starter_tasks" }
+PUT    /api/project-templates/:id             { "name", "description", "tags", "icon", "behavior_profile", "starter_tasks", "project_entry" }
 DELETE /api/project-templates/:id             → { "success": true, "trashed": true|false }
 POST   /api/project-templates/reveal          { "id": "..." }   // empty id opens the library root (local-first)
 ```
 
-Mutating a built-in template (`PUT`/`DELETE`, file edits, tools/agents) is rejected with `403` — duplicate it first. The same `template.json` config (`behavior_profile`, `starter_tasks`, `tools`, `agents`) is also editable via the `/templates` page; see [Project Templates](../features/project-templates.md).
+Mutating a built-in template (`PUT`/`DELETE`, file edits, tools/agents) is rejected with `403` — duplicate it first. For `project_entry`, omission preserves the current value, an object validates/replaces it, and `null` clears it; invalid values return `400`. The same `template.json` config (`behavior_profile`, `starter_tasks`, `tools`, `agents`, `project_entry`) is also editable via the `/templates` page; see [Project Templates](../features/project-templates.md).
 
 Import copies the folder **verbatim** (no token substitution — `{{name}}` in file names is preserved for instantiation time; symlinks skipped). Delete prefers the system Trash; deleted starter templates are re-materialized on the next server start. Metadata updates preserve unknown `template.json` fields.
 
