@@ -54,6 +54,24 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 	return handler
 }
 
+// SetFolderStore wires the canonical folder-backed workspace store used by
+// desktop side-effect handlers. Production wraps the primary workspace store
+// with decorators that do not necessarily expose optional folder capabilities,
+// so the FileStore must be injected explicitly rather than inferred only from
+// the outer Store value.
+func (h *HTTPHandler) SetFolderStore(store *FileStore) {
+	if h == nil {
+		return
+	}
+	if store == nil {
+		h.folderResolver = nil
+		h.folderWorkspaceResolver = nil
+		return
+	}
+	h.folderResolver = store
+	h.folderWorkspaceResolver = store
+}
+
 // SetScheduler wires the task scheduler so mission HTTP endpoints can fire
 // mission runs through the same MissionTrigger configured for cadence runs.
 func (h *HTTPHandler) SetScheduler(scheduler *TaskScheduler) {

@@ -88,8 +88,8 @@ func TestWorkspaceProjectOpenRouteUsesRuntimeHandler(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:43210"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected fixed project-open runtime route to require canonical folder storage, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected project-open runtime route to use canonical folder storage, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/workspaces/missing/project/open", nil)
