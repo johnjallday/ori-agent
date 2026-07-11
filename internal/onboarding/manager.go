@@ -268,6 +268,42 @@ func (m *Manager) ensureStateDefaultsUnlocked() {
 	}
 }
 
+// GetProgression returns a copy of the onboarding quest-log progression state.
+// It satisfies the progression package's state-store contract, keeping
+// app_state.json's single serialized writer.
+func (m *Manager) GetProgression() types.ProgressionState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.state.Progression == nil {
+		return types.ProgressionState{}
+	}
+	return cloneProgression(*m.state.Progression)
+}
+
+// SetProgression persists the onboarding quest-log progression state.
+func (m *Manager) SetProgression(p types.ProgressionState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cp := cloneProgression(p)
+	m.state.Progression = &cp
+	return m.saveUnlocked()
+}
+
+// cloneProgression deep-copies the completion map so callers can't mutate
+// persisted state through a shared reference.
+func cloneProgression(p types.ProgressionState) types.ProgressionState {
+	if p.CompletedQuests != nil {
+		completed := make(map[string]time.Time, len(p.CompletedQuests))
+		for id, at := range p.CompletedQuests {
+			completed[id] = at
+		}
+		p.CompletedQuests = completed
+	}
+	return p
+}
+
 func (m *Manager) SetUserStore(store userprofile.UserStore) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
