@@ -107,6 +107,28 @@ func TestRenderTemplatesPage(t *testing.T) {
 	}
 }
 
+func TestRenderCreateWorkspaceProjectOpenOption(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	html, err := r.RenderTemplate("workspaces", TemplateData{Title: "Workspaces - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(workspaces) failed: %v", err)
+	}
+	for _, want := range []string{
+		`id="projectTemplateOpenAfterCreate"`,
+		`id="projectTemplateOpenAfterCreateToggle"`,
+		`Open project after creation`,
+		`Uses your system's default app for this file type.`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered Create Workspace modal missing %q", want)
+		}
+	}
+}
+
 func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {

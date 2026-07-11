@@ -62,6 +62,43 @@ test('workspace detail activateWorkspaceConfigTab clicks the requested tab', () 
   assert.equal(mcpTab.clickCount, 1);
 });
 
+test('workspace detail consumes a scoped project-open failure notice once', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const storage = new Map([
+    [
+      'oriProjectOpenNotice:workspace-1',
+      JSON.stringify({
+        workspace_id: 'workspace-1',
+        message: 'Workspace created, but the project could not be opened. Use Open Project to try again.'
+      })
+    ]
+  ]);
+  const warnings = [];
+  const previousWindow = global.window;
+  global.window = {
+    ...previousWindow,
+    sessionStorage: {
+      getItem: key => storage.get(key) || null,
+      removeItem: key => storage.delete(key)
+    },
+    Toast: {
+      warning: (message, options) => warnings.push({ message, options })
+    }
+  };
+
+  try {
+    assert.equal(page.consumeProjectOpenFailureNotice(), true);
+    assert.equal(page.consumeProjectOpenFailureNotice(), false);
+  } finally {
+    global.window = previousWindow;
+  }
+
+  assert.equal(storage.has('oriProjectOpenNotice:workspace-1'), false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /Use Open Project to try again/);
+  assert.equal(warnings[0].options.title, 'Project not opened');
+});
+
 test('workspace detail renders reference URL task indicators', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const indicator = page.renderTaskReferenceURLIndicator({

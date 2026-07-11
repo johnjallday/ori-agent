@@ -3043,6 +3043,7 @@ const sessionManager = {
     } else {
       this.resetTemplateAgentReview();
     }
+    window.ProjectTemplateCard?.syncState?.();
   },
 
   clearImportDuplicateWarning() {
@@ -3765,6 +3766,40 @@ const sessionManager = {
     }
   },
 
+  projectOpenNoticeStorageKey(workspaceId) {
+    return `oriProjectOpenNotice:${String(workspaceId || '').trim()}`;
+  },
+
+  rememberProjectOpenFailure(workspaceId, error) {
+    const id = String(workspaceId || '').trim();
+    if (!id) return;
+    const detail = error && error.message ? String(error.message).trim() : '';
+    const message = detail
+      ? `Workspace created, but the project could not be opened. Use Open Project to try again. ${detail}`
+      : 'Workspace created, but the project could not be opened. Use Open Project to try again.';
+    try {
+      sessionStorage.setItem(
+        this.projectOpenNoticeStorageKey(id),
+        JSON.stringify({ workspace_id: id, message })
+      );
+    } catch (storageError) {
+      console.warn('Failed to preserve project-open notice:', storageError);
+    }
+  },
+
+  async openProjectAfterWorkspaceCreate(workspaceId) {
+    const id = String(workspaceId || '').trim();
+    if (!id) return;
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(id)}/project/open`,
+      { method: 'POST' }
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.error) {
+      throw new Error(result.error || result.message || 'The system default application did not accept the project file.');
+    }
+  },
+
   // Create folder
   async createFolder() {
     if (this.isCreatingFolder) return;
@@ -3780,6 +3815,9 @@ const sessionManager = {
     const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
 
     const importEnabled = this.importModeEnabled || Boolean(importToggle?.checked);
+    const openProjectAfterCreate = Boolean(
+      !importEnabled && window.ProjectTemplateCard?.shouldOpenAfterCreate?.()
+    );
     const importPath = importPathInput?.value?.trim() || '';
     const name = nameInput?.value.trim() || '';
     const description = descriptionInput?.value.trim() || '';
@@ -4036,6 +4074,15 @@ const sessionManager = {
         }
       } else {
         this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');
+      }
+
+      if (createdWorkspaceId && openProjectAfterCreate) {
+        try {
+          await this.openProjectAfterWorkspaceCreate(createdWorkspaceId);
+        } catch (error) {
+          console.warn('Workspace created but project open failed:', error);
+          this.rememberProjectOpenFailure(createdWorkspaceId, error);
+        }
       }
 
       // Close modal

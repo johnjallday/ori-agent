@@ -309,6 +309,7 @@ export class WorkspaceDetailPage {
     this.setupNotesPanelVaultDrop();
     this.setupPageDragAndDrop();
     await this.loadWorkspace();
+    this.consumeProjectOpenFailureNotice();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
     await Promise.all([
@@ -338,6 +339,44 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask) {
       await this.maybeStartTemplateSetup();
     }
+  }
+
+  projectOpenNoticeStorageKey() {
+    return `oriProjectOpenNotice:${String(this.workspaceId || '').trim()}`;
+  }
+
+  consumeProjectOpenFailureNotice() {
+    let raw = '';
+    try {
+      raw = window.sessionStorage?.getItem(this.projectOpenNoticeStorageKey()) || '';
+      if (raw) {
+        window.sessionStorage?.removeItem(this.projectOpenNoticeStorageKey());
+      }
+    } catch (error) {
+      console.warn('Failed to read project-open notice:', error);
+      return false;
+    }
+    if (!raw) return false;
+
+    let message = 'Workspace created, but the project could not be opened. Use Open Project to try again.';
+    try {
+      const notice = JSON.parse(raw);
+      if (notice?.workspace_id && String(notice.workspace_id) !== String(this.workspaceId)) {
+        return false;
+      }
+      if (typeof notice?.message === 'string' && notice.message.trim()) {
+        message = notice.message.trim();
+      }
+    } catch (error) {
+      console.warn('Failed to parse project-open notice:', error);
+    }
+
+    if (window.Toast?.warning) {
+      window.Toast.warning(message, { title: 'Project not opened', duration: 8000 });
+    } else if (typeof window.notifyToast === 'function') {
+      window.notifyToast(message, 'warning');
+    }
+    return true;
   }
 
   ensureScrollablePanelAccessibility() {
