@@ -258,6 +258,7 @@ type ManifestEdit struct {
 	Icon            *string
 	BehaviorProfile *string
 	StarterTasks    *[]StarterTask
+	ProjectEntry    *ProjectEntryEdit
 }
 
 // UpdateManifest writes display metadata into a library template's
@@ -322,6 +323,17 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 				raw["starter_tasks"] = tasks
 			} else {
 				delete(raw, "starter_tasks")
+			}
+		}
+		if edit.ProjectEntry != nil && edit.ProjectEntry.Set {
+			if edit.ProjectEntry.Value == nil {
+				delete(raw, "project_entry")
+			} else {
+				entry, err := normalizeProjectEntry(tpl.Path, edit.ProjectEntry.Value)
+				if err != nil {
+					return Template{}, err
+				}
+				raw["project_entry"] = entry
 			}
 		}
 	}

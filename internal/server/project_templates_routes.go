@@ -1,7 +1,10 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -59,9 +62,9 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 }
 
 // handleProjectTemplateUpdate serves PUT /api/project-templates/{templateID}:
-// edit a template's display metadata (template.json). The optional `tags` field
-// is tri-state: omitted preserves existing tags, an explicit empty array clears
-// them — so the legacy manage modal (which never sends tags) can't wipe them.
+// edit a template's metadata (template.json). Optional tags and project_entry
+// fields are tri-state so older clients preserve values they do not send;
+// project_entry null explicitly clears that object.
 func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name            string                          `json:"name"`
@@ -70,6 +73,7 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		Icon            *string                         `json:"icon"`
 		BehaviorProfile *string                         `json:"behavior_profile"`
 		StarterTasks    *[]projecttemplates.StarterTask `json:"starter_tasks"`
+		ProjectEntry    json.RawMessage                 `json:"project_entry"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -78,10 +82,24 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	var projectEntryEdit *projecttemplates.ProjectEntryEdit
+	if req.ProjectEntry != nil {
+		projectEntryEdit = &projecttemplates.ProjectEntryEdit{Set: true}
+		if !bytes.Equal(bytes.TrimSpace(req.ProjectEntry), []byte("null")) {
+			var entry projecttemplates.ProjectEntry
+			if err := json.Unmarshal(req.ProjectEntry, &entry); err != nil {
+				s.respondProjectTemplateError(w, fmt.Errorf("%w: project_entry must be an object: %v", projecttemplates.ErrInvalidProjectEntry, err))
+				return
+			}
+			projectEntryEdit.Value = &entry
+		}
+	}
+
 	edit := &projecttemplates.ManifestEdit{
 		Icon:            req.Icon,
 		BehaviorProfile: req.BehaviorProfile,
 		StarterTasks:    req.StarterTasks,
+		ProjectEntry:    projectEntryEdit,
 	}
 	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags, edit)
 	if err != nil {
@@ -349,7 +367,7 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	case errors.Is(err, projecttemplates.ErrTemplateNotFound), errors.Is(err, projecttemplates.ErrFileNotFound):
 		_ = orihttp.RespondNotFound(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable),
-		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrRosterRequired):
+		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrInvalidProjectEntry), errors.Is(err, projecttemplates.ErrRosterRequired):
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
 		_ = orihttp.RespondConflict(w, err.Error())

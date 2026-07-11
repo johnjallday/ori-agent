@@ -88,6 +88,8 @@ func TestRenderTemplatesPage(t *testing.T) {
 		`id="tplDirtyModal"`,
 		`id="tplStarterTasksList"`,
 		`id="tplStarterTaskAddBtn"`,
+		`id="tplEditProjectEntryPath"`,
+		`id="tplEditProjectEntryDefault"`,
 		`id="tplToolsSkills"`,
 		`id="tplToolsMcp"`,
 		`id="tplToolsPlugins"`,

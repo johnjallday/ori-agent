@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
@@ -150,5 +151,79 @@ func TestProjectTemplateManagementRoutes(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(libDir, "imported-pack")); !os.IsNotExist(err) {
 		t.Fatalf("template still present after delete (err=%v)", err)
+	}
+}
+
+func TestHandleProjectTemplateUpdateProjectEntryTriState(t *testing.T) {
+	libDir := t.TempDir()
+	templateDir := filepath.Join(libDir, "song")
+	if err := os.MkdirAll(templateDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, "{{name}}.rpp"), []byte("project"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, "template.json"), []byte(`{"name":"Song","custom_key":"kept"}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	s := newTemplateRoutesServer(t, libDir)
+
+	callUpdate := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/project-templates/song", bytes.NewBufferString(body))
+		req.SetPathValue("templateID", "song")
+		s.handleProjectTemplateUpdate(w, req)
+		return w
+	}
+
+	w := callUpdate(`{"name":"Song","project_entry":{"relative_path":"{{name}}.rpp","open_after_create_default":false}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set project entry: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Template struct {
+			ProjectEntry *struct {
+				RelativePath           string `json:"relative_path"`
+				OpenAfterCreateDefault bool   `json:"open_after_create_default"`
+			} `json:"project_entry"`
+		} `json:"template"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Template.ProjectEntry == nil || response.Template.ProjectEntry.RelativePath != "{{name}}.rpp" || response.Template.ProjectEntry.OpenAfterCreateDefault {
+		t.Fatalf("unexpected project entry response: %+v", response.Template.ProjectEntry)
+	}
+
+	// Omitting the field preserves it for older clients.
+	w = callUpdate(`{"name":"Song","description":"preserved"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"project_entry"`) {
+		t.Fatalf("omitted project entry was not preserved: %d %s", w.Code, w.Body.String())
+	}
+
+	// Explicit null clears it.
+	w = callUpdate(`{"name":"Song","project_entry":null}`)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"project_entry"`) {
+		t.Fatalf("project entry was not cleared: %d %s", w.Code, w.Body.String())
+	}
+
+	for _, body := range []string{
+		`{"name":"Song","project_entry":{"relative_path":"../escape.rpp","open_after_create_default":true}}`,
+		`{"name":"Song","project_entry":{"relative_path":"missing.rpp","open_after_create_default":true}}`,
+		`{"name":"Song","project_entry":"{{name}}.rpp"}`,
+	} {
+		w = callUpdate(body)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("invalid project entry: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(templateDir, "template.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"custom_key": "kept"`) {
+		t.Fatalf("unknown manifest field was lost: %s", data)
 	}
 }
