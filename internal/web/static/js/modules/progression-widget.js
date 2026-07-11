@@ -14,7 +14,6 @@
   let restore = null;
   let knownCompleted = null; // Set of completed quest IDs; null until first load.
   let knownTierComplete = {}; // tier number -> bool, from the previous render.
-  let pollTimer = null;
 
   function el(role) {
     return widget ? widget.querySelector(`[data-role="${role}"]`) : null;
@@ -177,7 +176,7 @@
     wireControls();
     refresh();
 
-    pollTimer = setInterval(refresh, POLL_MS);
+    setInterval(refresh, POLL_MS);
     // Refresh when the tab regains focus for snappier completion feedback.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') refresh();
