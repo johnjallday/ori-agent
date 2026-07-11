@@ -160,6 +160,7 @@ func (h *Handler) createNote(w http.ResponseWriter, r *http.Request) {
 
 	// Sync note to workspace folder as a markdown file
 	h.syncNoteToFile(note)
+	h.publishNoteCreated(note.WorkspaceID, note.ID)
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": req.WorkspaceID, "name": req.Name})
 
@@ -224,12 +225,28 @@ func (h *Handler) createNoteInWorkspace(w http.ResponseWriter, r *http.Request, 
 
 	// Sync note to workspace folder as a markdown file
 	h.syncNoteToFile(note)
+	h.publishNoteCreated(note.WorkspaceID, note.ID)
 
 	logger.Info("Note created", logger.Fields{"id": note.ID, "workspace_id": workspaceID, "name": req.Name})
 
 	_ = orihttp.RespondCreated(w, map[string]any{
 		"success": true,
 		"note":    note,
+	})
+}
+
+// publishNoteCreated emits a note.created event after a note is persisted. It
+// is consumed by the onboarding progression detector (Tier 2 "write a note").
+// No-op when the event bus is not configured.
+func (h *Handler) publishNoteCreated(workspaceID, noteID string) {
+	if h == nil || h.eventBus == nil {
+		return
+	}
+	h.eventBus.Publish(agentworkspace.Event{
+		Type:        agentworkspace.EventNoteCreated,
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Source:      "api",
+		Data:        map[string]any{"note_id": noteID},
 	})
 }
 

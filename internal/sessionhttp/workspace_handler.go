@@ -307,6 +307,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if ws != nil {
+		h.publishWorkspaceCreated(ws.ID, ws.Name)
+	}
+
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
 
 	// Seed the template's starter tasks server-side, after the skeleton is
@@ -345,6 +349,21 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		response["seeded_starter_tasks"] = seededStarterTasks
 	}
 	_ = orihttp.RespondCreated(w, response)
+}
+
+// publishWorkspaceCreated emits a workspace.created event after a workspace is
+// persisted. Consumed by the onboarding progression detector (Tier 2 "create
+// your first workspace"). No-op when the event bus is not configured.
+func (h *Handler) publishWorkspaceCreated(workspaceID, name string) {
+	if h == nil || h.eventBus == nil {
+		return
+	}
+	h.eventBus.Publish(agentworkspace.Event{
+		Type:        agentworkspace.EventWorkspaceCreated,
+		WorkspaceID: workspaceID,
+		Source:      "api",
+		Data:        map[string]any{"name": name},
+	})
 }
 
 // buildCreateWorkspace constructs the workspace record from a validated

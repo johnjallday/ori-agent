@@ -164,6 +164,21 @@ func (h *Handler) SetProjectTemplateDeps(templatesRootResolver func() string, ev
 	h.workspaceEventBus = eventBus
 }
 
+// publishMessageSent emits a message.sent event when the user sends a chat
+// message. It is used by the onboarding progression detector to complete the
+// Tier 1 "first contact" quest. No-op when the event bus is not configured.
+func (h *Handler) publishMessageSent(workspaceID, agentName string) {
+	if h == nil || h.workspaceEventBus == nil {
+		return
+	}
+	h.workspaceEventBus.Publish(workspace.Event{
+		Type:        workspace.EventMessageSent,
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Source:      "chat",
+		Data:        map[string]any{"agent": strings.TrimSpace(agentName)},
+	})
+}
+
 // SetShutdownFunc sets the shutdown function for the /exit command
 func (h *Handler) SetShutdownFunc(fn func()) {
 	h.commandHandler.SetShutdownFunc(fn)
@@ -854,6 +869,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	originalQuery := q
 	approvedActionPlanID := strings.TrimSpace(req.ApprovedActionPlanID)
 	normalizedRouteContext := normalizeChatRouteContext(req.RouteContext)
+
+	// Signal that the user sent a chat message. Consumed by the onboarding
+	// progression detector (Tier 1 "first contact"). Fire-and-forget: Publish
+	// delivers to subscribers on their own goroutines, so this never blocks the
+	// chat path, and the bus may be absent in stripped-down configurations.
+	h.publishMessageSent(normalizedRouteContext.WorkspaceID, req.AgentName)
 
 	// Get session ID from header for multi-tab support
 	sessionID := h.getSessionID(r)

@@ -1991,6 +1991,136 @@ h3, .h3 {
     outline: none;
 }
 
+/* Onboarding quest log */
+.quest-log {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 1.5rem;
+}
+
+.quest-log-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.quest-log-eyebrow {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.quest-log-tier {
+    margin: 0.15rem 0 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.quest-log-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-shrink: 0;
+}
+
+.quest-log-progress-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.quest-log-dismiss {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.2rem;
+    border-radius: 6px;
+}
+
+.quest-log-dismiss:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.quest-log-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.quest-item {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.quest-mark {
+    display: inline-flex;
+    width: 1.1rem;
+    justify-content: center;
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+
+.quest-item-done .quest-mark {
+    color: var(--primary-color);
+}
+
+.quest-item-done .quest-title {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+}
+
+a.quest-title {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+a.quest-title:hover {
+    text-decoration: underline;
+}
+
+.quest-log-why {
+    margin: 0.75rem 0 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.quest-log-restore {
+    margin-bottom: 1.25rem;
+}
+
+.quest-log-restore-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.quest-log-restore-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--primary-color);
+}
+
 .home-dashboard-sections {
     display: flex;
     flex-direction: column;

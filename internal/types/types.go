@@ -179,12 +179,27 @@ func (p *AssistantProgress) EnsureDefaults() {
 	}
 }
 
+// ProgressionState tracks onboarding quest-log progression for a single
+// install. Only quest completions are persisted as ground truth; per-quest
+// status and the current tier are derived from the quest graph at read time.
+type ProgressionState struct {
+	// CompletedQuests maps a stable quest ID to the time it was completed.
+	CompletedQuests map[string]time.Time `json:"completed_quests,omitempty"`
+	// Dismissed is true when the user has hidden the quest-log widget.
+	Dismissed bool `json:"dismissed,omitempty"`
+	// BackfilledAt is non-zero once the startup backfill scan has run, so it
+	// never re-runs (and never re-fires "grandfathering" completions).
+	BackfilledAt time.Time `json:"backfilled_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+}
+
 // AppState tracks application-level state (persisted separately from agent data)
 type AppState struct {
 	Onboarding        OnboardingState    `json:"onboarding"`
 	Device            DeviceInfo         `json:"device"`
 	UserProfile       *InferredProfile   `json:"user_profile,omitempty"`       // User's inferred profile from onboarding
 	AssistantProgress *AssistantProgress `json:"assistant_progress,omitempty"` // Global progression state for evolution features
+	Progression       *ProgressionState  `json:"progression,omitempty"`        // Onboarding quest-log progression
 	UserName          string             `json:"user_name,omitempty"`          // Optional user-provided display name
 	AssistantName     string             `json:"assistant_name,omitempty"`     // Optional assistant name chosen during onboarding
 	Timezone          string             `json:"timezone,omitempty"`           // User's preferred IANA timezone

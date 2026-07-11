@@ -62,6 +62,9 @@ const (
 	// Project events (project folders instantiated from templates)
 	EventProjectCreated EventType = "project.created"
 
+	// Note events
+	EventNoteCreated EventType = "note.created"
+
 	// Workflow events
 	EventWorkflowStarted   EventType = "workflow.started"
 	EventWorkflowCompleted EventType = "workflow.completed"

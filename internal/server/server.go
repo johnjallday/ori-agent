@@ -574,11 +574,11 @@ func (s *Server) serveWorkspaceRun(w http.ResponseWriter, workspaceID, runID str
 	s.renderAndWritePage(w, "workspace-run", data)
 }
 
+// servePersonalize redirects to the consolidated "About You" profile page,
+// which now hosts the personalization sections. The standalone /personalize
+// page was retired; this keeps old links and bookmarks working.
 func (s *Server) servePersonalize(w http.ResponseWriter, r *http.Request) {
-	data := s.prepareBasePageData("personalize")
-	data.Title = "Personalize - Ori Agent"
-	data.BrandText = "Ori Agent"
-	s.renderAndWritePage(w, "personalize", data)
+	http.Redirect(w, r, "/profile", http.StatusMovedPermanently)
 }
 
 func (s *Server) serveUsage(w http.ResponseWriter, r *http.Request) {

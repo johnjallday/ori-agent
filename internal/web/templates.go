@@ -116,7 +116,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/pages/skills.tmpl",
 		"templates/pages/templates.tmpl",
 		"templates/pages/workspaces.tmpl",
-		"templates/pages/personalize.tmpl",
 		"templates/pages/note.tmpl",
 		"templates/pages/action-center.tmpl",
 	}
@@ -163,7 +162,6 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 	tr.templates["skills"] = tmpl
 	tr.templates["templates"] = tmpl
 	tr.templates["workspaces"] = tmpl
-	tr.templates["personalize"] = tmpl
 	tr.templates["note-page"] = tmpl
 	tr.templates["action-center"] = tmpl
 	logger.Info("Successfully loaded templates from embedded filesystem", logger.Fields{})
@@ -187,7 +185,7 @@ func (tr *TemplateRenderer) RenderTemplate(name string, data TemplateData) (stri
 	switch name {
 	case "index":
 		templateName = "base.tmpl"
-	case "settings", "profile", "vault", "workflows", "workspace-canvas", "workspace-detail", "workspace-agent-detail", "workspace-diagnostics", "workspace-task", "workspace-run", "usage", "mcp", "plugins", "models", "review", "agents-roster", "agents-detail", "agents-claude-detail", "agents-codex-detail", "agents-create", "skills", "templates", "workspaces", "personalize", "note-page", "action-center":
+	case "settings", "profile", "vault", "workflows", "workspace-canvas", "workspace-detail", "workspace-agent-detail", "workspace-diagnostics", "workspace-task", "workspace-run", "usage", "mcp", "plugins", "models", "review", "agents-roster", "agents-detail", "agents-claude-detail", "agents-codex-detail", "agents-create", "skills", "templates", "workspaces", "note-page", "action-center":
 		// These templates use {{define "name"}}, so execute by defined name
 		templateName = name
 	case "agents":

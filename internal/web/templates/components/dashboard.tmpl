@@ -19,7 +19,7 @@
       <!-- Suggested prompt chips: populate the input on click (no auto-submit). -->
       <div class="home-prompt-chips" role="group" aria-label="Suggested prompts">
         {{if .Extra.IsFirstRun}}
-        <button type="button" class="home-prompt-chip" data-prompt="Create a workspace for a software project">Create a workspace for a software project</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Create a workspace for a project I'm working on">Create a workspace for a project I'm working on</button>
         <button type="button" class="home-prompt-chip" data-prompt="Help me organize a research project">Help me organize a research project</button>
         <button type="button" class="home-prompt-chip" data-prompt="Plan a product launch">Plan a product launch</button>
         {{else}}
@@ -39,6 +39,29 @@
       </div>
       {{end}}
     </div>
+  </div>
+
+  <!-- Onboarding quest log. Populated by progression-widget.js from
+       GET /api/progression; hidden until data loads (and stays hidden when
+       dismissed or all quests are complete). -->
+  <div id="questLog" class="quest-log" hidden aria-live="polite">
+    <div class="quest-log-inner">
+      <header class="quest-log-header">
+        <div class="quest-log-heading">
+          <span class="quest-log-eyebrow">Getting started</span>
+          <h2 class="quest-log-tier" data-role="tier-name">Quest log</h2>
+        </div>
+        <div class="quest-log-progress">
+          <span class="quest-log-progress-label" data-role="progress-label"></span>
+          <button type="button" class="quest-log-dismiss" data-role="dismiss" aria-label="Hide quest log" title="Hide quest log">✕</button>
+        </div>
+      </header>
+      <ul class="quest-log-list" data-role="quests"></ul>
+      <p class="quest-log-why" data-role="why"></p>
+    </div>
+  </div>
+  <div id="questLogRestore" class="quest-log-restore" hidden>
+    <button type="button" class="quest-log-restore-btn" data-role="restore">Show quest log</button>
   </div>
 
   <div id="homeDashboardSections" class="home-dashboard-sections" data-workspace-count="{{.Extra.WorkspaceCount}}">
