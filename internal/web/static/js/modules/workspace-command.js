@@ -333,6 +333,23 @@ export class WorkspaceCommandView {
     );
   }
 
+  projectOpenActionHTML() {
+    const page = this.page || {};
+    if (typeof page.hasProjectEntry !== 'function' || !page.hasProjectEntry()) return '';
+
+    const busy = page.projectOpenBusy === true;
+    return (
+      '<button type="button" class="ws-cmd-nav-btn" data-cmd-open-project ' +
+      'aria-label="Open project using the system default application" aria-busy="' +
+      (busy ? 'true' : 'false') +
+      '"' +
+      (busy ? ' disabled' : '') +
+      '>' +
+      (busy ? 'Opening Project...' : 'Open Project') +
+      '</button>'
+    );
+  }
+
   isGroupWorkspace() {
     const ws = (this.page && this.page.workspace) || {};
     return (
@@ -408,6 +425,7 @@ export class WorkspaceCommandView {
       '<a class="ws-cmd-nav-btn" href="' +
       escapeHtml(workflowHref) +
       '">Orchestration Skills</a>' +
+      this.projectOpenActionHTML() +
       this.commandViewSwitchHTML() +
       '</div>' +
       '<div class="ws-cmd-crest">' +
@@ -681,6 +699,14 @@ export class WorkspaceCommandView {
     if (!root) return;
 
     root.addEventListener('click', event => {
+      const openProjectBtn = event.target.closest('[data-cmd-open-project]');
+      if (openProjectBtn) {
+        const page = this.page || {};
+        if (!openProjectBtn.disabled && typeof page.openProject === 'function') {
+          void page.openProject();
+        }
+        return;
+      }
       const viewBtn = event.target.closest('[data-cmd-view-mode]');
       if (viewBtn) {
         this.setCommandViewMode(viewBtn.getAttribute('data-cmd-view-mode'), { focus: false });

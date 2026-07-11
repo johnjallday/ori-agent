@@ -959,6 +959,14 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 	trimmed := strings.TrimPrefix(path, "/api/workspaces/")
 	parts := strings.Split(trimmed, "/")
 
+	// Fixed-target desktop project launch must be claimed before the session
+	// handler's broader /project creation route. The runtime handler enforces
+	// POST, loopback origin, persisted metadata, and filesystem containment.
+	if len(parts) == 3 && parts[1] == "project" && parts[2] == "open" {
+		s.Handlers.Workspace.OpenWorkspaceProject(w, r)
+		return true
+	}
+
 	if strings.HasSuffix(path, "/events") {
 		s.Handlers.Workspace.GetWorkspaceEvents(w, r)
 		return true

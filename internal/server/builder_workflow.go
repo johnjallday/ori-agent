@@ -426,6 +426,9 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	}
 
 	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
+	if b.workspaceFileStore != nil {
+		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)
+	}
 	if verbose {
 		logger.Info("Workspace HTTP handler initialized", logger.Fields{})
 	}

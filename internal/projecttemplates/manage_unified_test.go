@@ -157,3 +157,72 @@ func TestUpdateManifestStripsLegacyOnboarding(t *testing.T) {
 		t.Errorf("unknown keys should survive the save: %s", data)
 	}
 }
+
+func TestUpdateManifestProjectEntryTriState(t *testing.T) {
+	dir := t.TempDir()
+	templateDir := filepath.Join(dir, "demo")
+	writeFile(t, filepath.Join(templateDir, ManifestFileName), `{"name":"Demo","custom_key":"kept"}`)
+	writeFile(t, filepath.Join(templateDir, "{{name}}.rpp"), "project")
+
+	entry := &ProjectEntry{RelativePath: "{{name}}.rpp", OpenAfterCreateDefault: false}
+	tpl, err := UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{
+		ProjectEntry: &ProjectEntryEdit{Set: true, Value: entry},
+	})
+	if err != nil {
+		t.Fatalf("UpdateManifest(set project entry): %v", err)
+	}
+	if tpl.ProjectEntry == nil || tpl.ProjectEntry.RelativePath != "{{name}}.rpp" || tpl.ProjectEntry.OpenAfterCreateDefault {
+		t.Fatalf("project entry did not persist: %#v", tpl.ProjectEntry)
+	}
+
+	data, err := os.ReadFile(filepath.Join(templateDir, ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"open_after_create_default": false`) || !strings.Contains(string(data), `"custom_key": "kept"`) {
+		t.Fatalf("manifest lost false default or unknown field: %s", data)
+	}
+
+	// An unrelated edit preserves the current object.
+	icon := "🎵"
+	tpl, err = UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{Icon: &icon})
+	if err != nil {
+		t.Fatalf("UpdateManifest(preserve project entry): %v", err)
+	}
+	if tpl.ProjectEntry == nil || tpl.ProjectEntry.RelativePath != "{{name}}.rpp" {
+		t.Fatalf("omitted project entry was not preserved: %#v", tpl.ProjectEntry)
+	}
+
+	// A present edit with a nil value clears the object.
+	tpl, err = UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{
+		ProjectEntry: &ProjectEntryEdit{Set: true},
+	})
+	if err != nil {
+		t.Fatalf("UpdateManifest(clear project entry): %v", err)
+	}
+	if tpl.ProjectEntry != nil {
+		t.Fatalf("project entry was not cleared: %#v", tpl.ProjectEntry)
+	}
+	data, err = os.ReadFile(filepath.Join(templateDir, ManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"project_entry"`) {
+		t.Fatalf("cleared project_entry key remains in manifest: %s", data)
+	}
+}
+
+func TestUpdateManifestRejectsInvalidProjectEntry(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "demo", ManifestFileName), `{"name":"Demo"}`)
+	writeFile(t, filepath.Join(dir, "demo", "seed.txt"), "seed")
+
+	for _, relativePath := range []string{"../escape.rpp", "{{other}}.rpp", "missing.rpp", "seed.txt/child"} {
+		_, err := UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{
+			ProjectEntry: &ProjectEntryEdit{Set: true, Value: &ProjectEntry{RelativePath: relativePath}},
+		})
+		if !errors.Is(err, ErrInvalidProjectEntry) {
+			t.Errorf("UpdateManifest(project_entry %q) error = %v, want ErrInvalidProjectEntry", relativePath, err)
+		}
+	}
+}

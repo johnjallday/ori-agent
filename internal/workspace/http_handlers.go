@@ -11,14 +11,25 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
+
+// folderWorkspaceResolver loads the canonical workspace.json record for a
+// workspace. It is deliberately separate from Store.Get because production
+// may use a SQLite-primary SyncStore whose row is only a best-effort mirror.
+type folderWorkspaceResolver interface {
+	GetFolderWorkspace(workspaceID string) (*Workspace, error)
+}
 
 // HTTPHandler handles HTTP requests for Agent Workspaces
 type HTTPHandler struct {
-	store         Store
-	orchestrator  *Orchestrator
-	eventBus      *EventBus
-	emailAccounts emailAccountStore
+	store                   Store
+	orchestrator            *Orchestrator
+	eventBus                *EventBus
+	emailAccounts           emailAccountStore
+	folderResolver          FolderResolver
+	folderWorkspaceResolver folderWorkspaceResolver
+	openFile                func(string) error
 	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
 	// Mission-related HTTP endpoints route through it so they share the same
 	// trigger configuration as cadence-driven runs. Optional — handlers
@@ -28,11 +39,37 @@ type HTTPHandler struct {
 
 // NewHTTPHandler creates a new HTTP handler
 func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus) *HTTPHandler {
-	return &HTTPHandler{
+	handler := &HTTPHandler{
 		store:        store,
 		orchestrator: orchestrator,
 		eventBus:     eventBus,
+		openFile:     platform.OpenFile,
 	}
+	if resolver, ok := store.(FolderResolver); ok {
+		handler.folderResolver = resolver
+	}
+	if resolver, ok := store.(folderWorkspaceResolver); ok {
+		handler.folderWorkspaceResolver = resolver
+	}
+	return handler
+}
+
+// SetFolderStore wires the canonical folder-backed workspace store used by
+// desktop side-effect handlers. Production wraps the primary workspace store
+// with decorators that do not necessarily expose optional folder capabilities,
+// so the FileStore must be injected explicitly rather than inferred only from
+// the outer Store value.
+func (h *HTTPHandler) SetFolderStore(store *FileStore) {
+	if h == nil {
+		return
+	}
+	if store == nil {
+		h.folderResolver = nil
+		h.folderWorkspaceResolver = nil
+		return
+	}
+	h.folderResolver = store
+	h.folderWorkspaceResolver = store
 }
 
 // SetScheduler wires the task scheduler so mission HTTP endpoints can fire

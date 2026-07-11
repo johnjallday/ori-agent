@@ -587,6 +587,12 @@ func (s *FileStore) BasePath() string {
 	return s.basePath
 }
 
+// GetFolderWorkspace explicitly identifies FileStore.Get as a canonical
+// workspace.json read for handlers that must not trust a session-store mirror.
+func (s *FileStore) GetFolderWorkspace(id string) (*Workspace, error) {
+	return s.Get(id)
+}
+
 // Get retrieves a workspace by ID, reading the full record (including chat history
 // and tasks) from disk. The in-memory cache holds metadata only (item 2.0), so Get
 // reads through to disk for the complete workspace rather than serving heavy fields

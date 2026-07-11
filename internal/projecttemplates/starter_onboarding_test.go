@@ -27,6 +27,12 @@ func TestReaperStarterSetupTask(t *testing.T) {
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("reaper-song should load without warnings, got %v", tpl.Warnings)
 	}
+	if tpl.BuiltinVersion < 3 {
+		t.Fatalf("reaper-song builtin_version = %d, want at least 3", tpl.BuiltinVersion)
+	}
+	if tpl.ProjectEntry == nil || tpl.ProjectEntry.RelativePath != "{{name}}.rpp" || !tpl.ProjectEntry.OpenAfterCreateDefault {
+		t.Fatalf("reaper-song project entry = %#v", tpl.ProjectEntry)
+	}
 
 	// Roster: exactly one producer entry agent with the REAPER skill bound.
 	if len(tpl.Agents) != 1 || tpl.Agents[0].Name != "Reaper Producer" {
@@ -53,6 +59,35 @@ func TestReaperStarterSetupTask(t *testing.T) {
 	for _, want := range []string{"120 BPM", "40 and 240", "reaper-session-setup"} {
 		if !strings.Contains(setup.Details, want) {
 			t.Errorf("setup details missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"one authoritative REAPER session file",
+		"never create or initialize a second .rpp file",
+		"does not prove that REAPER has finished opening it or that Web Remote is ready",
+		"Do not claim that live changes were applied",
+		"ask for the user's explicit confirmation",
+		"file change rather than a verified live-session change",
+	} {
+		if !strings.Contains(setup.Details, want) {
+			t.Errorf("setup details missing truthful project-control guidance %q", want)
+		}
+	}
+	if strings.Contains(setup.Details, "Otherwise edit the .rpp file directly") {
+		t.Error("setup task must not silently fall back to direct .rpp edits")
+	}
+
+	prompt := tpl.Agents[0].SystemPrompt
+	for _, want := range []string{
+		"only authoritative song project",
+		"never create or initialize a second .rpp file",
+		"does not prove that REAPER or Web Remote is ready",
+		"never claim live changes were applied",
+		"obtain the user's explicit confirmation",
+		"distinguish file changes from verified live-session changes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("Reaper Producer prompt missing %q", want)
 		}
 	}
 

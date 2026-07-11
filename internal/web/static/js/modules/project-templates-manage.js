@@ -335,7 +335,9 @@ function ptcElements() {
     pathInput: document.getElementById('projectTemplatePathInput'),
     browseBtn: document.getElementById('projectTemplateBrowseBtn'),
     manageLink: document.getElementById('projectTemplateManageLink'),
-    importToggle: document.getElementById('folderImportToggle')
+    importToggle: document.getElementById('folderImportToggle'),
+    openAfterCreate: document.getElementById('projectTemplateOpenAfterCreate'),
+    openAfterCreateToggle: document.getElementById('projectTemplateOpenAfterCreateToggle')
   };
 }
 
@@ -443,6 +445,35 @@ function ptcUpdateUI() {
     els.description.textContent = showDesc ? ptcSelected.description : '';
     els.description.hidden = !showDesc;
   }
+
+  const templatePath = els.pathInput?.value?.trim() || '';
+  const importMode = Boolean(els.importToggle?.checked);
+  const entry = ptcSelected?.project_entry;
+  const hasEntry = Boolean(
+    !importMode &&
+    !templatePath &&
+    ptcSelected &&
+    !ptcSelected.blank &&
+    entry &&
+    typeof entry === 'object' &&
+    typeof entry.relative_path === 'string' &&
+    entry.relative_path.trim()
+  );
+  if (els.openAfterCreate) els.openAfterCreate.hidden = !hasEntry;
+  if (els.openAfterCreateToggle) {
+    els.openAfterCreateToggle.checked = hasEntry
+      ? Boolean(entry.open_after_create_default)
+      : false;
+  }
+}
+
+function ptcShouldOpenAfterCreate() {
+  const els = ptcElements();
+  return Boolean(
+    els.openAfterCreate &&
+    !els.openAfterCreate.hidden &&
+    els.openAfterCreateToggle?.checked
+  );
 }
 
 function ptcBlankCard() {
@@ -464,6 +495,7 @@ function ptcSyncImportVisibility() {
   if (importMode) {
     if (els.description) els.description.hidden = true;
   }
+  ptcUpdateUI();
 }
 
 async function ptcPopulate() {
@@ -577,8 +609,10 @@ function ptcInit() {
 window.ProjectTemplateCard = {
   populate: ptcPopulate,
   reset: ptcReset,
+  syncState: ptcUpdateUI,
   getPayloadFields: ptcGetPayloadFields,
-  getSelectedTemplate: ptcGetSelectedTemplate
+  getSelectedTemplate: ptcGetSelectedTemplate,
+  shouldOpenAfterCreate: ptcShouldOpenAfterCreate
 };
 
 function ptmInitListeners() {

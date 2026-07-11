@@ -20,7 +20,8 @@ import (
 )
 
 // ManifestFileName is the optional per-template metadata file. It carries
-// display metadata only — never behavior — and is excluded from instantiation.
+// constrained declarative metadata, never executable behavior, and is excluded
+// from instantiation.
 const ManifestFileName = "template.json"
 
 // Behavior profiles understood by the workspace-creation flow (sent as
@@ -105,6 +106,9 @@ type Template struct {
 	BehaviorProfile string `json:"behavior_profile,omitempty"`
 	// StarterTasks are example tasks seeded into a new workspace.
 	StarterTasks []StarterTask `json:"starter_tasks,omitempty"`
+	// ProjectEntry is the optional scaffolded file Ori can offer to open after
+	// an explicit Create Workspace action. It is validated data only.
+	ProjectEntry *ProjectEntry `json:"project_entry,omitempty"`
 	// Builtin marks a template shipped with the app: read-only in the authoring
 	// UI and grouped as a built-in in the create-modal picker.
 	Builtin bool `json:"builtin"`
@@ -164,6 +168,7 @@ type manifest struct {
 	Icon            string          `json:"icon,omitempty"`
 	BehaviorProfile string          `json:"behavior_profile,omitempty"`
 	StarterTasks    []StarterTask   `json:"starter_tasks,omitempty"`
+	ProjectEntry    json.RawMessage `json:"project_entry,omitempty"`
 	Builtin         bool            `json:"builtin,omitempty"`
 	BuiltinVersion  int             `json:"builtin_version,omitempty"`
 	Onboarding      json.RawMessage `json:"onboarding,omitempty"`
@@ -209,11 +214,16 @@ func newTemplate(path string) Template {
 	t.BuiltinVersion = m.BuiltinVersion
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
 	t.Onboarding = m.Onboarding
+	projectEntry, projectEntryErr := normalizeManifestProjectEntry(t.Path, m.ProjectEntry)
+	t.ProjectEntry = projectEntry
 	if m.Tools != nil {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
 	t.Warnings = manifestWarnings(m, t.Agents)
+	if projectEntryErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
+	}
 	return t
 }
 

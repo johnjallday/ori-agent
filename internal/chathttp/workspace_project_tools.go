@@ -134,10 +134,11 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 				projectName = ws.Name
 			}
 
-			relPath, err := projecttemplates.Instantiate(tpl.Path, folderPath, projectName)
+			result, err := projecttemplates.InstantiateTemplate(tpl, folderPath, projectName)
 			if err != nil {
 				return "", err
 			}
+			relPath := result.ProjectPath
 
 			projectDirID, err := projecttemplates.EnsureProjectDirectoryReference(folderWS, projectName, folderPath, relPath)
 			if err != nil {
@@ -154,6 +155,10 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 				folderWS.SharedData = make(map[string]any)
 			}
 			projecttemplates.SetPrimaryDirectoryID(folderWS.SharedData, projectDirID)
+			if err := projecttemplates.SetProjectEntryPath(folderWS.SharedData, result.ProjectEntryPath); err != nil {
+				result.ProjectEntryPath = ""
+				result.ProjectWarning = joinProjectWarning(result.ProjectWarning, fmt.Sprintf("project entry metadata could not be persisted: %v", err))
+			}
 			folderWS.UpdatedAt = now
 			if err := p.fileStore.Save(folderWS); err != nil {
 				_ = os.RemoveAll(filepath.Join(folderPath, relPath))
@@ -167,6 +172,7 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 				ws.SharedData = make(map[string]any)
 			}
 			projecttemplates.SetPrimaryDirectoryID(ws.SharedData, projectDirID)
+			_ = projecttemplates.SetProjectEntryPath(ws.SharedData, result.ProjectEntryPath)
 			if refsJSON, err := json.Marshal(folderWS.DirectoryReferences); err == nil {
 				ws.DirectoryReferencesJSON = refsJSON
 			}
@@ -176,28 +182,57 @@ func (p *WorkspaceToolProvider) createProjectTool() toolapi.Tool {
 			}
 
 			if p.projectEventBus != nil {
+				data := map[string]any{
+					"project_path": relPath,
+					"template_id":  tpl.ID,
+				}
+				if result.ProjectEntryPath != "" {
+					data[projecttemplates.ProjectEntryPathKey] = result.ProjectEntryPath
+				}
+				if result.ProjectWarning != "" {
+					data["project_warning"] = result.ProjectWarning
+				}
 				p.projectEventBus.Publish(workspace.Event{
 					Type:        workspace.EventProjectCreated,
 					WorkspaceID: p.workspaceID,
 					Source:      "workspace_create_project",
-					Data: map[string]any{
-						"project_path": relPath,
-						"template_id":  tpl.ID,
-					},
+					Data:        data,
 				})
 			}
 
 			logger.Info("Workspace tool created project from template", logger.Fields{
-				"workspace_id": p.workspaceID,
-				"template":     tpl.ID,
-				"project_path": relPath,
+				"workspace_id":  p.workspaceID,
+				"template":      tpl.ID,
+				"project_path":  relPath,
+				"project_entry": result.ProjectEntryPath,
 			})
-			return marshalToolResponse(map[string]any{
+			message := fmt.Sprintf("Project created at %q inside the workspace folder (template %q). It is recorded as the workspace's project_path and is readable through the workspace filesystem tools.", relPath, tpl.ID)
+			response := map[string]any{
 				"project_path": relPath,
 				"template_id":  tpl.ID,
 				"tags":         ws.Tags,
-				"message":      fmt.Sprintf("Project created at %q inside the workspace folder (template %q). It is recorded as the workspace's project_path and is readable through the workspace filesystem tools.", relPath, tpl.ID),
-			})
+				"message":      message,
+			}
+			if result.ProjectEntryPath != "" {
+				response[projecttemplates.ProjectEntryPathKey] = result.ProjectEntryPath
+			}
+			if result.ProjectWarning != "" {
+				response["project_warning"] = result.ProjectWarning
+				response["message"] = message + " Warning: " + result.ProjectWarning
+			}
+			return marshalToolResponse(response)
 		},
 	}
+}
+
+func joinProjectWarning(existing, warning string) string {
+	existing = strings.TrimSpace(existing)
+	warning = strings.TrimSpace(warning)
+	if existing == "" {
+		return warning
+	}
+	if warning == "" {
+		return existing
+	}
+	return existing + "; " + warning
 }

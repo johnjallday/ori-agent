@@ -302,6 +302,59 @@ test('command subtitle includes mission automation state when mission state is l
   }
 });
 
+test('project open command is conditional, path-free, and exposes its busy state', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      workspace: {
+        project_path: 'secret-project',
+        shared_data: { project_entry_path: 'private/song.rpp' }
+      },
+      hasProjectEntry: () => false,
+      projectOpenBusy: false
+    }
+  });
+
+  assert.equal(commandView.projectOpenActionHTML(), '');
+
+  commandView.page.hasProjectEntry = () => true;
+  const readyHTML = commandView.projectOpenActionHTML();
+  assert.match(readyHTML, /data-cmd-open-project/);
+  assert.match(readyHTML, />Open Project<\/button>/);
+  assert.match(readyHTML, /aria-label="Open project using the system default application"/);
+  assert.match(readyHTML, /aria-busy="false"/);
+  assert.doesNotMatch(readyHTML, /secret-project|private\/song\.rpp/);
+
+  commandView.page.projectOpenBusy = true;
+  const busyHTML = commandView.projectOpenActionHTML();
+  assert.match(busyHTML, /aria-busy="true"/);
+  assert.match(busyHTML, / disabled/);
+  assert.match(busyHTML, />Opening Project\.\.\.<\/button>/);
+});
+
+test('command bar delegates Open Project through the workspace detail action layer', () => {
+  const topbar = makeListenerRoot();
+  let openCount = 0;
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: {
+      querySelector: selector => (selector === '.ws-cmd-topbar' ? topbar : null)
+    },
+    page: {
+      openProject() {
+        openCount += 1;
+      }
+    }
+  });
+
+  commandView.bindIdentityControls();
+  topbar.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-open-project': 'true' })
+  });
+
+  assert.equal(openCount, 1);
+});
+
 test('mission panel renders loaded goal state and findings link', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {

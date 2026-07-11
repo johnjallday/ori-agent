@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"fmt"
+
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
@@ -25,6 +27,24 @@ func (s *SyncStore) FileStore() *FileStore {
 	return s.fileSync
 }
 
+// GetFolderPath exposes the canonical disk folder when SyncStore is used by a
+// runtime handler that needs workspace-root containment rather than files/.
+func (s *SyncStore) GetFolderPath(workspaceID string) (string, error) {
+	if s.fileSync == nil {
+		return "", fmt.Errorf("workspace folder storage is unavailable")
+	}
+	return s.fileSync.GetFolderPath(workspaceID)
+}
+
+// GetFolderWorkspace reads the canonical workspace.json record rather than
+// the SQLite-primary mirror returned by Get.
+func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
+	if s.fileSync == nil {
+		return nil, fmt.Errorf("workspace folder storage is unavailable")
+	}
+	return s.fileSync.Get(workspaceID)
+}
+
 // Save persists the workspace.
 //
 // The FileStore runs first because it owns the monotonic Version counter and
@@ -36,6 +56,18 @@ func (s *SyncStore) FileStore() *FileStore {
 // the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
+		// ProjectPath is canonical in workspace.json and is not represented by
+		// the SQLite workspace table. A workspace fetched before project
+		// instantiation (or fetched from SQLite afterward) can therefore carry an
+		// empty value and must not erase a project path that was written directly
+		// to the folder store. There is no generic "empty means clear" operation
+		// through SyncStore; an intentional project removal must update the
+		// canonical FileStore explicitly.
+		if ws.ProjectPath == "" {
+			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
+				ws.ProjectPath = diskWorkspace.ProjectPath
+			}
+		}
 		if err := s.fileSync.Save(ws); err != nil {
 			logger.Warn("Failed to sync workspace to disk", logger.Fields{
 				"workspace_id": ws.ID,

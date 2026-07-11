@@ -7,7 +7,7 @@ A **template** describes how a workspace starts. It is presented as a single **T
 - **starter tasks** seeded into the new workspace and assigned to the entry agent (at most one may be marked `setup: true` — it auto-starts once, when the workspace is first opened),
 - default **tools** (skills / MCP servers / plugins, applied if present),
 - an **agent roster** — the agents created on the new workspace (entry agent + specialists), and
-- a **project folder skeleton** — a Reaper song, a writing project, a code scaffold, anything.
+- a **project folder skeleton** — a Reaper song, a writing project, a code scaffold, anything, with an optional **project entry file** Ori can offer to open in the system default application.
 
 A template that ships a skeleton scaffolds it into the workspace and records the result as the workspace's `project_path`. A **metadata-only** template (no files beyond `template.json`) contributes behavior/tasks/tools but creates no project folder. Either way, Ori contains no domain-specific code: a template is just a folder, and all domain specificity lives in template data.
 
@@ -15,9 +15,9 @@ A template that ships a skeleton scaffolds it into the workspace and records the
 
 Ori's capabilities come from MCP servers and skills, not built-in integrations. Project templates follow the same philosophy:
 
-- **The app ships one mechanism** — copy a folder skeleton, substitute names, set `project_path`.
+- **The app ships one mechanism** — copy a folder skeleton, substitute names, set `project_path`, and optionally remember one verified entry file.
 - **Templates carry the domain** — a `reaper-song` template makes Ori useful for music; a `novel` template makes it useful for writing. Supporting a new domain requires zero changes to Ori.
-- **Behavior stays in MCP/skills** — anything that should happen *after* instantiation ("open it in Reaper, set the tempo") belongs to a domain MCP or skill, never to the template manifest.
+- **Behavior stays in MCP/skills** — `project_entry` may identify a file and default the user's one-time **Open project after creation** choice, but it cannot name an application or perform domain work. Actions such as setting tempo, confirming that REAPER is ready, or editing a live session still belong to a domain MCP or skill.
 
 ## Where templates live
 
@@ -43,11 +43,29 @@ templates/
     assets/
 ```
 
-- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create actions. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details", "setup" }]`; at most one task may set `setup: true`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `agents` (agent roster — see below), `builtin`, and `builtin_version` (shipped manifest revision for built-ins — see "Keeping built-ins current"). Unknown keys are preserved untouched.
+```json
+{
+  "name": "My REAPER Template",
+  "project_entry": {
+    "relative_path": "{{name}}.rpp",
+    "open_after_create_default": true
+  }
+}
+```
+
+- `template.json` carries **declarative metadata only** — never executable hooks, scripts, or post-create commands. Recognized keys: `name`, `description`, `tags`, `icon` (emoji shown on the picker card), `behavior_profile` (`general` | `research` | `software_project`), `starter_tasks` (`[{ "description", "details", "setup" }]`; at most one task may set `setup: true`), `tools` (`{ "skills", "mcp_servers", "plugins" }`), `agents` (agent roster — see below), `project_entry`, `builtin`, and `builtin_version` (shipped manifest revision for built-ins — see "Keeping built-ins current"). Unknown keys are preserved untouched.
 - A folder containing **only** `template.json` is a valid metadata-only template (it scaffolds no files).
 - `{{name}}` becomes the slugified project name; `{{date}}` becomes `YYYY-MM-DD`. Substitution applies to file and folder **names only**; file contents are byte-copied untouched, so binary files are always safe.
 - Symlinks are skipped during instantiation (they would break portability or reach outside the template).
 - Keep templates small: instantiation is synchronous, and seeds are meant to be starting points, not finished projects.
+
+`project_entry` rules:
+
+- `relative_path` is relative to the generated project folder, uses `/` separators, and must name a regular, non-symlink scaffold file. Absolute paths, drive letters, traversal, malformed tokens, and symlinked components are rejected.
+- Only `{{name}}` and `{{date}}` are supported, using the same values as scaffold filename substitution. The literal source file must exist in the template (for example, `{{name}}.rpp`).
+- `open_after_create_default` defaults the Create Workspace checkbox; `false` still means the template has an entry and shows the checkbox unchecked. Omitting `project_entry` means there is no launch action.
+- A hand-edited invalid entry produces a template warning and is omitted from normalized API output. The authoring API rejects an invalid update with `400`. Entry verification problems during instantiation are non-fatal: the project remains created and the response carries `project_warning`.
+- The `/templates` **Overview** tab exposes **Project entry file** and **Open project after creation by default** controls. Leaving the path blank removes the entry.
 
 ## Agents
 
@@ -110,13 +128,24 @@ song-x/                  ← workspace folder
 
 This placement matters: the workspace's auto-provisioned filesystem MCP is rooted at the workspace folder, so agents can read and edit the project immediately — while the attachment reconcile that runs on file-tree loads only walks `files/`, keeping potentially large project media out of that scan.
 
-Because `project_path` is relative and stored in `workspace.json` (its canonical store — there is no SQLite column; reads hydrate from disk), the project travels with the workspace through renames, moves, grouping, and machine migrations.
+Because `project_path` is relative and stored in `workspace.json` (its canonical store — there is no SQLite column; reads hydrate from disk), the project travels with the workspace through renames, moves, grouping, and machine migrations. When an entry verifies successfully, its resolved portable path is stored relative to that project as `shared_data.project_entry_path`; session metadata is only a best-effort mirror.
+
+For a library template with a valid entry, Create Workspace shows **Open project after creation** and initializes it from `open_after_create_default`. The user can opt in or out before creating. An opted-in create sends one bodyless request to the fixed local open endpoint, then navigates to the new workspace. Opening failure never rolls back workspace/project creation; the destination shows a one-time warning and the persistent **Open Project** command remains available for retry. Ordinary workspace loads, reloads, chat-created projects, and adding a project to an existing workspace do not launch an application.
+
+**Open Project** asks the operating system to use the file type's default application. Acceptance means only that the OS request was issued; it does not prove that a domain application finished loading the file or that an automation interface such as REAPER Web Remote is ready. Domain skills must verify live state before claiming live changes.
+
+## Project-entry non-goals
+
+- Binding a template to a named application, executable, bundle path, command, arguments, environment variables, or shell hook.
+- Running arbitrary post-create scripts or launching on ordinary page load, reload, server start, chat tool use, or background workspace creation.
+- Treating an OS-open response as application readiness or bypassing the confirmation/safety behavior of a domain skill.
+- Persisting absolute machine paths. Both `project_path` and `shared_data.project_entry_path` remain portable relative paths.
 
 ## Managing the library
 
 The filesystem is the primary management surface — but the app provides a full authoring UI over it:
 
-- **`/templates` page** — the dedicated authoring surface. Per template: edit the Overview (name, description, tags, **icon**, **agent behavior**, **starter tasks**), browse/edit Files, configure Tools and Agents, **Duplicate**, **Reveal**, and **Delete**. Built-ins show a read-only badge and disable the mutating controls; **Duplicate to customize** makes an editable copy (the copy is never marked built-in). Mutating a built-in is also rejected server-side with `403` (defense in depth), so the read-only guarantee does not depend on the UI.
+- **`/templates` page** — the dedicated authoring surface. Per template: edit the Overview (name, description, tags, **icon**, **agent behavior**, **project entry**, **starter tasks**), browse/edit Files, configure Tools and Agents, **Duplicate**, **Reveal**, and **Delete**. Built-ins show a read-only badge and disable the mutating controls; **Duplicate to customize** makes an editable copy (the copy is never marked built-in). Mutating a built-in is also rejected server-side with `403` (defense in depth), so the read-only guarantee does not depend on the UI.
 - **Manage modal** (reachable from the create-workspace modal and Settings → Project Templates): a lighter list/import/edit/delete/reveal veneer over the same library.
 - **Settings → Project Templates**: configure `templates_root` (Browse/Save/Clear), open the library folder, and launch the authoring page. Changing the directory materializes the library there, including any absent built-ins.
 - Deleting a built-in lasts until the next server start, which re-adds absent built-ins; duplicate-and-edit instead if you want one gone-but-different.
@@ -126,5 +155,7 @@ The filesystem is the primary management surface — but the app provides a full
 - One project per workspace (v1). The chat tool and API refuse when `project_path` is already set.
 - Group workspaces cannot hold projects (their MCP roots are scoped to `files/` + `notes/`, so a sibling project would be invisible to group agents).
 - Instantiation failures never break workspace creation: the workspace is created without a project and the response carries `project_warning`.
+- Entry-only failures never remove a successfully scaffolded project: `project_warning` explains the missing entry and no `project_entry_path` is persisted.
+- The project-open endpoint accepts no caller path or request body, is limited to direct loopback requests, and revalidates the persisted workspace/project paths, containment, file type, and every symlink boundary immediately before invoking the system opener.
 - A failed copy removes the partial project folder; reserved names (`files`, `notes`, `outputs`, `agents`, `sub-workspaces`, `tasks`, `sessions`) and path traversal are rejected.
 - A `project.created` workspace event is published after successful instantiation.

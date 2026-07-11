@@ -74,7 +74,7 @@ function tplShowError(message) {
 }
 
 function tplSelected() {
-  return tplState.templates.find((t) => t.id === tplState.selectedId) || null;
+  return tplState.templates.find(t => t.id === tplState.selectedId) || null;
 }
 
 // --- Loading & list rendering ---
@@ -95,16 +95,18 @@ async function tplRefresh(selectId) {
   if (rootPath) rootPath.textContent = tplState.root;
 
   // Keep selection valid; default to the requested or first template.
-  if (selectId && tplState.templates.some((t) => t.id === selectId)) {
+  if (selectId && tplState.templates.some(t => t.id === selectId)) {
     tplState.selectedId = selectId;
-  } else if (!tplState.templates.some((t) => t.id === tplState.selectedId)) {
+  } else if (!tplState.templates.some(t => t.id === tplState.selectedId)) {
     tplState.selectedId = '';
   }
 
   // If the selected template changed out from under a loaded Files tree or
   // Tools editor, drop them so neither tab shows another template's data.
-  if ((tplFiles.templateId && tplFiles.templateId !== tplState.selectedId) ||
-      (tplTools.templateId && tplTools.templateId !== tplState.selectedId)) {
+  if (
+    (tplFiles.templateId && tplFiles.templateId !== tplState.selectedId) ||
+    (tplTools.templateId && tplTools.templateId !== tplState.selectedId)
+  ) {
     tplFilesReset();
     tplToolsReset();
   }
@@ -118,12 +120,12 @@ function tplVisibleTemplates() {
   let items = tplState.templates;
   const fb = window.OriTagFilterBar;
   if (fb && tplState.activeTags.length) {
-    items = fb.filterItems(items, tplState.activeTags, (t) => t.tags || []);
+    items = fb.filterItems(items, tplState.activeTags, t => t.tags || []);
   }
   const q = tplState.search.trim().toLowerCase();
   if (q) {
-    items = items.filter((t) =>
-      [t.name, t.id, t.description].filter(Boolean).some((v) => v.toLowerCase().includes(q))
+    items = items.filter(t =>
+      [t.name, t.id, t.description].filter(Boolean).some(v => v.toLowerCase().includes(q))
     );
   }
   return items;
@@ -162,26 +164,31 @@ function tplBuildRow(template) {
   row.setAttribute('role', 'listitem');
   row.style.cssText =
     'border: 1px solid var(--border-color); background: var(--bg-secondary);' +
-    (template.id === tplState.selectedId ? ' outline: 2px solid var(--accent-color, #6366f1);' : '');
+    (template.id === tplState.selectedId
+      ? ' outline: 2px solid var(--accent-color, #6366f1);'
+      : '');
   row.addEventListener('click', () => {
     if (tplState.selectedId === template.id) return;
     tplGuardDirty(() => tplSelectTemplate(template.id));
   });
 
   const title = document.createElement('div');
-  title.style.cssText = 'color: var(--text-primary); font-size: 14px; font-weight: 600; word-break: break-word;';
+  title.style.cssText =
+    'color: var(--text-primary); font-size: 14px; font-weight: 600; word-break: break-word;';
   title.textContent = (template.icon ? `${template.icon} ` : '') + (template.name || template.id);
   if (template.builtin) {
     const badge = document.createElement('span');
     badge.className = 'badge ms-1';
-    badge.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 600; font-size: 9px; vertical-align: middle;';
+    badge.style.cssText =
+      'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 600; font-size: 9px; vertical-align: middle;';
     badge.textContent = 'BUILT-IN';
     title.appendChild(badge);
   }
   row.appendChild(title);
 
   const id = document.createElement('div');
-  id.style.cssText = 'font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace);';
+  id.style.cssText =
+    'font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace);';
   id.textContent = template.id;
   row.appendChild(id);
 
@@ -199,7 +206,8 @@ function tplBuildRow(template) {
     for (const tag of template.tags) {
       const chip = document.createElement('span');
       chip.className = 'badge';
-      chip.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 500; font-size: 10px;';
+      chip.style.cssText =
+        'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 500; font-size: 10px;';
       chip.textContent = tag;
       tags.appendChild(chip);
     }
@@ -218,7 +226,7 @@ function tplEnsureFilterBar() {
   tplState.filterBar = window.OriTagFilterBar.createTagFilterBar({
     container,
     label: 'Tags',
-    onChange: (active) => {
+    onChange: active => {
       tplState.activeTags = active;
       tplRenderList();
     }
@@ -228,7 +236,7 @@ function tplEnsureFilterBar() {
 function tplSyncFilterTags() {
   tplEnsureFilterBar();
   if (!tplState.filterBar || !window.OriTagFilterBar) return;
-  const available = window.OriTagFilterBar.collectTags(tplState.templates, (t) => t.tags || []);
+  const available = window.OriTagFilterBar.collectTags(tplState.templates, t => t.tags || []);
   tplState.filterBar.setAvailableTags(available);
   tplState.activeTags = tplState.filterBar.getActiveTags();
 }
@@ -292,7 +300,8 @@ function tplStarterTaskRow(task) {
 
   const setupWrap = document.createElement('label');
   setupWrap.className = 'd-flex align-items-center gap-1 mb-0';
-  setupWrap.style.cssText = 'font-size: 12px; color: var(--text-secondary); white-space: nowrap; cursor: pointer;';
+  setupWrap.style.cssText =
+    'font-size: 12px; color: var(--text-secondary); white-space: nowrap; cursor: pointer;';
   const setup = document.createElement('input');
   setup.type = 'checkbox';
   setup.className = 'form-check-input mt-0';
@@ -302,7 +311,7 @@ function tplStarterTaskRow(task) {
   setup.addEventListener('change', () => {
     if (!setup.checked) return;
     // At most one setup task: checking this one unchecks the rest.
-    document.querySelectorAll('#tplStarterTasksList input[data-k="setup"]').forEach((other) => {
+    document.querySelectorAll('#tplStarterTasksList input[data-k="setup"]').forEach(other => {
       if (other !== setup) other.checked = false;
     });
   });
@@ -323,8 +332,10 @@ function tplStarterTaskRow(task) {
   details.className = 'form-control';
   details.rows = 3;
   details.dataset.k = 'details';
-  details.style.cssText = 'background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;';
-  details.placeholder = 'Details for the agent (Markdown). For a setup task, consider headings:\n## Created defaults\n## Questions to ask\n## Validation\n## How to apply changes';
+  details.style.cssText =
+    'background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical;';
+  details.placeholder =
+    'Details for the agent (Markdown). For a setup task, consider headings:\n## Created defaults\n## Questions to ask\n## Validation\n## How to apply changes';
   details.value = task && task.details ? task.details : '';
   row.appendChild(details);
 
@@ -335,7 +346,7 @@ function tplStarterTasksRender(tasks) {
   const list = tplEl('tplStarterTasksList');
   if (!list) return;
   list.innerHTML = '';
-  (Array.isArray(tasks) ? tasks : []).forEach((t) => list.appendChild(tplStarterTaskRow(t)));
+  (Array.isArray(tasks) ? tasks : []).forEach(t => list.appendChild(tplStarterTaskRow(t)));
 }
 
 // tplStarterTasksCollect reads the rows back into starter-task objects,
@@ -345,8 +356,8 @@ function tplStarterTasksCollect() {
   const list = tplEl('tplStarterTasksList');
   if (!list) return [];
   return Array.from(list.querySelectorAll('[data-role="starter-task"]'))
-    .map((row) => {
-      const val = (k) => row.querySelector(`[data-k="${k}"]`);
+    .map(row => {
+      const val = k => row.querySelector(`[data-k="${k}"]`);
       const description = (val('description')?.value || '').trim();
       if (!description) return null;
       const task = { description, details: (val('details')?.value || '').trim() };
@@ -362,12 +373,21 @@ function tplResetOverviewFields() {
   const nameInput = tplEl('tplEditName');
   const descInput = tplEl('tplEditDescription');
   // A name equal to the id is a folder-name fallback, not an explicit name.
-  if (nameInput) nameInput.value = template.name && template.name !== template.id ? template.name : '';
+  if (nameInput)
+    nameInput.value = template.name && template.name !== template.id ? template.name : '';
   if (descInput) descInput.value = template.description || '';
   const iconInput = tplEl('tplEditIcon');
   if (iconInput) iconInput.value = template.icon || '';
   const behaviorSelect = tplEl('tplEditBehavior');
   if (behaviorSelect) behaviorSelect.value = template.behavior_profile || 'general';
+  const projectEntryPath = tplEl('tplEditProjectEntryPath');
+  const projectEntryDefault = tplEl('tplEditProjectEntryDefault');
+  const entry =
+    template.project_entry && typeof template.project_entry === 'object'
+      ? template.project_entry
+      : null;
+  if (projectEntryPath) projectEntryPath.value = entry?.relative_path || '';
+  if (projectEntryDefault) projectEntryDefault.checked = Boolean(entry?.open_after_create_default);
   tplStarterTasksRender(template.starter_tasks);
   tplEnsureTagsWidget();
   if (tplState.tagsWidget) tplState.tagsWidget.setTags(template.tags || []);
@@ -380,7 +400,10 @@ async function tplSaveOverview() {
   const descInput = tplEl('tplEditDescription');
   const iconInput = tplEl('tplEditIcon');
   const behaviorSelect = tplEl('tplEditBehavior');
-  const tags = tplState.tagsWidget ? tplState.tagsWidget.getTags() : (template.tags || []);
+  const projectEntryPath = tplEl('tplEditProjectEntryPath');
+  const projectEntryDefault = tplEl('tplEditProjectEntryDefault');
+  const entryPath = projectEntryPath ? projectEntryPath.value.trim() : '';
+  const tags = tplState.tagsWidget ? tplState.tagsWidget.getTags() : template.tags || [];
   try {
     await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
       method: 'PUT',
@@ -391,7 +414,13 @@ async function tplSaveOverview() {
         tags,
         icon: iconInput ? iconInput.value.trim() : '',
         behavior_profile: behaviorSelect ? behaviorSelect.value : 'general',
-        starter_tasks: tplStarterTasksCollect()
+        starter_tasks: tplStarterTasksCollect(),
+        project_entry: entryPath
+          ? {
+              relative_path: entryPath,
+              open_after_create_default: Boolean(projectEntryDefault?.checked)
+            }
+          : null
       })
     });
     tplToast('Template saved.', 'success');
@@ -412,22 +441,41 @@ function tplApplyReadOnly() {
   if (notice) notice.hidden = !builtin;
   const agentsNotice = tplEl('tplAgentsReadOnlyNotice');
   if (agentsNotice) agentsNotice.hidden = !builtin;
-  ['tplAgentsAddBtn', 'tplAgentsSaveBtn'].forEach((id) => {
+  ['tplAgentsAddBtn', 'tplAgentsSaveBtn'].forEach(id => {
     const el = tplEl(id);
     if (el) el.hidden = builtin;
   });
   [
-    'tplEditName', 'tplEditDescription', 'tplEditIcon', 'tplEditBehavior', 'tplStarterTaskAddBtn',
-    'tplSaveBtn', 'tplResetBtn', 'tplDeleteBtn',
-    'tplFileNewBtn', 'tplFolderNewBtn', 'tplFileRenameBtn', 'tplFileDeleteBtn', 'tplEditorSaveBtn',
-    'tplToolsSaveBtn', 'tplAgentsAddBtn', 'tplAgentsSaveBtn'
-  ].forEach((id) => {
+    'tplEditName',
+    'tplEditDescription',
+    'tplEditIcon',
+    'tplEditBehavior',
+    'tplEditProjectEntryPath',
+    'tplEditProjectEntryDefault',
+    'tplStarterTaskAddBtn',
+    'tplSaveBtn',
+    'tplResetBtn',
+    'tplDeleteBtn',
+    'tplFileNewBtn',
+    'tplFolderNewBtn',
+    'tplFileRenameBtn',
+    'tplFileDeleteBtn',
+    'tplEditorSaveBtn',
+    'tplToolsSaveBtn',
+    'tplAgentsAddBtn',
+    'tplAgentsSaveBtn'
+  ].forEach(id => {
     const el = tplEl(id);
     if (el) el.disabled = builtin;
   });
   // The starter-tasks row editor is built dynamically; disable its controls too.
-  document.querySelectorAll('#tplStarterTasksList input, #tplStarterTasksList textarea, #tplStarterTasksList button')
-    .forEach((el) => { el.disabled = builtin; });
+  document
+    .querySelectorAll(
+      '#tplStarterTasksList input, #tplStarterTasksList textarea, #tplStarterTasksList button'
+    )
+    .forEach(el => {
+      el.disabled = builtin;
+    });
   // The tags widget is a custom component; dim + block interaction for built-ins.
   const tagsWrap = tplEl('tplEditTags');
   if (tagsWrap) {
@@ -437,8 +485,12 @@ function tplApplyReadOnly() {
   // Agent cards are rendered dynamically; disable their controls + drag for built-ins.
   const agentsList = tplEl('tplAgentsList');
   if (agentsList) {
-    agentsList.querySelectorAll('input, select, textarea, button').forEach((el) => { el.disabled = builtin; });
-    agentsList.querySelectorAll('.tpl-agent-card').forEach((card) => { card.draggable = !builtin; });
+    agentsList.querySelectorAll('input, select, textarea, button').forEach(el => {
+      el.disabled = builtin;
+    });
+    agentsList.querySelectorAll('.tpl-agent-card').forEach(card => {
+      card.draggable = !builtin;
+    });
   }
 }
 
@@ -481,7 +533,7 @@ function tplCreate() {
     label: 'Template name',
     confirm: 'Create',
     initial: '',
-    run: async (name) => {
+    run: async name => {
       if (!name) throw new Error('Please enter a name.');
       const result = await tplFetchJSON('/api/project-templates', {
         method: 'POST',
@@ -503,12 +555,15 @@ function tplDuplicate() {
     label: 'New template name',
     confirm: 'Duplicate',
     initial: `${template.name || template.id} copy`,
-    run: async (name) => {
-      const result = await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}/duplicate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
+    run: async name => {
+      const result = await tplFetchJSON(
+        `/api/project-templates/${encodeURIComponent(template.id)}/duplicate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        }
+      );
       const created = result.template || {};
       tplToast(`Duplicated to "${created.name || created.id}".`, 'success');
       await tplRefresh(created.id);
@@ -541,11 +596,15 @@ async function tplDelete() {
   const template = tplSelected();
   if (!template) return;
   const label = template.name || template.id;
-  if (!window.confirm(`Delete the template "${label}"? It will be moved to the Trash when possible.`)) {
+  if (
+    !window.confirm(`Delete the template "${label}"? It will be moved to the Trash when possible.`)
+  ) {
     return;
   }
   try {
-    const result = await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, { method: 'DELETE' });
+    const result = await tplFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
+      method: 'DELETE'
+    });
     tplToast(result.trashed ? `"${label}" moved to Trash.` : `"${label}" deleted.`, 'success');
     tplState.selectedId = '';
     await tplRefresh();
@@ -649,8 +708,12 @@ function tplBuildTreeRow(node) {
   row.className = 'd-flex align-items-center gap-2 px-2 py-1 text-start w-100';
   row.style.cssText =
     `border: none; border-radius: 4px; font-size: 13px; padding-left: ${8 + depth * 16}px !important;` +
-    (isDir ? ' background: transparent; color: var(--text-secondary);' : ' background: var(--bg-secondary); color: var(--text-primary);') +
-    (node.path === tplFiles.selectedPath ? ' outline: 2px solid var(--accent-color, #6366f1);' : '');
+    (isDir
+      ? ' background: transparent; color: var(--text-secondary);'
+      : ' background: var(--bg-secondary); color: var(--text-primary);') +
+    (node.path === tplFiles.selectedPath
+      ? ' outline: 2px solid var(--accent-color, #6366f1);'
+      : '');
   row.setAttribute('role', 'treeitem');
 
   const icon = document.createElement('span');
@@ -667,7 +730,8 @@ function tplBuildTreeRow(node) {
     const badge = document.createElement('span');
     badge.className = 'badge';
     badge.textContent = 'metadata';
-    badge.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 9px; font-weight: 500;';
+    badge.style.cssText =
+      'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 9px; font-weight: 500;';
     row.appendChild(badge);
   }
 
@@ -685,7 +749,12 @@ async function tplOpenFile(path) {
   try {
     const res = await fetch(`${tplApiBase()}/files/content?path=${encodeURIComponent(path)}`);
     if (res.status === 413) {
-      tplEditorShow(path, '', true, 'This file is larger than 512 KB and can’t be edited here. Use Reveal to open the template folder on disk.');
+      tplEditorShow(
+        path,
+        '',
+        true,
+        'This file is larger than 512 KB and can’t be edited here. Use Reveal to open the template folder on disk.'
+      );
       return;
     }
     const data = await res.json().catch(() => ({}));
@@ -804,7 +873,7 @@ function tplFileCreate(type) {
     label: 'Path (relative to the template)',
     confirm: 'Create',
     initial: '',
-    run: async (path) => {
+    run: async path => {
       if (!path) throw new Error('Please enter a path.');
       const result = await tplFetchJSON(`${tplApiBase()}/files`, {
         method: 'POST',
@@ -827,7 +896,7 @@ function tplFileRename() {
       label: 'New path (relative to the template)',
       confirm: 'Rename',
       initial: path,
-      run: async (to) => {
+      run: async to => {
         if (!to || to === path) return;
         const result = await tplFetchJSON(`${tplApiBase()}/files/rename`, {
           method: 'POST',
@@ -849,7 +918,9 @@ async function tplFileDelete() {
     return;
   }
   try {
-    await tplFetchJSON(`${tplApiBase()}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    await tplFetchJSON(`${tplApiBase()}/files?path=${encodeURIComponent(path)}`, {
+      method: 'DELETE'
+    });
     tplToast(`Deleted "${path}".`, 'success');
     tplClearDirty();
     tplFilesReset();
@@ -893,7 +964,12 @@ async function tplToolsLoad() {
   const declared = tplToolsDeclared();
   await Promise.all([
     tplToolsRenderSection('tplToolsSkills', '/api/skills', ['skills', 'items'], declared.skills),
-    tplToolsRenderSection('tplToolsMcp', '/api/mcp/servers', ['servers', 'items'], declared.mcp_servers),
+    tplToolsRenderSection(
+      'tplToolsMcp',
+      '/api/mcp/servers',
+      ['servers', 'items'],
+      declared.mcp_servers
+    ),
     tplToolsRenderSection('tplToolsPlugins', '/api/plugins', ['plugins', 'items'], declared.plugins)
   ]);
 }
@@ -911,7 +987,7 @@ async function tplToolsRenderSection(containerId, url, listKeys, declaredNames) 
     console.warn(`Failed to load ${url}:`, error);
   }
 
-  const declaredSet = new Set(declaredNames.map((n) => n.toLowerCase()));
+  const declaredSet = new Set(declaredNames.map(n => n.toLowerCase()));
   const seen = new Set();
   const rows = [];
   for (const name of installed) {
@@ -956,7 +1032,8 @@ function tplToolsRow(row) {
     const tag = document.createElement('span');
     tag.className = 'badge';
     tag.textContent = 'not installed';
-    tag.style.cssText = 'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 10px;';
+    tag.style.cssText =
+      'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 10px;';
     label.appendChild(tag);
   }
   return label;
@@ -980,7 +1057,7 @@ function tplToolsCollect(containerId) {
   const container = tplEl(containerId);
   if (!container) return [];
   return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
-    .map((cb) => cb.dataset.name)
+    .map(cb => cb.dataset.name)
     .filter(Boolean);
 }
 
@@ -1013,25 +1090,48 @@ async function tplToolsSave() {
 // with tplAgentsCollect() before any structural change (add/remove/reorder) so
 // in-progress input is never lost. The first card is the entry agent.
 
-const TPL_AGENT_ROLES = ['', 'orchestrator', 'specialist', 'researcher', 'analyzer', 'synthesizer', 'validator', 'general'];
+const TPL_AGENT_ROLES = [
+  '',
+  'orchestrator',
+  'specialist',
+  'researcher',
+  'analyzer',
+  'synthesizer',
+  'validator',
+  'general'
+];
 const TPL_AGENT_TYPES = ['', 'tool-calling', 'general', 'research'];
 
-const tplAgents = { templateId: '', dragIndex: -1, existingNames: [], existingLoaded: false, promptVars: [], promptVarsLoaded: false };
+const tplAgents = {
+  templateId: '',
+  dragIndex: -1,
+  existingNames: [],
+  existingLoaded: false,
+  promptVars: [],
+  promptVarsLoaded: false
+};
 
 function tplAgentsBlank() {
-  return { name: '', role: '', type: '', model: '', system_prompt: '', tools: { skills: [], mcp_servers: [] } };
+  return {
+    name: '',
+    role: '',
+    type: '',
+    model: '',
+    system_prompt: '',
+    tools: { skills: [], mcp_servers: [] }
+  };
 }
 
 function tplAgentsNormalizeList(agents) {
-  return (Array.isArray(agents) ? agents : []).map((a) => ({
+  return (Array.isArray(agents) ? agents : []).map(a => ({
     name: a.name || '',
     role: a.role || '',
     type: a.type || '',
     model: a.model || '',
     system_prompt: a.system_prompt || '',
     tools: {
-      skills: (a.tools && Array.isArray(a.tools.skills)) ? a.tools.skills : [],
-      mcp_servers: (a.tools && Array.isArray(a.tools.mcp_servers)) ? a.tools.mcp_servers : []
+      skills: a.tools && Array.isArray(a.tools.skills) ? a.tools.skills : [],
+      mcp_servers: a.tools && Array.isArray(a.tools.mcp_servers) ? a.tools.mcp_servers : []
     }
   }));
 }
@@ -1055,7 +1155,10 @@ function tplAgentsDisplayName(agent, index) {
 function tplAgentsInitials(name, index) {
   const cleaned = String(name || '').trim();
   const parts = cleaned.split(/\s+/).filter(Boolean);
-  const initials = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('');
+  const initials = parts
+    .slice(0, 2)
+    .map(part => part.charAt(0).toUpperCase())
+    .join('');
   return initials || String(index + 1).padStart(2, '0');
 }
 
@@ -1063,13 +1166,13 @@ function tplAgentsRoleLabel(agent, index) {
   if (index === 0) return 'Entry agent';
   const role = String(agent?.role || '').trim();
   if (!role) return 'Specialist';
-  return role.replace(/[_-]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+  return role.replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
 }
 
 function tplAgentsTypeLabel(type) {
   const value = String(type || '').trim();
   if (!value) return 'Default type';
-  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+  return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
 }
 
 function tplAgentsChip(text, kind = '') {
@@ -1082,12 +1185,14 @@ function tplAgentsChip(text, kind = '') {
 function tplAgentsChipList(values, emptyText, kind = '') {
   const list = document.createElement('div');
   list.className = 'tpl-agent-chip-list';
-  const items = (Array.isArray(values) ? values : []).map((item) => String(item || '').trim()).filter(Boolean);
+  const items = (Array.isArray(values) ? values : [])
+    .map(item => String(item || '').trim())
+    .filter(Boolean);
   if (items.length === 0) {
     list.appendChild(tplAgentsChip(emptyText, 'empty'));
     return list;
   }
-  items.slice(0, 3).forEach((item) => list.appendChild(tplAgentsChip(item, kind)));
+  items.slice(0, 3).forEach(item => list.appendChild(tplAgentsChip(item, kind)));
   if (items.length > 3) list.appendChild(tplAgentsChip(`+${items.length - 3}`, 'count'));
   return list;
 }
@@ -1113,7 +1218,7 @@ function tplAgentsCol(label, input) {
 function tplAgentsSelect(cls, values, selected) {
   const sel = document.createElement('select');
   sel.className = `modern-input w-100 ${cls}`;
-  values.forEach((v) => {
+  values.forEach(v => {
     const opt = document.createElement('option');
     opt.value = v;
     opt.textContent = v === '' ? 'Default' : v;
@@ -1144,7 +1249,7 @@ async function tplAgentsEnsureExistingNames() {
     const res = await fetch('/api/agents');
     const data = await res.json().catch(() => ({}));
     tplAgents.existingNames = Array.isArray(data.agents)
-      ? data.agents.map((a) => (a && typeof a === 'object' ? a.name : a)).filter(Boolean)
+      ? data.agents.map(a => (a && typeof a === 'object' ? a.name : a)).filter(Boolean)
       : [];
   } catch {
     tplAgents.existingNames = [];
@@ -1160,7 +1265,7 @@ function tplAgentsPopulateDatalist() {
     document.body.appendChild(dl);
   }
   dl.innerHTML = '';
-  (tplAgents.existingNames || []).forEach((name) => {
+  (tplAgents.existingNames || []).forEach(name => {
     const opt = document.createElement('option');
     opt.value = String(name);
     dl.appendChild(opt);
@@ -1168,9 +1273,11 @@ function tplAgentsPopulateDatalist() {
 }
 
 function tplAgentsNameMatchesExisting(value) {
-  const v = String(value || '').trim().toLowerCase();
+  const v = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!v) return false;
-  return (tplAgents.existingNames || []).some((n) => String(n).toLowerCase() === v);
+  return (tplAgents.existingNames || []).some(n => String(n).toLowerCase() === v);
 }
 
 // tplAgentsEnsurePromptVars lazily loads the closed prompt-variable vocabulary
@@ -1192,8 +1299,12 @@ async function tplAgentsEnsurePromptVars() {
 // tplInsertAtCursor inserts text at the textarea's caret (or end), keeps focus,
 // and fires an input event so any dependent state updates.
 function tplInsertAtCursor(textarea, text) {
-  const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
-  const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : textarea.value.length;
+  const start = Number.isInteger(textarea.selectionStart)
+    ? textarea.selectionStart
+    : textarea.value.length;
+  const end = Number.isInteger(textarea.selectionEnd)
+    ? textarea.selectionEnd
+    : textarea.value.length;
   textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
   const pos = start + text.length;
   textarea.selectionStart = pos;
@@ -1234,9 +1345,9 @@ function tplAgentsPromptTools(textarea) {
   panel.hidden = true;
   wrap.appendChild(panel);
 
-  tplAgentsEnsurePromptVars().then((vars) => {
+  tplAgentsEnsurePromptVars().then(vars => {
     chips.innerHTML = '';
-    vars.forEach((v) => {
+    vars.forEach(v => {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'tpl-prompt-var-chip';
@@ -1254,7 +1365,7 @@ function tplAgentsPromptTools(textarea) {
       const res = await fetch('/api/prompt-variables/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: textarea.value }),
+        body: JSON.stringify({ prompt: textarea.value })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1281,8 +1392,8 @@ function tplAgentsCard(agent, index) {
   card.draggable = !readOnly;
 
   const displayName = tplAgentsDisplayName(agent, index);
-  const skills = (agent.tools && agent.tools.skills ? agent.tools.skills : []);
-  const mcpServers = (agent.tools && agent.tools.mcp_servers ? agent.tools.mcp_servers : []);
+  const skills = agent.tools && agent.tools.skills ? agent.tools.skills : [];
+  const mcpServers = agent.tools && agent.tools.mcp_servers ? agent.tools.mcp_servers : [];
 
   const header = document.createElement('div');
   header.className = 'tpl-agent-card-head';
@@ -1306,7 +1417,8 @@ function tplAgentsCard(agent, index) {
   identity.appendChild(name);
   const subtitle = document.createElement('div');
   subtitle.className = 'tpl-agent-subtitle';
-  subtitle.textContent = index === 0 ? 'Required workspace front door' : 'Seeded workspace specialist';
+  subtitle.textContent =
+    index === 0 ? 'Required workspace front door' : 'Seeded workspace specialist';
   identity.appendChild(subtitle);
   header.appendChild(identity);
 
@@ -1321,9 +1433,13 @@ function tplAgentsCard(agent, index) {
 
   const summary = document.createElement('div');
   summary.className = 'tpl-agent-summary';
-  summary.appendChild(tplAgentsChip(tplAgentsRoleLabel(agent, index), index === 0 ? 'entry' : 'role'));
+  summary.appendChild(
+    tplAgentsChip(tplAgentsRoleLabel(agent, index), index === 0 ? 'entry' : 'role')
+  );
   summary.appendChild(tplAgentsChip(tplAgentsTypeLabel(agent.type), 'type'));
-  summary.appendChild(tplAgentsChip(agent.model ? agent.model : 'Workspace model', agent.model ? 'model' : 'empty'));
+  summary.appendChild(
+    tplAgentsChip(agent.model ? agent.model : 'Workspace model', agent.model ? 'model' : 'empty')
+  );
   card.appendChild(summary);
 
   const promptPreview = document.createElement('p');
@@ -1363,12 +1479,20 @@ function tplAgentsCard(agent, index) {
 
     const form = document.createElement('div');
     form.className = 'tpl-agent-form';
-    const nameInput = tplAgentsInput('tpl-agent-name', agent.name, 'Agent name or pick an existing agent', 'tpl-existing-agents');
+    const nameInput = tplAgentsInput(
+      'tpl-agent-name',
+      agent.name,
+      'Agent name or pick an existing agent',
+      'tpl-existing-agents'
+    );
     const nameField = tplAgentsField('Name', nameInput);
     const reuseHint = document.createElement('div');
     reuseHint.className = 'tpl-agent-reuse-hint';
-    reuseHint.textContent = 'Matches an existing agent — its saved prompt, model, and tools will be reused.';
-    const syncReuseHint = () => { reuseHint.hidden = !tplAgentsNameMatchesExisting(nameInput.value); };
+    reuseHint.textContent =
+      'Matches an existing agent — its saved prompt, model, and tools will be reused.';
+    const syncReuseHint = () => {
+      reuseHint.hidden = !tplAgentsNameMatchesExisting(nameInput.value);
+    };
     nameInput.addEventListener('input', syncReuseHint);
     syncReuseHint();
     nameField.appendChild(reuseHint);
@@ -1376,41 +1500,57 @@ function tplAgentsCard(agent, index) {
 
     const rt = document.createElement('div');
     rt.className = 'tpl-agent-form-row';
-    rt.appendChild(tplAgentsCol('Role', tplAgentsSelect('tpl-agent-role', TPL_AGENT_ROLES, agent.role || '')));
-    rt.appendChild(tplAgentsCol('Type', tplAgentsSelect('tpl-agent-type', TPL_AGENT_TYPES, agent.type || '')));
+    rt.appendChild(
+      tplAgentsCol('Role', tplAgentsSelect('tpl-agent-role', TPL_AGENT_ROLES, agent.role || ''))
+    );
+    rt.appendChild(
+      tplAgentsCol('Type', tplAgentsSelect('tpl-agent-type', TPL_AGENT_TYPES, agent.type || ''))
+    );
     form.appendChild(rt);
 
-    form.appendChild(tplAgentsField('Model', tplAgentsInput('tpl-agent-model', agent.model, 'Defaults to the workspace model')));
+    form.appendChild(
+      tplAgentsField(
+        'Model',
+        tplAgentsInput('tpl-agent-model', agent.model, 'Defaults to the workspace model')
+      )
+    );
 
     const prompt = document.createElement('textarea');
     prompt.className = 'form-control tpl-agent-prompt';
     prompt.rows = 2;
     prompt.value = agent.system_prompt || '';
-    prompt.placeholder = "This agent's instructions. Use {{variables}} to weave in workspace context.";
+    prompt.placeholder =
+      "This agent's instructions. Use {{variables}} to weave in workspace context.";
     form.appendChild(tplAgentsField('System prompt', tplAgentsPromptTools(prompt)));
 
     const sm = document.createElement('div');
     sm.className = 'tpl-agent-form-row';
     const skillsVal = skills.join(', ');
     const mcpVal = mcpServers.join(', ');
-    sm.appendChild(tplAgentsCol('Skills', tplAgentsInput('tpl-agent-skills', skillsVal, 'comma-separated')));
-    sm.appendChild(tplAgentsCol('MCP servers', tplAgentsInput('tpl-agent-mcp', mcpVal, 'comma-separated')));
+    sm.appendChild(
+      tplAgentsCol('Skills', tplAgentsInput('tpl-agent-skills', skillsVal, 'comma-separated'))
+    );
+    sm.appendChild(
+      tplAgentsCol('MCP servers', tplAgentsInput('tpl-agent-mcp', mcpVal, 'comma-separated'))
+    );
     form.appendChild(sm);
     details.appendChild(form);
     card.appendChild(details);
   }
 
-  card.addEventListener('dragstart', (event) => {
+  card.addEventListener('dragstart', event => {
     if (readOnly) return;
     tplAgents.dragIndex = index;
     card.classList.add('is-dragging');
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
   });
-  card.addEventListener('dragend', () => { card.classList.remove('is-dragging'); });
-  card.addEventListener('dragover', (event) => {
+  card.addEventListener('dragend', () => {
+    card.classList.remove('is-dragging');
+  });
+  card.addEventListener('dragover', event => {
     if (!readOnly) event.preventDefault();
   });
-  card.addEventListener('drop', (event) => {
+  card.addEventListener('drop', event => {
     if (readOnly) return;
     event.preventDefault();
     tplAgentsReorder(tplAgents.dragIndex, index);
@@ -1426,7 +1566,7 @@ function tplAgentsRender(agents) {
   // Lazily load existing agent names so the roster name field can suggest /
   // flag reuse; re-syncs hints once names arrive.
   tplAgentsEnsureExistingNames().then(() => {
-    list.querySelectorAll('.tpl-agent-name').forEach((input) => {
+    list.querySelectorAll('.tpl-agent-name').forEach(input => {
       input.dispatchEvent(new Event('input'));
     });
   });
@@ -1438,13 +1578,16 @@ function tplAgentsRender(agents) {
 }
 
 function tplAgentsParseNames(value) {
-  return String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return String(value || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 }
 
 function tplAgentsCollect() {
   const list = tplEl('tplAgentsList');
   if (!list) return [];
-  return Array.from(list.querySelectorAll('.tpl-agent-card')).map((card) => ({
+  return Array.from(list.querySelectorAll('.tpl-agent-card')).map(card => ({
     name: (card.querySelector('.tpl-agent-name')?.value || '').trim(),
     role: card.querySelector('.tpl-agent-role')?.value || '',
     type: card.querySelector('.tpl-agent-type')?.value || '',
@@ -1482,9 +1625,12 @@ function tplAgentsReorder(from, to) {
 async function tplAgentsSave() {
   const template = tplSelected();
   if (!template) return;
-  const agents = tplAgentsCollect().filter((a) => a.name);
+  const agents = tplAgentsCollect().filter(a => a.name);
   if (agents.length === 0) {
-    tplToast('A template needs at least one agent — the first is the workspace entry agent.', 'error');
+    tplToast(
+      'A template needs at least one agent — the first is the workspace entry agent.',
+      'error'
+    );
     return;
   }
   try {
@@ -1536,7 +1682,7 @@ function tplInit() {
   }
 
   tplEl('tplNameModalConfirm')?.addEventListener('click', () => void tplRunNameAction());
-  tplEl('tplNameModalInput')?.addEventListener('keydown', (event) => {
+  tplEl('tplNameModalInput')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       void tplRunNameAction();
@@ -1572,7 +1718,7 @@ function tplInit() {
   const filesTab = tplEl('tplTabFiles');
   if (filesTab) {
     filesTab.addEventListener('shown.bs.tab', () => tplFilesEnsureTree());
-    filesTab.addEventListener('hide.bs.tab', (event) => {
+    filesTab.addEventListener('hide.bs.tab', event => {
       if (!tplFiles.dirty) return;
       const target = event.relatedTarget;
       event.preventDefault();
