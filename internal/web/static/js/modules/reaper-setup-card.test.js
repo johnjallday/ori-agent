@@ -28,6 +28,7 @@ class FakeElement {
     delete this._attrs[k];
   }
   get textContent() {
+    if (this.children.length) return this._text + this.children.map(c => c.textContent).join('');
     return this._text;
   }
   set textContent(v) {
@@ -150,6 +151,112 @@ test('plugin_missing shows Install and blocks creation', async () => {
   );
   // Required plugin missing: creation is blocked until it's installed.
   assert.equal(doc.getElementById('createFolderBtn').disabled, true);
+});
+
+const flush = async () => {
+  for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0));
+};
+
+test('inline install: resolve from marketplace, show trust, install, enable, unblock', async () => {
+  const doc = setup();
+  let previewCall = 0;
+  globalThis.fetch = async (url, opts) => {
+    const method = (opts && opts.method) || 'GET';
+    if (url === '/api/reaper-setup/preview') {
+      previewCall += 1;
+      // First check: missing. After install+enable: ready.
+      const status = previewCall === 1 ? 'plugin_missing' : 'ready_to_attach';
+      return {
+        ok: true,
+        json: async () => ({ status, would_attach: [{ name: 'reaper-session-setup' }] })
+      };
+    }
+    if (url === '/api/plugins/marketplaces' && method === 'GET') {
+      return {
+        ok: true,
+        json: async () => ({
+          marketplaces: [{ name: 'my-mp', plugins: [{ name: 'reaper-plugin' }] }]
+        })
+      };
+    }
+    if (url === '/api/plugins/marketplaces/install' && method === 'POST') {
+      const body = JSON.parse(opts.body);
+      if (!body.confirm) {
+        return {
+          ok: true,
+          json: async () => ({
+            installed: false,
+            trust: { Name: 'reaper-plugin', Skills: ['reaper-session-setup'], MCPCommands: [] }
+          })
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ installed: true, plugin: { name: 'reaper-plugin' } })
+      };
+    }
+    if (url === '/api/plugins/reaper-plugin/enable' && method === 'POST') {
+      return { ok: true, json: async () => ({ enabled: true }) };
+    }
+    throw new Error('unexpected fetch ' + method + ' ' + url);
+  };
+
+  await mod.refresh(); // missing -> blocked, Install action present
+  assert.equal(doc.getElementById('createFolderBtn').disabled, true);
+
+  // Click Install plugin.
+  const actions = doc.getElementById('reaperSetupActions');
+  actions
+    .querySelectorAll('button')
+    .find(b => b.textContent === 'Install plugin')
+    .click();
+  await flush();
+
+  // Trust disclosure is shown with an Install & enable confirm.
+  const confirmBtn = doc
+    .getElementById('reaperSetupActions')
+    .querySelectorAll('button')
+    .find(b => b.textContent === 'Install & enable');
+  assert.ok(confirmBtn, 'expected an Install & enable confirm button');
+  assert.match(doc.getElementById('reaperSetupDetail').textContent, /Skills: reaper-session-setup/);
+
+  // Confirm install -> installs, enables, re-checks -> ready + unblocked.
+  confirmBtn.click();
+  await flush();
+  assert.match(doc.getElementById('reaperSetupStatusText').textContent, /will attach/i);
+  assert.equal(doc.getElementById('createFolderBtn').disabled, false);
+});
+
+test('inline install: no marketplace match falls back to a source input', async () => {
+  const doc = setup();
+  globalThis.fetch = async (url, opts) => {
+    const method = (opts && opts.method) || 'GET';
+    if (url === '/api/reaper-setup/preview') {
+      return { ok: true, json: async () => ({ status: 'plugin_missing', would_attach: [] }) };
+    }
+    if (url === '/api/plugins/marketplaces' && method === 'GET') {
+      return { ok: true, json: async () => ({ marketplaces: [{ name: 'empty', plugins: [] }] }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  };
+  await mod.refresh();
+  doc
+    .getElementById('reaperSetupActions')
+    .querySelectorAll('button')
+    .find(b => b.textContent === 'Install plugin')
+    .click();
+  await flush();
+  const actions = doc.getElementById('reaperSetupActions');
+  assert.ok(
+    actions.children.some(c => c.tagName === 'INPUT'),
+    'expected a source input'
+  );
+  assert.ok(
+    actions
+      .querySelectorAll('button')
+      .map(b => b.textContent)
+      .includes('Preview install')
+  );
 });
 
 test('fetch failure renders Retry and does not hard-block creation', async () => {
