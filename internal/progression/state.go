@@ -31,7 +31,9 @@ type Snapshot struct {
 	OrchestrationRuns int
 	MemoryWrites      int
 	ChatMessages      int
-	AssistantRenamed  bool
+	// Personalized is true when the user has filled out their profile
+	// (interests / work style) on the Personalize page.
+	Personalized bool
 }
 
 // Scanner produces a Snapshot of existing state for the backfill scan. The

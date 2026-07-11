@@ -26,6 +26,15 @@ type SmartOnboardingHandler struct {
 	onboardingMgr  *onboarding.Manager
 	systemProvider string
 	systemModel    string
+	// onPersonalized is an optional hook invoked after the user saves their
+	// profile, used to complete the onboarding "personalize" quest. May be nil.
+	onPersonalized func()
+}
+
+// SetOnPersonalized registers a hook invoked after the user saves their
+// personalization profile.
+func (h *SmartOnboardingHandler) SetOnPersonalized(fn func()) {
+	h.onPersonalized = fn
 }
 
 // NewSmartOnboardingHandler creates a new smart onboarding handler.
@@ -539,6 +548,10 @@ func (h *SmartOnboardingHandler) SavePersonalization(w http.ResponseWriter, r *h
 			logger.Error("Failed to award personalization XP", logger.Fields{"error": err})
 			// Non-fatal: continue with success
 		}
+	}
+
+	if h.onPersonalized != nil {
+		h.onPersonalized()
 	}
 
 	h.sendJSON(w, PersonalizeResponse{

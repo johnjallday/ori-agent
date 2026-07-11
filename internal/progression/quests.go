@@ -99,10 +99,10 @@ func BuiltinQuests() []Quest {
 		{
 			ID: "t1-personalize", Tier: 1,
 			Title: "Personalize Ori",
-			Why:   "Give your assistant a name that fits how you work.",
-			// Renaming happens through the onboarding names path, not an event;
-			// completed live by a direct Complete call and here via backfill.
-			Satisfied: func(s Snapshot) bool { return s.AssistantRenamed },
+			Why:   "Tell Ori your interests and work style on the Personalize page so it tailors its help to you.",
+			// Filling out the profile is not an event; completed live by a direct
+			// Complete call from the personalize handler and here via backfill.
+			Satisfied: func(s Snapshot) bool { return s.Personalized },
 		},
 
 		// ---- Tier 2 — Establish a Base ----

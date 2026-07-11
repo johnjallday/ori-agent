@@ -13,9 +13,6 @@ import (
 // Handler handles HTTP requests for onboarding
 type Handler struct {
 	onboardingMgr *onboarding.Manager
-	// onNamesSaved is an optional hook invoked after names are persisted,
-	// used to complete the onboarding "personalize" quest. May be nil.
-	onNamesSaved func(assistantName string)
 }
 
 // NewHandler creates a new onboarding HTTP handler
@@ -23,11 +20,6 @@ func NewHandler(onboardingMgr *onboarding.Manager) *Handler {
 	return &Handler{
 		onboardingMgr: onboardingMgr,
 	}
-}
-
-// SetOnNamesSaved registers a hook invoked after onboarding names are saved.
-func (h *Handler) SetOnNamesSaved(fn func(assistantName string)) {
-	h.onNamesSaved = fn
 }
 
 // StatusResponse represents the onboarding status response
@@ -279,9 +271,6 @@ func (h *Handler) SaveNames(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userName, persistedAssistantName := h.onboardingMgr.GetNames()
-	if h.onNamesSaved != nil {
-		h.onNamesSaved(persistedAssistantName)
-	}
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success":        true,

@@ -161,7 +161,7 @@ func TestBackfill_EstablishedInstall_GrandfathersSilently(t *testing.T) {
 		Triggers:          1,
 		OrchestrationRuns: 1,
 		MemoryWrites:      1,
-		AssistantRenamed:  true,
+		Personalized:      true,
 	}
 	if err := e.Backfill(ScannerFunc(func() Snapshot { return snap })); err != nil {
 		t.Fatal(err)

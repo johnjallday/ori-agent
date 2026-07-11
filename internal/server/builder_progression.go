@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -30,12 +29,10 @@ func (b *ServerBuilder) initializeProgression() {
 		engine.HandleEvent(ev)
 	}, nil)
 
-	// Renaming the assistant is not an event; complete the quest directly.
-	if b.onboardingHandler != nil {
-		b.onboardingHandler.SetOnNamesSaved(func(assistantName string) {
-			if assistantName != "" && assistantName != onboarding.DefaultAssistantName {
-				engine.Complete("t1-personalize")
-			}
+	// Filling out the profile is not an event; complete the quest directly.
+	if b.smartOnboardingHandler != nil {
+		b.smartOnboardingHandler.SetOnPersonalized(func() {
+			engine.Complete("t1-personalize")
 		})
 	}
 
@@ -66,8 +63,8 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 		snap.Agents = len(b.st.ListAgents())
 	}
 
-	if _, assistantName := b.onboardingMgr.GetNames(); assistantName != "" && assistantName != onboarding.DefaultAssistantName {
-		snap.AssistantRenamed = true
+	if profile := b.onboardingMgr.GetUserProfile(); profile != nil && !profile.PersonalizedAt.IsZero() {
+		snap.Personalized = true
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".
