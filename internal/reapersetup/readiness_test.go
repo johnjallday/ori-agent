@@ -98,7 +98,6 @@ func TestResolve_IdentificationSignals(t *testing.T) {
 }
 
 func TestResolve_StatusPrecedence(t *testing.T) {
-	tt := true
 	cases := []struct {
 		name   string
 		plugin pluginworkspace.PluginResult
@@ -150,7 +149,6 @@ func TestResolve_StatusPrecedence(t *testing.T) {
 			want: StatusOriReady,
 		},
 	}
-	_ = tt
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := reaperWS(t)

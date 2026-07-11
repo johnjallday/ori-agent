@@ -18,7 +18,7 @@
     status: document.getElementById('reaperSetupStatusText'),
     badge: document.getElementById('reaperSetupBadge'),
     detail: document.getElementById('reaperSetupDetail'),
-    actions: document.getElementById('reaperSetupActions'),
+    actions: document.getElementById('reaperSetupActions')
   });
 
   let busy = false;
@@ -37,7 +37,8 @@
   function setBadge(badge, label) {
     if (!badge) return;
     badge.textContent = label;
-    badge.className = 'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
+    badge.className =
+      'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
   }
 
   function button(label, opts = {}) {
@@ -55,14 +56,18 @@
     busy = on;
     const { actions } = els();
     if (!actions) return;
-    actions.querySelectorAll('button').forEach((b) => { b.disabled = on; });
+    actions.querySelectorAll('button').forEach(b => {
+      b.disabled = on;
+    });
   }
 
   async function enablePlugin() {
     if (busy) return;
     setBusy(true);
     try {
-      const resp = await fetch('/api/plugins/' + encodeURIComponent(PLUGIN_NAME) + '/enable', { method: 'POST' });
+      const resp = await fetch('/api/plugins/' + encodeURIComponent(PLUGIN_NAME) + '/enable', {
+        method: 'POST'
+      });
       if (!resp.ok) throw new Error('enable failed');
       await refresh();
     } catch (_) {
@@ -100,18 +105,22 @@
     card.hidden = false;
     if (actions) actions.textContent = '';
 
-    const components = (preview.would_attach || []).map((c) => c.name).join(', ');
+    const components = (preview.would_attach || []).map(c => c.name).join(', ');
 
     switch (preview.status) {
       case 'ready_to_attach':
         setBadge(badge, 'Ready');
-        status.textContent = 'reaper-plugin is installed. Its components will attach when you create this workspace.';
-        detail.textContent = (components ? 'Will attach: ' + components + '. ' : '') + verificationNote;
+        status.textContent =
+          'reaper-plugin is installed. Its components will attach when you create this workspace.';
+        detail.textContent =
+          (components ? 'Will attach: ' + components + '. ' : '') + verificationNote;
         break;
       case 'plugin_disabled':
         setBadge(badge, 'Disabled');
         status.textContent = 'reaper-plugin is installed but globally disabled.';
-        detail.textContent = 'Enable it to attach its components, or create a file-only project now. ' + verificationNote;
+        detail.textContent =
+          'Enable it to attach its components, or create a file-only project now. ' +
+          verificationNote;
         actions.appendChild(button('Enable plugin', { primary: true, onClick: enablePlugin }));
         break;
       case 'plugin_missing':

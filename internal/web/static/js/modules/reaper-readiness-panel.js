@@ -19,7 +19,7 @@
     badge: document.getElementById('reaperReadinessBadge'),
     rows: document.getElementById('reaperReadinessRows'),
     actions: document.getElementById('reaperReadinessActions'),
-    chip: document.getElementById('reaperReadinessChip'),
+    chip: document.getElementById('reaperReadinessChip')
   });
 
   let workspaceId = '';
@@ -32,7 +32,8 @@
   function setBadge(badge, label) {
     if (!badge) return;
     badge.textContent = label;
-    badge.className = 'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
+    badge.className =
+      'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
   }
 
   function row(label, value, ok) {
@@ -68,7 +69,10 @@
   function setBusy(on) {
     busy = on;
     const { actions } = els();
-    if (actions) actions.querySelectorAll('button').forEach((b) => { b.disabled = on; });
+    if (actions)
+      actions.querySelectorAll('button').forEach(b => {
+        b.disabled = on;
+      });
   }
 
   function openPluginsTab() {
@@ -96,11 +100,15 @@
     if (busy) return;
     setBusy(true);
     try {
-      const result = await post('/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
-        { confirm_enable: !!confirmEnable });
+      const result = await post(
+        '/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
+        { confirm_enable: !!confirmEnable }
+      );
       if (result.needs_confirm) {
         // Ask for explicit confirmation before enabling a disabled plugin.
-        renderConfirm('Enable reaper-plugin and attach its components to this workspace?', () => repair(true));
+        renderConfirm('Enable reaper-plugin and attach its components to this workspace?', () =>
+          repair(true)
+        );
         return;
       }
       if (result.needs_install) {
@@ -151,14 +159,22 @@
 
   function statusLabel(r) {
     switch (r.status) {
-      case 'ori_ready': return 'Ready';
-      case 'plugin_missing': return 'File-only';
-      case 'plugin_disabled': return 'Disabled';
-      case 'plugin_detached': return 'Detached';
-      case 'cli_agent_required': return 'Agent';
-      case 'native_cli_access_required': return 'Access';
-      case 'file_only': return 'File-only';
-      default: return 'Setup';
+      case 'ori_ready':
+        return 'Ready';
+      case 'plugin_missing':
+        return 'File-only';
+      case 'plugin_disabled':
+        return 'Disabled';
+      case 'plugin_detached':
+        return 'Detached';
+      case 'cli_agent_required':
+        return 'Agent';
+      case 'native_cli_access_required':
+        return 'Access';
+      case 'file_only':
+        return 'File-only';
+      default:
+        return 'Setup';
     }
   }
 
@@ -180,36 +196,95 @@
     // Rows: separate, text-labeled status lines (color is never the only signal).
     if (rows) {
       rows.textContent = '';
-      rows.appendChild(row('Project mode', r.project_mode === 'ori_ready' ? 'Ori is ready to check REAPER' : 'File-only', r.project_mode === 'ori_ready'));
-      rows.appendChild(row('Plugin', r.plugin_installed ? (r.plugin_enabled ? 'Installed and enabled' : 'Installed but disabled') : 'Not installed', r.plugin_installed && r.plugin_enabled));
-      rows.appendChild(row('Workspace attachment', r.plugin_attached ? 'Components attached' : ((r.missing_components || []).map((c) => c.name).join(', ') || 'Not attached'), r.plugin_attached));
-      rows.appendChild(row('Setup agent', r.setup_agent ? (r.setup_agent + (r.setup_agent_is_cli ? ' (compatible)' : ' (needs Codex or Claude Code)')) : 'Not assigned', r.setup_agent_is_cli));
-      rows.appendChild(row('Native CLI access', (r.workspace_native_cli_enabled ? 'Workspace on' : 'Workspace off') + ' · ' + (r.agent_native_cli_enabled ? 'Agent on' : 'Agent off'), r.workspace_native_cli_enabled && r.agent_native_cli_enabled));
-      rows.appendChild(row('Setup task', r.has_pending_setup_task ? 'Pending' : 'None pending', null));
-      rows.appendChild(row('Live REAPER verification', 'Not checked yet — verified when setup runs', null));
+      rows.appendChild(
+        row(
+          'Project mode',
+          r.project_mode === 'ori_ready' ? 'Ori is ready to check REAPER' : 'File-only',
+          r.project_mode === 'ori_ready'
+        )
+      );
+      rows.appendChild(
+        row(
+          'Plugin',
+          r.plugin_installed
+            ? r.plugin_enabled
+              ? 'Installed and enabled'
+              : 'Installed but disabled'
+            : 'Not installed',
+          r.plugin_installed && r.plugin_enabled
+        )
+      );
+      rows.appendChild(
+        row(
+          'Workspace attachment',
+          r.plugin_attached
+            ? 'Components attached'
+            : (r.missing_components || []).map(c => c.name).join(', ') || 'Not attached',
+          r.plugin_attached
+        )
+      );
+      rows.appendChild(
+        row(
+          'Setup agent',
+          r.setup_agent
+            ? r.setup_agent +
+                (r.setup_agent_is_cli ? ' (compatible)' : ' (needs Codex or Claude Code)')
+            : 'Not assigned',
+          r.setup_agent_is_cli
+        )
+      );
+      rows.appendChild(
+        row(
+          'Native CLI access',
+          (r.workspace_native_cli_enabled ? 'Workspace on' : 'Workspace off') +
+            ' · ' +
+            (r.agent_native_cli_enabled ? 'Agent on' : 'Agent off'),
+          r.workspace_native_cli_enabled && r.agent_native_cli_enabled
+        )
+      );
+      rows.appendChild(
+        row('Setup task', r.has_pending_setup_task ? 'Pending' : 'None pending', null)
+      );
+      rows.appendChild(
+        row('Live REAPER verification', 'Not checked yet — verified when setup runs', null)
+      );
     }
 
     // Actions.
     if (actions) {
       actions.textContent = '';
       if (r.status !== 'ori_ready') {
-        actions.appendChild(button('Repair REAPER setup', { primary: true, onClick: () => repair(false) }));
+        actions.appendChild(
+          button('Repair REAPER setup', { primary: true, onClick: () => repair(false) })
+        );
       }
       if (r.status === 'ori_ready' && r.has_pending_setup_task) {
-        actions.appendChild(button('Check again and start setup', { primary: true, onClick: checkAgainAndStartSetup }));
+        actions.appendChild(
+          button('Check again and start setup', { primary: true, onClick: checkAgainAndStartSetup })
+        );
       }
       if (!r.plugin_installed) {
-        actions.appendChild(button('Install plugin', { onClick: () => window.open('/plugins?install=reaper-plugin', '_blank', 'noopener') }));
+        actions.appendChild(
+          button('Install plugin', {
+            onClick: () => window.open('/plugins?install=reaper-plugin', '_blank', 'noopener')
+          })
+        );
       }
       if (r.status === 'cli_agent_required' || r.status === 'native_cli_access_required') {
-        actions.appendChild(button('Native CLI access', { onClick: () => document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.() }));
+        actions.appendChild(
+          button('Native CLI access', {
+            onClick: () =>
+              document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.()
+          })
+        );
       }
     }
 
     // Compact chip: setup-needed vs. compact success.
     if (chip) {
       chip.hidden = false;
-      chip.textContent = r.status === 'ori_ready' ? 'REAPER: ready to check' : 'REAPER setup needed';
+      chip.textContent =
+        r.status === 'ori_ready' ? 'REAPER: ready to check' : 'REAPER setup needed';
       chip.classList.toggle('reaper-setup-chip-ready', r.status === 'ori_ready');
       chip.setAttribute('aria-label', chip.textContent + '. Open REAPER Setup.');
     }

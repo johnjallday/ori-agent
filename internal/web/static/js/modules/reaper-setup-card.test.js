@@ -18,27 +18,53 @@ class FakeElement {
     this.children = [];
     this._listeners = {};
   }
-  get textContent() { return this._text; }
-  set textContent(v) { this._text = v; if (v === '') this.children = []; }
-  appendChild(el) { this.children.push(el); return el; }
-  addEventListener(ev, fn) { (this._listeners[ev] ||= []).push(fn); }
-  click() { (this._listeners.click || []).forEach((fn) => fn()); }
+  get textContent() {
+    return this._text;
+  }
+  set textContent(v) {
+    this._text = v;
+    if (v === '') this.children = [];
+  }
+  appendChild(el) {
+    this.children.push(el);
+    return el;
+  }
+  addEventListener(ev, fn) {
+    (this._listeners[ev] ||= []).push(fn);
+  }
+  click() {
+    (this._listeners.click || []).forEach(fn => fn());
+  }
   querySelectorAll(sel) {
-    if (sel === 'button') return this.children.filter((c) => c.tagName === 'BUTTON');
+    if (sel === 'button') return this.children.filter(c => c.tagName === 'BUTTON');
     return [];
   }
 }
 
 class FakeDocument {
-  constructor() { this.byId = new Map(); }
-  register(el) { this.byId.set(el.id, el); }
-  getElementById(id) { return this.byId.get(id) || null; }
-  createElement(tag) { return new FakeElement(tag); }
+  constructor() {
+    this.byId = new Map();
+  }
+  register(el) {
+    this.byId.set(el.id, el);
+  }
+  getElementById(id) {
+    return this.byId.get(id) || null;
+  }
+  createElement(tag) {
+    return new FakeElement(tag);
+  }
 }
 
 function setup() {
   const doc = new FakeDocument();
-  ['reaperSetupCard', 'reaperSetupStatusText', 'reaperSetupBadge', 'reaperSetupDetail', 'reaperSetupActions'].forEach((id) => {
+  [
+    'reaperSetupCard',
+    'reaperSetupStatusText',
+    'reaperSetupBadge',
+    'reaperSetupDetail',
+    'reaperSetupActions'
+  ].forEach(id => {
     const el = new FakeElement('div');
     el.id = id;
     doc.register(el);
@@ -64,7 +90,10 @@ test('ready_to_attach shows attach message and no action', async () => {
   const doc = setup();
   globalThis.fetch = async () => ({
     ok: true,
-    json: async () => ({ status: 'ready_to_attach', would_attach: [{ name: 'reaper-session-setup' }, { name: 'reaper-web-remote' }] }),
+    json: async () => ({
+      status: 'ready_to_attach',
+      would_attach: [{ name: 'reaper-session-setup' }, { name: 'reaper-web-remote' }]
+    })
   });
   await mod.refresh();
   const card = doc.getElementById('reaperSetupCard');
@@ -77,7 +106,10 @@ test('ready_to_attach shows attach message and no action', async () => {
 
 test('plugin_disabled offers an Enable action', async () => {
   const doc = setup();
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'plugin_disabled', would_attach: [] }) });
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ status: 'plugin_disabled', would_attach: [] })
+  });
   await mod.refresh();
   const actions = doc.getElementById('reaperSetupActions');
   const buttons = actions.querySelectorAll('button');
@@ -87,7 +119,10 @@ test('plugin_disabled offers an Enable action', async () => {
 
 test('plugin_missing shows file-only + Install action, never blocks creation', async () => {
   const doc = setup();
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'plugin_missing', would_attach: [] }) });
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ status: 'plugin_missing', would_attach: [] })
+  });
   await mod.refresh();
   const status = doc.getElementById('reaperSetupStatusText');
   const actions = doc.getElementById('reaperSetupActions');
