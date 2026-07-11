@@ -580,6 +580,11 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/sessions/stats", s.Handlers.Session.HandleStorageStats)
 		mux.HandleFunc("/api/sessions/bulk", s.Handlers.Session.HandleBulkDeleteSessions)
 
+		// Pre-create REAPER Setup preview for the Reaper Song template (no
+		// workspace id yet). Per-workspace readiness is dispatched under
+		// /api/workspaces/{id}/reaper-setup by the session handler.
+		mux.HandleFunc("/api/reaper-setup/preview", s.Handlers.Session.GetReaperCreatePreview)
+
 		// Auto-classify route (must be registered before the wildcard routes)
 		if s.Handlers.AutoClassify != nil {
 			mux.HandleFunc("/api/sessions/auto-classify", s.Handlers.AutoClassify.HandleAutoClassify)

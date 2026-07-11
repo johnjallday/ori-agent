@@ -282,6 +282,83 @@ func (r *Reconciler) Reconcile(req Request) (Result, error) {
 	return res, nil
 }
 
+// Inspect reports each requested plugin's state (missing / disabled / detached /
+// attached) and which recorded components are attached vs. missing, without
+// mutating the workspace or plugin store. Readiness uses it to describe state
+// truthfully; it never enables a plugin or writes bindings.
+func (r *Reconciler) Inspect(workspaceID string, plugins []string) ([]PluginResult, error) {
+	if r.store == nil {
+		return nil, nil
+	}
+	ws, err := r.store.Get(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if ws == nil {
+		return nil, nil
+	}
+	installed := map[string]plugin.InstalledPlugin{}
+	if r.plugins != nil {
+		list, err := r.plugins.List()
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range list {
+			installed[strings.ToLower(strings.TrimSpace(p.Name))] = p
+		}
+	}
+	boundSkills := map[string]bool{}
+	for _, b := range ws.GetSkillBindings() {
+		boundSkills[strings.ToLower(strings.TrimSpace(b.SkillName))] = true
+	}
+	boundMCP := map[string]bool{}
+	for _, b := range ws.GetMCPBindings() {
+		boundMCP[strings.ToLower(strings.TrimSpace(b.ServerName))] = true
+	}
+
+	out := make([]PluginResult, 0, len(plugins))
+	for _, name := range plugins {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		pr := PluginResult{Name: name}
+		p, ok := installed[strings.ToLower(name)]
+		if !ok {
+			pr.State = PluginStateMissing
+			out = append(out, pr)
+			continue
+		}
+		pr.Installed = true
+		pr.Enabled = p.Enabled
+		pr.Components = componentsOf(p)
+		for _, c := range pr.Components {
+			bound := false
+			switch c.Kind {
+			case ComponentSkill:
+				bound = boundSkills[strings.ToLower(c.Name)]
+			case ComponentMCP:
+				bound = boundMCP[strings.ToLower(c.Name)]
+			}
+			if bound {
+				pr.Attached = append(pr.Attached, c)
+			} else {
+				pr.Missing = append(pr.Missing, c)
+			}
+		}
+		switch {
+		case !p.Enabled:
+			pr.State = PluginStateDisabled
+		case len(pr.Missing) == 0:
+			pr.State = PluginStateAttached
+		default:
+			pr.State = PluginStateDetached
+		}
+		out = append(out, pr)
+	}
+	return out, nil
+}
+
 // aggregate fills the Result-level Applied and Warnings from per-plugin results.
 func (res *Result) aggregate() {
 	for _, pr := range res.Plugins {

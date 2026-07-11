@@ -98,6 +98,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.handleTemplateSetupStart(w, r, id)
 				return
 			}
+		case "reaper-setup":
+			h.handleReaperReadiness(w, r, id)
+			return
 		}
 	}
 

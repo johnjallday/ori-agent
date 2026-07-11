@@ -32,6 +32,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
+	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -351,6 +353,15 @@ func (b *ServerBuilder) initializeHandlers() {
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
+	}
+
+	// Wire the normalized REAPER readiness resolver + shared reconciler so the
+	// workspace UI, pre-create preview, and repair all read one truthful model
+	// backed by the configured plugin manager and synchronized workspace store.
+	if b.sessionHandler != nil && b.pluginHandler != nil && b.workspaceStore != nil {
+		reconciler := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore)
+		resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
+		b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler)
 	}
 }
 

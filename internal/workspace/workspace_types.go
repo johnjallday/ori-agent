@@ -129,6 +129,11 @@ type Workspace struct {
 	// defaults OFF; an agent must also opt in (Settings.AllowNativeMCPTools).
 	AllowNativeMCPCLI bool `json:"allow_native_mcp_cli,omitempty"`
 
+	// TemplateProvenance records the built-in template this workspace was created
+	// from (portable metadata; see template_provenance.go). Nil for workspaces
+	// created without a template or before provenance was recorded.
+	TemplateProvenance *TemplateProvenance `json:"template_provenance,omitempty"`
+
 	// Mission fields — workspace-level proactive goal carried out by the entry
 	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
 	// with MissionEnabled = false (the zero value) behaves exactly as before.
