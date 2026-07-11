@@ -17,7 +17,7 @@ name: Auto Release
 
 on:
   schedule:
-    - cron: '0 19 * * *' # ~15:00 America/New_York (EDT). GH cron is UTC w/o DST → 14:00 in winter.
+    - cron: '30 18 * * *' # ~14:30 America/New_York (EDT), before the 3pm dev-digest routine. GH cron is UTC w/o DST → 13:30 in winter.
   workflow_dispatch: # manual "evaluate now"
     inputs:
       force:
