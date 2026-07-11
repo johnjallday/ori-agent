@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -108,11 +107,11 @@ func requestBodyHasContent(r *http.Request) bool {
 	if r.Body == nil || r.Body == http.NoBody {
 		return false
 	}
-	data, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+	data, err := io.ReadAll(io.LimitReader(r.Body, 1))
 	if err != nil {
 		return true
 	}
-	return len(bytes.TrimSpace(data)) > 0
+	return len(data) > 0
 }
 
 func projectOpenRequestIsLoopback(r *http.Request) bool {

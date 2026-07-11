@@ -97,10 +97,19 @@ func TestOpenWorkspaceProjectRejectsMethodAndBody(t *testing.T) {
 		t.Fatalf("GET expected 405, got %d", rr.Code)
 	}
 
-	rr = httptest.NewRecorder()
-	handler.OpenWorkspaceProject(rr, localProjectOpenRequest(http.MethodPost, ws.ID, bytes.NewReader([]byte(`{"path":"outside.rpp"}`))))
-	if rr.Code != http.StatusBadRequest || called {
-		t.Fatalf("caller path expected 400/no open, got %d called=%v: %s", rr.Code, called, rr.Body.String())
+	for name, body := range map[string][]byte{
+		"caller path": []byte(`{"path":"outside.rpp"}`),
+		"whitespace":  []byte(" \n\t"),
+		"padded path": append(bytes.Repeat([]byte(" "), 2048), []byte(`{"path":"outside.rpp"}`)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			called = false
+			rr = httptest.NewRecorder()
+			handler.OpenWorkspaceProject(rr, localProjectOpenRequest(http.MethodPost, ws.ID, bytes.NewReader(body)))
+			if rr.Code != http.StatusBadRequest || called {
+				t.Fatalf("body expected 400/no open, got %d called=%v: %s", rr.Code, called, rr.Body.String())
+			}
+		})
 	}
 }
 
