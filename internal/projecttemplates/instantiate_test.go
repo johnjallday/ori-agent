@@ -87,6 +87,67 @@ func TestInstantiateSubstitutesNamesAndCopiesBytes(t *testing.T) {
 	}
 }
 
+func TestInstantiateTemplateResolvesProjectEntryWithScaffoldTokens(t *testing.T) {
+	date := pinnedDate(t)
+	tplDir := t.TempDir()
+	wsDir := t.TempDir()
+	writeFile(t, filepath.Join(tplDir, "sessions", "{{name}}-{{date}}.rpp"), "project")
+	writeFile(t, filepath.Join(tplDir, ManifestFileName), `{
+  "name":"Song",
+  "project_entry":{"relative_path":"sessions/{{name}}-{{date}}.rpp","open_after_create_default":true},
+  "agents":[{"name":"Producer","role":"orchestrator"}]
+}`)
+
+	tpl, err := LoadFolder(tplDir)
+	if err != nil {
+		t.Fatalf("LoadFolder: %v", err)
+	}
+	result, err := InstantiateTemplate(tpl, wsDir, "Midnight Song")
+	if err != nil {
+		t.Fatalf("InstantiateTemplate: %v", err)
+	}
+	if result.ProjectPath != "midnight-song" {
+		t.Fatalf("ProjectPath = %q", result.ProjectPath)
+	}
+	wantEntry := "sessions/midnight-song-" + date + ".rpp"
+	if result.ProjectEntryPath != wantEntry || result.ProjectWarning != "" {
+		t.Fatalf("unexpected entry result: %+v, want %q", result, wantEntry)
+	}
+	if _, err := os.Stat(filepath.Join(wsDir, result.ProjectPath, filepath.FromSlash(result.ProjectEntryPath))); err != nil {
+		t.Fatalf("resolved project entry does not exist: %v", err)
+	}
+}
+
+func TestInstantiateTemplateEntryFailureIsNonFatal(t *testing.T) {
+	tplDir := t.TempDir()
+	wsDir := t.TempDir()
+	entrySource := filepath.Join(tplDir, "{{name}}.rpp")
+	writeFile(t, entrySource, "project")
+	writeFile(t, filepath.Join(tplDir, "keep.txt"), "keep")
+	writeFile(t, filepath.Join(tplDir, ManifestFileName), `{
+  "project_entry":{"relative_path":"{{name}}.rpp","open_after_create_default":true},
+  "agents":[{"name":"Producer","role":"orchestrator"}]
+}`)
+	tpl, err := LoadFolder(tplDir)
+	if err != nil || tpl.ProjectEntry == nil {
+		t.Fatalf("LoadFolder entry = %#v, err = %v", tpl.ProjectEntry, err)
+	}
+	if err := os.Remove(entrySource); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := InstantiateTemplate(tpl, wsDir, "Song")
+	if err != nil {
+		t.Fatalf("entry failure should not fail instantiation: %v", err)
+	}
+	if result.ProjectPath != "song" || result.ProjectEntryPath != "" || result.ProjectWarning == "" {
+		t.Fatalf("unexpected non-fatal result: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(wsDir, "song", "keep.txt")); err != nil {
+		t.Fatalf("project was rolled back after entry warning: %v", err)
+	}
+}
+
 // Field-token substitution left with the intake engine: any leftover
 // {{fields.<id>}} token in a template entry name is a clear error instead of a
 // silently-literal folder name.

@@ -46,7 +46,7 @@ func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Even
 		cleanup()
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(libDir, "demo-template", "template.json"), []byte(`{"name":"Demo Template","tags":[" Music ","reaper","music"]}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(libDir, "demo-template", "template.json"), []byte(`{"name":"Demo Template","tags":[" Music ","reaper","music"],"project_entry":{"relative_path":"{{name}}.rpp","open_after_create_default":true}}`), 0o640); err != nil {
 		cleanup()
 		t.Fatal(err)
 	}
@@ -149,6 +149,9 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey] != projectRef.ID {
 		t.Fatalf("project directory = %v, want %q", diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey], projectRef.ID)
 	}
+	if diskWS.SharedData[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
+		t.Fatalf("project entry = %v, want song-x.rpp", diskWS.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	// Session reads hydrate project_path from workspace.json (it has no
 	// SQLite column), so a bare session row must come back with the path.
@@ -159,10 +162,13 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if len(hydrated.Tags) != 2 || hydrated.Tags[0] != "music" || hydrated.Tags[1] != "reaper" {
 		t.Fatalf("hydrated tags = %#v, want [music reaper]", hydrated.Tags)
 	}
+	if hydrated.SharedData[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
+		t.Fatalf("hydrated project entry = %v, want song-x.rpp", hydrated.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	select {
 	case event := <-events:
-		if event.WorkspaceID != wsID || event.Data["project_path"] != "song-x" {
+		if event.WorkspaceID != wsID || event.Data["project_path"] != "song-x" || event.Data[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
 			t.Fatalf("unexpected project.created payload: %+v", event)
 		}
 	case <-time.After(2 * time.Second):
@@ -478,6 +484,9 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if projectResp["project_path"] != "first-song" {
 		t.Fatalf("project_path = %v, want first-song", projectResp["project_path"])
 	}
+	if warning, present := projectResp["project_warning"]; present {
+		t.Fatalf("unexpected project_warning: %v", warning)
+	}
 
 	diskWS, err := handler.workspaceStore.Get(wsID)
 	if err != nil {
@@ -503,6 +512,9 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey] != projectRef.ID {
 		t.Fatalf("project directory = %v, want %q", diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey], projectRef.ID)
 	}
+	if diskWS.SharedData[projecttemplates.ProjectEntryPathKey] != "first-song.rpp" {
+		t.Fatalf("project entry = %v, want first-song.rpp", diskWS.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	sessionWS, err := handler.store.GetWorkspace(context.Background(), wsID)
 	if err != nil {
@@ -522,10 +534,13 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if len(hydrated.Tags) != 2 || hydrated.Tags[0] != "music" || hydrated.Tags[1] != "reaper" {
 		t.Fatalf("hydrated tags = %#v, want [music reaper]", hydrated.Tags)
 	}
+	if hydrated.SharedData[projecttemplates.ProjectEntryPathKey] != "first-song.rpp" {
+		t.Fatalf("hydrated project entry = %v, want first-song.rpp", hydrated.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	select {
 	case event := <-events:
-		if event.WorkspaceID != wsID || event.Data["project_path"] != "first-song" {
+		if event.WorkspaceID != wsID || event.Data["project_path"] != "first-song" || event.Data[projecttemplates.ProjectEntryPathKey] != "first-song.rpp" {
 			t.Fatalf("unexpected project.created payload: %+v", event)
 		}
 	case <-time.After(time.Second):

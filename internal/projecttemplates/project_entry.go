@@ -30,6 +30,10 @@ type ProjectEntryEdit struct {
 // ErrInvalidProjectEntry reports unsafe or unusable project-entry metadata.
 var ErrInvalidProjectEntry = errors.New("invalid project entry")
 
+// ProjectEntryPathKey is the stable workspace shared_data key containing the
+// resolved entry path relative to project_path.
+const ProjectEntryPathKey = "project_entry_path"
+
 var projectEntryTokenPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
 // ValidateProjectEntryPath validates and normalizes the portable, slash-based
@@ -139,4 +143,87 @@ func verifyTemplateEntrySource(templateDir, portablePath string) error {
 		}
 	}
 	return nil
+}
+
+func resolveInstantiatedProjectEntry(projectRoot string, entry *ProjectEntry, values templateTokenValues) (string, error) {
+	if entry == nil {
+		return "", nil
+	}
+	clean, err := ValidateProjectEntryPath(entry.RelativePath)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := substituteRelPathWithValues(clean, values)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidProjectEntry, err)
+	}
+	portable := filepath.ToSlash(resolved)
+	if strings.Contains(portable, "{{") || strings.Contains(portable, "}}") {
+		return "", fmt.Errorf("%w: project entry contains an unresolved token", ErrInvalidProjectEntry)
+	}
+
+	root := filepath.Clean(projectRoot)
+	target := filepath.Clean(filepath.Join(root, filepath.FromSlash(portable)))
+	if target == root || !strings.HasPrefix(target, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: resolved project entry escapes the generated project", ErrInvalidProjectEntry)
+	}
+	if err := verifyTemplateEntrySource(root, portable); err != nil {
+		return "", err
+	}
+	return portable, nil
+}
+
+// SetProjectEntryPath validates and stores a resolved portable entry path. An
+// empty value clears the key. The map is intentionally supplied by callers so
+// canonical folder and mirrored session metadata use the same implementation.
+func SetProjectEntryPath(sharedData map[string]any, relativePath string) error {
+	relativePath = strings.TrimSpace(relativePath)
+	if relativePath == "" {
+		ClearProjectEntryPath(sharedData)
+		return nil
+	}
+	if sharedData == nil {
+		return fmt.Errorf("%w: workspace shared_data is unavailable", ErrInvalidProjectEntry)
+	}
+	clean, err := validateResolvedProjectEntryPath(relativePath)
+	if err != nil {
+		return err
+	}
+	sharedData[ProjectEntryPathKey] = clean
+	return nil
+}
+
+// GetProjectEntryPath returns a validated resolved path from shared_data. A
+// missing key is not an error; a malformed/wrongly typed stored value is.
+func GetProjectEntryPath(sharedData map[string]any) (string, error) {
+	if sharedData == nil {
+		return "", nil
+	}
+	raw, ok := sharedData[ProjectEntryPathKey]
+	if !ok || raw == nil {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%w: stored %s must be a string", ErrInvalidProjectEntry, ProjectEntryPathKey)
+	}
+	return validateResolvedProjectEntryPath(value)
+}
+
+// ClearProjectEntryPath removes persisted project-entry metadata.
+func ClearProjectEntryPath(sharedData map[string]any) {
+	if sharedData != nil {
+		delete(sharedData, ProjectEntryPathKey)
+	}
+}
+
+func validateResolvedProjectEntryPath(relativePath string) (string, error) {
+	clean, err := ValidateProjectEntryPath(relativePath)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(clean, "{{") || strings.Contains(clean, "}}") {
+		return "", fmt.Errorf("%w: persisted project entry cannot contain template tokens", ErrInvalidProjectEntry)
+	}
+	return clean, nil
 }

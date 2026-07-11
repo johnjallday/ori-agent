@@ -571,12 +571,16 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 	default:
 		// Non-fatal by design: a failed instantiation must not fail
 		// workspace creation. The warning is surfaced to the user.
-		if err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
+		result, err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName)
+		if err != nil {
 			if tc.resolveErr != nil {
 				err = tc.resolveErr
 			}
 			projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
 			logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
+		} else if result.ProjectWarning != "" {
+			projectWarning = result.ProjectWarning
+			logger.Warn("Project entry was not persisted", logger.Fields{"id": ws.ID, "warning": result.ProjectWarning})
 		}
 	}
 

@@ -162,3 +162,40 @@ func TestLoadFolderRejectsSymlinkProjectEntry(t *testing.T) {
 		t.Fatalf("expected symlink entry to be warned and omitted, got entry=%#v warnings=%v", tpl.ProjectEntry, tpl.Warnings)
 	}
 }
+
+func TestProjectEntrySharedDataHelpers(t *testing.T) {
+	t.Parallel()
+
+	shared := map[string]any{}
+	if err := SetProjectEntryPath(shared, "sessions/song.rpp"); err != nil {
+		t.Fatalf("SetProjectEntryPath: %v", err)
+	}
+	if got, err := GetProjectEntryPath(shared); err != nil || got != "sessions/song.rpp" {
+		t.Fatalf("GetProjectEntryPath = %q, %v", got, err)
+	}
+
+	ClearProjectEntryPath(shared)
+	if got, err := GetProjectEntryPath(shared); err != nil || got != "" {
+		t.Fatalf("GetProjectEntryPath after clear = %q, %v", got, err)
+	}
+
+	for name, value := range map[string]any{
+		"wrong type": 123,
+		"absolute":   "/tmp/song.rpp",
+		"traversal":  "../song.rpp",
+		"token":      "{{name}}.rpp",
+		"backslash":  `sessions\song.rpp`,
+	} {
+		shared[ProjectEntryPathKey] = value
+		if _, err := GetProjectEntryPath(shared); !errors.Is(err, ErrInvalidProjectEntry) {
+			t.Errorf("%s: GetProjectEntryPath error = %v, want ErrInvalidProjectEntry", name, err)
+		}
+	}
+
+	if err := SetProjectEntryPath(nil, "song.rpp"); !errors.Is(err, ErrInvalidProjectEntry) {
+		t.Fatalf("SetProjectEntryPath(nil) error = %v, want ErrInvalidProjectEntry", err)
+	}
+	if err := SetProjectEntryPath(shared, ""); err != nil {
+		t.Fatalf("empty SetProjectEntryPath should clear: %v", err)
+	}
+}
