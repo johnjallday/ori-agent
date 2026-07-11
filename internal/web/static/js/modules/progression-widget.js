@@ -105,15 +105,27 @@
     const list = el('quests');
     list.innerHTML = '';
     current.quests.forEach((q) => {
+      const done = q.status === 'completed';
       const li = document.createElement('li');
-      li.className = 'quest-item' + (q.status === 'completed' ? ' quest-item-done' : '');
+      li.className = 'quest-item' + (done ? ' quest-item-done' : '');
       const mark = document.createElement('span');
       mark.className = 'quest-mark';
-      mark.textContent = q.status === 'completed' ? '✓' : '○';
+      mark.textContent = done ? '✓' : '○';
       mark.setAttribute('aria-hidden', 'true');
-      const title = document.createElement('span');
+
+      // An incomplete quest with an action destination renders as a link so the
+      // user can act on it directly; otherwise it's plain text.
+      let title;
+      if (!done && q.action_url) {
+        title = document.createElement('a');
+        title.href = q.action_url;
+        title.title = q.action_label || q.title;
+      } else {
+        title = document.createElement('span');
+      }
       title.className = 'quest-title';
       title.textContent = q.title;
+
       li.append(mark, title);
       list.appendChild(li);
     });

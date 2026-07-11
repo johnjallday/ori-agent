@@ -33,6 +33,11 @@ type Quest struct {
 	// satisfies this quest. nil means the quest cannot be backfilled and will
 	// only ever complete live.
 	Satisfied func(s Snapshot) bool
+	// ActionURL, when set, is where the widget links an incomplete quest so the
+	// user can act on it. ActionLabel is the link text. Empty means the action
+	// happens inline (e.g. the home chat box) with no separate destination.
+	ActionURL   string
+	ActionLabel string
 }
 
 // tierNames maps a tier number to its display name.
@@ -99,19 +104,23 @@ func BuiltinQuests() []Quest {
 		{
 			ID: "t1-personalize", Tier: 1,
 			Title: "Personalize Ori",
-			Why:   "Tell Ori your interests and work style on the Personalize page so it tailors its help to you.",
+			Why:   "Tell Ori your interests and work style so it tailors its help to you.",
 			// Filling out the profile is not an event; completed live by a direct
 			// Complete call from the personalize handler and here via backfill.
-			Satisfied: func(s Snapshot) bool { return s.Personalized },
+			Satisfied:   func(s Snapshot) bool { return s.Personalized },
+			ActionURL:   "/personalize",
+			ActionLabel: "Open the Personalize page",
 		},
 
 		// ---- Tier 2 — Establish a Base ----
 		{
 			ID: "t2-create-workspace", Tier: 2,
-			Title:     "Create your first workspace",
-			Why:       "A workspace is home base — where your projects, notes, and agents live.",
-			Match:     onEvent(ws.EventWorkspaceCreated),
-			Satisfied: func(s Snapshot) bool { return s.Workspaces > 0 },
+			Title:       "Create your first workspace",
+			Why:         "A workspace is home base — where your projects, notes, and agents live.",
+			Match:       onEvent(ws.EventWorkspaceCreated),
+			Satisfied:   func(s Snapshot) bool { return s.Workspaces > 0 },
+			ActionURL:   "/workspaces?create=1",
+			ActionLabel: "Create a workspace",
 		},
 		{
 			ID: "t2-create-note", Tier: 2,

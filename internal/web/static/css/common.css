@@ -2087,6 +2087,15 @@ h3, .h3 {
     text-decoration: line-through;
 }
 
+a.quest-title {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+a.quest-title:hover {
+    text-decoration: underline;
+}
+
 .quest-log-why {
     margin: 0.75rem 0 0;
     font-size: 0.82rem;

@@ -240,7 +240,10 @@ func (e *Engine) statusLocked() Status {
 			status = StatusAvailable
 		}
 
-		qv := QuestView{ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status}
+		qv := QuestView{
+			ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status,
+			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel,
+		}
 		if done {
 			completedAt := at
 			qv.CompletedAt = &completedAt

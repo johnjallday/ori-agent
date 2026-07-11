@@ -71,6 +71,8 @@ type QuestView struct {
 	Why         string      `json:"why"`
 	Status      QuestStatus `json:"status"`
 	CompletedAt *time.Time  `json:"completed_at,omitempty"`
+	ActionURL   string      `json:"action_url,omitempty"`
+	ActionLabel string      `json:"action_label,omitempty"`
 }
 
 // TierView groups a tier's quests for the API.
