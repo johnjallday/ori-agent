@@ -3950,6 +3950,27 @@ const sessionManager = {
           continue;
         }
 
+        if (
+          response.status === 409 &&
+          !importEnabled &&
+          ((Array.isArray(result.missing_plugins) && result.missing_plugins.length) ||
+            (Array.isArray(result.disabled_plugins) && result.disabled_plugins.length))
+        ) {
+          // Required-plugin gate: the selected template needs plugins installed
+          // and enabled before creation. Surface exactly what to fix and refresh
+          // the REAPER Setup card so its inline Install/Enable actions are shown.
+          const parts = [];
+          if (result.missing_plugins?.length) {
+            parts.push(`Install required plugin(s): ${result.missing_plugins.join(', ')}`);
+          }
+          if (result.disabled_plugins?.length) {
+            parts.push(`Enable required plugin(s): ${result.disabled_plugins.join(', ')}`);
+          }
+          this.showToast(parts.join(' · ') || 'Required plugins are not ready', 'warning');
+          window.ReaperSetupCard?.refresh?.();
+          return;
+        }
+
         break;
       }
 

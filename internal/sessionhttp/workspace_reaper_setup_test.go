@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -131,6 +132,33 @@ func TestHandleReaperRepair_PreviewAndApply(t *testing.T) {
 	got, _ := store.Get(ws.ID)
 	if len(got.GetSkillBindings()) != 2 {
 		t.Fatalf("repair should leave 2 skill bindings, got %d", len(got.GetSkillBindings()))
+	}
+}
+
+func TestUnsatisfiedRequiredPlugins(t *testing.T) {
+	tools := projecttemplates.ToolDefaults{Plugins: []string{"reaper-plugin"}}
+
+	// Missing plugin.
+	h, _ := reaperSetupHandler(t, nil)
+	if missing, disabled := h.unsatisfiedRequiredPlugins(tools); len(missing) != 1 || missing[0] != "reaper-plugin" || len(disabled) != 0 {
+		t.Fatalf("missing plugin: got missing=%v disabled=%v", missing, disabled)
+	}
+
+	// Installed but disabled.
+	h2, _ := reaperSetupHandler(t, []plugin.InstalledPlugin{{Name: "reaper-plugin", Enabled: false}})
+	if missing, disabled := h2.unsatisfiedRequiredPlugins(tools); len(disabled) != 1 || disabled[0] != "reaper-plugin" || len(missing) != 0 {
+		t.Fatalf("disabled plugin: got missing=%v disabled=%v", missing, disabled)
+	}
+
+	// Installed and enabled: satisfied.
+	h3, _ := reaperSetupHandler(t, []plugin.InstalledPlugin{{Name: "reaper-plugin", Enabled: true}})
+	if missing, disabled := h3.unsatisfiedRequiredPlugins(tools); len(missing)+len(disabled) != 0 {
+		t.Fatalf("enabled plugin should be satisfied: missing=%v disabled=%v", missing, disabled)
+	}
+
+	// Template declares no plugins: never blocks.
+	if missing, disabled := h.unsatisfiedRequiredPlugins(projecttemplates.ToolDefaults{}); len(missing)+len(disabled) != 0 {
+		t.Fatalf("no declared plugins should never block")
 	}
 }
 

@@ -3,10 +3,15 @@
 // Shown only when the Reaper Song template is selected. It reads the pre-create
 // preview from /api/reaper-setup/preview (the same backend the live readiness
 // resolver uses) and explains, with visible non-color text, whether the
-// installed reaper-plugin will attach, whether it must be enabled, or whether
-// the workspace will start as a usable file-only project. Workspace creation is
-// never blocked. Verification of REAPER/Web Remote/runner happens later, when
-// setup runs — the card never claims REAPER is connected.
+// installed reaper-plugin will attach or must be installed/enabled first.
+//
+// Required-plugin gate (product decision): the Reaper Song template requires
+// reaper-plugin installed AND enabled before the workspace can be created, so it
+// never starts missing its required tools. While the plugin is missing or
+// disabled, this card disables the Create Workspace button and offers inline
+// Install/Enable actions; the backend enforces the same rule with a 409.
+// Verification of REAPER/Web Remote/runner still happens later, when setup runs —
+// the card never claims REAPER is connected.
 (function () {
   'use strict';
 
@@ -29,9 +34,27 @@
     return id === REAPER_SONG_TEMPLATE_ID;
   }
 
+  // setCreateBlocked disables/enables the shared Create Workspace button so a
+  // Reaper Song workspace cannot be created until reaper-plugin will attach.
+  function setCreateBlocked(blocked, reason) {
+    const btn = document.getElementById('createFolderBtn');
+    if (!btn) return;
+    btn.disabled = !!blocked;
+    btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+    if (blocked) {
+      btn.dataset.reaperBlocked = '1';
+      if (reason) btn.title = reason;
+    } else if (btn.dataset.reaperBlocked) {
+      delete btn.dataset.reaperBlocked;
+      btn.removeAttribute('title');
+    }
+  }
+
   function hide() {
     const { card } = els();
     if (card) card.hidden = true;
+    // A non-REAPER template must never leave creation blocked.
+    setCreateBlocked(false);
   }
 
   function setBadge(badge, label) {
@@ -71,7 +94,7 @@
       if (!resp.ok) throw new Error('enable failed');
       await refresh();
     } catch (_) {
-      renderError('Could not enable reaper-plugin. You can still create a file-only workspace.');
+      renderError('Could not enable reaper-plugin. Enable it, then try again.');
     } finally {
       setBusy(false);
     }
@@ -89,15 +112,20 @@
     card.hidden = false;
     setBadge(badge, 'Error');
     if (status) status.textContent = message || 'Could not check reaper-plugin.';
-    if (detail) detail.textContent = 'File-only creation is still available.';
+    if (detail) detail.textContent = 'Try again; the backend re-checks the plugin when you create.';
     if (actions) {
       actions.textContent = '';
       actions.appendChild(button('Retry', { onClick: refresh }));
     }
+    // Don't hard-block on a transient preview error — the backend guard still
+    // enforces the requirement on create.
+    setCreateBlocked(false);
   }
 
   const verificationNote =
-    'You can create the workspace now. REAPER, Web Remote, and runner readiness are checked later, when setup runs.';
+    'REAPER, Web Remote, and runner readiness are checked later, when setup runs.';
+  const liveControlNote =
+    'Live local REAPER control also needs a Codex or Claude Code agent and native CLI access, which you enable inside the workspace after creation.';
 
   function render(preview) {
     const { card, status, detail, actions, badge } = els();
@@ -114,31 +142,34 @@
           'reaper-plugin is installed. Its components will attach when you create this workspace.';
         detail.textContent =
           (components ? 'Will attach: ' + components + '. ' : '') + verificationNote;
+        setCreateBlocked(false);
         break;
       case 'plugin_disabled':
-        setBadge(badge, 'Disabled');
-        status.textContent = 'reaper-plugin is installed but globally disabled.';
+        setBadge(badge, 'Required');
+        status.textContent =
+          'reaper-plugin is installed but globally disabled. Enable it to create this workspace.';
         detail.textContent =
-          'Enable it to attach its components, or create a file-only project now. ' +
+          'The Reaper Song template requires reaper-plugin. Creating is blocked until it is enabled. ' +
           verificationNote;
         actions.appendChild(button('Enable plugin', { primary: true, onClick: enablePlugin }));
+        setCreateBlocked(true, 'Enable reaper-plugin to create this workspace');
         break;
       case 'plugin_missing':
       default:
-        setBadge(badge, 'File-only');
-        status.textContent = 'File-only project: reaper-plugin is not installed.';
+        setBadge(badge, 'Required');
+        status.textContent =
+          'reaper-plugin is required and not installed. Install it to create this workspace.';
         detail.textContent =
-          'Creation still succeeds and your .rpp is intact. Install reaper-plugin (a global install; attachment is per-workspace) to enable live control later. ' +
+          'The Reaper Song template requires reaper-plugin (a global install; attachment is per-workspace). Creating is blocked until it is installed and enabled. ' +
           verificationNote;
         actions.appendChild(button('Install plugin', { primary: true, onClick: openPluginsPage }));
+        actions.appendChild(button('Re-check', { onClick: refresh }));
+        setCreateBlocked(true, 'Install reaper-plugin to create this workspace');
         break;
     }
-    // Live control also needs a Codex or Claude Code setup agent + explicit native
-    // CLI access, configured inside the workspace after creation (FR20/FR21).
     const note = document.createElement('div');
     note.style.cssText = 'font-size:11px;color:var(--text-secondary);margin-top:6px;opacity:0.85;';
-    note.textContent =
-      'Live local REAPER control also needs a Codex or Claude Code agent and native CLI access, which you enable inside the workspace after creation.';
+    note.textContent = liveControlNote;
     detail.appendChild(note);
   }
 
@@ -148,6 +179,8 @@
     card.hidden = false;
     setBadge(badge, 'Checking');
     if (status) status.textContent = 'Checking reaper-plugin…';
+    // Block creation while we resolve state, to avoid a create during the gap.
+    setCreateBlocked(true, 'Checking reaper-plugin…');
     try {
       const resp = await fetch('/api/reaper-setup/preview');
       if (!resp.ok) throw new Error('preview failed');

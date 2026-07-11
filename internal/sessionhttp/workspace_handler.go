@@ -281,6 +281,22 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Required-plugin gate: a template that declares plugins requires them
+	// installed and enabled before creation, so the workspace is never created
+	// missing its required tools. Reject with a structured 409 naming what to
+	// install/enable; the create modal surfaces this and offers the install/enable
+	// actions.
+	if templateResolved {
+		if missing, disabled := h.unsatisfiedRequiredPlugins(resolvedTemplate.Tools); len(missing)+len(disabled) > 0 {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":            "required plugins are not ready",
+				"missing_plugins":  missing,
+				"disabled_plugins": disabled,
+			})
+			return
+		}
+	}
+
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 
 	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved)

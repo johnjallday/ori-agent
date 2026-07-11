@@ -6,8 +6,50 @@ import (
 	"strings"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 )
+
+// unsatisfiedRequiredPlugins reports the template-declared plugins that are not
+// installed (missing) and those installed but globally disabled (disabled).
+//
+// Product decision (overrides the earlier file-only-always default): a template
+// that declares plugins requires them installed AND enabled before a workspace
+// can be created, so the workspace never starts missing its required tools. The
+// create flow blocks on any missing/disabled required plugin. Reads through the
+// same plugin manager the Plugins API uses. Fails open (returns nothing) when
+// the plugin manager is unavailable or its store can't be read, so a transient
+// read error never permanently blocks creation.
+func (h *Handler) unsatisfiedRequiredPlugins(tools projecttemplates.ToolDefaults) (missing, disabled []string) {
+	if len(tools.Plugins) == 0 || h.reaperPluginLister == nil {
+		return nil, nil
+	}
+	installed, err := h.reaperPluginLister.List()
+	if err != nil {
+		return nil, nil
+	}
+	enabledByName := make(map[string]bool, len(installed))
+	present := make(map[string]bool, len(installed))
+	for _, p := range installed {
+		key := strings.ToLower(strings.TrimSpace(p.Name))
+		present[key] = true
+		enabledByName[key] = p.Enabled
+	}
+	for _, name := range tools.Plugins {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		switch {
+		case !present[key]:
+			missing = append(missing, name)
+		case !enabledByName[key]:
+			disabled = append(disabled, name)
+		}
+	}
+	return missing, disabled
+}
 
 // handleReaperReadiness serves GET /api/workspaces/{id}/reaper-setup: the one
 // normalized REAPER readiness result reused by the workspace UI, repair, and
