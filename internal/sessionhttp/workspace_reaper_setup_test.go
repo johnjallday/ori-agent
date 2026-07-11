@@ -27,9 +27,10 @@ func reaperSetupHandler(t *testing.T, plugins []plugin.InstalledPlugin) (*Handle
 	pm := &fakePluginMgr{list: plugins}
 	rec := pluginworkspace.New(pm, store)
 	resolver := reapersetup.NewResolver(store, rec)
+	repairer := reapersetup.NewRepairer(store, rec, resolver)
 	h := New(nil)
 	h.SetWorkspaceTaskStore(store)
-	h.SetReaperSetup(resolver, pm, rec)
+	h.SetReaperSetup(resolver, pm, rec, repairer)
 	return h, store
 }
 

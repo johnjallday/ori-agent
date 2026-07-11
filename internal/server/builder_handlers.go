@@ -361,7 +361,8 @@ func (b *ServerBuilder) initializeHandlers() {
 	if b.sessionHandler != nil && b.pluginHandler != nil && b.workspaceStore != nil {
 		reconciler := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore)
 		resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
-		b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler)
+		repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
+		b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
 	}
 }
 

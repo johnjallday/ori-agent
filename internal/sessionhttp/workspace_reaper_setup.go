@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -34,6 +35,51 @@ func (h *Handler) handleReaperReadiness(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	orihttp.WriteJSON(w, readiness)
+}
+
+// handleReaperRepair serves the existing-workspace repair endpoint at
+// /api/workspaces/{id}/reaper-setup/repair. GET previews the changes; POST
+// applies them (body {"confirm_enable": bool} to permit enabling a disabled
+// plugin). Repair only runs for conservatively identified REAPER workspaces and
+// never enables native access, mutates an agent, creates a task, or touches an
+// .rpp file. After a mutation, the response carries the refreshed readiness
+// status so the UI updates in place.
+func (h *Handler) handleReaperRepair(w http.ResponseWriter, r *http.Request, workspaceID string) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
+		return
+	}
+	if h.reaperRepairer == nil {
+		orihttp.WriteJSON(w, reapersetup.RepairPlan{})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		plan, err := h.reaperRepairer.Preview(workspaceID)
+		if err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+		orihttp.WriteJSON(w, plan)
+	case http.MethodPost:
+		var req struct {
+			ConfirmEnable bool `json:"confirm_enable"`
+		}
+		// Body is optional; decode leniently and default to no-confirm without
+		// erroring on an empty/absent body.
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&req)
+		}
+		result, err := h.reaperRepairer.Apply(workspaceID, req.ConfirmEnable)
+		if err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
+		orihttp.WriteJSON(w, result)
+	default:
+		_ = orihttp.RespondMethodNotAllowed(w)
+	}
 }
 
 // GetReaperCreatePreview serves GET /api/reaper-setup/preview: the pre-create

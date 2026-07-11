@@ -59,6 +59,7 @@ type Handler struct {
 	reaperResolver     *reapersetup.Resolver
 	reaperPluginLister reapersetup.PluginLister
 	reaperReconciler   *pluginworkspace.Reconciler
+	reaperRepairer     *reapersetup.Repairer
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -123,10 +124,11 @@ func (h *Handler) SetAgentToolApplier(fn func(workspaceID, agentName string, too
 // SetReaperSetup injects the normalized REAPER readiness resolver, the plugin
 // lister used for the pre-create preview, and the shared reconciler used by
 // repair. The server supplies these because the plugin manager lives there.
-func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reapersetup.PluginLister, reconciler *pluginworkspace.Reconciler) {
+func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reapersetup.PluginLister, reconciler *pluginworkspace.Reconciler, repairer *reapersetup.Repairer) {
 	h.reaperResolver = resolver
 	h.reaperPluginLister = lister
 	h.reaperReconciler = reconciler
+	h.reaperRepairer = repairer
 }
 
 // SetTemplatesRootResolver sets the resolver used to locate the project

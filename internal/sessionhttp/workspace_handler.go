@@ -99,6 +99,10 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case "reaper-setup":
+			if len(parts) == 3 && parts[2] == "repair" {
+				h.handleReaperRepair(w, r, id)
+				return
+			}
 			h.handleReaperReadiness(w, r, id)
 			return
 		}
