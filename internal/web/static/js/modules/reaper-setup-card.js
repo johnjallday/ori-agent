@@ -31,11 +31,26 @@
   });
 
   let busy = false;
+  // The exact install source the selected template declares for reaper-plugin
+  // (tools.plugin_sources). When set, Install is one click (trust-previewed) with
+  // no marketplace lookup or pasted source needed.
+  let declaredSource = '';
 
   function isReaperTemplate(template) {
     if (!template) return false;
     const id = String(template.id || template.ID || '').toLowerCase();
     return id === REAPER_SONG_TEMPLATE_ID;
+  }
+
+  // declaredPluginSource reads the template's declared source for reaper-plugin,
+  // matching the plugin name case-insensitively.
+  function declaredPluginSource(template) {
+    const sources = template && template.tools && template.tools.plugin_sources;
+    if (!sources || typeof sources !== 'object') return '';
+    for (const key of Object.keys(sources)) {
+      if (String(key).toLowerCase() === PLUGIN_NAME) return String(sources[key] || '').trim();
+    }
+    return '';
   }
 
   // setCreateBlocked disables/enables the shared Create Workspace button so a
@@ -121,6 +136,12 @@
 
   async function beginInstall() {
     if (busy) return;
+    // Preferred path: the template declares the exact source, so install is one
+    // click (still trust-previewed) with no marketplace lookup or paste.
+    if (declaredSource) {
+      await previewSourceInstall(declaredSource);
+      return;
+    }
     setBusy(true);
     renderMessage('Finding reaper-plugin…');
     try {
@@ -410,9 +431,11 @@
 
   function showForTemplate(template) {
     if (!isReaperTemplate(template)) {
+      declaredSource = '';
       hide();
       return;
     }
+    declaredSource = declaredPluginSource(template);
     void refresh();
   }
 

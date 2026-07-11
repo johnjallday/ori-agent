@@ -269,3 +269,68 @@ test('fetch failure renders Retry and does not hard-block creation', async () =>
   // the button is not left permanently disabled by the card.
   assert.equal(doc.getElementById('createFolderBtn').disabled, false);
 });
+
+// Placed last: it sets the module's declaredSource via showForTemplate, which
+// would otherwise steer earlier marketplace/paste tests down the source path.
+test('template-declared source: one-click install skips the marketplace', async () => {
+  const doc = setup();
+  const SRC = 'https://github.com/johnjallday/reaper-plugin.git';
+  let previewCall = 0;
+  const seen = [];
+  globalThis.fetch = async (url, opts) => {
+    const method = (opts && opts.method) || 'GET';
+    seen.push(method + ' ' + url);
+    if (url === '/api/reaper-setup/preview') {
+      previewCall += 1;
+      const status = previewCall === 1 ? 'plugin_missing' : 'ready_to_attach';
+      return {
+        ok: true,
+        json: async () => ({ status, would_attach: [{ name: 'reaper-session-setup' }] })
+      };
+    }
+    if (url === '/api/plugins/install' && method === 'POST') {
+      const body = JSON.parse(opts.body);
+      assert.equal(body.source, SRC);
+      if (!body.confirm) {
+        return {
+          ok: true,
+          json: async () => ({
+            installed: false,
+            trust: { Name: 'reaper-plugin', Skills: ['reaper-session-setup'], MCPCommands: [] }
+          })
+        };
+      }
+      return { ok: true, json: async () => ({ installed: true }) };
+    }
+    if (url === '/api/plugins/reaper-plugin/enable' && method === 'POST') {
+      return { ok: true, json: async () => ({ enabled: true }) };
+    }
+    throw new Error('unexpected fetch ' + method + ' ' + url);
+  };
+
+  mod.showForTemplate({ id: 'reaper-song', tools: { plugin_sources: { 'reaper-plugin': SRC } } });
+  await flush();
+
+  // Install uses the declared source directly — no marketplace lookup.
+  doc
+    .getElementById('reaperSetupActions')
+    .querySelectorAll('button')
+    .find(b => b.textContent === 'Install plugin')
+    .click();
+  await flush();
+  assert.ok(
+    !seen.includes('GET /api/plugins/marketplaces'),
+    'must not consult the marketplace when a source is declared'
+  );
+
+  const confirmBtn = doc
+    .getElementById('reaperSetupActions')
+    .querySelectorAll('button')
+    .find(b => b.textContent === 'Install & enable');
+  assert.ok(confirmBtn, 'expected the trust-preview confirm button');
+  confirmBtn.click();
+  await flush();
+  assert.equal(doc.getElementById('createFolderBtn').disabled, false);
+
+  mod.showForTemplate({ id: 'blank' }); // reset declaredSource for isolation
+});
