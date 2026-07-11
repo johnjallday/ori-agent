@@ -108,8 +108,8 @@ func BuiltinQuests() []Quest {
 			// Filling out the profile is not an event; completed live by a direct
 			// Complete call from the personalize handler and here via backfill.
 			Satisfied:   func(s Snapshot) bool { return s.Personalized },
-			ActionURL:   "/personalize",
-			ActionLabel: "Open the Personalize page",
+			ActionURL:   "/profile#personalization",
+			ActionLabel: "Personalize on your Profile page",
 		},
 
 		// ---- Tier 2 — Establish a Base ----
