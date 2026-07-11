@@ -625,6 +625,26 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 			}
 		}
 	}
+
+	// Persist portable template provenance so features (REAPER readiness, repair)
+	// can identify the originating built-in without scanning filenames or task
+	// prose. Best-effort: a failure here never fails creation.
+	if tc.resolved && tc.template.Builtin && strings.TrimSpace(tc.template.ID) != "" && h.workspaceTaskStore != nil {
+		prov := &agentworkspace.TemplateProvenance{
+			TemplateID:   tc.template.ID,
+			TemplateName: tc.template.Name,
+			Builtin:      true,
+			Version:      tc.template.BuiltinVersion,
+			AppliedAt:    time.Now(),
+		}
+		if err := h.workspaceTaskStore.Update(ws.ID, func(w *agentworkspace.Workspace) error {
+			w.SetTemplateProvenance(prov)
+			return nil
+		}); err != nil {
+			logger.Warn("Failed to persist template provenance", logger.Fields{"id": ws.ID, "template": tc.template.ID, "error": err})
+		}
+	}
+
 	return projectWarning
 }
 
