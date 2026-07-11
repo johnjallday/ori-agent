@@ -118,6 +118,60 @@ func TestSyncStore_SaveUpdatesWorkspaceJSON(t *testing.T) {
 	}
 }
 
+func TestSyncStore_SavePreservesCanonicalProjectPathFromStalePrimaryWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-project-path-sync", "Project Path Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reproduce Create Workspace: orchestration can retain a SQLite-backed
+	// workspace fetched before the template handler writes project_path directly
+	// to canonical workspace.json.
+	staleWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace.ProjectPath = "song"
+	if err := SetProjectEntryPath(canonicalWorkspace.SharedData, "song.rpp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	staleWorkspace.SharedData[ProjectEntryPathKey] = "song.rpp"
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "setup-task", Status: TaskStatusCompleted})
+	if err := store.Save(staleWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diskWorkspace.ProjectPath != "song" {
+		t.Fatalf("canonical project_path = %q, want song", diskWorkspace.ProjectPath)
+	}
+	if diskWorkspace.SharedData[ProjectEntryPathKey] != "song.rpp" {
+		t.Fatalf("canonical project entry = %v, want song.rpp", diskWorkspace.SharedData[ProjectEntryPathKey])
+	}
+	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "setup-task" {
+		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)
+	}
+}
+
 func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

@@ -153,6 +153,28 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 		t.Fatalf("project entry = %v, want song-x.rpp", diskWS.SharedData[projecttemplates.ProjectEntryPathKey])
 	}
 
+	// A task mutation reads through the SQLite-primary SyncStore, whose table
+	// does not carry project_path. Its write-through save must merge the
+	// disk-canonical value instead of erasing it immediately after creation.
+	taskWorkspace, err := handler.workspaceTaskStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceTaskStore.Get: %v", err)
+	}
+	taskWorkspace.Tasks = append(taskWorkspace.Tasks, agentworkspace.Task{
+		ID:     "post-create-task-update",
+		Status: agentworkspace.TaskStatusCompleted,
+	})
+	if err := handler.workspaceTaskStore.Save(taskWorkspace); err != nil {
+		t.Fatalf("workspaceTaskStore.Save: %v", err)
+	}
+	diskWS, err = handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get after task save: %v", err)
+	}
+	if diskWS.ProjectPath != "song-x" {
+		t.Fatalf("disk project_path after task save = %q, want song-x", diskWS.ProjectPath)
+	}
+
 	// Session reads hydrate project_path from workspace.json (it has no
 	// SQLite column), so a bare session row must come back with the path.
 	hydrated := handler.hydrateWorkspaceMetadataFromFileStore(&session.Workspace{ID: wsID})
