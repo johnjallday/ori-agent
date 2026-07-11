@@ -69,6 +69,15 @@ func dataString(ev ws.Event, key string) string {
 	return strings.TrimSpace(v)
 }
 
+// onWorkspaceAction builds a Match for a workspace.updated event carrying a
+// specific "action" in its data payload. Skill and MCP binding changes are
+// published this way rather than as dedicated event types.
+func onWorkspaceAction(action string) func(ws.Event) bool {
+	return func(ev ws.Event) bool {
+		return ev.Type == ws.EventWorkspaceUpdated && dataString(ev, "action") == action
+	}
+}
+
 // BuiltinQuests returns the ordered built-in quest graph. The slice is freshly
 // built on each call so callers can't mutate shared state.
 //
@@ -106,11 +115,9 @@ func BuiltinQuests() []Quest {
 		},
 		{
 			ID: "t2-create-note", Tier: 2,
-			Title: "Write a note",
-			Why:   "Capture a thought or a plan — Ori can read and build on your notes.",
-			Match: func(ev ws.Event) bool {
-				return ev.Type == ws.EventStoreNodeCreated && dataString(ev, "kind") == "note"
-			},
+			Title:     "Write a note",
+			Why:       "Capture a thought or a plan — Ori can read and build on your notes.",
+			Match:     onEvent(ws.EventNoteCreated),
 			Satisfied: func(s Snapshot) bool { return s.Notes > 0 },
 		},
 		{
@@ -149,16 +156,16 @@ func BuiltinQuests() []Quest {
 		// ---- Tier 4 — Equip ----
 		{
 			ID: "t4-enable-skill", Tier: 4,
-			Title: "Enable a skill",
-			Why:   "Skills teach an agent a reusable capability — equip one to level it up.",
-			// Skill-binding changes do not yet emit an event (added in a
-			// follow-up group); backfill grandfathers existing installs.
+			Title:     "Enable a skill",
+			Why:       "Skills teach an agent a reusable capability — equip one to level it up.",
+			Match:     onWorkspaceAction("skill_binding_created"),
 			Satisfied: func(s Snapshot) bool { return s.SkillsBound > 0 },
 		},
 		{
 			ID: "t4-connect-mcp", Tier: 4,
 			Title:     "Connect an MCP server",
 			Why:       "MCP servers give agents real tools — files, APIs, apps on your machine.",
+			Match:     onWorkspaceAction("mcp_binding_created"),
 			Satisfied: func(s Snapshot) bool { return s.MCPServers > 0 },
 		},
 		{

@@ -88,6 +88,34 @@ func TestAgentTaskCompleteRequiresAgent(t *testing.T) {
 	}
 }
 
+func TestHandleEvent_NoteCreatedCompletesQuest(t *testing.T) {
+	e := New(&fakeStore{})
+	e.HandleEvent(ws.Event{Type: ws.EventNoteCreated, WorkspaceID: "w1"})
+	if !completed(e, "t2-create-note") {
+		t.Fatal("note.created should complete t2-create-note")
+	}
+}
+
+func TestHandleEvent_SkillAndMCPBindings(t *testing.T) {
+	e := New(&fakeStore{})
+
+	// A generic workspace.updated must NOT complete the equip quests.
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceUpdated, Data: map[string]any{"action": "renamed"}})
+	if completed(e, "t4-enable-skill") || completed(e, "t4-connect-mcp") {
+		t.Fatal("unrelated workspace.updated should not complete equip quests")
+	}
+
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceUpdated, Data: map[string]any{"action": "skill_binding_created"}})
+	if !completed(e, "t4-enable-skill") {
+		t.Fatal("skill_binding_created action should complete t4-enable-skill")
+	}
+
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceUpdated, Data: map[string]any{"action": "mcp_binding_created"}})
+	if !completed(e, "t4-connect-mcp") {
+		t.Fatal("mcp_binding_created action should complete t4-connect-mcp")
+	}
+}
+
 func TestComplete_DirectAndIdempotent(t *testing.T) {
 	e := New(&fakeStore{})
 
