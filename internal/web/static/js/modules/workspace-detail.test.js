@@ -62,6 +62,165 @@ test('workspace detail activateWorkspaceConfigTab clicks the requested tab', () 
   assert.equal(mcpTab.clickCount, 1);
 });
 
+test('workspace detail consumes a scoped project-open failure notice once', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const storage = new Map([
+    [
+      'oriProjectOpenNotice:workspace-1',
+      JSON.stringify({
+        workspace_id: 'workspace-1',
+        message: 'Workspace created, but the project could not be opened. Use Open Project to try again.'
+      })
+    ]
+  ]);
+  const warnings = [];
+  const previousWindow = global.window;
+  global.window = {
+    ...previousWindow,
+    sessionStorage: {
+      getItem: key => storage.get(key) || null,
+      removeItem: key => storage.delete(key)
+    },
+    Toast: {
+      warning: (message, options) => warnings.push({ message, options })
+    }
+  };
+
+  try {
+    assert.equal(page.consumeProjectOpenFailureNotice(), true);
+    assert.equal(page.consumeProjectOpenFailureNotice(), false);
+  } finally {
+    global.window = previousWindow;
+  }
+
+  assert.equal(storage.has('oriProjectOpenNotice:workspace-1'), false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /Use Open Project to try again/);
+  assert.equal(warnings[0].options.title, 'Project not opened');
+});
+
+test('workspace detail detects project entries only from complete persisted metadata', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const cases = [
+    [{}, false],
+    [{ project_path: 'song' }, false],
+    [{ project_path: 'song', shared_data: {} }, false],
+    [{ project_path: 'song', shared_data: { project_entry_path: 42 } }, false],
+    [{ project_path: 'song', shared_data: { project_entry_path: '   ' } }, false],
+    [{ project_path: '', shared_data: { project_entry_path: 'song.rpp' } }, false],
+    [
+      { project_path: 'song', shared_data: { project_entry_path: 'song.rpp' } },
+      true
+    ]
+  ];
+
+  for (const [workspace, expected] of cases) {
+    page.workspace = workspace;
+    assert.equal(page.hasProjectEntry(), expected);
+  }
+});
+
+test('workspace detail sends a bodyless project-open request and reports success', async () => {
+  const page = new WorkspaceDetailPage('workspace / one');
+  page.workspace = {
+    project_path: 'song',
+    shared_data: { project_entry_path: 'secret/song.rpp' }
+  };
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const requests = [];
+  const successes = [];
+  let refreshCount = 0;
+  global.window = {
+    ...originalWindow,
+    Toast: { success: message => successes.push(message), error() {} },
+    workspaceCommand: { refresh: () => (refreshCount += 1) }
+  };
+  global.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    return {
+      ok: true,
+      json: async () => ({ message: 'Project open request accepted' })
+    };
+  };
+
+  try {
+    assert.equal(await page.openProject(), true);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+  }
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/workspaces/workspace%20%2F%20one/project/open');
+  assert.deepEqual(requests[0].options, { method: 'POST' });
+  assert.equal(Object.hasOwn(requests[0].options, 'body'), false);
+  assert.equal(requests[0].url.includes('secret'), false);
+  assert.equal(refreshCount, 2);
+  assert.equal(page.projectOpenBusy, false);
+  assert.match(successes[0], /system default application/);
+});
+
+test('workspace detail prevents duplicate project-open requests and remains retryable', async () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    project_path: 'song',
+    shared_data: { project_entry_path: 'song.rpp' }
+  };
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const originalConsoleError = console.error;
+  const errors = [];
+  const successes = [];
+  let refreshCount = 0;
+  let requestCount = 0;
+  let releaseFirst;
+  const firstResponse = new Promise(resolve => {
+    releaseFirst = resolve;
+  });
+  global.window = {
+    ...originalWindow,
+    Toast: {
+      success: message => successes.push(message),
+      error: message => errors.push(message)
+    },
+    workspaceCommand: { refresh: () => (refreshCount += 1) }
+  };
+  console.error = () => {};
+  global.fetch = async () => {
+    requestCount += 1;
+    if (requestCount === 1) return firstResponse;
+    return { ok: true, json: async () => ({}) };
+  };
+
+  try {
+    const firstOpen = page.openProject();
+    assert.equal(page.projectOpenBusy, true);
+    assert.equal(await page.openProject(), false);
+    assert.equal(requestCount, 1);
+
+    releaseFirst({
+      ok: false,
+      json: async () => ({ error: 'Project entry file was not found' })
+    });
+    assert.equal(await firstOpen, false);
+    assert.equal(page.projectOpenBusy, false);
+    assert.equal(await page.openProject(), true);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(requestCount, 2);
+  assert.equal(refreshCount, 4);
+  assert.match(errors[0], /Project entry file was not found/);
+  assert.match(errors[0], /try again/);
+  assert.equal(successes.length, 1);
+});
+
 test('workspace detail renders reference URL task indicators', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const indicator = page.renderTaskReferenceURLIndicator({
@@ -507,7 +666,7 @@ test('workspace detail links catalog-backed agents to the global detail page', (
   assert.match(markup, /data-agent-detail-kind="global"/);
 });
 
-test('workspace detail keeps snapshot-backed local agents off the global detail route', () => {
+test('workspace detail links snapshot-backed local agents to their workspace-scoped page', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   page.workspace = {
     entry_agent_name: 'Local Manager',
@@ -524,13 +683,15 @@ test('workspace detail keeps snapshot-backed local agents off the global detail 
     'summary-local'
   );
 
+  // Workspace-local agents are NOT in the global agent store, so /agents/<name>
+  // would 404. They get a workspace-scoped detail page instead.
   assert.equal(target.kind, 'workspace-local');
-  assert.equal(target.interactive, false);
-  assert.equal(target.href, '');
-  assert.match(markup, /workspace-detail-agent-identity-link is-static/);
+  assert.equal(target.interactive, true);
+  assert.equal(target.href, '/workspaces/workspace-1/agents/Local%20Manager');
   assert.match(markup, /data-agent-detail-kind="workspace-local"/);
-  assert.doesNotMatch(markup, /href="/);
-  assert.doesNotMatch(markup, /\/agents\/Local%20Manager/);
+  assert.match(markup, /href="\/workspaces\/workspace-1\/agents\/Local%20Manager"/);
+  assert.doesNotMatch(markup, /href="\/agents\/Local%20Manager"/);
+  assert.doesNotMatch(markup, /is-static/);
 });
 
 test('workspace detail routes missing entry agents to workspace recovery', () => {
@@ -561,6 +722,30 @@ test('workspace detail routes missing entry agents to workspace recovery', () =>
   assert.match(backMarkup, /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/);
   assert.doesNotMatch(frontMarkup, /\/agents\/Missing%20Manager/);
   assert.doesNotMatch(backMarkup, /\/agents\/Missing%20Manager/);
+});
+
+test('buildAgentPromptPreview collapses whitespace and truncates long prompts', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+
+  assert.equal(
+    page.buildAgentPromptPreview({ effective_prompt: 'You are\n  a  helpful\tagent.' }),
+    'You are a helpful agent.'
+  );
+  assert.equal(
+    page.buildAgentPromptPreview({ base_system_prompt: '', effective_prompt: '' }),
+    'No system prompt set for this agent.'
+  );
+
+  const long = 'x'.repeat(400);
+  const preview = page.buildAgentPromptPreview({ effective_prompt: long });
+  assert.ok(preview.length <= 161, `preview should be capped, got ${preview.length}`);
+  assert.ok(preview.endsWith('…'), 'truncated preview should end with an ellipsis');
+
+  // Falls back to the base prompt when no composed prompt is present.
+  assert.equal(
+    page.buildAgentPromptPreview({ base_system_prompt: 'Base only.', effective_prompt: '' }),
+    'Base only.'
+  );
 });
 
 test('workspace detail agent back face does not render agent level copy', () => {
@@ -741,4 +926,142 @@ test('workspace-local model save posts to the workspace-scoped endpoint', async 
   const body = JSON.parse(captured.opts.body);
   assert.equal(body.model, 'claude-opus-4');
   assert.equal(body.llm_provider, 'claude');
+});
+
+test('showAddTaskModalForAgent preselects the chosen agent as the task assignee', () => {
+  const page = new WorkspaceDetailPage('ws-7');
+  const calls = [];
+  const originalController = global.window.taskModalController;
+  global.window.taskModalController = {
+    openForCreate(workspaceId, prefill, onSave, options) {
+      calls.push({ workspaceId, prefill, options });
+    }
+  };
+  try {
+    page.showAddTaskModalForAgent(encodeURIComponent('Atlas Prime'));
+  } finally {
+    global.window.taskModalController = originalController;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].workspaceId, 'ws-7');
+  assert.equal(calls[0].options.draftAssignmentValue, 'node:Atlas Prime-node-1');
+});
+
+test('showAddTaskModalForAgent with no agent opens the modal without an assignee', () => {
+  const page = new WorkspaceDetailPage('ws-7');
+  const calls = [];
+  const originalController = global.window.taskModalController;
+  global.window.taskModalController = {
+    openForCreate(workspaceId, prefill, onSave, options) {
+      calls.push({ options });
+    }
+  };
+  try {
+    page.showAddTaskModalForAgent('');
+  } finally {
+    global.window.taskModalController = originalController;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.ok(
+    !calls[0].options || !('draftAssignmentValue' in calls[0].options),
+    'no assignment value is forced when no agent is given'
+  );
+});
+
+test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding access set', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }, { id: 'inst-B', name: 'Bolt' }] };
+  const persisted = [];
+  page.skillsManager.getWorkspaceSkillAgentAccessSelections = () => [
+    { id: 'inst-A', checked: false },
+    { id: 'inst-B', checked: true }
+  ];
+  page.skillsManager.persistWorkspaceSkillAgentAccess = async (bindingId, ids) => {
+    persisted.push([bindingId, ids]);
+  };
+  page.loadWorkspace = async () => {};
+
+  const ok = await page.setAgentWorkspaceCapabilityEnabled('skill', 'Atlas', 'sk-1', true);
+
+  assert.equal(ok, true);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0][0], 'sk-1');
+  assert.deepEqual([...persisted[0][1]].sort(), ['inst-A', 'inst-B']);
+});
+
+test('setAgentWorkspaceCapabilityEnabled removes the agent when disabling', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }, { id: 'inst-B', name: 'Bolt' }] };
+  const persisted = [];
+  page.mcpManager.getWorkspaceMCPAgentAccessSelections = () => [
+    { id: 'inst-A', checked: true },
+    { id: 'inst-B', checked: true }
+  ];
+  page.mcpManager.persistWorkspaceMCPAgentAccess = async (bindingId, ids) => {
+    persisted.push([bindingId, ids]);
+  };
+  page.loadWorkspace = async () => {};
+
+  await page.setAgentWorkspaceCapabilityEnabled('mcp', 'Atlas', 'mcp-1', false);
+
+  assert.deepEqual(persisted[0][1], ['inst-B']);
+});
+
+test('addAgentWorkspaceCapability creates a workspace MCP binding then enables it for the agent', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }] };
+  page.mcpManager.getWorkspaceMCPBindings = () => [];
+  page.loadWorkspace = async () => {};
+  const enableCalls = [];
+  page.setAgentWorkspaceCapabilityEnabled = async (...a) => {
+    enableCalls.push(a);
+    return true;
+  };
+  const fetchCalls = [];
+  const origFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    fetchCalls.push([url, opts]);
+    return { ok: true, json: async () => ({ binding: { id: 'b1' } }), text: async () => '' };
+  };
+  try {
+    const ok = await page.addAgentWorkspaceCapability('mcp', 'Atlas', 'weather');
+    assert.equal(ok, true);
+  } finally {
+    global.fetch = origFetch;
+  }
+
+  assert.equal(fetchCalls.length, 1);
+  assert.match(fetchCalls[0][0], /\/api\/workspaces\/ws-1\/mcp-bindings$/);
+  assert.equal(fetchCalls[0][1].method, 'POST');
+  assert.deepEqual(JSON.parse(fetchCalls[0][1].body), { server_name: 'weather', enabled: true });
+  assert.deepEqual(enableCalls, [['mcp', 'Atlas', 'b1', true]]);
+});
+
+test('addAgentWorkspaceCapability reuses an existing enabled binding without a POST', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }] };
+  page.skillsManager.getWorkspaceSkillBindings = () => [
+    { id: 'sk-existing', skillName: 'planner', enabled: true }
+  ];
+  const enableCalls = [];
+  page.setAgentWorkspaceCapabilityEnabled = async (...a) => {
+    enableCalls.push(a);
+    return true;
+  };
+  const origFetch = global.fetch;
+  let fetched = false;
+  global.fetch = async () => {
+    fetched = true;
+    return { ok: true, json: async () => ({}), text: async () => '' };
+  };
+  try {
+    await page.addAgentWorkspaceCapability('skill', 'Atlas', 'planner');
+  } finally {
+    global.fetch = origFetch;
+  }
+
+  assert.equal(fetched, false, 'no binding is created when one already exists enabled');
+  assert.deepEqual(enableCalls, [['skill', 'Atlas', 'sk-existing', true]]);
 });

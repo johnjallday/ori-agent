@@ -16,7 +16,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
@@ -61,6 +60,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "rescan":
 		h.handleWorkspaceRescan(w, r)
 		return
+	case "template-agent-plan":
+		h.handleTemplateAgentPlan(w, r)
+		return
 	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout
@@ -91,6 +93,11 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "restore":
 			h.restoreWorkspace(w, r, id)
 			return
+		case "template-setup":
+			if len(parts) == 3 && parts[2] == "start" {
+				h.handleTemplateSetupStart(w, r, id)
+				return
+			}
 		}
 	}
 
@@ -191,22 +198,24 @@ func splitWorkspaceBootstrapValues(raw string) []string {
 
 // createWorkspaceRequest is the JSON body of POST /api/workspaces.
 type createWorkspaceRequest struct {
-	Name               string                     `json:"name"`
-	Kind               string                     `json:"kind,omitempty"`
-	WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
-	Description        string                     `json:"description,omitempty"`
-	ParentID           string                     `json:"parent_id,omitempty"`
-	OrderIndex         *int                       `json:"order_index,omitempty"`
-	Color              string                     `json:"color,omitempty"`
-	ProjectPath        string                     `json:"project_path,omitempty"`
-	FolderSlug         string                     `json:"folder_slug,omitempty"`
-	Location           string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
-	EntryAgentName     string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
-	WorkspaceBootstrap *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
-	TemplateID         string                     `json:"template_id,omitempty"`   // Optional project template from the library
-	TemplatePath       string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
-	ProjectName        string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
-	Tags               []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
+	Name                   string                     `json:"name"`
+	Kind                   string                     `json:"kind,omitempty"`
+	WorkspacePreset        string                     `json:"workspace_preset,omitempty"`
+	Description            string                     `json:"description,omitempty"`
+	ParentID               string                     `json:"parent_id,omitempty"`
+	OrderIndex             *int                       `json:"order_index,omitempty"`
+	Color                  string                     `json:"color,omitempty"`
+	ProjectPath            string                     `json:"project_path,omitempty"`
+	FolderSlug             string                     `json:"folder_slug,omitempty"`
+	Location               string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
+	EntryAgentName         string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
+	WorkspaceBootstrap     *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
+	TemplateID             string                     `json:"template_id,omitempty"`   // Optional project template from the library
+	TemplatePath           string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
+	ProjectName            string                     `json:"project_name,omitempty"`  // Project name for template instantiation (defaults to the workspace name)
+	Tags                   []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
+	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
+	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
 }
 
 // createWorkspace handles POST /api/workspaces. The flow is staged:
@@ -256,6 +265,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolvedTemplate, templateResolveErr = h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
 		templateResolved = templateResolveErr == nil
 	}
+	if templateResolved && createTemplateAgentsEnabled(req) && len(req.TemplateAgentOverrides) > 0 {
+		var err error
+		resolvedTemplate, err = applyTemplateAgentOverrides(resolvedTemplate, req.TemplateAgentOverrides)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+	}
 
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 
@@ -279,14 +296,32 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if responded {
 		return
 	}
+
+	// Local creation implies this data directory owns the workspace: allowlist it
+	// so its agent snapshots are restored (and not wiped) on subsequent startups,
+	// mirroring the import flow. Best-effort; a failure only affects later agent
+	// hydration, not this creation.
+	if h.workspaceAllowlist != nil && ws != nil {
+		if err := h.workspaceAllowlist.Add(ws.ID); err != nil {
+			logger.Warn("Failed to allowlist created workspace", logger.Fields{"id": ws.ID, "error": err.Error()})
+		}
+	}
+
 	agentSeedWarnings := append(seed.Warnings, prov.agentToolWarnings...)
 
+	// Seed the template's starter tasks server-side, after the skeleton is
+	// instantiated and the roster is attached, so they are assigned to a real
+	// entry agent and the setup task only ever adjusts files that already
+	// exist. Best-effort: a failure logs and never fails creation.
+	seededStarterTasks := 0
+	if templateResolved && kind != session.WorkspaceKindGroup {
+		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, resolvedTemplate)
+	}
+
 	// Completeness/ordering backstop: when the workspace was created with an
-	// entry agent (an explicit one, or a group's auto-created manager), claim any
-	// tasks that already exist on the folder workspace. The common flow seeds
-	// starter tasks from the client after this response — where default-on-create
-	// assigns them to the coordinator directly — so this is a no-op there and the
-	// safety net for create-time/import-style seeds.
+	// entry agent, claim any tasks that already exist on the folder workspace
+	// (e.g. import-style seeds). Template starter tasks are assigned at seed
+	// time above, so this is a no-op for them.
 	if seed.EntrySet {
 		h.claimUnassignedTasksForEntryAgentLogged(ws.ID)
 	}
@@ -303,8 +338,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if len(agentSeedWarnings) > 0 {
 		response["agent_warnings"] = agentSeedWarnings
 	}
-	if prov.onboardingSummary != nil {
-		response["onboarding"] = prov.onboardingSummary
+	if len(seed.ReuseNotices) > 0 {
+		response["agent_reuse_notices"] = seed.ReuseNotices
+	}
+	if seededStarterTasks > 0 {
+		response["seeded_starter_tasks"] = seededStarterTasks
 	}
 	_ = orihttp.RespondCreated(w, response)
 }
@@ -352,8 +390,9 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 
 // selectCreateWorkspaceEntryAgent applies the create-time entry-agent policy:
 // an explicitly named agent wins; otherwise a template roster seeds agents
-// (first = entry agent); otherwise groups auto-create a "<Name> Manager".
-// Concrete workspaces without any of those stay agent-less so the UI can
+// (first = entry agent), with a "<Name> Manager" auto-created when the
+// template declares no roster; otherwise groups auto-create a "<Name>
+// Manager". Concrete non-template workspaces stay agent-less so the UI can
 // prompt the user to create one with their choice of model/provider.
 // Returns ok=false when an error response has already been written.
 func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool) (seedAgentsResult, bool) {
@@ -370,19 +409,35 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			seed.EntrySet = true
 		}
-	case templateResolved && tmpl.HasAgents():
+	case templateResolved && createTemplateAgentsEnabled(req):
 		// The template declares an agent roster: seed it (first = entry agent,
-		// rest = specialists). A seeded entry agent suppresses the mandatory
-		// "create an entry agent" prompt; if it fails, the workspace is left
-		// agent-less and the prompt fires as the fallback.
-		seed = h.seedTemplateAgents(ws, tmpl)
+		// rest = specialists). Every template-created workspace must end up with
+		// an entry agent to own its seeded starter tasks, so a roster-less
+		// (legacy) template — or a roster whose seeding failed — falls back to
+		// an auto-created "<Name> Manager". An explicit create_template_agents:
+		// false opt-out skips this case entirely: the caller chose to pick
+		// agents post-create, and the claim-on-agent-add sweep hands the seeded
+		// tasks over when the first agent joins.
+		if tmpl.HasAgents() {
+			seed = h.seedTemplateAgents(ws, tmpl)
+		}
+		if !seed.EntrySet {
+			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+				setWorkspaceEntryAgent(ws, agentName)
+				seed.EntrySet = true
+			}
+		}
 	case kind == session.WorkspaceKindGroup:
-		if agentName := h.autoCreateGroupEntryAgent(ws); agentName != "" {
+		if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)
 			seed.EntrySet = true
 		}
 	}
 	return seed, true
+}
+
+func createTemplateAgentsEnabled(req createWorkspaceRequest) bool {
+	return req.CreateTemplateAgents == nil || *req.CreateTemplateAgents
 }
 
 // createTemplateContext bundles the template-resolution results that folder
@@ -398,7 +453,6 @@ type createTemplateContext struct {
 // createWorkspace's response assembly.
 type createProvisionOutcome struct {
 	projectWarning    string
-	onboardingSummary any
 	agentToolWarnings []string
 }
 
@@ -496,53 +550,37 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	logger.Info("Workspace folder created on disk", logger.Fields{"id": ws.ID, "path": folderPath})
 
 	if tc.wantsProject {
-		out.projectWarning, out.onboardingSummary = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
+		out.projectWarning = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
 	}
 	return out, false
 }
 
 // applyCreateWorkspaceTemplate applies the selected project template to a
-// freshly-provisioned (non-group) workspace folder: template onboarding when
-// declared, direct instantiation otherwise, plus the template's default tool
-// bindings. Never fatal — a failure is reported via the returned warning.
-func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string, onboardingSummary any) {
-	onboardingHandled := false
-	if tc.resolved && h.templateOnboarding != nil && tc.template.HasOnboarding() {
-		summary, handled, err := h.templateOnboarding.ResolveAndStart(ctx, ws, tc.template, templateonboarding.StartOptions{
-			TemplateID:   req.TemplateID,
-			TemplatePath: tc.template.Path,
-			ProjectName:  req.ProjectName,
-		})
-		onboardingHandled = handled
-		if summary != nil {
-			onboardingSummary = summary
-		}
-		if handled {
-			if err != nil {
-				projectWarning = fmt.Sprintf("workspace was created, but template onboarding could not start: %v", err)
-				logger.Warn("Template onboarding session creation failed", logger.Fields{"id": ws.ID, "template": tc.template.ID, "error": err})
-			} else {
-				logger.Info("Template onboarding session created", logger.Fields{"id": ws.ID, "template": tc.template.ID})
+// freshly-provisioned (non-group) workspace folder: direct skeleton
+// instantiation plus the template's default tool bindings. A legacy
+// `onboarding` block in the manifest is ignored (the intake engine was
+// replaced by setup starter tasks). Never fatal — a failure is reported via
+// the returned warning.
+func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWorkspaceRequest, ws *session.Workspace, folderWS *agentworkspace.Workspace, tc createTemplateContext) (projectWarning string) {
+	switch {
+	case tc.resolved && !tc.template.HasSkeleton:
+		// Metadata-only template (no files): there is no project to
+		// scaffold by design. Its behavior/tools/starter-tasks still
+		// apply; skip instantiation without surfacing a warning.
+		logger.Info("Metadata-only template: skipping project scaffold", logger.Fields{"id": ws.ID, "template": tc.template.ID})
+	default:
+		// Non-fatal by design: a failed instantiation must not fail
+		// workspace creation. The warning is surfaced to the user.
+		result, err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName)
+		if err != nil {
+			if tc.resolveErr != nil {
+				err = tc.resolveErr
 			}
-		}
-	}
-	if !onboardingHandled {
-		switch {
-		case tc.resolved && !tc.template.HasSkeleton:
-			// Metadata-only template (no files): there is no project to
-			// scaffold by design. Its behavior/tools/starter-tasks still
-			// apply; skip instantiation without surfacing a warning.
-			logger.Info("Metadata-only template: skipping project scaffold", logger.Fields{"id": ws.ID, "template": tc.template.ID})
-		default:
-			// Non-fatal by design: a failed instantiation must not fail
-			// workspace creation. The warning is surfaced to the user.
-			if err := h.instantiateWorkspaceProject(ctx, ws, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
-				if tc.resolveErr != nil {
-					err = tc.resolveErr
-				}
-				projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
-				logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
-			}
+			projectWarning = fmt.Sprintf("workspace was created, but the project template was not applied: %v", err)
+			logger.Warn("Project template instantiation failed", logger.Fields{"id": ws.ID, "error": err})
+		} else if result.ProjectWarning != "" {
+			projectWarning = result.ProjectWarning
+			logger.Warn("Project entry was not persisted", logger.Fields{"id": ws.ID, "warning": result.ProjectWarning})
 		}
 	}
 
@@ -565,7 +603,7 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 			}
 		}
 	}
-	return projectWarning, onboardingSummary
+	return projectWarning
 }
 
 func workspacePathsEqual(a, b string) bool {

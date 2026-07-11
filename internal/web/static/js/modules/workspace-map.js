@@ -1,7 +1,8 @@
 /*
  * workspace-map.js — Workspace Map view ("tactical command-center")
  *
- * Opt-in third view on the /workspaces hub, beside Cards and Tree. Loaded as a
+ * Primary browse/open view on the /workspaces hub, beside the Tree management
+ * view. Loaded as a
  * plain deferred script (not an ES module); exposes itself on
  * window.OriWorkspaceMap, which workspace-hub.js calls when the "map" view is
  * active.
@@ -19,6 +20,19 @@
 
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
+
+  // Ids checked for a bulk operation (multi-select), remembered across re-mounts.
+  // Distinct from selectedId: selectedId drives the Overview preview, while this
+  // set drives the multi-select action bar. Only plain workspace tiles (not
+  // group districts) can be multi-selected.
+  var multiSelected = Object.create(null);
+
+  function multiIds() {
+    return Object.keys(multiSelected);
+  }
+  function multiCount() {
+    return multiIds().length;
+  }
 
   // curated, distinct building palettes (picked by stable id hash)
   var PALETTE = [
@@ -224,6 +238,8 @@
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
     var isSel = selectedId && ws.id === selectedId;
     var selected = isSel ? ' is-selected' : '';
+    var isMulti = !!multiSelected[ws.id];
+    var multiCls = isMulti ? ' is-multi' : '';
     var left = PAD + tile.col * CELL_W;
     var top = PAD + tile.row * CELL_H;
     var meta = agents + (agents === 1 ? ' agent' : ' agents') + ' · ' +
@@ -234,12 +250,15 @@
     var actionHint = isSel ? '. Selected — activate to open' : '. Activate to select, double-click to open';
 
     return (
-      '<button type="button" class="ws-map-tile' + selected + '" ' +
+      '<button type="button" class="ws-map-tile' + selected + multiCls + '" ' +
       'data-ws-id="' + escapeHtml(ws.id) + '" ' +
       'aria-pressed="' + (isSel ? 'true' : 'false') + '" ' +
       'style="left:' + left + 'px;top:' + top + 'px;--i:' + (index || 0) + '" ' +
       'aria-label="' + escapeHtml(ws.name || 'Workspace') + ', ' + meta + ', ' + statusText +
       (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + actionHint + '">' +
+      '<span class="ws-map-tile-check" data-ws-check role="checkbox" tabindex="-1" ' +
+      'aria-checked="' + (isMulti ? 'true' : 'false') + '" ' +
+      'aria-label="Select for bulk action" title="Select"></span>' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' + (active ? ' is-working' : '') + '"></span>' +
       escapeHtml(statusText) + '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
@@ -314,6 +333,23 @@
     );
   }
 
+  // Contextual action bar for the multi-select set. Rendered inside the theatre
+  // and shown only while at least one tile is checked. Count text is refreshed
+  // in place by updateSelBar so toggling selection never re-mounts the map.
+  function selBarHTML() {
+    var n = multiCount();
+    return (
+      '<div class="ws-map-selbar" data-ws-selbar' + (n ? '' : ' hidden') + '>' +
+      '<span class="ws-map-selbar-count" data-ws-selbar-count>' + n + ' selected</span>' +
+      '<div class="ws-map-selbar-actions">' +
+      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group>⊕ Group</button>' +
+      '<button type="button" class="ws-map-selbar-del" data-ws-selbar-delete>✕ Delete</button>' +
+      '<button type="button" class="ws-map-selbar-clear" data-ws-selbar-clear>Clear</button>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
   function avatarHTML(name, extraClass) {
     var pal = paletteFor(name);
     return '<span class="ws-map-av' + (extraClass ? ' ' + extraClass : '') +
@@ -321,7 +357,118 @@
       escapeHtml(initials(name)) + '</span>';
   }
 
-  function overviewBodyHTML(ws) {
+  function mapMetadata(options) {
+    return options && options.metadata && typeof options.metadata === 'object'
+      ? options.metadata
+      : {};
+  }
+
+  function metadataValue(options, key, id) {
+    var metadata = mapMetadata(options);
+    var table = metadata && metadata[key];
+    return table && id ? table[id] : null;
+  }
+
+  function normalizeTags(tags) {
+    return (Array.isArray(tags) ? tags : [])
+      .map(function (tag) { return String(tag || '').trim(); })
+      .filter(Boolean);
+  }
+
+  function folderDisplayFor(ws, options) {
+    if (!ws || !ws.id) return null;
+    return metadataValue(options, 'folderDisplayById', ws.id) ||
+      ws.map_folder_display ||
+      ws.folder_display ||
+      null;
+  }
+
+  function tagsFor(ws, options) {
+    if (!ws || !ws.id) return [];
+    return normalizeTags(metadataValue(options, 'tagsById', ws.id) || ws.tags);
+  }
+
+  function groupPreviewFor(ws, options) {
+    if (!ws || !ws.id || !isGroup(ws)) return null;
+    var fromMetadata = metadataValue(options, 'groupPreviewById', ws.id);
+    if (fromMetadata) return fromMetadata;
+
+    var children = Array.isArray(ws.children) ? ws.children : [];
+    var names = children.slice(0, 3).map(function (child) {
+      return String(child && (child.name || child.id) || 'Untitled Workspace').trim();
+    }).filter(Boolean);
+    return {
+      childCount: children.length,
+      previewNames: names,
+      overflowCount: Math.max(0, children.length - names.length)
+    };
+  }
+
+  function folderOverviewHTML(ws, options) {
+    var folder = folderDisplayFor(ws, options);
+    if (!folder) return '';
+    var badgeClass = folder.badgeClass || (folder.linked ? 'is-linked' : 'is-unlinked');
+    var badge = folder.badgeLabel || (folder.linked ? 'Linked folder' : 'No folder linked');
+    var detail = folder.detail || (folder.linked ? 'Linked folder' : 'No local folder attached.');
+    var title = folder.detailTitle || detail;
+    return (
+      '<div class="ws-map-ov-label">Folder</div>' +
+      '<div class="ws-map-folder ' + escapeHtml(badgeClass) + '">' +
+      '<span class="ws-map-folder-badge">' + escapeHtml(badge) + '</span>' +
+      '<span class="ws-map-folder-path" title="' + escapeHtml(title) + '">' + escapeHtml(detail) + '</span>' +
+      '</div>'
+    );
+  }
+
+  function tagsOverviewHTML(ws, options) {
+    var tags = tagsFor(ws, options);
+    var workspaceId = ws && ws.id ? String(ws.id) : '';
+    var limit = 4;
+    var visible = tags.slice(0, limit);
+    var overflow = Math.max(0, tags.length - visible.length);
+    var body = '';
+
+    if (!tags.length) {
+      body = '<span class="ws-map-ov-none">No tags yet</span>';
+    } else {
+      body = '<div class="ws-map-tags">' + visible.map(function (tag) {
+        var safeTag = escapeHtml(tag);
+        return (
+          '<span class="ws-map-tag" title="' + safeTag + '">' +
+          '<button type="button" class="ws-map-tag-label" data-ws-tag-filter="' + safeTag + '" title="Filter by ' + safeTag + '">' + safeTag + '</button>' +
+          '<button type="button" class="ws-map-tag-remove" data-ws-tag-remove="' + escapeHtml(workspaceId) + '" data-ws-tag="' + safeTag + '" aria-label="Remove tag ' + safeTag + '" title="Remove tag">&times;</button>' +
+          '</span>'
+        );
+      }).join('') +
+        (overflow > 0
+          ? '<span class="ws-map-tag ws-map-tag-more" title="' + escapeHtml(tags.slice(limit).join(', ')) + '">+' + overflow + ' more</span>'
+          : '') +
+        '</div>';
+    }
+
+    return '<div class="ws-map-ov-label">Tags</div>' + body;
+  }
+
+  function groupPreviewHTML(ws, options) {
+    var preview = groupPreviewFor(ws, options);
+    if (!preview) return '';
+    var count = Number(preview.childCount || 0);
+    var names = normalizeTags(preview.previewNames);
+    var overflow = Number(preview.overflowCount || 0);
+    var summary = count + ' workspace' + (count === 1 ? '' : 's');
+    var body = names.length
+      ? names.join(' · ') + (overflow > 0 ? ' +' + overflow + ' more' : '')
+      : 'Drop workspaces here to organize related work.';
+    return (
+      '<div class="ws-map-ov-label">Group Preview</div>' +
+      '<div class="ws-map-group-preview">' +
+      '<span class="ws-map-group-count">' + escapeHtml(summary) + '</span>' +
+      '<span class="ws-map-group-names" title="' + escapeHtml(body) + '">' + escapeHtml(body) + '</span>' +
+      '</div>'
+    );
+  }
+
+  function overviewBodyHTML(ws, options) {
     if (!ws) {
       return '<div class="ws-map-overview-empty"><span class="ws-big">◈</span>' +
         'Select a workspace to see its agents, tasks, tools, and skills.</div>';
@@ -333,6 +480,8 @@
     var openTasks = Number(ws.open_task_count || 0);
     var mcp = Number(ws.mcp_count || 0);
     var skills = Number(ws.skill_count || 0);
+    var description = String(ws.description || '').trim();
+    var delLabel = isGroup(ws) ? 'Delete group' : 'Delete workspace';
 
     var keeper = entry
       ? '<div class="ws-map-ov-keeper">' + avatarHTML(entry, 'is-keeper') +
@@ -353,6 +502,12 @@
       '<button type="button" class="ws-map-ov-open" data-ws-open="' + escapeHtml(ws.id) +
       '" aria-label="Open ' + escapeHtml(ws.name || 'workspace') + '">Open ▸</button>' +
       '</div>' +
+      (description
+        ? '<p class="ws-map-ov-desc" title="' + escapeHtml(description) + '">' + escapeHtml(description) + '</p>'
+        : '<p class="ws-map-ov-desc is-empty">No description yet.</p>') +
+      folderOverviewHTML(ws, options) +
+      tagsOverviewHTML(ws, options) +
+      groupPreviewHTML(ws, options) +
       '<div class="ws-map-ov-label">Entry agent</div>' +
       '<div class="ws-map-ov-keeperwrap">' + keeper + '</div>' +
       '<div class="ws-map-ov-label">Agents · ' + agents.length + '</div>' +
@@ -362,11 +517,15 @@
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tools · MCP</span>' +
       '<span class="ws-map-ov-v">' + mcp + '</span></div>' +
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Skills</span>' +
-      '<span class="ws-map-ov-v">' + skills + '</span></div>'
+      '<span class="ws-map-ov-v">' + skills + '</span></div>' +
+      '<div class="ws-map-ov-actions">' +
+      '<button type="button" class="ws-map-ov-delete" data-ws-delete="' + escapeHtml(ws.id) +
+      '" aria-label="' + escapeHtml(delLabel + ' ' + (ws.name || '')) + '">✕ ' + escapeHtml(delLabel) + '</button>' +
+      '</div>'
     );
   }
 
-  function shellHTML(stats, workspaces, selectedId, maxCols) {
+  function shellHTML(stats, workspaces, selectedId, maxCols, options) {
     var canvas = (Array.isArray(workspaces) && workspaces.length > 0)
       ? canvasHTML(workspaces, selectedId, maxCols).html
       : emptyCanvasHTML();
@@ -398,10 +557,16 @@
       '<aside class="ws-map-overview" role="region" aria-label="Workspace overview">' +
       '<div class="ws-map-overview-head"><div><span class="ws-map-ix">WS</span> <h3>Overview</h3></div></div>' +
       '<div class="ws-map-overview-body">' +
-      overviewBodyHTML(findWs(workspaces, selectedId)) +
+      overviewBodyHTML(findWs(workspaces, selectedId), options) +
       '</div>' +
       '</aside>' +
-      '</div>'
+      '</div>' +
+      // The selbar is position:fixed, so it must live OUTSIDE .ws-map-theatre —
+      // that panel's clip-path + overflow:hidden would otherwise clip the bar
+      // (fixed descendants are still clipped by an ancestor's clip-path), making
+      // it invisible at the viewport bottom. Kept inside the container so
+      // bindSelBar/updateSelBar still resolve it.
+      selBarHTML()
     );
   }
 
@@ -465,17 +630,52 @@
     if (id) window.location.href = '/workspaces/' + encodeURIComponent(id);
   }
 
-  function bindOverviewActions(container) {
+  function deleteWorkspace(id) {
+    if (!id) return;
+    // Reuse the hub's single-item delete flow (confirm modal, group handling,
+    // Trash + Undo, toasts). It reloads on success, which re-mounts the map.
+    if (window.WorkspaceHub && typeof window.WorkspaceHub.deleteWorkspace === 'function') {
+      window.WorkspaceHub.deleteWorkspace(id);
+    }
+  }
+
+  function bindOverviewActions(container, options) {
     var opens = container.querySelectorAll('[data-ws-open]');
     Array.prototype.forEach.call(opens, function (el) {
       el.addEventListener('click', function () {
         openWorkspace(el.getAttribute('data-ws-open'));
       });
     });
+    var deletes = container.querySelectorAll('[data-ws-delete]');
+    Array.prototype.forEach.call(deletes, function (el) {
+      el.addEventListener('click', function () {
+        deleteWorkspace(el.getAttribute('data-ws-delete'));
+      });
+    });
+    var tagFilters = container.querySelectorAll('[data-ws-tag-filter]');
+    Array.prototype.forEach.call(tagFilters, function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        var callback = options && options.onTagFilter;
+        if (typeof callback === 'function') {
+          callback(el.getAttribute('data-ws-tag-filter'));
+        }
+      });
+    });
+    var tagRemoves = container.querySelectorAll('[data-ws-tag-remove]');
+    Array.prototype.forEach.call(tagRemoves, function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        var callback = options && options.onTagRemove;
+        if (typeof callback === 'function') {
+          callback(el.getAttribute('data-ws-tag-remove'), el.getAttribute('data-ws-tag'));
+        }
+      });
+    });
   }
 
   // Update selection in place (no full re-mount) to avoid flicker.
-  function applySelection(container, workspaces, id) {
+  function applySelection(container, workspaces, id, options) {
     selectedId = id;
     var tiles = container.querySelectorAll('.ws-map-tile');
     Array.prototype.forEach.call(tiles, function (el) {
@@ -485,22 +685,92 @@
     });
     var body = container.querySelector('.ws-map-overview-body');
     if (body) {
-      body.innerHTML = overviewBodyHTML(findWs(workspaces, id));
-      bindOverviewActions(container);
+      body.innerHTML = overviewBodyHTML(findWs(workspaces, id), options);
+      bindOverviewActions(container, options);
     }
   }
 
-  function bindTiles(container, workspaces) {
+  // Refresh the multi-select action bar and per-tile checked state in place
+  // (no re-mount) to keep toggling flicker-free.
+  function updateSelBar(container) {
+    var n = multiCount();
+    var bar = container.querySelector('[data-ws-selbar]');
+    if (bar) {
+      bar.hidden = n === 0;
+      var count = bar.querySelector('[data-ws-selbar-count]');
+      if (count) count.textContent = n + ' selected';
+    }
+    var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
+    Array.prototype.forEach.call(tiles, function (el) {
+      var on = !!multiSelected[el.getAttribute('data-ws-id')];
+      el.classList.toggle('is-multi', on);
+      var check = el.querySelector('[data-ws-check]');
+      if (check) check.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  }
+
+  function toggleMulti(container, id) {
+    if (!id) return;
+    if (multiSelected[id]) delete multiSelected[id];
+    else multiSelected[id] = true;
+    updateSelBar(container);
+  }
+
+  function clearMulti(container) {
+    multiSelected = Object.create(null);
+    updateSelBar(container);
+  }
+
+  function deleteMulti() {
+    var ids = multiIds();
+    if (!ids.length) return;
+    // Reuse the hub's batch delete (confirm + Trash + Undo). On success it
+    // reloads and re-mounts the map, where mount() prunes the deleted ids.
+    if (window.WorkspaceHub && typeof window.WorkspaceHub.deleteWorkspaces === 'function') {
+      window.WorkspaceHub.deleteWorkspaces(ids);
+    }
+  }
+
+  function groupMulti() {
+    var ids = multiIds();
+    if (!ids.length) return;
+    // Reuse the hub's Create Group modal + create/reparent flow. On success it
+    // reloads and re-mounts the map, where mount() prunes the grouped ids.
+    if (window.WorkspaceHub && typeof window.WorkspaceHub.groupWorkspaces === 'function') {
+      window.WorkspaceHub.groupWorkspaces(ids);
+    }
+  }
+
+  function bindSelBar(container) {
+    var group = container.querySelector('[data-ws-selbar-group]');
+    if (group) group.addEventListener('click', function () { groupMulti(); });
+    var del = container.querySelector('[data-ws-selbar-delete]');
+    if (del) del.addEventListener('click', function () { deleteMulti(); });
+    var clr = container.querySelector('[data-ws-selbar-clear]');
+    if (clr) clr.addEventListener('click', function () { clearMulti(container); });
+  }
+
+  function bindTiles(container, workspaces, options) {
     var selectables = container.querySelectorAll(
       '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
     );
     Array.prototype.forEach.call(selectables, function (el) {
+      var isTile = el.classList.contains('ws-map-tile');
       // Single click selects; clicking (or Enter, which fires click on a
       // button) an already-selected tile opens it. Double-click always opens.
-      el.addEventListener('click', function () {
+      // The corner checkbox — or a Cmd/Ctrl/Shift-click anywhere on a tile —
+      // toggles the tile into the multi-select set instead (group districts
+      // can't be multi-selected).
+      el.addEventListener('click', function (e) {
         var id = el.getAttribute('data-ws-id');
+        var onCheck = e.target && e.target.closest && e.target.closest('[data-ws-check]');
+        if (isTile && (onCheck || e.metaKey || e.ctrlKey || e.shiftKey)) {
+          e.preventDefault();
+          toggleMulti(container, id);
+          return;
+        }
         if (id && id === selectedId) { openWorkspace(id); return; }
-        applySelection(container, workspaces, id);
+        applySelection(container, workspaces, id, options);
       });
       el.addEventListener('dblclick', function () {
         openWorkspace(el.getAttribute('data-ws-id'));
@@ -522,14 +792,21 @@
     selectedId = findWs(workspaces, selectedId) ? selectedId
       : (findWs(workspaces, incoming) ? incoming : pickDefaultSelection(workspaces));
 
+    // Drop any multi-selected ids that no longer exist (e.g. after a delete
+    // reload) so the action bar count stays truthful.
+    multiIds().forEach(function (id) {
+      if (!findWs(workspaces, id)) delete multiSelected[id];
+    });
+
     var maxCols = measureMaxCols(container);
     lastMount = { container: container, state: state };
     lastMaxCols = maxCols;
 
-    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId, maxCols);
+    container.innerHTML = shellHTML(computeStats(workspaces), workspaces, selectedId, maxCols, state);
     bindCreate(container);
-    bindTiles(container, workspaces);
-    bindOverviewActions(container);
+    bindTiles(container, workspaces, state);
+    bindOverviewActions(container, state);
+    bindSelBar(container);
 
     if (!resizeBound && typeof window.addEventListener === 'function') {
       window.addEventListener('resize', handleResize);
@@ -542,6 +819,7 @@
     if (!container) return;
     container.innerHTML = '';
     lastMount = null;
+    multiSelected = Object.create(null);
   }
 
   window.OriWorkspaceMap = {
@@ -551,6 +829,7 @@
     computeStats: computeStats,
     computeMaxCols: computeMaxCols,
     tileHTML: tileHTML,
-    overviewBodyHTML: overviewBodyHTML
+    overviewBodyHTML: overviewBodyHTML,
+    selBarHTML: selBarHTML
   };
 })();

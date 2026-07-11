@@ -1385,13 +1385,10 @@ async function loadAgentsForSidebar() {
   try {
     const data = await API.get('/api/agents');
     const all = Array.isArray(data.agents) ? data.agents : [];
-    // Hide workspace-scoped agents (workspace entry agents) from the
-    // global sidebar — they're bound to a specific workspace context.
-    const visible = all.filter((agent) => {
-      if (!agent) return false;
-      const scope = typeof agent === 'object' ? String(agent.scope || '').toLowerCase() : '';
-      return scope !== 'workspace';
-    });
+    // Every definition is listed — entry agents are no longer hidden from the
+    // global sidebar; their workspace membership is surfaced elsewhere
+    // (PRD FR6). Keep only well-formed entries.
+    const visible = all.filter((agent) => !!agent);
     agentsLog.debug('Received agents', { count: all.length, visible: visible.length });
     displayAgents(visible, resolveSidebarCurrentAgent());
 

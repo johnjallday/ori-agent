@@ -33,7 +33,7 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 		}
 	}
 
-	// Scaffold starters keep their files, onboarding, and are flagged builtin.
+	// Scaffold starters keep their files and are flagged builtin.
 	reaper := byID["reaper-song"]
 	if reaper.Name != "Reaper Song" || !reaper.Builtin || !reaper.HasSkeleton {
 		t.Errorf("reaper-song: %+v", reaper)
@@ -41,8 +41,17 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if len(reaper.Tags) != 2 || reaper.Tags[0] != "music" || reaper.Tags[1] != "reaper" {
 		t.Errorf("reaper starter tags not applied: %+v", reaper.Tags)
 	}
-	if !reaper.HasOnboarding() {
-		t.Error("reaper starter should carry template onboarding")
+	if reaper.HasOnboarding() {
+		t.Error("reaper starter must not carry the legacy intake onboarding block")
+	}
+	if len(reaper.StarterTasks) == 0 || !reaper.StarterTasks[0].Setup {
+		t.Errorf("reaper starter should lead with a setup starter task: %+v", reaper.StarterTasks)
+	}
+	if reaper.BuiltinVersion < 3 {
+		t.Errorf("reaper starter builtin_version = %d, want at least 3", reaper.BuiltinVersion)
+	}
+	if reaper.ProjectEntry == nil || reaper.ProjectEntry.RelativePath != "{{name}}.rpp" || !reaper.ProjectEntry.OpenAfterCreateDefault {
+		t.Errorf("reaper starter project entry is not configured for default launch: %#v", reaper.ProjectEntry)
 	}
 	if writing := byID["writing-project"]; !writing.Builtin || !writing.HasSkeleton ||
 		len(writing.Tags) != 1 || writing.Tags[0] != "writing" {
@@ -154,6 +163,41 @@ func TestEnsureLibraryRefreshesBuiltinManifestOnVersionBump(t *testing.T) {
 	}
 }
 
+func TestEnsureLibraryRefreshesReaperProjectEntryOnVersionBump(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "templates")
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	reaperDir := filepath.Join(dir, "reaper-song")
+	manifestPath := filepath.Join(reaperDir, ManifestFileName)
+	if err := os.WriteFile(manifestPath, []byte(`{"name":"Reaper Song","builtin":true,"builtin_version":2}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	seed := filepath.Join(reaperDir, "{{name}}.rpp")
+	if err := os.WriteFile(seed, []byte("user-edited reaper project"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary (refresh): %v", err)
+	}
+	refreshed, err := FindLibraryTemplate(dir, "reaper-song")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if refreshed.BuiltinVersion < 3 {
+		t.Errorf("reaper builtin_version = %d, want at least 3", refreshed.BuiltinVersion)
+	}
+	if refreshed.ProjectEntry == nil || refreshed.ProjectEntry.RelativePath != "{{name}}.rpp" || !refreshed.ProjectEntry.OpenAfterCreateDefault {
+		t.Errorf("refreshed Reaper project entry = %#v", refreshed.ProjectEntry)
+	}
+	data, err := os.ReadFile(seed)
+	if err != nil || string(data) != "user-edited reaper project" {
+		t.Errorf("Reaper seed should survive manifest refresh, got %q err=%v", string(data), err)
+	}
+}
+
 func TestStarterInstantiatesEndToEnd(t *testing.T) {
 	// Generality gate (PRD success metric 2): both starters run through the
 	// identical engine path; the music template is in no way special.
@@ -163,24 +207,43 @@ func TestStarterInstantiatesEndToEnd(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		id       string
-		wantFile string
+		id        string
+		wantFile  string
+		wantEntry string
 	}{
-		{"reaper-song", "midnight.rpp"},
-		{"writing-project", "outline.md"},
+		{"reaper-song", "midnight.rpp", "midnight.rpp"},
+		{"writing-project", "outline.md", ""},
 	} {
 		wsDir := t.TempDir()
 		tpl, err := FindLibraryTemplate(libDir, tc.id)
 		if err != nil {
 			t.Fatalf("FindLibraryTemplate(%s): %v", tc.id, err)
 		}
-		rel, err := Instantiate(tpl.Path, wsDir, "Midnight")
+		result, err := InstantiateTemplate(tpl, wsDir, "Midnight")
 		if err != nil {
 			t.Fatalf("Instantiate(%s): %v", tc.id, err)
 		}
-		target := filepath.Join(wsDir, rel, tc.wantFile)
+		target := filepath.Join(wsDir, result.ProjectPath, tc.wantFile)
 		if _, err := os.Stat(target); err != nil {
 			t.Errorf("%s: expected %s: %v", tc.id, tc.wantFile, err)
+		}
+		if result.ProjectEntryPath != tc.wantEntry || result.ProjectWarning != "" {
+			t.Errorf("%s: project entry = %q warning = %q, want %q without warning", tc.id, result.ProjectEntryPath, result.ProjectWarning, tc.wantEntry)
+		}
+		if tc.id == "reaper-song" {
+			entries, err := os.ReadDir(filepath.Join(wsDir, result.ProjectPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rppCount := 0
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".rpp") {
+					rppCount++
+				}
+			}
+			if rppCount != 1 {
+				t.Errorf("reaper-song scaffold contains %d .rpp files, want exactly one", rppCount)
+			}
 		}
 	}
 }

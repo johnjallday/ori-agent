@@ -22,14 +22,67 @@ async function openCreateModal(page: Page) {
     window.bootstrap.Modal.getOrCreateInstance(el).show();
   });
   await expect(page.locator('#addFolderModal')).toBeVisible();
-  // The show handler renders the Starting-point grid.
-  await expect(page.locator('#folderTemplateGrid .workspace-template-card')).toHaveCount(6);
+  // The show handler renders the unified Template picker.
+  await expect(cardByLabel(page, 'Blank')).toBeVisible();
+  await expect(cardByLabel(page, 'Research Project')).toBeVisible();
+  await expect(cardByLabel(page, 'Travels')).toBeVisible();
+  await expect(cardByLabel(page, 'Content Production')).toBeVisible();
 }
 
 function cardByLabel(page: Page, label: string) {
   return page
-    .locator('#folderTemplateGrid .workspace-template-card')
+    .locator('#templatePicker .workspace-template-card')
     .filter({ has: page.locator('.workspace-template-card-label', { hasText: new RegExp(`^${label}$`) }) });
+}
+
+async function routeProjectEntryTemplates(page: Page) {
+  await page.route('**/api/project-templates', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        templates_root: '/tmp/templates',
+        templates: [
+          { id: 'research-project', name: 'Research Project', builtin: true, behavior_profile: 'research' },
+          { id: 'travels', name: 'Travels', builtin: true, behavior_profile: 'general' },
+          { id: 'content-production', name: 'Content Production', builtin: true, behavior_profile: 'general' },
+          {
+            id: 'auto-project',
+            name: 'Auto Project',
+            description: 'Template with automatic project opening.',
+            builtin: true,
+            behavior_profile: 'general',
+            project_entry: { relative_path: '{{name}}.rpp', open_after_create_default: true }
+          },
+          {
+            id: 'manual-project',
+            name: 'Manual Project',
+            description: 'Template with optional project opening.',
+            builtin: true,
+            behavior_profile: 'general',
+            project_entry: { relative_path: '{{name}}.rpp', open_after_create_default: false }
+          },
+          { id: 'no-entry', name: 'No Entry', builtin: true, behavior_profile: 'general' }
+        ]
+      })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+    });
+  });
+}
+
+async function stubWorkspaceReview(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { WorkspaceBootstrapReview?: Record<string, unknown> };
+    const r = (w.WorkspaceBootstrapReview = w.WorkspaceBootstrapReview || {});
+    r.ensureReviewed = async () => ({ ready: true });
+    r.applyPlan = async () => ({ invitedAgents: 0, boundMCPs: 0, attachedSkills: 0, addedPlugins: 0, failures: [] });
+  });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -108,6 +161,171 @@ test('switching starting points updates auto-filled name, but never typed input'
   await expect(name).toHaveValue('Travels');
   await cardByLabel(page, 'Blank').click();
   await expect(name).toHaveValue('');
+});
+
+test('project-open option follows template defaults and resets for non-library flows', async ({ page }) => {
+  await routeProjectEntryTemplates(page);
+  await openCreateModal(page);
+
+  const panel = page.locator('#projectTemplateOpenAfterCreate');
+  const toggle = page.locator('#projectTemplateOpenAfterCreateToggle');
+  await expect(panel).toBeHidden();
+  await expect(toggle).not.toBeChecked();
+
+  await cardByLabel(page, 'Auto Project').click();
+  await expect(panel).toBeVisible();
+  await expect(toggle).toBeChecked();
+
+  await toggle.uncheck();
+  await cardByLabel(page, 'Manual Project').click();
+  await expect(panel).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+
+  // Every template change reapplies that template's own default.
+  await cardByLabel(page, 'Auto Project').click();
+  await expect(toggle).toBeChecked();
+  await cardByLabel(page, 'Manual Project').click();
+  await expect(toggle).not.toBeChecked();
+
+  await cardByLabel(page, 'No Entry').click();
+  await expect(panel).toBeHidden();
+  await expect(toggle).not.toBeChecked();
+
+  // An ad-hoc path overrides the selected library template and clears launch.
+  await cardByLabel(page, 'Auto Project').click();
+  await page.locator('#folderAdvancedDisclosure .workspace-advanced-summary').click();
+  await page.locator('#projectTemplatePathInput').fill('/tmp/ad-hoc-template');
+  await expect(panel).toBeHidden();
+  await expect(toggle).not.toBeChecked();
+
+  // Import mode never carries a launch choice.
+  await page.evaluate(() => {
+    (window as unknown as { sessionManager: { setImportModeEnabled: (enabled: boolean) => void } })
+      .sessionManager.setImportModeEnabled(true);
+  });
+  await expect(panel).toBeHidden();
+  await expect(toggle).not.toBeChecked();
+
+  await page.evaluate(() => {
+    const el = document.getElementById('addFolderModal');
+    // @ts-expect-error bootstrap is a page global
+    window.bootstrap.Modal.getInstance(el)?.hide();
+  });
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await openCreateModal(page);
+  await expect(panel).toBeHidden();
+  await expect(toggle).not.toBeChecked();
+});
+
+test('live Reaper Song defaults to launch, supports keyboard opt-out, and never opens on reload', async ({ page }) => {
+  let openCalls = 0;
+  await page.route('**/api/workspaces/**/project/open', async route => {
+    openCalls += 1;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+
+  const panel = page.locator('#projectTemplateOpenAfterCreate');
+  const toggle = page.locator('#projectTemplateOpenAfterCreateToggle');
+  await expect(panel).toBeVisible();
+  await expect(toggle).toBeChecked();
+
+  await toggle.focus();
+  await page.keyboard.press('Space');
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toBeFocused();
+
+  await page.reload();
+  await expect.poll(() => openCalls).toBe(0);
+});
+
+test('checked project-open option posts exactly once after create and before navigation', async ({ page }) => {
+  await routeProjectEntryTemplates(page);
+  await openCreateModal(page);
+  await stubWorkspaceReview(page);
+
+  const calls: string[] = [];
+  await page.route('**/api/workspaces/created-open/project/open', async route => {
+    calls.push('open');
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: 'ok' }) });
+  });
+  await page.route('**/api/workspaces', async route => {
+    calls.push('create');
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'created-open' }, seeded_starter_tasks: 0 })
+    });
+  });
+
+  await cardByLabel(page, 'Auto Project').click();
+  await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).toBeChecked();
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/created-open');
+
+  await expect.poll(() => calls).toEqual(['create', 'open']);
+});
+
+test('unchecked project-open option creates and navigates without an open request', async ({ page }) => {
+  await routeProjectEntryTemplates(page);
+  await openCreateModal(page);
+  await stubWorkspaceReview(page);
+
+  let openCalls = 0;
+  await page.route('**/api/workspaces/created-closed/project/open', async route => {
+    openCalls += 1;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+  await page.route('**/api/workspaces', async route => {
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'created-closed' }, seeded_starter_tasks: 0 })
+    });
+  });
+
+  await cardByLabel(page, 'Manual Project').click();
+  await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/created-closed');
+  await expect.poll(() => openCalls).toBe(0);
+});
+
+test('project-open failure still navigates and shows a one-time retry notice', async ({ page }) => {
+  await routeProjectEntryTemplates(page);
+  await openCreateModal(page);
+  await stubWorkspaceReview(page);
+
+  let openCalls = 0;
+  await page.route('**/api/workspaces/created-failure/project/open', async route => {
+    openCalls += 1;
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'No default app is available.' })
+    });
+  });
+  await page.route('**/api/workspaces', async route => {
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'created-failure' }, seeded_starter_tasks: 0 })
+    });
+  });
+
+  await cardByLabel(page, 'Auto Project').click();
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/created-failure');
+  const retryNotice = page.locator('.toast-message', { hasText: 'Use Open Project to try again' });
+  await expect(retryNotice).toHaveCount(1);
+  await expect.poll(() => openCalls).toBe(1);
+
+  await page.reload();
+  await expect(retryNotice).toHaveCount(0);
+  await expect.poll(() => openCalls).toBe(1);
 });
 
 test('createFolder submits workspace_preset for create and import', async ({ page }) => {

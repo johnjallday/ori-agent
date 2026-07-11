@@ -27,6 +27,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   const LAUNCHER_VIEW_CARDS = 'cards';
   const LAUNCHER_VIEW_TREE = 'tree';
   const LAUNCHER_VIEW_MAP = 'map';
+  const LAUNCHER_DEFAULT_VIEW = LAUNCHER_VIEW_MAP;
   console.log('[workspace-hub] hubEl exists:', !!hubEl);
   if (!hubEl) return;
 
@@ -247,7 +248,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   let launcherOverviewRefreshTimer = null;
   let workspaceListRefreshTimer = null;
   let launcherActiveTab = 'workspaces';
-  let launcherActiveView = LAUNCHER_VIEW_CARDS;
+  let launcherActiveView = LAUNCHER_DEFAULT_VIEW;
   let launcherWorkspaceRootState = null;
   let launcherWorkspaceRootEditorOpen = false;
   let launcherSuppressClickUntil = 0;
@@ -343,9 +344,10 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.launcherOverviewOpenSessions) elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
   }
 
-  // Canonical "N agents · M open tasks" summary, shared by Cards and Tree
-  // rows so switching views reprojects the same facts instead of changing
-  // the subject (Map already shows the same shape in its tile meta line).
+  // Canonical "N agents · M open tasks" summary, shared by Tree rows and
+  // the deprecated Cards fallback so switching views reprojects the same facts
+  // instead of changing the subject (Map already shows the same shape in its
+  // tile meta line).
   function formatWorkspaceSummaryMeta(workspace) {
     const agents = Number(workspace && workspace.agent_count) || 0;
     const openTasks = Number(workspace && workspace.open_task_count) || 0;
@@ -450,6 +452,47 @@ console.log('[workspace-hub.js] FILE LOADED');
       detail: extraCount > 0 ? `${primaryPath} (+${extraCount} more)` : primaryPath,
       detailTitle: allPaths.join(' | ') || primaryPath,
       ariaLabel: directoryCount === 1 ? 'linked folder' : `${directoryCount} linked folders`
+    };
+  }
+
+  function buildLauncherMapMetadata(flattened, tree) {
+    const folderDisplayById = {};
+    const tagsById = {};
+    const groupPreviewById = {};
+
+    (Array.isArray(flattened) ? flattened : []).forEach((workspace) => {
+      if (!workspace || !workspace.id) return;
+      folderDisplayById[workspace.id] = getWorkspaceFolderDisplay(workspace);
+      tagsById[workspace.id] = getWorkspaceTags(workspace);
+    });
+
+    function visitGroups(nodes) {
+      (Array.isArray(nodes) ? nodes : []).forEach((workspace) => {
+        if (!workspace || !workspace.id) return;
+        const children = Array.isArray(workspace.children) ? workspace.children : [];
+        if (isGroupWorkspace(workspace)) {
+          const previewNames = children
+            .slice(0, 3)
+            .map((child) => String(child && (child.name || child.id) || 'Untitled Workspace').trim())
+            .filter(Boolean);
+          groupPreviewById[workspace.id] = {
+            childCount: children.length,
+            previewNames,
+            overflowCount: Math.max(0, children.length - previewNames.length)
+          };
+        }
+        if (children.length > 0) {
+          visitGroups(children);
+        }
+      });
+    }
+
+    visitGroups(tree);
+
+    return {
+      folderDisplayById,
+      tagsById,
+      groupPreviewById
     };
   }
 
@@ -742,28 +785,29 @@ console.log('[workspace-hub.js] FILE LOADED');
     setLauncherTab(saved === 'summary' ? 'summary' : 'workspaces', { force: true });
   }
 
-  function normalizeLauncherView(value) {
+  function normalizeLauncherView(value, options = {}) {
     const v = String(value || '').trim().toLowerCase();
     if (v === LAUNCHER_VIEW_TREE) return LAUNCHER_VIEW_TREE;
     if (v === LAUNCHER_VIEW_MAP) return LAUNCHER_VIEW_MAP;
-    return LAUNCHER_VIEW_CARDS;
+    if (v === LAUNCHER_VIEW_CARDS && options.allowDeprecatedCards !== false) return LAUNCHER_VIEW_CARDS;
+    return LAUNCHER_DEFAULT_VIEW;
   }
 
   function getLauncherViewPreference() {
     try {
       const saved = localStorage.getItem(LAUNCHER_VIEW_STORAGE_KEY);
-      const normalized = normalizeLauncherView(saved);
+      const normalized = normalizeLauncherView(saved, { allowDeprecatedCards: false });
       if (saved && saved !== normalized) {
         localStorage.setItem(LAUNCHER_VIEW_STORAGE_KEY, normalized);
       }
       return normalized;
     } catch (err) {
-      return LAUNCHER_VIEW_CARDS;
+      return LAUNCHER_DEFAULT_VIEW;
     }
   }
 
   function setLauncherViewPreference(view) {
-    const normalized = normalizeLauncherView(view);
+    const normalized = normalizeLauncherView(view, { allowDeprecatedCards: false });
     try {
       localStorage.setItem(LAUNCHER_VIEW_STORAGE_KEY, normalized);
     } catch (err) {
@@ -801,24 +845,24 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   // Reads ?view= from the URL, honoring only values normalizeLauncherView
   // would return unchanged — anything else is silently ignored rather than
-  // falling back to cards (a typo'd param shouldn't override localStorage).
+  // falling back to the default (a typo'd param shouldn't override localStorage).
   function getLauncherViewFromURL() {
     try {
       const raw = new URLSearchParams(window.location.search).get('view');
       if (!raw) return null;
-      const normalized = normalizeLauncherView(raw);
+      const normalized = normalizeLauncherView(raw, { allowDeprecatedCards: true });
       return raw.trim().toLowerCase() === normalized ? normalized : null;
     } catch (err) {
       return null;
     }
   }
 
-  // Deep-linkable, non-spammy: cards (the default) has no param at all, and
+  // Deep-linkable, non-spammy: Map (the default) has no param at all, and
   // every toggle uses replaceState so switching views never grows history.
   function syncLauncherViewToURL(view) {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (view === LAUNCHER_VIEW_CARDS) {
+      if (view === LAUNCHER_DEFAULT_VIEW) {
         params.delete('view');
       } else {
         params.set('view', view);
@@ -855,7 +899,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     // stays plain even if the saved preference is tree/map.
     const urlView = getLauncherViewFromURL();
     const initialView = urlView || getLauncherViewPreference();
-    setLauncherViewMode(initialView, { persist: true, render: false, syncUrl: false });
+    setLauncherViewMode(initialView, { persist: !urlView, render: false, syncUrl: false });
   }
 
   function navigateToWorkspace(workspaceId) {
@@ -1337,11 +1381,12 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   // Cheap alternative to scheduleLauncherOverviewRefresh: a single
-  // /api/workspaces?tree=true refetch keeps Cards/Tree/Map badges (sourced
-  // from each workspace's own enriched summary fields) current after a task
-  // changes, without re-fetching every workspace's task/session list just to
-  // recount them. The heavier overview refresh above stays reserved for the
-  // Summary tab, which needs actual task/session content, not just counts.
+  // /api/workspaces?tree=true refetch keeps Map/Tree/deprecated Cards fallback
+  // badges (sourced from each workspace's own enriched summary fields) current
+  // after a task changes, without re-fetching every workspace's task/session
+  // list just to recount them. The heavier overview refresh above stays
+  // reserved for the Summary tab, which needs actual task/session content, not
+  // just counts.
   function scheduleWorkspaceListRefresh(delayMs = 700) {
     if (workspaceListRefreshTimer) {
       clearTimeout(workspaceListRefreshTimer);
@@ -1881,6 +1926,9 @@ console.log('[workspace-hub.js] FILE LOADED');
           workspaces: visibleFlattened,
           tree,
           selectedId: state.selectedId,
+          metadata: buildLauncherMapMetadata(visibleFlattened, tree),
+          onTagFilter: toggleLauncherTagFilter,
+          onTagRemove: removeWorkspaceTag,
         });
       }
       return;
@@ -3390,6 +3438,15 @@ console.log('[workspace-hub.js] FILE LOADED');
     // Top-level ids only: a checked group is deleted as one branch, so its
     // selected descendants are deduped under it instead of deleted separately.
     const selected = getTopLevelSelectedIds();
+    await confirmAndDeleteWorkspaces(selected);
+  }
+
+  // Confirm-then-delete a batch of workspace ids. Shared by the launcher's
+  // "delete selected" toolbar and the Map view's multi-select action bar. A
+  // single id defers to the per-item confirm (which handles group modals); two
+  // or more show a batch confirm before moving everything to Trash.
+  async function confirmAndDeleteWorkspaces(ids) {
+    const selected = (Array.isArray(ids) ? ids : []).filter(Boolean);
     if (selected.length === 0) return;
 
     if (selected.length === 1) {
@@ -3444,9 +3501,18 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
   }
 
-  // Reset and open the Create Group modal (used by the toolbar button and the
-  // Cmd/Ctrl+G shortcut).
-  function openCreateGroupModal() {
+  // When set, the Create Group modal groups this explicit id set instead of the
+  // List view's checkbox selection. The Map view's "Group selected" action uses
+  // it to funnel its own multi-select set through the same modal + create flow.
+  // Reset to null on every modal open so a cancelled map-group never leaks into
+  // a later List-view group.
+  let pendingGroupMemberIds = null;
+
+  // Reset and open the Create Group modal. Called by the List toolbar button,
+  // the Cmd/Ctrl+G shortcut (no arg → group the List selection), and the Map
+  // view's "Group selected" action (memberIds → group that explicit set).
+  function openCreateGroupModal(memberIds) {
+    pendingGroupMemberIds = Array.isArray(memberIds) && memberIds.length ? memberIds.slice() : null;
     if (!elements.launcherGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
     const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
     if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
@@ -3457,10 +3523,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   async function createGroupFromSelection() {
-    // Top-level ids only: moving a checked group into the new group carries its
-    // members with it, so we must not also move the members (that would flatten
-    // them out of their group).
-    const selected = getTopLevelSelectedIds();
+    // Map view supplies an explicit id set; List view derives one from its
+    // checkbox selection. Top-level ids only: moving a checked group into the
+    // new group carries its members with it, so we must not also move the
+    // members (that would flatten them out of their group).
+    const selected = pendingGroupMemberIds || getTopLevelSelectedIds();
     if (selected.length === 0) return;
 
     const name = (elements.launcherGroupNameInput?.value || '').trim();
@@ -3511,7 +3578,9 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
       if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
 
-      // Reset selection + refresh
+      // Reset selection + refresh. Clearing the List selection is harmless when
+      // the members came from the Map view (that selection set is empty).
+      pendingGroupMemberIds = null;
       clearLauncherSelection({ render: false });
       await loadWorkspaces();
     } catch (err) {
@@ -3977,9 +4046,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     setLauncherTab(launcherActiveTab, { refreshSummary: false, force: true });
-    // Cards/Tree/Map badges already come from state.workspaces' enriched
-    // fields (no fetch needed); only the Summary tab needs a refresh here,
-    // and only when it's the tab actually being shown.
+    // Map/Tree/deprecated Cards fallback badges already come from
+    // state.workspaces' enriched fields (no fetch needed); only the Summary tab
+    // needs a refresh here, and only when it's the tab actually being shown.
     if (launcherActiveTab === 'summary') {
       const flattened = flattenWorkspaces(state.workspaces || []).filter(isConcreteWorkspace);
       void refreshLauncherTaskOverview(flattened);
@@ -4518,9 +4587,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     EventBus.on('task:created', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (hubEl.dataset.state === 'launcher') {
-        // Cheap list refetch keeps Cards/Tree/Map badges current; only
-        // re-run the expensive per-workspace fan-out if the Summary tab
-        // (which needs full task content, not just counts) is open.
+        // Cheap list refetch keeps Map/Tree/deprecated Cards fallback badges
+        // current; only re-run the expensive per-workspace fan-out if the
+        // Summary tab (which needs full task content, not just counts) is open.
         scheduleWorkspaceListRefresh();
         if (launcherActiveTab === 'summary') {
           scheduleLauncherOverviewRefresh();
@@ -4535,9 +4604,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     EventBus.on('task:updated', (data) => {
       const state = window.WorkspaceHubState.getState();
       if (hubEl.dataset.state === 'launcher') {
-        // Cheap list refetch keeps Cards/Tree/Map badges current; only
-        // re-run the expensive per-workspace fan-out if the Summary tab
-        // (which needs full task content, not just counts) is open.
+        // Cheap list refetch keeps Map/Tree/deprecated Cards fallback badges
+        // current; only re-run the expensive per-workspace fan-out if the
+        // Summary tab (which needs full task content, not just counts) is open.
         scheduleWorkspaceListRefresh();
         if (launcherActiveTab === 'summary') {
           scheduleLauncherOverviewRefresh();
@@ -4607,6 +4676,16 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   window.WorkspaceHub = window.WorkspaceHub || {};
   window.WorkspaceHub.loadWorkspaces = loadWorkspaces;
+  // Single-item delete entry point reused by the Map view's Overview panel. It
+  // routes groups to the confirmed group-delete modal and plain workspaces to
+  // the trash confirm, then reloads (which re-mounts the map).
+  window.WorkspaceHub.deleteWorkspace = confirmDeleteWorkspace;
+  // Batch delete (confirm + Trash + Undo) reused by the Map view's multi-select
+  // action bar; also reloads on success, which re-mounts the map.
+  window.WorkspaceHub.deleteWorkspaces = confirmAndDeleteWorkspaces;
+  // Group an explicit id set (the Map view's multi-select) via the shared Create
+  // Group modal + create/reparent flow; reloads on success, re-mounting the map.
+  window.WorkspaceHub.groupWorkspaces = (ids) => openCreateGroupModal(ids);
   window.WorkspaceHub.__test = {
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,

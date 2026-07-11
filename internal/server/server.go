@@ -232,7 +232,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.ShowSidebarToggle = true // Enable sidebar toggle
-	s.renderAndWritePage(w, "agents", data)
+	// The roster/stage redesign is now the default Agents page (G5). The classic
+	// dashboard remains reachable at ?view=classic as a fallback.
+	if r.URL.Query().Get("view") == "classic" {
+		s.renderAndWritePage(w, "agents", data)
+		return
+	}
+	s.renderAndWritePage(w, "agents-roster", data)
 }
 
 // serveActionCenter renders the cross-workspace Action Center page. The page
@@ -428,6 +434,18 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Workspace-scoped agent detail: /workspaces/{id}/agents/{name}. Workspace-
+	// local agents live only in the workspace config.json (not the global agent
+	// store), so this is their detail home rather than /agents/<name>.
+	if len(parts) == 3 && parts[1] == "agents" && strings.TrimSpace(parts[2]) != "" {
+		agentName, err := url.PathUnescape(parts[2])
+		if err != nil {
+			agentName = parts[2]
+		}
+		s.serveWorkspaceAgentDetail(w, workspaceID, agentName)
+		return
+	}
+
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
@@ -502,6 +520,20 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string)
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
 	s.renderAndWritePage(w, "workspace-detail", data)
+}
+
+// serveWorkspaceAgentDetail renders the detail page for a workspace-scoped
+// agent (an entry/manager agent defined in the workspace's config.json). These
+// agents are not registered in the global agent store, so they have no
+// /agents/<name> page; this workspace-scoped route is their home.
+func (s *Server) serveWorkspaceAgentDetail(w http.ResponseWriter, workspaceID, agentName string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Workspace Agent - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["AgentName"] = agentName
+	s.renderAndWritePage(w, "workspace-agent-detail", data)
 }
 
 func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID string) {

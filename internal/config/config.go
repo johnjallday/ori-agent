@@ -194,6 +194,53 @@ func defaultUtilitySettings() UtilitySettings {
 	}
 }
 
+// DefaultDataDir returns the application's base data directory used to anchor
+// runtime state (agent store, and any future CWD-independent data).
+//
+// Resolution order:
+//  1. ORI_DATA_DIR, if set (made absolute).
+//  2. A stable per-user application-support directory
+//     (~/Library/Application Support/OriAgent on macOS, ~/.ori-agent elsewhere).
+//  3. The current working directory as a last resort when the home directory
+//     cannot be determined.
+//
+// Unlike the older CWD-based fallbacks in this package, this deliberately does
+// NOT default to the working directory when a home directory is available, so
+// that the resolved location is identical regardless of where the process was
+// launched from (e.g. the menu-bar app vs. a terminal). This is what makes the
+// agent store survive restarts under a different working directory.
+func DefaultDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("ORI_DATA_DIR")); dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			return abs
+		}
+		return dir
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		if platform.IsMacOS() {
+			return filepath.Join(home, "Library", "Application Support", "OriAgent")
+		}
+		return filepath.Join(home, ".ori-agent")
+	}
+
+	// Home directory unavailable: fall back to the working directory.
+	if cwd, err := os.Getwd(); err == nil {
+		if abs, absErr := filepath.Abs(cwd); absErr == nil {
+			return abs
+		}
+		return cwd
+	}
+	return "."
+}
+
+// DefaultAgentStorePath returns the path to the agent store index file
+// (agents.json) inside the stable data directory. Individual agents are stored
+// in an "agents/" folder alongside it.
+func DefaultAgentStorePath() string {
+	return filepath.Join(DefaultDataDir(), "agents.json")
+}
+
 // DefaultWorkspaceRoot returns the fallback directory used for new workspace folders.
 func DefaultWorkspaceRoot() string {
 	home, err := os.UserHomeDir()

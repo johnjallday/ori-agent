@@ -1192,6 +1192,76 @@
         color: var(--text-muted);
     }
 
+    .ops-agent-membership {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 6px;
+    }
+
+    .ops-membership-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+    }
+
+    .ops-membership-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .ops-membership-chip {
+        display: inline-block;
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        line-height: 1.5;
+        text-decoration: none;
+        color: var(--text-secondary);
+        background: var(--surface-muted, rgba(148, 163, 184, 0.14));
+        border: 1px solid rgba(148, 163, 184, 0.28);
+    }
+
+    a.ops-membership-chip:hover {
+        border-color: rgba(99, 102, 241, 0.5);
+        color: var(--text-primary, inherit);
+    }
+
+    .ops-membership-chip.entry {
+        color: #5b21b6;
+        background: #ede9fe;
+        border-color: rgba(124, 58, 237, 0.25);
+        font-weight: 600;
+    }
+
+    [data-bs-theme="dark"] .ops-membership-chip.entry {
+        color: #c4b5fd;
+        background: rgba(139, 92, 246, 0.18);
+        border-color: rgba(139, 92, 246, 0.35);
+    }
+
+    .ops-membership-more {
+        font-size: 11px;
+        color: var(--text-muted);
+        align-self: center;
+    }
+
+    .ops-membership-pill.library {
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-muted);
+        background: transparent;
+        border: 1px dashed rgba(148, 163, 184, 0.45);
+    }
+
     .ops-card-actions {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1589,6 +1659,7 @@
                 <p>Monitor health, start chats, and fix configuration issues.</p>
             </div>
             <div class="header-actions">
+                <a class="btn" href="/agents" title="Switch to the new roster view">New Agents view</a>
                 <a class="btn btn-primary" href="/agents/create">
                     <span>+</span> New Agent
                 </a>

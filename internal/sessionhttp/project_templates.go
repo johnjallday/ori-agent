@@ -47,55 +47,60 @@ func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (proje
 	}
 }
 
+func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		TemplateID   string `json:"template_id,omitempty"`
+		TemplatePath string `json:"template_path,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if strings.TrimSpace(req.TemplateID) != "" && strings.TrimSpace(req.TemplatePath) != "" {
+		_ = orihttp.RespondBadRequest(w, "specify either template_id or template_path, not both")
+		return
+	}
+	if strings.TrimSpace(req.TemplateID) == "" && strings.TrimSpace(req.TemplatePath) == "" {
+		_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(projecttemplates.Template{}))
+		return
+	}
+
+	tpl, err := h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
+	if err != nil {
+		h.respondWorkspaceProjectError(w, err)
+		return
+	}
+
+	_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(tpl))
+}
+
 // instantiateWorkspaceProject creates a project folder from a template inside
 // the workspace's folder, persists ProjectPath in both the session store and
 // the folder store, and publishes project.created. On any failure after the
 // copy it removes the project folder again so the workspace never ends up
-// with an orphaned project or a dangling ProjectPath.
-func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string) error {
-	return h.instantiateWorkspaceProjectWithFields(ctx, ws, folderWS, templateID, templatePath, projectName, nil)
-}
-
-// InstantiateProject creates a deferred onboarding project from the stored
-// template metadata. It implements templateonboarding.ProjectInstantiator.
-func (h *Handler) InstantiateProject(ctx context.Context, workspaceID, templateID, templatePath, projectName string, fieldValues map[string]any) (string, error) {
-	if h == nil || h.store == nil {
-		return "", fmt.Errorf("workspace session store is unavailable")
-	}
-	ws, err := h.store.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		return "", err
-	}
-	h.hydrateWorkspaceMetadataInto(ws)
-	if h.workspaceStore == nil {
-		return "", fmt.Errorf("workspace folder storage is unavailable")
-	}
-	folderWS, err := h.workspaceStore.Get(workspaceID)
-	if err != nil {
-		return "", fmt.Errorf("workspace folder is unavailable: %w", err)
-	}
-	if err := h.instantiateWorkspaceProjectWithFields(ctx, ws, folderWS, templateID, templatePath, projectName, fieldValues); err != nil {
-		return "", err
-	}
-	return ws.ProjectPath, nil
-}
-
-func (h *Handler) instantiateWorkspaceProjectWithFields(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string, fieldValues map[string]any) error {
+// with an orphaned project or a dangling ProjectPath. Entry-file verification
+// is deliberately non-fatal and is returned in InstantiationResult.
+func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.Workspace, folderWS *agentworkspace.Workspace, templateID, templatePath, projectName string) (projecttemplates.InstantiationResult, error) {
 	if err := projecttemplates.ValidateTarget(ws.IsGroup(), ws.ProjectPath); err != nil {
-		return err
+		return projecttemplates.InstantiationResult{}, err
 	}
 	if h.workspaceStore == nil {
-		return fmt.Errorf("workspace folder storage is unavailable")
+		return projecttemplates.InstantiationResult{}, fmt.Errorf("workspace folder storage is unavailable")
 	}
 
 	folderPath, err := h.workspaceStore.GetFolderPath(ws.ID)
 	if err != nil {
-		return fmt.Errorf("workspace folder is unavailable: %w", err)
+		return projecttemplates.InstantiationResult{}, fmt.Errorf("workspace folder is unavailable: %w", err)
 	}
 
 	tpl, err := h.resolveProjectTemplate(templateID, templatePath)
 	if err != nil {
-		return err
+		return projecttemplates.InstantiationResult{}, err
 	}
 
 	if strings.TrimSpace(projectName) == "" {
@@ -103,15 +108,16 @@ func (h *Handler) instantiateWorkspaceProjectWithFields(ctx context.Context, ws 
 	}
 	displayProjectName := strings.TrimSpace(projectName)
 
-	relPath, err := projecttemplates.InstantiateWithFields(tpl.Path, folderPath, projectName, fieldValues)
+	result, err := projecttemplates.InstantiateTemplate(tpl, folderPath, projectName)
 	if err != nil {
-		return err
+		return projecttemplates.InstantiationResult{}, err
 	}
+	relPath := result.ProjectPath
 
 	projectDirID, err := projecttemplates.EnsureProjectDirectoryReference(folderWS, displayProjectName, folderPath, relPath)
 	if err != nil {
 		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
-		return fmt.Errorf("failed to register project folder: %w", err)
+		return projecttemplates.InstantiationResult{}, fmt.Errorf("failed to register project folder: %w", err)
 	}
 
 	// workspace.json is the canonical store for project_path (there is no
@@ -121,22 +127,27 @@ func (h *Handler) instantiateWorkspaceProjectWithFields(ctx context.Context, ws 
 	folderWS.ProjectPath = relPath
 	folderWS.Tags = agentworkspace.MergeWorkspaceTags(folderWS.Tags, tpl.Tags)
 	setFileStoreWorkspacePrimaryDirectoryID(folderWS, projectDirID)
+	if err := projecttemplates.SetProjectEntryPath(folderWS.SharedData, result.ProjectEntryPath); err != nil {
+		result.ProjectEntryPath = ""
+		result.ProjectWarning = appendProjectWarning(result.ProjectWarning, fmt.Sprintf("project entry metadata could not be persisted: %v", err))
+	}
 	folderWS.UpdatedAt = now
 	if err := h.workspaceStore.Save(folderWS); err != nil {
 		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
 		folderWS.ProjectPath = ""
-		return fmt.Errorf("failed to persist project path: %w", err)
+		return projecttemplates.InstantiationResult{}, fmt.Errorf("failed to persist project path: %w", err)
 	}
 
 	ws.ProjectPath = relPath
 	ws.Tags = agentworkspace.MergeWorkspaceTags(ws.Tags, tpl.Tags)
+	if ws.SharedData == nil {
+		ws.SharedData = make(map[string]any)
+	}
 	if projectDirID != "" {
 		setWorkspacePrimaryDirectoryID(ws, projectDirID)
-		if ws.SharedData == nil {
-			ws.SharedData = make(map[string]any)
-		}
 		ws.SharedData[workspaceSharedDataProjectDirectoryIDKey] = projectDirID
 	}
+	_ = projecttemplates.SetProjectEntryPath(ws.SharedData, result.ProjectEntryPath)
 	if refsJSON, err := json.Marshal(folderWS.DirectoryReferences); err == nil {
 		ws.DirectoryReferencesJSON = refsJSON
 	} else {
@@ -150,23 +161,43 @@ func (h *Handler) instantiateWorkspaceProjectWithFields(ctx context.Context, ws 
 	}
 
 	if h.eventBus != nil {
+		data := map[string]any{
+			"project_path": relPath,
+			"template_id":  tpl.ID,
+		}
+		if result.ProjectEntryPath != "" {
+			data[projecttemplates.ProjectEntryPathKey] = result.ProjectEntryPath
+		}
+		if result.ProjectWarning != "" {
+			data["project_warning"] = result.ProjectWarning
+		}
 		h.eventBus.Publish(agentworkspace.Event{
 			Type:        agentworkspace.EventProjectCreated,
 			WorkspaceID: ws.ID,
 			Source:      "sessionhttp",
-			Data: map[string]any{
-				"project_path": relPath,
-				"template_id":  tpl.ID,
-			},
+			Data:        data,
 		})
 	}
 
 	logger.Info("Project instantiated from template", logger.Fields{
-		"workspace_id": ws.ID,
-		"template":     tpl.ID,
-		"project_path": relPath,
+		"workspace_id":  ws.ID,
+		"template":      tpl.ID,
+		"project_path":  relPath,
+		"project_entry": result.ProjectEntryPath,
 	})
-	return nil
+	return result, nil
+}
+
+func appendProjectWarning(existing, warning string) string {
+	existing = strings.TrimSpace(existing)
+	warning = strings.TrimSpace(warning)
+	if existing == "" {
+		return warning
+	}
+	if warning == "" {
+		return existing
+	}
+	return existing + "; " + warning
 }
 
 func setFileStoreWorkspacePrimaryDirectoryID(ws *agentworkspace.Workspace, directoryID string) {
@@ -226,17 +257,22 @@ func (h *Handler) handleWorkspaceProject(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := h.instantiateWorkspaceProject(r.Context(), workspace, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName); err != nil {
+	result, err := h.instantiateWorkspaceProject(r.Context(), workspace, folderWS, req.TemplateID, req.TemplatePath, req.ProjectName)
+	if err != nil {
 		h.respondWorkspaceProjectError(w, err)
 		return
 	}
 
 	hydrated := h.hydrateWorkspaceMetadataFromFileStore(workspace)
-	_ = orihttp.RespondCreated(w, map[string]any{
+	response := map[string]any{
 		"success":      true,
 		"project_path": hydrated.ProjectPath,
 		"workspace":    h.buildWorkspaceDetailResponse(hydrated),
-	})
+	}
+	if result.ProjectWarning != "" {
+		response["project_warning"] = result.ProjectWarning
+	}
+	_ = orihttp.RespondCreated(w, response)
 }
 
 func (h *Handler) respondWorkspaceProjectError(w http.ResponseWriter, err error) {

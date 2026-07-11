@@ -195,6 +195,11 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			avatarHandler.ServeHTTP(w, r)
 			return
 		}
+		// Agent-centric workspace assignment: PUT /api/agents/{name}/workspaces
+		if strings.HasSuffix(r.URL.Path, "/workspaces") && r.Method == http.MethodPut {
+			agentHandler.AssignWorkspaces(w, r)
+			return
+		}
 		// Regular agent requests - delegate to agentHandler
 		agentHandler.ServeHTTP(w, r)
 	})
@@ -675,9 +680,10 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
-		if s.Handlers.TemplateOnboarding != nil {
-			s.Handlers.TemplateOnboarding.RegisterRoutes(mux)
-		}
+
+		// Closed prompt-variable vocabulary + preview (template authoring UI)
+		mux.HandleFunc("GET /api/prompt-variables", s.handlePromptVariablesList)
+		mux.HandleFunc("POST /api/prompt-variables/preview", s.handlePromptVariablesPreview)
 
 		// Project template library (used by the workspace creation flow)
 		mux.HandleFunc("/api/project-templates", s.handleProjectTemplates)
@@ -695,9 +701,6 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/project-templates/{templateID}/files/rename", s.handleProjectTemplateFileRename)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}/files", s.handleProjectTemplateFileDelete)
 		// Onboarding intake block authoring
-		mux.HandleFunc("GET /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingGet)
-		mux.HandleFunc("PUT /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingSet)
-		mux.HandleFunc("DELETE /api/project-templates/{templateID}/onboarding", s.handleProjectTemplateOnboardingDelete)
 		// Default tool bindings (skills / MCP servers / plugins), applied if present at creation
 		mux.HandleFunc("PUT /api/project-templates/{templateID}/tools", s.handleProjectTemplateToolsSet)
 		// Agent roster (first = entry agent, rest = specialists), seeded at creation
@@ -891,6 +894,22 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.GetNativeMCPSettings)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPWorkspace)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/native-mcp", s.Handlers.Workspace.UpdateNativeMCPAgent)
+
+	// Per-instance refinement of a shared agent definition (role / description /
+	// custom_instructions) scoped to this workspace only; never mutates the
+	// global definition (PRD FR18). Handled by the session handler which owns
+	// the workspace AgentInstances.
+	if s.Handlers.Session != nil {
+		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/instance-settings", s.Handlers.Session.UpdateWorkspaceAgentInstanceSettings)
+		// Resolved effective prompt inspector (base + per-workspace refinement).
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/agents/{name}/effective-prompt", s.Handlers.Session.GetWorkspaceAgentEffectivePrompt)
+	}
+
+	// Editable base system prompt for a workspace-local agent, stored in the
+	// workspace config.json (the source of truth for these agents). Handled by
+	// the workspace handler which owns config.json access.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agents/{name}/system-prompt", s.Handlers.Workspace.GetWorkspaceAgentSystemPrompt)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}/system-prompt", s.Handlers.Workspace.UpdateWorkspaceAgentSystemPrompt)
 }
 
 // registerActionCenterRoutes registers cross-workspace Action Center triage endpoints.
@@ -939,6 +958,14 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 	}
 	trimmed := strings.TrimPrefix(path, "/api/workspaces/")
 	parts := strings.Split(trimmed, "/")
+
+	// Fixed-target desktop project launch must be claimed before the session
+	// handler's broader /project creation route. The runtime handler enforces
+	// POST, loopback origin, persisted metadata, and filesystem containment.
+	if len(parts) == 3 && parts[1] == "project" && parts[2] == "open" {
+		s.Handlers.Workspace.OpenWorkspaceProject(w, r)
+		return true
+	}
 
 	if strings.HasSuffix(path, "/events") {
 		s.Handlers.Workspace.GetWorkspaceEvents(w, r)

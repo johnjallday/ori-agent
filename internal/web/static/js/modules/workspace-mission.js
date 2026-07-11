@@ -88,14 +88,14 @@
     commandActionStatus: '#workspace-command-mission-action-status',
     commandEditBtn: '#workspace-command-mission-edit',
     commandRunBtn: '#workspace-command-mission-run',
-    commandFindingsBtn: '#workspace-command-mission-findings',
+    commandFindingsBtn: '#workspace-command-mission-findings'
   };
 
   // Plain-language summary of each autonomy policy. The quick-edit modal only
   // displays the current value (read-only) — it's changed in Advanced settings.
   const AUTONOMY_LABELS = {
     watch: { label: 'Watch', desc: 'reports findings only, makes no changes' },
-    propose: { label: 'Propose', desc: 'may draft inside the workspace, no external changes' },
+    propose: { label: 'Propose', desc: 'may draft inside the workspace, no external changes' }
   };
 
   let latestState = null;
@@ -103,6 +103,7 @@
   // Guards against overlapping runs and keeps the goal card's Run button
   // disabled while a run is in flight (see renderGoalCard).
   let runInProgress = false;
+  let lastRunOutcome = null;
   const RUN_POLL_INTERVAL_MS = 2000;
   const RUN_POLL_TIMEOUT_MS = 120000;
 
@@ -124,7 +125,7 @@
       domWrap: SELECTORS.cadenceDomWrap,
       intervalWrap: SELECTORS.cadenceIntervalWrap,
       enabled: SELECTORS.enabled,
-      enabledHint: SELECTORS.enabledHint,
+      enabledHint: SELECTORS.enabledHint
     },
     modal: {
       type: SELECTORS.goalModalCadenceType,
@@ -137,8 +138,8 @@
       domWrap: SELECTORS.goalModalCadenceDomWrap,
       intervalWrap: SELECTORS.goalModalCadenceIntervalWrap,
       enabled: SELECTORS.goalModalEnabled,
-      enabledHint: SELECTORS.goalModalEnabledHint,
-    },
+      enabledHint: SELECTORS.goalModalEnabledHint
+    }
   };
 
   function $(sel) {
@@ -255,7 +256,7 @@
       daily: ['timeWrap'],
       weekly: ['timeWrap', 'dowWrap'],
       monthly: ['timeWrap', 'domWrap'],
-      interval: ['intervalWrap'],
+      interval: ['intervalWrap']
     };
     const visible = new Set(wraps[type] || []);
     for (const key of ['timeWrap', 'dowWrap', 'domWrap', 'intervalWrap']) {
@@ -299,14 +300,14 @@
       return {
         type: 'weekly',
         time_of_day: $(fields.time).value || '09:00',
-        day_of_week: parseInt($(fields.dow).value, 10),
+        day_of_week: parseInt($(fields.dow).value, 10)
       };
     }
     if (type === 'monthly') {
       return {
         type: 'monthly',
         time_of_day: $(fields.time).value || '09:00',
-        day_of_month: parseInt($(fields.dom).value, 10) || 1,
+        day_of_month: parseInt($(fields.dom).value, 10) || 1
       };
     }
     if (type === 'interval') {
@@ -346,7 +347,7 @@
     return {
       mission: $(SELECTORS.goalModalText).value,
       cadence: readCadenceFields(CADENCE_SURFACES.modal),
-      mission_enabled: $(SELECTORS.goalModalEnabled).checked,
+      mission_enabled: $(SELECTORS.goalModalEnabled).checked
     };
   }
 
@@ -387,20 +388,27 @@
     return {
       href: wsId ? `/action-center?workspace=${encodeURIComponent(wsId)}` : '/action-center',
       label: openFindings > 0 ? `Findings (${openFindings})` : 'Findings',
-      hasFindings: openFindings > 0,
+      hasFindings: openFindings > 0
     };
   }
 
   function commandSummary(state) {
     const current = state || latestState || {};
     const mission = String(current.mission || '').trim();
-    const status = missionStatus(current);
+    const status = runInProgress
+      ? { label: 'Running', className: 'is-running' }
+      : mission && lastRunOutcome
+        ? lastRunOutcome
+        : missionStatus(current);
     const findings = buildFindingsMeta(current);
     const mcp = Array.isArray(current.unclassified_mcp_ids) ? current.unclassified_mcp_ids : [];
-    const skills = Array.isArray(current.unclassified_skill_ids) ? current.unclassified_skill_ids : [];
-    const actionStatus = mission && mcp.length + skills.length > 0
-      ? 'Classify MCP or skill bindings before scheduled runs.'
-      : '';
+    const skills = Array.isArray(current.unclassified_skill_ids)
+      ? current.unclassified_skill_ids
+      : [];
+    const actionStatus =
+      mission && mcp.length + skills.length > 0
+        ? 'Classify MCP or skill bindings before scheduled runs.'
+        : '';
     return {
       mission,
       label: status.label,
@@ -413,11 +421,15 @@
       nextTitle: current.next_mission_run_at ? fmtTime(current.next_mission_run_at) : '',
       lastTitle: current.last_mission_run_at ? fmtTime(current.last_mission_run_at) : '',
       canRun: !!mission && !runInProgress,
-      runTitle: mission ? 'Run this goal check now' : 'Set a goal before running',
+      runTitle: runInProgress
+        ? 'A goal run is already in progress'
+        : mission
+          ? 'Run this goal check now'
+          : 'Set a goal before running',
       findingsHref: findings.href,
       findingsLabel: findings.label,
       hasFindings: findings.hasFindings,
-      actionStatus,
+      actionStatus
     };
   }
 
@@ -476,7 +488,8 @@
       findingsBtn.textContent = summary.findingsLabel;
       findingsBtn.classList.toggle('has-findings', summary.hasFindings);
     }
-    if (!runInProgress) setCommandActionStatus(summary.actionStatus, summary.actionStatus ? 'error' : null);
+    if (!runInProgress)
+      setCommandActionStatus(summary.actionStatus, summary.actionStatus ? 'error' : null);
     renderCommandSubtitle(state);
   }
 
@@ -532,7 +545,9 @@
     // (the live "Running…" / result message must not be cleared by a poll).
     if (!runInProgress) {
       const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids : [];
-      const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids : [];
+      const skills = Array.isArray(state.unclassified_skill_ids)
+        ? state.unclassified_skill_ids
+        : [];
       if (mission && mcp.length + skills.length > 0) {
         setGoalActionStatus('Classify MCP or skill bindings before scheduled runs.', 'error');
       } else {
@@ -615,7 +630,9 @@
   // goal can run (manually or on a schedule).
   function unclassifiedCounts(state) {
     const mcp = Array.isArray(state.unclassified_mcp_ids) ? state.unclassified_mcp_ids.length : 0;
-    const skills = Array.isArray(state.unclassified_skill_ids) ? state.unclassified_skill_ids.length : 0;
+    const skills = Array.isArray(state.unclassified_skill_ids)
+      ? state.unclassified_skill_ids.length
+      : 0;
     return { mcp, skills, total: mcp + skills };
   }
 
@@ -662,7 +679,7 @@
     // Autonomy
     const radios = document.querySelectorAll(SELECTORS.autonomyRadios);
     const policy = state.autonomy_policy || 'propose';
-    radios.forEach((r) => {
+    radios.forEach(r => {
       r.checked = r.value === policy;
     });
 
@@ -688,7 +705,7 @@
       home: 'Watch over home devices, maintenance, and recurring household needs.',
       finance: 'Monitor finance for risks, opportunities, and reconciliation issues.',
       health: 'Track health routines, appointments, and check-ins.',
-      travel: 'Maintain trip plans, bookings, and travel-readiness checklists.',
+      travel: 'Maintain trip plans, bookings, and travel-readiness checklists.'
     };
     for (const [key, hint] of Object.entries(hints)) {
       if (name.includes(key)) {
@@ -699,7 +716,9 @@
   }
 
   function readFormState() {
-    const policy = Array.from(document.querySelectorAll(SELECTORS.autonomyRadios)).find((r) => r.checked);
+    const policy = Array.from(document.querySelectorAll(SELECTORS.autonomyRadios)).find(
+      r => r.checked
+    );
     const cadence = readCadenceFields(CADENCE_SURFACES.form);
 
     const minPriority = $(SELECTORS.notifPriority).value;
@@ -718,7 +737,7 @@
       cadence,
       notification_policy,
       mission_enabled: $(SELECTORS.enabled).checked,
-      mission_cadence_heartbeat: heartbeatEl ? heartbeatEl.checked : false,
+      mission_cadence_heartbeat: heartbeatEl ? heartbeatEl.checked : false
     };
   }
 
@@ -735,7 +754,7 @@
     const resp = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/mission`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload)
     });
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
@@ -750,7 +769,7 @@
   async function triggerMission(endpoint) {
     const wsId = getWorkspaceId();
     const resp = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/mission/${endpoint}`, {
-      method: 'POST',
+      method: 'POST'
     });
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
@@ -766,6 +785,7 @@
     try {
       const state = await fetchMissionState();
       latestState = state;
+      lastRunOutcome = null;
       renderReadOnly(state);
       populateFormFromState(state);
       populateGoalModalFromState(state);
@@ -819,7 +839,7 @@
   }
 
   function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // Repaint the read-only surfaces (goal card + advanced status strip + run
@@ -844,7 +864,7 @@
     const noGoal = !String(state.mission || '').trim();
     const buttons = [
       [$(SELECTORS.baselineBtn), isFirstRun],
-      [$(SELECTORS.triggerBtn), !isFirstRun],
+      [$(SELECTORS.triggerBtn), !isFirstRun]
     ];
     for (const [btn, visible] of buttons) {
       if (!btn) continue;
@@ -881,7 +901,7 @@
         return {
           done: true,
           failed: (state.mission_failure_count || 0) > beforeFailures,
-          runId: r.run_id,
+          runId: r.run_id
         };
       }
     }
@@ -894,6 +914,7 @@
   async function handleRunClick(endpoint, button, report) {
     if (runInProgress) return;
     runInProgress = true;
+    lastRunOutcome = null;
     let originalLabel;
     if (button) {
       button.disabled = true;
@@ -905,22 +926,29 @@
     let message = 'Run complete.';
     let kind = null;
     try {
-      const result = await executeRun(endpoint, (msg) => report(msg));
+      const result = await executeRun(endpoint, msg => report(msg));
       if (!result.done) {
         message = 'Still running — this is taking a while. Use Refresh to check status.';
         kind = 'error';
+        lastRunOutcome = { label: 'Running', className: 'is-running' };
       } else if (result.failed) {
         message = 'Run finished with an error. Check the Action Center or server logs.';
         kind = 'error';
+        lastRunOutcome = { label: 'Failed', className: 'is-failed' };
+      } else {
+        lastRunOutcome = { label: 'Completed', className: 'is-completed' };
       }
     } catch (e) {
       kind = 'error';
       if (e.status === 412) {
         message = 'Classify workspace bindings before running.';
+        lastRunOutcome = { label: 'Blocked', className: 'is-blocked' };
       } else if (e.status === 503) {
         message = 'Goal runner is not configured on this server.';
+        lastRunOutcome = { label: 'Failed', className: 'is-failed' };
       } else {
         message = `Run failed: ${e.message}`;
+        lastRunOutcome = { label: 'Failed', className: 'is-failed' };
       }
     }
 
@@ -952,7 +980,7 @@
 
     const goalModalForm = $(SELECTORS.goalModalForm);
     if (goalModalForm) {
-      goalModalForm.addEventListener('submit', async (evt) => {
+      goalModalForm.addEventListener('submit', async evt => {
         evt.preventDefault();
         const payload = readGoalModalState();
         if (payload.mission_enabled && !String(payload.mission || '').trim()) {
@@ -969,6 +997,7 @@
         setGoalModalStatus('Saving...');
         try {
           await saveMission(payload);
+          lastRunOutcome = null;
           await reload();
           hideGoalModal();
           setGoalActionStatus('Goal saved.');
@@ -994,7 +1023,7 @@
 
     const form = $(SELECTORS.form);
     if (form) {
-      form.addEventListener('submit', async (evt) => {
+      form.addEventListener('submit', async evt => {
         evt.preventDefault();
         const payload = readFormState();
         if (payload.mission_enabled && !payload.cadence) {
@@ -1006,12 +1035,16 @@
         setStatusText('Saving...');
         try {
           await saveMission(payload);
+          lastRunOutcome = null;
           setStatusText('Goal settings saved.');
           await reload();
           setGoalActionStatus('Goal saved.');
         } catch (e) {
           if (e.status === 412) {
-            setStatusText('Classify your workspace bindings before enabling goal automation.', 'error');
+            setStatusText(
+              'Classify your workspace bindings before enabling goal automation.',
+              'error'
+            );
             setGoalActionStatus('Classify workspace bindings before enabling this goal.', 'error');
           } else {
             setStatusText(`Save failed: ${e.message}`, 'error');
@@ -1068,13 +1101,13 @@
     if (typeof window === 'undefined') return;
     window.workspaceMission = Object.assign(window.workspaceMission || {}, {
       getState: () => latestState,
-      getSummary: () => latestState ? commandSummary(latestState) : {},
+      getSummary: () => (latestState ? commandSummary(latestState) : {}),
       renderCommandSurfaces: () => {
         if (latestState) renderCommandPanel(latestState);
       },
       openGoalModal,
       runNow: runNowFromCommand,
-      reload,
+      reload
     });
   }
 

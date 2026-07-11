@@ -2,11 +2,24 @@ package projecttemplates
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/promptvars"
 )
+
+// ErrInvalidPromptVariable reports a template agent whose system prompt uses a
+// variable outside the closed vocabulary. Callers map it to a client error.
+var ErrInvalidPromptVariable = errors.New("invalid prompt variable")
+
+// ErrRosterRequired reports an attempt to save a template roster with no
+// agents. Every template must declare at least one agent (the first is the
+// entry agent); templates created before this rule surface a load-time warning
+// instead of failing, and workspace creation auto-creates a fallback manager.
+var ErrRosterRequired = errors.New("template must declare at least one agent; the first agent is the entry agent")
 
 // MaxTemplateAgents caps how many agents a single template may declare. Extra
 // entries beyond the cap are dropped during normalization rather than failing
@@ -17,10 +30,10 @@ const MaxTemplateAgents = 10
 
 // AgentSpec declares one agent a template seeds onto a workspace created from
 // it. Like ToolDefaults, this package carries the spec as data only — it never
-// creates or resolves agents. Role/Type/Model are trimmed and carried verbatim;
-// canonicalizing them against the real agent enums and resolving empty values to
-// defaults happens in the workspace-creation (seeding) layer, keeping this
-// file-copy engine domain-blind. The first surviving entry in a template's
+// creates or resolves agents. Role/Type/Model/Provider are trimmed and carried
+// verbatim; canonicalizing them against the real agent enums and resolving empty
+// values to defaults happens in the workspace-creation (seeding) layer, keeping
+// this file-copy engine domain-blind. The first surviving entry in a template's
 // roster is the workspace entry agent; the rest are specialist sub-agents.
 type AgentSpec struct {
 	Name         string       `json:"name"`
@@ -28,6 +41,7 @@ type AgentSpec struct {
 	Type         string       `json:"type,omitempty"`
 	SystemPrompt string       `json:"system_prompt,omitempty"`
 	Model        string       `json:"model,omitempty"`
+	Provider     string       `json:"provider,omitempty"`
 	Tools        ToolDefaults `json:"tools"`
 }
 
@@ -59,6 +73,7 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 			Type:         strings.TrimSpace(s.Type),
 			SystemPrompt: strings.TrimSpace(s.SystemPrompt),
 			Model:        strings.TrimSpace(s.Model),
+			Provider:     strings.TrimSpace(s.Provider),
 			Tools:        normalizeToolDefaults(s.Tools),
 		})
 		if len(out) >= MaxTemplateAgents {
@@ -71,13 +86,42 @@ func normalizeAgentSpecs(specs []AgentSpec) []AgentSpec {
 	return out
 }
 
-// SetAgents writes (or clears) the `agents` block in a template's template.json,
-// preserving every other key. The roster is normalized first; an empty result
-// clears the key. Like the tools/onboarding writers, this stores agent specs as
-// data and never creates agents.
+// ValidateAgentPrompts rejects any agent whose system prompt references a
+// variable outside the closed vocabulary, returning an error naming the first
+// offending variable and the agent (PRD FR23). Called at roster save / import so
+// an invalid template never reaches runtime; template loading/listing does NOT
+// call this, so one bad template cannot crash the library view.
+func ValidateAgentPrompts(specs []AgentSpec) error {
+	for _, s := range specs {
+		unknown := promptvars.Unknown(s.SystemPrompt)
+		if len(unknown) == 0 {
+			continue
+		}
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			name = "(unnamed)"
+		}
+		return fmt.Errorf("%w: agent %q uses unknown prompt variable {{%s}} — only the documented variables are allowed", ErrInvalidPromptVariable, name, unknown[0])
+	}
+	return nil
+}
+
+// SetAgents writes the `agents` block in a template's template.json, preserving
+// every other key. The roster is normalized first; a roster that normalizes to
+// empty is rejected with ErrRosterRequired — every template must keep at least
+// one agent (the first is the entry agent). Like the tools writer, this stores
+// agent specs as data and never creates agents.
 func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
 	tpl, err := FindLibraryTemplate(libDir, id)
 	if err != nil {
+		return Template{}, err
+	}
+
+	normalized := normalizeAgentSpecs(agents)
+	if len(normalized) == 0 {
+		return Template{}, ErrRosterRequired
+	}
+	if err := ValidateAgentPrompts(normalized); err != nil {
 		return Template{}, err
 	}
 
@@ -89,17 +133,13 @@ func SetAgents(libDir, id string, agents []AgentSpec) (Template, error) {
 		_ = json.Unmarshal(data, &raw)
 	}
 
-	if normalized := normalizeAgentSpecs(agents); len(normalized) > 0 {
-		encoded, err := json.Marshal(normalized)
-		if err != nil {
-			return Template{}, fmt.Errorf("failed to encode agents: %w", err)
-		}
-		var v any
-		_ = json.Unmarshal(encoded, &v)
-		raw["agents"] = v
-	} else {
-		delete(raw, "agents")
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return Template{}, fmt.Errorf("failed to encode agents: %w", err)
 	}
+	var v any
+	_ = json.Unmarshal(encoded, &v)
+	raw["agents"] = v
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {

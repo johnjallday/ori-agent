@@ -125,8 +125,7 @@ func CreateBlank(libDir, name string) (Template, error) {
 }
 
 // Duplicate copies an existing library template into a new one. The copy is
-// verbatim (like ImportFolder), so the source's files, tags, and onboarding
-// block carry over. newName, when empty, defaults to "<source name> copy"; the
+// verbatim (like ImportFolder), so the source's files and tags carry over. newName, when empty, defaults to "<source name> copy"; the
 // new id is the slugified result, and a collision yields ErrTemplateExists. The
 // duplicate's manifest display name is always set to the resolved name so the
 // two templates stay distinguishable.
@@ -165,7 +164,8 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
 	}
-	// Set the duplicate's display name (tags/onboarding/unknown keys preserved).
+	// Set the duplicate's display name (tags/unknown keys preserved; a legacy
+	// onboarding block is stripped by the save, matching the authoring path).
 	if _, err := UpdateManifest(absLib, newID, basis, src.Description, nil, nil); err != nil {
 		_ = os.RemoveAll(dest)
 		return Template{}, err
@@ -258,6 +258,7 @@ type ManifestEdit struct {
 	Icon            *string
 	BehaviorProfile *string
 	StarterTasks    *[]StarterTask
+	ProjectEntry    *ProjectEntryEdit
 }
 
 // UpdateManifest writes display metadata into a library template's
@@ -311,13 +312,35 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 			raw["behavior_profile"] = NormalizeBehaviorProfile(*edit.BehaviorProfile)
 		}
 		if edit.StarterTasks != nil {
+			// Validate the raw edit before normalization: normalization demotes
+			// extra setup flags for load resilience, so checking afterwards would
+			// never fire and the author would get a silent demotion instead of
+			// an error.
+			if err := validateStarterTasks(*edit.StarterTasks); err != nil {
+				return Template{}, err
+			}
 			if tasks := normalizeStarterTasks(*edit.StarterTasks); len(tasks) > 0 {
 				raw["starter_tasks"] = tasks
 			} else {
 				delete(raw, "starter_tasks")
 			}
 		}
+		if edit.ProjectEntry != nil && edit.ProjectEntry.Set {
+			if edit.ProjectEntry.Value == nil {
+				delete(raw, "project_entry")
+			} else {
+				entry, err := normalizeProjectEntry(tpl.Path, edit.ProjectEntry.Value)
+				if err != nil {
+					return Template{}, err
+				}
+				raw["project_entry"] = entry
+			}
+		}
 	}
+
+	// Legacy cleanup: the intake-era `onboarding` block is ignored at runtime,
+	// so any authoring save removes it from the manifest.
+	delete(raw, "onboarding")
 
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {

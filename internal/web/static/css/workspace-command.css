@@ -2,8 +2,8 @@
  * workspace-command.css — Workspace Command view (interior "tactical" reskin)
  *
  * Opt-in tactical layout on the workspace detail page, scoped under `.ws-cmd`.
- * A dark surface regardless of the app's `data-bs-theme`. Mirrors the Map's
- * `.ws-map` visual system; the self-hosted @font-face declarations are already
+ * Mirrors the Map's `.ws-map` visual system with theme-responsive tactical
+ * tokens; the self-hosted @font-face declarations are already
  * provided globally by workspace-map.css, so this file only references them.
  *
  * Rules must NOT leak outside `.ws-cmd`. No ui-refresh.css edits, no `!important`.
@@ -24,7 +24,7 @@
   /* ink */
   --ws-ink: #d6d9de;
   --ws-ink-dim: #8b909a;
-  --ws-ink-faint: #5a5f6a;
+  --ws-ink-faint: #7d838e;
 
   /* semantic accents */
   --ws-faction: #46d39a;
@@ -34,6 +34,9 @@
   --ws-idle: #4ec5e6;
   --ws-working: #46d39a;
   --ws-alert: #e2654d;
+  --ws-waiting: #e8b54b;
+  --ws-input: #f08a4b;
+  --ws-done: #93d66b;
 
   /* geometry */
   --ws-clip: 14px;
@@ -41,8 +44,8 @@
   --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
 
   /* type (families vendored globally by workspace-map.css) */
-  --ws-font-display: 'Chakra Petch', system-ui, sans-serif;
-  --ws-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --ws-font-display: "Chakra Petch", system-ui, sans-serif;
+  --ws-font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   display: block;
   color: var(--ws-ink);
@@ -50,47 +53,153 @@
   letter-spacing: 0.2px;
 }
 
-.ws-cmd[hidden] { display: none; }
+.ws-cmd[hidden] {
+  display: none;
+}
 
 .ws-cmd .ws-tick {
-  font-family: var(--ws-font-mono); font-size: 10.5px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
 }
 
 /* ---------- command bar ---------- */
 .ws-cmd-topbar {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
   border: 1px solid var(--ws-line);
   background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
-  padding: 14px 18px; margin-bottom: 18px;
-  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 16px) 0,
+    100% 16px,
+    100% 100%,
+    16px 100%,
+    0 calc(100% - 16px)
+  );
   box-shadow: var(--ws-glow);
 }
-.ws-cmd-nav { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ws-cmd-nav {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .ws-cmd-nav-btn {
-  min-height: 30px; display: inline-flex; align-items: center; padding: 7px 10px; border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer;
-  font-family: var(--ws-font-mono); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; transition: 0.15s;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  transition: 0.15s;
   text-decoration: none;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px));
 }
-.ws-cmd-nav-btn:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); text-decoration: none; }
-.ws-cmd-nav-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-nav-btn:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  text-decoration: none;
+}
+.ws-cmd-nav-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-nav-btn:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.ws-cmd-view-switch {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-view-btn {
+  min-height: 28px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ws-ink-faint);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.ws-cmd-view-btn:hover {
+  color: var(--ws-faction);
+}
+.ws-cmd-view-btn.is-active {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-view-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 .ws-cmd-crest {
-  width: 50px; height: 50px; flex: 0 0 auto; display: grid; place-items: center;
-  border: 1px solid var(--ws-line-bright); color: var(--ws-faction);
+  width: 50px;
+  height: 50px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
   background: radial-gradient(circle at 50% 30%, rgba(70, 211, 154, 0.18), transparent 70%);
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
-.ws-cmd-title { flex: 1 1 auto; min-width: 0; }
-.ws-cmd-title .ws-kicker { display: flex; align-items: center; gap: 10px; }
-.ws-cmd-title .ws-dot { width: 6px; height: 6px; background: var(--ws-faction); box-shadow: 0 0 8px var(--ws-faction); transform: rotate(45deg); }
-.ws-cmd-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ws-cmd-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ws-cmd-title .ws-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ws-cmd-title .ws-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--ws-faction);
+  box-shadow: 0 0 8px var(--ws-faction);
+  transform: rotate(45deg);
+}
+.ws-cmd-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .ws-cmd-group-badge {
-  flex: 0 0 auto; align-self: center; margin-top: 4px; padding: 3px 8px;
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 4px;
+  padding: 3px 8px;
   border: 1px solid var(--ws-group-accent-line, var(--ws-line-bright));
   background: var(--ws-group-accent-soft, rgba(70, 211, 154, 0.08));
   color: var(--ws-group-accent, var(--ws-faction));
-  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
   clip-path: polygon(0 0, 100% 0, 100% 70%, calc(100% - 6px) 100%, 0 100%);
 }
 .ws-cmd-topbar.is-group .ws-dot {
@@ -102,235 +211,2147 @@
   border-color: var(--ws-group-accent-line, var(--ws-line-bright));
 }
 .ws-cmd-title h2 {
-  flex: 1 1 auto; min-width: 0; margin: 4px 0 0; font-weight: 700; font-size: 24px; letter-spacing: 1px; text-transform: uppercase; color: #eef0f3;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 4px 0 0;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #eef0f3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ws-cmd-title .ws-sub { margin-top: 3px; color: var(--ws-ink-dim); font-size: 13px; }
-.ws-cmd-description-row, .ws-cmd-tags-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; min-width: 0; }
+.ws-cmd-title .ws-sub {
+  margin-top: 3px;
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+}
+.ws-cmd-description-row,
+.ws-cmd-tags-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  min-width: 0;
+}
 .ws-cmd-description {
-  flex: 1 1 auto; min-width: 0; margin: 0; color: var(--ws-ink-dim); font-size: 13px; line-height: 1.35;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+  line-height: 1.35;
 }
-.ws-cmd-description.is-empty { color: var(--ws-ink-faint); font-style: italic; }
+.ws-cmd-description.is-empty {
+  color: var(--ws-ink-faint);
+  font-style: italic;
+}
 .ws-cmd-description.is-collapsed {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .ws-cmd-mini-btn {
-  flex: 0 0 auto; padding: 4px 7px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
-  color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
-.ws-cmd-mini-btn:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-cmd-mini-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-tags { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; }
-.ws-cmd-tag, .ws-cmd-tag-empty {
-  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  border: 1px solid var(--ws-line-bright); padding: 2px 7px; font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase;
+.ws-cmd-mini-btn:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
 }
-.ws-cmd-tag { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.06); }
-.ws-cmd-tag.is-more { color: var(--ws-ink-dim); border-color: var(--ws-line-bright); background: transparent; }
-.ws-cmd-tag-empty { color: var(--ws-ink-faint); }
+.ws-cmd-mini-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-tags {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.ws-cmd-tag,
+.ws-cmd-tag-empty {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--ws-line-bright);
+  padding: 2px 7px;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-tag {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-tag.is-more {
+  color: var(--ws-ink-dim);
+  border-color: var(--ws-line-bright);
+  background: transparent;
+}
+.ws-cmd-tag-empty {
+  color: var(--ws-ink-faint);
+}
 .ws-cmd-identity-editor {
-  margin-top: 10px; padding: 10px; display: grid; gap: 8px; border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.2);
+  margin-top: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
 }
 .ws-cmd-identity-field {
-  width: 100%; min-width: 0; border: 1px solid var(--ws-line-bright); background: var(--ws-bg); color: var(--ws-ink);
-  padding: 8px 10px; font: inherit; font-size: 13px; line-height: 1.35;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg);
+  color: var(--ws-ink);
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
 }
-.ws-cmd-identity-field:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-tags-editor-mount .tag-input { border-color: var(--ws-line-bright); background: var(--ws-bg); color: var(--ws-ink); }
-.ws-cmd-identity-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.ws-cmd-identity-save, .ws-cmd-identity-cancel {
-  padding: 7px 10px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
-  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+.ws-cmd-identity-field:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
 }
-.ws-cmd-identity-save { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08); }
-.ws-cmd-identity-save:disabled { opacity: 0.55; cursor: wait; }
-.ws-cmd-identity-save:focus-visible, .ws-cmd-identity-cancel:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-identity-error { font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-alert); }
+.ws-cmd-tags-editor-mount .tag-input {
+  border-color: var(--ws-line-bright);
+  background: var(--ws-bg);
+  color: var(--ws-ink);
+}
+.ws-cmd-identity-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ws-cmd-identity-save,
+.ws-cmd-identity-cancel {
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-identity-save {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-identity-save:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.ws-cmd-identity-save:focus-visible,
+.ws-cmd-identity-cancel:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-identity-error {
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  color: var(--ws-alert);
+}
 
-.ws-cmd-readout { display: flex; gap: 10px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+.ws-cmd-readout {
+  display: flex;
+  gap: 10px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .ws-cmd-stat {
-  min-width: 84px; text-align: center; border: 1px solid var(--ws-line); background: var(--ws-bg-2); padding: 8px 12px;
-  color: inherit; font: inherit; cursor: pointer; transition: 0.15s;
+  min-width: 84px;
+  text-align: center;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-bg-2);
+  padding: 8px 12px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: 0.15s;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
 }
-.ws-cmd-stat:hover { border-color: var(--ws-line-bright); background: rgba(70, 211, 154, 0.06); }
-.ws-cmd-stat:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-stat .ws-v { font-family: var(--ws-font-mono); font-size: 20px; font-weight: 700; color: #eef0f3; line-height: 1; font-variant-numeric: tabular-nums; }
-.ws-cmd-stat .ws-l { font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-ink-faint); margin-top: 5px; }
-.ws-cmd-stat.is-alert { border-color: rgba(226, 101, 77, 0.55); background: rgba(226, 101, 77, 0.08); }
-.ws-cmd-stat.is-alert .ws-v, .ws-cmd-stat.is-alert .ws-l { color: var(--ws-alert); }
+.ws-cmd-stat:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-stat:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-stat .ws-v {
+  font-family: var(--ws-font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: #eef0f3;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ws-cmd-stat .ws-l {
+  font-size: 9.5px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+  margin-top: 5px;
+}
+.ws-cmd-stat.is-alert {
+  border-color: rgba(226, 101, 77, 0.55);
+  background: rgba(226, 101, 77, 0.08);
+}
+.ws-cmd-stat.is-alert .ws-v,
+.ws-cmd-stat.is-alert .ws-l {
+  color: var(--ws-alert);
+}
 
-/* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
-.ws-cmd-layout { display: grid; grid-template-columns: 1fr 332px; gap: 18px; align-items: start; }
-.ws-cmd-main { min-width: 0; display: flex; flex-direction: column; gap: 18px; }
-.ws-cmd-mission {
-  display: flex; justify-content: space-between; align-items: stretch; gap: 16px; min-width: 0;
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014);
-  padding: 14px 16px;
-  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+/* ---------- Operations Map mode ---------- */
+.ws-cmd-map-shell {
+  position: relative;
+}
+.ws-cmd-opmap {
+  position: relative;
+  min-height: clamp(560px, 62vh, 780px);
+  overflow: hidden;
+  border: 1px solid var(--ws-line);
+  background:
+    radial-gradient(circle at 28% 28%, rgba(78, 149, 224, 0.14), transparent 28%),
+    radial-gradient(circle at 72% 74%, rgba(232, 181, 75, 0.1), transparent 26%),
+    linear-gradient(rgba(70, 211, 154, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.024) 1px, transparent 1px),
+    linear-gradient(180deg, var(--ws-panel), #0c0d11 78%);
+  background-size:
+    auto,
+    auto,
+    42px 42px,
+    42px 42px,
+    auto;
   box-shadow: var(--ws-glow);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
 }
-.ws-cmd-mission-main { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.ws-cmd-mission-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.ws-cmd-mission-kicker {
-  font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--ws-faction);
+.ws-cmd-map-world {
+  min-height: inherit;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 40px 82px 76px 40px;
+  isolation: isolate;
 }
-.ws-cmd-mission-status {
-  display: inline-flex; align-items: center; min-height: 21px; padding: 3px 8px; border: 1px solid var(--ws-line-bright);
-  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--ws-ink-dim);
+.ws-cmd-map-floor {
+  position: absolute;
+  inset: 24px;
+  z-index: -1;
+  border: 1px solid rgba(70, 211, 154, 0.13);
+  background:
+    linear-gradient(120deg, transparent 0 44%, rgba(70, 211, 154, 0.1) 45% 46%, transparent 47%),
+    radial-gradient(circle at 50% 46%, rgba(70, 211, 154, 0.1), transparent 42%),
+    repeating-linear-gradient(0deg, transparent 0 37px, rgba(70, 211, 154, 0.045) 38px 39px),
+    repeating-linear-gradient(90deg, transparent 0 37px, rgba(70, 211, 154, 0.04) 38px 39px);
+  clip-path: polygon(3% 0, 100% 0, 100% 92%, 94% 100%, 0 100%, 0 7%);
+}
+.ws-cmd-map-floor::before,
+.ws-cmd-map-floor::after {
+  content: "";
+  position: absolute;
+  border: 1px solid rgba(70, 211, 154, 0.12);
+  pointer-events: none;
+}
+.ws-cmd-map-floor::before {
+  inset: 13%;
+}
+.ws-cmd-map-floor::after {
+  width: 160px;
+  height: 160px;
+  left: calc(50% - 80px);
+  top: calc(50% - 80px);
+  border-radius: 50%;
+}
+.ws-cmd-map-belt {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 3;
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid rgba(70, 211, 154, 0.18);
+  background:
+    linear-gradient(180deg, rgba(17, 22, 29, 0.9), rgba(6, 8, 12, 0.9)), rgba(6, 8, 12, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 32px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(6px);
+}
+.ws-cmd-map-belt-btn {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+.ws-cmd-map-belt-btn .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.ws-cmd-map-belt-btn i {
+  font-size: 18px;
+  line-height: 1;
+}
+.ws-cmd-map-belt-btn::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 2;
+  min-width: max-content;
+  max-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid rgba(70, 211, 154, 0.24);
+  background: rgba(7, 10, 14, 0.94);
+  color: var(--ws-ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.ws-cmd-map-belt-btn:first-child::after {
+  left: 0;
+  transform: translate(0, -2px);
+}
+.ws-cmd-map-belt-btn:last-child::after {
+  right: 0;
+  left: auto;
+  transform: translate(0, -2px);
+}
+.ws-cmd-map-belt-btn:hover,
+.ws-cmd-map-belt-btn.is-active {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.1);
+}
+.ws-cmd-map-belt-btn:hover::after,
+.ws-cmd-map-belt-btn:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.ws-cmd-map-belt-btn:first-child:hover::after,
+.ws-cmd-map-belt-btn:first-child:focus-visible::after,
+.ws-cmd-map-belt-btn:last-child:hover::after,
+.ws-cmd-map-belt-btn:last-child:focus-visible::after {
+  transform: translate(0, 0);
+}
+/* Quick "New Quest" composer: floating dock at the map's bottom-right. */
+.ws-cmd-map-quest-dock {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+}
+.ws-cmd-map-quest-fab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.2), rgba(15, 59, 48, 0.9));
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+}
+.ws-cmd-map-quest-fab i {
+  font-size: 15px;
+  color: var(--ws-faction);
+}
+.ws-cmd-map-quest-fab:hover,
+.ws-cmd-map-quest-fab.is-open {
+  border-color: var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.3), rgba(15, 59, 48, 0.95));
+}
+.ws-cmd-map-quest-fab:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-quest-composer {
+  width: min(340px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: linear-gradient(180deg, #15171c, #0b0c10);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), var(--ws-glow);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+.ws-cmd-map-quest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--ws-font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--ws-faction);
+}
+.ws-cmd-map-quest-close {
+  border: none;
+  background: none;
+  color: var(--ws-ink-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.ws-cmd-map-quest-close:hover {
+  color: var(--ws-ink);
+}
+.ws-cmd-map-quest-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.9);
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ws-cmd-map-quest-input:focus-visible {
+  outline: 1px solid var(--ws-faction);
+  outline-offset: 0;
+  border-color: var(--ws-faction);
+}
+.ws-cmd-map-quest-error {
+  margin: 0;
+  color: var(--ws-alert);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+.ws-cmd-map-quest-actions {
+  display: flex;
+  gap: 8px;
+}
+.ws-cmd-map-quest-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+}
+.ws-cmd-map-quest-btn:hover:not([disabled]) {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-map-quest-btn.is-primary {
+  border-color: var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.22), rgba(15, 59, 48, 0.9));
+  color: var(--ws-ink);
+}
+.ws-cmd-map-quest-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-quest-btn[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.ws-cmd-map-quest-hint {
+  margin: 0;
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.ws-cmd-map-window-backdrop {
+  position: fixed;
+  inset: clamp(76px, 10vh, 112px) 16px 16px;
+  z-index: 10010;
+  display: grid;
+  place-items: start center;
+  padding: 28px;
+  overflow: hidden;
+  background: rgba(2, 3, 6, 0.48);
+  backdrop-filter: blur(2px);
+}
+.ws-cmd-map-window {
+  width: min(780px, 100%);
+  max-height: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--ws-line-bright);
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, #15171c, #0b0c10);
+  background-size:
+    34px 34px,
+    34px 34px,
+    auto;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.5),
+    var(--ws-glow);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+}
+.ws-cmd-map-window-inventory {
+  width: min(980px, 100%);
+}
+.ws-cmd-map-window-inspector {
+  width: min(940px, 100%);
+}
+.ws-cmd-map-window-head {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-map-window-head div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-display);
+  font-size: 17px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-window-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-window-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+.ws-cmd-map-window-close:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-map-window-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+.ws-cmd-map-window-section {
+  min-width: 0;
+}
+.ws-cmd-map-quest-frame {
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-map-quest-frame-head {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(70, 211, 154, 0.2);
+  background: linear-gradient(90deg, rgba(70, 211, 154, 0.1), transparent 58%), rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-map-quest-frame-head span {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-map-quest-frame-head strong {
+  color: #eef0f3;
+  font-family: var(--ws-font-display);
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-map-window-section.is-objective .ws-cmd-mission {
+  box-shadow: none;
+  clip-path: none;
+}
+.ws-cmd-map-zone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0 12px;
+}
+.ws-cmd-map-zone-head div {
+  min-width: 0;
+}
+.ws-cmd-map-zone-head span {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-zone-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #eef0f3;
+  font-size: 15px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-map-zone-count {
+  min-width: 32px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.06);
+  font-family: var(--ws-font-mono);
+  font-size: 14px;
+}
+.ws-cmd-map-task-list,
+.ws-cmd-map-station-grid,
+.ws-cmd-map-agent-field,
+.ws-cmd-map-inspector-card {
+  padding: 0;
+}
+.ws-cmd-map-task-list {
+  display: grid;
+  gap: 8px;
+}
+.ws-cmd-map-task-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.ws-cmd-map-task-row-wrap .ws-cmd-map-task-row {
+  flex: 1 1 auto;
+}
+.ws-cmd-map-task-start {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px;
+  border: 1px solid var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.18), rgba(15, 59, 48, 0.85));
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+}
+.ws-cmd-map-task-start i {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-task-start:hover {
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.28), rgba(15, 59, 48, 0.92));
+}
+.ws-cmd-map-task-start:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-task-row,
+.ws-cmd-map-station,
+.ws-cmd-map-inventory-slot {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.ws-cmd-map-task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 52px;
+  padding: 9px 10px;
+}
+.ws-cmd-map-task-marker {
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--ws-line);
+  background: rgba(70, 211, 154, 0.06);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  padding: 3px 7px;
+}
+.ws-cmd-map-task-row:hover,
+.ws-cmd-map-station:hover,
+.ws-cmd-map-inventory-slot:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-map-task-row:focus-visible,
+.ws-cmd-map-station:focus-visible,
+.ws-cmd-map-inventory-slot:focus-visible,
+.ws-cmd-map-zone-action:focus-visible,
+.ws-cmd-map-inventory-total:focus-visible,
+.ws-cmd-map-inventory-badge:focus-visible,
+.ws-cmd-map-inventory-group button:focus-visible,
+.ws-cmd-map-agent:focus-visible,
+.ws-cmd-map-belt-btn:focus-visible,
+.ws-cmd-map-window-close:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-task-name,
+.ws-cmd-map-slot-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-task-status,
+.ws-cmd-map-inventory-slot em {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  font-style: normal;
+}
+.ws-cmd-map-task-row.alert .ws-cmd-map-task-status {
+  color: var(--ws-alert);
+}
+.ws-cmd-map-task-row.working .ws-cmd-map-task-status {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-task-row.needs-input .ws-cmd-map-task-status {
+  color: var(--ws-input);
+}
+.ws-cmd-map-task-row.done .ws-cmd-map-task-status {
+  color: var(--ws-done);
+}
+.ws-cmd-map-zone-action {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-station-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ws-cmd-map-station {
+  min-height: 82px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 11px;
+}
+.ws-cmd-map-station span {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-map-station strong {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 24px;
+}
+.ws-cmd-map-agent-field {
+  width: min(100%, 980px);
+  min-height: 410px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  align-content: center;
+  justify-content: center;
+  gap: 18px;
+  position: relative;
+}
+.ws-cmd-map-agent {
+  min-width: 0;
+  min-height: 152px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  padding: 12px 10px 10px;
+  border: 1px solid var(--ws-line);
+  background: radial-gradient(circle at 50% 24%, rgba(70, 211, 154, 0.13), rgba(0, 0, 0, 0.16) 62%);
+  color: var(--ws-ink);
+  cursor: pointer;
+  transition:
+    transform 0.22s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+}
+.ws-cmd-map-agent:hover,
+.ws-cmd-map-agent.is-selected {
+  border-color: var(--ws-faction);
+  background: radial-gradient(circle at 50% 24%, rgba(70, 211, 154, 0.23), rgba(0, 0, 0, 0.12) 64%);
+}
+.ws-cmd-map-agent.alert {
+  border-color: rgba(226, 101, 77, 0.52);
+  background: radial-gradient(circle at 50% 24%, rgba(226, 101, 77, 0.2), rgba(0, 0, 0, 0.12) 64%);
+}
+.ws-cmd-map-agent.working {
+  border-color: rgba(70, 211, 154, 0.52);
+}
+.ws-cmd-map-agent.waiting {
+  border-color: rgba(232, 181, 75, 0.46);
+  background: radial-gradient(circle at 50% 24%, rgba(232, 181, 75, 0.16), rgba(0, 0, 0, 0.12) 64%);
+}
+.ws-cmd-map-agent.needs-input {
+  border-color: rgba(240, 138, 75, 0.58);
+  background: radial-gradient(circle at 50% 24%, rgba(240, 138, 75, 0.2), rgba(0, 0, 0, 0.12) 64%);
+}
+.ws-cmd-map-agent.done {
+  border-color: rgba(147, 214, 107, 0.46);
+  background: radial-gradient(
+    circle at 50% 24%,
+    rgba(147, 214, 107, 0.14),
+    rgba(0, 0, 0, 0.12) 64%
+  );
+}
+.ws-cmd-map-agent.toward-tasks {
+  transform: translateY(-4px);
+}
+.ws-cmd-map-agent.toward-tools {
+  transform: translate(5px, -5px);
+}
+.ws-cmd-map-agent.is-selected {
+  transform: translateY(-7px);
+}
+.ws-cmd-map-agent-path {
+  position: absolute;
+  inset: auto 16px 12px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(70, 211, 154, 0.8), transparent);
+  opacity: 0.32;
+}
+.ws-cmd-map-agent.alert .ws-cmd-map-agent-path {
+  background: linear-gradient(90deg, transparent, rgba(226, 101, 77, 0.9), transparent);
+}
+.ws-cmd-map-agent.waiting .ws-cmd-map-agent-path {
+  background: linear-gradient(90deg, transparent, rgba(232, 181, 75, 0.86), transparent);
+}
+.ws-cmd-map-agent.needs-input .ws-cmd-map-agent-path {
+  background: linear-gradient(90deg, transparent, rgba(240, 138, 75, 0.9), transparent);
+}
+.ws-cmd-map-agent.done .ws-cmd-map-agent-path {
+  background: linear-gradient(90deg, transparent, rgba(147, 214, 107, 0.84), transparent);
+}
+.ws-cmd-map-agent-status {
+  position: absolute;
+  top: 9px;
+  left: 9px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.24);
+}
+.ws-cmd-map-agent-status .ws-cmd-led {
+  width: 8px;
+  height: 8px;
+}
+.ws-cmd-map-entry-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.12);
+  color: var(--ws-keeper);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+  padding: 4px 6px;
+}
+.ws-cmd-map-entry-badge i {
+  font-size: 10px;
+  line-height: 1;
+}
+.ws-cmd-map-agent-copy {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+.ws-cmd-map-agent-copy strong,
+.ws-cmd-map-agent-copy span,
+.ws-cmd-map-agent-copy em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-agent-copy strong {
+  color: #eef0f3;
+  font-size: 13px;
+}
+.ws-cmd-map-agent-copy span {
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+}
+.ws-cmd-map-agent-copy em {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  font-style: normal;
+}
+.ws-cmd-map-agent.alert .ws-cmd-map-agent-copy em {
+  color: var(--ws-alert);
+}
+.ws-cmd-map-agent.waiting .ws-cmd-map-agent-copy em {
+  color: var(--ws-waiting);
+}
+.ws-cmd-map-agent.needs-input .ws-cmd-map-agent-copy em {
+  color: var(--ws-input);
+}
+.ws-cmd-map-agent.done .ws-cmd-map-agent-copy em {
+  color: var(--ws-done);
+}
+.ws-cmd-map-inspector-card {
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 760px) {
+  .ws-cmd-map-window-inspector .ws-cmd-map-inspector-card {
+    grid-template-columns: minmax(0, 1fr) minmax(290px, 0.74fr);
+    align-items: start;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-map-agent-sheet-head {
+    grid-column: 1 / -1;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-rpg-sheet {
+    grid-column: 1;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-rpg-command-panel {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+  }
+}
+.ws-cmd-map-agent-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
   background: rgba(0, 0, 0, 0.18);
 }
-.ws-cmd-mission-status.is-enabled { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.07); }
-.ws-cmd-mission-status.is-paused,
-.ws-cmd-mission-status.is-manual { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); background: rgba(232, 181, 75, 0.07); }
-.ws-cmd-mission-status.is-empty,
-.ws-cmd-mission-status.is-loading { color: var(--ws-ink-faint); }
-.ws-cmd-mission-title {
-  margin: 0; color: #eef0f3; font-size: 17px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase;
+.ws-cmd-map-agent-sheet-head .ws-cmd-character {
+  width: 74px;
+  height: 74px;
+  flex: 0 0 auto;
 }
-.ws-cmd-mission-text {
-  max-width: 88ch; margin: 0; color: var(--ws-ink); font-size: 13.5px; line-height: 1.45;
+.ws-cmd-map-agent-sheet-head div {
+  min-width: 0;
 }
-.ws-cmd-mission-text.is-empty { color: var(--ws-ink-faint); font-style: italic; }
-.ws-cmd-mission-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-.ws-cmd-mission-meta span {
-  display: inline-flex; align-items: center; min-height: 22px; padding: 3px 8px; border: 1px solid var(--ws-line);
-  background: rgba(0, 0, 0, 0.18); color: var(--ws-ink-dim);
-  font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 0.7px; text-transform: uppercase;
+.ws-cmd-map-agent-sheet-head span {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
 }
-.ws-cmd-mission-action-status {
-  min-height: 15px; color: var(--ws-ink-dim); font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 0.4px;
+.ws-cmd-map-agent-sheet-head strong {
+  display: block;
+  margin-top: 3px;
+  color: #eef0f3;
+  font-family: var(--ws-font-display);
+  font-size: 22px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
-.ws-cmd-mission-action-status.is-error { color: var(--ws-alert); }
-.ws-cmd-mission-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; }
-.ws-cmd-mission-btn {
-  min-height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 7px 10px;
-  border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
-  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
-  text-decoration: none; transition: 0.13s;
+.ws-cmd-map-agent-sheet-head p {
+  margin: 6px 0 0;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
-.ws-cmd-mission-btn.is-primary {
-  color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+.ws-cmd-rpg-sheet {
+  display: grid;
+  gap: 12px;
 }
-.ws-cmd-mission-btn.has-findings { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); background: rgba(232, 181, 75, 0.08); }
-.ws-cmd-mission-btn:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); text-decoration: none; }
-.ws-cmd-mission-btn:disabled { color: var(--ws-ink-faint); border-color: var(--ws-line); cursor: not-allowed; opacity: 0.72; }
-.ws-cmd-mission-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-garrison {
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014); min-height: 200px;
-  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+.ws-cmd-rpg-class-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ws-cmd-rpg-class-card {
+  min-width: 0;
+  min-height: 68px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid var(--ws-line);
+  background:
+    linear-gradient(120deg, rgba(70, 211, 154, 0.08), transparent 58%), rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-rpg-class-card span,
+.ws-cmd-rpg-loadout > span {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-class-card strong {
+  min-width: 0;
+  color: #eef0f3;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-status-strip,
+.ws-cmd-rpg-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-rpg-status-strip strong,
+.ws-cmd-rpg-status-strip span:last-child,
+.ws-cmd-rpg-sheet-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-status-strip span:last-child {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-rpg-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.ws-cmd-rpg-stat {
+  min-height: 82px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 5px;
+  border: 1px solid var(--ws-line);
+  background:
+    radial-gradient(circle at 50% 20%, rgba(70, 211, 154, 0.11), transparent 58%),
+    rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-rpg-stat span,
+.ws-cmd-rpg-quest-card span,
+.ws-cmd-rpg-sheet-row span {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-stat strong {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-display);
+  font-size: 27px;
+  line-height: 1;
+}
+.ws-cmd-rpg-quest-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-rpg-quest-card strong {
+  min-width: 0;
+  color: #eef0f3;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-quest-card p {
+  margin: 0;
+  min-width: 0;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-loadout {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-rpg-loadout div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ws-cmd-rpg-loadout em {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ws-line);
+  background: rgba(70, 211, 154, 0.05);
+  color: var(--ws-ink);
+  font-size: 11px;
+  font-style: normal;
+  padding: 5px 7px;
+}
+.ws-cmd-rpg-loadout small {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-loadout.is-empty strong {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-rpg-sheet-row {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.ws-cmd-rpg-sheet-row strong {
+  color: var(--ws-ink);
+  font-size: 12px;
+  text-align: right;
+}
+.ws-cmd-rpg-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ws-cmd-rpg-effects span {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 4px 8px;
+}
+.ws-cmd-map-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-cmd-rpg-command-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(70, 211, 154, 0.18);
+  background:
+    linear-gradient(120deg, rgba(70, 211, 154, 0.08), transparent 58%), rgba(0, 0, 0, 0.18);
+  padding: 12px;
+}
+.ws-cmd-rpg-command-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ws-cmd-rpg-command-panel header span {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-command-panel header strong {
+  min-width: 0;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-rpg-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ws-cmd-rpg-command {
+  width: 100%;
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--ws-line);
+  background: rgba(5, 7, 10, 0.44);
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  padding: 9px;
+}
+.ws-cmd-rpg-command i {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.06);
+  color: var(--ws-faction);
+  font-size: 15px;
+}
+.ws-cmd-rpg-command span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.ws-cmd-rpg-command strong,
+.ws-cmd-rpg-command small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-rpg-command strong {
+  color: #eef0f3;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+.ws-cmd-rpg-command small {
+  color: var(--ws-ink-faint);
+  font-size: 11px;
+}
+.ws-cmd-rpg-command:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.07);
+  text-decoration: none;
+}
+.ws-cmd-rpg-command:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-rpg-command.is-primary {
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.12);
+}
+.ws-cmd-rpg-command.is-alert {
+  border-color: rgba(226, 101, 77, 0.55);
+  background: rgba(226, 101, 77, 0.1);
+}
+.ws-cmd-rpg-command.is-alert i {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.48);
+  background: rgba(226, 101, 77, 0.08);
+}
+.ws-cmd-rpg-command.is-needs-input {
+  border-color: rgba(240, 138, 75, 0.58);
+  background: rgba(240, 138, 75, 0.1);
+}
+.ws-cmd-rpg-command.is-needs-input i {
+  color: var(--ws-input);
+  border-color: rgba(240, 138, 75, 0.5);
+  background: rgba(240, 138, 75, 0.08);
+}
+.ws-cmd-map-inventory-box {
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-map-inventory-summary {
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.ws-cmd-map-inventory-total {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.07);
+  color: var(--ws-ink);
+  font-family: var(--ws-font-display);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 10px 12px;
+}
+.ws-cmd-map-inventory-total strong {
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 20px;
+}
+.ws-cmd-map-inventory-badges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.ws-cmd-map-inventory-badge {
+  min-width: 0;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  padding: 7px 8px;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.ws-cmd-map-inventory-badge i {
+  color: var(--ws-faction);
+  font-size: 16px;
+}
+.ws-cmd-map-inventory-badge span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-map-inventory-badge strong {
+  color: var(--ws-faction);
+}
+.ws-cmd-map-inventory-badge.is-active {
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+  color: var(--ws-faction);
+}
+.ws-cmd-map-inventory-drawer {
+  display: grid;
+  gap: 10px;
+}
+.ws-cmd-map-inventory-group {
+  display: none;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.ws-cmd-map-inventory-group.is-active {
+  display: block;
+}
+.ws-cmd-map-inventory-group header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-map-inventory-group header span {
+  display: block;
+  color: var(--ws-ink-faint);
+  font-size: 11px;
+}
+.ws-cmd-map-inventory-group header strong {
+  color: #eef0f3;
+}
+.ws-cmd-map-inventory-group button {
+  border: 1px solid var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 7px 9px;
+}
+.ws-cmd-map-inventory-list {
+  padding: 8px 9px;
+}
+.ws-cmd-map-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 9px;
+}
+.ws-cmd-map-inventory-slot {
+  position: relative;
+  min-height: 116px;
+  display: grid;
+  grid-template-rows: auto minmax(0, auto) auto;
+  justify-items: center;
+  align-content: center;
+  gap: 7px;
+  padding: 10px 8px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(70, 211, 154, 0.09), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.035);
+  pointer-events: none;
+}
+.ws-cmd-map-slot-type {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 1;
+  min-height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(70, 211, 154, 0.16);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  padding: 2px 5px;
+}
+.ws-cmd-map-inventory-slot.is-notes {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(78, 197, 230, 0.12), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-schedules {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(232, 181, 75, 0.12), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-sessions {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(70, 211, 154, 0.11), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-folders {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(160, 132, 232, 0.12), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-files {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(214, 217, 222, 0.09), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-systems {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(240, 138, 75, 0.13), transparent 52%),
+    rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-map-inventory-slot.is-empty {
+  cursor: default;
+  color: var(--ws-ink-faint);
+  border-style: dashed;
+  opacity: 0.72;
+}
+.ws-cmd-map-inventory-slot.is-empty:hover {
+  border-color: var(--ws-line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.ws-cmd-map-slot-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(70, 211, 154, 0.07);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 18px;
+  line-height: 1;
+}
+.ws-cmd-map-slot-name {
+  width: 100%;
+  color: #eef0f3;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ws-cmd-map-empty {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  color: var(--ws-ink-faint);
+  font-size: 13px;
+}
+.ws-cmd-map-empty strong {
+  color: var(--ws-ink);
+}
+
+/* ---------- layout (garrison + rail scaffold; filled in Phase 2-3) ---------- */
+.ws-cmd-layout {
+  display: grid;
+  grid-template-columns: 1fr 332px;
+  gap: 18px;
+  align-items: start;
+}
+.ws-cmd-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.ws-cmd-mission {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 16px;
+  min-width: 0;
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(180deg, var(--ws-panel), #0f1014);
+  padding: 14px 16px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
   box-shadow: var(--ws-glow);
 }
-.ws-cmd-rail { display: flex; flex-direction: column; gap: 16px; }
+.ws-cmd-mission-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ws-cmd-mission-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.ws-cmd-mission-kicker {
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ws-faction);
+}
+.ws-cmd-mission-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 3px 8px;
+  border: 1px solid var(--ws-line-bright);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-mission-status.is-enabled {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+}
+.ws-cmd-mission-status.is-running {
+  color: var(--ws-idle);
+  border-color: color-mix(in srgb, var(--ws-idle) 46%, var(--ws-line));
+  background: color-mix(in srgb, var(--ws-idle) 8%, transparent);
+}
+.ws-cmd-mission-status.is-completed {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+}
+.ws-cmd-mission-status.is-failed,
+.ws-cmd-mission-status.is-blocked {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.42);
+  background: rgba(226, 101, 77, 0.07);
+}
+.ws-cmd-mission-status.is-paused,
+.ws-cmd-mission-status.is-manual {
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.07);
+}
+.ws-cmd-mission-status.is-empty,
+.ws-cmd-mission-status.is-loading {
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-mission-title {
+  margin: 0;
+  color: #eef0f3;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.ws-cmd-mission-text {
+  max-width: 88ch;
+  margin: 0;
+  color: var(--ws-ink);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.ws-cmd-mission-text.is-empty {
+  color: var(--ws-ink-faint);
+  font-style: italic;
+}
+.ws-cmd-mission-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.ws-cmd-mission-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 8px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.ws-cmd-mission-action-status {
+  min-height: 15px;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+.ws-cmd-mission-action-status.is-error {
+  color: var(--ws-alert);
+}
+.ws-cmd-mission-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.ws-cmd-mission-btn {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: 0.13s;
+}
+.ws-cmd-mission-btn.is-primary {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-mission-btn.has-findings {
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.08);
+}
+.ws-cmd-mission-btn:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  text-decoration: none;
+}
+.ws-cmd-mission-btn:disabled {
+  color: var(--ws-ink-faint);
+  border-color: var(--ws-line);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+.ws-cmd-mission-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-garrison {
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(180deg, var(--ws-panel), #0f1014);
+  min-height: 200px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 14px) 0,
+    100% 14px,
+    100% 100%,
+    14px 100%,
+    0 calc(100% - 14px)
+  );
+  box-shadow: var(--ws-glow);
+}
+.ws-cmd-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
 /* rail panels */
 .ws-cmd-panel {
-  border: 1px solid var(--ws-line); background: linear-gradient(180deg, var(--ws-panel), #0f1014);
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(180deg, var(--ws-panel), #0f1014);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 12px,
+    100% 100%,
+    12px 100%,
+    0 calc(100% - 12px)
+  );
   box-shadow: var(--ws-glow);
 }
-.ws-cmd-panel.is-managing { border-color: var(--ws-line-bright); background: linear-gradient(180deg, #1c1f26, #0f1014); }
-.ws-cmd-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--ws-line); }
-.ws-cmd-panel-title { display: flex; align-items: center; gap: 9px; }
-.ws-cmd-panel-title h4 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #e3e6ea; }
-.ws-cmd-panel-count { font-family: var(--ws-font-mono); font-size: 10px; color: var(--ws-ink-faint); }
-.ws-cmd-panel-tools { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.ws-cmd-panel.is-managing {
+  border-color: var(--ws-line-bright);
+  background: linear-gradient(180deg, #1c1f26, #0f1014);
+}
+.ws-cmd-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.ws-cmd-panel-title h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #e3e6ea;
+}
+.ws-cmd-panel-count {
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .ws-cmd-panel-more {
-  width: 26px; height: 24px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; transition: 0.15s;
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  transition: 0.15s;
 }
-.ws-cmd-panel-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-cmd-panel-more:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-panel-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.ws-cmd-panel-more:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-panel-more:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-panel-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .ws-cmd-panel-action {
-  min-height: 24px; padding: 5px 7px; border: 1px solid var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
-  color: var(--ws-faction); cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; transition: 0.13s;
+  min-height: 24px;
+  padding: 5px 7px;
+  border: 1px solid var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
-.ws-cmd-panel-action:hover { background: rgba(70, 211, 154, 0.14); border-color: var(--ws-faction); }
-.ws-cmd-panel-action:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-rail-empty { padding: 16px 6px; text-align: center; font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
+.ws-cmd-panel-action:hover {
+  background: rgba(70, 211, 154, 0.14);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-panel-action:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-rail-empty {
+  padding: 16px 6px;
+  text-align: center;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-ink-faint);
+  letter-spacing: 0.5px;
+}
 .ws-cmd-rail-item {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
-  padding: 8px 9px; border: 1px solid transparent; background: none; color: var(--ws-ink); cursor: pointer; text-decoration: none; transition: 0.13s;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-decoration: none;
+  transition: 0.13s;
 }
-.ws-cmd-rail-item.is-static { cursor: default; }
-.ws-cmd-rail-item:hover:not(.is-static) { border-color: var(--ws-line-bright); background: var(--ws-bg-2); }
-.ws-cmd-rail-item:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 1px; }
-.ws-cmd-rail-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
-.ws-cmd-rail-t { flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eef0f3; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-cmd-rail-m { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--ws-font-mono); font-size: 9.5px; color: var(--ws-ink-faint); letter-spacing: 0.5px; }
+.ws-cmd-rail-item.is-static {
+  cursor: default;
+}
+.ws-cmd-rail-item:hover:not(.is-static) {
+  border-color: var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+.ws-cmd-rail-item:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 1px;
+}
+.ws-cmd-rail-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.ws-cmd-rail-t {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: #eef0f3;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-rail-m {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ws-font-mono);
+  font-size: 9.5px;
+  color: var(--ws-ink-faint);
+  letter-spacing: 0.5px;
+}
 .ws-cmd-rail-role {
-  flex: 0 0 auto; padding: 2px 6px; border: 1px solid var(--ws-line-bright);
-  font-family: var(--ws-font-mono); font-size: 8px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--ws-ink-dim);
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--ws-line-bright);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
 }
-.ws-cmd-rail-role.is-project { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); background: rgba(232, 181, 75, 0.08); }
-.ws-cmd-rail-role.is-reference { color: var(--ws-ink-dim); }
+.ws-cmd-rail-role.is-project {
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.08);
+}
+.ws-cmd-rail-role.is-reference {
+  color: var(--ws-ink-dim);
+}
 .ws-cmd-rail-more {
-  margin-top: 4px; padding: 7px; border: 1px dashed var(--ws-line-bright); background: none; color: var(--ws-ink-dim); cursor: pointer;
-  font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; transition: 0.13s;
+  margin-top: 4px;
+  padding: 7px;
+  border: 1px dashed var(--ws-line-bright);
+  background: none;
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
-.ws-cmd-rail-more:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-cmd-rail-item.is-missing .ws-cmd-rail-t { color: var(--ws-alert); }
+.ws-cmd-rail-more:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-rail-item.is-missing .ws-cmd-rail-t {
+  color: var(--ws-alert);
+}
 /* Notes multi-select rows: checkbox + open button on one line. */
-.ws-cmd-note-row { flex-direction: row; align-items: center; gap: 8px; padding: 4px 9px; }
-.ws-cmd-note-check { flex: 0 0 auto; width: 14px; height: 14px; accent-color: var(--ws-faction); cursor: pointer; }
+.ws-cmd-note-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px;
+}
+.ws-cmd-note-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--ws-faction);
+  cursor: pointer;
+}
 .ws-cmd-note-open {
-  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; text-align: left;
-  padding: 4px 0; border: 0; background: none; color: var(--ws-ink); cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--ws-ink);
+  cursor: pointer;
 }
-.ws-cmd-note-open:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 1px; }
-.ws-cmd-note-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.ws-cmd-note-open:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 1px;
+}
+.ws-cmd-note-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
 .ws-cmd-note-tool {
-  padding: 5px 9px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
-  cursor: pointer; text-decoration: none; font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; transition: 0.13s;
+  padding: 5px 9px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  text-decoration: none;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
-.ws-cmd-note-tool:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-cmd-note-tool.is-danger:hover { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); }
-.ws-cmd-note-tool:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-note-filter, .ws-cmd-modal-note-filter { margin-bottom: 8px; }
+.ws-cmd-note-tool:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-note-tool.is-danger:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.4);
+}
+.ws-cmd-note-tool:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-note-filter,
+.ws-cmd-modal-note-filter {
+  margin-bottom: 8px;
+}
 .ws-cmd-files-drop,
 .ws-cmd-files-browse {
-  width: 100%; min-height: 34px; margin-bottom: 6px; display: grid; place-items: center;
-  border: 1px dashed var(--ws-line-bright); background: rgba(0, 0, 0, 0.18); color: var(--ws-ink-dim);
-  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
-  transition: 0.13s; text-align: center;
+  width: 100%;
+  min-height: 34px;
+  margin-bottom: 6px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--ws-line-bright);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: 0.13s;
+  text-align: center;
 }
 .ws-cmd-files-drop:hover,
 .ws-cmd-files-drop.is-active,
 .ws-cmd-files-browse:hover {
-  color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
 }
 .ws-cmd-files-drop:focus-visible,
 .ws-cmd-files-browse:focus-visible {
-  outline: 2px solid var(--ws-faction); outline-offset: 2px;
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
 }
-.ws-cmd-systems-body { gap: 10px; }
+.ws-cmd-systems-body {
+  gap: 10px;
+}
 .ws-cmd-system-tabs {
-  display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--ws-line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ws-line);
 }
 .ws-cmd-system-tab {
-  min-height: 28px; padding: 6px 8px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2);
-  color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono); font-size: 9.5px;
-  letter-spacing: 0.9px; text-transform: uppercase; transition: 0.13s;
+  min-height: 28px;
+  padding: 6px 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
 .ws-cmd-system-tab:hover,
 .ws-cmd-system-tab.is-active {
-  color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08);
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
 }
-.ws-cmd-system-tab:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-system-tab:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 .ws-cmd-system-host {
-  max-height: 72vh; overflow: auto; min-width: 0; padding-right: 2px;
+  max-height: 72vh;
+  overflow: auto;
+  min-width: 0;
+  padding-right: 2px;
 }
 .ws-cmd-system-host .workspace-detail-tools-card,
 .ws-cmd-system-host .workspace-detail-config-card {
-  margin: 0; border: 0; box-shadow: none; background: transparent; border-radius: 0; color: var(--text-primary);
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
+  color: var(--text-primary);
 }
 .ws-cmd-system-host .workspace-detail-config-header,
 .ws-cmd-system-host .workspace-detail-config-nav {
   display: none;
 }
 .ws-cmd-system-host .workspace-detail-config-content {
-  padding: 0; border: 0; background: transparent;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .ws-cmd-system-host .workspace-detail-config-body {
   padding: 0;
@@ -339,201 +2360,1790 @@
   padding: 0;
 }
 .ws-cmd-members-host {
-  max-height: 72vh; overflow: auto; min-width: 0; padding-right: 2px;
+  max-height: 72vh;
+  overflow: auto;
+  min-width: 0;
+  padding-right: 2px;
 }
 /* Neutralize the mounted detail-view members bento card so it reads as a rail panel body. */
 .ws-cmd-members-host .workspace-detail-panel-members {
-  margin: 0; border: 0; box-shadow: none; background: transparent; border-radius: 0;
-  cursor: default; color: var(--text-primary); padding: 0;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  border-radius: 0;
+  cursor: default;
+  color: var(--text-primary);
+  padding: 0;
 }
 .ws-cmd-members-host .workspace-detail-panel-members:hover {
-  box-shadow: none; border-color: transparent;
+  box-shadow: none;
+  border-color: transparent;
 }
-.ws-cmd-members-host .workspace-detail-panel-close { display: none; }
-.ws-cmd-members-host .workspace-detail-panel-header { padding: 0 0 8px; }
-.ws-cmd-members-host .workspace-detail-panel-body { padding: 0; max-height: none; }
+.ws-cmd-members-host .workspace-detail-panel-close {
+  display: none;
+}
+.ws-cmd-members-host .workspace-detail-panel-header {
+  padding: 0 0 8px;
+}
+.ws-cmd-members-host .workspace-detail-panel-body {
+  padding: 0;
+  max-height: none;
+}
 .ws-cmd-soon {
-  display: grid; place-items: center; min-height: 200px; padding: 24px;
-  font-family: var(--ws-font-mono); font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-faint); text-align: center;
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  padding: 24px;
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+  text-align: center;
 }
 
 /* ---------- garrison ---------- */
-.ws-cmd-garrison { padding: 14px; }
-.ws-cmd-garrison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.ws-cmd-garrison-grid.is-odd .ws-cmd-unit:last-child { grid-column: 1 / -1; }
+.ws-cmd-garrison {
+  padding: 14px;
+}
+.ws-cmd-garrison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.ws-cmd-garrison-grid.is-odd .ws-cmd-unit:last-child {
+  grid-column: 1 / -1;
+}
 
 .ws-cmd-unit {
-  border: 1px solid var(--ws-line); background: linear-gradient(165deg, #171a20, #0e0f13); overflow: hidden;
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  border: 1px solid var(--ws-line);
+  background: linear-gradient(165deg, #171a20, #0e0f13);
+  overflow: hidden;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 12px,
+    100% 100%,
+    12px 100%,
+    0 calc(100% - 12px)
+  );
 }
-.ws-cmd-unit.is-keeper { border-color: rgba(232, 181, 75, 0.32); }
-.ws-cmd-unit-top { display: flex; gap: 12px; padding: 13px 13px 11px; border-bottom: 1px solid var(--ws-line); }
+.ws-cmd-unit.is-keeper {
+  border-color: rgba(232, 181, 75, 0.32);
+}
+.ws-cmd-unit-top {
+  display: flex;
+  gap: 12px;
+  padding: 13px 13px 11px;
+  border-bottom: 1px solid var(--ws-line);
+}
 .ws-cmd-av {
-  width: 46px; height: 46px; flex: 0 0 auto; display: grid; place-items: center;
-  font-family: var(--ws-font-mono); font-weight: 700; font-size: 14px; color: #04110c;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  font-family: var(--ws-font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  color: #04110c;
   background: hsl(var(--agent-avatar-hue, 160) 52% 48%);
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
-.ws-cmd-unit-id { flex: 1 1 auto; min-width: 0; }
-.ws-cmd-unit-name { font-size: 15px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: #f3f5f8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-cmd-unit-role { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
+.ws-cmd-unit-id {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ws-cmd-unit-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #f3f5f8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-unit-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
 .ws-cmd-badge {
-  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
-  padding: 2px 7px; border: 1px solid var(--ws-line-bright); color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink-dim);
 }
-.ws-cmd-badge.is-keeper { color: var(--ws-keeper); border-color: rgba(232, 181, 75, 0.4); background: rgba(232, 181, 75, 0.08); }
-.ws-cmd-state { display: flex; align-items: center; gap: 6px; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--ws-ink-dim); }
-.ws-cmd-led { width: 7px; height: 7px; border-radius: 50%; background: var(--ws-idle); box-shadow: 0 0 7px var(--ws-idle); }
-.ws-cmd-led.working { background: var(--ws-working); box-shadow: 0 0 8px var(--ws-working); }
-.ws-cmd-led.alert { background: var(--ws-alert); box-shadow: 0 0 8px var(--ws-alert); }
-.ws-cmd-led.idle { background: var(--ws-idle); }
-.ws-cmd-unit-ctl { display: flex; align-items: flex-start; gap: 6px; }
-.ws-cmd-lock { color: var(--ws-keeper); font-size: 13px; line-height: 26px; }
+.ws-cmd-badge.is-keeper {
+  color: var(--ws-keeper);
+  border-color: rgba(232, 181, 75, 0.4);
+  background: rgba(232, 181, 75, 0.08);
+}
+.ws-cmd-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ws-idle);
+  box-shadow: 0 0 7px var(--ws-idle);
+}
+.ws-cmd-led.working {
+  background: var(--ws-working);
+  box-shadow: 0 0 8px var(--ws-working);
+}
+.ws-cmd-led.alert {
+  background: var(--ws-alert);
+  box-shadow: 0 0 8px var(--ws-alert);
+}
+.ws-cmd-led.waiting {
+  background: var(--ws-waiting);
+  box-shadow: 0 0 8px var(--ws-waiting);
+}
+.ws-cmd-led.needs-input {
+  background: var(--ws-input);
+  box-shadow: 0 0 8px var(--ws-input);
+}
+.ws-cmd-led.done {
+  background: var(--ws-done);
+  box-shadow: 0 0 8px var(--ws-done);
+}
+.ws-cmd-led.idle {
+  background: var(--ws-idle);
+}
+.ws-cmd-unit-ctl {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ws-cmd-lock {
+  color: var(--ws-keeper);
+  font-size: 13px;
+  line-height: 26px;
+}
 .ws-cmd-icon-btn {
-  width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2); color: var(--ws-faction); cursor: pointer; font-size: 14px; transition: 0.15s;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-size: 14px;
+  transition: 0.15s;
 }
-.ws-cmd-icon-btn.sm { width: 22px; height: 22px; font-size: 12px; }
-.ws-cmd-icon-btn:hover { background: rgba(70, 211, 154, 0.1); border-color: var(--ws-faction-deep); }
-.ws-cmd-icon-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-icon-btn.sm {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+.ws-cmd-icon-btn:hover {
+  background: rgba(70, 211, 154, 0.1);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-icon-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 
-.ws-cmd-unit-rows { padding: 11px 13px; display: flex; flex-direction: column; gap: 8px; }
-.ws-cmd-row { display: flex; justify-content: space-between; align-items: center; }
-.ws-cmd-rk { font-family: var(--ws-font-mono); font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ws-ink-faint); }
-.ws-cmd-rv { font-family: var(--ws-font-mono); font-size: 12px; color: #eef0f3; }
+.ws-cmd-unit-rows {
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ws-cmd-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ws-cmd-rk {
+  font-family: var(--ws-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-rv {
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  color: #eef0f3;
+}
 
-.ws-cmd-questlog { margin: 2px 13px 13px; border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.22); }
-.ws-cmd-ql-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 11px; border-bottom: 1px solid var(--ws-line); }
-.ws-cmd-ql-t { font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ws-ink-dim); }
-.ws-cmd-ql-empty { padding: 13px 11px; text-align: center; font-family: var(--ws-font-mono); font-size: 10.5px; color: var(--ws-ink-faint); letter-spacing: 1px; }
-.ws-cmd-quest { display: flex; align-items: center; gap: 9px; padding: 9px 11px; }
-.ws-cmd-quest + .ws-cmd-quest { border-top: 1px solid var(--ws-line); }
-.ws-cmd-q-glyph { width: 22px; height: 22px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--ws-keeper-deep); color: var(--ws-keeper); font-size: 11px; }
+.ws-cmd-unit-name-link {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+.ws-cmd-unit-name-link:hover,
+.ws-cmd-unit-name-link:focus-visible {
+  color: var(--ws-faction);
+  border-bottom-color: var(--ws-faction-deep);
+  outline: none;
+}
+
+/* System-prompt preview block on a unit card (opens the full prompt modal). */
+.ws-cmd-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  margin: 0 13px 11px;
+  padding: 9px 11px;
+  box-sizing: border-box;
+  width: calc(100% - 26px);
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.ws-cmd-prompt:hover {
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-prompt:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-prompt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ws-cmd-prompt-cta {
+  font-family: var(--ws-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ws-faction);
+}
+.ws-cmd-prompt-preview {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ws-ink-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ws-cmd-prompt-preview.is-empty {
+  font-style: italic;
+  color: var(--ws-ink-faint);
+}
+
+.ws-cmd-questlog {
+  margin: 2px 13px 13px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.22);
+}
+.ws-cmd-ql-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-ql-t {
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-ql-empty {
+  padding: 13px 11px;
+  text-align: center;
+  font-family: var(--ws-font-mono);
+  font-size: 10.5px;
+  color: var(--ws-ink-faint);
+  letter-spacing: 1px;
+}
+.ws-cmd-quest {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+}
+.ws-cmd-quest + .ws-cmd-quest {
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-q-glyph {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-keeper-deep);
+  color: var(--ws-keeper);
+  font-size: 11px;
+}
 .ws-cmd-q-name {
-  flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: none; text-align: left;
-  font: inherit; font-size: 13px; color: #eef0f3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: #eef0f3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.ws-cmd-q-name:hover { color: var(--ws-faction); text-decoration: underline; text-underline-offset: 3px; }
-.ws-cmd-q-name:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-q-status { font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--ws-line-bright); color: var(--ws-ink-dim); }
-.ws-cmd-q-status.pending { color: var(--ws-keeper); border-color: var(--ws-keeper-deep); }
-.ws-cmd-q-status.working { color: var(--ws-working); border-color: var(--ws-faction-deep); }
-.ws-cmd-q-status.alert { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); }
-.ws-cmd-q-status.done { color: var(--ws-ink-faint); }
-.ws-cmd-q-run { width: 28px; height: 28px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--ws-faction-deep); color: var(--ws-faction); background: rgba(70, 211, 154, 0.07); cursor: pointer; transition: 0.15s; }
-.ws-cmd-q-run:hover { background: var(--ws-faction); color: #04110c; }
-.ws-cmd-q-run:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-q-name:hover {
+  color: var(--ws-faction);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ws-cmd-q-name:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-q-status {
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-q-status.pending {
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+}
+.ws-cmd-q-status.working {
+  color: var(--ws-working);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-q-status.alert {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.4);
+}
+.ws-cmd-q-status.done {
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-q-run {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-faction-deep);
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.07);
+  cursor: pointer;
+  transition: 0.15s;
+}
+.ws-cmd-q-run:hover {
+  background: var(--ws-faction);
+  color: #04110c;
+}
+.ws-cmd-q-run:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
+/* ---------- agent command deck ---------- */
+.ws-cmd-garrison {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(180deg, var(--ws-panel), #0f1014);
+  background-size:
+    28px 28px,
+    28px 28px,
+    auto;
+}
+.ws-cmd-deck {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.62fr) minmax(220px, 0.85fr) minmax(320px, 1.45fr);
+  min-height: 540px;
+}
+.ws-cmd-roster,
+.ws-cmd-agent-stage,
+.ws-cmd-agent-overview {
+  min-width: 0;
+}
+.ws-cmd-roster {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--ws-line);
+  background: rgba(7, 8, 11, 0.58);
+}
+.ws-cmd-roster-head {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-roster-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.ws-cmd-roster-head span,
+.ws-cmd-stage-kicker,
+.ws-cmd-overview-label,
+.ws-cmd-loadout-kicker,
+.ws-cmd-unassigned-kicker {
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-roster-head strong {
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-faction);
+}
+.ws-cmd-roster-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-roster-item {
+  position: relative;
+  width: 100%;
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 6px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ws-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.16s ease;
+}
+.ws-cmd-roster-item::before {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px -1px;
+  width: 2px;
+  background: transparent;
+}
+.ws-cmd-roster-item:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(255, 255, 255, 0.025);
+}
+.ws-cmd-roster-item.is-selected {
+  border-color: rgba(70, 211, 154, 0.45);
+  background: linear-gradient(90deg, rgba(70, 211, 154, 0.13), rgba(70, 211, 154, 0.025));
+  transform: translateX(2px);
+}
+.ws-cmd-roster-item.is-selected::before {
+  background: var(--ws-faction);
+  box-shadow: 0 0 12px var(--ws-faction);
+}
+.ws-cmd-roster-item.is-entry.is-selected {
+  border-color: rgba(232, 181, 75, 0.45);
+  background: linear-gradient(90deg, rgba(232, 181, 75, 0.13), rgba(232, 181, 75, 0.025));
+}
+.ws-cmd-roster-item.is-entry.is-selected::before {
+  background: var(--ws-keeper);
+  box-shadow: 0 0 12px var(--ws-keeper);
+}
+.ws-cmd-roster-item:focus-visible,
+.ws-cmd-agent-tab:focus-visible,
+.ws-cmd-agent-action:focus-visible,
+.ws-cmd-loadout-edit:focus-visible,
+.ws-cmd-activity-item:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-roster-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ws-cmd-roster-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+  color: #f3f5f8;
+}
+.ws-cmd-roster-role {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-roster-copy .ws-cmd-state {
+  margin-top: 1px;
+  font-size: 8px;
+}
+.ws-cmd-roster-entry,
+.ws-cmd-roster-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 4px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  font-family: var(--ws-font-mono);
+  font-size: 7px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-roster-entry {
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+}
+.ws-cmd-roster-count {
+  top: auto;
+  bottom: 6px;
+}
+.ws-cmd-character {
+  --character-accent: hsl(var(--agent-character-hue) 64% 54%);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
+}
+.ws-cmd-character.is-roster {
+  width: 46px;
+  height: 58px;
+}
+.ws-cmd-character.is-stage {
+  width: min(220px, 82%);
+  aspect-ratio: 100 / 118;
+}
+.ws-cmd-character svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ws-cmd-character-body {
+  fill: color-mix(in srgb, var(--character-accent) 20%, #12171c);
+  stroke: color-mix(in srgb, var(--character-accent) 56%, var(--ws-line-bright));
+  stroke-width: 2;
+}
+.ws-cmd-character-head {
+  fill: color-mix(in srgb, var(--character-accent) 28%, #151a20);
+  stroke: var(--character-accent);
+  stroke-width: 2;
+}
+.ws-cmd-character-visor {
+  fill: color-mix(in srgb, var(--character-accent) 70%, white);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 5px var(--character-accent));
+}
+.ws-cmd-character-shoulders,
+.ws-cmd-character-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--character-accent) 70%, var(--ws-line-bright));
+  stroke-width: 2;
+}
+.ws-cmd-character-line.is-soft {
+  opacity: 0.36;
+}
+.ws-cmd-character-emblem {
+  fill: var(--character-accent);
+  filter: drop-shadow(0 0 4px var(--character-accent));
+}
+.ws-cmd-character.alert {
+  --character-accent: var(--ws-alert);
+}
+.ws-cmd-character.working {
+  --character-accent: var(--ws-working);
+}
+.ws-cmd-character.waiting {
+  --character-accent: var(--ws-waiting);
+}
+.ws-cmd-character.needs-input {
+  --character-accent: var(--ws-input);
+}
+.ws-cmd-character.done {
+  --character-accent: var(--ws-done);
+}
+.ws-cmd-agent-stage {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  border-right: 1px solid var(--ws-line);
+  padding: 18px 16px 16px;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(70, 211, 154, 0.13), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent);
+}
+.ws-cmd-agent-stage.alert {
+  background:
+    radial-gradient(circle at 50% 34%, rgba(226, 101, 77, 0.14), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent);
+}
+.ws-cmd-stage-grid {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: 0.28;
+  background:
+    linear-gradient(90deg, transparent 49.5%, rgba(70, 211, 154, 0.15) 50%, transparent 50.5%),
+    repeating-linear-gradient(0deg, transparent 0 23px, rgba(255, 255, 255, 0.035) 24px);
+  mask-image: linear-gradient(to bottom, black, transparent 80%);
+}
+.ws-cmd-stage-character {
+  min-height: 220px;
+  width: 100%;
+  display: grid;
+  place-items: center;
+}
+.ws-cmd-stage-copy {
+  width: 100%;
+  text-align: center;
+}
+.ws-cmd-stage-copy h3 {
+  margin: 5px 0 7px;
+  font-size: clamp(17px, 2vw, 22px);
+  letter-spacing: 0.75px;
+  text-transform: uppercase;
+  color: #f3f5f8;
+}
+.ws-cmd-stage-badges {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.ws-cmd-stage-role {
+  margin: 8px 0;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-cmd-stage-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-stage-status strong {
+  color: var(--ws-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.ws-cmd-stage-actions {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 16px;
+}
+.ws-cmd-agent-action,
+.ws-cmd-loadout-edit {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  text-decoration: none;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-agent-action:hover,
+.ws-cmd-loadout-edit:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  text-decoration: none;
+}
+.ws-cmd-agent-action.is-primary {
+  color: #06120d;
+  border-color: var(--ws-faction);
+  background: var(--ws-faction);
+}
+.ws-cmd-agent-action.is-danger:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.48);
+}
+.ws-cmd-agent-lock {
+  align-self: center;
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  color: var(--ws-keeper);
+  text-transform: uppercase;
+}
+.ws-cmd-agent-overview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgba(12, 13, 16, 0.72);
+}
+.ws-cmd-agent-tabs {
+  display: flex;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ws-line);
+  scrollbar-width: thin;
+}
+.ws-cmd-agent-tab {
+  position: relative;
+  min-height: 54px;
+  flex: 1 0 auto;
+  padding: 10px 11px;
+  border: 0;
+  border-right: 1px solid var(--ws-line);
+  background: transparent;
+  color: var(--ws-ink-faint);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 8.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-agent-tab::after {
+  content: "";
+  position: absolute;
+  inset: auto 10px 0;
+  height: 2px;
+  background: transparent;
+}
+.ws-cmd-agent-tab:hover {
+  color: var(--ws-ink);
+  background: rgba(255, 255, 255, 0.025);
+}
+.ws-cmd-agent-tab.is-active {
+  color: var(--ws-faction);
+}
+.ws-cmd-agent-tab.is-active::after {
+  background: var(--ws-faction);
+  box-shadow: 0 0 9px var(--ws-faction);
+}
+.ws-cmd-agent-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 486px;
+  overflow: auto;
+  padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-agent-tabpanel[hidden] {
+  display: none;
+}
+.ws-cmd-overview-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+}
+.ws-cmd-overview-hero > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ws-cmd-overview-hero strong {
+  color: #f1f3f6;
+  font-size: 14px;
+}
+.ws-cmd-overview-hero p,
+.ws-cmd-overview-brief p {
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.ws-cmd-overview-signal {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid var(--ws-line-bright);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-overview-signal.working {
+  color: var(--ws-working);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-overview-signal.alert {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.42);
+}
+.ws-cmd-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+.ws-cmd-overview-stats > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.13);
+}
+.ws-cmd-overview-stats span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ws-font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-overview-stats strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 17px;
+}
+.ws-cmd-overview-brief {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: baseline;
+  margin-top: 12px;
+  padding: 12px 2px;
+}
+.ws-cmd-agent-tabpanel .ws-cmd-questlog {
+  margin: 0;
+}
+.ws-cmd-agent-task-list {
+  display: grid;
+  gap: 7px;
+}
+.ws-cmd-agent-task-list .workspace-detail-item {
+  margin: 0;
+}
+.ws-cmd-loadout-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.ws-cmd-loadout-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.16);
+}
+.ws-cmd-loadout-card:first-child {
+  grid-column: 1 / -1;
+}
+.ws-cmd-loadout-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-loadout-card strong {
+  color: #f1f3f6;
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+}
+.ws-cmd-loadout-edit {
+  min-height: 24px;
+  padding: 4px 7px;
+  font-size: 8px;
+}
+.ws-cmd-loadout-readonly {
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.ws-cmd-loadout-chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 3px 6px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+}
+.ws-cmd-loadout-chip.skill {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-loadout-chip.mcp {
+  color: var(--ws-idle);
+}
+.ws-cmd-loadout-empty {
+  color: var(--ws-ink-faint);
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* Interactive loadout editor (map Unit Sheet + details Loadout tab). */
+.ws-cmd-loadout-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ws-cmd-loadout-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-cmd-loadout-editor-section header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-cmd-loadout-add-btn {
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ws-cmd-loadout-add-btn:hover,
+.ws-cmd-loadout-add-btn.is-open {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-loadout-add-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-chip.is-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  background: transparent;
+  font-size: 10px;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.ws-cmd-loadout-chip-mark {
+  font-weight: 700;
+}
+.ws-cmd-loadout-chip.is-toggle.is-on {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.1);
+}
+.ws-cmd-loadout-chip.is-toggle.is-off {
+  color: var(--ws-ink-faint);
+  border-color: var(--ws-line);
+}
+.ws-cmd-loadout-chip.is-toggle:hover:not([disabled]) {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-loadout-chip.is-toggle:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-chip.is-toggle.is-busy,
+.ws-cmd-loadout-chip.is-toggle[disabled] {
+  opacity: 0.55;
+  cursor: progress;
+}
+.ws-cmd-loadout-chip.is-locked {
+  color: var(--ws-ink-faint);
+  border-style: dashed;
+}
+.ws-cmd-loadout-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.7);
+}
+.ws-cmd-loadout-picker.is-loading,
+.ws-cmd-loadout-picker.is-empty {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  font-style: italic;
+}
+.ws-cmd-loadout-picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+.ws-cmd-loadout-picker-item i {
+  font-size: 9px;
+  color: var(--ws-faction);
+}
+.ws-cmd-loadout-picker-item:hover:not([disabled]) {
+  color: var(--ws-ink);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-loadout-picker-item:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-picker-item.is-busy,
+.ws-cmd-loadout-picker-item[disabled] {
+  opacity: 0.55;
+  cursor: progress;
+}
+.ws-cmd-loadout-editor-error {
+  margin: 0;
+  color: var(--ws-alert);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+}
+.ws-cmd-rpg-loadout.is-editable {
+  display: block;
+}
+.ws-cmd-rpg-loadout-model {
+  margin-bottom: 8px;
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+.ws-cmd-rpg-loadout-model small {
+  display: block;
+  color: var(--ws-ink-faint);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ws-cmd-loadout-card.is-editor {
+  display: block;
+}
+.ws-cmd-loadout-prompt {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 9px;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-loadout-prompt > div {
+  min-width: 0;
+}
+.ws-cmd-loadout-title {
+  color: var(--ws-ink);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-prompt p {
+  margin: 5px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.ws-cmd-loadout-prompt.is-error {
+  border-color: rgba(226, 101, 77, 0.42);
+}
+.ws-cmd-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-cmd-activity-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--ws-ink);
+  text-align: left;
+  cursor: pointer;
+}
+.ws-cmd-activity-item:hover {
+  border-color: var(--ws-line-bright);
+  background: rgba(255, 255, 255, 0.025);
+}
+.ws-cmd-activity-kind {
+  padding: 3px 5px;
+  border: 1px solid var(--ws-faction-deep);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 7.5px;
+  text-transform: uppercase;
+}
+.ws-cmd-activity-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-cmd-activity-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.ws-cmd-activity-copy span,
+.ws-cmd-activity-item time {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: capitalize;
+}
+.ws-cmd-tab-empty,
+.ws-cmd-deck-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  min-height: 220px;
+  padding: 24px;
+  text-align: center;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-tab-empty strong,
+.ws-cmd-deck-empty strong {
+  color: var(--ws-ink);
+  text-transform: uppercase;
+}
+.ws-cmd-tab-empty span,
+.ws-cmd-deck-empty span {
+  font-size: 11px;
+}
+.ws-cmd-deck-empty-glyph {
+  color: var(--ws-faction);
+  font-size: 44px;
+  text-shadow: 0 0 18px rgba(70, 211, 154, 0.5);
+}
+.ws-cmd-unassigned {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  align-items: center;
+  margin: 8px;
+  padding: 9px;
+  border: 1px dashed rgba(232, 181, 75, 0.45);
+  background: rgba(232, 181, 75, 0.045);
+}
+.ws-cmd-unassigned > div {
+  min-width: 0;
+}
+.ws-cmd-unassigned strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ws-keeper);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.ws-cmd-unassigned-count {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  color: var(--ws-keeper);
+  font-family: var(--ws-font-mono);
+  font-size: 16px;
+}
+.ws-cmd-unassigned .ws-cmd-agent-action {
+  grid-column: 1 / -1;
+  min-height: 25px;
+  margin-top: 3px;
+  padding: 4px 7px;
+  color: var(--ws-keeper);
+  border-color: var(--ws-keeper-deep);
+}
+.ws-cmd-mission.is-empty {
+  min-height: 0;
+  max-height: 160px;
+}
 
 /* ---------- stat manager modal (agents / tasks / mcp / skills) ---------- */
 /* Lives inside the .ws-cmd container so it inherits the tactical tokens, but is
    position:fixed so it overlays the viewport regardless of scroll position. */
 .ws-cmd-modal {
-  position: fixed; inset: 0; z-index: 1050; display: flex; align-items: center; justify-content: center; padding: 24px;
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
 }
-.ws-cmd-modal[hidden] { display: none; }
-.ws-cmd-modal-backdrop { position: absolute; inset: 0; background: rgba(3, 7, 8, 0.72); }
+.ws-cmd-modal[hidden] {
+  display: none;
+}
+.ws-cmd-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 7, 8, 0.72);
+}
 .ws-cmd-modal-panel {
-  position: relative; z-index: 1; width: 100%; max-width: 560px; max-height: 82vh; display: flex; flex-direction: column;
-  border: 1px solid var(--ws-line-bright); background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
-  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
-  box-shadow: var(--ws-glow); outline: none;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 560px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ws-line-bright);
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  clip-path: polygon(
+    0 0,
+    calc(100% - 16px) 0,
+    100% 16px,
+    100% 100%,
+    16px 100%,
+    0 calc(100% - 16px)
+  );
+  box-shadow: var(--ws-glow);
+  outline: none;
 }
-.ws-cmd-modal-panel:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--ws-line); }
-.ws-cmd-modal-title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #eef0f3; }
-.ws-cmd-modal-count { font-family: var(--ws-font-mono); font-size: 11px; color: var(--ws-ink-faint); }
-.ws-cmd-modal-head-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.ws-cmd-modal-panel:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-modal-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: #eef0f3;
+}
+.ws-cmd-modal-count {
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-modal-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .ws-cmd-modal-add {
-  padding: 7px 12px; border: 1px solid var(--ws-faction-deep); background: rgba(70, 211, 154, 0.09); color: var(--ws-faction);
-  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; transition: 0.13s;
+  padding: 7px 12px;
+  border: 1px solid var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.09);
+  color: var(--ws-faction);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  transition: 0.13s;
   clip-path: polygon(0 0, 100% 0, 100% 100%, 8px 100%, 0 calc(100% - 8px));
 }
-.ws-cmd-modal-add:hover { background: rgba(70, 211, 154, 0.16); border-color: var(--ws-faction); }
-.ws-cmd-modal-add:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-add:hover {
+  background: rgba(70, 211, 154, 0.16);
+  border-color: var(--ws-faction);
+}
+.ws-cmd-modal-add:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 .ws-cmd-modal-filter {
-  padding: 7px 10px; border: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
-  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; transition: 0.13s;
+  padding: 7px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
 .ws-cmd-modal-filter[aria-pressed="true"],
-.ws-cmd-modal-filter:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.08); }
-.ws-cmd-modal-filter:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-modal-viewtoggle { display: inline-flex; border: 1px solid var(--ws-line-bright); }
-.ws-cmd-modal-view {
-  padding: 7px 11px; border: 0; border-right: 1px solid var(--ws-line-bright); background: var(--ws-bg-2); color: var(--ws-ink-dim);
-  cursor: pointer; font-family: var(--ws-font-mono); font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; transition: 0.13s;
+.ws-cmd-modal-filter:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.08);
 }
-.ws-cmd-modal-view:last-child { border-right: 0; }
+.ws-cmd-modal-filter:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-modal-viewtoggle {
+  display: inline-flex;
+  border: 1px solid var(--ws-line-bright);
+}
+.ws-cmd-modal-view {
+  padding: 7px 11px;
+  border: 0;
+  border-right: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  transition: 0.13s;
+}
+.ws-cmd-modal-view:last-child {
+  border-right: 0;
+}
 .ws-cmd-modal-view.is-active,
-.ws-cmd-modal-view:hover { color: var(--ws-faction); background: rgba(70, 211, 154, 0.08); }
-.ws-cmd-modal-view:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: -2px; }
+.ws-cmd-modal-view:hover {
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.08);
+}
+.ws-cmd-modal-view:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -2px;
+}
 /* Board mode goes wide so status columns have room. */
-.ws-cmd-modal-panel.is-board { max-width: min(1240px, 96vw); }
-.ws-cmd-modal-board-body { flex: 1 1 auto; min-height: 0; padding: 12px 14px; }
-.ws-cmd-board-host { min-width: 0; height: 100%; overflow: auto; }
+.ws-cmd-modal-panel.is-board {
+  max-width: min(1240px, 96vw);
+}
+.ws-cmd-modal-board-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 14px;
+}
+.ws-cmd-board-host {
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+}
 /* Neutralize the mounted detail board wrapper chrome inside the modal host. */
-.ws-cmd-board-host .workspace-detail-board { display: block; margin: 0; }
+.ws-cmd-board-host .workspace-detail-board {
+  display: block;
+  margin: 0;
+}
 /* MCP/Skills stat modals mount the live Workspace config surface. Go wide like the board
    and strip the config card's own header + tab strip so only the active manager pane shows. */
-.ws-cmd-modal-panel.is-config { max-width: min(1000px, 94vw); }
-.ws-cmd-modal-config-body { flex: 1 1 auto; min-height: 0; padding: 0; display: flex; flex-direction: column; }
+.ws-cmd-modal-panel.is-config {
+  max-width: min(1000px, 94vw);
+}
+.ws-cmd-modal-config-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
 /* The Tools modal stacks a sub-tab strip above the mounted surface. */
-.ws-cmd-modal-config-body .ws-cmd-system-tabs { flex: 0 0 auto; padding: 12px 14px 0; }
-.ws-cmd-config-host { min-width: 0; flex: 1 1 auto; min-height: 0; overflow: auto; }
+.ws-cmd-modal-config-body .ws-cmd-system-tabs {
+  flex: 0 0 auto;
+  padding: 12px 14px 0;
+}
+.ws-cmd-config-host {
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
 .ws-cmd-config-host .workspace-detail-config-card.is-command-modal {
-  margin: 0; border: 0; background: transparent; box-shadow: none; clip-path: none;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  clip-path: none;
 }
 .workspace-detail-config-card.is-command-modal .workspace-detail-config-header,
-.workspace-detail-config-card.is-command-modal .workspace-detail-config-nav { display: none; }
-.workspace-detail-config-card.is-command-modal .workspace-detail-config-content { padding: 14px 16px; }
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-nav {
+  display: none;
+}
+.workspace-detail-config-card.is-command-modal .workspace-detail-config-content {
+  padding: 14px 16px;
+}
 .ws-cmd-modal-close {
-  width: 30px; height: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-size: 16px; line-height: 1; transition: 0.13s;
+  width: 30px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: 0.13s;
 }
-.ws-cmd-modal-close:hover { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); }
-.ws-cmd-modal-close:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
-.ws-cmd-modal-body { padding: 12px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.ws-cmd-modal-empty { padding: 28px 12px; text-align: center; font-family: var(--ws-font-mono); font-size: 11px; letter-spacing: 0.8px; color: var(--ws-ink-faint); }
-.ws-cmd-modal-foot { padding: 11px 14px; border-top: 1px solid var(--ws-line); display: flex; justify-content: flex-end; }
+.ws-cmd-modal-close:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.4);
+}
+.ws-cmd-modal-close:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-modal-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ws-cmd-modal-empty {
+  padding: 28px 12px;
+  text-align: center;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-modal-foot {
+  padding: 11px 14px;
+  border-top: 1px solid var(--ws-line);
+  display: flex;
+  justify-content: flex-end;
+}
 .ws-cmd-modal-detailed {
-  border: none; background: none; color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono);
-  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; transition: 0.13s;
+  border: none;
+  background: none;
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
-.ws-cmd-modal-detailed:hover { color: var(--ws-faction); }
-.ws-cmd-modal-detailed:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-modal-detailed:hover {
+  color: var(--ws-faction);
+}
+.ws-cmd-modal-detailed:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
 
 /* rows */
-.ws-cmd-mrow { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--ws-line); background: rgba(0, 0, 0, 0.22); }
+.ws-cmd-mrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.22);
+}
 .ws-cmd-mrow-av {
-  width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; font-family: var(--ws-font-mono);
-  font-weight: 700; font-size: 11px; color: #04110c; background: hsl(var(--agent-avatar-hue, 160) 52% 48%);
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  font-family: var(--ws-font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  color: #04110c;
+  background: hsl(var(--agent-avatar-hue, 160) 52% 48%);
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
-.ws-cmd-mrow-main { flex: 1 1 auto; min-width: 0; }
-.ws-cmd-mrow-name { display: flex; align-items: center; gap: 7px; font-size: 14px; color: #eef0f3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-cmd-mrow-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ws-cmd-mrow-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ws-cmd-mrow-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  color: #eef0f3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-mrow-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
 .ws-cmd-mchip {
-  font-family: var(--ws-font-mono); font-size: 9px; letter-spacing: 0.8px; text-transform: uppercase; padding: 2px 7px;
-  border: 1px solid var(--ws-line-bright); color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink-dim);
 }
-.ws-cmd-mchip.is-on { color: var(--ws-faction); border-color: var(--ws-faction-deep); }
-.ws-cmd-mchip.is-disabled { color: var(--ws-ink-faint); }
-.ws-cmd-mchip.is-keeper { color: var(--ws-keeper); border-color: rgba(232, 181, 75, 0.4); background: rgba(232, 181, 75, 0.08); }
-.ws-cmd-mrow-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.ws-cmd-mchip.is-on {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+}
+.ws-cmd-mchip.is-disabled {
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-mchip.is-keeper {
+  color: var(--ws-keeper);
+  border-color: rgba(232, 181, 75, 0.4);
+  background: rgba(232, 181, 75, 0.08);
+}
+.ws-cmd-mrow-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
 .ws-cmd-mrow-btn {
-  padding: 5px 9px; min-width: 28px; display: grid; place-items: center; border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2); color: var(--ws-ink-dim); cursor: pointer; font-family: var(--ws-font-mono);
-  font-size: 10px; letter-spacing: 0.8px; text-transform: uppercase; transition: 0.13s;
+  padding: 5px 9px;
+  min-width: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  transition: 0.13s;
 }
-.ws-cmd-mrow-btn:hover { color: var(--ws-faction); border-color: var(--ws-faction-deep); background: rgba(70, 211, 154, 0.07); }
-.ws-cmd-mrow-btn.is-danger:hover { color: var(--ws-alert); border-color: rgba(226, 101, 77, 0.4); background: rgba(226, 101, 77, 0.07); }
-.ws-cmd-mrow-btn:focus-visible { outline: 2px solid var(--ws-faction); outline-offset: 2px; }
+.ws-cmd-mrow-btn:hover {
+  color: var(--ws-faction);
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+}
+.ws-cmd-mrow-btn.is-danger:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.4);
+  background: rgba(226, 101, 77, 0.07);
+}
+.ws-cmd-mrow-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
+/* Light mode keeps the tactical layout but uses the same neutral shell palette
+   as the rest of Ori's light UI. Dark mode continues to use the base charcoal tokens. */
+[data-bs-theme="light"] .ws-cmd {
+  --ws-bg: #eef1f3;
+  --ws-bg-2: #f7f8f9;
+  --ws-panel: #eceff2;
+  --ws-panel-2: #fbfcfd;
+  --ws-panel-deep: #dfe4e8;
+  --ws-line: #c8cdd3;
+  --ws-line-bright: #a8b0ba;
+
+  --ws-ink: #1f2128;
+  --ws-ink-dim: #5c5c5e;
+  --ws-ink-faint: #626a74;
+  --ws-ink-heading: #0a0a0a;
+
+  --ws-faction: #1f6b4e;
+  --ws-faction-deep: rgba(31, 107, 78, 0.34);
+  --ws-keeper: #9b641b;
+  --ws-keeper-deep: rgba(155, 100, 27, 0.34);
+  --ws-idle: #167c99;
+  --ws-working: #1f6b4e;
+  --ws-alert: #b94b3f;
+
+  --ws-on-accent: #ffffff;
+  --ws-avatar-text: #04110c;
+  --ws-field-bg: rgba(255, 255, 255, 0.62);
+  --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 20px 42px -26px rgba(10, 10, 10, 0.34);
+}
+
+[data-bs-theme="light"] .ws-cmd-title h2,
+[data-bs-theme="light"] .ws-cmd-stat .ws-v,
+[data-bs-theme="light"] .ws-cmd-mission-title,
+[data-bs-theme="light"] .ws-cmd-panel-title h4,
+[data-bs-theme="light"] .ws-cmd-rail-t,
+[data-bs-theme="light"] .ws-cmd-unit-name,
+[data-bs-theme="light"] .ws-cmd-roster-name,
+[data-bs-theme="light"] .ws-cmd-stage-copy h3,
+[data-bs-theme="light"] .ws-cmd-overview-hero strong,
+[data-bs-theme="light"] .ws-cmd-loadout-card strong,
+[data-bs-theme="light"] .ws-cmd-rv,
+[data-bs-theme="light"] .ws-cmd-q-name,
+[data-bs-theme="light"] .ws-cmd-modal-title,
+[data-bs-theme="light"] .ws-cmd-mrow-name {
+  color: var(--ws-ink-heading);
+}
+
+[data-bs-theme="light"] .ws-cmd-stat.is-alert .ws-v,
+[data-bs-theme="light"] .ws-cmd-stat.is-alert .ws-l {
+  color: var(--ws-alert);
+}
+
+[data-bs-theme="light"] .ws-cmd-mission,
+[data-bs-theme="light"] .ws-cmd-garrison,
+[data-bs-theme="light"] .ws-cmd-panel {
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+}
+
+[data-bs-theme="light"] .ws-cmd-panel.is-managing {
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel-deep));
+}
+
+[data-bs-theme="light"] .ws-cmd-unit {
+  background: linear-gradient(165deg, var(--ws-panel-2), var(--ws-panel-deep));
+}
+
+[data-bs-theme="light"] .ws-cmd-roster,
+[data-bs-theme="light"] .ws-cmd-agent-overview {
+  background: rgba(247, 248, 249, 0.78);
+}
+
+[data-bs-theme="light"] .ws-cmd-agent-stage {
+  background:
+    radial-gradient(circle at 50% 34%, rgba(31, 107, 78, 0.12), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.52), transparent);
+}
+
+[data-bs-theme="light"] .ws-cmd-overview-hero,
+[data-bs-theme="light"] .ws-cmd-overview-stats > div,
+[data-bs-theme="light"] .ws-cmd-loadout-card,
+[data-bs-theme="light"] .ws-cmd-loadout-prompt,
+[data-bs-theme="light"] .ws-cmd-activity-item {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+[data-bs-theme="light"] .ws-cmd-identity-editor,
+[data-bs-theme="light"] .ws-cmd-files-drop,
+[data-bs-theme="light"] .ws-cmd-files-browse,
+[data-bs-theme="light"] .ws-cmd-prompt,
+[data-bs-theme="light"] .ws-cmd-questlog,
+[data-bs-theme="light"] .ws-cmd-mrow {
+  background: var(--ws-field-bg);
+}
+
+[data-bs-theme="light"] .ws-cmd-av,
+[data-bs-theme="light"] .ws-cmd-mrow-av {
+  color: var(--ws-avatar-text);
+}
+
+[data-bs-theme="light"] .ws-cmd-q-run:hover {
+  color: var(--ws-on-accent);
+}
+
+[data-bs-theme="light"] .ws-cmd-agent-action.is-primary {
+  color: var(--ws-on-accent);
+}
+
+@media (max-width: 1199px) {
+  .ws-cmd-mission.is-empty {
+    max-height: none;
+  }
+  .ws-cmd-map-world {
+    padding: 34px 76px 72px 34px;
+  }
+  .ws-cmd-deck {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr);
+  }
+  .ws-cmd-roster {
+    grid-column: 1 / -1;
+    border-right: 0;
+    border-bottom: 1px solid var(--ws-line);
+  }
+  .ws-cmd-roster-list {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .ws-cmd-roster-item {
+    flex: 0 0 210px;
+    margin-bottom: 0;
+  }
+}
 
 @media (max-width: 1100px) {
-  .ws-cmd-topbar { align-items: flex-start; }
-  .ws-cmd-title { flex-basis: calc(100% - 70px); }
-  .ws-cmd-readout { flex: 1 1 100%; justify-content: flex-start; }
-  .ws-cmd-garrison-grid { grid-template-columns: 1fr; }
-  .ws-cmd-garrison-grid.is-odd .ws-cmd-unit:last-child { grid-column: auto; }
+  .ws-cmd-topbar {
+    align-items: flex-start;
+  }
+  .ws-cmd-view-switch {
+    margin-left: 0;
+  }
+  .ws-cmd-title {
+    flex-basis: calc(100% - 70px);
+  }
+  .ws-cmd-readout {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+  .ws-cmd-garrison-grid {
+    grid-template-columns: 1fr;
+  }
+  .ws-cmd-garrison-grid.is-odd .ws-cmd-unit:last-child {
+    grid-column: auto;
+  }
 }
 @media (min-width: 1101px) {
   .ws-cmd-layout:has(.ws-cmd-systems-panel.is-managing) {
@@ -541,31 +4151,241 @@
   }
 }
 @media (max-width: 900px) {
-  .ws-cmd-layout { grid-template-columns: 1fr; }
-  .ws-cmd-mission { flex-direction: column; }
-  .ws-cmd-mission-actions { justify-content: flex-start; }
-  .ws-cmd-system-host { max-height: none; }
-  .ws-cmd-members-host { max-height: none; }
+  .ws-cmd-layout {
+    grid-template-columns: 1fr;
+  }
+  .ws-cmd-map-world {
+    padding: 28px 72px 72px 28px;
+  }
+  .ws-cmd-map-window-backdrop {
+    padding: 18px;
+  }
+  .ws-cmd-mission {
+    flex-direction: column;
+  }
+  .ws-cmd-mission-actions {
+    justify-content: flex-start;
+  }
+  .ws-cmd-system-host {
+    max-height: none;
+  }
+  .ws-cmd-members-host {
+    max-height: none;
+  }
+}
+@media (max-width: 767px) {
+  .ws-cmd-deck {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-map-agent-field {
+    min-height: 0;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
+  .ws-cmd-rpg-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ws-cmd-map-inventory-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  }
+  .ws-cmd-agent-stage {
+    min-height: 450px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ws-line);
+  }
+  .ws-cmd-agent-panel-body {
+    max-height: none;
+  }
+  .ws-cmd-overview-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ws-cmd-loadout-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-loadout-card:first-child {
+    grid-column: auto;
+  }
+  .ws-cmd-activity-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .ws-cmd-activity-item time {
+    grid-column: 2;
+  }
 }
 @media (max-width: 640px) {
-  .ws-cmd-nav-btn { flex: 1 1 calc(50% - 8px); justify-content: center; }
-  .ws-cmd-crest { width: 42px; height: 42px; }
-  .ws-cmd-title h2 { font-size: 20px; }
-  .ws-cmd-panel-head { align-items: flex-start; }
-  .ws-cmd-panel-tools { flex-wrap: wrap; justify-content: flex-end; }
-  .ws-cmd-readout .ws-cmd-stat { flex: 1 1 calc(50% - 10px); }
-  .ws-cmd-mission-actions .ws-cmd-mission-btn { flex: 1 1 calc(50% - 8px); }
+  .ws-cmd-nav-btn {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
+  }
+  .ws-cmd-view-switch {
+    flex: 1 1 100%;
+  }
+  .ws-cmd-view-btn {
+    flex: 1 1 0;
+  }
+  .ws-cmd-opmap {
+    min-height: 560px;
+  }
+  .ws-cmd-map-world {
+    padding: 78px 16px 24px;
+  }
+  .ws-cmd-map-floor {
+    inset: 14px;
+  }
+  .ws-cmd-map-belt {
+    top: 16px;
+    right: 16px;
+    bottom: auto;
+    left: auto;
+    flex-direction: row;
+    transform: none;
+  }
+  .ws-cmd-map-belt-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .ws-cmd-map-quest-dock {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    align-items: stretch;
+  }
+  .ws-cmd-map-quest-fab {
+    align-self: flex-end;
+  }
+  .ws-cmd-map-quest-composer {
+    width: 100%;
+  }
+  .ws-cmd-map-window-backdrop {
+    padding: 12px;
+  }
+  .ws-cmd-map-window {
+    max-height: calc(100% - 12px);
+  }
+  .ws-cmd-map-station-grid,
+  .ws-cmd-map-inventory-badges,
+  .ws-cmd-rpg-class-grid,
+  .ws-cmd-rpg-command-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-map-task-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-map-inventory-group header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ws-cmd-map-inventory-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ws-cmd-map-inventory-slot {
+    min-height: 104px;
+  }
+  .ws-cmd-rpg-sheet-row {
+    display: grid;
+  }
+  .ws-cmd-rpg-sheet-row strong {
+    text-align: left;
+  }
+  .ws-cmd-crest {
+    width: 42px;
+    height: 42px;
+  }
+  .ws-cmd-title h2 {
+    font-size: 20px;
+  }
+  .ws-cmd-panel-head {
+    align-items: flex-start;
+  }
+  .ws-cmd-panel-tools {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .ws-cmd-readout .ws-cmd-stat {
+    flex: 1 1 calc(50% - 10px);
+  }
+  .ws-cmd-mission-actions .ws-cmd-mission-btn {
+    flex: 1 1 calc(50% - 8px);
+  }
+  .ws-cmd-agent-stage {
+    min-height: 420px;
+  }
+  .ws-cmd-stage-character {
+    min-height: 190px;
+  }
+  .ws-cmd-agent-tab {
+    min-width: max-content;
+  }
+  .ws-cmd-overview-hero,
+  .ws-cmd-loadout-prompt {
+    flex-direction: column;
+  }
+  .ws-cmd-overview-brief {
+    grid-template-columns: 1fr;
+  }
   /* Reserve space for the floating Workspace Assistant FAB so the last rail/panel
      controls are never trapped underneath it (PRD FR5.20). */
-  .ws-cmd { padding-bottom: 84px; }
+  .ws-cmd {
+    padding-bottom: 84px;
+  }
 }
 
 /* Auto-playing motion is opt-in via the OS "reduce motion" preference. */
-@keyframes ws-cmd-rise { from { opacity: 0; transform: translateY(8px); } }
-@keyframes ws-cmd-pulse { 50% { opacity: 0.35; } }
+@keyframes ws-cmd-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes ws-cmd-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes ws-cmd-character-breathe {
+  50% {
+    transform: translateY(-4px) scale(1.012);
+  }
+}
+@keyframes ws-cmd-character-scan {
+  50% {
+    opacity: 0.58;
+  }
+}
 @media (prefers-reduced-motion: no-preference) {
-  .ws-cmd-topbar { animation: ws-cmd-rise 0.35s ease both; }
-  .ws-cmd-mission, .ws-cmd-garrison, .ws-cmd-rail { animation: ws-cmd-rise 0.4s ease both; animation-delay: 0.05s; }
-  .ws-cmd-led.working { animation: ws-cmd-pulse 1.5s ease-in-out infinite; }
-  .ws-cmd-modal-panel { animation: ws-cmd-rise 0.22s ease both; }
+  .ws-cmd-topbar {
+    animation: ws-cmd-rise 0.35s ease both;
+  }
+  .ws-cmd-mission,
+  .ws-cmd-garrison,
+  .ws-cmd-rail,
+  .ws-cmd-map-world,
+  .ws-cmd-map-window {
+    animation: ws-cmd-rise 0.4s ease both;
+    animation-delay: 0.05s;
+  }
+  .ws-cmd-led.working,
+  .ws-cmd-led.needs-input {
+    animation: ws-cmd-pulse 1.5s ease-in-out infinite;
+  }
+  .ws-cmd-map-agent.working .ws-cmd-character {
+    animation: ws-cmd-character-breathe 3.8s ease-in-out infinite;
+  }
+  .ws-cmd-map-agent.needs-input .ws-cmd-map-agent-status {
+    animation: ws-cmd-pulse 1.1s ease-in-out infinite;
+  }
+  .ws-cmd-agent-stage .ws-cmd-character.is-stage {
+    animation: ws-cmd-character-breathe 3.8s ease-in-out infinite;
+  }
+  .ws-cmd-character.working .ws-cmd-character-visor {
+    animation: ws-cmd-character-scan 1.25s ease-in-out infinite;
+  }
+  .ws-cmd-modal-panel {
+    animation: ws-cmd-rise 0.22s ease both;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-cmd-map-agent,
+  .ws-cmd-map-window {
+    transition: none;
+  }
 }

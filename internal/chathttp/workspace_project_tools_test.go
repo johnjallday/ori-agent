@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -47,7 +48,7 @@ func setupProjectToolProvider(t *testing.T, ws *session.Workspace) (*WorkspaceTo
 		cleanup()
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(libDir, "demo", "template.json"), []byte(`{"name":"Demo","description":"demo template","tags":[" Music ","reaper","music"]}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(libDir, "demo", "template.json"), []byte(`{"name":"Demo","description":"demo template","tags":[" Music ","reaper","music"],"project_entry":{"relative_path":"{{name}}.rpp","open_after_create_default":true}}`), 0o640); err != nil {
 		cleanup()
 		t.Fatal(err)
 	}
@@ -112,14 +113,15 @@ func TestWorkspaceCreateProjectTool(t *testing.T) {
 		t.Fatalf("create tool: %v", err)
 	}
 	var payload struct {
-		ProjectPath string   `json:"project_path"`
-		TemplateID  string   `json:"template_id"`
-		Tags        []string `json:"tags"`
+		ProjectPath      string   `json:"project_path"`
+		ProjectEntryPath string   `json:"project_entry_path"`
+		TemplateID       string   `json:"template_id"`
+		Tags             []string `json:"tags"`
 	}
 	if err := json.Unmarshal([]byte(result), &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if payload.ProjectPath != "song-x" || payload.TemplateID != "demo" {
+	if payload.ProjectPath != "song-x" || payload.ProjectEntryPath != "song-x.rpp" || payload.TemplateID != "demo" {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 	if len(payload.Tags) != 2 || payload.Tags[0] != "music" || payload.Tags[1] != "reaper" {
@@ -162,10 +164,16 @@ func TestWorkspaceCreateProjectTool(t *testing.T) {
 	if folderWS.SharedData["project_directory_id"] != folderWS.DirectoryReferences[0].ID {
 		t.Fatalf("project directory = %v, want %q", folderWS.SharedData["project_directory_id"], folderWS.DirectoryReferences[0].ID)
 	}
+	if folderWS.SharedData[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
+		t.Fatalf("folder project entry = %v, want song-x.rpp", folderWS.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
+	if sessionWS.SharedData[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
+		t.Fatalf("session project entry = %v, want song-x.rpp", sessionWS.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	select {
 	case event := <-events:
-		if event.Data["project_path"] != "song-x" {
+		if event.Data["project_path"] != "song-x" || event.Data[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
 			t.Fatalf("unexpected event payload: %+v", event)
 		}
 	case <-time.After(2 * time.Second):

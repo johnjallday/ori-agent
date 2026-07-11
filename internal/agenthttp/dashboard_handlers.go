@@ -44,8 +44,9 @@ func (h *DashboardHandler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
 	h.cliAgentRegistry = r
 }
 
-// SetWorkspaceStore wires the workspace store so dashboard can filter out
-// workspace entry agents from the top-level agents list.
+// SetWorkspaceStore wires the workspace store so the dashboard can annotate
+// each agent with the workspaces it is attached to (workspace_count +
+// workspaces).
 func (h *DashboardHandler) SetWorkspaceStore(s workspace.Store) {
 	h.workspaceStore = s
 }
@@ -64,19 +65,21 @@ func (h *DashboardHandler) SetCodexSyncProvider(provider func() any) {
 
 // AgentListItem represents an agent in the dashboard list view
 type AgentListItem struct {
-	Name           string                 `json:"name"`
-	Type           string                 `json:"type"`
-	Role           types.AgentRole        `json:"role"`
-	Source         string                 `json:"source"`
-	Scope          string                 `json:"scope,omitempty"`
-	WorkspaceID    string                 `json:"workspace_id,omitempty"`
-	Capabilities   []string               `json:"capabilities,omitempty"`
-	Status         types.AgentStatus      `json:"status"`
-	Statistics     *types.AgentStatistics `json:"statistics,omitempty"`
-	Metadata       *types.AgentMetadata   `json:"metadata,omitempty"`
-	Evolution      *types.AgentEvolution  `json:"evolution,omitempty"`
-	AllowWebSearch bool                   `json:"allow_web_search"`
-	Model          string                 `json:"model"`
+	Name           string                   `json:"name"`
+	Type           string                   `json:"type"`
+	Role           types.AgentRole          `json:"role"`
+	Source         string                   `json:"source"`
+	Scope          string                   `json:"scope,omitempty"`
+	WorkspaceID    string                   `json:"workspace_id,omitempty"`
+	WorkspaceCount int                      `json:"workspace_count"`
+	Workspaces     []workspace.WorkspaceRef `json:"workspaces,omitempty"`
+	Capabilities   []string                 `json:"capabilities,omitempty"`
+	Status         types.AgentStatus        `json:"status"`
+	Statistics     *types.AgentStatistics   `json:"statistics,omitempty"`
+	Metadata       *types.AgentMetadata     `json:"metadata,omitempty"`
+	Evolution      *types.AgentEvolution    `json:"evolution,omitempty"`
+	AllowWebSearch bool                     `json:"allow_web_search"`
+	Model          string                   `json:"model"`
 }
 
 // AgentDetailResponse represents detailed agent information
@@ -96,6 +99,10 @@ type AgentDetailResponse struct {
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
+	// Version is an optimistic-concurrency token over the editable definition.
+	// The Agents page echoes it back on update so the server can reject stale
+	// edits (PRD FR13). Empty for CLI agents, which are read-only.
+	Version string `json:"version,omitempty"`
 	// ClaudeSync carries read-only ~/.claude state for the Claude Code agent.
 	ClaudeSync any `json:"claude_sync,omitempty"`
 	// CodexSync carries read-only ~/.codex state for the Codex CLI agent.
@@ -112,9 +119,11 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 	tagFilter := r.URL.Query().Get("tag")
 	favoriteOnly := r.URL.Query().Get("favorite") == "true"
 
-	// Map of workspace entry agent name (lowercase) → workspace ID, so each
-	// agent can be annotated with scope="workspace" and its workspace link.
-	entryAgentWorkspaces := collectWorkspaceEntryAgentNames(h.workspaceStore)
+	// Per-agent workspace membership (lowercase agent name → attached
+	// workspaces), computed from the metadata-only cache. Every referenced
+	// definition is annotated with workspace_count + workspaces; scope is no
+	// longer used to hide workspace entry agents (PRD FR1/FR2).
+	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
 
 	// Get all agents
 	names := h.State.ListAgents()
@@ -167,10 +176,18 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Model:          ag.Settings.Model,
 		}
 
-		// Annotate workspace entry agents so the UI can group / hide them.
-		if wsID, isEntry := entryAgentWorkspaces[strings.ToLower(strings.TrimSpace(name))]; isEntry {
-			item.Scope = "workspace"
-			item.WorkspaceID = wsID
+		// Annotate workspace membership so the UI can group definitions by the
+		// workspaces they're attached to (PRD FR1). The entry-agent workspace,
+		// when present, is carried as workspace_id for backward compatibility.
+		if m, ok := memberships[strings.ToLower(strings.TrimSpace(name))]; ok {
+			item.WorkspaceCount = m.Count
+			item.Workspaces = m.Workspaces
+			for _, ref := range m.Workspaces {
+				if ref.EntryPoint {
+					item.WorkspaceID = ref.ID
+					break
+				}
+			}
 		}
 
 		agents = append(agents, item)
@@ -311,40 +328,12 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		MaxOutputTokens: ag.Settings.MaxOutputTokens,
 		SystemPrompt:    ag.Settings.SystemPrompt,
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
+		Version:         agentConfigVersion(ag),
 	}
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")
 	orihttp.WriteJSON(w, response)
-}
-
-// collectWorkspaceEntryAgentNames returns a map (lowercase agent name →
-// workspace ID) for every workspace that designates an entry agent. Returns
-// an empty map when the workspace store is nil or unreachable. Shared by the
-// dashboard and main agent list handlers so both can annotate workspace-scoped
-// entry agents consistently.
-func collectWorkspaceEntryAgentNames(wsStore workspace.Store) map[string]string {
-	names := make(map[string]string)
-	if wsStore == nil {
-		return names
-	}
-
-	ids, err := wsStore.List()
-	if err != nil {
-		return names
-	}
-
-	for _, id := range ids {
-		ws, err := wsStore.Get(id)
-		if err != nil || ws == nil {
-			continue
-		}
-		name := strings.ToLower(strings.TrimSpace(ws.EntryAgentName()))
-		if name != "" {
-			names[name] = ws.ID
-		}
-	}
-	return names
 }
 
 // Helper functions

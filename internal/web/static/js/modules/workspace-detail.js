@@ -14,7 +14,6 @@ import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
-import { TemplateOnboardingPanel } from './template-onboarding.js';
 
 /**
  * Format a date for display
@@ -227,16 +226,17 @@ export class WorkspaceDetailPage {
     this.providerCatalogPromise = null;
     this.agentSkillsCache = new Map();
     this.agentSkillsPromises = new Map();
+    // Cached effective-prompt payloads (base + refinement + effective) keyed by
+    // normalized agent name, plus in-flight fetch promises for de-duping. Feeds
+    // both the flip-card prompt preview and the "View system prompt" modal.
+    this.agentPromptCache = new Map();
+    this.agentPromptPromises = new Map();
+    this.activeAgentPromptView = null;
     this.mcpManager = new WorkspaceMCPManager(this);
     this.nativeMCPManager = new WorkspaceNativeMCPManager(this);
     this.skillsManager = new WorkspaceSkillsManager(this);
     this.pluginsManager = new WorkspacePluginsManager(this);
     this.memoryManager = new WorkspaceMemoryManager(this);
-    this.templateOnboardingPanel = new TemplateOnboardingPanel({
-      workspaceId: this.workspaceId,
-      mountId: 'workspace-template-onboarding',
-      onRefresh: () => this.loadWorkspace()
-    });
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
     this.workspaceTaskMarkdownStatus = null;
@@ -288,6 +288,7 @@ export class WorkspaceDetailPage {
     this.projectTemplates = [];
     this.projectTemplatesRoot = '';
     this.projectTemplateSubmitting = false;
+    this.projectOpenBusy = false;
     this.workspaceTagDraft = [];
     this.workspaceTagsSaving = false;
 
@@ -309,7 +310,7 @@ export class WorkspaceDetailPage {
     this.setupNotesPanelVaultDrop();
     this.setupPageDragAndDrop();
     await this.loadWorkspace();
-    await this.templateOnboardingPanel.init();
+    this.consumeProjectOpenFailureNotice();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
     await Promise.all([
@@ -336,6 +337,47 @@ export class WorkspaceDetailPage {
     if (!restoredBlockedTask && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
     }
+    if (!restoredBlockedTask) {
+      await this.maybeStartTemplateSetup();
+    }
+  }
+
+  projectOpenNoticeStorageKey() {
+    return `oriProjectOpenNotice:${String(this.workspaceId || '').trim()}`;
+  }
+
+  consumeProjectOpenFailureNotice() {
+    let raw = '';
+    try {
+      raw = window.sessionStorage?.getItem(this.projectOpenNoticeStorageKey()) || '';
+      if (raw) {
+        window.sessionStorage?.removeItem(this.projectOpenNoticeStorageKey());
+      }
+    } catch (error) {
+      console.warn('Failed to read project-open notice:', error);
+      return false;
+    }
+    if (!raw) return false;
+
+    let message = 'Workspace created, but the project could not be opened. Use Open Project to try again.';
+    try {
+      const notice = JSON.parse(raw);
+      if (notice?.workspace_id && String(notice.workspace_id) !== String(this.workspaceId)) {
+        return false;
+      }
+      if (typeof notice?.message === 'string' && notice.message.trim()) {
+        message = notice.message.trim();
+      }
+    } catch (error) {
+      console.warn('Failed to parse project-open notice:', error);
+    }
+
+    if (window.Toast?.warning) {
+      window.Toast.warning(message, { title: 'Project not opened', duration: 8000 });
+    } else if (typeof window.notifyToast === 'function') {
+      window.notifyToast(message, 'warning');
+    }
+    return true;
   }
 
   ensureScrollablePanelAccessibility() {
@@ -607,8 +649,7 @@ export class WorkspaceDetailPage {
     for (const file of files) {
       const hasExtension = file.name.includes('.');
       const isLikelyFolder =
-        (!file.type && file.size === 0) ||
-        (!file.type && !hasExtension && file.size < 4096);
+        (!file.type && file.size === 0) || (!file.type && !hasExtension && file.size < 4096);
       if (isLikelyFolder) {
         if (window.Toast) {
           window.Toast.info('To add a folder, use the Linked Folders panel instead.', {
@@ -966,7 +1007,6 @@ export class WorkspaceDetailPage {
     });
   }
 
-
   /**
    * Cache DOM elements
    */
@@ -1101,9 +1141,7 @@ export class WorkspaceDetailPage {
         'workspace-detail-task-result-next-steps-actions'
       ),
       taskResultCopyBtn: document.getElementById('workspace-detail-task-result-copy'),
-      taskResultPromoteModal: document.getElementById(
-        'workspace-detail-task-result-promote-modal'
-      ),
+      taskResultPromoteModal: document.getElementById('workspace-detail-task-result-promote-modal'),
       taskResultPromoteTitleInput: document.getElementById(
         'workspace-detail-task-result-promote-title'
       ),
@@ -1154,13 +1192,9 @@ export class WorkspaceDetailPage {
         'workspace-detail-project-template-refresh'
       ),
       projectTemplatePathInput: document.getElementById('workspace-detail-project-template-path'),
-      projectTemplateBrowseBtn: document.getElementById(
-        'workspace-detail-project-template-browse'
-      ),
+      projectTemplateBrowseBtn: document.getElementById('workspace-detail-project-template-browse'),
       projectNameInput: document.getElementById('workspace-detail-project-name'),
-      projectTemplateSubmitBtn: document.getElementById(
-        'workspace-detail-project-template-submit'
-      ),
+      projectTemplateSubmitBtn: document.getElementById('workspace-detail-project-template-submit'),
       projectTemplateError: document.getElementById('workspace-detail-project-template-error'),
 
       // Assist modal — the assist page swaps in for the Command view surface.
@@ -1232,6 +1266,14 @@ export class WorkspaceDetailPage {
       agentModelSelect: document.getElementById('workspace-detail-agent-model-select'),
       agentModelHelp: document.getElementById('workspace-detail-agent-model-help'),
       agentModelSubmitBtn: document.getElementById('workspace-detail-agent-model-submit'),
+
+      // Agent system prompt modal
+      agentPromptModal: document.getElementById('workspace-detail-agent-prompt-modal'),
+      agentPromptTitle: document.getElementById('workspace-detail-agent-prompt-title'),
+      agentPromptAgentName: document.getElementById('workspace-detail-agent-prompt-agent-name'),
+      agentPromptBody: document.getElementById('workspace-detail-agent-prompt-body'),
+      agentPromptDetailLink: document.getElementById('workspace-detail-agent-prompt-detail-link'),
+      agentPromptCopyBtn: document.getElementById('workspace-detail-agent-prompt-copy'),
 
       // Workspace MCP modal
       mcpModal: document.getElementById('workspace-detail-mcp-modal'),
@@ -1427,8 +1469,12 @@ export class WorkspaceDetailPage {
     // Note buttons
     this.elements.addNoteBtn?.addEventListener('click', () => this.showNoteModal());
     this.elements.selectAllNotesBtn?.addEventListener('click', () => this.toggleSelectAllNotes());
-    this.elements.copyAllNotesBtn?.addEventListener('click', () => this.copySelectedNotesToClipboard());
-    this.elements.deleteSelectedNotesBtn?.addEventListener('click', () => this.deleteSelectedNotes());
+    this.elements.copyAllNotesBtn?.addEventListener('click', () =>
+      this.copySelectedNotesToClipboard()
+    );
+    this.elements.deleteSelectedNotesBtn?.addEventListener('click', () =>
+      this.deleteSelectedNotes()
+    );
 
     // "View all" -> workspace notes app. The href is set here (not in the
     // template) because the workspace ID isn't known at server-render time.
@@ -1439,47 +1485,59 @@ export class WorkspaceDetailPage {
     // "Open task editor" icon button: opens the task modal in auto mode with whatever
     // text is currently in the entry-prompt input, so users can review/configure before saving.
     this.elements.homeAssistantConfigureTaskBtn?.addEventListener('click', () => {
-      if (!window.taskModalController || typeof window.taskModalController.openForCreate !== 'function') {
+      if (
+        !window.taskModalController ||
+        typeof window.taskModalController.openForCreate !== 'function'
+      ) {
         console.warn('Task modal controller not available');
         return;
       }
       const input = this.elements.homeAssistantInput;
       const description = String(input?.value || '').trim();
-      window.taskModalController.openForCreate(this.workspaceId, description, () => {
-        if (input) input.value = '';
-        this.loadTasks?.();
-        this.loadSchedules?.();
-      }, {
-        forceAutoMode: true,
-        prefillAutoDescription: description,
-      });
+      window.taskModalController.openForCreate(
+        this.workspaceId,
+        description,
+        () => {
+          if (input) input.value = '';
+          this.loadTasks?.();
+          this.loadSchedules?.();
+        },
+        {
+          forceAutoMode: true,
+          prefillAutoDescription: description
+        }
+      );
     });
 
     // Quick "Create Description" button: route multiline /note templates to the note modal
     // instead of stuffing markdown (with newlines) into the single-line entry input where it
     // collapses to garbage.
-    this.elements.homeAssistantQuickNotesBtn?.addEventListener('click', (event) => {
-      const button = event.currentTarget;
-      const prompt = button?.getAttribute('data-home-prompt') || '';
-      if (!prompt.startsWith('/note ') || !prompt.includes('\n')) return;
-      event.stopImmediatePropagation();
-      event.preventDefault();
-      const body = prompt.slice('/note '.length);
-      const lines = body.split('\n');
-      let title = '';
-      let content = body;
-      if (lines[0]?.startsWith('# ')) {
-        title = lines[0].slice(2).trim();
-        content = lines.slice(1).join('\n').replace(/^\n+/, '');
-      }
-      this.showNoteModal();
-      window.requestAnimationFrame(() => {
-        const titleInput = document.getElementById('noteNameInput');
-        const contentInput = document.getElementById('noteContentInput');
-        if (titleInput && title) titleInput.value = title;
-        if (contentInput) contentInput.value = content;
-      });
-    }, true);
+    this.elements.homeAssistantQuickNotesBtn?.addEventListener(
+      'click',
+      event => {
+        const button = event.currentTarget;
+        const prompt = button?.getAttribute('data-home-prompt') || '';
+        if (!prompt.startsWith('/note ') || !prompt.includes('\n')) return;
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        const body = prompt.slice('/note '.length);
+        const lines = body.split('\n');
+        let title = '';
+        let content = body;
+        if (lines[0]?.startsWith('# ')) {
+          title = lines[0].slice(2).trim();
+          content = lines.slice(1).join('\n').replace(/^\n+/, '');
+        }
+        this.showNoteModal();
+        window.requestAnimationFrame(() => {
+          const titleInput = document.getElementById('noteNameInput');
+          const contentInput = document.getElementById('noteContentInput');
+          if (titleInput && title) titleInput.value = title;
+          if (contentInput) contentInput.value = content;
+        });
+      },
+      true
+    );
 
     // Directory buttons
     this.elements.createProjectBtn?.addEventListener('click', event => {
@@ -1501,7 +1559,10 @@ export class WorkspaceDetailPage {
       this.updateProjectTemplateModalState();
     });
     this.elements.projectTemplatePathInput?.addEventListener('input', () => {
-      if (this.elements.projectTemplatePathInput?.value.trim() && this.elements.projectTemplateSelect) {
+      if (
+        this.elements.projectTemplatePathInput?.value.trim() &&
+        this.elements.projectTemplateSelect
+      ) {
         this.elements.projectTemplateSelect.value = '';
       }
       this.updateProjectTemplateModalState();
@@ -1674,6 +1735,9 @@ export class WorkspaceDetailPage {
     );
     this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () =>
       this.resetAgentModelModal()
+    );
+    this.elements.agentPromptCopyBtn?.addEventListener('click', () =>
+      this.copyAgentPromptToClipboard()
     );
 
     // Make workspace name and description editable
@@ -1979,13 +2043,13 @@ export class WorkspaceDetailPage {
 
   getWorkspaceTags(workspace = this.workspace) {
     if (!workspace || !Array.isArray(workspace.tags)) return [];
-    return workspace.tags
-      .map(tag => String(tag || '').trim())
-      .filter(Boolean);
+    return workspace.tags.map(tag => String(tag || '').trim()).filter(Boolean);
   }
 
   normalizeWorkspaceTagValue(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '')
+      .trim()
+      .toLowerCase();
   }
 
   normalizeWorkspaceTagList(tags) {
@@ -2097,7 +2161,9 @@ export class WorkspaceDetailPage {
   async saveWorkspaceTags() {
     if (this.workspaceTagsSaving) return;
 
-    const draft = this.workspaceTagInput ? this.workspaceTagInput.getTags() : this.workspaceTagDraft;
+    const draft = this.workspaceTagInput
+      ? this.workspaceTagInput.getTags()
+      : this.workspaceTagDraft;
 
     this.workspaceTagsSaving = true;
     if (this.elements.workspaceTagsSaveBtn) {
@@ -2918,7 +2984,10 @@ export class WorkspaceDetailPage {
   renderChildren() {
     // Groups manage members through the dedicated Members panel; the
     // read-only child cards would duplicate it.
-    const isGroup = String(this.workspace?.kind || '').trim().toLowerCase() === 'group';
+    const isGroup =
+      String(this.workspace?.kind || '')
+        .trim()
+        .toLowerCase() === 'group';
 
     // Show/hide the children panel based on whether there are children
     if (this.elements.childrenPanel) {
@@ -3048,9 +3117,13 @@ export class WorkspaceDetailPage {
   refreshTaskActivityBadges() {
     if (this._taskActivity.size === 0) return;
     const runningIds = new Set();
-    for (const t of (this.tasks || [])) {
+    for (const t of this.tasks || []) {
       if (!t) continue;
-      if (String(t.status || '').trim().toLowerCase() === 'in_progress') {
+      if (
+        String(t.status || '')
+          .trim()
+          .toLowerCase() === 'in_progress'
+      ) {
         runningIds.add(t.id);
       }
     }
@@ -3086,13 +3159,16 @@ export class WorkspaceDetailPage {
     `;
     }
 
-    const safeHref = this.escapeAttribute(target.href);
     const safeTitle = this.escapeAttribute(target.title || `Open ${agentName} details`);
-    const safeAriaLabel = this.escapeAttribute(target.ariaLabel || target.title || `Open ${agentName} details`);
+    const safeAriaLabel = this.escapeAttribute(
+      target.ariaLabel || target.title || `Open ${agentName} details`
+    );
+    const safeKind = this.escapeAttribute(target.kind || 'global');
+    const safeHref = this.escapeAttribute(target.href);
     return `
       <a href="${safeHref}"
          class="workspace-detail-agent-link"
-         data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+         data-agent-detail-kind="${safeKind}"
          title="${safeTitle}"
          aria-label="${safeAriaLabel}"
          onclick="event.stopPropagation();">
@@ -3146,14 +3222,20 @@ export class WorkspaceDetailPage {
     }
 
     if (this.hasWorkspaceAgentSnapshot(normalizedName)) {
-      const title = `${normalizedName} is a workspace-local agent. Global agent details are not available.`;
-      return {
-        kind: 'workspace-local',
-        href: '',
-        interactive: false,
-        title,
-        ariaLabel: title
-      };
+      // Workspace-local agents (entry/manager agents defined in the workspace's
+      // config.json) are NOT part of the global agent store, so /agents/<name>
+      // would 404. They have a workspace-scoped detail page instead.
+      const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+      if (workspaceId) {
+        const title = `Open ${normalizedName} details`;
+        return {
+          kind: 'workspace-local',
+          href: `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodedAgentName}`,
+          interactive: true,
+          title,
+          ariaLabel: title
+        };
+      }
     }
 
     if (this.isWorkspaceEntryAgent(normalizedName)) {
@@ -3214,10 +3296,12 @@ export class WorkspaceDetailPage {
           `;
     }
 
+    const safeKind = this.escapeAttribute(target.kind || 'global');
+
     return `
             <a href="${this.escapeAttribute(target.href)}"
                class="workspace-detail-agent-identity-link"
-               data-agent-detail-kind="${this.escapeAttribute(target.kind || 'global')}"
+               data-agent-detail-kind="${safeKind}"
                title="${this.escapeAttribute(title)}"
                aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
                aria-describedby="${summaryId}"
@@ -3428,9 +3512,7 @@ export class WorkspaceDetailPage {
 
   getAgentGroupRolePresentation(group) {
     const roles = Array.isArray(group?.roles)
-      ? group.roles
-          .map(role => String(role || '').trim())
-          .filter(Boolean)
+      ? group.roles.map(role => String(role || '').trim()).filter(Boolean)
       : [];
     const uniqueRoles = [];
     const seen = new Set();
@@ -3461,10 +3543,14 @@ export class WorkspaceDetailPage {
       .split(/[\s._-]+/)
       .map(part => part.trim())
       .filter(Boolean);
-    const initials = (words.length > 1 ? `${words[0][0]}${words[words.length - 1][0]}` : words[0]?.slice(0, 2) || 'A')
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '')
-      .slice(0, 2) || 'A';
+    const initials =
+      (words.length > 1
+        ? `${words[0][0]}${words[words.length - 1][0]}`
+        : words[0]?.slice(0, 2) || 'A'
+      )
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+        .slice(0, 2) || 'A';
 
     let hash = 0;
     for (let index = 0; index < key.length; index += 1) {
@@ -3515,7 +3601,9 @@ export class WorkspaceDetailPage {
       if (!task) continue;
       if (this.normalizeAgentName(task.to) !== key) continue;
 
-      const status = String(task.status || '').trim().toLowerCase();
+      const status = String(task.status || '')
+        .trim()
+        .toLowerCase();
       if (status === 'in_progress') {
         return { key: 'working', label: 'Working', detail: 'Task in progress' };
       }
@@ -3550,7 +3638,9 @@ export class WorkspaceDetailPage {
     }
 
     const chips = summary.visible
-      .map(skill => `<span class="workspace-detail-agent-skill-chip">${this.escapeHtml(skill)}</span>`)
+      .map(
+        skill => `<span class="workspace-detail-agent-skill-chip">${this.escapeHtml(skill)}</span>`
+      )
       .join('');
     const overflow =
       summary.overflow > 0
@@ -3579,7 +3669,9 @@ export class WorkspaceDetailPage {
   renderAgentModelPowerBadge(agentName, profile, encodedAgentName = '') {
     const presentation = this.getAgentModelPresentation(profile);
     const editable = this.agentAllowsModelEditing(profile);
-    const title = presentation.empty ? `Set model for ${agentName}` : `Change model for ${agentName}`;
+    const title = presentation.empty
+      ? `Set model for ${agentName}`
+      : `Change model for ${agentName}`;
     const badgeClass = `workspace-detail-agent-model-badge${editable ? ' is-editable' : ''}${presentation.empty ? ' is-empty' : ''}`;
     const modelMarkup = presentation.empty
       ? '<span>Model not set</span>'
@@ -3689,9 +3781,7 @@ export class WorkspaceDetailPage {
             ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
             : `Remove ${group.name} from workspace`;
         const removeButton =
-          group.isWorkspaceAgent &&
-          !group.isUnassigned &&
-          !this.isWorkspaceEntryAgent(group.name)
+          group.isWorkspaceAgent && !group.isUnassigned && !this.isWorkspaceEntryAgent(group.name)
             ? `
         <button type="button"
                 class="workspace-detail-agent-remove-btn"
@@ -3734,11 +3824,10 @@ export class WorkspaceDetailPage {
           </svg>
         </button>
       `;
-        const backFace = canFlip
-          ? this.renderAgentBackFace(group, cardMeta, encodedAgentName)
-          : '';
+        const backFace = canFlip ? this.renderAgentBackFace(group, cardMeta, encodedAgentName) : '';
         const flippedClass = isFlipped ? ' is-flipped' : '';
-        const leaderClass = !group.isUnassigned && this.isWorkspaceEntryAgent(group.name) ? ' is-leader' : '';
+        const leaderClass =
+          !group.isUnassigned && this.isWorkspaceEntryAgent(group.name) ? ' is-leader' : '';
         const unassignedClass = group.isUnassigned ? ' is-unassigned' : '';
         const detailLink = group.isUnassigned
           ? `
@@ -3858,9 +3947,7 @@ export class WorkspaceDetailPage {
         ? `Remove all ${group.instanceCount} ${group.name} instances from workspace`
         : `Remove ${group.name} from workspace`;
     const removeButton =
-      group.isWorkspaceAgent &&
-      !group.isUnassigned &&
-      !this.isWorkspaceEntryAgent(group.name)
+      group.isWorkspaceAgent && !group.isUnassigned && !this.isWorkspaceEntryAgent(group.name)
         ? `
       <button type="button"
               class="workspace-detail-agent-remove-btn"
@@ -3914,8 +4001,53 @@ export class WorkspaceDetailPage {
             <div class="workspace-detail-agent-chip-list">${mcpMarkup}</div>
           </div>
         </div>
+        ${this.renderAgentPromptSection(group, encodedAgentName)}
       </div>
     `;
+  }
+
+  // Renders the "System Prompt" section on the agent info back face: a short,
+  // lazily-loaded preview plus a button that opens the full prompt modal. The
+  // preview span carries a data-agent-prompt-key so refreshAgentCardPrompt() can
+  // fill it in once the effective-prompt fetch resolves (see toggleAgentCardFlip).
+  renderAgentPromptSection(group, encodedAgentName) {
+    const key = String(group?.key || '');
+    const cached = this.agentPromptCache.get(this.normalizeAgentName(group?.name));
+    const hasPrompt = cached && !cached.error;
+    const previewText = hasPrompt
+      ? this.buildAgentPromptPreview(cached)
+      : cached && cached.error
+        ? 'System prompt unavailable.'
+        : 'Flip to load the system prompt this agent uses in this workspace.';
+    const previewClass = hasPrompt ? '' : ' is-placeholder';
+    return `
+      <div class="workspace-detail-agent-prompt-section">
+        <div class="workspace-detail-agent-prompt-head">
+          <div class="workspace-detail-agent-info-label">System Prompt</div>
+          <button type="button"
+                  class="workspace-detail-agent-prompt-view-btn"
+                  title="View full system prompt"
+                  aria-label="View full system prompt for ${this.escapeAttribute(group?.name || 'agent')}"
+                  onclick="event.stopPropagation(); window.workspaceDetail?.openAgentPromptModal('${encodedAgentName}')">
+            View full
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
+            </svg>
+          </button>
+        </div>
+        <p class="workspace-detail-agent-prompt-preview${previewClass}" data-agent-prompt-key="${this.escapeAttribute(key)}">${this.escapeHtml(previewText)}</p>
+      </div>
+    `;
+  }
+
+  // Collapses a multi-line prompt into a single-line preview snippet.
+  buildAgentPromptPreview(data) {
+    const source = String(data?.effective_prompt || data?.base_system_prompt || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!source) return 'No system prompt set for this agent.';
+    const limit = 160;
+    return source.length > limit ? `${source.slice(0, limit).trim()}…` : source;
   }
 
   // Renders the agent info card's SKILLS chips from the skills that are
@@ -4019,6 +4151,370 @@ export class WorkspaceDetailPage {
     // The agent info card's SKILLS now renders synchronously from
     // workspace-effective skill bindings (see renderAgentWorkspaceSkillChips),
     // so flipping no longer needs to fetch the agent's global skill catalog.
+    //
+    // The system prompt preview IS async: lazy-load it on first flip so we only
+    // hit the effective-prompt endpoint for cards the user actually inspects.
+    this.ensureAgentPromptData(agentName).then(() => this.refreshAgentCardPrompt(agentName));
+  }
+
+  // Updates the flip-card's system prompt preview span in place once the
+  // effective-prompt payload is available, matching refreshAgentCardSkills().
+  refreshAgentCardPrompt(agentName) {
+    const key = this.normalizeAgentName(agentName);
+    if (!key) return false;
+    const card = this.getAgentCardElementByKey(key);
+    if (!card) return false;
+
+    const data = this.agentPromptCache.get(key);
+    const previews = card.querySelectorAll(
+      '.workspace-detail-agent-prompt-preview[data-agent-prompt-key]'
+    );
+    let updated = false;
+    previews.forEach(preview => {
+      if (preview.getAttribute('data-agent-prompt-key') !== key) return;
+      if (!data) return;
+      if (data.error) {
+        preview.textContent = 'System prompt unavailable.';
+        preview.classList.add('is-placeholder');
+      } else {
+        preview.textContent = this.buildAgentPromptPreview(data);
+        preview.classList.remove('is-placeholder');
+      }
+      updated = true;
+    });
+    return updated;
+  }
+
+  // Fetches (and caches) the workspace-effective prompt for an agent from
+  // GET /api/workspaces/{id}/agents/{name}/effective-prompt. De-dupes in-flight
+  // requests and returns the cached payload on repeat calls.
+  async ensureAgentPromptData(agentName, options = {}) {
+    const normalizedName = String(agentName || '').trim();
+    const key = this.normalizeAgentName(normalizedName);
+    if (!normalizedName || !key) return null;
+
+    if (!options.force && this.agentPromptCache.has(key)) {
+      return this.agentPromptCache.get(key);
+    }
+    if (this.agentPromptPromises.has(key)) {
+      return this.agentPromptPromises.get(key);
+    }
+
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return null;
+
+    const loadPromise = (async () => {
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
+            normalizedName
+          )}/effective-prompt`
+        );
+        if (!response.ok) {
+          const failure = { error: true, status: response.status };
+          this.agentPromptCache.set(key, failure);
+          return failure;
+        }
+        const data = await response.json();
+        this.agentPromptCache.set(key, data);
+        return data;
+      } catch (_error) {
+        const failure = { error: true };
+        this.agentPromptCache.set(key, failure);
+        return failure;
+      } finally {
+        this.agentPromptPromises.delete(key);
+      }
+    })();
+
+    this.agentPromptPromises.set(key, loadPromise);
+    return loadPromise;
+  }
+
+  // Opens the "System Prompt" modal for an agent, showing the base prompt, the
+  // workspace's per-instance refinement, and the composed effective prompt.
+  async openAgentPromptModal(encodedAgentName = '') {
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || ''));
+    } catch (_error) {
+      agentName = String(encodedAgentName || '');
+    }
+    agentName = String(agentName || '').trim();
+    if (!agentName) return;
+
+    // Workspace-local agents (those with a config.json snapshot) can edit their
+    // base system prompt in place; global agents remain read-only here.
+    const editable = this.hasWorkspaceAgentSnapshot(agentName);
+    this.activeAgentPromptView = {
+      agentName,
+      data: null,
+      editable,
+      editing: false,
+      basePrompt: ''
+    };
+
+    if (this.elements.agentPromptAgentName) {
+      this.elements.agentPromptAgentName.textContent = agentName;
+    }
+    if (this.elements.agentPromptTitle) {
+      this.elements.agentPromptTitle.textContent = `System Prompt · ${agentName}`;
+    }
+    if (this.elements.agentPromptDetailLink) {
+      const target = this.getAgentDetailTarget(agentName);
+      if (target.interactive && target.href) {
+        this.elements.agentPromptDetailLink.href = target.href;
+        this.elements.agentPromptDetailLink.classList.remove('d-none');
+      } else {
+        this.elements.agentPromptDetailLink.classList.add('d-none');
+      }
+    }
+    if (this.elements.agentPromptBody) {
+      this.elements.agentPromptBody.innerHTML =
+        '<div class="workspace-detail-loading">Loading system prompt…</div>';
+    }
+
+    if (this.elements.agentPromptModal && window.bootstrap) {
+      const modal =
+        typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(this.elements.agentPromptModal)
+          : bootstrap.Modal.getInstance(this.elements.agentPromptModal) ||
+            new bootstrap.Modal(this.elements.agentPromptModal);
+      modal.show();
+    }
+
+    const data = await this.ensureAgentPromptData(agentName);
+    // Ignore a resolved fetch if the user has since opened a different agent.
+    if (!this.activeAgentPromptView || this.activeAgentPromptView.agentName !== agentName) {
+      return;
+    }
+    this.activeAgentPromptView.data = data;
+
+    // For editable agents, load the real base prompt from config.json (the
+    // effective-prompt endpoint reads the global store, which is empty for
+    // workspace-local agents). If the endpoint is unavailable, fall back to
+    // read-only display.
+    if (this.activeAgentPromptView.editable) {
+      const base = await this.fetchWorkspaceAgentBasePrompt(agentName);
+      if (!this.activeAgentPromptView || this.activeAgentPromptView.agentName !== agentName) {
+        return;
+      }
+      if (base == null) {
+        this.activeAgentPromptView.editable = false;
+      } else {
+        this.activeAgentPromptView.basePrompt = base;
+      }
+    }
+
+    this.renderAgentPromptModalBody(agentName, data);
+    // Keep the flip-card preview consistent with what the modal just loaded.
+    this.refreshAgentCardPrompt(agentName);
+  }
+
+  async fetchWorkspaceAgentBasePrompt(agentName) {
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return null;
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
+          agentName
+        )}/system-prompt`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return String(data?.system_prompt || '');
+    } catch (error) {
+      console.error('Failed to load workspace agent base prompt:', error);
+      return null;
+    }
+  }
+
+  enterModalPromptEdit() {
+    const view = this.activeAgentPromptView;
+    if (!view || !view.editable) return;
+    view.editing = true;
+    this.renderAgentPromptModalBody(view.agentName, view.data);
+    document.getElementById('workspace-detail-agent-prompt-editor')?.focus();
+  }
+
+  cancelModalPromptEdit() {
+    const view = this.activeAgentPromptView;
+    if (!view) return;
+    view.editing = false;
+    this.renderAgentPromptModalBody(view.agentName, view.data);
+  }
+
+  async saveModalPrompt() {
+    const view = this.activeAgentPromptView;
+    if (!view || !view.editable) return;
+    const editor = document.getElementById('workspace-detail-agent-prompt-editor');
+    if (!editor) return;
+    const value = editor.value;
+    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
+    if (!workspaceId) return;
+
+    const status = document.getElementById('workspace-detail-agent-prompt-status');
+    const saveBtn = document.getElementById('workspace-detail-agent-prompt-save');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+    }
+    if (status) {
+      status.textContent = 'Saving…';
+      status.classList.remove('is-error', 'is-success');
+    }
+
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(
+          view.agentName
+        )}/system-prompt`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ system_prompt: value })
+        }
+      );
+      if (!res.ok) {
+        let detail = '';
+        try {
+          const body = await res.json();
+          detail = String(body?.error || body?.message || '').trim();
+        } catch (_error) {
+          detail = '';
+        }
+        throw new Error(detail || `save failed: ${res.status}`);
+      }
+      const body = await res.json();
+      view.basePrompt = String(body?.system_prompt ?? value.trim());
+      view.editing = false;
+      this.renderAgentPromptModalBody(view.agentName, view.data);
+      // Invalidate the cached effective prompt so the flip-card preview refreshes.
+      this.agentPromptCache?.delete(this.normalizeAgentName(view.agentName));
+      this.refreshAgentCardPrompt(view.agentName);
+      window.workspaceCommand?.refresh();
+      if (window.Toast) window.Toast.success('System prompt saved.');
+    } catch (error) {
+      console.error('Failed to save system prompt:', error);
+      if (status) {
+        status.textContent = error?.message || 'Could not save the system prompt.';
+        status.classList.add('is-error');
+      }
+      if (window.Toast) window.Toast.error('Failed to save system prompt.');
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      }
+    }
+  }
+
+  renderAgentPromptModalBody(agentName, data) {
+    const body = this.elements.agentPromptBody;
+    if (!body) return;
+
+    if (!data || data.error) {
+      body.innerHTML = `<div class="workspace-detail-empty">Could not load the system prompt for ${this.escapeHtml(
+        agentName
+      )}.</div>`;
+      return;
+    }
+
+    const view = this.activeAgentPromptView || {};
+    const refinement = String(data.refinement || '').trim();
+    const effective = String(data.effective_prompt || '').trim();
+    const note = String(data.note || '').trim();
+
+    const section = (label, value, emptyLabel) => `
+      <div class="workspace-detail-agent-prompt-block">
+        <div class="workspace-detail-agent-prompt-block-label">${this.escapeHtml(label)}</div>
+        ${
+          value
+            ? `<pre class="workspace-detail-agent-prompt-pre">${this.escapeHtml(value)}</pre>`
+            : `<div class="workspace-detail-agent-prompt-empty">${this.escapeHtml(emptyLabel)}</div>`
+        }
+      </div>
+    `;
+
+    // Editable path: workspace-local agents edit their base prompt (config.json)
+    // in place. The base comes from view.basePrompt, not the effective-prompt
+    // endpoint (whose base is the global store, empty for these agents).
+    if (view.editable) {
+      const base = String(view.basePrompt || '').trim();
+      const baseBlock = view.editing
+        ? `
+          <div class="workspace-detail-agent-prompt-block">
+            <div class="workspace-detail-agent-prompt-block-head">
+              <div class="workspace-detail-agent-prompt-block-label">Base system prompt</div>
+              <div class="workspace-detail-agent-prompt-edit-actions">
+                <button type="button" class="btn btn-sm btn-link p-0" onclick="window.workspaceDetail?.cancelModalPromptEdit()">Cancel</button>
+                <button type="button" class="btn btn-sm btn-primary" id="workspace-detail-agent-prompt-save" onclick="window.workspaceDetail?.saveModalPrompt()">Save</button>
+              </div>
+            </div>
+            <textarea id="workspace-detail-agent-prompt-editor" class="workspace-detail-agent-prompt-editor" rows="10" placeholder="Describe how this agent should behave…">${this.escapeHtml(
+              base
+            )}</textarea>
+            <div id="workspace-detail-agent-prompt-status" class="workspace-detail-agent-prompt-status"></div>
+          </div>`
+        : `
+          <div class="workspace-detail-agent-prompt-block">
+            <div class="workspace-detail-agent-prompt-block-head">
+              <div class="workspace-detail-agent-prompt-block-label">Base system prompt</div>
+              <button type="button" class="btn btn-sm btn-link p-0" onclick="window.workspaceDetail?.enterModalPromptEdit()">Edit</button>
+            </div>
+            ${
+              base
+                ? `<pre class="workspace-detail-agent-prompt-pre">${this.escapeHtml(base)}</pre>`
+                : `<div class="workspace-detail-agent-prompt-empty">No base system prompt set. Click Edit to add one.</div>`
+            }
+          </div>`;
+
+      body.innerHTML = `
+        ${baseBlock}
+        ${section(
+          'Workspace refinement',
+          refinement,
+          'No workspace-specific refinement (role, description, or custom instructions).'
+        )}
+        ${
+          note
+            ? `<div class="workspace-detail-agent-prompt-hint">${this.escapeHtml(note)}</div>`
+            : ''
+        }
+      `;
+      return;
+    }
+
+    // Read-only path (global agents): unchanged three-section view.
+    const base = String(data.base_system_prompt || '').trim();
+    body.innerHTML = `
+      ${section('Base system prompt', base, 'No base system prompt set for this agent.')}
+      ${section(
+        'Workspace refinement',
+        refinement,
+        'No workspace-specific refinement (role, description, or custom instructions).'
+      )}
+      ${section('Effective prompt (composed)', effective, 'Nothing to compose.')}
+      ${
+        note ? `<div class="workspace-detail-agent-prompt-hint">${this.escapeHtml(note)}</div>` : ''
+      }
+    `;
+  }
+
+  async copyAgentPromptToClipboard() {
+    const view = this.activeAgentPromptView;
+    const data = view?.data;
+    const text = String(data?.effective_prompt || data?.base_system_prompt || '').trim();
+    if (!text) {
+      if (window.Toast) window.Toast.warning('No system prompt to copy.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (window.Toast) window.Toast.success('System prompt copied.');
+    } catch (_error) {
+      if (window.Toast) window.Toast.error('Failed to copy system prompt.');
+    }
   }
 
   async loadAgentSkills(agentName, options = {}) {
@@ -4103,15 +4599,15 @@ export class WorkspaceDetailPage {
 
       let group = groupByKey.get(normalized);
       if (!group) {
-          group = {
-            key: normalized,
-            name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
-            isWorkspaceAgent,
-            isUnassigned,
-            instanceCount: 0,
-            roles: [],
-            tasks: []
-          };
+        group = {
+          key: normalized,
+          name: isUnassigned ? 'Unassigned' : String(name || '').trim(),
+          isWorkspaceAgent,
+          isUnassigned,
+          instanceCount: 0,
+          roles: [],
+          tasks: []
+        };
         groupByKey.set(normalized, group);
         groups.push(group);
       } else if (isWorkspaceAgent) {
@@ -4389,7 +4885,11 @@ export class WorkspaceDetailPage {
     const resultData = this.getDisplayResult(task, subtasks);
     const hasResultData = !!resultData;
     const hasAssistData = !!statusInfo.isBlocked;
-    const taskTerminalState = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' || task.status === 'timeout';
+    const taskTerminalState =
+      task.status === 'completed' ||
+      task.status === 'failed' ||
+      task.status === 'cancelled' ||
+      task.status === 'timeout';
     const isRerun = !isParent && taskTerminalState;
     const executeTitle = isParent
       ? hasUnassignedSubtasks
@@ -4398,7 +4898,9 @@ export class WorkspaceDetailPage {
           ? 'A subtask is already running'
           : 'Execute workflow now'
       : !assignedAgent
-        ? (isRerun ? 'Will auto-assign a workspace agent before re-running' : 'Will auto-assign a workspace agent before execution')
+        ? isRerun
+          ? 'Will auto-assign a workspace agent before re-running'
+          : 'Will auto-assign a workspace agent before execution'
         : awaitingNextStep
           ? 'Execute the next internal step'
           : task.status === 'in_progress'
@@ -4520,13 +5022,15 @@ export class WorkspaceDetailPage {
                 title="${this.escapeHtml(executeTitle)}"
                 aria-label="${isRerun ? 'Re-run' : 'Execute'} task ${taskLabel}"
                 ${canExecute ? '' : 'disabled'}>
-          ${isRerun
-            ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          ${
+            isRerun
+              ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
                </svg>`
-            : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              : `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                  <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
-               </svg>`}
+               </svg>`
+          }
         </button>
         <button type="button" class="workspace-detail-item-delete" onclick="event.stopPropagation(); window.workspaceDetail?.deleteTask('${task.id}')" title="Delete task" aria-label="Delete task ${this.escapeHtml(task.description || task.name || 'Untitled Task')}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -4657,6 +5161,33 @@ export class WorkspaceDetailPage {
     }
 
     open();
+  }
+
+  /**
+   * First-open auto-start for a template's setup task. The server stamps a
+   * once-only consumed marker and starts the task through the same path as
+   * pressing Start on it; repeat opens (reloads, other tabs) no-op
+   * server-side, so this is safe to call on every page init.
+   */
+  async maybeStartTemplateSetup() {
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/template-setup/start`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+      );
+      if (!response.ok) return;
+      const result = await response.json().catch(() => ({}));
+      if (!result?.started || !result?.task_id) return;
+      await this.loadTasks();
+      if (window.Toast) {
+        window.Toast.info('Setup task started — the workspace agent is getting things ready.');
+      }
+      // Land where the setup conversation surfaces: the same execution monitor
+      // a manual Start opens (agent questions arrive via the blocked-task flow).
+      this.startExecutionMonitor(result.task_id);
+    } catch (error) {
+      console.warn('Template setup auto-start check failed:', error);
+    }
   }
 
   async maybePromptForMissingEntryAgent() {
@@ -5953,9 +6484,7 @@ export class WorkspaceDetailPage {
     if (!normalizedAgentName || !normalizedKey) return;
 
     if (this.isWorkspaceEntryAgent(normalizedAgentName)) {
-      window.alert(
-        `"${normalizedAgentName}" is the workspace entry agent and can't be removed.`
-      );
+      window.alert(`"${normalizedAgentName}" is the workspace entry agent and can't be removed.`);
       return;
     }
 
@@ -6181,11 +6710,19 @@ export class WorkspaceDetailPage {
 
     const humanLoop = this.getTaskHumanLoop(task);
     const humanLoopState = String(humanLoop?.state || '').toLowerCase();
-    if (humanLoop && (humanLoopState === 'blocked' || humanLoopState === 'waiting_for_choice' || task?.status === 'waiting_for_choice')) {
+    if (
+      humanLoop &&
+      (humanLoopState === 'blocked' ||
+        humanLoopState === 'waiting_for_choice' ||
+        task?.status === 'waiting_for_choice')
+    ) {
       const reason = String(humanLoop.reason || '').trim();
       return {
         className: 'blocked',
-        label: task?.status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice' ? 'Waiting for Choice' : 'Needs Input',
+        label:
+          task?.status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice'
+            ? 'Waiting for Choice'
+            : 'Needs Input',
         isBlocked: true,
         reason
       };
@@ -6476,11 +7013,18 @@ export class WorkspaceDetailPage {
 
   canPromoteTaskResultToWorkflow(sourceTask, text) {
     if (!sourceTask || typeof sourceTask !== 'object') return false;
-    if (String(sourceTask.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (
+      String(sourceTask.status || '')
+        .trim()
+        .toLowerCase() !== 'completed'
+    )
+      return false;
     if (!String(sourceTask.result || '').trim()) return false;
     if (String(sourceTask.error || '').trim()) return false;
 
-    const resultType = String(sourceTask.result_type || '').trim().toLowerCase();
+    const resultType = String(sourceTask.result_type || '')
+      .trim()
+      .toLowerCase();
     if (resultType === 'task_list') return true;
 
     const structuredResult = sourceTask.structured_result;
@@ -6585,7 +7129,8 @@ export class WorkspaceDetailPage {
     this.currentTaskResultPromotionSubmitting = Boolean(isSubmitting);
     if (this.elements.taskResultPromoteSubmitBtn) {
       this.elements.taskResultPromoteSubmitBtn.disabled = this.currentTaskResultPromotionSubmitting;
-      this.elements.taskResultPromoteSubmitBtn.textContent = this.currentTaskResultPromotionSubmitting
+      this.elements.taskResultPromoteSubmitBtn.textContent = this
+        .currentTaskResultPromotionSubmitting
         ? 'Creating...'
         : 'Create';
     }
@@ -9691,7 +10236,9 @@ export class WorkspaceDetailPage {
       // Workspace-local agents persist to the workspace config.json via a
       // workspace-scoped endpoint, and their model picker is not type-filtered.
       isWorkspaceAgent:
-        String(profile.source || '').trim().toLowerCase() === 'workspace',
+        String(profile.source || '')
+          .trim()
+          .toLowerCase() === 'workspace',
       workspaceId: this.workspace?.id || ''
     };
 
@@ -10256,7 +10803,9 @@ export class WorkspaceDetailPage {
         ? raw.planning
         : {};
     const taskMarkdown =
-      raw.task_markdown && typeof raw.task_markdown === 'object' && !Array.isArray(raw.task_markdown)
+      raw.task_markdown &&
+      typeof raw.task_markdown === 'object' &&
+      !Array.isArray(raw.task_markdown)
         ? raw.task_markdown
         : {};
     const boolOrDefault = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
@@ -10530,9 +11079,8 @@ export class WorkspaceDetailPage {
         normalized.task_markdown.generate_agent_views !== false;
     }
     if (this.elements.settingsTaskMarkdownStatus) {
-      this.elements.settingsTaskMarkdownStatus.textContent = this.getTaskMarkdownStatusText(
-        normalized
-      );
+      this.elements.settingsTaskMarkdownStatus.textContent =
+        this.getTaskMarkdownStatusText(normalized);
     }
   }
 
@@ -10609,8 +11157,7 @@ export class WorkspaceDetailPage {
       task_markdown: {
         enabled: this.elements.settingsTaskMarkdownEnabledInput?.checked === true,
         path: String(this.elements.settingsTaskMarkdownPathInput?.value || '').trim(),
-        generate_agent_views:
-          this.elements.settingsTaskMarkdownAgentViewsInput?.checked !== false
+        generate_agent_views: this.elements.settingsTaskMarkdownAgentViewsInput?.checked !== false
       }
     });
 
@@ -10792,7 +11339,8 @@ export class WorkspaceDetailPage {
     try {
       await this.loadTasks();
       if (this.elements.settingsTaskMarkdownStatus) {
-        this.elements.settingsTaskMarkdownStatus.textContent = 'Imported task map and refreshed tasks.';
+        this.elements.settingsTaskMarkdownStatus.textContent =
+          'Imported task map and refreshed tasks.';
       }
       if (window.Toast) {
         window.Toast.success('Markdown tasks imported');
@@ -10868,6 +11416,176 @@ export class WorkspaceDetailPage {
     return ids;
   }
 
+  // ---------------------------------------------------------------------------
+  // Shared agent loadout editing (map Unit Sheet + details Loadout tab)
+  //
+  // These reuse the skills/MCP managers' access primitives so both surfaces
+  // agree on the "no access entry = all workspace bindings enabled" convention
+  // and its default-collapse behavior. Synthesized bindings (e.g. the implicit
+  // workspace filesystem server) have no persisted row and are reported locked.
+  // ---------------------------------------------------------------------------
+
+  getAgentWorkspaceSkillLoadout(agentName) {
+    const mgr = this.skillsManager;
+    if (!mgr) return [];
+    const effective = new Set(
+      mgr
+        .getEffectiveWorkspaceSkillBindingsForAgent(agentName)
+        .map(binding => String(binding?.id || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return mgr
+      .getWorkspaceSkillBindings()
+      .map(binding => {
+        const bindingId = String(binding?.id || '').trim();
+        return {
+          bindingId,
+          name: String(binding?.skillName || '').trim(),
+          enabled: effective.has(bindingId.toLowerCase()),
+          locked: binding?.source === 'synthesized'
+        };
+      })
+      .filter(item => item.bindingId && item.name);
+  }
+
+  getAgentWorkspaceMCPLoadout(agentName) {
+    const mgr = this.mcpManager;
+    if (!mgr) return [];
+    const effective = new Set(
+      mgr
+        .getEffectiveWorkspaceMCPBindingsForAgent(agentName)
+        .map(binding => String(binding?.id || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return mgr
+      .getWorkspaceMCPBindings()
+      .map(binding => {
+        const bindingId = String(binding?.id || '').trim();
+        return {
+          bindingId,
+          name: String(binding?.serverName || '').trim(),
+          enabled: effective.has(bindingId.toLowerCase()),
+          locked: binding?.source === 'synthesized'
+        };
+      })
+      .filter(item => item.bindingId && item.name);
+  }
+
+  // Registry capabilities of `kind` ('skill'|'mcp') not yet present as an
+  // enabled workspace binding — the candidates a "bind new" picker should list.
+  async listAgentLoadoutAdditions(kind) {
+    const isMCP = kind === 'mcp';
+    const mgr = isMCP ? this.mcpManager : this.skillsManager;
+    if (!mgr) return [];
+    let registry = [];
+    try {
+      registry = isMCP
+        ? await mgr.loadAvailableMCPServers()
+        : await mgr.loadAvailableSkills();
+    } catch (_error) {
+      registry = [];
+    }
+    const bound = new Set(
+      (isMCP ? mgr.getWorkspaceMCPBindings() : mgr.getWorkspaceSkillBindings())
+        .map(binding => String(isMCP ? binding?.serverName : binding?.skillName || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    return (Array.isArray(registry) ? registry : [])
+      .map(entry => String(entry?.name || '').trim())
+      .filter(name => name && !bound.has(name.toLowerCase()));
+  }
+
+  async setAgentWorkspaceCapabilityEnabled(kind, agentName, bindingId, enabled) {
+    const id = String(bindingId || '').trim();
+    const name = String(agentName || '').trim();
+    if (!id || !name) return false;
+    const isMCP = kind === 'mcp';
+    const mgr = isMCP ? this.mcpManager : this.skillsManager;
+    if (!mgr) return false;
+
+    const selections = isMCP
+      ? mgr.getWorkspaceMCPAgentAccessSelections(id)
+      : mgr.getWorkspaceSkillAgentAccessSelections(id);
+    const enabledInstanceIds = new Set(
+      selections
+        .filter(selection => selection.checked)
+        .map(selection => String(selection.id || '').trim())
+        .filter(Boolean)
+    );
+    const instanceIds = this.getAgentInstanceIdsForName(name);
+    if (instanceIds.length === 0) return false;
+    instanceIds.forEach(instanceId => {
+      if (enabled) enabledInstanceIds.add(instanceId);
+      else enabledInstanceIds.delete(instanceId);
+    });
+
+    if (isMCP) {
+      await mgr.persistWorkspaceMCPAgentAccess(id, Array.from(enabledInstanceIds));
+    } else {
+      await mgr.persistWorkspaceSkillAgentAccess(id, Array.from(enabledInstanceIds));
+    }
+    await this.loadWorkspace();
+    return true;
+  }
+
+  // Bind a registry capability into the workspace (create or enable), then
+  // enable it for the agent. Mirrors the create-or-enable-then-merge flow used
+  // by agent creation, but scoped to a single agent + capability.
+  async addAgentWorkspaceCapability(kind, agentName, capabilityName) {
+    const name = String(capabilityName || '').trim();
+    const agent = String(agentName || '').trim();
+    if (!name || !agent) return false;
+    const isMCP = kind === 'mcp';
+    const mgr = isMCP ? this.mcpManager : this.skillsManager;
+    if (!mgr) return false;
+
+    const bindingName = binding =>
+      String(isMCP ? binding?.serverName : binding?.skillName || '').trim();
+    const findBinding = () =>
+      (isMCP
+        ? mgr.getWorkspaceMCPBindings({ includeDisabled: true })
+        : mgr.getWorkspaceSkillBindings({ includeDisabled: true })
+      ).find(
+        binding =>
+          binding?.source !== 'synthesized' &&
+          bindingName(binding).toLowerCase() === name.toLowerCase()
+      );
+
+    const collection = isMCP ? 'mcp-bindings' : 'skill-bindings';
+    const base = `/api/workspaces/${encodeURIComponent(this.workspaceId)}/${collection}`;
+    let match = findBinding();
+    let bindingId = match ? String(match.id || '').trim() : '';
+
+    if (!bindingId) {
+      const payload = isMCP
+        ? { server_name: name, enabled: true }
+        : { skill_name: name, enabled: true, config: {} };
+      const response = await fetch(base, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error((await response.text()) || `Failed to bind ${name}`);
+      const data = await response.json().catch(() => ({}));
+      bindingId = String(data?.binding?.id || data?.id || '').trim();
+      await this.loadWorkspace();
+      if (!bindingId) {
+        match = findBinding();
+        bindingId = match ? String(match.id || '').trim() : '';
+      }
+    } else if (match && match.enabled === false) {
+      const response = await fetch(`${base}/${encodeURIComponent(bindingId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: true })
+      });
+      if (!response.ok) throw new Error((await response.text()) || `Failed to enable ${name}`);
+      await this.loadWorkspace();
+    }
+
+    if (!bindingId) throw new Error(`Could not resolve a workspace binding for ${name}`);
+    return this.setAgentWorkspaceCapabilityEnabled(kind, agent, bindingId, true);
+  }
 
   async loadWorkspaceAgentSnapshots() {
     this.workspaceAgentSnapshots = new Set();
@@ -10893,7 +11611,10 @@ export class WorkspaceDetailPage {
           type: String(agent?.type || '').trim(),
           model: String(agent?.model || '').trim(),
           provider: String(agent?.provider || '').trim(),
-          source: String(agent?.source || 'workspace').trim().toLowerCase() || 'workspace'
+          source:
+            String(agent?.source || 'workspace')
+              .trim()
+              .toLowerCase() || 'workspace'
         });
       });
     } catch (_err) {
@@ -11332,7 +12053,12 @@ export class WorkspaceDetailPage {
     const humanLoopState = String(task?.context?.human_loop?.state || '')
       .trim()
       .toLowerCase();
-    if (humanLoopState === 'blocked' || humanLoopState === 'waiting_for_choice' || status === 'waiting_for_choice') return 'waiting_for_choice';
+    if (
+      humanLoopState === 'blocked' ||
+      humanLoopState === 'waiting_for_choice' ||
+      status === 'waiting_for_choice'
+    )
+      return 'waiting_for_choice';
     return status || 'pending';
   }
 
@@ -13665,6 +14391,45 @@ export class WorkspaceDetailPage {
     return this.getWorkspaceProjectPath() !== '';
   }
 
+  hasProjectEntry() {
+    const entryPath = this.workspace?.shared_data?.project_entry_path;
+    return (
+      this.workspaceHasProject() && typeof entryPath === 'string' && entryPath.trim() !== ''
+    );
+  }
+
+  async openProject() {
+    if (this.projectOpenBusy || !this.hasProjectEntry()) return false;
+
+    this.projectOpenBusy = true;
+    window.workspaceCommand?.refresh();
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/project/open`,
+        { method: 'POST' }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || result.message || 'The project open request failed');
+      }
+
+      if (window.Toast?.success) {
+        window.Toast.success('Open request sent to the system default application');
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to open workspace project:', error);
+      const detail = error?.message || 'The project open request failed';
+      if (window.Toast?.error) {
+        window.Toast.error(`Could not open project. ${detail}. Resolve the issue and try again.`);
+      }
+      return false;
+    } finally {
+      this.projectOpenBusy = false;
+      window.workspaceCommand?.refresh();
+    }
+  }
+
   getProjectDirectoryId() {
     return String(this.workspace?.shared_data?.project_directory_id || '').trim();
   }
@@ -13675,7 +14440,11 @@ export class WorkspaceDetailPage {
   }
 
   isGroupWorkspace() {
-    return String(this.workspace?.kind || '').trim().toLowerCase() === 'group';
+    return (
+      String(this.workspace?.kind || '')
+        .trim()
+        .toLowerCase() === 'group'
+    );
   }
 
   syncProjectActionState() {
@@ -13921,11 +14690,14 @@ export class WorkspaceDetailPage {
     this.setProjectTemplateSubmitting(true);
     this.clearProjectTemplateError();
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/project`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/project`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.error) {
         throw new Error(result.error || 'Failed to create project');
@@ -13991,7 +14763,9 @@ export class WorkspaceDetailPage {
         this.workspace.primary_directory_id =
           typeof workspace.primary_directory_id === 'string' ? workspace.primary_directory_id : '';
         this.workspace.project_path =
-          typeof workspace.project_path === 'string' ? workspace.project_path : this.workspace.project_path || '';
+          typeof workspace.project_path === 'string'
+            ? workspace.project_path
+            : this.workspace.project_path || '';
         this.workspace.shared_data =
           workspace.shared_data && typeof workspace.shared_data === 'object'
             ? workspace.shared_data
@@ -14736,7 +15510,12 @@ export class WorkspaceDetailPage {
     // starts clean. We check live state to avoid stale labels persisting
     // after a completion event sneaks past the heartbeat goroutine.
     const task = this.tasks?.find?.(t => t?.id === taskId);
-    if (task && String(task.status || '').trim().toLowerCase() !== 'in_progress') {
+    if (
+      task &&
+      String(task.status || '')
+        .trim()
+        .toLowerCase() !== 'in_progress'
+    ) {
       this._taskActivity.delete(taskId);
     }
 
@@ -14745,7 +15524,7 @@ export class WorkspaceDetailPage {
   }
 
   taskActivityLabelFor(eventType, payload) {
-    const data = (payload && typeof payload === 'object') ? payload : {};
+    const data = payload && typeof payload === 'object' ? payload : {};
     switch (eventType) {
       case 'task.thinking': {
         const phase = String(data.phase || '').trim();
@@ -14802,8 +15581,12 @@ export class WorkspaceDetailPage {
     }
     const ago = this.formatTaskActivityAgo(activity.at);
     const text = activity.label
-      ? (ago ? `${activity.label} · ${ago}` : activity.label)
-      : (ago ? `Active ${ago}` : 'Active');
+      ? ago
+        ? `${activity.label} · ${ago}`
+        : activity.label
+      : ago
+        ? `Active ${ago}`
+        : 'Active';
     slot.textContent = text;
     slot.hidden = false;
   }
@@ -14948,13 +15731,19 @@ export class WorkspaceDetailPage {
   /**
    * Show add task modal
    */
-  showAddTaskModal() {
+  showAddTaskModal(options = {}) {
     // Use existing task modal controller
     if (
       window.taskModalController &&
       typeof window.taskModalController.openForCreate === 'function'
     ) {
-      window.taskModalController.openForCreate(this.workspaceId, '', () => this.loadTasks());
+      const createOptions = options && typeof options === 'object' ? options : {};
+      window.taskModalController.openForCreate(
+        this.workspaceId,
+        '',
+        () => this.loadTasks(),
+        createOptions
+      );
     } else {
       // Fallback to prompt
       const name = prompt('Enter task name:');
@@ -14963,10 +15752,21 @@ export class WorkspaceDetailPage {
   }
 
   showAddTaskModalForAgent(encodedAgentName = '') {
-    // Keep current behavior (workspace task modal), but route from per-agent section actions.
-    // Future enhancement can preselect agent assignment in the task modal.
-    void encodedAgentName;
-    this.showAddTaskModal();
+    // Route from per-agent section actions with the assignee preselected, so a task
+    // given to a specific agent lands on that agent instead of the entry-agent default.
+    let agentName = '';
+    try {
+      agentName = decodeURIComponent(String(encodedAgentName || '')).trim();
+    } catch (_error) {
+      agentName = String(encodedAgentName || '').trim();
+    }
+    if (!agentName) {
+      this.showAddTaskModal();
+      return;
+    }
+    // The assignment dropdown keys agents as `node:<name>-node-1` (see task modal
+    // populateAgentDropdown); draftAssignmentValue is applied after it populates.
+    this.showAddTaskModal({ draftAssignmentValue: `node:${agentName}-node-1` });
   }
 
   /**
@@ -15323,11 +16123,8 @@ export class WorkspaceDetailPage {
       btn.disabled = isBusy || total === 0;
       btn.setAttribute('aria-pressed', allSelected ? 'true' : 'false');
       btn.setAttribute('aria-label', allSelected ? 'Deselect all notes' : 'Select all notes');
-      btn.title = total === 0
-        ? 'No notes to select'
-        : allSelected
-          ? 'Clear selection'
-          : 'Select every note';
+      btn.title =
+        total === 0 ? 'No notes to select' : allSelected ? 'Clear selection' : 'Select every note';
     }
 
     if (this.elements.copyAllNotesBtn) {
@@ -15335,9 +16132,10 @@ export class WorkspaceDetailPage {
       // and surface the selected count through the tooltip + aria-label.
       const btn = this.elements.copyAllNotesBtn;
       btn.disabled = isBusy || selectedCount === 0;
-      const label = selectedCount > 0
-        ? `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
-        : 'Copy selected notes';
+      const label =
+        selectedCount > 0
+          ? `Copy ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
+          : 'Copy selected notes';
       btn.title = selectedCount === 0 ? 'Select notes to copy' : label;
       btn.setAttribute('aria-label', label);
     }
@@ -15347,9 +16145,10 @@ export class WorkspaceDetailPage {
       // and surface the selected count through the tooltip + aria-label.
       const btn = this.elements.deleteSelectedNotesBtn;
       btn.disabled = isBusy || selectedCount === 0;
-      const label = selectedCount > 0
-        ? `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
-        : 'Delete selected notes';
+      const label =
+        selectedCount > 0
+          ? `Delete ${selectedCount} selected note${selectedCount === 1 ? '' : 's'}`
+          : 'Delete selected notes';
       btn.title = selectedCount === 0 ? 'Select notes to delete' : label;
       btn.setAttribute('aria-label', label);
     }

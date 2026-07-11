@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -181,6 +182,88 @@ func TestBuildRuntimeSystemPrompt_IncludesUserProfile(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected runtime prompt to contain %q, got:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestBuildRuntimeSystemPrompt_IncludesAgentRefinement(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Content", Agents: []string{"Copywriter"}})
+	ws.ID = "workspace-refine"
+	ws.AgentInstances = []workspace.AgentInstance{
+		{ID: "i1", Name: "Copywriter", InstanceNumber: 1, EntryPoint: true,
+			Role: "Voice keeper", CustomInstructions: "Favor short-form social copy."},
+	}
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	h := &Handler{workspaceStore: wsStore}
+
+	// With the responding agent set, its per-workspace refinement is layered in.
+	prompt := h.buildRuntimeSystemPrompt(context.Background(), normalizedChatRouteContext{
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID,
+		AgentName:   "Copywriter",
+	})
+	for _, want := range []string{"Voice keeper", "Favor short-form social copy.", "only in this workspace"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected refinement %q in runtime prompt, got:\n%s", want, prompt)
+		}
+	}
+
+	// Without a resolved agent, no refinement section is added.
+	noAgent := h.buildRuntimeSystemPrompt(context.Background(), normalizedChatRouteContext{
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID,
+	})
+	if strings.Contains(noAgent, "Favor short-form social copy.") {
+		t.Fatalf("expected no refinement without a resolved agent, got:\n%s", noAgent)
+	}
+}
+
+func TestResolveAgentBasePromptVars(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Acme Campaign", Agents: []string{"Copywriter"}})
+	ws.ID = "workspace-vars"
+	ws.Description = "Q3 launch"
+	ws.AgentInstances = []workspace.AgentInstance{
+		{ID: "i1", Name: "Copywriter", InstanceNumber: 1, EntryPoint: true, CustomInstructions: "Be concise."},
+	}
+	if err := wsStore.Save(ws); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	h := &Handler{workspaceStore: wsStore}
+	routeCtx := normalizedChatRouteContext{
+		Surface: "workspace_detail", PagePath: "/workspaces/" + ws.ID,
+		WorkspaceID: ws.ID, AgentName: "Copywriter",
+	}
+
+	// Variable-bearing base prompt: resolved in place, reports hadVars=true.
+	ag := &resolvedChatAgent{Agent: &agent.Agent{Settings: types.Settings{
+		SystemPrompt: "You serve {{workspace.name}} ({{workspace.description}}). {{workspace.custom_instructions}}",
+	}}}
+	if !h.resolveAgentBasePromptVars(context.Background(), routeCtx, ag) {
+		t.Fatal("expected hadVars=true for variable-bearing prompt")
+	}
+	got := ag.Agent.Settings.SystemPrompt
+	for _, want := range []string{"Acme Campaign", "Q3 launch", "Be concise."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("resolved base prompt missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "{{") {
+		t.Errorf("no token should survive: %s", got)
+	}
+
+	// Plain base prompt: unchanged, hadVars=false.
+	plain := &resolvedChatAgent{Agent: &agent.Agent{Settings: types.Settings{SystemPrompt: "Plain prompt."}}}
+	if h.resolveAgentBasePromptVars(context.Background(), routeCtx, plain) {
+		t.Error("expected hadVars=false for plain prompt")
+	}
+	if plain.Agent.Settings.SystemPrompt != "Plain prompt." {
+		t.Errorf("plain prompt should be unchanged, got %q", plain.Agent.Settings.SystemPrompt)
 	}
 }
 

@@ -78,16 +78,38 @@ func ValidateTarget(isGroup bool, existingProjectPath string) error {
 // nowFunc is stubbed in tests to pin {{date}} substitution.
 var nowFunc = time.Now
 
+type templateTokenValues struct {
+	projectSlug string
+	date        string
+}
+
+func newTemplateTokenValues(projectSlug string) templateTokenValues {
+	return templateTokenValues{
+		projectSlug: projectSlug,
+		date:        nowFunc().Format("2006-01-02"),
+	}
+}
+
+func (values templateTokenValues) substitute(name string) string {
+	name = strings.ReplaceAll(name, "{{name}}", values.projectSlug)
+	name = strings.ReplaceAll(name, "{{date}}", values.date)
+	return name
+}
+
 // substituteTokens replaces the supported tokens in a path name. Replacement
 // values are slug/date strings (lowercase alphanumerics and hyphens), so
 // substitution can never introduce path separators.
-func substituteTokens(name, projectSlug string, fieldTokens map[string]string) string {
-	name = strings.ReplaceAll(name, "{{name}}", projectSlug)
-	name = strings.ReplaceAll(name, "{{date}}", nowFunc().Format("2006-01-02"))
-	for id, value := range fieldTokens {
-		name = strings.ReplaceAll(name, "{{fields."+id+"}}", value)
-	}
-	return name
+func substituteTokens(name, projectSlug string) string {
+	return newTemplateTokenValues(projectSlug).substitute(name)
+}
+
+// InstantiationResult carries the fatal scaffold result separately from the
+// optional project-entry warning. A project can be fully created even when its
+// declared entry file cannot be verified.
+type InstantiationResult struct {
+	ProjectPath      string
+	ProjectEntryPath string
+	ProjectWarning   string
 }
 
 // Instantiate copies the template at templatePath into a new project folder
@@ -97,53 +119,63 @@ func substituteTokens(name, projectSlug string, fieldTokens map[string]string) s
 // skipped, the root template.json is excluded, and any failure removes the
 // partially created project folder.
 func Instantiate(templatePath, workspaceFolder, projectName string) (string, error) {
-	return InstantiateWithFields(templatePath, workspaceFolder, projectName, nil)
+	result, err := instantiateTemplate(templatePath, workspaceFolder, projectName, nil)
+	return result.ProjectPath, err
 }
 
-// InstantiateWithFields is Instantiate plus token replacement for
-// {{fields.<id>}} in file and folder names. Field values are slugified before
-// replacement, matching {{name}} safety guarantees.
-func InstantiateWithFields(templatePath, workspaceFolder, projectName string, fieldValues map[string]any) (string, error) {
+// InstantiateTemplate copies a normalized Template and resolves its optional
+// project entry with the exact same token values used for scaffold filenames.
+func InstantiateTemplate(tpl Template, workspaceFolder, projectName string) (InstantiationResult, error) {
+	return instantiateTemplate(tpl.Path, workspaceFolder, projectName, tpl.ProjectEntry)
+}
+
+func instantiateTemplate(templatePath, workspaceFolder, projectName string, entry *ProjectEntry) (InstantiationResult, error) {
 	slug, err := SanitizeProjectName(projectName)
 	if err != nil {
-		return "", err
+		return InstantiationResult{}, err
 	}
-	fieldTokens, err := fieldReplacementTokens(fieldValues)
-	if err != nil {
-		return "", err
-	}
+	values := newTemplateTokenValues(slug)
 
 	srcInfo, err := os.Stat(templatePath)
 	if err != nil || !srcInfo.IsDir() {
-		return "", fmt.Errorf("%w: %q is not a folder", ErrTemplateNotFound, templatePath)
+		return InstantiationResult{}, fmt.Errorf("%w: %q is not a folder", ErrTemplateNotFound, templatePath)
 	}
 	if !hasSkeletonFiles(templatePath) {
-		return "", fmt.Errorf("%w: %q", ErrNoSkeleton, templatePath)
+		return InstantiationResult{}, fmt.Errorf("%w: %q", ErrNoSkeleton, templatePath)
 	}
 	wsInfo, err := os.Stat(workspaceFolder)
 	if err != nil || !wsInfo.IsDir() {
-		return "", fmt.Errorf("workspace folder %q is not accessible", workspaceFolder)
+		return InstantiationResult{}, fmt.Errorf("workspace folder %q is not accessible", workspaceFolder)
 	}
 
 	destRoot := filepath.Join(workspaceFolder, slug)
 	if _, err := os.Lstat(destRoot); err == nil {
-		return "", fmt.Errorf("%w: %q already exists in the workspace folder", ErrProjectExists, slug)
+		return InstantiationResult{}, fmt.Errorf("%w: %q already exists in the workspace folder", ErrProjectExists, slug)
 	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("failed to inspect project folder %q: %w", destRoot, err)
+		return InstantiationResult{}, fmt.Errorf("failed to inspect project folder %q: %w", destRoot, err)
 	}
 
-	if err := copyTemplateTree(templatePath, destRoot, slug, fieldTokens, srcInfo.Mode().Perm()); err != nil {
+	if err := copyTemplateTree(templatePath, destRoot, values, srcInfo.Mode().Perm()); err != nil {
 		// Best-effort cleanup so a failed instantiation leaves no partial
 		// project folder behind (and the caller never persists ProjectPath).
 		_ = os.RemoveAll(destRoot)
-		return "", err
+		return InstantiationResult{}, err
 	}
 
-	return slug, nil
+	result := InstantiationResult{ProjectPath: slug}
+	if entry != nil {
+		entryPath, err := resolveInstantiatedProjectEntry(destRoot, entry, values)
+		if err != nil {
+			result.ProjectWarning = fmt.Sprintf("project was created, but its entry file is unavailable: %v", err)
+		} else {
+			result.ProjectEntryPath = entryPath
+		}
+	}
+	return result, nil
 }
 
 // copyTemplateTree walks the template and materializes it under destRoot.
-func copyTemplateTree(templatePath, destRoot, slug string, fieldTokens map[string]string, rootPerm fs.FileMode) error {
+func copyTemplateTree(templatePath, destRoot string, values templateTokenValues, rootPerm fs.FileMode) error {
 	if err := os.MkdirAll(destRoot, normalizeDirPerm(rootPerm)); err != nil {
 		return fmt.Errorf("failed to create project folder: %w", err)
 	}
@@ -171,7 +203,7 @@ func copyTemplateTree(templatePath, destRoot, slug string, fieldTokens map[strin
 			return nil
 		}
 
-		destRel, err := substituteRelPath(relPath, slug, fieldTokens)
+		destRel, err := substituteRelPathWithValues(relPath, values)
 		if err != nil {
 			return err
 		}
@@ -203,10 +235,14 @@ func copyTemplateTree(templatePath, destRoot, slug string, fieldTokens map[strin
 // substituteRelPath applies token substitution to every segment of a
 // slash-separated fs.WalkDir path and re-validates the result so a template
 // cannot smuggle in traversal segments.
-func substituteRelPath(relPath, slug string, fieldTokens map[string]string) (string, error) {
+func substituteRelPath(relPath, slug string) (string, error) {
+	return substituteRelPathWithValues(relPath, newTemplateTokenValues(slug))
+}
+
+func substituteRelPathWithValues(relPath string, values templateTokenValues) (string, error) {
 	segments := strings.Split(relPath, "/")
 	for i, segment := range segments {
-		substituted := substituteTokens(segment, slug, fieldTokens)
+		substituted := values.substitute(segment)
 		if strings.Contains(substituted, "{{fields.") {
 			return "", fmt.Errorf("template entry %q references an unknown field token", relPath)
 		}
@@ -221,25 +257,6 @@ func substituteRelPath(relPath, slug string, fieldTokens map[string]string) (str
 		return "", fmt.Errorf("template entry %q escapes the project folder", relPath)
 	}
 	return joined, nil
-}
-
-func fieldReplacementTokens(values map[string]any) (map[string]string, error) {
-	if len(values) == 0 {
-		return nil, nil
-	}
-	tokens := make(map[string]string, len(values))
-	for id, raw := range values {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			return nil, fmt.Errorf("field token id is required")
-		}
-		token := workspace.Slugify(fmt.Sprint(raw))
-		if token == "" {
-			return nil, fmt.Errorf("field token %q is empty after slugification", id)
-		}
-		tokens[id] = token
-	}
-	return tokens, nil
 }
 
 // normalizeDirPerm keeps template-provided directory modes but guarantees the

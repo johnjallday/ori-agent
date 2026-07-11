@@ -108,9 +108,6 @@
                     <button class="nav-link" id="tplTabFiles" data-bs-toggle="tab" data-bs-target="#tplFilesPane" type="button" role="tab" aria-controls="tplFilesPane" aria-selected="false">Files</button>
                   </li>
                   <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="tplTabOnboarding" data-bs-toggle="tab" data-bs-target="#tplOnboardingPane" type="button" role="tab" aria-controls="tplOnboardingPane" aria-selected="false">Onboarding</button>
-                  </li>
-                  <li class="nav-item" role="presentation">
                     <button class="nav-link" id="tplTabTools" data-bs-toggle="tab" data-bs-target="#tplToolsPane" type="button" role="tab" aria-controls="tplToolsPane" aria-selected="false">Tools</button>
                   </li>
                   <li class="nav-item" role="presentation">
@@ -148,13 +145,31 @@
                       </div>
                     </div>
                     <div class="mb-3">
+                      <label for="tplEditProjectEntryPath" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Project entry file</label>
+                      <input id="tplEditProjectEntryPath" type="text" class="modern-input w-100" placeholder="{{`{{name}}`}}.rpp" autocomplete="off" aria-describedby="tplEditProjectEntryHelp">
+                      <div id="tplEditProjectEntryHelp" style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                        Relative to the generated project folder. It must name a scaffolded file and may use only
+                        <code>{{`{{name}}`}}</code> or <code>{{`{{date}}`}}</code> in file names. Leave blank to remove it.
+                      </div>
+                      <label class="d-flex align-items-center gap-2 mt-2 mb-0" style="font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+                        <input id="tplEditProjectEntryDefault" type="checkbox" class="form-check-input mt-0">
+                        <span>Open project after creation by default</span>
+                      </label>
+                    </div>
+                    <div class="mb-3">
                       <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Tags</label>
                       <div id="tplEditTags"></div>
                     </div>
                     <div class="mb-3">
-                      <label for="tplEditStarterTasks" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Starter tasks</label>
-                      <textarea id="tplEditStarterTasks" class="form-control" rows="3" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;" placeholder="One task per line. Optional details after a pipe:&#10;Plan an upcoming trip | destination, dates, budget"></textarea>
-                      <div style="margin-top: 4px; font-size: 11px; color: var(--text-secondary);">One task per line; add details after a <code>|</code>. Seeded into the workspace on creation.</div>
+                      <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Starter tasks</label>
+                      <div id="tplStarterTasksList" class="d-flex flex-column gap-2 mb-2"></div>
+                      <button id="tplStarterTaskAddBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Add task</button>
+                      <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                        Seeded into the workspace (assigned to the entry agent) on creation. Mark at most one task as the
+                        <strong>setup task</strong> — it auto-starts once, when the workspace is first opened, and should
+                        offer to adjust the defaults your files already scaffold. Suggested details headings:
+                        <code>Created defaults</code>, <code>Questions to ask</code>, <code>Validation</code>, <code>How to apply changes</code>.
+                      </div>
                     </div>
                     <div class="d-flex gap-2">
                       <button id="tplSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save changes</button>
@@ -202,52 +217,6 @@
                     </div>
                   </div>
 
-                  <!-- Onboarding: visual intake editor -->
-                  <div class="tab-pane fade" id="tplOnboardingPane" role="tabpanel" aria-labelledby="tplTabOnboarding">
-                    <div id="tplOnbEmpty" class="text-center py-4" style="color: var(--text-secondary); font-size: 13px;" hidden>
-                      <div class="mb-2">This template has no onboarding intake. Add one to ask the entry agent
-                        questions (e.g. BPM, key) when a workspace is created from it.</div>
-                      <button id="tplOnbAddBtn" class="modern-btn modern-btn-primary btn-sm">Add onboarding</button>
-                    </div>
-
-                    <div id="tplOnbEditor" hidden>
-                      <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-                        <div style="font-size: 12px; color: var(--text-secondary);">Intake runs when a workspace is created from this template.</div>
-                        <div class="d-flex gap-2">
-                          <button id="tplOnbJsonToggle" class="modern-btn modern-btn-secondary btn-sm">Edit as JSON</button>
-                          <button id="tplOnbRemoveBtn" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;">Remove</button>
-                        </div>
-                      </div>
-
-                      <div id="tplOnbVisual">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                          <h6 class="mb-0" style="color: var(--text-primary);">Intake fields</h6>
-                          <button id="tplOnbAddFieldBtn" class="modern-btn modern-btn-secondary btn-sm">Add field</button>
-                        </div>
-                        <div id="tplOnbFields" class="d-flex flex-column gap-2 mb-3"></div>
-
-                        <h6 class="mb-1" style="color: var(--text-primary);">Completion action</h6>
-                        <div id="tplOnbCompletion" class="mb-3"></div>
-
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                          <h6 class="mb-0" style="color: var(--text-primary);">Dependencies</h6>
-                          <button id="tplOnbAddDepBtn" class="modern-btn modern-btn-secondary btn-sm">Add dependency</button>
-                        </div>
-                        <div id="tplOnbDeps" class="d-flex flex-column gap-2 mb-3"></div>
-                      </div>
-
-                      <div id="tplOnbJson" hidden>
-                        <textarea id="tplOnbJsonText" class="form-control" spellcheck="false" rows="16"
-                                  style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace; font-size: 0.85em; resize: vertical;"></textarea>
-                      </div>
-
-                      <div id="tplOnbProblems" class="alert alert-danger py-2" style="font-size: 12px;" hidden></div>
-                      <div class="d-flex gap-2 mt-2">
-                        <button id="tplOnbSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save onboarding</button>
-                      </div>
-                    </div>
-                  </div>
-
                   <!-- Tools: default skills / MCP servers / plugins bound on workspace creation -->
                   <div class="tab-pane fade" id="tplToolsPane" role="tabpanel" aria-labelledby="tplTabTools">
                     <div style="font-size: 12px; color: var(--text-secondary);" class="mb-2">
@@ -265,24 +234,29 @@
 
                   <!-- Agents: roster seeded when a workspace is created from this template -->
                   <div class="tab-pane fade" id="tplAgentsPane" role="tabpanel" aria-labelledby="tplTabAgents">
-                    <div id="tplAgentsReadOnlyNotice" hidden class="mb-3" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-tertiary); font-size: 12px; color: var(--text-secondary);">
-                      This is a built-in template and is read-only.
-                      <button id="tplAgentsDuplicateBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Duplicate to customize</button>
+                    <div id="tplAgentsReadOnlyNotice" hidden class="tpl-agents-readonly mb-3">
+                      <span>This is a built-in template and is read-only.</span>
+                      <button id="tplAgentsDuplicateBtn" class="modern-btn modern-btn-primary btn-sm">Duplicate to customize</button>
                     </div>
-                    <div style="font-size: 12px; color: var(--text-secondary);" class="mb-2">
-                      Agents are created when a workspace is made from this template. The
-                      <strong>first agent is the entry agent</strong> (the one required agent every workspace
-                      needs) — drag an agent to the top to make it the entry agent. The rest are specialist
-                      sub-agents. A name that already exists is reused as-is.
+                    <div class="tpl-agents-head">
+                      <div>
+                        <div class="tpl-section-kicker">Seeded roster</div>
+                        <h5 class="tpl-section-title">Agents</h5>
+                        <p class="tpl-section-copy">
+                          Agents are created when a workspace is made from this template. The first card becomes the entry agent; the rest seed specialist sub-agents.
+                          Every template needs at least one agent — the entry agent owns the template's starter tasks.
+                        </p>
+                      </div>
+                      <div class="tpl-agents-actions">
+                        <button id="tplAgentsAddBtn" class="modern-btn modern-btn-secondary btn-sm">Add agent</button>
+                        <button id="tplAgentsSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save agents</button>
+                      </div>
                     </div>
-                    <div id="tplAgentsEmpty" class="text-center py-3" style="color: var(--text-secondary); font-size: 13px;" hidden>
-                      This template seeds no agents. Workspaces created from it will prompt for an entry agent.
+                    <div id="tplAgentsEmpty" class="tpl-agents-empty" hidden>
+                      <div class="tpl-agents-empty-title">No seeded agents</div>
+                      <div>Add at least one agent — until then, workspaces created from this template get an auto-created "&lt;Name&gt; Manager" as their entry agent.</div>
                     </div>
-                    <div id="tplAgentsList" class="d-flex flex-column gap-2 mb-3"></div>
-                    <div class="d-flex gap-2">
-                      <button id="tplAgentsAddBtn" class="modern-btn modern-btn-secondary btn-sm">Add agent</button>
-                      <button id="tplAgentsSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save agents</button>
-                    </div>
+                    <div id="tplAgentsList" class="tpl-agents-grid mb-3"></div>
                   </div>
                 </div>
               </div>

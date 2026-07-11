@@ -4,20 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
-	agentstore "github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
-	"github.com/johnjallday/ori-agent/internal/templateonboardinghttp"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -34,6 +31,11 @@ func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Even
 		t.Fatalf("failed to create workspace file store: %v", err)
 	}
 	handler.SetWorkspaceStore(fileStore)
+	// Mirror production task wiring: task mutations go through the SyncStore
+	// (SQLite primary via the session adapter + disk write-through), so the
+	// session row's TasksJSON stays consistent with workspace.json and the
+	// portable-state sync cannot clobber folder-seeded tasks.
+	handler.SetWorkspaceTaskStore(agentworkspace.NewSyncStore(session.NewWorkspaceStoreAdapter(handler.store), fileStore))
 
 	libDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(libDir, "demo-template"), 0o750); err != nil {
@@ -44,7 +46,7 @@ func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Even
 		cleanup()
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(libDir, "demo-template", "template.json"), []byte(`{"name":"Demo Template","tags":[" Music ","reaper","music"]}`), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(libDir, "demo-template", "template.json"), []byte(`{"name":"Demo Template","tags":[" Music ","reaper","music"],"project_entry":{"relative_path":"{{name}}.rpp","open_after_create_default":true}}`), 0o640); err != nil {
 		cleanup()
 		t.Fatal(err)
 	}
@@ -58,85 +60,6 @@ func templateTestEnv(t *testing.T) (*Handler, string, <-chan agentworkspace.Even
 	handler.SetEventBus(bus)
 
 	return handler, baseDir, events, cleanup
-}
-
-func writeOnboardingTemplate(t *testing.T, libDir string) {
-	t.Helper()
-	tplDir := filepath.Join(libDir, "onboarding-template")
-	if err := os.MkdirAll(tplDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n>\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	manifest := `{
-		"name":"Onboarding Template",
-		"tags":["reaper"],
-		"onboarding":{
-			"version":"1",
-			"fields":[
-				{"id":"bpm","label":"BPM","type":"number","default":120},
-				{"id":"song_name","label":"Song name","type":"string","required":true}
-			],
-			"completion":{"type":"none","instantiate_skeleton":true}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeOnboardingActionTemplate(t *testing.T, libDir string) {
-	t.Helper()
-	tplDir := filepath.Join(libDir, "onboarding-action")
-	if err := os.MkdirAll(tplDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n  TEMPO 120 4 4\n>\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	manifest := `{
-		"name":"Onboarding Action",
-		"tags":["reaper"],
-		"onboarding":{
-			"version":"1",
-			"fields":[
-				{"id":"bpm","label":"BPM","type":"number","default":120,"required":true,"validation":{"min":40,"max":240}},
-				{"id":"key","label":"Key","type":"enum","default":"C major","required":true,"options":["C major","A minor"]},
-				{"id":"song_name","label":"Song name","type":"string","required":true}
-			],
-			"completion":{
-				"type":"task",
-				"ref":"reaper-session-setup",
-				"instructions":"Create ${fields.song_name} at ${fields.bpm} BPM in ${fields.key}.",
-				"skill_refs":["reaper-session-setup"],
-				"inputs":{"bpm":"${fields.bpm}","key":"${fields.key}","song_name":"${fields.song_name}"},
-				"instantiate_skeleton":true
-			}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeMalformedOnboardingTemplate(t *testing.T, libDir string) {
-	t.Helper()
-	tplDir := filepath.Join(libDir, "malformed-onboarding")
-	if err := os.MkdirAll(tplDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n>\n"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	manifest := `{
-		"name":"Malformed Onboarding",
-		"tags":["reaper"],
-		"onboarding":{"version":"999","completion":{"type":"none","instantiate_skeleton":true}}
-	}`
-	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func postCreateWorkspace(t *testing.T, handler *Handler, body string) (*httptest.ResponseRecorder, map[string]any) {
@@ -226,6 +149,31 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey] != projectRef.ID {
 		t.Fatalf("project directory = %v, want %q", diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey], projectRef.ID)
 	}
+	if diskWS.SharedData[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
+		t.Fatalf("project entry = %v, want song-x.rpp", diskWS.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
+
+	// A task mutation reads through the SQLite-primary SyncStore, whose table
+	// does not carry project_path. Its write-through save must merge the
+	// disk-canonical value instead of erasing it immediately after creation.
+	taskWorkspace, err := handler.workspaceTaskStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceTaskStore.Get: %v", err)
+	}
+	taskWorkspace.Tasks = append(taskWorkspace.Tasks, agentworkspace.Task{
+		ID:     "post-create-task-update",
+		Status: agentworkspace.TaskStatusCompleted,
+	})
+	if err := handler.workspaceTaskStore.Save(taskWorkspace); err != nil {
+		t.Fatalf("workspaceTaskStore.Save: %v", err)
+	}
+	diskWS, err = handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get after task save: %v", err)
+	}
+	if diskWS.ProjectPath != "song-x" {
+		t.Fatalf("disk project_path after task save = %q, want song-x", diskWS.ProjectPath)
+	}
 
 	// Session reads hydrate project_path from workspace.json (it has no
 	// SQLite column), so a bare session row must come back with the path.
@@ -236,14 +184,56 @@ func TestCreateWorkspaceWithTemplate(t *testing.T) {
 	if len(hydrated.Tags) != 2 || hydrated.Tags[0] != "music" || hydrated.Tags[1] != "reaper" {
 		t.Fatalf("hydrated tags = %#v, want [music reaper]", hydrated.Tags)
 	}
+	if hydrated.SharedData[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
+		t.Fatalf("hydrated project entry = %v, want song-x.rpp", hydrated.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	select {
 	case event := <-events:
-		if event.WorkspaceID != wsID || event.Data["project_path"] != "song-x" {
+		if event.WorkspaceID != wsID || event.Data["project_path"] != "song-x" || event.Data[projecttemplates.ProjectEntryPathKey] != "song-x.rpp" {
 			t.Fatalf("unexpected project.created payload: %+v", event)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("project.created event not published")
+	}
+}
+
+// TestCreateWorkspaceIgnoresLegacyOnboardingBlock pins the post-intake
+// behavior: a template that still carries an intake-era `onboarding` block
+// instantiates its skeleton immediately (nothing defers), and the create
+// response carries no onboarding payload.
+func TestCreateWorkspaceIgnoresLegacyOnboardingBlock(t *testing.T) {
+	handler, baseDir, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "legacy-onboarding")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n  TEMPO 120 4 4\n>\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Legacy Onboarding",
+		"onboarding":{"version":"1","fields":[{"id":"bpm","label":"BPM","type":"number"}],"completion":{"type":"none","instantiate_skeleton":true}}
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Legacy Flow","template_id":"legacy-onboarding"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if warning, present := resp["project_warning"]; present {
+		t.Fatalf("unexpected project_warning: %v", warning)
+	}
+	if _, present := resp["onboarding"]; present {
+		t.Fatal("legacy onboarding block must not produce an onboarding response")
+	}
+	// The skeleton instantiates immediately — nothing defers on intake.
+	if _, err := os.Stat(filepath.Join(baseDir, "legacy-flow", "legacy-flow", "legacy-flow.rpp")); err != nil {
+		t.Fatalf("skeleton should instantiate immediately: %v", err)
 	}
 }
 
@@ -310,295 +300,178 @@ func TestCreateWorkspaceSeedsTemplateAgentRoster(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspaceWithOnboardingTemplateDefersProject(t *testing.T) {
-	handler, baseDir, events, cleanup := templateTestEnv(t)
-	defer cleanup()
-
-	libDir := handler.templatesRootResolver()
-	writeOnboardingTemplate(t, libDir)
-
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Onboarding Song","template_id":"onboarding-template"}`)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	if warning, present := resp["project_warning"]; present {
-		t.Fatalf("unexpected project_warning: %v", warning)
-	}
-
-	folder := resp["folder"].(map[string]any)
-	wsID := folder["id"].(string)
-	if got, present := folder["project_path"]; present && got != "" {
-		t.Fatalf("project_path = %v, want empty until onboarding completion", got)
-	}
-	if _, err := os.Stat(filepath.Join(baseDir, "onboarding-song", "onboarding-song")); !os.IsNotExist(err) {
-		t.Fatalf("project folder should be deferred until completion (err=%v)", err)
-	}
-
-	onboarding, ok := resp["onboarding"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected onboarding summary in response: %#v", resp["onboarding"])
-	}
-	if got := onboarding["status"]; got != string(templateonboarding.StatusPendingEntryAgent) {
-		t.Fatalf("onboarding status = %v, want pending_entry_agent", got)
-	}
-	fields, ok := onboarding["fields"].([]any)
-	if !ok || len(fields) != 2 {
-		t.Fatalf("onboarding fields = %#v, want 2 fields", onboarding["fields"])
-	}
-
-	store := templateonboarding.NewStore(handler.workspaceStore)
-	session, err := store.Load(context.Background(), wsID)
-	if err != nil {
-		t.Fatalf("load onboarding session: %v", err)
-	}
-	if session.Status != templateonboarding.StatusPendingEntryAgent {
-		t.Fatalf("stored onboarding status = %q, want pending_entry_agent", session.Status)
-	}
-	if len(session.Spec.Fields) != 2 || session.Spec.Fields[0].ID != "bpm" {
-		t.Fatalf("stored spec snapshot = %+v", session.Spec)
-	}
-
-	select {
-	case event := <-events:
-		t.Fatalf("project.created should not fire before onboarding completion: %+v", event)
-	default:
-	}
-}
-
-func TestAddingEntryAgentResumesPendingTemplateOnboarding(t *testing.T) {
+func TestCreateWorkspaceTemplateAgentPlanEndpoint(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{provider: "codex", model: "gpt-5.3-codex"})
 
-	writeOnboardingTemplate(t, handler.templatesRootResolver())
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Agent Later","template_id":"onboarding-template"}`)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
 	}
-	wsID := resp["folder"].(map[string]any)["id"].(string)
-	store := templateonboarding.NewStore(handler.workspaceStore)
-	session, err := store.Load(context.Background(), wsID)
-	if err != nil {
-		t.Fatalf("load onboarding session: %v", err)
-	}
-	if _, err := session.MergeValues(map[string]any{"song_name": "Late Entry"}); err != nil {
-		t.Fatalf("MergeValues: %v", err)
-	}
-	if err := store.Save(context.Background(), session); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/agents", bytes.NewBufferString(`{"agent_name":"Producer"}`))
-	req.Header.Set("Content-Type", "application/json")
-	addW := httptest.NewRecorder()
-	handler.HandleWorkspaces(addW, req)
-	if addW.Code != http.StatusCreated {
-		t.Fatalf("expected add agent 201, got %d: %s", addW.Code, addW.Body.String())
-	}
-	var addResp map[string]any
-	if err := json.Unmarshal(addW.Body.Bytes(), &addResp); err != nil {
-		t.Fatalf("decode add response: %v", err)
-	}
-	onboarding := addResp["onboarding"].(map[string]any)
-	if got := onboarding["status"]; got != string(templateonboarding.StatusCollecting) {
-		t.Fatalf("onboarding status after add = %v, want collecting", got)
-	}
-
-	reloaded, err := store.Load(context.Background(), wsID)
-	if err != nil {
-		t.Fatalf("reload onboarding session: %v", err)
-	}
-	if reloaded.Status != templateonboarding.StatusCollecting {
-		t.Fatalf("stored status after add = %q, want collecting", reloaded.Status)
-	}
-	if reloaded.Values["song_name"] != "Late Entry" {
-		t.Fatalf("stored values after add = %#v, want preserved song_name", reloaded.Values)
-	}
-}
-
-func TestTemplateOnboardingCreateValuesCompleteWithStubbedTask(t *testing.T) {
-	handler, baseDir, events, cleanup := templateTestEnv(t)
-	defer cleanup()
-
-	writeOnboardingActionTemplate(t, handler.templatesRootResolver())
-	if err := handler.agentStore.CreateAgent("Producer", &agentstore.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
-		t.Fatalf("CreateAgent: %v", err)
-	}
-
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Studio Song","template_id":"onboarding-action","entry_agent_name":"Producer"}`)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	folder := resp["folder"].(map[string]any)
-	wsID := folder["id"].(string)
-	if got, present := folder["project_path"]; present && got != "" {
-		t.Fatalf("project_path = %v, want deferred until completion", got)
-	}
-	if _, err := os.Stat(filepath.Join(baseDir, "studio-song", "studio-song")); !os.IsNotExist(err) {
-		t.Fatalf("project folder should not exist before completion (err=%v)", err)
-	}
-	onboarding := resp["onboarding"].(map[string]any)
-	if got := onboarding["status"]; got != string(templateonboarding.StatusCollecting) {
-		t.Fatalf("onboarding status = %v, want collecting", got)
-	}
-
-	// Later edits to template.json must not alter the in-flight session's spec.
-	mutatedManifest := `{"name":"Mutated","onboarding":{"version":"999","completion":{"type":"none"}}}`
-	if err := os.WriteFile(filepath.Join(handler.templatesRootResolver(), "onboarding-action", "template.json"), []byte(mutatedManifest), 0o640); err != nil {
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator","system_prompt":"lead it"},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
 		t.Fatal(err)
 	}
 
-	store := templateonboarding.NewStore(handler.workspaceStore)
-	httpHandler := templateonboardinghttp.NewHandler(store, templateonboardinghttp.EntryAgentResolverFunc(func(ctx context.Context, workspaceID string) (string, error) {
-		if workspaceID != wsID {
-			t.Fatalf("entry agent resolver workspaceID = %q, want %q", workspaceID, wsID)
-		}
-		return "Producer", nil
-	}))
-	runner := &stubTaskCompletionRunner{store: store, handler: handler}
-	httpHandler.SetCompletionRunner(runner)
-	mux := http.NewServeMux()
-	httpHandler.RegisterRoutes(mux)
-
-	patch := httptest.NewRecorder()
-	mux.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+wsID+"/template-onboarding/values", bytes.NewBufferString(`{"values":{"bpm":132,"key":"A minor","song_name":"Solar Drift"}}`)))
-	if patch.Code != http.StatusOK {
-		t.Fatalf("PATCH values = %d, want 200: %s", patch.Code, patch.Body.String())
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/template-agent-plan", bytes.NewBufferString(`{"template_id":"roster-template"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var valuesResp templateonboardinghttp.StatusResponse
-	if err := json.Unmarshal(patch.Body.Bytes(), &valuesResp); err != nil {
-		t.Fatalf("decode values response: %v", err)
+	var plan templateAgentPlan
+	if err := json.Unmarshal(w.Body.Bytes(), &plan); err != nil {
+		t.Fatalf("decode plan: %v", err)
 	}
-	if valuesResp.Status != templateonboarding.StatusReadyToComplete {
-		t.Fatalf("status after values = %q, want ready_to_complete", valuesResp.Status)
+	if !plan.HasAgents || plan.EntryAgentName != "Campaign Lead" {
+		t.Fatalf("unexpected plan: %+v", plan)
 	}
-	if len(valuesResp.Fields) != 3 || valuesResp.Fields[0].ID != "bpm" {
-		t.Fatalf("fields came from mutated template, got %+v", valuesResp.Fields)
+	if len(plan.Agents) != 2 || plan.Agents[0].Action != "create" || plan.Agents[0].Model != "gpt-5.3-codex" {
+		t.Fatalf("unexpected planned agents: %+v", plan.Agents)
 	}
-
-	complete := httptest.NewRecorder()
-	mux.ServeHTTP(complete, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+wsID+"/template-onboarding/complete", nil))
-	if complete.Code != http.StatusOK {
-		t.Fatalf("complete = %d, want 200: %s", complete.Code, complete.Body.String())
-	}
-	var completeResp templateonboardinghttp.StatusResponse
-	if err := json.Unmarshal(complete.Body.Bytes(), &completeResp); err != nil {
-		t.Fatalf("decode complete response: %v", err)
-	}
-	if completeResp.Status != templateonboarding.StatusSucceeded {
-		t.Fatalf("complete status = %q, want succeeded", completeResp.Status)
-	}
-	if completeResp.ActionResult == nil || completeResp.ActionResult.RunID != "stub-run-1" || completeResp.ActionResult.ProjectPath != "studio-song" {
-		t.Fatalf("action result = %+v, want stub run and project path", completeResp.ActionResult)
-	}
-	if !runner.called {
-		t.Fatal("stub completion runner was not called")
-	}
-	if _, err := os.Stat(filepath.Join(baseDir, "studio-song", "studio-song", "studio-song.rpp")); err != nil {
-		t.Fatalf("expected deferred project seed after completion: %v", err)
-	}
-
-	persisted, err := store.Load(context.Background(), wsID)
-	if err != nil {
-		t.Fatalf("load persisted onboarding session: %v", err)
-	}
-	if persisted.Status != templateonboarding.StatusSucceeded {
-		t.Fatalf("persisted status = %q, want succeeded", persisted.Status)
-	}
-	if persisted.Spec.Fields[0].Label != "BPM" || persisted.Spec.Completion.Type != templateonboarding.ActionTask {
-		t.Fatalf("stored spec snapshot changed unexpectedly: %+v", persisted.Spec)
-	}
-	if persisted.Values["song_name"] != "Solar Drift" || persisted.Values["bpm"] != float64(132) {
-		t.Fatalf("persisted values = %#v", persisted.Values)
-	}
-
-	select {
-	case event := <-events:
-		if event.WorkspaceID != wsID || event.Data["project_path"] != "studio-song" {
-			t.Fatalf("unexpected project.created payload: %+v", event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected project.created event after completion")
+	if plan.Agents[0].SystemPrompt != "lead it" {
+		t.Fatalf("expected system prompt in plan, got %q", plan.Agents[0].SystemPrompt)
 	}
 }
 
-func TestMalformedOnboardingTemplateFallsBackToImmediateInstantiation(t *testing.T) {
-	handler, baseDir, _, cleanup := templateTestEnv(t)
+func TestCreateWorkspaceAppliesTemplateAgentOverrides(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
-	writeMalformedOnboardingTemplate(t, handler.templatesRootResolver())
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Broken Onboarding","template_id":"malformed-onboarding"}`)
+	var appliedTools []string
+	handler.SetAgentToolApplier(func(_ string, agentName string, tools projecttemplates.ToolDefaults) ([]string, []string) {
+		if len(tools.Skills) > 0 {
+			appliedTools = append(appliedTools, agentName+":"+strings.Join(tools.Skills, ","))
+		}
+		return tools.Skills, nil
+	})
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator","model":"gpt-5-mini","system_prompt":"lead it","tools":{"skills":["planning"]}},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{
+		"name":"Launch",
+		"template_id":"roster-template",
+		"template_agent_overrides":[
+			{"index":0,"name":"Launch Lead","model":"gpt-5.7","provider":"codex","system_prompt":"custom launch prompt"}
+		]
+	}`
+	w, resp := postCreateWorkspace(t, handler, body)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if warning, present := resp["project_warning"]; present {
-		t.Fatalf("unexpected project_warning: %v", warning)
+	if _, ok := handler.agentStore.GetAgent("Campaign Lead"); ok {
+		t.Fatal("original agent name should not be created after override")
 	}
-	if onboarding, present := resp["onboarding"]; present {
-		t.Fatalf("malformed onboarding must not create an onboarding response: %v", onboarding)
+	created, ok := handler.agentStore.GetAgent("Launch Lead")
+	if !ok {
+		t.Fatal("expected overridden agent name to be created")
+	}
+	if created.Settings.Model != "gpt-5.7" || created.Settings.Provider != "codex" || created.Settings.SystemPrompt != "custom launch prompt" {
+		t.Fatalf("overridden settings not applied: %+v", created.Settings)
+	}
+	if len(appliedTools) != 1 || appliedTools[0] != "Launch Lead:planning" {
+		t.Fatalf("expected original tools bound to renamed agent, got %v", appliedTools)
+	}
+
+	folder := resp["folder"].(map[string]any)
+	wsID := folder["id"].(string)
+	sessWS, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if got := currentWorkspaceEntryAgentName(sessWS); got != "Launch Lead" {
+		t.Fatalf("entry agent = %q, want Launch Lead", got)
+	}
+}
+
+func TestCreateWorkspaceRejectsDuplicateTemplateAgentOverrides(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator"},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{
+		"name":"Launch",
+		"template_id":"roster-template",
+		"template_agent_overrides":[
+			{"index":0,"name":"Copywriter"}
+		]
+	}`
+	w, _ := postCreateWorkspace(t, handler, body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateWorkspaceCanSkipTemplateAgentRoster(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator"},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Launch","template_id":"roster-template","create_template_agents":false}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := handler.agentStore.GetAgent("Campaign Lead"); ok {
+		t.Fatal("entry agent should not be created when create_template_agents=false")
 	}
 	folder := resp["folder"].(map[string]any)
 	wsID := folder["id"].(string)
-	if got := folder["project_path"]; got != "broken-onboarding" {
-		t.Fatalf("project_path = %v, want immediate instantiation", got)
-	}
-	if _, err := os.Stat(filepath.Join(baseDir, "broken-onboarding", "broken-onboarding", "broken-onboarding.rpp")); err != nil {
-		t.Fatalf("expected project seed despite malformed onboarding: %v", err)
-	}
-	store := templateonboarding.NewStore(handler.workspaceStore)
-	if _, err := store.Load(context.Background(), wsID); err == nil {
-		t.Fatal("malformed onboarding should not persist a session")
-	}
-}
-
-type stubTaskCompletionRunner struct {
-	store   *templateonboarding.Store
-	handler *Handler
-	called  bool
-}
-
-func (r *stubTaskCompletionRunner) Complete(ctx context.Context, session *templateonboarding.Session, entryAgentName string) (*templateonboarding.ActionResult, error) {
-	if r == nil || r.store == nil || r.handler == nil {
-		return nil, fmt.Errorf("stub completion runner is not configured")
-	}
-	if entryAgentName != "Producer" {
-		return nil, fmt.Errorf("entry agent = %q, want Producer", entryAgentName)
-	}
-	if session.TemplateID != "onboarding-action" || session.TemplatePath == "" {
-		return nil, fmt.Errorf("template metadata missing from session: id=%q path=%q", session.TemplateID, session.TemplatePath)
-	}
-	if session.Spec.Completion.Type != templateonboarding.ActionTask || !session.Spec.Completion.InstantiateSkeleton {
-		return nil, fmt.Errorf("completion = %+v, want task with skeleton", session.Spec.Completion)
-	}
-	if session.Values["song_name"] != "Solar Drift" || session.Values["bpm"] != float64(132) || session.Values["key"] != "A minor" {
-		return nil, fmt.Errorf("values = %#v, want patched onboarding values", session.Values)
-	}
-
-	if _, err := session.StartCompletion(); err != nil {
-		return nil, err
-	}
-	if err := r.store.Save(ctx, session); err != nil {
-		return nil, err
-	}
-	projectPath, err := r.handler.InstantiateProject(ctx, session.WorkspaceID, session.TemplateID, session.TemplatePath, session.ProjectName, session.Values)
+	sessWS, err := handler.store.GetWorkspace(context.Background(), wsID)
 	if err != nil {
-		_, _ = session.MarkFailed(err.Error())
-		_ = r.store.Save(ctx, session)
-		return nil, err
+		t.Fatalf("GetWorkspace: %v", err)
 	}
-	result := &templateonboarding.ActionResult{
-		Result:      "stubbed task completed",
-		RunID:       "stub-run-1",
-		TaskID:      "stub-task-1",
-		ProjectPath: projectPath,
+	if len(sessWS.AgentInstances) != 0 || currentWorkspaceEntryAgentName(sessWS) != "" {
+		t.Fatalf("expected agentless workspace, got instances=%v entry=%q", sessWS.AgentInstances, currentWorkspaceEntryAgentName(sessWS))
 	}
-	if _, err := session.MarkSucceeded(result); err != nil {
-		return nil, err
-	}
-	if err := r.store.Save(ctx, session); err != nil {
-		return nil, err
-	}
-	r.called = true
-	return result, nil
 }
 
 func TestCreateProjectForExistingWorkspace(t *testing.T) {
@@ -633,6 +506,9 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if projectResp["project_path"] != "first-song" {
 		t.Fatalf("project_path = %v, want first-song", projectResp["project_path"])
 	}
+	if warning, present := projectResp["project_warning"]; present {
+		t.Fatalf("unexpected project_warning: %v", warning)
+	}
 
 	diskWS, err := handler.workspaceStore.Get(wsID)
 	if err != nil {
@@ -658,6 +534,9 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey] != projectRef.ID {
 		t.Fatalf("project directory = %v, want %q", diskWS.SharedData[workspaceSharedDataProjectDirectoryIDKey], projectRef.ID)
 	}
+	if diskWS.SharedData[projecttemplates.ProjectEntryPathKey] != "first-song.rpp" {
+		t.Fatalf("project entry = %v, want first-song.rpp", diskWS.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	sessionWS, err := handler.store.GetWorkspace(context.Background(), wsID)
 	if err != nil {
@@ -677,10 +556,13 @@ func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	if len(hydrated.Tags) != 2 || hydrated.Tags[0] != "music" || hydrated.Tags[1] != "reaper" {
 		t.Fatalf("hydrated tags = %#v, want [music reaper]", hydrated.Tags)
 	}
+	if hydrated.SharedData[projecttemplates.ProjectEntryPathKey] != "first-song.rpp" {
+		t.Fatalf("hydrated project entry = %v, want first-song.rpp", hydrated.SharedData[projecttemplates.ProjectEntryPathKey])
+	}
 
 	select {
 	case event := <-events:
-		if event.WorkspaceID != wsID || event.Data["project_path"] != "first-song" {
+		if event.WorkspaceID != wsID || event.Data["project_path"] != "first-song" || event.Data[projecttemplates.ProjectEntryPathKey] != "first-song.rpp" {
 			t.Fatalf("unexpected project.created payload: %+v", event)
 		}
 	case <-time.After(time.Second):

@@ -69,14 +69,18 @@ const (
 
 // AgentInstance represents a specific instance of an agent with a stable identifier
 type AgentInstance struct {
-	ID             string    `json:"id"`              // Stable UUID for this agent instance
-	Name           string    `json:"name"`            // Agent type name (e.g., "default", "writer")
-	InstanceNumber int       `json:"instance_number"` // Instance number for display (e.g., 1, 2, 3)
-	NodeID         string    `json:"node_id"`         // Stable node ID (e.g., "default-node-1")
-	Role           string    `json:"role,omitempty"`  // Workspace-specific responsibility label (e.g., "Project Manager")
-	Description    string    `json:"description,omitempty"`
-	EntryPoint     bool      `json:"entry_point,omitempty"` // Marks the default entry node for workspace-level requests
-	CreatedAt      time.Time `json:"created_at"`            // When this instance was added
+	ID             string `json:"id"`              // Stable UUID for this agent instance
+	Name           string `json:"name"`            // Agent type name (e.g., "default", "writer")
+	InstanceNumber int    `json:"instance_number"` // Instance number for display (e.g., 1, 2, 3)
+	NodeID         string `json:"node_id"`         // Stable node ID (e.g., "default-node-1")
+	Role           string `json:"role,omitempty"`  // Workspace-specific responsibility label (e.g., "Project Manager")
+	Description    string `json:"description,omitempty"`
+	// CustomInstructions is the workspace owner's per-attachment refinement of a
+	// shared agent definition, layered onto the shared base prompt for this
+	// workspace only (never mutates the global definition). PRD FR16/FR17.
+	CustomInstructions string    `json:"custom_instructions,omitempty"`
+	EntryPoint         bool      `json:"entry_point,omitempty"` // Marks the default entry node for workspace-level requests
+	CreatedAt          time.Time `json:"created_at"`            // When this instance was added
 }
 
 // Folder represents a managed folder under the workspace files root.

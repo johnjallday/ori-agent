@@ -29,20 +29,31 @@ async function createWorkspace(page: Page, name: string, description: string): P
 }
 
 // Concrete workspaces are created without an entry agent (by design), so the
-// page shows a "Create an entry agent?" prompt. Dismiss any open modal so it
-// doesn't intercept clicks on the Find tools card.
-async function dismissBlockingModals(page: Page) {
-  await page.evaluate(() => {
-    document.querySelectorAll('.modal.show').forEach((m) => {
-      // @ts-expect-error bootstrap is a page global
-      window.bootstrap?.Modal?.getInstance(m)?.hide();
-      (m as HTMLElement).classList.remove('show');
-      (m as HTMLElement).style.display = 'none';
-    });
-    document.querySelectorAll('.modal-backdrop').forEach((b) => b.remove());
-    document.body.classList.remove('modal-open');
-    document.body.style.removeProperty('overflow');
-  });
+// detail page would otherwise show a mandatory "Create an entry agent?" prompt.
+async function suppressEntryAgentPrompt(page: Page, workspaceId: string) {
+  await page.addInitScript((id) => {
+    window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
+  }, workspaceId);
+}
+
+async function gotoWorkspaceCommand(page: Page, workspaceId: string) {
+  await suppressEntryAgentPrompt(page, workspaceId);
+  await page.goto(`/workspaces/${workspaceId}`);
+  await expect(page.locator('#workspaceCommandView')).toBeVisible();
+}
+
+async function openFindToolsSurface(page: Page) {
+  const toolsStat = page.getByRole('button', { name: /Open tools: MCP, skills, plugins, and find tools/i });
+  await expect(toolsStat).toBeVisible();
+  await toolsStat.click();
+
+  const modal = page.locator('#workspaceCommandView .ws-cmd-modal:not([hidden])');
+  await expect(modal).toBeVisible();
+  await modal.getByRole('tab', { name: 'Find Tools' }).click();
+
+  await expect(page.locator('#workspace-detail-tools-card')).toBeVisible();
+  await expect(page.locator('#workspace-tools-find-btn')).toBeVisible();
+  return modal;
 }
 
 test.beforeEach(async ({ page }) => {
@@ -80,10 +91,10 @@ test('creating a workspace is non-blocking and makes no marketplace calls', asyn
 
 test('workspace page shows Find tools and not the old setup-review surface', async ({ page }) => {
   const wid = await createWorkspace(page, 'E2E ToolsCard', 'Plans and tracks trips.');
-  await page.goto(`/workspaces/${wid}`);
+  await gotoWorkspaceCommand(page, wid);
 
   // New surface present.
-  await expect(page.locator('#workspace-detail-tools-card')).toBeVisible();
+  await openFindToolsSurface(page);
   await expect(page.locator('#workspace-tools-find-btn')).toHaveText('Find tools');
 
   // Old Settings -> Intent setup-review surface removed.
@@ -104,9 +115,8 @@ test('Find tools searches and renders add-ons only with honest copy', async ({ p
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ servers: [], results: [] }) }));
 
   const wid = await createWorkspace(page, 'E2E Search', 'Plans and tracks trips.');
-  await page.goto(`/workspaces/${wid}`);
-  await page.waitForTimeout(800);
-  await dismissBlockingModals(page);
+  await gotoWorkspaceCommand(page, wid);
+  await openFindToolsSurface(page);
 
   await page.locator('#workspace-tools-find-btn').click();
   const host = page.locator('#workspace-tools-panel-host');

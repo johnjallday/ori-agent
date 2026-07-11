@@ -1074,7 +1074,17 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	toolRuntimeSystemPrompt := h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
+	// Carry the resolved agent so the runtime prompt can layer this agent's
+	// per-workspace refinement (PRD FR15/FR16/FR19).
+	normalizedRouteContext.AgentName = current
+	// Resolve any closed-vocabulary variables in the agent's base prompt. When it
+	// used variables, the author placed context explicitly, so the generic
+	// workspace-context layer is suppressed (PRD FR24).
+	basePromptHasVars := h.resolveAgentBasePromptVars(ctx, normalizedRouteContext, ag)
+	toolRuntimeSystemPrompt := ""
+	if !basePromptHasVars {
+		toolRuntimeSystemPrompt = h.buildRuntimeSystemPrompt(ctx, normalizedRouteContext)
+	}
 	providerName, providerErr := resolveChatProviderName(current, ag, h.llmFactory)
 	if providerErr != nil {
 		writeJSONResponse(w, attachRouteMetadata(map[string]any{
@@ -1088,7 +1098,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Check if this is a Claude Code provider - route to Claude Code handler
 	if providerName == "claude_code" && h.llmFactory != nil {
-		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
+		runtimeSystemPrompt := ""
+		if !basePromptHasVars {
+			runtimeSystemPrompt = h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
+		}
 		h.handleClaudeCodeChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
 		return
 	}
@@ -1111,7 +1124,10 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if providerName == "codex" && h.llmFactory != nil {
-		runtimeSystemPrompt := h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
+		runtimeSystemPrompt := ""
+		if !basePromptHasVars {
+			runtimeSystemPrompt = h.buildRuntimeSystemPromptForToolCapability(ctx, normalizedRouteContext, false)
+		}
 		h.handleCodexChat(w, r, ag, q, current, base, llmImages, plannerDecision, runtimeSystemPrompt, normalizedRouteContext)
 		return
 	}

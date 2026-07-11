@@ -58,7 +58,14 @@ func mergePortableWorkspaceState(target, source *agentworkspace.Workspace) {
 	target.AgentInstances = append([]agentworkspace.AgentInstance(nil), source.AgentInstances...)
 	target.SharedData = source.SharedData
 	target.Messages = source.Messages
-	target.Tasks = source.Tasks
+	// Tasks: nil means the session row carried no task data at all (its
+	// TasksJSON was empty), not "zero tasks" — clobbering the folder store's
+	// tasks with nil would erase tasks that live only on disk (e.g. seeded
+	// through the folder store when no SyncStore is wired). A known-empty
+	// task list decodes to a non-nil empty slice and still syncs through.
+	if source.Tasks != nil {
+		target.Tasks = source.Tasks
+	}
 	target.Attachments = source.Attachments
 	target.ScheduledTasks = source.ScheduledTasks
 	target.StoreNodes = source.StoreNodes

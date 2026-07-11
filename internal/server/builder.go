@@ -46,8 +46,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
-	"github.com/johnjallday/ori-agent/internal/templateonboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
 	"github.com/johnjallday/ori-agent/internal/updatemanager"
@@ -166,13 +164,10 @@ type ServerBuilder struct {
 	speechHandler          *speechhttp.Handler
 
 	// Session management
-	sessionStore                  session.HybridStore
-	sessionHandler                *sessionhttp.Handler
-	templateOnboardingStore       *templateonboarding.Store
-	templateOnboardingService     *templateonboarding.Service
-	templateOnboardingHTTPHandler *templateonboardinghttp.Handler
-	autoClassifyHandler           *sessionhttp.AutoClassifyHandler
-	smartInputHandler             *sessionhttp.SmartInputHandler
+	sessionStore        session.HybridStore
+	sessionHandler      *sessionhttp.Handler
+	autoClassifyHandler *sessionhttp.AutoClassifyHandler
+	smartInputHandler   *sessionhttp.SmartInputHandler
 
 	// Note generation
 	noteHandler *notehttp.Handler
@@ -402,8 +397,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Plugin:           b.pluginHandler,
 		// initializeMissionBridge (which builds the trigger handler) runs
 		// before this facade is rebuilt, so it must be attached here too.
-		Triggers:           b.triggerHandler,
-		TemplateOnboarding: b.templateOnboardingHTTPHandler,
+		Triggers: b.triggerHandler,
 	}
 	if b.workspaceFileStore != nil {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -10,7 +12,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
-	"github.com/johnjallday/ori-agent/internal/templateonboarding"
 )
 
 // handleProjectTemplates serves GET /api/project-templates: the project
@@ -61,9 +62,9 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 }
 
 // handleProjectTemplateUpdate serves PUT /api/project-templates/{templateID}:
-// edit a template's display metadata (template.json). The optional `tags` field
-// is tri-state: omitted preserves existing tags, an explicit empty array clears
-// them — so the legacy manage modal (which never sends tags) can't wipe them.
+// edit a template's metadata (template.json). Optional tags and project_entry
+// fields are tri-state so older clients preserve values they do not send;
+// project_entry null explicitly clears that object.
 func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name            string                          `json:"name"`
@@ -72,6 +73,7 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		Icon            *string                         `json:"icon"`
 		BehaviorProfile *string                         `json:"behavior_profile"`
 		StarterTasks    *[]projecttemplates.StarterTask `json:"starter_tasks"`
+		ProjectEntry    json.RawMessage                 `json:"project_entry"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -80,10 +82,24 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	var projectEntryEdit *projecttemplates.ProjectEntryEdit
+	if req.ProjectEntry != nil {
+		projectEntryEdit = &projecttemplates.ProjectEntryEdit{Set: true}
+		if !bytes.Equal(bytes.TrimSpace(req.ProjectEntry), []byte("null")) {
+			var entry projecttemplates.ProjectEntry
+			if err := json.Unmarshal(req.ProjectEntry, &entry); err != nil {
+				s.respondProjectTemplateError(w, fmt.Errorf("%w: project_entry must be an object: %v", projecttemplates.ErrInvalidProjectEntry, err))
+				return
+			}
+			projectEntryEdit.Value = &entry
+		}
+	}
+
 	edit := &projecttemplates.ManifestEdit{
 		Icon:            req.Icon,
 		BehaviorProfile: req.BehaviorProfile,
 		StarterTasks:    req.StarterTasks,
+		ProjectEntry:    projectEntryEdit,
 	}
 	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags, edit)
 	if err != nil {
@@ -266,83 +282,6 @@ func (s *Server) handleProjectTemplateFileDelete(w http.ResponseWriter, r *http.
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "path": path})
 }
 
-// handleProjectTemplateOnboardingGet serves GET
-// /api/project-templates/{templateID}/onboarding: the parsed onboarding spec
-// (plus the raw block for the JSON editor), or an absent/invalid state.
-func (s *Server) handleProjectTemplateOnboardingGet(w http.ResponseWriter, r *http.Request) {
-	tpl, err := projecttemplates.FindLibraryTemplate(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"))
-	if err != nil {
-		s.respondProjectTemplateError(w, err)
-		return
-	}
-
-	resp := map[string]any{
-		"present":    false,
-		"onboarding": nil,
-		"raw":        strings.TrimSpace(string(tpl.Onboarding)),
-	}
-	spec, perr := templateonboarding.ParseSpec(tpl.Onboarding)
-	switch {
-	case perr != nil:
-		// Malformed block on disk: report it so the raw-JSON editor can repair it.
-		resp["present"] = true
-		resp["error"] = perr.Error()
-	case spec != nil:
-		resp["present"] = true
-		resp["onboarding"] = spec
-	}
-	_ = orihttp.RespondSuccess(w, resp)
-}
-
-// handleProjectTemplateOnboardingSet serves PUT
-// /api/project-templates/{templateID}/onboarding: validate the submitted spec
-// (ParseSpec + Validate) and write it into template.json. A `null` body clears
-// onboarding. Validation problems are returned as a 400 with a problems list.
-func (s *Server) handleProjectTemplateOnboardingSet(w http.ResponseWriter, r *http.Request) {
-	var body json.RawMessage
-	if !orihttp.ParseJSONBody(w, r, &body) {
-		return
-	}
-
-	spec, perr := templateonboarding.ParseSpec(body)
-	if perr != nil {
-		_ = orihttp.RespondBadRequest(w, perr.Error())
-		return
-	}
-	if spec != nil {
-		if res := templateonboarding.Validate(spec); !res.OK() {
-			_ = orihttp.RespondJSON(w, http.StatusBadRequest, map[string]any{
-				"error":    "onboarding spec is invalid",
-				"problems": res.Problems,
-			})
-			return
-		}
-	}
-
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
-		return
-	}
-	tpl, err := projecttemplates.SetOnboarding(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), body)
-	if err != nil {
-		s.respondProjectTemplateError(w, err)
-		return
-	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "present": tpl.HasOnboarding()})
-}
-
-// handleProjectTemplateOnboardingDelete serves DELETE
-// /api/project-templates/{templateID}/onboarding: remove the onboarding block.
-func (s *Server) handleProjectTemplateOnboardingDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.guardTemplateMutable(w, r.PathValue("templateID")) {
-		return
-	}
-	if _, err := projecttemplates.SetOnboarding(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), nil); err != nil {
-		s.respondProjectTemplateError(w, err)
-		return
-	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "present": false})
-}
-
 // handleProjectTemplateToolsSet serves PUT
 // /api/project-templates/{templateID}/tools: set the template's default tool
 // bindings (skills / MCP servers / plugins), referenced by name. The names are
@@ -427,7 +366,8 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, projecttemplates.ErrTemplateNotFound), errors.Is(err, projecttemplates.ErrFileNotFound):
 		_ = orihttp.RespondNotFound(w, err.Error())
-	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath):
+	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable),
+		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrInvalidProjectEntry), errors.Is(err, projecttemplates.ErrRosterRequired):
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
 		_ = orihttp.RespondConflict(w, err.Error())

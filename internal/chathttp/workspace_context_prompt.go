@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/promptvars"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -43,8 +44,9 @@ func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context,
 	base := buildWorkspaceRuntimeSystemPromptForToolCapability(ctx, routeCtx, h.workspaceStore, h.sessionStore, toolCallable)
 	profile := h.buildUserProfilePrompt(ctx, routeCtx)
 	memory := h.buildWorkspaceMemoryPrompt(routeCtx, toolCallable)
+	refinement := h.buildAgentRefinementPrompt(routeCtx)
 
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if strings.TrimSpace(base) != "" {
 		parts = append(parts, base)
 	}
@@ -54,7 +56,95 @@ func (h *Handler) buildRuntimeSystemPromptForToolCapability(ctx context.Context,
 	if strings.TrimSpace(memory) != "" {
 		parts = append(parts, memory)
 	}
+	if strings.TrimSpace(refinement) != "" {
+		parts = append(parts, refinement)
+	}
 	return strings.Join(parts, "\n\n---\n")
+}
+
+// resolveAgentBasePromptVars resolves the closed prompt-variable vocabulary in
+// the responding agent's base system prompt in place (the agent is a per-request
+// clone, so this never touches the stored definition). It returns true when the
+// base prompt contained variables — in which case the author has placed context
+// explicitly and the generic workspace-context layer is suppressed (PRD FR24).
+func (h *Handler) resolveAgentBasePromptVars(ctx context.Context, routeCtx normalizedChatRouteContext, ag *resolvedChatAgent) bool {
+	if h == nil || ag == nil || ag.Agent == nil {
+		return false
+	}
+	prompt := ag.Agent.Settings.SystemPrompt
+	if !promptvars.HasVariables(prompt) {
+		return false
+	}
+
+	var ws *workspace.Workspace
+	if h.workspaceStore != nil && strings.TrimSpace(routeCtx.WorkspaceID) != "" {
+		ws, _ = h.workspaceStore.Get(routeCtx.WorkspaceID)
+	}
+	inst, _ := workspace.AgentInstanceByName(ws, routeCtx.AgentName)
+
+	memory := ""
+	if h.fileStore != nil && ws != nil {
+		if raw, err := workspace.NewMemoryStore(h.fileStore).ReadRaw(routeCtx.WorkspaceID); err == nil {
+			memory = raw
+		}
+	}
+
+	// Fetch notes / tools only when the prompt actually uses those variables, to
+	// avoid a note-store query on every variable-bearing prompt.
+	notes := ""
+	if h.sessionStore != nil && strings.Contains(prompt, "workspace.notes.recent") && strings.TrimSpace(routeCtx.WorkspaceID) != "" {
+		if items, err := h.sessionStore.ListNotesByWorkspace(ctx, routeCtx.WorkspaceID); err == nil {
+			lines := make([]string, 0, len(items))
+			for _, n := range limitWorkspaceNotes(items, workspaceSnapshotMaxNotes) {
+				line := "- " + strings.TrimSpace(n.Name)
+				if p := strings.TrimSpace(n.Preview); p != "" {
+					line += " — " + p
+				}
+				lines = append(lines, line)
+			}
+			notes = strings.Join(lines, "\n")
+		}
+	}
+	tools := ""
+	if strings.Contains(prompt, "workspace.tools") {
+		skillNames := make([]string, 0, len(ag.EffectiveSkills))
+		for _, s := range ag.EffectiveSkills {
+			skillNames = append(skillNames, s.Name)
+		}
+		tools = workspace.FormatToolNames(skillNames, ag.MCPServers)
+	}
+
+	resolved, hadVars := workspace.ResolveAgentBasePrompt(prompt, workspace.PromptVarInputs{
+		Workspace:   ws,
+		Instance:    inst,
+		AgentName:   routeCtx.AgentName,
+		Memory:      memory,
+		NotesRecent: notes,
+		Tools:       tools,
+	})
+	if hadVars {
+		ag.Agent.Settings.SystemPrompt = resolved
+	}
+	return hadVars
+}
+
+// buildAgentRefinementPrompt renders the responding agent's per-workspace
+// refinement (role/description/custom_instructions) so it reaches the chat
+// prompt. Requires a workspace-scoped route with a resolved agent (PRD
+// FR16/FR19). Shares the renderer with the task path.
+func (h *Handler) buildAgentRefinementPrompt(routeCtx normalizedChatRouteContext) string {
+	if h == nil || h.workspaceStore == nil || !shouldAttachWorkspaceSnapshot(routeCtx) {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(routeCtx.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	inst, ok := workspace.AgentInstanceByName(ws, routeCtx.AgentName)
+	if !ok {
+		return ""
+	}
+	return workspace.RenderAgentRefinement(inst)
 }
 
 func (h *Handler) buildUserProfilePrompt(ctx context.Context, routeCtx normalizedChatRouteContext) string {

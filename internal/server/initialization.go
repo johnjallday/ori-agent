@@ -9,6 +9,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/authdiscovery"
 	"github.com/johnjallday/ori-agent/internal/config"
@@ -225,12 +226,20 @@ func localProviderContextOptions(prefix string) map[string]any {
 }
 
 // resolveAgentStorePath determines the agent store path from environment or default.
+//
+// The default anchors the store to a stable data directory (see
+// config.DefaultAgentStorePath) rather than the current working directory, so
+// agents created under one launch method (e.g. the menu-bar app) remain visible
+// after a restart under a different working directory (e.g. a terminal launch).
+// AGENT_STORE_PATH still takes precedence for explicit overrides.
 func resolveAgentStorePath() string {
-	agentStorePath := "agents.json"
-	if p := os.Getenv("AGENT_STORE_PATH"); p != "" {
-		agentStorePath = p
-	} else if abs, err := filepath.Abs(agentStorePath); err == nil {
-		agentStorePath = abs
+	agentStorePath := config.DefaultAgentStorePath()
+	if p := strings.TrimSpace(os.Getenv("AGENT_STORE_PATH")); p != "" {
+		if abs, err := filepath.Abs(p); err == nil {
+			agentStorePath = abs
+		} else {
+			agentStorePath = p
+		}
 	}
 
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
@@ -241,13 +250,157 @@ func resolveAgentStorePath() string {
 	return agentStorePath
 }
 
+// resolveAllowlistPath determines the per-data-dir workspace allowlist path.
+//
+// Like the agent store, this is anchored to the stable data directory rather
+// than the current working directory. The allowlist gates which workspaces'
+// agent snapshots hydrate into the global store on startup; resolving it
+// against CWD meant the gate silently emptied whenever the server was launched
+// from a different directory, dropping every workspace's agents from /agents.
+func resolveAllowlistPath() string {
+	return filepath.Join(config.DefaultDataDir(), workspace.DefaultAllowlistFilename)
+}
+
 // createFileStore creates a new file-based storage system for agents.
 func createFileStore(agentStorePath string, defaultConf types.Settings) (store.Store, error) {
+	if err := migrateLegacyAgentStore(agentStorePath); err != nil {
+		logger.Verbosef("Warning: legacy agent store migration failed: %v", err)
+	}
+
 	st, err := store.NewFileStore(agentStorePath, defaultConf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file store: %w", err)
 	}
 	return st, nil
+}
+
+// migrateLegacyAgentStore performs a one-time adoption of agents that were
+// previously written next to the current working directory (the old
+// CWD-relative "<cwd>/agents/" location) into the resolved stable store.
+//
+// It is a no-op when the destination already contains agents, when the legacy
+// location resolves to the same directory as the destination, or when there is
+// nothing to adopt. Existing agents in the destination are never overwritten.
+func migrateLegacyAgentStore(agentStorePath string) error {
+	destAgentsDir := filepath.Join(filepath.Dir(agentStorePath), "agents")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil // can't locate a legacy dir; nothing to do
+	}
+	legacyAgentsDir := filepath.Join(cwd, "agents")
+
+	// Same directory (e.g. CWD already is the data dir): nothing to migrate.
+	if absEqual(legacyAgentsDir, destAgentsDir) {
+		return nil
+	}
+
+	legacyAgents := agentDirNames(legacyAgentsDir)
+	if len(legacyAgents) == 0 {
+		return nil // nothing to adopt
+	}
+
+	// Only adopt when the destination has no agents yet, so we never clobber a
+	// populated stable store.
+	if len(agentDirNames(destAgentsDir)) > 0 {
+		return nil
+	}
+
+	if err := os.MkdirAll(destAgentsDir, 0o755); err != nil {
+		return err
+	}
+
+	adopted := 0
+	for _, name := range legacyAgents {
+		src := filepath.Join(legacyAgentsDir, name)
+		dst := filepath.Join(destAgentsDir, name)
+		if _, statErr := os.Stat(dst); statErr == nil {
+			continue // never overwrite an existing agent
+		}
+		if err := copyDir(src, dst); err != nil {
+			logger.Verbosef("Warning: failed to migrate agent %q: %v", name, err)
+			continue
+		}
+		adopted++
+	}
+
+	if adopted > 0 {
+		logger.Info("Adopted legacy agents into stable data dir", logger.Fields{
+			"count": adopted,
+			"from":  legacyAgentsDir,
+			"to":    destAgentsDir,
+		})
+	}
+	return nil
+}
+
+// agentDirNames returns the names of immediate subdirectories of dir, which for
+// the agent store correspond to individual agents. Returns nil when dir is
+// missing or unreadable.
+func agentDirNames(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// absEqual reports whether two paths resolve to the same absolute location.
+func absEqual(a, b string) bool {
+	aa, aerr := filepath.Abs(a)
+	bb, berr := filepath.Abs(b)
+	if aerr != nil || berr != nil {
+		return a == b
+	}
+	return aa == bb
+}
+
+// copyDir recursively copies the directory tree at src to dst.
+func copyDir(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyFile copies a single file from src to dst, preserving its permissions.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src) //nolint:gosec // paths derived from local agent store dirs
+	if err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(src); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	return os.WriteFile(dst, data, mode)
 }
 
 // loadLocationZones loads location zones from the specified file path.

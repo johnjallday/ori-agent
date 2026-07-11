@@ -212,14 +212,16 @@ func defaultGroupEntryAgentName(workspaceName string) string {
 	return name + " Manager"
 }
 
-// autoCreateGroupEntryAgent creates the default "<Name> Manager" agent for a
-// newly created group and returns its name, so groups are chat-ready the
-// moment they exist. A fresh agent is always created — name collisions get a
-// numeric suffix rather than adopting an unrelated existing agent, because a
-// workspace's entry agent is deleted along with the workspace. Failures are
-// non-fatal and return "": the detail page then falls back to its standard
-// missing-entry-agent prompt.
-func (h *Handler) autoCreateGroupEntryAgent(ws *session.Workspace) string {
+// autoCreateManagerEntryAgent creates the default "<Name> Manager" agent for a
+// newly created workspace and returns its name. Groups always get one so they
+// are chat-ready the moment they exist; template-created workspaces get one as
+// the fallback when the template declares no roster (every template workspace
+// must have an entry agent to own its starter tasks). A fresh agent is always
+// created — name collisions get a numeric suffix rather than adopting an
+// unrelated existing agent, because a workspace's entry agent is deleted along
+// with the workspace. Failures are non-fatal and return "": the detail page
+// then falls back to its standard missing-entry-agent prompt.
+func (h *Handler) autoCreateManagerEntryAgent(ws *session.Workspace) string {
 	if h == nil || h.agentStore == nil || ws == nil {
 		return ""
 	}
@@ -264,14 +266,15 @@ func toWorkspaceAgentInstances(items []session.AgentInstance) []agentworkspace.A
 	out := make([]agentworkspace.AgentInstance, len(items))
 	for i, item := range items {
 		out[i] = agentworkspace.AgentInstance{
-			ID:             item.ID,
-			Name:           item.Name,
-			InstanceNumber: item.InstanceNumber,
-			NodeID:         item.NodeID,
-			Role:           item.Role,
-			Description:    item.Description,
-			EntryPoint:     item.EntryPoint,
-			CreatedAt:      item.CreatedAt,
+			ID:                 item.ID,
+			Name:               item.Name,
+			InstanceNumber:     item.InstanceNumber,
+			NodeID:             item.NodeID,
+			Role:               item.Role,
+			Description:        item.Description,
+			CustomInstructions: item.CustomInstructions,
+			EntryPoint:         item.EntryPoint,
+			CreatedAt:          item.CreatedAt,
 		}
 	}
 	return out

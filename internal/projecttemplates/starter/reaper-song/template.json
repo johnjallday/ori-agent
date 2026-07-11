@@ -1,79 +1,39 @@
 {
   "name": "Reaper Song",
-  "description": "A minimal REAPER project seeded with a single .rpp file named after your project.",
+  "description": "A minimal REAPER project seeded with a single .rpp file named after your project, created at 120 BPM and ready to adjust in chat.",
   "icon": "🎵",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
+  "builtin_version": 3,
+  "project_entry": {
+    "relative_path": "{{name}}.rpp",
+    "open_after_create_default": true
+  },
   "tags": [
     "music",
     "reaper"
   ],
-  "onboarding": {
-    "version": "1",
-    "fields": [
-      {
-        "id": "bpm",
-        "label": "BPM",
-        "type": "number",
-        "default": 120,
-        "required": true,
-        "prompt": "Tempo in beats per minute.",
-        "validation": {
-          "min": 40,
-          "max": 240
-        }
-      },
-      {
-        "id": "key",
-        "label": "Key",
-        "type": "enum",
-        "default": "C major",
-        "required": true,
-        "options": [
-          "C major",
-          "G major",
-          "D major",
-          "A major",
-          "E major",
-          "F major",
-          "A minor",
-          "E minor",
-          "D minor"
-        ],
-        "prompt": "Primary musical key for the song."
-      },
-      {
-        "id": "song_name",
-        "label": "Song name",
-        "type": "string",
-        "required": true,
-        "prompt": "Title to use for the REAPER session.",
-        "validation": {
-          "min": 1,
-          "max": 80
-        }
-      }
-    ],
-    "completion": {
-      "type": "task",
-      "ref": "reaper-session-setup",
-      "instructions": "Create a REAPER song project from this template. Use the scaffolded project as the session home, set the tempo to ${fields.bpm} BPM, use ${fields.key} as the musical key, and name the session ${fields.song_name}.",
-      "skill_refs": [
-        "reaper-session-setup"
-      ],
-      "inputs": {
-        "bpm": "${fields.bpm}",
-        "key": "${fields.key}",
-        "song_name": "${fields.song_name}"
-      },
-      "instantiate_skeleton": true
+  "starter_tasks": [
+    {
+      "description": "Adjust the new REAPER session to the user's preferences",
+      "details": "## Created defaults\nThe project scaffold already created the workspace's one authoritative REAPER session file, `<project name>.rpp`, in the workspace project folder. It is set to 120 BPM in 4/4, with no tracks yet. Treat that existing scaffolded file as the song project and never create or initialize a second .rpp file.\n\n## Questions to ask\nTell the user what was created, then ask whether they want to change:\n- Tempo (BPM)\n- Musical key\nIf they are happy with the defaults, confirm and finish without changing anything.\n\n## Validation\n- Tempo must be between 40 and 240 BPM. If the user asks for something outside that range, say why and ask again.\n- Accept any conventional key spelling (e.g. \"A minor\", \"F# major\").\n\n## How to apply changes\nPrefer the reaper-session-setup skill only after live REAPER state and the required control interface are verified. An operating-system open request only asks the default application to open the project file; it does not prove that REAPER has finished opening it or that Web Remote is ready. If live control cannot be verified, say what is unavailable and ask the user to open or wait for REAPER, or enable the required Web Remote interface. Do not claim that live changes were applied.\n\nBefore falling back to direct file edits, explain that live REAPER state could not be verified and ask for the user's explicit confirmation. If they confirm, edit only the existing authoritative .rpp file (the tempo lives on its `TEMPO <bpm> 4 4` line), never create another project, and clearly describe the result as a file change rather than a verified live-session change. Record the chosen key in your summary (and in the session notes if asked) — the .rpp format has no key field.",
+      "setup": true
     },
-    "dependencies": [
-      {
-        "type": "skill",
-        "ref": "reaper-session-setup"
+    {
+      "description": "Sketch the song's arrangement",
+      "details": "Outline sections (intro, verse, chorus, bridge...) with rough bar counts, then ask the agent to add named markers or empty tracks for each section."
+    }
+  ],
+  "agents": [
+    {
+      "name": "Reaper Producer",
+      "role": "orchestrator",
+      "system_prompt": "You are the music producer for this workspace. It was created from the Reaper Song template, so one scaffolded REAPER session file named after the project already exists in the project folder at 120 BPM. Treat that persisted project entry as the only authoritative song project and never create or initialize a second .rpp file. Help the user shape the song: adjust session settings, plan arrangements, and drive REAPER through the reaper-session-setup skill only after live REAPER state and its required control interface are verified. An operating-system open request does not prove that REAPER or Web Remote is ready. If live control is unavailable, ask the user to open or wait for REAPER or enable the required interface, and never claim live changes were applied. Before editing the .rpp file directly as a fallback, explain that live state is unverified and obtain the user's explicit confirmation; then edit only the existing authoritative file and distinguish file changes from verified live-session changes. Keep answers practical, truthful, and studio-minded.",
+      "tools": {
+        "skills": [
+          "reaper-session-setup"
+        ]
       }
-    ]
-  }
+    }
+  ]
 }

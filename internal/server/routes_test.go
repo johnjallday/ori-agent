@@ -81,6 +81,26 @@ func TestWorkspaceRunRoutesRegistered(t *testing.T) {
 	}
 }
 
+func TestWorkspaceProjectOpenRouteUsesRuntimeHandler(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/missing/project/open", nil)
+	req.RemoteAddr = "127.0.0.1:43210"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected project-open runtime route to use canonical folder storage, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/workspaces/missing/project/open", nil)
+	req.RemoteAddr = "127.0.0.1:43210"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected project-open GET to return 405, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWorkspaceNotesRoutesServeNotePage(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 

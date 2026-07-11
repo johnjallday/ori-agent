@@ -1,24 +1,25 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Ori Agent is a Go-first monorepo with supporting assets. Key areas: `cmd/server` hosts the HTTP/WebSocket entry point, while `cmd/menubar` builds the macOS helper. Reusable services (LLM integrations, MCP integration, skills, health checks) live under `internal/…`. The web UI (HTML/CSS/JS) is embedded under `internal/web`. Tests are split between `internal/*/*_test.go` for package-level coverage and `tests/integration` plus `tests/e2e` for higher-level suites.
+Ori Agent is a Go application with an embedded web UI. `cmd/server` contains the HTTP/WebSocket server, `cmd/menubar` builds the macOS helper, and `cmd/test-cli` supports testing. Shared services live under `internal/` for LLMs, workspaces, MCP, skills, health checks, and web handlers. UI templates and static assets live in `internal/web`. Tests live beside Go packages as `*_test.go` plus higher-level suites under `tests/`.
 
 ## Build, Test, and Development Commands
-Run `make deps` to sync Go modules. `make build` emits `bin/ori-agent`, and `make menubar` builds `bin/ori-menubar`. Use `go run cmd/server/main.go` or `make run PORT=8765` for iterative backend work; `./scripts/build.sh` compiles the server for release checks. Clean artifacts with `make clean`. Docker users can validate images with `make docker-build && make docker-run`.
+Use `make deps` to download and tidy modules. `make build` creates `bin/ori-agent`; `make menubar` creates `bin/ori-menubar`; `make all` builds both. For local work, run `make run-dev PORT=8765`, or `make run PORT=8765` to build first. `make clean` removes build and coverage artifacts. Frontend checks use `npm run lint`, `npm run format:check`, and `npm run test:smoke`.
 
 ## Coding Style & Naming Conventions
-All Go code must stay `gofmt` clean—use `make fmt` before submitting. Favor idiomatic Go naming (mixedCaps for exported symbols, lowercase for internals) and keep files scoped by package responsibility (`llm_factory.go`, `agent_store.go`). Lint with `make lint` (golangci-lint) and gate changes through `make vet` for static analysis. Config files (`settings.json`, `agents.json`) are snake_case.
+Keep Go code `gofmt` clean with `make fmt`; run `make vet` and `make lint` for static checks. Use idiomatic Go mixedCaps names and package-focused filenames such as `agent_store.go` or `llm_factory.go`. Frontend code in `internal/web/static` uses ESLint and Prettier through npm scripts. Runtime config files such as `settings.json` and `agents.json` use snake_case keys.
 
 ## Testing Guidelines
-`make test-unit` runs fast package tests (`*_test.go`) without external calls. `make test-integration` exercises live LLM providers and requires `OPENAI_API_KEY` (and optionally `ANTHROPIC_API_KEY`). `make test-e2e` first builds the binary and then runs `tests/e2e` against a live server; skip locally when keys are absent, but ensure CI coverage before merging. Generate coverage reports via `make test-coverage`, which drops `coverage/coverage.html`. Match test names to the behavior under test (e.g., `TestProviderIntegration_WithRetries`) for easy filtering.
+`make test-unit` runs fast Go tests with `-short`; `make test` runs the main suite; `make test-coverage` writes `coverage/coverage.html`. JS module tests run with `make test-js`; Playwright smoke tests run with `npm run test:smoke`. Integration, e2e, and user suites may require `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `USE_OLLAMA=true`. Name tests after observable behavior, for example `TestProviderIntegration_WithRetries`.
 
 ## Commit & Pull Request Guidelines
-Recent history shows short, imperative commits (“Fix race conditions in location manager tests”). Follow that style, group logical changes, and reference issues with `#123` when applicable. Pull requests should describe motivation, summarize major touches (paths or packages), and call out manual test steps. Attach screenshots or terminal logs when UI changes or CLI outputs shift. Require passing `make test` (and any affected integration/E2E suites) before requesting review.
+Recent history uses Conventional Commit-style subjects such as `feat(workspace): ...` and `chore(config): ...`. Keep commits focused and reference issues or PRs with `#123` when relevant. Pull requests should explain motivation, summarize touched paths, list validation commands, and include screenshots or terminal output for UI, CLI, or workflow changes. Run `make test` plus affected JS, integration, e2e, or smoke suites before review.
 
 ## Security & Configuration Tips
-Never commit API keys; load them through environment variables or `settings.json` (listed in `.gitignore`). Use `make check-env` to verify keys before running agents. Tool capabilities come from MCP servers and skills configured per workspace; store any secrets they need in environment variables or the vault rather than committing them.
+Never commit API keys or local state. Load provider credentials through environment variables or ignored local config, and use `make check-env` before running provider-backed agents. Keep generated binaries, coverage output, and workspace state out of commits unless explicitly required.
 
-CLI-provider agents (Claude Code, Codex) can run a workspace's MCP + built-in tools natively, but this is **off by default** and gated by a two-level opt-in (`Workspace.AllowNativeMCPCLI` *and* the agent's `Settings.AllowNativeMCPTools`), toggleable from the workspace MCP pane. When enabled, the CLI executes tools itself — outside Ori's per-call confirmation gate — sandboxed to the workspace folder; treat it as a trusted-autonomy setting. Native-MCP runs use a separate, longer timeout (`native_mcp_exec_timeout_seconds`, default 300s).
+## Agent-Specific Instructions
+CLI-provider agents can run native workspace MCP only after both `Workspace.AllowNativeMCPCLI` and `Settings.AllowNativeMCPTools` are enabled. Treat this as trusted autonomy: calls execute outside Ori's per-call confirmation gate, sandboxed to the workspace folder. Native MCP execution uses `native_mcp_exec_timeout_seconds`, defaulting to 300 seconds.
 
 
 # Rule: Generating a Product Requirements Document (PRD)
@@ -126,12 +127,13 @@ To guide an AI assistant in creating a detailed, step-by-step task list in Markd
 
 1.  **Receive Requirements:** The user provides a feature request, task description, or points to existing documentation
 2.  **Analyze Requirements:** The AI analyzes the functional requirements, user needs, and implementation scope from the provided information
-3.  **Phase 1: Generate Parent Tasks:** Based on the requirements analysis, create the file and generate the main, high-level tasks required to implement the feature. **IMPORTANT: Always include task 0.0 "Create feature branch" as the first task, unless the user specifically requests not to create a branch.** If the user already created a branch, include the task but mark it complete. Use your judgement on how many additional high-level tasks to use. It's likely to be about 5. Present these tasks to the user in the specified format (without sub-tasks yet). Inform the user: "I have generated the high-level tasks based on your requirements. Ready to generate the sub-tasks? Respond with 'Go' to proceed."
+3.  **Phase 1: Generate Parent Tasks:** Based on the requirements analysis, create the file and generate the main, high-level tasks required to implement the feature. Use your judgement on how many high-level tasks to use. It's likely to be about 5. Present these tasks to the user in the specified format (without sub-tasks yet). Inform the user: "I have generated the high-level tasks based on your requirements. Ready to generate the sub-tasks? Respond with 'Go' to proceed."
 4.  **Wait for Confirmation:** Pause and wait for the user to respond with "Go".
 5.  **Phase 2: Generate Sub-Tasks:** Once the user confirms, break down each parent task into smaller, actionable sub-tasks necessary to complete the parent task. Ensure sub-tasks logically follow from the parent task and cover the implementation details implied by the requirements.
 6.  **Identify Relevant Files:** Based on the tasks and requirements, identify potential files that will need to be created or modified. List these under the `Relevant Files` section, including corresponding test files if applicable.
 7.  **Generate Final Output:** Combine the parent tasks, sub-tasks, relevant files, and notes into the final Markdown structure.
 8.  **Save Task List:** Save the generated document in the `/tasks/` directory with the filename `tasks-[feature-name].md`, where `[feature-name]` describes the main feature or task being implemented (e.g., if the request was about user profile editing, the output is `tasks-user-profile-editing.md`).
+9.  **Create Worktree:** Immediately after saving the task list, create the feature's isolated worktree by running `wt start [feature-name]` (the `ori-devflow` agent owns this workflow; see `scripts/wt.sh`). This fetches `origin/dev`, creates the worktree, copies the PRD and this task list into it, and switches into it — **no additional confirmation needed**, this runs right after step 8 without waiting for another "Go". All sub-tasks from 1.1 onward are implemented in that worktree, never in `ori-agent-dev`.
 
 ## Output Format
 
@@ -163,8 +165,6 @@ Update the file after completing each sub-task, not just after completing an ent
 
 ## Tasks
 
-- [ ] 0.0 Create feature branch
-  - [ ] 0.1 Create and checkout a new branch for this feature (e.g., `git checkout -b feature/[feature-name]`)
 - [ ] 1.0 Parent Task Title
   - [ ] 1.1 [Sub-task description 1.1]
   - [ ] 1.2 [Sub-task description 1.2]
@@ -175,7 +175,9 @@ Update the file after completing each sub-task, not just after completing an ent
 
 ## Interaction Model
 
-The process explicitly requires a pause after generating parent tasks to get user confirmation ("Go") before proceeding to generate the detailed sub-tasks. This ensures the high-level plan aligns with user expectations before diving into details.
+The process has exactly one pause: after generating parent tasks, wait for user confirmation ("Go") before generating the detailed sub-tasks. This ensures the high-level plan aligns with user expectations before diving into details.
+
+There is a second checkpoint, but it is **not** a pause: once the sub-tasks are generated and the task list is saved (step 8), immediately proceed to step 9 (`wt start [feature-name]`) without asking again. PRD generation and the full task list (parent + sub-tasks) both happen in the `ori-agent-dev` worktree, which is the single source of truth for planning docs (`tasks/` is gitignored, so it doesn't sync between worktrees on its own). Only after the complete task list is saved does a feature worktree get created — implementation never starts in dev.
 
 ## Target Audience
 

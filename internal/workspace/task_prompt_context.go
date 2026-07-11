@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/promptvars"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
@@ -103,6 +104,70 @@ func (h *LLMTaskHandler) buildTaskSystemPrompt(compact bool) string {
 // prompt. Memory tools are available during task execution, so tool guidance is
 // included. Returns "" when the store can't resolve a folder path (e.g. a
 // non-folder store) or memory is empty and there's nothing to guide.
+// resolveTaskAgentBasePrompt resolves the closed prompt-variable vocabulary in
+// the task agent's base system prompt, but ONLY when it actually uses variables
+// (opt-in): the task path otherwise ignores an agent's base prompt, so injecting
+// it unconditionally would change behavior for every existing agent. When the
+// author used variables they clearly intend a parametric persona to apply, so we
+// resolve it and let the caller lead the task prompt with it (PRD FR24). Returns
+// hadVars=false (and "") for plain prompts, leaving task behavior untouched.
+func (h *LLMTaskHandler) resolveTaskAgentBasePrompt(ctx context.Context, ag *resolvedTaskAgent, agentName string, task Task) (string, bool) {
+	if h == nil || ag == nil || ag.Agent == nil {
+		return "", false
+	}
+	prompt := ag.Settings.SystemPrompt
+	if !promptvars.HasVariables(prompt) {
+		return "", false
+	}
+
+	var ws *Workspace
+	if h.workspaceStore != nil && strings.TrimSpace(task.WorkspaceID) != "" {
+		ws, _ = h.workspaceStore.Get(task.WorkspaceID)
+	}
+	inst, _ := AgentInstanceByName(ws, agentName)
+
+	memory := ""
+	if resolver, ok := h.workspaceStore.(workspaceFolderStore); ok && strings.TrimSpace(task.WorkspaceID) != "" {
+		if raw, err := NewMemoryStore(resolver).ReadRaw(task.WorkspaceID); err == nil {
+			memory = raw
+		}
+	}
+
+	// Fetch notes / tools only when the prompt actually uses those variables.
+	notes := ""
+	if h.contextStore != nil && strings.Contains(prompt, "workspace.notes.recent") && strings.TrimSpace(task.WorkspaceID) != "" {
+		if items, err := h.contextStore.ListNotesByWorkspace(ctx, task.WorkspaceID); err == nil {
+			lines := make([]string, 0, len(items))
+			for _, n := range limitTaskPromptNotes(items, taskPromptMaxNotes) {
+				line := "- " + strings.TrimSpace(n.Name)
+				if p := strings.TrimSpace(n.Preview); p != "" {
+					line += " — " + p
+				}
+				lines = append(lines, line)
+			}
+			notes = strings.Join(lines, "\n")
+		}
+	}
+	tools := ""
+	if strings.Contains(prompt, "workspace.tools") {
+		skillNames := make([]string, 0, len(ag.EffectiveSkills))
+		for _, s := range ag.EffectiveSkills {
+			skillNames = append(skillNames, s.Name)
+		}
+		tools = FormatToolNames(skillNames, ag.MCPServers)
+	}
+
+	return ResolveAgentBasePrompt(prompt, PromptVarInputs{
+		Workspace:   ws,
+		Instance:    inst,
+		AgentName:   agentName,
+		Memory:      memory,
+		NotesRecent: notes,
+		Tools:       tools,
+		TaskGoal:    task.Description,
+	})
+}
+
 func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
 	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
 		return ""

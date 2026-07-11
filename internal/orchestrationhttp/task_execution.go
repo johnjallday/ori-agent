@@ -104,6 +104,58 @@ func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// StartTaskAsync starts one pending task through the same execution path as
+// the manual execute endpoint: default the execution mode, persist, and run
+// executeTaskWithDependencies in a goroutine. Used by the template-setup
+// first-open auto-start, which stamps its consumed marker before calling this,
+// so a failure here leaves the task manually startable but never auto-retried.
+func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
+	if th == nil || th.taskHandler == nil {
+		return fmt.Errorf("task execution not available")
+	}
+	ws, err := th.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return fmt.Errorf("workspace %s not found: %w", workspaceID, err)
+	}
+	task, err := ws.GetTask(taskID)
+	if err != nil {
+		return fmt.Errorf("task %s not found: %w", taskID, err)
+	}
+	if task.Status == workspace.TaskStatusInProgress {
+		return fmt.Errorf("task %s is already in progress", taskID)
+	}
+	if task.ExecutionMode == "" {
+		task.ExecutionMode = workspace.TaskExecutionModeAuto
+		if err := ws.UpdateTask(*task); err != nil {
+			return fmt.Errorf("failed to set task execution mode: %w", err)
+		}
+		if err := th.workspaceStore.Save(ws); err != nil {
+			return fmt.Errorf("failed to save workspace: %w", err)
+		}
+	}
+
+	go func() {
+		ws, err := th.workspaceStore.Get(workspaceID)
+		if err != nil {
+			logger.Error("Failed to reload workspace for async task start", logger.Fields{"workspace_id": workspaceID, "error": err})
+			return
+		}
+		task, err := ws.GetTask(taskID)
+		if err != nil {
+			logger.Error("Task not found for async start", logger.Fields{"task_id": taskID, "error": err})
+			return
+		}
+		if _, err := th.executeTaskWithDependencies(ws, task); err != nil {
+			var blockedErr *workspace.TaskBlockedError
+			if errors.As(err, &blockedErr) {
+				return
+			}
+			logger.Error("Async task execution failed", logger.Fields{"task_id": taskID, "error": err})
+		}
+	}()
+	return nil
+}
+
 // ExecuteTaskHandler handles manual task execution
 func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

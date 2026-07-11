@@ -157,9 +157,12 @@ function loadWorkspaceHub(overrides = {}) {
   const launcherTagFilterbar = createElement('launcherTagFilterbar');
   const launcherTagFilterChips = createElement('launcherTagFilterChips');
   const launcherTagFilterClear = createElement('launcherTagFilterClear');
-  const launcherViewCards = createElement('launcherViewCards');
+  const launcherViewCards = overrides.includeCardsToggle ? createElement('launcherViewCards') : null;
   const launcherViewTree = createElement('launcherViewTree');
+  const launcherViewMap = createElement('launcherViewMap');
+  const launcherMap = createElement('launcherMap');
   const workspaceTags = createElement('hubWorkspaceTags');
+  const mapMounts = [];
 
   elements.set('workspaceHub', hubEl);
   elements.set('launcherGrid', launcherGrid);
@@ -167,8 +170,10 @@ function loadWorkspaceHub(overrides = {}) {
   elements.set('launcherTagFilterbar', launcherTagFilterbar);
   elements.set('launcherTagFilterChips', launcherTagFilterChips);
   elements.set('launcherTagFilterClear', launcherTagFilterClear);
-  elements.set('launcherViewCards', launcherViewCards);
+  if (launcherViewCards) elements.set('launcherViewCards', launcherViewCards);
   elements.set('launcherViewTree', launcherViewTree);
+  elements.set('launcherViewMap', launcherViewMap);
+  elements.set('launcherMap', launcherMap);
   elements.set('hubWorkspaceTags', workspaceTags);
 
   const state = {
@@ -193,6 +198,12 @@ function loadWorkspaceHub(overrides = {}) {
       renderFiles: () => {}
     },
     WorkspaceHubModals: { bindModalEvents: () => {} },
+    OriWorkspaceMap: overrides.OriWorkspaceMap || {
+      mount: (container, mapState) => {
+        mapMounts.push({ container, state: mapState });
+      },
+      unmount: () => {}
+    },
     WorkspaceHubNotes: {
       createNewNote: () => {},
       loadNotes: async () => {},
@@ -288,11 +299,14 @@ function loadWorkspaceHub(overrides = {}) {
     helpers: window.WorkspaceHub.__test,
     launcherEmpty,
     launcherGrid,
+    launcherMap,
     launcherTagFilterbar,
     launcherTagFilterChips,
     launcherTagFilterClear,
     launcherViewCards,
+    launcherViewMap,
     launcherViewTree,
+    mapMounts,
     documentListeners,
     state,
     storage,
@@ -301,14 +315,24 @@ function loadWorkspaceHub(overrides = {}) {
   };
 }
 
-test('launcher view preference defaults to cards and persists valid values', () => {
+test('launcher view preference defaults to map and persists valid values', () => {
   const { helpers, storage } = loadWorkspaceHub();
 
   assert.equal(helpers.normalizeLauncherView('tree'), 'tree');
-  assert.equal(helpers.normalizeLauncherView('invalid'), 'cards');
-  assert.equal(helpers.getLauncherViewPreference(), 'cards');
+  assert.equal(helpers.normalizeLauncherView('invalid'), 'map');
+  assert.equal(helpers.getLauncherViewPreference(), 'map');
   assert.equal(helpers.setLauncherViewPreference('tree'), 'tree');
   assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'tree');
+});
+
+test('launcher view preference migrates saved cards to map', () => {
+  const { helpers, storage } = loadWorkspaceHub({
+    localStorage: { oriWorkspaceHubLauncherView: 'cards' }
+  });
+
+  assert.equal(helpers.getLauncherViewPreference(), 'map');
+  assert.equal(storage.get('oriWorkspaceHubLauncherView'), 'map');
+  assert.equal(helpers.setLauncherViewPreference('cards'), 'map');
 });
 
 test('launcher view registers the map view and persists it', () => {
@@ -329,7 +353,10 @@ test('getLauncherViewFromURL only trusts an explicit, valid ?view= param', () =>
   window.location.search = '?view=tree';
   assert.equal(helpers.getLauncherViewFromURL(), 'tree');
 
-  // Garbage should not silently fall back to cards — that would let a typo'd
+  window.location.search = '?view=cards';
+  assert.equal(helpers.getLauncherViewFromURL(), 'cards');
+
+  // Garbage should not silently fall back to the default — that would let a typo'd
   // param mask the user's saved localStorage preference.
   window.location.search = '?view=bogus';
   assert.equal(helpers.getLauncherViewFromURL(), null);
@@ -338,7 +365,7 @@ test('getLauncherViewFromURL only trusts an explicit, valid ?view= param', () =>
   assert.equal(helpers.getLauncherViewFromURL(), null);
 });
 
-test('syncLauncherViewToURL omits the param for cards and sets it otherwise, via replaceState', () => {
+test('syncLauncherViewToURL omits the param for map and sets non-default views via replaceState', () => {
   const { helpers, window } = loadWorkspaceHub();
   window.location.pathname = '/workspaces';
   window.location.search = '';
@@ -346,11 +373,15 @@ test('syncLauncherViewToURL omits the param for cards and sets it otherwise, via
   window.history = { replaceState: (state, title, url) => calls.push(url) };
 
   helpers.syncLauncherViewToURL('map');
-  assert.deepEqual(calls, ['/workspaces?view=map']);
+  assert.deepEqual(calls, ['/workspaces']);
 
-  window.location.search = '?view=map';
+  window.location.search = '';
+  helpers.syncLauncherViewToURL('tree');
+  assert.deepEqual(calls, ['/workspaces', '/workspaces?view=tree']);
+
+  window.location.search = '?view=tree';
   helpers.syncLauncherViewToURL('cards');
-  assert.deepEqual(calls, ['/workspaces?view=map', '/workspaces']);
+  assert.deepEqual(calls, ['/workspaces', '/workspaces?view=tree', '/workspaces?view=cards']);
 });
 
 test('setLauncherViewMode syncs the URL for real toggles but not for the initial bootstrap', () => {
@@ -368,8 +399,11 @@ test('setLauncherViewMode syncs the URL for real toggles but not for the initial
   helpers.setLauncherViewMode('tree', { render: false });
   assert.deepEqual(calls, ['/workspaces?view=tree']);
 
+  helpers.setLauncherViewMode('cards', { persist: false, render: false });
+  assert.deepEqual(calls, ['/workspaces?view=tree', '/workspaces?view=cards']);
+
   helpers.setLauncherViewMode('cards', { render: false });
-  assert.deepEqual(calls, ['/workspaces?view=tree', '/workspaces']);
+  assert.deepEqual(calls, ['/workspaces?view=tree', '/workspaces?view=cards', '/workspaces']);
 });
 
 test('launcher tree renders minimal hierarchy with always-available workspace checkboxes', () => {
@@ -462,7 +496,7 @@ test('launcher cards show the Idle/Working LED (from enriched active) instead of
   assert.match(launcherGrid.innerHTML, /launcher-card-summary">1 agent · 0 open tasks</);
 });
 
-test('launcher tree rows carry the same canonical summary as Cards, but group rows do not', () => {
+test('launcher tree rows carry the same canonical summary as the deprecated Cards fallback, but group rows do not', () => {
   const workspaces = [
     {
       id: 'group-1',
@@ -545,7 +579,7 @@ test('launcher tag filters use AND logic and retain matching groups', () => {
     },
     { id: 'client', kind: 'workspace', name: 'Client', tags: ['client:acme'] }
   ];
-  const { helpers, launcherGrid, state } = loadWorkspaceHub({
+  const { helpers, mapMounts, state } = loadWorkspaceHub({
     state: {
       launcherActiveTags: new Set(['music', 'reaper']),
       workspaces
@@ -555,10 +589,9 @@ test('launcher tag filters use AND logic and retain matching groups', () => {
   helpers.renderLauncherActiveView(flattenWorkspaces(workspaces));
 
   assert.equal(state.launcherActiveTags.has('music'), true);
-  assert.match(launcherGrid.innerHTML, /data-workspace-id="group-1"/);
-  assert.match(launcherGrid.innerHTML, /Song A/);
-  assert.doesNotMatch(launcherGrid.innerHTML, /Song B/);
-  assert.doesNotMatch(launcherGrid.innerHTML, /Client/);
+  const mounted = mapMounts[mapMounts.length - 1].state;
+  assert.deepEqual(mounted.workspaces.map((workspace) => workspace.id), ['group-1', 'song-a']);
+  assert.equal(mounted.metadata.groupPreviewById['group-1'].childCount, 1);
 });
 
 test('launcher tag filters drop stale active tags', () => {
