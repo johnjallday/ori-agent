@@ -6956,3 +6956,56 @@ body.task-modal-open {
 .reaper-setup-card .reaper-setup-badge-checking {
   opacity: 0.7;
 }
+
+/* Durable REAPER Setup readiness card (workspace detail → Plugins). */
+.workspace-detail-reaper-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.05));
+}
+.workspace-detail-reaper-card:focus {
+  outline: 2px solid var(--accent-color, #3b82f6);
+  outline-offset: 2px;
+}
+.workspace-detail-reaper-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.workspace-detail-reaper-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.workspace-detail-reaper-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.workspace-detail-reaper-rows {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  gap: 4px;
+}
+.workspace-detail-reaper-row {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.workspace-detail-reaper-row-mark {
+  width: 12px;
+  flex: 0 0 auto;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.workspace-detail-reaper-row-label { color: var(--text-secondary); }
+.workspace-detail-reaper-row-value { color: var(--text-primary); }
+.reaper-setup-chip { cursor: pointer; }
+.reaper-setup-chip.reaper-setup-chip-ready { opacity: 0.85; }

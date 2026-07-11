@@ -97,6 +97,43 @@ func TestHandleReaperReadiness_PluginMissingStaysFileOnly(t *testing.T) {
 	}
 }
 
+func TestHandleReaperRepair_PreviewAndApply(t *testing.T) {
+	h, store := reaperSetupHandler(t, []plugin.InstalledPlugin{
+		{Name: "reaper-plugin", Enabled: true, Skills: []string{"reaper-session-setup", "reaper-web-remote"}},
+	})
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Song", Agents: []string{"Reaper Producer"}})
+	ws.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: reapersetup.ReaperSongTemplateID})
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Preview: detached -> plan to attach both components.
+	rr := httptest.NewRecorder()
+	h.handleReaperRepair(rr, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/reaper-setup/repair", nil), ws.ID)
+	var plan reapersetup.RepairPlan
+	if err := json.Unmarshal(rr.Body.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Identified || len(plan.AttachPlan) != 2 {
+		t.Fatalf("expected a 2-component attach plan, got %+v", plan)
+	}
+
+	// Apply: attaches components.
+	rr2 := httptest.NewRecorder()
+	h.handleReaperRepair(rr2, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/reaper-setup/repair", nil), ws.ID)
+	var res reapersetup.RepairResult
+	if err := json.Unmarshal(rr2.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Attached) != 2 {
+		t.Fatalf("expected 2 components attached, got %+v", res)
+	}
+	got, _ := store.Get(ws.ID)
+	if len(got.GetSkillBindings()) != 2 {
+		t.Fatalf("repair should leave 2 skill bindings, got %d", len(got.GetSkillBindings()))
+	}
+}
+
 func TestGetReaperCreatePreview(t *testing.T) {
 	h, _ := reaperSetupHandler(t, []plugin.InstalledPlugin{
 		{Name: "reaper-plugin", Enabled: true, Skills: []string{"reaper-session-setup", "reaper-web-remote"}},
