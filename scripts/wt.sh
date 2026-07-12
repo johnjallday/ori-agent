@@ -379,6 +379,13 @@ function wt_dispatch {
     fi
     tasks_dir="$dev_path/tasks"
 
+    # The (N) glob qualifier below needs BARE_GLOB_QUAL, which is a zsh default
+    # but is off when this file is sourced from an `emulate sh`-style shell (e.g.
+    # a non-interactive/CI/headless agent). Without it, `prd-*.md(N)` aborts with
+    # "no matches found" before the loop runs. Force the option locally;
+    # local_options reverts it on return so the caller's shell is untouched.
+    setopt local_options bareglobqual
+
     local -a prd_files
     local f
     for f in "$tasks_dir"/prd-*.md(N); do
