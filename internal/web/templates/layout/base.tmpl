@@ -2,7 +2,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light{{if index .Extra "HomeCommandBridge"}} home-command-page{{end}}">
   <!-- Skip link for keyboard users (styled in common.css) -->
   <a class="skip-link" href="#main-content">Skip to main content</a>
 
@@ -13,10 +13,10 @@
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
-    {{template "sidebar.tmpl" .}}
+    {{if not (index .Extra "HideSidebar")}}{{template "sidebar.tmpl" .}}{{end}}
 
     <!-- Main Content -->
-    <main id="main-content" class="main-content" role="main" aria-label="Dashboard">
+    <main id="main-content" class="main-content{{if index .Extra "HomeCommandBridge"}} home-command-main{{end}}" role="main" aria-label="Dashboard">
       {{template "dashboard.tmpl" .}}
     </main>
   </div>

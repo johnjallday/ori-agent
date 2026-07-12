@@ -1,97 +1,111 @@
-<!-- Ori Dashboard - Prompt-first layout -->
-<div class="container-fluid py-5 dashboard-shell dashboard-shell-minimal">
-  <div id="homeAssistantCard" class="modern-card p-4 p-md-5 mb-4 dashboard-home-card dashboard-home-card-minimal" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
-    <div class="home-assistant-minimal-wrap">
-      <div class="home-assistant-minimal-label">{{if .Extra.IsFirstRun}}Welcome{{else}}Ask Ori{{end}}</div>
-      <h1 class="home-assistant-minimal-title mb-0">{{if .Extra.IsFirstRun}}What do you want to get done?{{else}}What should Ori do?{{end}}</h1>
-      <p class="home-assistant-minimal-subtitle mb-0">
-        {{if .Extra.IsFirstRun}}Describe a task and Ori turns it into a plan — or create a workspace to keep a project's tasks, notes, and files together.{{else}}Enter a task and Ori plans it, then runs it — showing each step as it goes.{{end}}
-      </p>
-      <form id="homeAssistantForm" class="home-assistant-form home-assistant-form-minimal">
+<!-- Ori Dashboard — Command Bridge -->
+<div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
+  <section id="homeAssistantCard" class="modern-card home-command-strip" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Ask Ori">
+    <div class="home-command-strip-main">
+      <div class="home-command-kicker">
+        <span class="home-command-kicker-led" aria-hidden="true"></span>
+        {{if .Extra.IsFirstRun}}FIRST COMMAND{{else}}COMMAND{{end}}
+        <span class="home-command-shortcut" aria-hidden="true">⌘J</span>
+      </div>
+      <form id="homeAssistantForm" class="home-assistant-form home-command-form">
+        <span class="home-command-prompt" aria-hidden="true">&gt;</span>
         <label for="homeAssistantInput" class="visually-hidden">Ask Ori</label>
-        <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
+        <input id="homeAssistantInput" type="text" class="modern-input home-command-input" maxlength="800"
                name="home_assistant_prompt"
                autocomplete="off"
-               placeholder="{{if .Extra.IsFirstRun}}Plan a product launch…{{else}}Ask Ori to do something…{{end}}"
-               style="min-height: 50px;">
-        <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Ask</button>
+               placeholder="{{if .Extra.IsFirstRun}}Plan a product launch…{{else}}Ask Ori to do something…{{end}}">
+        <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn home-command-execute">Ask</button>
       </form>
-      <!-- Suggested prompt chips: populate the input on click (no auto-submit). -->
-      <div class="home-prompt-chips" role="group" aria-label="Suggested prompts">
+      <!-- Suggested prompt chips populate the input but never auto-submit. -->
+      <div class="home-prompt-chips home-command-chips" role="group" aria-label="Suggested commands">
         {{if .Extra.IsFirstRun}}
-        <button type="button" class="home-prompt-chip" data-prompt="Create a workspace for a project I'm working on">Create a workspace for a project I'm working on</button>
-        <button type="button" class="home-prompt-chip" data-prompt="Help me organize a research project">Help me organize a research project</button>
-        <button type="button" class="home-prompt-chip" data-prompt="Plan a product launch">Plan a product launch</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Create a workspace for a project I'm working on">Create a workspace</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Help me organize a research project">Organize research</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Plan a product launch">Plan a launch</button>
         {{else}}
-        <button type="button" class="home-prompt-chip" data-prompt="Draft a weekly digest from my notes">Draft a weekly digest from my notes</button>
-        <button type="button" class="home-prompt-chip" data-prompt="Summarize this week's task activity">Summarize this week's task activity</button>
-        <button type="button" class="home-prompt-chip" data-prompt="What should I work on today?">What should I work on today?</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Draft a weekly digest from my notes">Draft a weekly digest</button>
+        <button type="button" class="home-prompt-chip" data-prompt="Summarize this week's task activity">Summarize activity</button>
+        <button type="button" class="home-prompt-chip" data-prompt="What should I work on today?">What should I work on?</button>
         {{end}}
       </div>
-      {{if .Extra.IsFirstRun}}
-      <!-- First run: one secondary path to the structured route. The Ask box
-           above is the primary action; this offers the workspace flow without a
-           second competing hero card. -->
-      <div class="home-assistant-secondary">
-        <span class="home-assistant-secondary-or">or</span>
-        <a id="homeFirstRunStart" href="/workspaces?create=1" class="home-assistant-secondary-link">Create a workspace</a>
-        <span class="home-assistant-secondary-hint">to organize a project's tasks, notes, and files</span>
-      </div>
-      {{end}}
     </div>
-  </div>
+  </section>
 
-  <!-- Onboarding quest log. Populated by progression-widget.js from
-       GET /api/progression; hidden until data loads (and stays hidden when
-       dismissed or all quests are complete). -->
-  <div id="questLog" class="quest-log" hidden aria-live="polite">
-    <div class="quest-log-inner">
-      <header class="quest-log-header">
-        <div class="quest-log-heading">
-          <span class="quest-log-eyebrow">Getting started</span>
-          <h2 class="quest-log-tier" data-role="tier-name">Quest log</h2>
+  <div class="home-command-layout">
+    <section id="homeDashboardSections" class="home-dashboard-sections home-operations-board" data-workspace-count="{{.Extra.WorkspaceCount}}" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Operations board">
+      <header class="home-operations-header">
+        <div>
+          <span class="home-operations-eyebrow">System overview</span>
+          <p class="home-operations-title">Operations board</p>
         </div>
-        <div class="quest-log-progress">
-          <span class="quest-log-progress-label" data-role="progress-label"></span>
-          <button type="button" class="quest-log-dismiss" data-role="dismiss" aria-label="Hide quest log" title="Hide quest log">✕</button>
+        <div class="home-stat-readout" data-role="stat-readout" role="status" aria-live="polite" aria-label="Workspace statistics">
+          <span class="home-stat"><strong data-role="stat-workspaces">—</strong><span>Workspaces</span></span>
+          <span class="home-stat"><strong data-role="stat-agents">—</strong><span>Agents</span></span>
+          <span class="home-stat"><strong data-role="stat-open-tasks">—</strong><span>Open tasks</span></span>
         </div>
       </header>
-      <ul class="quest-log-list" data-role="quests"></ul>
-      <p class="quest-log-why" data-role="why"></p>
-    </div>
-  </div>
-  <div id="questLogRestore" class="quest-log-restore" hidden>
-    <button type="button" class="quest-log-restore-btn" data-role="restore">Show quest log</button>
-  </div>
 
-  <div id="homeDashboardSections" class="home-dashboard-sections" data-workspace-count="{{.Extra.WorkspaceCount}}">
-    <section id="homeRecentWorkspaces" class="home-section home-section-workspaces" aria-labelledby="homeRecentWorkspacesTitle">
-      <header class="home-section-header">
-        <h2 id="homeRecentWorkspacesTitle" class="home-section-title">Recent workspaces</h2>
-        <a href="/workspaces" class="home-section-link" data-role="view-all" hidden>View all →</a>
-      </header>
-      <div class="home-section-body" data-role="content" aria-live="polite">
-        <div class="home-section-placeholder" data-role="placeholder">Loading…</div>
+      <section id="homeRecentWorkspaces" class="home-section home-section-workspaces" aria-labelledby="homeRecentWorkspacesTitle">
+        <header class="home-section-header">
+          <h2 id="homeRecentWorkspacesTitle" class="home-section-title">Workspaces</h2>
+          <a href="/workspaces" class="home-section-link" data-role="view-all" hidden>All workspaces <span aria-hidden="true">▸</span></a>
+        </header>
+        <div class="home-section-body" data-role="content" aria-live="polite">
+          <div class="home-section-placeholder" data-role="placeholder">Loading workspaces…</div>
+        </div>
+      </section>
+
+      <div class="home-dashboard-row">
+        <section id="homeUpcomingTasks" class="home-section home-section-upcoming" aria-labelledby="homeUpcomingTasksTitle">
+          <header class="home-section-header">
+            <h2 id="homeUpcomingTasksTitle" class="home-section-title">Upcoming</h2>
+          </header>
+          <div class="home-section-body" data-role="content" aria-live="polite">
+            <div class="home-section-placeholder" data-role="placeholder">Loading schedule…</div>
+          </div>
+        </section>
+        <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
+          <header class="home-section-header">
+            <h2 id="homeRecentActivityTitle" class="home-section-title">Activity</h2>
+          </header>
+          <div class="home-section-body" data-role="content" aria-live="polite">
+            <div class="home-section-placeholder" data-role="placeholder">Loading activity…</div>
+          </div>
+        </section>
       </div>
     </section>
-    <div class="home-dashboard-row">
-      <section id="homeUpcomingTasks" class="home-section home-section-upcoming" aria-labelledby="homeUpcomingTasksTitle">
-        <header class="home-section-header">
-          <h2 id="homeUpcomingTasksTitle" class="home-section-title">Upcoming</h2>
-        </header>
-        <div class="home-section-body" data-role="content" aria-live="polite">
-          <div class="home-section-placeholder" data-role="placeholder">Loading…</div>
+
+    <aside class="home-progression-zone" aria-label="Onboarding progression">
+      <!-- Populated by progression-widget.js from GET /api/progression. -->
+      <div id="questLog" class="quest-log" hidden aria-live="polite">
+        <div class="quest-log-inner">
+          <header class="quest-log-header">
+            <span class="quest-log-insignia" data-role="tier-insignia" aria-hidden="true">01</span>
+            <div class="quest-log-heading">
+              <span class="quest-log-eyebrow">Progression</span>
+              <h2 class="quest-log-tier" data-role="tier-name">Quest log</h2>
+            </div>
+            <div class="quest-log-progress">
+              <span class="quest-log-progress-label" data-role="progress-label"></span>
+              <span class="quest-log-progress-count" data-role="progress-count"></span>
+              <button type="button" class="quest-log-dismiss" data-role="dismiss" aria-label="Collapse quest log" title="Collapse quest log">Collapse</button>
+            </div>
+          </header>
+          <div class="quest-log-meter" role="progressbar" aria-label="Current tier progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span class="quest-log-meter-fill" data-role="progress-bar"></span>
+          </div>
+          <ul class="quest-log-list" data-role="quests"></ul>
+          <p class="quest-log-why" data-role="why"></p>
         </div>
-      </section>
-      <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
-        <header class="home-section-header">
-          <h2 id="homeRecentActivityTitle" class="home-section-title">Recent activity</h2>
-        </header>
-        <div class="home-section-body" data-role="content" aria-live="polite">
-          <div class="home-section-placeholder" data-role="placeholder">Loading…</div>
-        </div>
-      </section>
-    </div>
+      </div>
+      <div id="questLogRestore" class="quest-log-restore" hidden>
+        <button type="button" class="quest-log-restore-btn" data-role="restore" aria-label="Expand quest log">
+          <span class="quest-log-restore-insignia" data-role="restore-insignia" aria-hidden="true">01</span>
+          <span class="quest-log-restore-copy"><span data-role="restore-tier">Tier 1</span><span data-role="restore-progress">0/0</span></span>
+          <span class="quest-log-restore-meter" aria-hidden="true"><span data-role="restore-meter"></span></span>
+        </button>
+      </div>
+    </aside>
   </div>
 </div>
 
