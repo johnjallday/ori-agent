@@ -66,6 +66,10 @@ Thumbs.db
 marketplace_cache_*.json
 # Local installed-plugins store (installed.json + downloaded src); machine-local state
 plugins/
+# Local plugin registry + plugin fixtures/uploads written by running a server; machine-local state
+local_plugin_registry.json
+test_plugins/
+uploaded_plugins/
 cache/
 tmp/
 temp/

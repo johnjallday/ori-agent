@@ -21,6 +21,9 @@ Never commit API keys or local state. Load provider credentials through environm
 ## Agent-Specific Instructions
 CLI-provider agents can run native workspace MCP only after both `Workspace.AllowNativeMCPCLI` and `Settings.AllowNativeMCPTools` are enabled. Treat this as trusted autonomy: calls execute outside Ori's per-call confirmation gate, sandboxed to the workspace folder. Native MCP execution uses `native_mcp_exec_timeout_seconds`, defaulting to 300 seconds.
 
+## Planning Artifact Location
+For the PRD and task-list workflows below, create planning artifacts in this dev worktree's `tasks/` directory (that is, `ori-agent-dev/tasks/`), creating it if necessary. `/tasks/` is not an absolute filesystem path. Finish both planning artifacts there before running `wt start`; it copies them to the isolated feature worktree. Because `tasks/` is gitignored, verify planning artifacts by reading the files directly (and, if needed, use `git status --ignored`) rather than relying on `git diff`.
+
 
 # Rule: Generating a Product Requirements Document (PRD)
 
@@ -35,7 +38,7 @@ To guide an AI assistant in creating a detailed Product Requirements Document (P
 1.  **Receive Initial Prompt:** The user provides a brief description or request for a new feature or functionality.
 2.  **Ask Clarifying Questions:** Before writing the PRD, the AI *must* ask only the most essential clarifying questions needed to write a clear PRD. Limit questions to 3-5 critical gaps in understanding. The goal is to understand the "what" and "why" of the feature, not necessarily the "how" (which the developer will figure out). Make sure to provide options in letter/number lists so I can respond easily with my selections.
 3.  **Generate PRD:** Based on the initial prompt and the user's answers to the clarifying questions, generate a PRD using the structure outlined below.
-4.  **Save PRD:** Save the generated document as `prd-[feature-name].md` inside the `/tasks` directory.
+4.  **Save PRD:** Save the generated document as `prd-[feature-name].md` in the planning artifact location defined above.
 
 ## Clarifying Questions (Guidelines)
 
@@ -97,7 +100,7 @@ Assume the primary reader of the PRD is a **junior developer**. Therefore, requi
 ## Output
 
 *   **Format:** Markdown (`.md`)
-*   **Location:** `/tasks/`
+*   **Location:** `ori-agent-dev/tasks/` (the planning artifact location above)
 *   **Filename:** `prd-[feature-name].md`
 
 ## Final instructions
@@ -120,7 +123,7 @@ To guide an AI assistant in creating a detailed, step-by-step task list in Markd
 ## Output
 
 - **Format:** Markdown (`.md`)
-- **Location:** `/tasks/`
+- **Location:** `ori-agent-dev/tasks/` (the planning artifact location above)
 - **Filename:** `tasks-[feature-name].md` (e.g., `tasks-user-profile-editing.md`)
 
 ## Process
@@ -129,11 +132,11 @@ To guide an AI assistant in creating a detailed, step-by-step task list in Markd
 2.  **Analyze Requirements:** The AI analyzes the functional requirements, user needs, and implementation scope from the provided information
 3.  **Phase 1: Generate Parent Tasks:** Based on the requirements analysis, create the file and generate the main, high-level tasks required to implement the feature. Use your judgement on how many high-level tasks to use. It's likely to be about 5. Present these tasks to the user in the specified format (without sub-tasks yet). Inform the user: "I have generated the high-level tasks based on your requirements. Ready to generate the sub-tasks? Respond with 'Go' to proceed."
 4.  **Wait for Confirmation:** Pause and wait for the user to respond with "Go".
-5.  **Phase 2: Generate Sub-Tasks:** Once the user confirms, break down each parent task into smaller, actionable sub-tasks necessary to complete the parent task. Ensure sub-tasks logically follow from the parent task and cover the implementation details implied by the requirements.
+5.  **Phase 2: Generate Sub-Tasks:** Once the user confirms, break down each parent task into smaller, actionable sub-tasks necessary to complete the parent task. Ensure sub-tasks logically follow from the parent task and cover the implementation details implied by the requirements. Include a `Commit: "<conventional message>"` sub-task after each parent group that represents a tested, reviewable milestone, and end the final group with the feature-delivery steps described below.
 6.  **Identify Relevant Files:** Based on the tasks and requirements, identify potential files that will need to be created or modified. List these under the `Relevant Files` section, including corresponding test files if applicable.
 7.  **Generate Final Output:** Combine the parent tasks, sub-tasks, relevant files, and notes into the final Markdown structure.
-8.  **Save Task List:** Save the generated document in the `/tasks/` directory with the filename `tasks-[feature-name].md`, where `[feature-name]` describes the main feature or task being implemented (e.g., if the request was about user profile editing, the output is `tasks-user-profile-editing.md`).
-9.  **Create Worktree:** Immediately after saving the task list, create the feature's isolated worktree by running `wt start [feature-name]` (the `ori-devflow` agent owns this workflow; see `scripts/wt.sh`). This fetches `origin/dev`, creates the worktree, copies the PRD and this task list into it, and switches into it — **no additional confirmation needed**, this runs right after step 8 without waiting for another "Go". All sub-tasks from 1.1 onward are implemented in that worktree, never in `ori-agent-dev`.
+8.  **Save Task List:** Save the generated document in the planning artifact location with the filename `tasks-[feature-name].md`, where `[feature-name]` describes the main feature or task being implemented (e.g., if the request was about user profile editing, the output is `tasks-user-profile-editing.md`).
+9.  **Create Worktree:** Immediately after saving the task list, create the feature's isolated worktree by running `wt start [feature-name]` (the `ori-devflow` agent owns this workflow; see `scripts/wt.sh`). This fetches `origin/dev`, creates the worktree and feature branch, copies the PRD and task list into it, and switches into it — **no additional confirmation needed**, this runs right after step 8 without waiting for another "Go". Do not add a separate branch-creation task. All sub-tasks from 1.1 onward are implemented in that worktree, never in `ori-agent-dev`.
 
 ## Output Format
 
@@ -163,14 +166,26 @@ Example:
 
 Update the file after completing each sub-task, not just after completing an entire parent task.
 
+## Delivery Checkpoints
+
+By default, one PRD and task list maps to one feature worktree, one branch, and one PR targeting `dev`. Keep commits conventional and focused. Include a `Commit: "<conventional message>"` sub-task after every parent group that is a tested, reviewable milestone. The final parent group must end with `Open PR → squash-merge to dev` (using `wt pr` when authorized) and `Run wt done [feature-name] after merge` to archive the completed checklist back to the dev worktree and clean up the feature worktree.
+
 ## Tasks
 
 - [ ] 1.0 Parent Task Title
   - [ ] 1.1 [Sub-task description 1.1]
   - [ ] 1.2 [Sub-task description 1.2]
+  - [ ] 1.3 Validate the completed parent task
+  - [ ] 1.4 Commit: "feat(scope): deliver parent task title"
 - [ ] 2.0 Parent Task Title
   - [ ] 2.1 [Sub-task description 2.1]
+  - [ ] 2.2 Validate the completed parent task
+  - [ ] 2.3 Commit: "feat(scope): deliver parent task title"
 - [ ] 3.0 Parent Task Title (may not require sub-tasks if purely structural or configuration)
+  - [ ] 3.1 Validate the completed feature
+  - [ ] 3.2 Commit: "feat(scope): deliver parent task title"
+  - [ ] 3.3 Open PR → squash-merge to dev
+  - [ ] 3.4 Run `wt done [feature-name]` after merge
 ```
 
 ## Interaction Model
