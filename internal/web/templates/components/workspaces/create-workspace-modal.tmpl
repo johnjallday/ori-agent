@@ -11,198 +11,228 @@
         <div class="workspace-create-layout">
           <div class="workspace-create-main-fields">
 
-            <!-- ===== SELECT BLUEPRINT: template grid + user templates ===== -->
-            <div id="workspaceCreateBlueprintHeader" class="workspace-create-section-header d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
-              <span class="workspace-create-section-title">Select Blueprint</span>
-              <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
-            </div>
-            <div id="templatePicker" role="radiogroup" aria-label="Workspace template">
-              <div id="templateBuiltinGrid" class="workspace-template-grid mb-2"></div>
-              <div id="templateUserSection" hidden>
-                <div class="workspace-template-list-heading">Your templates</div>
-                <div id="templateUserList" class="workspace-template-list mb-2"></div>
-              </div>
-            </div>
-            <div id="projectTemplateEmptyHint" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" hidden></div>
-
-            <!-- ===== BRIEFING: selected template's description + what it deploys ===== -->
-            <div id="workspaceCreateBriefingHeader" class="workspace-create-section-header" style="margin-bottom: 6px;">
-              <span class="workspace-create-section-title">Briefing</span>
-            </div>
-            <div id="templateBriefing" class="workspace-template-briefing mb-2">
-              <div id="templateBriefingDefault" class="workspace-template-briefing-default">
-                Pick a template to set up the workspace. Some templates also scaffold a starter project folder; everything is optional and editable after creation.
-              </div>
-              <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
-              <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
-                <div class="workspace-template-briefing-deploys-kicker">Deploys</div>
-                <div id="templateBriefingAgentsRow" class="workspace-template-briefing-row" hidden>
-                  <span class="workspace-template-briefing-row-label">Agents</span>
-                  <span id="templateBriefingAgentsValue" class="workspace-template-briefing-row-value"></span>
-                </div>
-                <div id="templateBriefingScaffoldRow" class="workspace-template-briefing-row" hidden>
-                  <span class="workspace-template-briefing-row-label">Project folder</span>
-                  <span id="templateBriefingScaffoldValue" class="workspace-template-briefing-row-value"></span>
-                </div>
-                <div id="templateBriefingAddonsRow" class="workspace-template-briefing-row workspace-template-briefing-row-addons" hidden>
-                  <span class="workspace-template-briefing-row-label">Add-ons</span>
-                  <div id="templateBriefingAddonsList" class="workspace-template-briefing-chips"></div>
-                </div>
-              </div>
+            <!-- Wizard stepper: hidden in import mode (single-step). -->
+            <div id="wizardStepper" class="workspace-create-stepper" aria-hidden="true">
+              <span class="workspace-create-step is-active" data-step="1">
+                <span class="workspace-create-step-num">1</span>Select Blueprint
+              </span>
+              <span class="workspace-create-step-sep">→</span>
+              <span class="workspace-create-step" data-step="2">
+                <span class="workspace-create-step-num">2</span>Construct
+              </span>
             </div>
 
-            <div id="projectTemplateOpenAfterCreate" class="workspace-setup-card mb-2" hidden>
-              <label class="d-flex align-items-start gap-2 mb-0" for="projectTemplateOpenAfterCreateToggle" style="cursor: pointer;">
-                <input type="checkbox" id="projectTemplateOpenAfterCreateToggle" class="form-check-input mt-1">
-                <span>
-                  <span class="workspace-setup-title d-block">Open project after creation</span>
-                  <span class="workspace-setup-help d-block">Uses your system's default app for this file type.</span>
-                </span>
-              </label>
+            <!-- ===== STEP 1 · SELECT BLUEPRINT: template grid + user templates ===== -->
+            <div id="wizardStep1">
+              <div id="workspaceCreateBlueprintHeader" class="workspace-create-section-header d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
+                <span class="workspace-create-section-title">Select Blueprint</span>
+                <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
+              </div>
+              <div id="templatePicker" role="radiogroup" aria-label="Workspace template">
+                <div id="templateBuiltinGrid" class="workspace-template-grid mb-2"></div>
+                <div id="templateUserSection" hidden>
+                  <div class="workspace-template-list-heading">Your templates</div>
+                  <div id="templateUserList" class="workspace-template-list mb-2"></div>
+                </div>
+              </div>
+              <div id="projectTemplateEmptyHint" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" hidden></div>
+              <div class="workspace-create-step-hint" style="margin-top: 4px; font-size: 12px; color: var(--text-secondary);">
+                Pick a blueprint (or Blank), then continue to name and configure it. Double-click a blueprint to skip ahead.
+              </div>
+
+              <!-- Briefing: the selected blueprint's description + what it deploys.
+                   Lives on step 1 as decision-support while choosing. -->
+              <div id="workspaceCreateBriefingHeader" class="workspace-create-section-header" style="margin-top: 14px; margin-bottom: 6px;">
+                <span class="workspace-create-section-title">Briefing</span>
+              </div>
+              <div id="templateBriefing" class="workspace-template-briefing mb-2">
+                <div id="templateBriefingDefault" class="workspace-template-briefing-default">
+                  Starting from a blank workspace. You can add tools, agents, and structure after it's created.
+                </div>
+                <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
+                <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
+                  <div class="workspace-template-briefing-deploys-kicker">Deploys</div>
+                  <div id="templateBriefingAgentsRow" class="workspace-template-briefing-row" hidden>
+                    <span class="workspace-template-briefing-row-label">Agents</span>
+                    <span id="templateBriefingAgentsValue" class="workspace-template-briefing-row-value"></span>
+                  </div>
+                  <div id="templateBriefingScaffoldRow" class="workspace-template-briefing-row" hidden>
+                    <span class="workspace-template-briefing-row-label">Project folder</span>
+                    <span id="templateBriefingScaffoldValue" class="workspace-template-briefing-row-value"></span>
+                  </div>
+                  <div id="templateBriefingAddonsRow" class="workspace-template-briefing-row workspace-template-briefing-row-addons" hidden>
+                    <span class="workspace-template-briefing-row-label">Add-ons</span>
+                    <div id="templateBriefingAddonsList" class="workspace-template-briefing-chips"></div>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div id="templateAgentReview" class="workspace-template-agent-review mb-2" hidden>
-              <div class="workspace-template-agent-review-head">
-                <div>
-                  <div class="workspace-template-agent-review-title">Template Agents</div>
-                  <div id="templateAgentReviewSummary" class="workspace-template-agent-review-summary" aria-live="polite"></div>
-                </div>
-                <label class="workspace-template-agent-toggle">
-                  <input type="checkbox" id="templateAgentReviewToggle" checked>
-                  <span>Create</span>
+            <!-- ===== STEP 2 · CONSTRUCT: name, description, agents, advanced ===== -->
+            <div id="wizardStep2" hidden>
+
+              <!-- Recap of the blueprint chosen on step 1. -->
+              <div id="wizardStep2Recap" class="workspace-create-recap mb-2">
+                <span id="wizardStep2RecapIcon" class="workspace-create-recap-icon" aria-hidden="true">✍</span>
+                <span class="workspace-create-recap-label">Constructing</span>
+                <span id="wizardStep2RecapName" class="workspace-create-recap-name">Blank workspace</span>
+              </div>
+
+              <div id="projectTemplateOpenAfterCreate" class="workspace-setup-card mb-2" hidden>
+                <label class="d-flex align-items-start gap-2 mb-0" for="projectTemplateOpenAfterCreateToggle" style="cursor: pointer;">
+                  <input type="checkbox" id="projectTemplateOpenAfterCreateToggle" class="form-check-input mt-1">
+                  <span>
+                    <span class="workspace-setup-title d-block">Open project after creation</span>
+                    <span class="workspace-setup-help d-block">Uses your system's default app for this file type.</span>
+                  </span>
                 </label>
               </div>
-              <div id="templateAgentReviewStatus" class="workspace-template-agent-review-status" aria-live="polite"></div>
-              <div id="templateAgentReviewList" class="workspace-template-agent-list"></div>
-              <div id="templateAgentReviewWarnings" class="workspace-template-agent-warnings" hidden></div>
-            </div>
 
-            <!-- REAPER Setup card: shown only when the Reaper Song template is
-                 selected. Populated by sessions.js from /api/reaper-setup/preview. -->
-            <div id="reaperSetupCard" class="workspace-setup-card reaper-setup-card mb-2" role="group" aria-label="REAPER Setup" hidden>
-              <div class="workspace-setup-header" style="align-items: flex-start;">
-                <div>
-                  <div class="workspace-setup-title">REAPER Setup</div>
-                  <p id="reaperSetupStatusText" class="workspace-setup-help mb-0" aria-live="polite">Checking reaper-plugin…</p>
+              <div id="templateAgentReview" class="workspace-template-agent-review mb-2" hidden>
+                <div class="workspace-template-agent-review-head">
+                  <div>
+                    <div class="workspace-template-agent-review-title">Template Agents</div>
+                    <div id="templateAgentReviewSummary" class="workspace-template-agent-review-summary" aria-live="polite"></div>
+                  </div>
+                  <label class="workspace-template-agent-toggle">
+                    <input type="checkbox" id="templateAgentReviewToggle" checked>
+                    <span>Create</span>
+                  </label>
                 </div>
-                <span id="reaperSetupBadge" class="reaper-setup-badge" aria-hidden="true"></span>
-              </div>
-              <div id="reaperSetupDetail" class="reaper-setup-detail" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;"></div>
-              <div id="reaperSetupActions" class="reaper-setup-actions d-flex flex-wrap gap-2" style="margin-top: 8px;"></div>
-            </div>
-
-            <!-- ===== Designation: name + description feed Ori's setup review ===== -->
-            <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
-            <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
-            <div class="workspace-setup-card mb-2">
-              <div class="workspace-setup-header" style="align-items: flex-start;">
-                <div>
-                  <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description</label>
-                  <p class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
-                </div>
+                <div id="templateAgentReviewStatus" class="workspace-template-agent-review-status" aria-live="polite"></div>
+                <div id="templateAgentReviewList" class="workspace-template-agent-list"></div>
+                <div id="templateAgentReviewWarnings" class="workspace-template-agent-warnings" hidden></div>
               </div>
 
-              <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
+              <!-- REAPER Setup card: shown only when the Reaper Song template is
+                   selected. Populated by sessions.js from /api/reaper-setup/preview. -->
+              <div id="reaperSetupCard" class="workspace-setup-card reaper-setup-card mb-2" role="group" aria-label="REAPER Setup" hidden>
+                <div class="workspace-setup-header" style="align-items: flex-start;">
+                  <div>
+                    <div class="workspace-setup-title">REAPER Setup</div>
+                    <p id="reaperSetupStatusText" class="workspace-setup-help mb-0" aria-live="polite">Checking reaper-plugin…</p>
+                  </div>
+                  <span id="reaperSetupBadge" class="reaper-setup-badge" aria-hidden="true"></span>
+                </div>
+                <div id="reaperSetupDetail" class="reaper-setup-detail" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;"></div>
+                <div id="reaperSetupActions" class="reaper-setup-actions d-flex flex-wrap gap-2" style="margin-top: 8px;"></div>
+              </div>
 
-              <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
-              <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
-
-              <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
-              <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
-            </div>
-
-            <!-- ===== Advanced: agent behavior, folder-as-template, group, tags, color ===== -->
-            <details id="folderAdvancedDisclosure" class="workspace-advanced-details mb-2">
-              <summary class="workspace-advanced-summary">
-                <span class="workspace-advanced-summary-title">Advanced</span>
-                <span id="folderBehaviorHint" class="workspace-advanced-summary-hint" aria-live="polite">Agent behavior: General</span>
-              </summary>
-              <div class="workspace-advanced-body">
-                <label for="folderPresetSelect" style="font-size: 12px; color: var(--text-secondary);">Agent behavior</label>
-                <select id="folderPresetSelect" class="modern-input w-100 mb-2" aria-label="Agent behavior">
-                  <option value="general" selected>General</option>
-                  <option value="research">Research</option>
-                  <option value="software_project">Software Project</option>
-                </select>
-                <div style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-                  Controls how agents in this workspace plan and act — planning depth, whether they write a PRD / task list, and when they ask before destructive actions. Set automatically from your Template; change it anytime.
+              <!-- Designation: name + description feed Ori's setup review. -->
+              <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
+              <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
+              <div class="workspace-setup-card mb-2">
+                <div class="workspace-setup-header" style="align-items: flex-start;">
+                  <div>
+                    <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description</label>
+                    <p class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
+                  </div>
                 </div>
 
-                <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Use any folder as a template</label>
-                <div class="d-flex flex-column flex-sm-row gap-2 mb-1">
-                  <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
-                  <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
-                    Choose folder…
-                  </button>
+                <textarea id="folderDescriptionInput" class="modern-input w-100 mb-2" placeholder="What this workspace is for and what Ori should help with" rows="3" style="resize: vertical;"></textarea>
+
+                <label for="folderSystemsInput" style="font-size: 12px; color: var(--text-secondary);">Apps and systems <span style="opacity: 0.8;">(optional)</span></label>
+                <input type="text" id="folderSystemsInput" class="modern-input w-100 mb-2" placeholder="Keynote, Finder, Google Drive">
+
+                <label for="folderContextInput" style="font-size: 12px; color: var(--text-secondary);">Key files or context <span style="opacity: 0.8;">(optional)</span></label>
+                <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
+              </div>
+
+              <!-- Advanced: agent behavior, folder-as-template, group, tags, color. -->
+              <details id="folderAdvancedDisclosure" class="workspace-advanced-details mb-2">
+                <summary class="workspace-advanced-summary">
+                  <span class="workspace-advanced-summary-title">Advanced</span>
+                  <span id="folderBehaviorHint" class="workspace-advanced-summary-hint" aria-live="polite">Agent behavior: General</span>
+                </summary>
+                <div class="workspace-advanced-body">
+                  <label for="folderPresetSelect" style="font-size: 12px; color: var(--text-secondary);">Agent behavior</label>
+                  <select id="folderPresetSelect" class="modern-input w-100 mb-2" aria-label="Agent behavior">
+                    <option value="general" selected>General</option>
+                    <option value="research">Research</option>
+                    <option value="software_project">Software Project</option>
+                  </select>
+                  <div style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                    Controls how agents in this workspace plan and act — planning depth, whether they write a PRD / task list, and when they ask before destructive actions. Set automatically from your Template; change it anytime.
+                  </div>
+
+                  <label for="projectTemplatePathInput" style="font-size: 12px; color: var(--text-secondary);">Use any folder as a template</label>
+                  <div class="d-flex flex-column flex-sm-row gap-2 mb-1">
+                    <input type="text" id="projectTemplatePathInput" class="modern-input w-100" placeholder="/absolute/path/to/template-folder" autocomplete="off">
+                    <button type="button" id="projectTemplateBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 130px;" aria-label="Browse for a template folder">
+                      Choose folder…
+                    </button>
+                  </div>
+                  <div style="margin-top: -2px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                    Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
+                  </div>
+
+                  <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
+                  <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
+                    <option value="">No group</option>
+                  </select>
+                  <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                    Optional. Choose a group for this workspace.
+                  </div>
+
+                  <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
+                  <div id="folderTagsMount" class="mb-1"></div>
+                  <div id="folderTemplateTagsHint" style="margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
+
+                  <div class="folder-color-picker">
+                    <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
+                    <div id="folderColorOptions" class="folder-color-options mt-1">
+                      <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
+                      <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
+                      <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
+                      <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
+                      <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
+                      <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
+                      <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
+                    </div>
+                  </div>
                 </div>
-                <div style="margin-top: -2px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-                  Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
+              </details>
+
+              <input type="checkbox" id="folderImportToggle" hidden aria-hidden="true" tabindex="-1">
+              <div id="folderImportCard" class="workspace-setup-card mb-2" hidden>
+                <div class="workspace-setup-header" style="align-items: flex-start;">
+                  <div>
+                    <div class="workspace-setup-title">Import Folder</div>
+                    <p class="workspace-setup-help mb-0">Link a local folder so this workspace starts with real project context.</p>
+                  </div>
                 </div>
 
-                <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
-                <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
-                  <option value="">No group</option>
-                </select>
-                <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-                  Optional. Choose a group for this workspace.
-                </div>
+                <div id="folderImportSection" hidden>
+                  <label for="folderImportPathInput" style="font-size: 12px; color: var(--text-secondary);">Folder path</label>
+                  <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
+                    <input type="text" id="folderImportPathInput" class="modern-input w-100" placeholder="/absolute/path/to/project" autocomplete="off">
+                    <button type="button" id="folderImportBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 96px;" aria-label="Browse for folder path">
+                      Browse
+                    </button>
+                  </div>
+                  <div style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">
+                    Enter an absolute path to import. Workspace name defaults to the folder name, and you can edit it.
+                  </div>
 
-                <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
-                <div id="folderTagsMount" class="mb-1"></div>
-                <div id="folderTemplateTagsHint" style="margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
-
-                <div class="folder-color-picker">
-                  <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
-                  <div id="folderColorOptions" class="folder-color-options mt-1">
-                    <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
-                    <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
-                    <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
-                    <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
-                    <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
-                    <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
-                    <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
+                  <div id="folderImportDuplicateWarning" class="modern-card p-2 mb-2" style="display: none; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
+                    <div id="folderImportDuplicateText" style="font-size: 12px; color: var(--text-primary); margin-bottom: 8px;" aria-live="polite"></div>
+                    <div class="d-flex flex-column flex-sm-row gap-2">
+                      <button type="button" id="folderImportOpenExistingBtn" class="modern-btn modern-btn-secondary" style="flex: 1;">Open Existing</button>
+                      <button type="button" id="folderImportProceedDuplicateBtn" class="modern-btn modern-btn-primary" style="flex: 1;">Import Anyway</button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </details>
 
-            <input type="checkbox" id="folderImportToggle" hidden aria-hidden="true" tabindex="-1">
-            <div id="folderImportCard" class="workspace-setup-card mb-2" hidden>
-              <div class="workspace-setup-header" style="align-items: flex-start;">
-                <div>
-                  <div class="workspace-setup-title">Import Folder</div>
-                  <p class="workspace-setup-help mb-0">Link a local folder so this workspace starts with real project context.</p>
-                </div>
-              </div>
-
-              <div id="folderImportSection" hidden>
-                <label for="folderImportPathInput" style="font-size: 12px; color: var(--text-secondary);">Folder path</label>
-                <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
-                  <input type="text" id="folderImportPathInput" class="modern-input w-100" placeholder="/absolute/path/to/project" autocomplete="off">
-                  <button type="button" id="folderImportBrowseBtn" class="modern-btn modern-btn-secondary" style="white-space: nowrap; min-width: 96px;" aria-label="Browse for folder path">
-                    Browse
-                  </button>
-                </div>
-                <div style="margin-top: -6px; margin-bottom: 8px; font-size: 12px; color: var(--text-secondary);">
-                  Enter an absolute path to import. Workspace name defaults to the folder name, and you can edit it.
-                </div>
-
-                <div id="folderImportDuplicateWarning" class="modern-card p-2 mb-2" style="display: none; border: 1px solid #f59e0b; background: rgba(245, 158, 11, 0.08);">
-                  <div id="folderImportDuplicateText" style="font-size: 12px; color: var(--text-primary); margin-bottom: 8px;" aria-live="polite"></div>
-                  <div class="d-flex flex-column flex-sm-row gap-2">
-                    <button type="button" id="folderImportOpenExistingBtn" class="modern-btn modern-btn-secondary" style="flex: 1;">Open Existing</button>
-                    <button type="button" id="folderImportProceedDuplicateBtn" class="modern-btn modern-btn-primary" style="flex: 1;">Import Anyway</button>
-                  </div>
-                </div>
-              </div>
             </div>
-
           </div>
         </div>
       </div>
       <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
+        <button type="button" id="wizardBackBtn" class="modern-btn modern-btn-secondary me-auto" hidden>← Back</button>
         <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary">Create Workspace</button>
+        <button type="button" id="wizardNextBtn" class="modern-btn modern-btn-primary">Next →</button>
+        <button type="button" id="createFolderBtn" class="modern-btn modern-btn-primary" hidden>Create Workspace</button>
       </div>
     </div>
   </div>

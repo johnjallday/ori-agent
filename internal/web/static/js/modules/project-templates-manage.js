@@ -399,6 +399,13 @@ function ptcEmitSelection() {
   }));
 }
 
+// Double-click on a blueprint: select it, then ask the wizard to advance to the
+// Construct step (the host listens for this on #addFolderModal).
+function ptcEmitAdvance() {
+  document.getElementById('addFolderModal')
+    ?.dispatchEvent(new CustomEvent('workspace-template-advance'));
+}
+
 function ptcMarkSelectedAcross(selectedEl) {
   const els = ptcElements();
   [els.grid, els.userList].forEach((container) => {
@@ -444,6 +451,7 @@ function ptcCard(template) {
     card.append(tagline);
   }
   card.addEventListener('click', () => ptcSelect(template, card));
+  card.addEventListener('dblclick', () => { ptcSelect(template, card); ptcEmitAdvance(); });
   return card;
 }
 
@@ -463,6 +471,7 @@ function ptcRow(template) {
   label.textContent = template.name || template.id;
   row.append(icon, label);
   row.addEventListener('click', () => ptcSelect(template, row));
+  row.addEventListener('dblclick', () => { ptcSelect(template, row); ptcEmitAdvance(); });
   return row;
 }
 

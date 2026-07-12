@@ -240,6 +240,71 @@
   color: var(--wc-faction);
 }
 
+/* ---------- wizard stepper (Select Blueprint → Construct) ---------- */
+.workspace-create-modal .workspace-create-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-create-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-create-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-faint);
+  font-size: 9px;
+}
+.workspace-create-modal .workspace-create-step.is-active {
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-create-step.is-active .workspace-create-step-num {
+  border-color: var(--wc-faction);
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-create-step-sep {
+  color: var(--wc-ink-faint);
+}
+
+/* ---------- step-2 recap of the chosen blueprint ---------- */
+.workspace-create-modal .workspace-create-recap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--wc-line);
+  border-left: 2px solid var(--wc-faction);
+  background: var(--wc-panel-2);
+}
+.workspace-create-modal .workspace-create-recap-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+.workspace-create-modal .workspace-create-recap-label {
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-create-recap-name {
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #f3f5f8;
+}
+
 /* ---------- briefing panel ---------- */
 .workspace-create-modal .workspace-template-briefing {
   border: 1px solid var(--wc-line);
@@ -421,6 +486,7 @@
 [data-bs-theme="light"] .workspace-create-modal .workspace-setup-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-advanced-summary-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-card-label,
+[data-bs-theme="light"] .workspace-create-modal .workspace-create-recap-name,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model strong {
   color: var(--wc-ink-heading);
