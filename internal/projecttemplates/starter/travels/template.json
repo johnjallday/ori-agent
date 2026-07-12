@@ -1,11 +1,13 @@
 {
   "name": "Travels",
-  "description": "Flights, hotels, trip planning. Recommended add-ons: a flight/hotel MCP, a calendar MCP, and a Travel skill.",
-  "icon": "✈",
+  "description": "Flights, hotels, trip planning.",
+  "icon": "\u2708",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
-  "tags": ["travel"],
+  "builtin_version": 2,
+  "tags": [
+    "travel"
+  ],
   "starter_tasks": [
     {
       "description": "Plan an upcoming trip",
@@ -23,5 +25,11 @@
       "role": "researcher",
       "system_prompt": "You research flight, lodging, and local-transit options for the trip. Present a few ranked choices with clear trade-offs (price, timing, location) rather than a single pick."
     }
+  ],
+  "tagline": "Flights, hotels, trip planning.",
+  "addons": [
+    "flight/hotel MCP",
+    "calendar MCP",
+    "Travel skill"
   ]
 }

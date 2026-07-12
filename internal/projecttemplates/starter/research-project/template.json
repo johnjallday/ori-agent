@@ -1,11 +1,13 @@
 {
   "name": "Research Project",
-  "description": "Synthesis docs, sources, weekly reading. Maintains a synthesis doc, a sources index, and recurring summaries. Recommended add-ons: a web search MCP and a Citations skill.",
-  "icon": "📚",
+  "description": "Synthesis docs, sources, weekly reading. Maintains a synthesis doc, a sources index, and recurring summaries.",
+  "icon": "\ud83d\udcda",
   "behavior_profile": "research",
   "builtin": true,
-  "builtin_version": 1,
-  "tags": ["research"],
+  "builtin_version": 2,
+  "tags": [
+    "research"
+  ],
   "starter_tasks": [
     {
       "description": "Build the synthesis doc",
@@ -32,5 +34,10 @@
       "role": "synthesizer",
       "system_prompt": "You maintain the synthesis document. Fold new findings into the current best understanding, keep the open-gaps list honest, and write clear, well-attributed summaries."
     }
+  ],
+  "tagline": "Synthesis docs, sources, weekly reading.",
+  "addons": [
+    "web search MCP",
+    "Citations skill"
   ]
 }

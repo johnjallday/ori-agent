@@ -44,6 +44,10 @@ const sessionManager = {
   // Starting point no longer overwrites their choice. Reset on modal open.
   behaviorOverridden: false,
 
+  // Create-workspace wizard step (1 = Select Blueprint, 2 = Construct). Import
+  // mode is single-step and always renders the step-2 layout. Reset on open.
+  wizardStep: 1,
+
   // Auto mode state
   chatAutoMode: false,
   chatLlmAvailable: false,
@@ -220,6 +224,14 @@ const sessionManager = {
     // Create folder button
     document.getElementById('createFolderBtn')?.addEventListener('click', () => this.createFolder());
 
+    // Wizard navigation (Select Blueprint → Construct).
+    document.getElementById('wizardNextBtn')?.addEventListener('click', () => this.goToWizardStep(2));
+    document.getElementById('wizardBackBtn')?.addEventListener('click', () => this.goToWizardStep(1));
+    // Double-clicking a blueprint selects it and jumps straight to Construct.
+    document.getElementById('addFolderModal')?.addEventListener('workspace-template-advance', () => {
+      if (!this.importModeEnabled) this.goToWizardStep(2);
+    });
+
     // Agent behavior (formerly "Workspace preset"): a manual change marks the
     // value as overridden so picking a Template won't clobber it.
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
@@ -236,6 +248,7 @@ const sessionManager = {
       this.prefillTemplateValue(document.getElementById('folderNameInput'), template?.name || '', 'autofillName');
       this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
       this.applyTemplateBehavior(template);
+      this.updateWizardRecap(template);
       void this.refreshTemplateAgentPlan();
       // Show the REAPER Setup card only for the Reaper Song template.
       window.ReaperSetupCard?.showForTemplate?.(template);
@@ -294,7 +307,17 @@ const sessionManager = {
       btn.addEventListener('click', (e) => {
         document.querySelectorAll('.folder-color-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
+        this.updateBehaviorHint();
       });
+    });
+
+    // Group/Color/Tags live inside the Advanced disclosure now; refresh the
+    // collapsed summary hint when they change or when Advanced is toggled shut.
+    document.getElementById('folderParentSelect')?.addEventListener('change', () => {
+      this.updateBehaviorHint();
+    });
+    document.getElementById('folderAdvancedDisclosure')?.addEventListener('toggle', () => {
+      this.updateBehaviorHint();
     });
 
     const addFolderModal = document.getElementById('addFolderModal');
@@ -3046,6 +3069,7 @@ const sessionManager = {
       this.resetTemplateAgentReview();
     }
     window.ProjectTemplateCard?.syncState?.();
+    this.refreshWizardChrome();
   },
 
   clearImportDuplicateWarning() {
@@ -3184,6 +3208,9 @@ const sessionManager = {
 
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
+    // Every open starts on step 1; setImportModeEnabled(false) below re-renders
+    // the wizard chrome, and an import open flips it to the single-step layout.
+    this.wizardStep = 1;
     const modalElement = document.getElementById('addFolderModal');
     const nameInput = document.getElementById('folderNameInput');
     const descriptionInput = document.getElementById('folderDescriptionInput');
@@ -3701,12 +3728,88 @@ const sessionManager = {
     }
   },
 
-  // Refreshes the collapsed "Agent behavior: X" hint from the select value.
+  // Refreshes the collapsed "Agent behavior: X" hint from the select value,
+  // appending any non-default Group/Color/Tags picks so the collapsed Advanced
+  // section reflects what's set inside it.
   updateBehaviorHint() {
     const hint = document.getElementById('folderBehaviorHint');
     if (!hint) return;
     const profile = document.getElementById('folderPresetSelect')?.value || 'general';
-    hint.textContent = `Agent behavior: ${this.behaviorProfileLabel(profile)}`;
+    const parts = [`Agent behavior: ${this.behaviorProfileLabel(profile)}`];
+
+    const parentSelect = document.getElementById('folderParentSelect');
+    if (parentSelect && parentSelect.value) {
+      const label = parentSelect.options[parentSelect.selectedIndex]?.textContent?.trim();
+      if (label) parts.push(`Group: ${label}`);
+    }
+
+    const activeColor = document.querySelector('#addFolderModal .folder-color-btn.active');
+    if (activeColor && String(activeColor.dataset.color || '').trim()) {
+      parts.push('Color set');
+    }
+
+    const tagCount = window.WorkspaceTagsCard?.getPayloadFields?.().tags?.length || 0;
+    if (tagCount > 0) parts.push(`${tagCount} tag${tagCount === 1 ? '' : 's'}`);
+
+    hint.textContent = parts.join(' · ');
+  },
+
+  // ----- Create-workspace wizard (Select Blueprint → Construct) -----
+
+  // Renders the wizard chrome for the current mode + step: which step panel is
+  // visible, the stepper, and which footer buttons show. Import mode is a
+  // single step that always shows the step-2 layout with no stepper/Back/Next.
+  refreshWizardChrome() {
+    const importMode = Boolean(this.importModeEnabled);
+    const step = importMode ? 2 : this.wizardStep;
+
+    const step1 = document.getElementById('wizardStep1');
+    const step2 = document.getElementById('wizardStep2');
+    const stepper = document.getElementById('wizardStepper');
+    const backBtn = document.getElementById('wizardBackBtn');
+    const nextBtn = document.getElementById('wizardNextBtn');
+    const createBtn = document.getElementById('createFolderBtn');
+
+    if (step1) step1.hidden = importMode || step !== 1;
+    if (step2) step2.hidden = step !== 2;
+    if (stepper) stepper.hidden = importMode;
+    stepper?.querySelectorAll('.workspace-create-step').forEach((el) => {
+      el.classList.toggle('is-active', String(el.dataset.step || '') === String(step));
+    });
+
+    const onStep1 = !importMode && step === 1;
+    if (nextBtn) nextBtn.hidden = !onStep1;
+    if (backBtn) backBtn.hidden = importMode || step !== 2;
+    // createFolderBtn stays hidden on step 1; its disabled state is owned by the
+    // REAPER setup card, so only toggle visibility here.
+    if (createBtn) createBtn.hidden = onStep1;
+    // The step-2 recap names the chosen blueprint; import mode has no blueprint.
+    const recap = document.getElementById('wizardStep2Recap');
+    if (recap) recap.hidden = importMode;
+  },
+
+  // Sets the step-2 recap line ("Constructing: <icon> <name>") from the selected
+  // blueprint, falling back to a Blank-workspace label.
+  updateWizardRecap(template) {
+    const nameEl = document.getElementById('wizardStep2RecapName');
+    const iconEl = document.getElementById('wizardStep2RecapIcon');
+    const isBlank = !template || template.blank || !template.id;
+    if (nameEl) nameEl.textContent = isBlank ? 'Blank workspace' : (template.name || template.id);
+    if (iconEl) iconEl.textContent = (template && template.icon) ? template.icon : '✍';
+  },
+
+  // Moves the wizard to a step and re-renders chrome. Scrolls the modal body to
+  // the top and moves focus to the step's primary control.
+  goToWizardStep(step) {
+    this.wizardStep = step === 2 ? 2 : 1;
+    this.refreshWizardChrome();
+    const body = document.querySelector('#addFolderModal .modal-body');
+    if (body) body.scrollTop = 0;
+    if (this.wizardStep === 2) {
+      document.getElementById('folderNameInput')?.focus();
+    } else {
+      document.querySelector('#templateBuiltinGrid .workspace-template-card.is-selected')?.focus();
+    }
   },
 
   // Applies a Template's default Agent behavior to the select, unless the user

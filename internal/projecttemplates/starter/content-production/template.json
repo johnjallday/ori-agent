@@ -1,11 +1,13 @@
 {
   "name": "Content Production",
-  "description": "Brand voice, drafts, scheduled posts. Recommended add-ons: a style-guide note, a publishing-tool MCP, and a Brand Voice skill.",
-  "icon": "✏",
+  "description": "Brand voice, drafts, scheduled posts.",
+  "icon": "\u270f",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
-  "tags": ["content"],
+  "builtin_version": 2,
+  "tags": [
+    "content"
+  ],
   "starter_tasks": [
     {
       "description": "Draft a style guide",
@@ -37,5 +39,11 @@
       "role": "specialist",
       "system_prompt": "You adapt approved content for each channel and schedule it against the content calendar. Tailor length and format per platform without changing the core message."
     }
+  ],
+  "tagline": "Brand voice, drafts, scheduled posts.",
+  "addons": [
+    "style-guide note",
+    "publishing-tool MCP",
+    "Brand Voice skill"
   ]
 }

@@ -46,6 +46,15 @@
   font-family: var(--wc-font-display);
 }
 
+/* The `hidden` attribute must win over Bootstrap display utilities (.d-flex
+   etc. use `display: … !important`), so JS toggling `.hidden` on a header/row
+   actually hides it — e.g. hiding the Select Blueprint header (a .d-flex row)
+   in import mode. Only applies while [hidden] is set; removing it restores the
+   element's normal display. */
+.workspace-create-modal [hidden] {
+  display: none !important;
+}
+
 /* ---------- chrome ---------- */
 .workspace-create-modal .modal-content {
   background: var(--wc-panel) !important;
@@ -178,7 +187,14 @@
   clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
   transition:
     transform 0.15s ease,
-    border-color 0.15s ease;
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+/* Uniform, compact blueprint cards: icon + name + a single-line tagline that
+   clamps to two lines so every card in the grid is the same height. */
+.workspace-create-modal .workspace-template-card {
+  min-height: 96px;
+  box-shadow: none;
 }
 .workspace-create-modal .workspace-template-card:hover,
 .workspace-create-modal .workspace-template-row:hover {
@@ -187,8 +203,11 @@
 }
 .workspace-create-modal .workspace-template-card.is-selected,
 .workspace-create-modal .workspace-template-row.is-selected {
-  border-color: var(--wc-faction-deep);
+  border-color: var(--wc-faction);
   background: rgba(70, 211, 154, 0.08);
+  box-shadow:
+    0 0 0 1px var(--wc-faction),
+    0 0 18px -6px var(--wc-faction);
 }
 .workspace-create-modal .workspace-template-card:focus-visible,
 .workspace-create-modal .workspace-template-row:focus-visible {
@@ -206,6 +225,150 @@
 }
 .workspace-create-modal .workspace-template-card-desc {
   color: var(--wc-ink-faint);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- section headers (Select Blueprint / Briefing) ---------- */
+.workspace-create-modal .workspace-create-section-title {
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--wc-faction);
+}
+
+/* ---------- wizard stepper (Select Blueprint → Construct) ---------- */
+.workspace-create-modal .workspace-create-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-create-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-create-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-faint);
+  font-size: 9px;
+}
+.workspace-create-modal .workspace-create-step.is-active {
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-create-step.is-active .workspace-create-step-num {
+  border-color: var(--wc-faction);
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-create-step-sep {
+  color: var(--wc-ink-faint);
+}
+
+/* ---------- step-2 recap of the chosen blueprint ---------- */
+.workspace-create-modal .workspace-create-recap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--wc-line);
+  border-left: 2px solid var(--wc-faction);
+  background: var(--wc-panel-2);
+}
+.workspace-create-modal .workspace-create-recap-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+.workspace-create-modal .workspace-create-recap-label {
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-create-recap-name {
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #f3f5f8;
+}
+
+/* ---------- briefing panel ---------- */
+.workspace-create-modal .workspace-template-briefing {
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-2);
+  padding: 10px 12px;
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+}
+.workspace-create-modal .workspace-template-briefing-default,
+.workspace-create-modal .workspace-template-briefing-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-briefing-deploys {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wc-line);
+}
+.workspace-create-modal .workspace-template-briefing-deploys-kicker {
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--wc-ink-faint);
+  margin-bottom: 6px;
+}
+.workspace-create-modal .workspace-template-briefing-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-template-briefing-row:last-child {
+  margin-bottom: 0;
+}
+.workspace-create-modal .workspace-template-briefing-row-label {
+  flex: 0 0 88px;
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-template-briefing-row-value {
+  color: var(--wc-ink);
+  line-height: 1.4;
+}
+.workspace-create-modal .workspace-template-briefing-row-addons {
+  align-items: flex-start;
+}
+.workspace-create-modal .workspace-template-briefing-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.workspace-create-modal .workspace-template-briefing-chip {
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border: 1px solid var(--wc-line-bright);
+  background: color-mix(in srgb, var(--wc-faction) 9%, transparent);
+  color: var(--wc-ink-dim);
 }
 
 .workspace-create-modal .workspace-template-agent-review {
@@ -323,6 +486,7 @@
 [data-bs-theme="light"] .workspace-create-modal .workspace-setup-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-advanced-summary-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-card-label,
+[data-bs-theme="light"] .workspace-create-modal .workspace-create-recap-name,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model strong {
   color: var(--wc-ink-heading);
