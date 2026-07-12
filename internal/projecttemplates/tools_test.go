@@ -76,3 +76,26 @@ func TestSetTools(t *testing.T) {
 		t.Errorf("unknown template = %v, want ErrTemplateNotFound", err)
 	}
 }
+
+func TestToolDefaults_PluginSourceAndNormalize(t *testing.T) {
+	td := normalizeToolDefaults(ToolDefaults{
+		Plugins:       []string{"reaper-plugin"},
+		PluginSources: map[string]string{"  Reaper-Plugin ": "  https://example.com/x.git ", "blank": "  "},
+	})
+	// Case-insensitive lookup, trimmed value.
+	if got := td.PluginSource("reaper-plugin"); got != "https://example.com/x.git" {
+		t.Fatalf("PluginSource = %q", got)
+	}
+	// Blank-valued entries are dropped by normalize.
+	if _, ok := td.PluginSources["blank"]; ok {
+		t.Fatalf("blank-valued source should be dropped: %+v", td.PluginSources)
+	}
+	// Undeclared plugin returns empty.
+	if got := td.PluginSource("other"); got != "" {
+		t.Fatalf("undeclared plugin source = %q, want empty", got)
+	}
+	// Sources-only (no plugins) is still IsEmpty.
+	if !(ToolDefaults{PluginSources: map[string]string{"a": "b"}}).IsEmpty() {
+		t.Fatalf("plugin_sources without plugins must be IsEmpty")
+	}
+}

@@ -42,6 +42,10 @@
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-connections-chip">MCP: 0</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-skills-chip">Skills: 0</span>
                   <span class="workspace-detail-config-chip" id="workspace-detail-config-reference-chip" hidden>Refs: 0</span>
+                  <!-- Compact REAPER setup-needed indicator; opens the readiness
+                       card in the Plugins tab. Hidden unless a REAPER workspace
+                       needs setup (or shows a compact success once ori_ready). -->
+                  <button type="button" class="workspace-detail-config-chip reaper-setup-chip" id="reaperReadinessChip" hidden></button>
                 </div>
               </div>
               <button
@@ -489,6 +493,21 @@
                   role="tabpanel"
                   aria-labelledby="workspace-detail-config-plugins-tab"
                   tabindex="0">
+                  <!-- Durable REAPER Setup readiness card. Hidden unless the
+                       workspace is identified as REAPER and not yet ori_ready
+                       (or collapsed to a compact success summary once ready).
+                       Populated by reaper-readiness-panel.js. -->
+                  <div id="reaperReadinessCard" class="workspace-detail-reaper-card" role="group" aria-label="REAPER Setup" hidden>
+                    <div class="workspace-detail-reaper-head">
+                      <div>
+                        <div class="workspace-detail-reaper-title">REAPER Setup</div>
+                        <div id="reaperReadinessStatus" class="workspace-detail-reaper-status" aria-live="polite"></div>
+                      </div>
+                      <span id="reaperReadinessBadge" class="reaper-setup-badge" aria-hidden="true"></span>
+                    </div>
+                    <ul id="reaperReadinessRows" class="workspace-detail-reaper-rows"></ul>
+                    <div id="reaperReadinessActions" class="workspace-detail-reaper-actions d-flex flex-wrap gap-2"></div>
+                  </div>
                   <div class="workspace-detail-config-pane-header">
                     <div>
                       <div class="workspace-detail-config-pane-title">Workspace Plugins</div>
@@ -8589,6 +8608,9 @@
   <script defer src="/js/modules/workspace-bootstrap-review.js"></script>
   <script defer src="/js/modules/workspace-tools.js"></script>
   <script defer src="/js/modules/workspace-group-options.js"></script>
+  <script defer src="/js/modules/reaper-plugin-install.js"></script>
+  <script defer src="/js/modules/reaper-setup-card.js"></script>
+  <script defer src="/js/modules/reaper-readiness-panel.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/dashboard.js"></script>
   <script defer src="/js/modules/toast.js"></script>

@@ -53,6 +53,20 @@
               <div id="templateAgentReviewWarnings" class="workspace-template-agent-warnings" hidden></div>
             </div>
 
+            <!-- REAPER Setup card: shown only when the Reaper Song template is
+                 selected. Populated by sessions.js from /api/reaper-setup/preview. -->
+            <div id="reaperSetupCard" class="workspace-setup-card reaper-setup-card mb-2" role="group" aria-label="REAPER Setup" hidden>
+              <div class="workspace-setup-header" style="align-items: flex-start;">
+                <div>
+                  <div class="workspace-setup-title">REAPER Setup</div>
+                  <p id="reaperSetupStatusText" class="workspace-setup-help mb-0" aria-live="polite">Checking reaper-plugin…</p>
+                </div>
+                <span id="reaperSetupBadge" class="reaper-setup-badge" aria-hidden="true"></span>
+              </div>
+              <div id="reaperSetupDetail" class="reaper-setup-detail" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;"></div>
+              <div id="reaperSetupActions" class="reaper-setup-actions d-flex flex-wrap gap-2" style="margin-top: 8px;"></div>
+            </div>
+
             <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
             <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
             <div class="workspace-setup-card mb-2">

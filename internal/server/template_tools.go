@@ -6,14 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
-
-// templatePluginsDir is the managed plugins directory the plugin handler uses;
-// the applier reads installed.json from here to expand plugin references.
-const templatePluginsDir = "plugins"
 
 // makeTemplateToolApplier returns a function that binds a template's declared
 // default tools onto a freshly created workspace, applying only what resolves on
@@ -21,12 +17,19 @@ const templatePluginsDir = "plugins"
 //
 //   - skills bind by name (resolved downstream by the skill manager);
 //   - MCP servers bind when configured (else reported missing);
-//   - plugins expand to their installed component skills + MCP servers.
+//   - plugins expand to their installed component skills + MCP servers through
+//     the shared pluginworkspace reconciler, which reads installed-plugin state
+//     from the configured plugin manager/store used by the Plugins API and
+//     honors the plugin's enabled flag.
 //
 // It binds through the same workspace store the binding endpoints read from (the
 // SyncStore), Get→bind→Save by id, so the new bindings are immediately visible —
 // writing through the raw FileStore would land on disk but bypass the read path.
 // Builder fields are read at apply time (request time), so wiring order is moot.
+//
+// Skills/MCP are bound and saved first; plugin components are then reconciled as
+// a separate Get→bind→Save pass so the two writes never clobber each other
+// regardless of whether the store returns shared or cloned workspace values.
 func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.ToolDefaults) ([]string, []string) {
 	return func(workspaceID string, tools projecttemplates.ToolDefaults) (applied, missing []string) {
 		store := b.workspaceStore
@@ -48,6 +51,7 @@ func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.Too
 			boundMCP[strings.ToLower(strings.TrimSpace(bnd.ServerName))] = true
 		}
 
+		changed := false
 		bindSkill := func(name string) {
 			name = strings.TrimSpace(name)
 			key := strings.ToLower(name)
@@ -59,6 +63,7 @@ func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.Too
 				ID: uuid.NewString(), SkillName: name, Enabled: true, CreatedAt: now, UpdatedAt: now,
 			}); err == nil {
 				applied = append(applied, "skill:"+name)
+				changed = true
 			}
 		}
 		bindMCP := func(name string) {
@@ -72,6 +77,7 @@ func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.Too
 				ID: uuid.NewString(), ServerName: name, Enabled: true, CreatedAt: now, UpdatedAt: now,
 			}); err == nil {
 				applied = append(applied, "mcp:"+name)
+				changed = true
 			}
 		}
 
@@ -91,33 +97,40 @@ func makeTemplateToolApplier(b *ServerBuilder) func(string, projecttemplates.Too
 			bindMCP(srv)
 		}
 
-		// Plugins: expand each installed plugin to its component skills + servers.
-		if len(tools.Plugins) > 0 {
-			installed, _ := plugin.NewStore(templatePluginsDir).List()
-			byName := make(map[string]plugin.InstalledPlugin, len(installed))
-			for _, p := range installed {
-				byName[strings.ToLower(p.Name)] = p
-			}
-			for _, pl := range tools.Plugins {
-				p, ok := byName[strings.ToLower(strings.TrimSpace(pl))]
-				if !ok {
-					missing = append(missing, "plugin:"+pl)
-					continue
-				}
-				for _, s := range p.Skills {
-					bindSkill(s)
-				}
-				for _, srv := range p.MCPServers {
-					bindMCP(srv)
-				}
-			}
-		}
-
-		if len(applied) > 0 {
+		if changed {
 			if err := store.Save(ws); err != nil {
 				return nil, missing
 			}
 		}
+
+		// Plugins: reconcile each declared plugin's recorded components through the
+		// shared service. Template application reports a disabled plugin without
+		// enabling it (AllowEnable=false); enabling is an explicit user decision in
+		// manual attachment or repair.
+		if len(tools.Plugins) > 0 && b.pluginHandler != nil {
+			rec := pluginworkspace.New(b.pluginHandler.Manager(), store)
+			res, err := rec.Reconcile(pluginworkspace.Request{
+				WorkspaceID: workspaceID,
+				Plugins:     tools.Plugins,
+				AllowEnable: false,
+			})
+			if err == nil {
+				applied = append(applied, res.Applied...)
+				for _, pr := range res.Plugins {
+					switch pr.State {
+					case pluginworkspace.PluginStateMissing:
+						missing = append(missing, "plugin:"+pr.Name)
+					case pluginworkspace.PluginStateDisabled:
+						missing = append(missing, "plugin:"+pr.Name+" (globally disabled)")
+					case pluginworkspace.PluginStateDetached:
+						for _, c := range pr.Missing {
+							missing = append(missing, c.String())
+						}
+					}
+				}
+			}
+		}
+
 		return applied, missing
 	}
 }

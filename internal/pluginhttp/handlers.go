@@ -34,6 +34,12 @@ func newHandlerWithManager(mgr *plugin.Manager) *Handler {
 	return &Handler{mgr: mgr}
 }
 
+// Manager returns the underlying plugin manager so other subsystems (template
+// application, REAPER readiness, repair) inspect installed plugins and reconcile
+// workspace bindings through the same configured store the Plugins API uses,
+// rather than a separate hard-coded plugins/ lookup.
+func (h *Handler) Manager() *plugin.Manager { return h.mgr }
+
 // ListHandler handles GET /api/plugins.
 func (h *Handler) ListHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

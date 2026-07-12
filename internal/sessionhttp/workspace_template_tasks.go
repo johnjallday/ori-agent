@@ -10,6 +10,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -120,6 +121,25 @@ func (h *Handler) handleTemplateSetupStart(w http.ResponseWriter, r *http.Reques
 	if store == nil {
 		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "started": false, "reason": "no_task_store"})
 		return
+	}
+
+	// Gate on normalized readiness BEFORE reserving/writing the consumed marker.
+	// For a REAPER workspace, auto-start proceeds only when Ori is configured to
+	// attempt live control (ori_ready). Otherwise the setup task is left pending
+	// and unconsumed with a stable blocker reason, so a later readiness change
+	// (repair, enable, permission) still auto-starts it exactly once. Non-REAPER
+	// templates are not identified and keep the prior behavior.
+	if h.reaperResolver != nil {
+		if readiness, rerr := h.reaperResolver.Resolve(workspaceID); rerr == nil && readiness.Identified && readiness.Status != reapersetup.StatusOriReady {
+			_ = orihttp.RespondSuccess(w, map[string]any{
+				"success":          true,
+				"started":          false,
+				"reason":           "not_ready",
+				"readiness_status": string(readiness.Status),
+				"readiness":        readiness,
+			})
+			return
+		}
 	}
 
 	var (

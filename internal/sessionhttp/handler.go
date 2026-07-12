@@ -12,7 +12,9 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -49,6 +51,15 @@ type Handler struct {
 	// orchestration task handler); used by the template-setup first-open
 	// auto-start after the consumed marker is stamped.
 	templateSetupStarter func(workspaceID, taskID string) error
+
+	// REAPER setup: the normalized readiness resolver, the plugin lister used for
+	// the pre-create preview, and the shared reconciler used by repair. Injected
+	// by the server, which holds the plugin manager; nil when plugins are
+	// unavailable (the endpoints then report an unidentified/empty result).
+	reaperResolver     *reapersetup.Resolver
+	reaperPluginLister reapersetup.PluginLister
+	reaperReconciler   *pluginworkspace.Reconciler
+	reaperRepairer     *reapersetup.Repairer
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
@@ -108,6 +119,25 @@ func (h *Handler) SetTemplateToolApplier(fn func(workspaceID string, tools proje
 // per-agent tools (skills enabled on the agent; MCP servers on the workspace).
 func (h *Handler) SetAgentToolApplier(fn func(workspaceID, agentName string, tools projecttemplates.ToolDefaults) (applied, missing []string)) {
 	h.applyAgentTools = fn
+}
+
+// SetReaperSetup injects the normalized REAPER readiness resolver, the plugin
+// lister used for the pre-create preview, and the shared reconciler used by
+// repair. The server supplies these because the plugin manager lives there.
+func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reapersetup.PluginLister, reconciler *pluginworkspace.Reconciler, repairer *reapersetup.Repairer) {
+	h.reaperResolver = resolver
+	h.reaperPluginLister = lister
+	h.reaperReconciler = reconciler
+	h.reaperRepairer = repairer
+}
+
+// ReaperSetupWired reports whether the REAPER readiness resolver, preview lister,
+// and repairer have been injected. Used by build wiring tests to catch the
+// ordering bug where wiring ran before the workspace store existed (which left
+// every REAPER endpoint nil-guarded and the create preview stuck on
+// plugin_missing).
+func (h *Handler) ReaperSetupWired() bool {
+	return h.reaperResolver != nil && h.reaperPluginLister != nil && h.reaperRepairer != nil
 }
 
 // SetTemplatesRootResolver sets the resolver used to locate the project

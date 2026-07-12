@@ -98,6 +98,13 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.handleTemplateSetupStart(w, r, id)
 				return
 			}
+		case "reaper-setup":
+			if len(parts) == 3 && parts[2] == "repair" {
+				h.handleReaperRepair(w, r, id)
+				return
+			}
+			h.handleReaperReadiness(w, r, id)
+			return
 		}
 	}
 
@@ -270,6 +277,22 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolvedTemplate, err = applyTemplateAgentOverrides(resolvedTemplate, req.TemplateAgentOverrides)
 		if err != nil {
 			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+	}
+
+	// Required-plugin gate: a template that declares plugins requires them
+	// installed and enabled before creation, so the workspace is never created
+	// missing its required tools. Reject with a structured 409 naming what to
+	// install/enable; the create modal surfaces this and offers the install/enable
+	// actions.
+	if templateResolved {
+		if missing, disabled := h.unsatisfiedRequiredPlugins(resolvedTemplate.Tools); len(missing)+len(disabled) > 0 {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":            "required plugins are not ready",
+				"missing_plugins":  missing,
+				"disabled_plugins": disabled,
+			})
 			return
 		}
 	}
@@ -622,6 +645,26 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 			}
 		}
 	}
+
+	// Persist portable template provenance so features (REAPER readiness, repair)
+	// can identify the originating built-in without scanning filenames or task
+	// prose. Best-effort: a failure here never fails creation.
+	if tc.resolved && tc.template.Builtin && strings.TrimSpace(tc.template.ID) != "" && h.workspaceTaskStore != nil {
+		prov := &agentworkspace.TemplateProvenance{
+			TemplateID:   tc.template.ID,
+			TemplateName: tc.template.Name,
+			Builtin:      true,
+			Version:      tc.template.BuiltinVersion,
+			AppliedAt:    time.Now(),
+		}
+		if err := h.workspaceTaskStore.Update(ws.ID, func(w *agentworkspace.Workspace) error {
+			w.SetTemplateProvenance(prov)
+			return nil
+		}); err != nil {
+			logger.Warn("Failed to persist template provenance", logger.Fields{"id": ws.ID, "template": tc.template.ID, "error": err})
+		}
+	}
+
 	return projectWarning
 }
 

@@ -228,6 +228,11 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		b.sessionHandler.SetWorkspaceTaskStore(ws)
 	}
 
+	// Now that the workspace store (SyncStore) exists, wire REAPER readiness /
+	// preview / repair. Done here rather than in initializeHandlers because the
+	// store is created in this phase (Phase 18), after the handlers.
+	b.wireReaperSetup()
+
 	return nil
 }
 

@@ -4,7 +4,15 @@
   "icon": "🎵",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 3,
+  "builtin_version": 5,
+  "tools": {
+    "plugins": [
+      "reaper-plugin"
+    ],
+    "plugin_sources": {
+      "reaper-plugin": "https://github.com/johnjallday/reaper-plugin.git"
+    }
+  },
   "project_entry": {
     "relative_path": "{{name}}.rpp",
     "open_after_create_default": true

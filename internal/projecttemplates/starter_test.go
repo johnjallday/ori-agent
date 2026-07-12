@@ -47,8 +47,22 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if len(reaper.StarterTasks) == 0 || !reaper.StarterTasks[0].Setup {
 		t.Errorf("reaper starter should lead with a setup starter task: %+v", reaper.StarterTasks)
 	}
-	if reaper.BuiltinVersion < 3 {
-		t.Errorf("reaper starter builtin_version = %d, want at least 3", reaper.BuiltinVersion)
+	if reaper.BuiltinVersion < 5 {
+		t.Errorf("reaper starter builtin_version = %d, want at least 5 (declares reaper-plugin + source)", reaper.BuiltinVersion)
+	}
+	// The manifest declares reaper-plugin under top-level workspace tool defaults
+	// so creation attaches its components when installed.
+	if len(reaper.Tools.Plugins) != 1 || reaper.Tools.Plugins[0] != "reaper-plugin" {
+		t.Errorf("reaper starter must declare reaper-plugin in tool defaults, got %+v", reaper.Tools.Plugins)
+	}
+	// It also declares the exact install source so the create UI can offer a
+	// one-click, trust-previewed install without resolving a marketplace.
+	if src := reaper.Tools.PluginSource("reaper-plugin"); src == "" || !strings.Contains(src, "reaper-plugin") {
+		t.Errorf("reaper starter must declare a reaper-plugin install source, got %q", src)
+	}
+	// One authoritative Reaper Producer agent; no extra default agents.
+	if len(reaper.Agents) != 1 || reaper.Agents[0].Name != "Reaper Producer" {
+		t.Errorf("reaper starter must keep exactly one Reaper Producer agent, got %+v", reaper.Agents)
 	}
 	if reaper.ProjectEntry == nil || reaper.ProjectEntry.RelativePath != "{{name}}.rpp" || !reaper.ProjectEntry.OpenAfterCreateDefault {
 		t.Errorf("reaper starter project entry is not configured for default launch: %#v", reaper.ProjectEntry)

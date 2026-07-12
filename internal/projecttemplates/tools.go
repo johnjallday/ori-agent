@@ -17,19 +17,56 @@ type ToolDefaults struct {
 	Skills     []string `json:"skills,omitempty"`
 	MCPServers []string `json:"mcp_servers,omitempty"`
 	Plugins    []string `json:"plugins,omitempty"`
+	// PluginSources maps a declared plugin name to the exact source it installs
+	// from (a git URL or local path the plugin installer accepts). It lets the
+	// install UI offer a one-click, trust-previewed install without resolving a
+	// marketplace or asking the user to paste a source. Optional; a plugin
+	// without a declared source falls back to marketplace resolution / paste.
+	// Keys are matched case-insensitively against Plugins.
+	PluginSources map[string]string `json:"plugin_sources,omitempty"`
 }
 
-// IsEmpty reports whether no tools are declared.
+// IsEmpty reports whether no tools are declared. Plugin sources alone (with no
+// plugins) are not meaningful and do not count.
 func (t ToolDefaults) IsEmpty() bool {
 	return len(t.Skills) == 0 && len(t.MCPServers) == 0 && len(t.Plugins) == 0
 }
 
+// PluginSource returns the declared install source for a plugin name
+// (case-insensitive), or "" when none is declared.
+func (t ToolDefaults) PluginSource(name string) string {
+	if len(t.PluginSources) == 0 {
+		return ""
+	}
+	want := strings.ToLower(strings.TrimSpace(name))
+	for k, v := range t.PluginSources {
+		if strings.ToLower(strings.TrimSpace(k)) == want {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 func normalizeToolDefaults(t ToolDefaults) ToolDefaults {
-	return ToolDefaults{
+	out := ToolDefaults{
 		Skills:     normalizeNameList(t.Skills),
 		MCPServers: normalizeNameList(t.MCPServers),
 		Plugins:    normalizeNameList(t.Plugins),
 	}
+	if len(t.PluginSources) > 0 {
+		out.PluginSources = make(map[string]string, len(t.PluginSources))
+		for k, v := range t.PluginSources {
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if k != "" && v != "" {
+				out.PluginSources[k] = v
+			}
+		}
+		if len(out.PluginSources) == 0 {
+			out.PluginSources = nil
+		}
+	}
+	return out
 }
 
 // normalizeNameList trims, drops blanks, de-duplicates case-insensitively
