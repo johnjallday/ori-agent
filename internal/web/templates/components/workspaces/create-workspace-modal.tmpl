@@ -10,8 +10,10 @@
       <div class="modal-body workspace-create-modal-body">
         <div class="workspace-create-layout">
           <div class="workspace-create-main-fields">
-            <div class="d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
-              <label style="font-size: 12px; color: var(--text-secondary);">Template</label>
+
+            <!-- ===== SELECT BLUEPRINT: template grid + user templates ===== -->
+            <div class="workspace-create-section-header d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
+              <span class="workspace-create-section-title">Select Blueprint</span>
               <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
             </div>
             <div id="templatePicker" role="radiogroup" aria-label="Workspace template">
@@ -21,10 +23,32 @@
                 <div id="templateUserList" class="workspace-template-list mb-2"></div>
               </div>
             </div>
-            <div id="projectTemplateDescription" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
             <div id="projectTemplateEmptyHint" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" hidden></div>
-            <div style="margin-bottom: 12px; font-size: 12px; color: var(--text-secondary);">
-              Pick a template to set up the workspace. Some templates also scaffold a starter project folder; everything is optional and editable after creation.
+
+            <!-- ===== BRIEFING: selected template's description + what it deploys ===== -->
+            <div class="workspace-create-section-header" style="margin-bottom: 6px;">
+              <span class="workspace-create-section-title">Briefing</span>
+            </div>
+            <div id="templateBriefing" class="workspace-template-briefing mb-2">
+              <div id="templateBriefingDefault" class="workspace-template-briefing-default">
+                Pick a template to set up the workspace. Some templates also scaffold a starter project folder; everything is optional and editable after creation.
+              </div>
+              <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
+              <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
+                <div class="workspace-template-briefing-deploys-kicker">Deploys</div>
+                <div id="templateBriefingAgentsRow" class="workspace-template-briefing-row" hidden>
+                  <span class="workspace-template-briefing-row-label">Agents</span>
+                  <span id="templateBriefingAgentsValue" class="workspace-template-briefing-row-value"></span>
+                </div>
+                <div id="templateBriefingScaffoldRow" class="workspace-template-briefing-row" hidden>
+                  <span class="workspace-template-briefing-row-label">Project folder</span>
+                  <span id="templateBriefingScaffoldValue" class="workspace-template-briefing-row-value"></span>
+                </div>
+                <div id="templateBriefingAddonsRow" class="workspace-template-briefing-row workspace-template-briefing-row-addons" hidden>
+                  <span class="workspace-template-briefing-row-label">Add-ons</span>
+                  <div id="templateBriefingAddonsList" class="workspace-template-briefing-chips"></div>
+                </div>
+              </div>
             </div>
 
             <div id="projectTemplateOpenAfterCreate" class="workspace-setup-card mb-2" hidden>
@@ -67,6 +91,7 @@
               <div id="reaperSetupActions" class="reaper-setup-actions d-flex flex-wrap gap-2" style="margin-top: 8px;"></div>
             </div>
 
+            <!-- ===== Designation: name + description feed Ori's setup review ===== -->
             <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
             <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
             <div class="workspace-setup-card mb-2">
@@ -86,6 +111,7 @@
               <textarea id="folderContextInput" class="modern-input w-100" placeholder="Folder paths, source docs, launch notes, brand references" rows="2" style="resize: vertical;"></textarea>
             </div>
 
+            <!-- ===== Advanced: agent behavior, folder-as-template, group, tags, color ===== -->
             <details id="folderAdvancedDisclosure" class="workspace-advanced-details mb-2">
               <summary class="workspace-advanced-summary">
                 <span class="workspace-advanced-summary-title">Advanced</span>
@@ -109,8 +135,33 @@
                     Choose folder…
                   </button>
                 </div>
-                <div style="margin-top: -2px; font-size: 12px; color: var(--text-secondary);">
+                <div style="margin-top: -2px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
                   Scaffolds the chosen folder's files into the workspace as its project. Overrides the template selection above.
+                </div>
+
+                <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
+                <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
+                  <option value="">No group</option>
+                </select>
+                <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
+                  Optional. Choose a group for this workspace.
+                </div>
+
+                <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
+                <div id="folderTagsMount" class="mb-1"></div>
+                <div id="folderTemplateTagsHint" style="margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
+
+                <div class="folder-color-picker">
+                  <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
+                  <div id="folderColorOptions" class="folder-color-options mt-1">
+                    <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
+                    <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
+                    <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
+                  </div>
                 </div>
               </div>
             </details>
@@ -143,31 +194,6 @@
                     <button type="button" id="folderImportProceedDuplicateBtn" class="modern-btn modern-btn-primary" style="flex: 1;">Import Anyway</button>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <label for="folderParentSelect" style="font-size: 12px; color: var(--text-secondary);">Group (optional)</label>
-            <select id="folderParentSelect" class="modern-input w-100 mb-2" aria-label="Select workspace group" aria-describedby="folderParentHelp">
-              <option value="">No group</option>
-            </select>
-            <div id="folderParentHelp" style="margin-top: -6px; margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);">
-              Optional. Choose a group for this workspace.
-            </div>
-
-            <label style="font-size: 12px; color: var(--text-secondary);">Tags <span style="opacity: 0.8;">(optional)</span></label>
-            <div id="folderTagsMount" class="mb-1"></div>
-            <div id="folderTemplateTagsHint" style="margin-bottom: 10px; font-size: 12px; color: var(--text-secondary);" aria-live="polite" hidden></div>
-
-            <div class="folder-color-picker">
-              <label style="font-size: 12px; color: var(--text-secondary);">Color:</label>
-              <div id="folderColorOptions" class="folder-color-options mt-1">
-                <button type="button" class="folder-color-btn active" data-color="" title="Default" aria-label="Default color"></button>
-                <button type="button" class="folder-color-btn" data-color="#ef4444" title="Red" aria-label="Red color" style="background: #ef4444;"></button>
-                <button type="button" class="folder-color-btn" data-color="#f59e0b" title="Orange" aria-label="Orange color" style="background: #f59e0b;"></button>
-                <button type="button" class="folder-color-btn" data-color="#22c55e" title="Green" aria-label="Green color" style="background: #22c55e;"></button>
-                <button type="button" class="folder-color-btn" data-color="#3b82f6" title="Blue" aria-label="Blue color" style="background: #3b82f6;"></button>
-                <button type="button" class="folder-color-btn" data-color="#8b5cf6" title="Purple" aria-label="Purple color" style="background: #8b5cf6;"></button>
-                <button type="button" class="folder-color-btn" data-color="#ec4899" title="Pink" aria-label="Pink color" style="background: #ec4899;"></button>
               </div>
             </div>
 
