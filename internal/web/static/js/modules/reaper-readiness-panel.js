@@ -112,7 +112,11 @@
         return;
       }
       if (result.needs_install) {
-        window.open('/plugins?install=reaper-plugin', '_blank', 'noopener');
+        // Plugin missing: run the inline install, then re-check (which will
+        // attach on the next repair once installed+enabled).
+        setBusy(false);
+        installPlugin();
+        return;
       }
       await refresh();
     } catch (_) {
@@ -120,6 +124,24 @@
     } finally {
       setBusy(false);
     }
+  }
+
+  // installPlugin runs the shared inline reaper-plugin install into the card's
+  // actions area, then re-checks readiness (existing workspaces have no
+  // template-declared source, so it resolves a marketplace or takes a paste).
+  function installPlugin() {
+    const { actions } = els();
+    if (!actions) return;
+    if (!window.ReaperPluginInstall) {
+      window.open('/plugins?install=reaper-plugin', '_blank', 'noopener');
+      return;
+    }
+    window.ReaperPluginInstall.begin({
+      host: actions,
+      declaredSource: '',
+      onComplete: refresh,
+      onCancel: refresh
+    });
   }
 
   async function checkAgainAndStartSetup() {
@@ -264,11 +286,7 @@
         );
       }
       if (!r.plugin_installed) {
-        actions.appendChild(
-          button('Install plugin', {
-            onClick: () => window.open('/plugins?install=reaper-plugin', '_blank', 'noopener')
-          })
-        );
+        actions.appendChild(button('Install plugin', { primary: true, onClick: installPlugin }));
       }
       if (r.status === 'cli_agent_required' || r.status === 'native_cli_access_required') {
         actions.appendChild(

@@ -46,8 +46,17 @@ class FakeElement {
     (this._listeners.click || []).forEach(fn => fn());
   }
   querySelectorAll(sel) {
-    if (sel === 'button') return this.children.filter(c => c.tagName === 'BUTTON');
-    return [];
+    // Recurse like the real DOM so nested buttons/inputs are found.
+    const want = String(sel).toUpperCase();
+    const out = [];
+    const walk = el => {
+      el.children.forEach(c => {
+        if (c.tagName === want) out.push(c);
+        walk(c);
+      });
+    };
+    walk(this);
+    return out;
   }
 }
 
@@ -87,6 +96,7 @@ function setup() {
 
 const mod = await (async () => {
   setup();
+  await import('./reaper-plugin-install.js'); // shared installer the card delegates to
   await import('./reaper-setup-card.js');
   return globalThis.window.ReaperSetupCard;
 })();
@@ -218,7 +228,11 @@ test('inline install: resolve from marketplace, show trust, install, enable, unb
     .querySelectorAll('button')
     .find(b => b.textContent === 'Install & enable');
   assert.ok(confirmBtn, 'expected an Install & enable confirm button');
-  assert.match(doc.getElementById('reaperSetupDetail').textContent, /Skills: reaper-session-setup/);
+  // The shared installer renders the trust disclosure into the actions host.
+  assert.match(
+    doc.getElementById('reaperSetupActions').textContent,
+    /Skills: reaper-session-setup/
+  );
 
   // Confirm install -> installs, enables, re-checks -> ready + unblocked.
   confirmBtn.click();
@@ -247,10 +261,7 @@ test('inline install: no marketplace match falls back to a source input', async 
     .click();
   await flush();
   const actions = doc.getElementById('reaperSetupActions');
-  assert.ok(
-    actions.children.some(c => c.tagName === 'INPUT'),
-    'expected a source input'
-  );
+  assert.ok(actions.querySelectorAll('input').length > 0, 'expected a source input');
   assert.ok(
     actions
       .querySelectorAll('button')
