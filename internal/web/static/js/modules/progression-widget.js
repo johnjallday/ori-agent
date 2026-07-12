@@ -14,9 +14,14 @@
   let restore = null;
   let knownCompleted = null; // Set of completed quest IDs; null until first load.
   let knownTierComplete = {}; // tier number -> bool, from the previous render.
+  let latestStatus = null;
 
   function el(role) {
     return widget ? widget.querySelector(`[data-role="${role}"]`) : null;
+  }
+
+  function restoreEl(role) {
+    return restore ? restore.querySelector(`[data-role="${role}"]`) : null;
   }
 
   async function fetchStatus() {
@@ -47,15 +52,15 @@
   // Skipped on the very first load so a returning user isn't flooded.
   function announceChanges(status) {
     const completedNow = new Set();
-    (status.tiers || []).forEach((t) => {
-      (t.quests || []).forEach((q) => {
+    (status.tiers || []).forEach(t => {
+      (t.quests || []).forEach(q => {
         if (q.status === 'completed') completedNow.add(q.id);
       });
     });
 
     if (knownCompleted !== null) {
-      (status.tiers || []).forEach((t) => {
-        (t.quests || []).forEach((q) => {
+      (status.tiers || []).forEach(t => {
+        (t.quests || []).forEach(q => {
           if (q.status === 'completed' && !knownCompleted.has(q.id)) {
             toast(q.title, 'Quest complete');
           }
@@ -68,13 +73,61 @@
 
     knownCompleted = completedNow;
     knownTierComplete = {};
-    (status.tiers || []).forEach((t) => { knownTierComplete[t.tier] = !!t.complete; });
+    (status.tiers || []).forEach(t => {
+      knownTierComplete[t.tier] = !!t.complete;
+    });
+  }
+
+  function currentTier(status) {
+    return (
+      (status.tiers || []).find(tier => tier.tier === status.current_tier) ||
+      (status.tiers || [])[0] ||
+      null
+    );
+  }
+
+  function completedCount(tier) {
+    return (tier?.quests || []).filter(quest => quest.status === 'completed').length;
+  }
+
+  function setMeter(bar, completed, total) {
+    if (!bar) return;
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+    bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+
+    const meter = bar.closest('[role="progressbar"]');
+    if (meter) meter.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, percent))));
+  }
+
+  function tierInsignia(tier) {
+    const value = Number(tier);
+    return Number.isFinite(value) && value > 0 ? String(value).padStart(2, '0') : '—';
+  }
+
+  function renderRestoreBadge(status, current) {
+    const completed = status.all_complete ? status.total_count : completedCount(current);
+    const total = status.all_complete ? status.total_count : (current?.quests || []).length;
+    const tierLabel = status.all_complete ? 'All tiers complete' : `Tier ${status.current_tier}`;
+
+    const insignia = restoreEl('restore-insignia');
+    const tier = restoreEl('restore-tier');
+    const progress = restoreEl('restore-progress');
+    const meter = restoreEl('restore-meter');
+    if (insignia)
+      insignia.textContent = status.all_complete ? '✓' : tierInsignia(status.current_tier);
+    if (tier) tier.textContent = tierLabel;
+    if (progress) progress.textContent = `${completed}/${total}`;
+    if (meter) meter.style.width = `${total > 0 ? Math.round((completed / total) * 100) : 0}%`;
   }
 
   function render(status) {
     if (!widget) return;
+    latestStatus = status;
+
+    const current = currentTier(status);
 
     if (status.dismissed) {
+      renderRestoreBadge(status, current);
       widget.hidden = true;
       if (restore) restore.hidden = false;
       return;
@@ -84,26 +137,32 @@
     // All quests complete: compact congratulatory state.
     if (status.all_complete) {
       el('tier-name').textContent = 'All quests complete';
-      el('progress-label').textContent = `${status.total_count}/${status.total_count}`;
+      el('tier-insignia').textContent = '✓';
+      el('progress-label').textContent = 'Tier complete';
+      el('progress-count').textContent = `${status.total_count}/${status.total_count}`;
+      setMeter(el('progress-bar'), status.total_count, status.total_count);
       el('quests').innerHTML = '';
       el('why').textContent = "You've mastered the basics — Ori is all yours.";
       widget.hidden = false;
       return;
     }
 
-    const current = (status.tiers || []).find((t) => t.tier === status.current_tier)
-      || (status.tiers || [])[0];
     if (!current) {
       widget.hidden = true;
       return;
     }
 
     el('tier-name').textContent = current.name;
+    el('tier-insignia').textContent = tierInsignia(status.current_tier);
     el('progress-label').textContent = `Tier ${status.current_tier} of ${status.total_tiers}`;
+    const complete = completedCount(current);
+    const total = current.quests.length;
+    el('progress-count').textContent = `${complete}/${total}`;
+    setMeter(el('progress-bar'), complete, total);
 
     const list = el('quests');
     list.innerHTML = '';
-    current.quests.forEach((q) => {
+    current.quests.forEach(q => {
       const done = q.status === 'completed';
       const li = document.createElement('li');
       li.className = 'quest-item' + (done ? ' quest-item-done' : '');
@@ -149,20 +208,26 @@
     const dismissBtn = el('dismiss');
     if (dismissBtn) {
       dismissBtn.addEventListener('click', async () => {
-        widget.hidden = true;
-        if (restore) restore.hidden = false;
-        try { await postJSON('/api/progression/dismiss', { dismissed: true }); } catch (_) { /* ignore */ }
+        const optimistic = latestStatus ? { ...latestStatus, dismissed: true } : null;
+        if (optimistic) render(optimistic);
+        try {
+          const status = await postJSON('/api/progression/dismiss', { dismissed: true });
+          render(status);
+        } catch (_) {
+          if (latestStatus) render({ ...latestStatus, dismissed: false });
+        }
       });
     }
     if (restore) {
       const restoreBtn = restore.querySelector('[data-role="restore"]');
       if (restoreBtn) {
         restoreBtn.addEventListener('click', async () => {
-          restore.hidden = true;
           try {
             const status = await postJSON('/api/progression/dismiss', { dismissed: false });
             render(status);
-          } catch (_) { /* ignore */ }
+          } catch (_) {
+            /* ignore */
+          }
         });
       }
     }

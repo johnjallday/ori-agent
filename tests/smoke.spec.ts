@@ -50,12 +50,12 @@ test.describe('Smoke Tests', () => {
     }
   });
 
-  test('sidebar navigation is accessible', async ({ page }) => {
+  test('home uses navbar navigation without a sidebar', async ({ page }) => {
     await page.goto('/');
 
-    // Check sidebar exists
-    const sidebar = page.locator('.sidebar, [class*="sidebar"]').first();
-    await expect(sidebar).toBeVisible();
+    await expect(page.locator('.navbar').first()).toBeVisible();
+    await expect(page.locator('#sidebar')).toHaveCount(0);
+    await expect(page.locator('#sidebarToggle')).toHaveCount(0);
   });
 });
 
@@ -180,15 +180,314 @@ test.describe('Home First Run', () => {
     test.skip((data.workspaces || []).length !== 0, 'requires an empty workspace store');
 
     await page.goto('/');
-    await expect(page.locator('#homeFirstRunHero')).toBeVisible();
-    await expect(page.locator('#homeFirstRunStart')).toHaveText('Create Workspace');
+    await expect(page.locator('body.home-command-page')).toBeVisible();
+    await expect(page.locator('#homeAssistantCard')).toHaveAttribute('data-first-run', 'true');
+    await expect(page.locator('#homeDashboardSections')).toHaveAttribute('data-first-run', 'true');
+    await expect(page.locator('#homeFirstRunStart')).toContainText('Establish first workspace');
     await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
       'placeholder',
       'Plan a product launch…'
     );
-    await expect(
-      page.getByText('Create a workspace for a software project', { exact: true })
-    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Create a workspace' })).toBeVisible();
+    await expect(page.locator('#sidebar')).toHaveCount(0);
+  });
+
+  test('keeps the command-strip interaction contract on home', async ({ page }) => {
+    await page.goto('/');
+
+    await expect(page.locator('#homeAssistantCard')).toBeVisible();
+    await expect(page.locator('#homeAssistantCard h1')).toHaveCount(0);
+    await expect(page.locator('#homeAssistantInput')).toBeVisible();
+    await expect(page.locator('#homeAssistantSendBtn')).toBeVisible();
+    await expect(page.locator('.home-prompt-chip')).toHaveCount(3);
+    await expect(page.locator('#homeDashboardSections')).toBeVisible();
+  });
+
+  test('preserves quick-order chips, the command shortcut, and submit flow', async ({ page }) => {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+
+    await page.goto('/');
+    const input = page.locator('#homeAssistantInput');
+    const chip = page.locator('.home-prompt-chip').first();
+    const prompt = await chip.getAttribute('data-prompt');
+
+    await chip.focus();
+    await expect(chip).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(input).toHaveValue(prompt || '');
+
+    await page.keyboard.press('Control+j');
+    await expect(input).toBeFocused();
+
+    await input.fill('Summarize current operations');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#homeAssistantThinkingModal')).toHaveClass(/show/);
+  });
+
+  test('renders the bridge without browser console errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route(/\/api\/agents\?name=Ori$/, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ allow_web_search: false })
+      });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('.home-command-bridge')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps maximum bridge readouts inside a desktop viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+
+    const workspaces = Array.from({ length: 6 }, (_, index) => ({
+      id: `bridge-${index + 1}`,
+      name: `Bridge workspace ${index + 1}`,
+      updated_at: `2026-07-${String(11 - index).padStart(2, '0')}T12:00:00Z`,
+      agent_count: index + 1,
+      open_task_count: index === 1 ? 2 : 0,
+      needs_attention_count: index === 0 ? 1 : 0
+    }));
+    await page.route('**/api/workspaces', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ workspaces })
+      });
+    });
+    await page.route('**/api/orchestration/scheduled-tasks/upcoming**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          upcoming: Array.from({ length: 5 }, (_, index) => ({
+            task_name: `Scheduled operation ${index + 1}`,
+            workspace_id: `bridge-${index + 1}`,
+            workspace_name: `Bridge workspace ${index + 1}`,
+            agent_name: `Agent ${index + 1}`,
+            next_run: `2026-07-12T${String(13 + index).padStart(2, '0')}:00:00Z`
+          }))
+        })
+      });
+    });
+    await page.route('**/api/activity/recent**', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          events: Array.from({ length: 5 }, (_, index) => ({
+            kind: index === 0 ? 'task_completed' : 'note_edited',
+            description: `Operation event ${index + 1}`,
+            workspace_id: `bridge-${index + 1}`,
+            workspace_name: `Bridge workspace ${index + 1}`,
+            timestamp: `2026-07-12T${String(11 + index).padStart(2, '0')}:00:00Z`
+          }))
+        })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 3,
+          total_count: 3,
+          completed_count: 1,
+          dismissed: false,
+          all_complete: false,
+          tiers: [
+            {
+              tier: 1,
+              name: 'First contact',
+              quests: [
+                { id: 'bridge-q1', title: 'Establish a workspace', status: 'completed' },
+                {
+                  id: 'bridge-q2',
+                  title: 'Plan an operation',
+                  status: 'pending',
+                  action_url: '/workspaces'
+                },
+                { id: 'bridge-q3', title: 'Run a review', status: 'pending', action_url: '/review' }
+              ]
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('[data-role="workspace-card"]')).toHaveCount(6);
+    await expect(page.locator('.home-row')).toHaveCount(10);
+    await expect(page.locator('.home-status-led.is-attention')).toHaveCount(1);
+    await expect(page.locator('.home-status-led.is-working')).toHaveCount(1);
+    await expect(page.locator('#questLog')).toBeVisible();
+
+    for (const [width, height] of [
+      [1280, 800],
+      [1512, 805]
+    ]) {
+      await page.setViewportSize({ width, height });
+      const dimensions = await page.evaluate(() => ({
+        viewport: window.innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+        bodyHeight: document.body.scrollHeight
+      }));
+      expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewport + 1);
+      expect(dimensions.bodyHeight).toBeLessThanOrEqual(dimensions.viewport + 1);
+    }
+  });
+
+  test('collapses the quest log to a progress badge and restores it', async ({ page }) => {
+    const status = {
+      current_tier: 1,
+      total_tiers: 3,
+      total_count: 2,
+      completed_count: 1,
+      all_complete: false,
+      tiers: [
+        {
+          tier: 1,
+          name: 'First contact',
+          quests: [
+            { id: 'collapse-q1', title: 'Say hello to Ori', status: 'completed' },
+            {
+              id: 'collapse-q2',
+              title: 'Personalize Ori',
+              status: 'pending',
+              action_url: '/profile'
+            }
+          ]
+        }
+      ]
+    };
+    const dismisses: boolean[] = [];
+    let dismissed = false;
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression/dismiss', async route => {
+      const request = route.request().postDataJSON();
+      dismissed = Boolean(request.dismissed);
+      dismisses.push(dismissed);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...status, dismissed })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...status, dismissed })
+      });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#questLog')).toBeVisible();
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('1/2');
+
+    const collapse = page.locator('[data-role="dismiss"]');
+    await collapse.focus();
+    await expect(collapse).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#questLog')).toBeHidden();
+    await expect(page.locator('#questLogRestore')).toBeVisible();
+    await expect(page.locator('[data-role="restore-progress"]')).toHaveText('1/2');
+
+    await page.reload();
+    await expect(page.locator('#questLog')).toBeHidden();
+    await expect(page.locator('#questLogRestore')).toBeVisible();
+
+    const restore = page.locator('[data-role="restore"]');
+    await restore.focus();
+    await expect(restore).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#questLog')).toBeVisible();
+    await expect(page.locator('#questLogRestore')).toBeHidden();
+    expect(dismisses).toEqual([true, false]);
+  });
+
+  test('stacks bridge zones below desktop width without horizontal overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 960, height: 720 });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 3,
+          total_count: 2,
+          completed_count: 0,
+          dismissed: false,
+          all_complete: false,
+          tiers: [
+            {
+              tier: 1,
+              name: 'First contact',
+              quests: [
+                { id: 'responsive-q1', title: 'Say hello to Ori', status: 'pending' },
+                { id: 'responsive-q2', title: 'Create a workspace', status: 'pending' }
+              ]
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#homeDashboardSections')).toBeVisible();
+    await expect(page.locator('#questLog')).toBeVisible();
+
+    const layout = await page.evaluate(() => {
+      const board = document.getElementById('homeDashboardSections')?.getBoundingClientRect();
+      const progression = document.querySelector('.home-progression-zone')?.getBoundingClientRect();
+      return {
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        boardBottom: board?.bottom || 0,
+        progressionTop: progression?.top || 0
+      };
+    });
+    expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.progressionTop).toBeGreaterThanOrEqual(layout.boardBottom);
   });
 });
 

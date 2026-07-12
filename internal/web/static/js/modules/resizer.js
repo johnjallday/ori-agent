@@ -13,6 +13,11 @@ class SidebarResizer {
   }
 
   init() {
+    // The Command Bridge deliberately omits the sidebar. Avoid mutating global
+    // sidebar dimensions or dispatching resize events on pages without one.
+    if (!document.getElementById('sidebarResizeHandle') || !document.getElementById('sidebar')) {
+      return;
+    }
     this.bindEvents();
     this.setSidebarWidth(this.sidebarWidth);
   }

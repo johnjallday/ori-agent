@@ -113,6 +113,9 @@ if (typeof EventBus !== 'undefined') {
 
 // Main sidebar setup function that coordinates all modules
 function setupSidebar() {
+  if (!document.getElementById('sidebar')) {
+    return;
+  }
   sidebarLog.debug('Setting up sidebar functionality...');
 
   // Add hover effects to interactive items
@@ -289,6 +292,9 @@ function setupSidebarToggle() {
 
 // Initialize all sidebar modules and load data
 async function initializeSidebar() {
+  if (!document.getElementById('sidebar')) {
+    return;
+  }
   try {
     sidebarLog.debug('Initializing sidebar modules...');
 

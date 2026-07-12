@@ -36,6 +36,18 @@ body::before {
   z-index: -1;
 }
 
+/* The Command Bridge owns its own grid-backed tactical canvas. Keep the
+   gradient and decorative particles on every other page. */
+body.home-command-page {
+  background: var(--home-command-canvas, var(--bg-primary)) !important;
+}
+
+body.home-command-page::before {
+  content: none;
+  display: none;
+  animation: none;
+}
+
 @keyframes float {
   0%, 100% { transform: translateY(0px) rotate(0deg); }
   50% { transform: translateY(-10px) rotate(180deg); }
@@ -202,6 +214,14 @@ body::before {
     margin-left: 0;
     max-width: 100vw;
     width: 100vw;
+  }
+
+  /* Home omits the sidebar from the DOM, so the sibling selector above cannot
+     reset its desktop offset. Scope this reset strictly to the bridge. */
+  body.home-command-page .main-content {
+    margin-left: 0;
+    max-width: 100vw;
+    width: 100%;
   }
 }
 
