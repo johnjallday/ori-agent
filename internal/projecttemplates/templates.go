@@ -100,6 +100,12 @@ type Template struct {
 	Tags        []string `json:"tags,omitempty"`
 	// Icon is an optional emoji glyph shown on the create-modal picker card.
 	Icon string `json:"icon,omitempty"`
+	// Tagline is a one-line summary shown on the compact create-modal picker
+	// card. Falls back to Description (truncated) when absent.
+	Tagline string `json:"tagline,omitempty"`
+	// Addons are short recommended-addon labels (e.g. "Citations skill") shown
+	// as chips in the create-modal briefing panel's "deploys" readout.
+	Addons []string `json:"addons,omitempty"`
 	// BehaviorProfile is the workspace behavior profile (workspace_preset) a
 	// workspace created from this template defaults to. Always normalized to one
 	// of ValidBehaviorProfiles.
@@ -166,6 +172,8 @@ type manifest struct {
 	Description     string          `json:"description"`
 	Tags            []string        `json:"tags,omitempty"`
 	Icon            string          `json:"icon,omitempty"`
+	Tagline         string          `json:"tagline,omitempty"`
+	Addons          []string        `json:"addons,omitempty"`
 	BehaviorProfile string          `json:"behavior_profile,omitempty"`
 	StarterTasks    []StarterTask   `json:"starter_tasks,omitempty"`
 	ProjectEntry    json.RawMessage `json:"project_entry,omitempty"`
@@ -208,6 +216,8 @@ func newTemplate(path string) Template {
 	t.Description = strings.TrimSpace(m.Description)
 	t.Tags = workspace.NormalizeWorkspaceTags(m.Tags)
 	t.Icon = strings.TrimSpace(m.Icon)
+	t.Tagline = strings.TrimSpace(m.Tagline)
+	t.Addons = normalizeAddons(m.Addons)
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
@@ -261,6 +271,25 @@ func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 		setup := task.Setup && !haveSetup
 		haveSetup = haveSetup || setup
 		out = append(out, StarterTask{Description: desc, Details: strings.TrimSpace(task.Details), Setup: setup})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// normalizeAddons trims each recommended-addon label and drops empties.
+func normalizeAddons(addons []string) []string {
+	if len(addons) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(addons))
+	for _, addon := range addons {
+		addon = strings.TrimSpace(addon)
+		if addon == "" {
+			continue
+		}
+		out = append(out, addon)
 	}
 	if len(out) == 0 {
 		return nil

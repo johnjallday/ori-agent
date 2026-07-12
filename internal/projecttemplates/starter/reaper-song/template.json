@@ -1,10 +1,10 @@
 {
   "name": "Reaper Song",
   "description": "A minimal REAPER project seeded with a single .rpp file named after your project, created at 120 BPM and ready to adjust in chat.",
-  "icon": "🎵",
+  "icon": "\ud83c\udfb5",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 5,
+  "builtin_version": 6,
   "tools": {
     "plugins": [
       "reaper-plugin"
@@ -24,7 +24,7 @@
   "starter_tasks": [
     {
       "description": "Adjust the new REAPER session to the user's preferences",
-      "details": "## Created defaults\nThe project scaffold already created the workspace's one authoritative REAPER session file, `<project name>.rpp`, in the workspace project folder. It is set to 120 BPM in 4/4, with no tracks yet. Treat that existing scaffolded file as the song project and never create or initialize a second .rpp file.\n\n## Questions to ask\nTell the user what was created, then ask whether they want to change:\n- Tempo (BPM)\n- Musical key\nIf they are happy with the defaults, confirm and finish without changing anything.\n\n## Validation\n- Tempo must be between 40 and 240 BPM. If the user asks for something outside that range, say why and ask again.\n- Accept any conventional key spelling (e.g. \"A minor\", \"F# major\").\n\n## How to apply changes\nPrefer the reaper-session-setup skill only after live REAPER state and the required control interface are verified. An operating-system open request only asks the default application to open the project file; it does not prove that REAPER has finished opening it or that Web Remote is ready. If live control cannot be verified, say what is unavailable and ask the user to open or wait for REAPER, or enable the required Web Remote interface. Do not claim that live changes were applied.\n\nBefore falling back to direct file edits, explain that live REAPER state could not be verified and ask for the user's explicit confirmation. If they confirm, edit only the existing authoritative .rpp file (the tempo lives on its `TEMPO <bpm> 4 4` line), never create another project, and clearly describe the result as a file change rather than a verified live-session change. Record the chosen key in your summary (and in the session notes if asked) — the .rpp format has no key field.",
+      "details": "## Created defaults\nThe project scaffold already created the workspace's one authoritative REAPER session file, `<project name>.rpp`, in the workspace project folder. It is set to 120 BPM in 4/4, with no tracks yet. Treat that existing scaffolded file as the song project and never create or initialize a second .rpp file.\n\n## Questions to ask\nTell the user what was created, then ask whether they want to change:\n- Tempo (BPM)\n- Musical key\nIf they are happy with the defaults, confirm and finish without changing anything.\n\n## Validation\n- Tempo must be between 40 and 240 BPM. If the user asks for something outside that range, say why and ask again.\n- Accept any conventional key spelling (e.g. \"A minor\", \"F# major\").\n\n## How to apply changes\nPrefer the reaper-session-setup skill only after live REAPER state and the required control interface are verified. An operating-system open request only asks the default application to open the project file; it does not prove that REAPER has finished opening it or that Web Remote is ready. If live control cannot be verified, say what is unavailable and ask the user to open or wait for REAPER, or enable the required Web Remote interface. Do not claim that live changes were applied.\n\nBefore falling back to direct file edits, explain that live REAPER state could not be verified and ask for the user's explicit confirmation. If they confirm, edit only the existing authoritative .rpp file (the tempo lives on its `TEMPO <bpm> 4 4` line), never create another project, and clearly describe the result as a file change rather than a verified live-session change. Record the chosen key in your summary (and in the session notes if asked) \u2014 the .rpp format has no key field.",
       "setup": true
     },
     {
@@ -43,5 +43,6 @@
         ]
       }
     }
-  ]
+  ],
+  "tagline": "A minimal REAPER project at 120 BPM."
 }

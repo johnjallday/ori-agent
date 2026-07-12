@@ -1,10 +1,10 @@
 {
   "name": "Writing Project",
   "description": "An outline plus a chapters folder for long-form writing.",
-  "icon": "📝",
+  "icon": "\ud83d\udcdd",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
+  "builtin_version": 2,
   "tags": [
     "writing"
   ],
@@ -24,5 +24,6 @@
       "role": "validator",
       "system_prompt": "You edit prose for clarity, rhythm, and consistency while preserving the author's voice. Suggest tightening and fixes; never rewrite wholesale or flatten the style."
     }
-  ]
+  ],
+  "tagline": "An outline plus a chapters folder."
 }

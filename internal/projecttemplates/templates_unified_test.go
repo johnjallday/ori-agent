@@ -49,6 +49,55 @@ func TestNewTemplateParsesUnifiedFields(t *testing.T) {
 	}
 }
 
+// TestNewTemplateParsesTaglineAndAddons covers the create-modal briefing-panel
+// metadata: tagline (trimmed) and addons (trimmed, empties dropped, absent when
+// none remain).
+func TestNewTemplateParsesTaglineAndAddons(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "research", ManifestFileName), `{
+		"name": "Research Project",
+		"tagline": "  Synthesis docs, sources, weekly reading.  ",
+		"addons": ["  web search MCP  ", "", "   ", "Citations skill"]
+	}`)
+	writeFile(t, filepath.Join(dir, "writing", ManifestFileName), `{
+		"name": "Writing Project"
+	}`)
+
+	tpl, err := FindLibraryTemplate(dir, "research")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if tpl.Tagline != "Synthesis docs, sources, weekly reading." {
+		t.Errorf("Tagline = %q, want trimmed tagline", tpl.Tagline)
+	}
+	if want := []string{"web search MCP", "Citations skill"}; !equalStrings(tpl.Addons, want) {
+		t.Errorf("Addons = %#v, want %#v (trimmed, empties dropped)", tpl.Addons, want)
+	}
+
+	blank, err := FindLibraryTemplate(dir, "writing")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate: %v", err)
+	}
+	if blank.Tagline != "" {
+		t.Errorf("Tagline = %q, want empty when absent from manifest", blank.Tagline)
+	}
+	if blank.Addons != nil {
+		t.Errorf("Addons = %#v, want nil when absent from manifest", blank.Addons)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestNormalizeBehaviorProfile(t *testing.T) {
 	cases := map[string]string{
 		"general":          BehaviorProfileGeneral,
