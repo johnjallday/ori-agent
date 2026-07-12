@@ -46,6 +46,15 @@
   font-family: var(--wc-font-display);
 }
 
+/* The `hidden` attribute must win over Bootstrap display utilities (.d-flex
+   etc. use `display: … !important`), so JS toggling `.hidden` on a header/row
+   actually hides it — e.g. hiding the Select Blueprint header (a .d-flex row)
+   in import mode. Only applies while [hidden] is set; removing it restores the
+   element's normal display. */
+.workspace-create-modal [hidden] {
+  display: none !important;
+}
+
 /* ---------- chrome ---------- */
 .workspace-create-modal .modal-content {
   background: var(--wc-panel) !important;

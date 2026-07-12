@@ -294,7 +294,17 @@ const sessionManager = {
       btn.addEventListener('click', (e) => {
         document.querySelectorAll('.folder-color-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
+        this.updateBehaviorHint();
       });
+    });
+
+    // Group/Color/Tags live inside the Advanced disclosure now; refresh the
+    // collapsed summary hint when they change or when Advanced is toggled shut.
+    document.getElementById('folderParentSelect')?.addEventListener('change', () => {
+      this.updateBehaviorHint();
+    });
+    document.getElementById('folderAdvancedDisclosure')?.addEventListener('toggle', () => {
+      this.updateBehaviorHint();
     });
 
     const addFolderModal = document.getElementById('addFolderModal');
@@ -3701,12 +3711,30 @@ const sessionManager = {
     }
   },
 
-  // Refreshes the collapsed "Agent behavior: X" hint from the select value.
+  // Refreshes the collapsed "Agent behavior: X" hint from the select value,
+  // appending any non-default Group/Color/Tags picks so the collapsed Advanced
+  // section reflects what's set inside it.
   updateBehaviorHint() {
     const hint = document.getElementById('folderBehaviorHint');
     if (!hint) return;
     const profile = document.getElementById('folderPresetSelect')?.value || 'general';
-    hint.textContent = `Agent behavior: ${this.behaviorProfileLabel(profile)}`;
+    const parts = [`Agent behavior: ${this.behaviorProfileLabel(profile)}`];
+
+    const parentSelect = document.getElementById('folderParentSelect');
+    if (parentSelect && parentSelect.value) {
+      const label = parentSelect.options[parentSelect.selectedIndex]?.textContent?.trim();
+      if (label) parts.push(`Group: ${label}`);
+    }
+
+    const activeColor = document.querySelector('#addFolderModal .folder-color-btn.active');
+    if (activeColor && String(activeColor.dataset.color || '').trim()) {
+      parts.push('Color set');
+    }
+
+    const tagCount = window.WorkspaceTagsCard?.getPayloadFields?.().tags?.length || 0;
+    if (tagCount > 0) parts.push(`${tagCount} tag${tagCount === 1 ? '' : 's'}`);
+
+    hint.textContent = parts.join(' · ');
   },
 
   // Applies a Template's default Agent behavior to the select, unless the user
