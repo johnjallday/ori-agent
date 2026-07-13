@@ -6,6 +6,15 @@
  * modals and hidden shared hosts — see #workspace-detail-shared-hosts) and
  * renders into #workspaceCommandView.
  */
+// Shared task-presentation model — single source of truth for task status
+// predicates (and, in later groups, labels/counts/actions). The Map's status
+// predicates delegate here so no surface keeps a parallel copy (FR29).
+import {
+  isBlockedTask as sharedIsBlockedTask,
+  isNeedsInputTask as sharedIsNeedsInputTask,
+  isWorkingTask as sharedIsWorkingTask,
+  isQueuedTask as sharedIsQueuedTask
+} from './task-presentation.js';
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -2595,40 +2604,23 @@ export class WorkspaceCommandView {
       .toLowerCase();
   }
 
+  // These delegate to the shared task-presentation predicates so the Map no
+  // longer maintains its own copy. Behaviour is byte-identical to the prior
+  // inline logic (FR29, inert landing).
   isBlockedTask(task) {
-    const status = String(task?.status || '')
-      .trim()
-      .toLowerCase();
-    const humanLoop = this.taskHumanLoopState(task);
-    return status === 'blocked' || humanLoop === 'blocked';
+    return sharedIsBlockedTask(task);
   }
 
   isNeedsInputTask(task) {
-    const status = String(task?.status || '')
-      .trim()
-      .toLowerCase();
-    const humanLoop = this.taskHumanLoopState(task);
-    return (
-      status === 'waiting_for_choice' ||
-      humanLoop === 'waiting_for_choice' ||
-      task?.context?.execution_step_waiting === true
-    );
+    return sharedIsNeedsInputTask(task);
   }
 
   isWorkingTask(task) {
-    return (
-      String(task?.status || '')
-        .trim()
-        .toLowerCase() === 'in_progress'
-    );
+    return sharedIsWorkingTask(task);
   }
 
   isQueuedTask(task) {
-    return (
-      String(task?.status || '')
-        .trim()
-        .toLowerCase() === 'pending'
-    );
+    return sharedIsQueuedTask(task);
   }
 
   taskPriority(task) {
