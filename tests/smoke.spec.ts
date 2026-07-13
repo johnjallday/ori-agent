@@ -50,12 +50,22 @@ test.describe('Smoke Tests', () => {
     }
   });
 
-  test('home uses navbar navigation without a sidebar', async ({ page }) => {
+  test('home exposes the shared sidebar navigation', async ({ page }) => {
     await page.goto('/');
 
     await expect(page.locator('.navbar').first()).toBeVisible();
-    await expect(page.locator('#sidebar')).toHaveCount(0);
-    await expect(page.locator('#sidebarToggle')).toHaveCount(0);
+    const sidebar = page.locator('#sidebar');
+    const sidebarToggle = page.locator('#sidebarToggle');
+
+    await expect(sidebar).toHaveCount(1);
+    await expect(sidebarToggle).toBeVisible();
+    await expect(sidebarToggle).toHaveAttribute('aria-expanded', 'false');
+
+    await sidebarToggle.click();
+
+    await expect(sidebar).toBeVisible();
+    await expect(sidebarToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(sidebar.getByRole('link', { name: 'Workflows' })).toBeVisible();
   });
 });
 
@@ -189,7 +199,8 @@ test.describe('Home First Run', () => {
       'Plan a product launch…'
     );
     await expect(page.getByRole('button', { name: 'Create a workspace' })).toBeVisible();
-    await expect(page.locator('#sidebar')).toHaveCount(0);
+    await expect(page.locator('#sidebar')).toHaveCount(1);
+    await expect(page.locator('#sidebarToggle')).toBeVisible();
   });
 
   test('keeps the command-strip interaction contract on home', async ({ page }) => {

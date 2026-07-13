@@ -225,10 +225,8 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	data.Extra["WorkspaceCount"] = workspaceCount
 	data.Extra["IsFirstRun"] = workspaceCount == 0
-	// Home is a dedicated command bridge rather than a second navigation shell.
-	// Keep sidebar behavior on every other page unchanged.
-	data.ShowSidebarToggle = false
-	data.Extra["HideSidebar"] = true
+	// Keep the command bridge as the home surface while retaining the shared
+	// application navigation, including its sidebar and navbar toggle.
 	data.Extra["HomeCommandBridge"] = true
 
 	s.renderAndWritePage(w, "index", data)
