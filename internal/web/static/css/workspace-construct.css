@@ -371,6 +371,51 @@
   color: var(--wc-ink-dim);
 }
 
+/* Agent chips: a role-hued dot + name. --wc-agent-dot carries the role hue,
+   defaulting to a neutral for specialists/unknown roles. */
+.workspace-create-modal .workspace-template-briefing-agent-chip {
+  --wc-agent-dot: var(--wc-ink-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 2px 8px 2px 7px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-2);
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-briefing-agent-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--wc-agent-dot);
+  background: transparent;
+}
+/* Role hues. */
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="orchestrator"] { --wc-agent-dot: var(--wc-faction); }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="researcher"] { --wc-agent-dot: #6cb2ff; }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="validator"] { --wc-agent-dot: #e5b567; }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="synthesizer"] { --wc-agent-dot: #b892ff; }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="analyzer"] { --wc-agent-dot: #5fd0c8; }
+/* Validator reads as a "checkpoint": a mid-filled dot (◉) vs the hollow default. */
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="validator"] .workspace-template-briefing-agent-dot {
+  background: color-mix(in srgb, var(--wc-agent-dot) 55%, transparent);
+}
+/* Entry agent: the lead — solid green dot and a brighter chip. */
+.workspace-create-modal .workspace-template-briefing-agent-chip.is-entry {
+  --wc-agent-dot: var(--wc-faction);
+  border-color: var(--wc-line-bright);
+  background: color-mix(in srgb, var(--wc-faction) 9%, transparent);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-template-briefing-agent-chip.is-entry .workspace-template-briefing-agent-dot {
+  background: var(--wc-faction);
+  border-color: var(--wc-faction);
+}
+
 .workspace-create-modal .workspace-template-agent-review {
   background: rgba(70, 211, 154, 0.06);
   border-color: var(--wc-faction-deep);
