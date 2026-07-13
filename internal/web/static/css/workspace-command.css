@@ -4456,6 +4456,26 @@
   outline-offset: 3px;
 }
 
+.ws-cmd-drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-cmd-drawer-add {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-working);
+  background: transparent;
+  border: 1px solid var(--ws-working);
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-drawer-add:hover {
+  background: var(--ws-faction-deep);
+}
+
 .ws-cmd-drawer-close {
   background: transparent;
   border: 1px solid var(--ws-line);

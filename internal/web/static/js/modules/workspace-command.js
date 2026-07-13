@@ -58,6 +58,7 @@ export class WorkspaceCommandView {
     this.taskDrawerTrigger = null;
     this.taskDrawerFilter = FILTER.ACTIONABLE;
     this.taskDrawerSelectedId = '';
+    this._drawerAnnounce = '';
     // Quick "New Quest" composer on the operations map (create task → entry-agent default).
     this.taskComposerOpen = false;
     this.taskComposerDraft = '';
@@ -2997,6 +2998,12 @@ export class WorkspaceCommandView {
         this.closeTaskDrawer();
         return;
       }
+      if (event.target.closest('[data-cmd-drawer-add]')) {
+        // Reuse the Map's New Quest composer — create a task without leaving
+        // Map mode (FR23). The composer floats over the Map beside the drawer.
+        if (typeof this.openTaskComposer === 'function') this.openTaskComposer();
+        return;
+      }
       const filterBtn = event.target.closest('[data-cmd-drawer-filter]');
       if (filterBtn) {
         this.setDrawerFilter(filterBtn.getAttribute('data-cmd-drawer-filter'));
@@ -3018,9 +3025,22 @@ export class WorkspaceCommandView {
     return el;
   }
 
+  // If the selected task vanished on a live refresh (deleted/became unavailable),
+  // announce it and pick the next task by deterministic order (FR27).
+  reconcileDrawerSelection() {
+    this._drawerAnnounce = '';
+    if (!this.taskDrawerSelectedId) return;
+    const stillHere = this.drawerTasks().some(t => String(t.id || '') === this.taskDrawerSelectedId);
+    if (stillHere) return;
+    this._drawerAnnounce = 'The selected task is no longer available.';
+    const next = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
+    this.taskDrawerSelectedId = next ? String(next.id || '') : '';
+  }
+
   renderTaskDrawerBody() {
     const el = this.ensureTaskDrawer();
     if (!el || el.hidden) return;
+    this.reconcileDrawerSelection();
     // Preserve list scroll across body repaints (live refresh — FR25).
     const prevList = el.querySelector('.ws-cmd-drawer-list');
     const prevScroll = prevList ? prevList.scrollTop : 0;
@@ -3059,8 +3079,14 @@ export class WorkspaceCommandView {
     return (
       '<header class="ws-cmd-drawer-head">' +
       '<h2 class="ws-cmd-drawer-title" tabindex="-1">Tasks</h2>' +
+      '<div class="ws-cmd-drawer-head-actions">' +
+      '<button type="button" class="ws-cmd-drawer-add" data-cmd-drawer-add aria-label="Add task">＋ Add Task</button>' +
       '<button type="button" class="ws-cmd-drawer-close" data-cmd-drawer-close aria-label="Close tasks">×</button>' +
+      '</div>' +
       '</header>' +
+      '<div class="ws-cmd-drawer-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
+      escapeHtml(this._drawerAnnounce || '') +
+      '</div>' +
       '<div class="ws-cmd-drawer-filters" role="group" aria-label="Filter tasks">' +
       filters +
       '</div>' +

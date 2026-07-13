@@ -127,3 +127,29 @@ test('runDrawerAction routes view_result to showTaskResult', () => {
   view.runDrawerAction('view_result', 'c-done');
   assert.deepEqual(calls, ['c-done']);
 });
+
+test('drawer header exposes an Add Task entry point and a polite live region (FR23, FR27)', () => {
+  const view = makeView(tasks);
+  const html = view.taskDrawerHTML();
+  assert.ok(html.includes('data-cmd-drawer-add'), 'in-drawer Add Task control present');
+  assert.match(html, /aria-live="polite"/, 'polite live region for announcements');
+});
+
+test('reconcileDrawerSelection announces and reselects when the selection vanishes (FR27)', () => {
+  const view = makeView(tasks);
+  view.taskDrawerSelectedId = 'ghost-task';
+  view.reconcileDrawerSelection();
+  assert.match(view._drawerAnnounce, /no longer available/);
+  assert.ok(
+    view.drawerTasks().some(t => t.id === view.taskDrawerSelectedId),
+    'a present task is selected in place of the vanished one'
+  );
+});
+
+test('reconcileDrawerSelection is silent when the selection still exists', () => {
+  const view = makeView(tasks);
+  view.taskDrawerSelectedId = 'a-run';
+  view.reconcileDrawerSelection();
+  assert.equal(view._drawerAnnounce, '');
+  assert.equal(view.taskDrawerSelectedId, 'a-run');
+});
