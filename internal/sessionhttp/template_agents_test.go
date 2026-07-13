@@ -289,6 +289,40 @@ func TestSeedTemplateAgents_EmptyRosterNoop(t *testing.T) {
 	}
 }
 
+func TestBlankWorkspaceTemplate_SeedsSingleEntryAgent(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	tpl := blankWorkspaceTemplate()
+	if !tpl.HasAgents() || len(tpl.Agents) != 1 {
+		t.Fatalf("expected exactly one blank roster agent, got %d", len(tpl.Agents))
+	}
+
+	ws := &session.Workspace{ID: "ws-blank", Name: "Plain"}
+	res := handler.seedTemplateAgents(ws, tpl)
+
+	if !res.EntrySet {
+		t.Fatal("expected the blank Workspace Manager to be set as entry agent")
+	}
+	if got := currentWorkspaceEntryAgentName(ws); got != blankWorkspaceEntryAgentName {
+		t.Fatalf("expected entry agent %q, got %q", blankWorkspaceEntryAgentName, got)
+	}
+	created, ok := handler.agentStore.GetAgent(blankWorkspaceEntryAgentName)
+	if !ok {
+		t.Fatalf("expected agent %q to be created", blankWorkspaceEntryAgentName)
+	}
+	if strings.TrimSpace(created.Settings.SystemPrompt) == "" {
+		t.Fatal("expected the blank entry agent to carry a system prompt")
+	}
+
+	// The plan the review panel renders must advertise the single entry agent.
+	plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
+	if !plan.HasAgents || plan.EntryAgentName != blankWorkspaceEntryAgentName {
+		t.Fatalf("expected plan entry %q, got has_agents=%v entry=%q",
+			blankWorkspaceEntryAgentName, plan.HasAgents, plan.EntryAgentName)
+	}
+}
+
 func TestCanonicalAgentTypeAndRole(t *testing.T) {
 	if got := canonicalAgentType("General"); got != agent.TypeGeneral {
 		t.Fatalf("type General -> %q", got)

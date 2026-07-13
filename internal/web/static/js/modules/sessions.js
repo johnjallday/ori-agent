@@ -3314,9 +3314,14 @@ const sessionManager = {
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
     const templatePath = String(fields.template_path || '').trim();
+    // Blank ships a synthetic single-agent roster (Workspace Manager). It has no
+    // template_id/path, so signal it explicitly — but an ad-hoc folder override
+    // (template_path) takes precedence and is no longer "blank".
+    const isBlank = Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank)
+      && !templateId && !templatePath;
     const requestId = ++this.templateAgentPlanRequestId;
 
-    if (this.importModeEnabled || (!templateId && !templatePath)) {
+    if (this.importModeEnabled || (!templateId && !templatePath && !isBlank)) {
       this.resetTemplateAgentReview();
       return;
     }
@@ -3328,7 +3333,8 @@ const sessionManager = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           template_id: templateId || undefined,
-          template_path: templatePath || undefined
+          template_path: templatePath || undefined,
+          blank: isBlank || undefined
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -4013,7 +4019,14 @@ const sessionManager = {
           // Optional project scaffolding from the template picker
           // (template_id/template_path). The scaffolded project folder name
           // defaults to the workspace name server-side.
-          Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+          const templateFields = window.ProjectTemplateCard.getPayloadFields();
+          Object.assign(payload, templateFields);
+          // Blank blueprint (no template_id/path, no ad-hoc folder override):
+          // tell the backend to seed the synthetic single-agent roster.
+          if (window.ProjectTemplateCard.getSelectedTemplate?.()?.blank
+            && !templateFields.template_id && !templateFields.template_path) {
+            payload.blank = true;
+          }
         }
         if (this.templateAgentPlan?.has_agents) {
           const createTemplateAgents = Boolean(document.getElementById('templateAgentReviewToggle')?.checked);
