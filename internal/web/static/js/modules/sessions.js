@@ -3770,6 +3770,11 @@ const sessionManager = {
     const nextBtn = document.getElementById('wizardNextBtn');
     const createBtn = document.getElementById('createFolderBtn');
 
+    // The workspace name field is a single element relocated to the visible
+    // step's mount, so it's the first input on Select Blueprint yet stays
+    // editable on Construct (and in import mode's single-step layout).
+    this.relocateWizardNameField(step);
+
     if (step1) step1.hidden = importMode || step !== 1;
     if (step2) step2.hidden = step !== 2;
     if (stepper) stepper.hidden = importMode;
@@ -3786,6 +3791,18 @@ const sessionManager = {
     // The step-2 recap names the chosen blueprint; import mode has no blueprint.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode;
+  },
+
+  // Moves the single #wizardNameField (which owns #folderNameInput) into the
+  // mount for the given effective step. appendChild preserves the input's value,
+  // focus, and listeners, so no cross-step syncing is needed.
+  relocateWizardNameField(step) {
+    const field = document.getElementById('wizardNameField');
+    if (!field) return;
+    const mount = document.getElementById(step === 2 ? 'wizardStep2NameMount' : 'wizardStep1NameMount');
+    if (mount && field.parentElement !== mount) {
+      mount.appendChild(field);
+    }
   },
 
   // Sets the step-2 recap line ("Constructing: <icon> <name>") from the selected

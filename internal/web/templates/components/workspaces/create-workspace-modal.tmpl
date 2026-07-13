@@ -24,6 +24,18 @@
 
             <!-- ===== STEP 1 · SELECT BLUEPRINT: template grid + user templates ===== -->
             <div id="wizardStep1">
+
+              <!-- Workspace name: the first input users reach. This is the single
+                   canonical #folderNameInput; refreshWizardChrome() relocates the
+                   #wizardNameField wrapper into #wizardStep2NameMount on Construct
+                   so the same field stays editable there (no dueling inputs). -->
+              <div id="wizardStep1NameMount">
+                <div id="wizardNameField" class="workspace-create-name-field mb-3">
+                  <label for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
+                  <input type="text" id="folderNameInput" class="modern-input w-100" placeholder="Name your workspace">
+                </div>
+              </div>
+
               <div id="workspaceCreateBlueprintHeader" class="workspace-create-section-header d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
                 <span class="workspace-create-section-title">Select Blueprint</span>
                 <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
@@ -78,6 +90,10 @@
                 <span id="wizardStep2RecapName" class="workspace-create-recap-name">Blank workspace</span>
               </div>
 
+              <!-- Editable workspace name on Construct. #wizardNameField is moved
+                   here from step 1 by refreshWizardChrome(); this is just its mount. -->
+              <div id="wizardStep2NameMount" class="mb-2"></div>
+
               <div id="projectTemplateOpenAfterCreate" class="workspace-setup-card mb-2" hidden>
                 <label class="d-flex align-items-start gap-2 mb-0" for="projectTemplateOpenAfterCreateToggle" style="cursor: pointer;">
                   <input type="checkbox" id="projectTemplateOpenAfterCreateToggle" class="form-check-input mt-1">
@@ -118,9 +134,8 @@
                 <div id="reaperSetupActions" class="reaper-setup-actions d-flex flex-wrap gap-2" style="margin-top: 8px;"></div>
               </div>
 
-              <!-- Designation: name + description feed Ori's setup review. -->
-              <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
-              <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
+              <!-- Designation: name (relocated above via #wizardStep2NameMount) +
+                   description feed Ori's setup review. -->
               <div class="workspace-setup-card mb-2">
                 <div class="workspace-setup-header" style="align-items: flex-start;">
                   <div>
