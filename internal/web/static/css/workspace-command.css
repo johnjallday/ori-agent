@@ -21,6 +21,25 @@
   --ws-line: #262931;
   --ws-line-bright: #363a45;
 
+  /* ---- overlay layer scale ----
+     Single documented z-index scale for the workspace detail surface, mirroring
+     the LAYER constants in workspace-overlay-coordinator.js. New surfaces
+     (drawer/tray/modal/menu/toast) reference these tokens instead of inventing
+     local z-index values. The two `legacy` tokens below preserve the CURRENT
+     stacking (map window 10010 / stat modal 1050) so this change is inert; they
+     get folded into the scale in group 3 when the task drawer replaces the
+     in-map task-manager modal flow and the ordering can be verified end-to-end. */
+  --wsx-layer-map: 100;
+  --wsx-layer-drawer: 200;
+  --wsx-layer-tray: 300;
+  --wsx-layer-popover: 900;
+  --wsx-layer-modal-backdrop: 1000;
+  --wsx-layer-modal: 1010;
+  --wsx-layer-menu: 1100;
+  --wsx-layer-toast: 2000;
+  --wsx-layer-legacy-map-window: 10010;
+  --wsx-layer-legacy-stat-modal: 1050;
+
   /* ink */
   --ws-ink: #d6d9de;
   --ws-ink-dim: #8b909a;
@@ -730,7 +749,7 @@
 .ws-cmd-map-window-backdrop {
   position: fixed;
   inset: clamp(76px, 10vh, 112px) 16px 16px;
-  z-index: 10010;
+  z-index: var(--wsx-layer-legacy-map-window);
   display: grid;
   place-items: start center;
   padding: 28px;
@@ -3637,7 +3656,7 @@
 .ws-cmd-modal {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: var(--wsx-layer-legacy-stat-modal);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -165,6 +165,8 @@ export default defineConfig([
       'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/workspace-tags-card.js',
       'internal/web/static/js/modules/workspace-command.js',
+      'internal/web/static/js/modules/workspace-execution-controller.js',
+      'internal/web/static/js/modules/workspace-overlay-coordinator.js',
     ],
     languageOptions: {
       sourceType: 'module'
