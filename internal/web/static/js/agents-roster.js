@@ -344,14 +344,19 @@
     // fall back to free text so the field always works.
     var hasCatalog = Array.isArray(state.providers) && state.providers.length > 0;
     var modelControl = hasCatalog
-      ? modelSelectInput('ov-model', detail.model || '')
+      ? modelSelectInput('ov-model', detail.model || '', detail.provider || '')
       : textInput('ov-model', detail.model || '');
+    // With the picker, provider is derived from the chosen model, so it is shown
+    // read-only. Without a catalog (text fallback) it stays editable.
+    var providerControl = hasCatalog
+      ? readonlyInput('ov-provider', detail.provider || '', 'Set by the selected model')
+      : textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…');
 
     els.overviewFacts.innerHTML =
       '<form class="stage-form" id="overviewForm" novalidate>' +
       field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
       field('Model', modelControl, 'ov-model') +
-      field('Provider', textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…'), 'ov-provider') +
+      field('Provider', providerControl, 'ov-provider') +
       field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1'), 'ov-temperature') +
       field('Reasoning effort', selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; }), 'ov-reasoning') +
       field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'), 'ov-maxtokens') +
@@ -943,6 +948,12 @@
     return '<input id="' + id + '" type="text" value="' + esc(value) + '"' +
       (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '>';
   }
+  // A read-only text input for derived values (e.g. Provider, set by the model).
+  // Kept as an <input> so the form still submits its value, but not user-editable.
+  function readonlyInput(id, value, title) {
+    return '<input id="' + id + '" class="field__readonly" type="text" readonly tabindex="-1" value="' + esc(value) + '"' +
+      (title ? ' title="' + esc(title) + '"' : '') + '>';
+  }
   function numInput(id, value, min, max, step) {
     return '<input id="' + id + '" type="number" value="' + esc(value === '' ? '' : value) + '"' +
       (min !== '' ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '') + '>';
@@ -964,7 +975,7 @@
   // carries data-provider so the Provider field can follow the chosen model. A
   // model that isn't in the catalog (custom, or a provider without a key) is
   // preserved under a "Current" group so switching to a picker never drops it.
-  function modelSelectInput(id, currentValue) {
+  function modelSelectInput(id, currentValue, currentProvider) {
     var providers = state.providers || [];
     var groups = '';
     var matched = false;
@@ -984,7 +995,8 @@
     });
     if (currentValue && !matched) {
       groups = '<optgroup label="Current">' +
-        '<option value="' + esc(currentValue) + '" selected>' + esc(currentValue) + '</option>' +
+        '<option value="' + esc(currentValue) + '" data-provider="' + esc(currentProvider || '') + '" selected>' +
+        esc(currentValue) + '</option>' +
         '</optgroup>' + groups;
     }
     return '<select id="' + id + '">' + groups + '</select>';

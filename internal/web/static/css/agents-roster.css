@@ -541,6 +541,17 @@
 
 .field__control textarea { resize: vertical; line-height: 1.5; }
 
+/* Read-only derived field (e.g. Provider, set by the selected model). */
+.field__control input.field__readonly {
+  background: var(--bg-secondary, #f3f4f6);
+  color: var(--text-secondary, #6b7280);
+  cursor: default;
+}
+.field__control input.field__readonly:focus-visible {
+  outline: none;
+  border-color: var(--border-color, #d1d5db);
+}
+
 .stage-textarea {
   width: 100%;
   resize: vertical;
@@ -651,6 +662,10 @@
 [data-bs-theme="dark"] .field__control textarea,
 [data-bs-theme="dark"] .stage-textarea {
   background: rgba(255, 255, 255, 0.04);
+}
+[data-bs-theme="dark"] .field__control input.field__readonly {
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--text-secondary, #9ca3af);
 }
 
 @media (max-width: 560px) {
