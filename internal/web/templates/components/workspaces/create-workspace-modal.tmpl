@@ -32,7 +32,8 @@
               <div id="wizardStep1NameMount">
                 <div id="wizardNameField" class="workspace-create-name-field mb-3">
                   <label for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
-                  <input type="text" id="folderNameInput" class="modern-input w-100" placeholder="Name your workspace">
+                  <input type="text" id="folderNameInput" class="modern-input w-100" placeholder="Name your workspace" aria-describedby="workspaceNameHint">
+                  <div id="workspaceNameHint" class="workspace-create-name-hint" aria-live="polite"></div>
                 </div>
               </div>
 
@@ -59,7 +60,7 @@
               </div>
               <div id="templateBriefing" class="workspace-template-briefing mb-2">
                 <div id="templateBriefingDefault" class="workspace-template-briefing-default">
-                  Starting from a blank workspace. You can add tools, agents, and structure after it's created.
+                  Starting from a blank workspace with a Workspace Manager agent. You can add tools, more agents, and structure after it's created.
                 </div>
                 <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
                 <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
@@ -139,7 +140,7 @@
               <div class="workspace-setup-card mb-2">
                 <div class="workspace-setup-header" style="align-items: flex-start;">
                   <div>
-                    <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description</label>
+                    <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
                     <p class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
                   </div>
                 </div>

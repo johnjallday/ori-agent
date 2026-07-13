@@ -240,6 +240,21 @@
   color: var(--wc-faction);
 }
 
+/* ---------- workspace name hint / inline error ---------- */
+.workspace-create-modal .workspace-create-name-hint {
+  margin-top: 5px;
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-create-name-hint.is-error {
+  color: var(--wc-alert, #e5675b);
+}
+.workspace-create-modal .modern-input.is-invalid {
+  border-color: var(--wc-alert, #e5675b);
+}
+
 /* ---------- wizard stepper (Select Blueprint → Construct) ---------- */
 .workspace-create-modal .workspace-create-stepper {
   display: flex;

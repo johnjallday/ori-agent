@@ -232,6 +232,24 @@ const sessionManager = {
       if (!this.importModeEnabled) this.goToWizardStep(2);
     });
 
+    // Name field: live folder-slug preview, clear the inline error on edit, and
+    // Enter to advance (step 1) or create (step 2). The field is a single
+    // relocated element, so binding once covers both steps.
+    const workspaceNameInput = document.getElementById('folderNameInput');
+    workspaceNameInput?.addEventListener('input', () => {
+      this.clearWorkspaceNameError();
+      this.updateWorkspaceNameHint();
+    });
+    workspaceNameInput?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (this.importModeEnabled || this.wizardStep === 2) {
+        this.createFolder();
+      } else {
+        this.goToWizardStep(2);
+      }
+    });
+
     // Agent behavior (formerly "Workspace preset"): a manual change marks the
     // value as overridden so picking a Template won't clobber it.
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
@@ -247,6 +265,7 @@ const sessionManager = {
       this.workspaceTemplate = template;
       this.prefillTemplateValue(document.getElementById('folderNameInput'), template?.name || '', 'autofillName');
       this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
+      this.updateWorkspaceNameHint();
       this.applyTemplateBehavior(template);
       this.updateWizardRecap(template);
       void this.refreshTemplateAgentPlan();
@@ -3224,6 +3243,7 @@ const sessionManager = {
       String(modalElement.dataset.askOriPostCreate || '') === 'open_workspace_dashboard'
     );
 
+    this.clearWorkspaceNameError();
     if (!keepSeedValues) {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
@@ -3271,6 +3291,9 @@ const sessionManager = {
     this.resetTemplateAgentReview();
     window.ReaperSetupCard?.hide?.();
     this.updateBehaviorHint();
+    // Refresh the folder-slug preview now that the name value is settled (the
+    // ProjectTemplateCard reset above may have re-prefilled it).
+    this.updateWorkspaceNameHint();
   },
 
   resetTemplateAgentReview() {
@@ -3417,9 +3440,11 @@ const sessionManager = {
     if (status) {
       const provider = String(plan.system_provider || '').trim();
       const model = String(plan.system_model || '').trim();
+      // Applies to any blueprint's roster, not just Blank — the message names
+      // where agents without an explicit model get theirs from.
       status.textContent = provider && model
-        ? `Blank template models resolve to ${provider} / ${model}.`
-        : 'Blank template models use the app default because no system model is configured.';
+        ? `Agents without their own model use ${provider} / ${model}.`
+        : 'Agents without their own model use the app default because no system model is configured.';
     }
     if (list) {
       list.innerHTML = agents.map((agent, index) => this.renderTemplateAgentPlanRow(agent, index)).join('');
@@ -3828,6 +3853,8 @@ const sessionManager = {
     // step's mount, so it's the first input on Select Blueprint yet stays
     // editable on Construct (and in import mode's single-step layout).
     this.relocateWizardNameField(step);
+    // Keep the folder-slug preview in sync with import mode (which hides it).
+    this.updateWorkspaceNameHint();
 
     if (step1) step1.hidden = importMode || step !== 1;
     if (step2) step2.hidden = step !== 2;
@@ -3857,6 +3884,55 @@ const sessionManager = {
     if (mount && field.parentElement !== mount) {
       mount.appendChild(field);
     }
+  },
+
+  // Mirrors internal/workspace.Slugify so the folder-name preview matches what
+  // the server will create on disk: lowercase, strip accents, non-alphanumeric
+  // to hyphens, collapse/trim hyphens, cap at 64 chars.
+  slugifyWorkspaceName(name) {
+    const s = String(name || '').trim();
+    if (!s) return 'untitled';
+    let slug = s.normalize('NFD').replace(/\p{Mn}/gu, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (slug.length > 64) slug = slug.slice(0, 64).replace(/-+$/g, '');
+    return slug || 'untitled';
+  },
+
+  // Shows the folder the current name will map to on disk, so the name→folder
+  // relationship (and slug conflicts) aren't a surprise at create time. Skipped
+  // in import mode, where the folder name comes from the imported path.
+  updateWorkspaceNameHint() {
+    const hint = document.getElementById('workspaceNameHint');
+    if (!hint) return;
+    if (hint.classList.contains('is-error')) return; // an active error owns the slot
+    const name = document.getElementById('folderNameInput')?.value.trim() || '';
+    if (this.importModeEnabled || !name) {
+      hint.textContent = '';
+      hint.hidden = true;
+      return;
+    }
+    hint.textContent = `Folder: ${this.slugifyWorkspaceName(name)}`;
+    hint.hidden = false;
+  },
+
+  setWorkspaceNameError(message) {
+    const hint = document.getElementById('workspaceNameHint');
+    const input = document.getElementById('folderNameInput');
+    input?.classList.add('is-invalid');
+    if (hint) {
+      hint.textContent = message;
+      hint.hidden = false;
+      hint.classList.add('is-error');
+    }
+  },
+
+  clearWorkspaceNameError() {
+    const hint = document.getElementById('workspaceNameHint');
+    document.getElementById('folderNameInput')?.classList.remove('is-invalid');
+    hint?.classList.remove('is-error');
   },
 
   // Sets the step-2 recap line ("Constructing: <icon> <name>") from the selected
@@ -3999,18 +4075,18 @@ const sessionManager = {
     const name = nameInput?.value.trim() || '';
     const description = descriptionInput?.value.trim() || '';
     if (!name && !importEnabled) {
-      this.showToast('Workspace name is required', 'warning');
+      // Inline error on the field (which is now the first thing on step 1) rather
+      // than a toast that fires only after the user reaches the end.
+      this.setWorkspaceNameError('Workspace name is required');
+      nameInput?.focus();
       return;
     }
     if (importEnabled && !importPath) {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;
     }
-    if (!description) {
-      this.showToast('Workspace description is required', 'warning');
-      descriptionInput?.focus();
-      return;
-    }
+    // Description is optional: a workspace can start with just a name, and Ori
+    // can still review the setup later. It only enriches the setup review.
 
     const parentId = parentSelect?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
