@@ -50,6 +50,7 @@
     els = {
       list: document.getElementById('rosterList'),
       count: document.getElementById('rosterCount'),
+      stats: document.getElementById('rosterStats'),
       search: document.getElementById('rosterSearch'),
       sort: document.getElementById('rosterSort'),
       empty: document.getElementById('rosterEmpty'),
@@ -187,6 +188,8 @@
     var total = state.agents.length;
     var shown = state.filtered.length;
 
+    renderStatusTiles();
+
     if (shown === 0) {
       els.empty.hidden = false;
       els.count.textContent = total === 0 ? 'No agents yet.' : '0 of ' + total + ' agents';
@@ -201,6 +204,37 @@
     });
     els.list.appendChild(frag);
     highlightSelected();
+  }
+
+  // At-a-glance status summary over ALL agents (not the filtered view). Mirrors
+  // the health model the retired classic dashboard used: an agent needs attention
+  // when it errored or has no model; disabled is counted on its own; everything
+  // else is ready.
+  function renderStatusTiles() {
+    if (!els.stats) return;
+    var total = state.agents.length;
+    if (total === 0) { els.stats.hidden = true; els.stats.innerHTML = ''; return; }
+    var needs = 0, disabled = 0;
+    state.agents.forEach(function (a) {
+      var status = String((a && a.status) || 'idle').toLowerCase();
+      if (status === 'disabled') { disabled++; return; }
+      if (status === 'error' || !String((a && a.model) || '').trim()) { needs++; }
+    });
+    var ready = total - needs - disabled;
+    els.stats.hidden = false;
+    els.stats.innerHTML =
+      statTile('needs', 'Needs attention', needs) +
+      statTile('ready', 'Ready', ready) +
+      statTile('disabled', 'Disabled', disabled) +
+      statTile('total', 'Total', total);
+  }
+
+  function statTile(kind, label, value) {
+    var zero = value === 0 ? ' roster-stat--zero' : '';
+    return '<div class="roster-stat roster-stat--' + kind + zero + '">' +
+      '<span class="roster-stat__value">' + value + '</span>' +
+      '<span class="roster-stat__label">' + esc(label) + '</span>' +
+      '</div>';
   }
 
   function buildCard(agent, idx) {

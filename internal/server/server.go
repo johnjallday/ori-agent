@@ -237,12 +237,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	data.ShowSidebarToggle = true // Enable sidebar toggle
-	// The roster/stage redesign is now the default Agents page (G5). The classic
-	// dashboard remains reachable at ?view=classic as a fallback.
-	if r.URL.Query().Get("view") == "classic" {
-		s.renderAndWritePage(w, "agents", data)
-		return
-	}
+	// The roster/stage redesign is the Agents page. The classic dashboard has been
+	// retired now that the roster covers its surface (per-agent detail lives on the
+	// standalone /agents/{name} page).
 	s.renderAndWritePage(w, "agents-roster", data)
 }
 
