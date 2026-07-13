@@ -484,6 +484,66 @@
   border-color: rgba(78, 197, 230, 0.24);
 }
 
+/* Reused agent: a compact "already exists, will be linked" row. Its editable
+   view is hidden until "Make a workspace copy" forks a fresh agent. */
+.workspace-create-modal .workspace-template-agent-reuse {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workspace-create-modal .workspace-template-agent-reuse-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.workspace-create-modal .workspace-template-agent-reuse-head .workspace-template-agent-meta {
+  margin-top: 0;
+}
+.workspace-create-modal .workspace-template-agent-reuse-name {
+  font-weight: 650;
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-template-agent-reuse-sub {
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+  color: var(--wc-ink-dim);
+}
+/* A locked reuse row hides the right-hand model column (the sub-line already
+   names the saved model); forking reveals the full editable layout. */
+.workspace-create-modal .workspace-template-agent-row.is-reuse:not([data-forked="true"]) .workspace-template-agent-model {
+  display: none;
+}
+.workspace-create-modal .workspace-template-agent-fork-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  color: var(--wc-faction);
+  background: color-mix(in srgb, var(--wc-faction) 8%, transparent);
+  border: 1px solid var(--wc-faction-deep);
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-template-agent-fork-btn:hover {
+  background: color-mix(in srgb, var(--wc-faction) 16%, transparent);
+}
+.workspace-create-modal .workspace-template-agent-fork-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.workspace-create-modal .workspace-template-agent-fork-note {
+  display: none;
+  margin-top: 0.35rem;
+  font-size: 11px;
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-template-agent-row[data-forked="true"] .workspace-template-agent-fork-note {
+  display: block;
+}
+
 /* color picker: keep the swatch colors, tactical active ring */
 .workspace-create-modal .folder-color-btn.active {
   box-shadow: 0 0 0 2px var(--wc-faction);

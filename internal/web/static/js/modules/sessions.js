@@ -3409,10 +3409,10 @@ const sessionManager = {
     const createCount = agents.filter((agent) => agent.action === 'create').length;
     const reuseCount = agents.filter((agent) => agent.action === 'reuse').length;
     const parts = [];
-    if (createCount) parts.push(`${createCount} new`);
     if (reuseCount) parts.push(`${reuseCount} reused`);
+    if (createCount) parts.push(`${createCount} new`);
     if (summary) {
-      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} will be attached to this workspace.`;
+      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} attached to this workspace.`;
     }
     if (status) {
       const provider = String(plan.system_provider || '').trim();
@@ -3455,26 +3455,44 @@ const sessionManager = {
       : 'App default';
     const modelOptions = this.renderTemplateAgentModelOptions(agent, editableModel, editableProvider, modelText);
     const promptState = systemPrompt ? 'Prompt set' : 'No prompt';
-    const chips = [
-      `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>`,
+    const isReuse = action === 'reuse';
+    // The role/type chip pair shared by both the compact reuse view and the
+    // editable view. The action chip lives only in the editable view so its
+    // "Reuse -> Create" flip on fork targets a single element.
+    const roleChips = [
       agent?.entry_point ? '<span class="workspace-template-agent-chip entry">Entry</span>' : '<span class="workspace-template-agent-chip">Specialist</span>',
       role ? `<span class="workspace-template-agent-chip">${this.escapeHtml(role)}</span>` : '',
       type ? `<span class="workspace-template-agent-chip">${this.escapeHtml(type)}</span>` : '',
       tools ? `<span class="workspace-template-agent-chip">${this.escapeHtml(tools)}</span>` : ''
     ].filter(Boolean).join('');
-    const reuseNote = action === 'reuse'
-      ? '<div class="workspace-template-agent-note">This name matches an existing agent. Saved settings are reused unless you rename it.</div>'
-      : '';
+    const chips = `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>${roleChips}`;
+
+    // Reuse view: a name-matched agent already exists, so it is linked, not
+    // created. Shown compact and locked; "Make a workspace copy" reveals the
+    // editable view (below) and forks a fresh, workspace-scoped agent.
+    const reuseView = isReuse ? `
+        <div class="workspace-template-agent-reuse">
+          <div class="workspace-template-agent-reuse-head">
+            <span class="workspace-template-agent-reuse-name">${this.escapeHtml(name)}</span>
+            <div class="workspace-template-agent-meta">
+              <span class="workspace-template-agent-chip reuse">Reuse</span>${roleChips}
+            </div>
+          </div>
+          <div class="workspace-template-agent-reuse-sub">Using your existing agent${model ? ` · ${this.escapeHtml(modelText)}` : ''}</div>
+          <button type="button" class="workspace-template-agent-fork-btn">Make a workspace copy</button>
+        </div>` : '';
 
     return `
-      <div class="workspace-template-agent-row"
+      <div class="workspace-template-agent-row${isReuse ? ' is-reuse' : ''}"
            data-template-agent-index="${index}"
+           data-forked="false"
            data-original-action="${this.escapeHtml(action)}"
            data-original-name="${this.escapeHtml(name)}"
            data-original-model="${this.escapeHtml(editableModel)}"
            data-original-provider="${this.escapeHtml(editableProvider)}"
            data-original-system-prompt="${this.escapeHtml(systemPrompt)}">
-        <div class="workspace-template-agent-main">
+        ${reuseView}
+        <div class="workspace-template-agent-main"${isReuse ? ' hidden' : ''}>
           <div class="workspace-template-agent-fields">
             <label class="workspace-template-agent-field">
               <span>Name</span>
@@ -3491,7 +3509,7 @@ const sessionManager = {
             </label>
           </div>
           <div class="workspace-template-agent-meta">${chips}</div>
-          ${reuseNote}
+          ${isReuse ? '<div class="workspace-template-agent-fork-note">New workspace copy — edit freely. Your existing agent is left untouched.</div>' : ''}
           <details class="workspace-template-agent-prompt" open>
             <summary>
               <span>System prompt</span>
@@ -3556,8 +3574,35 @@ const sessionManager = {
         control.addEventListener('input', () => this.updateTemplateAgentReviewRowState(row));
         control.addEventListener('change', () => this.updateTemplateAgentReviewRowState(row));
       });
+      row.querySelector('.workspace-template-agent-fork-btn')
+        ?.addEventListener('click', () => this.forkTemplateAgentRow(row));
       this.updateTemplateAgentReviewRowState(row);
     });
+  },
+
+  // Fork a reused (name-matched) agent into a fresh workspace-scoped copy:
+  // reveal the editable view, suffix the name so it no longer matches the
+  // existing agent (which flips the row to "Create"), and let the existing
+  // rename-fork override path carry the edits. The existing agent is untouched.
+  forkTemplateAgentRow(row) {
+    if (!row) return;
+    const reuseView = row.querySelector('.workspace-template-agent-reuse');
+    const main = row.querySelector('.workspace-template-agent-main');
+    const nameInput = row.querySelector('.workspace-template-agent-name-input');
+    row.dataset.forked = 'true';
+    if (reuseView) reuseView.hidden = true;
+    if (main) main.hidden = false;
+    if (nameInput) {
+      nameInput.value = this.suggestForkedAgentName(row.dataset.originalName || nameInput.value);
+      nameInput.focus();
+      nameInput.select?.();
+    }
+    this.updateTemplateAgentReviewRowState(row);
+  },
+
+  suggestForkedAgentName(base) {
+    const trimmed = String(base || '').trim();
+    return trimmed ? `${trimmed} copy` : 'Agent copy';
   },
 
   updateTemplateAgentReviewRowState(row) {
@@ -3706,6 +3751,9 @@ const sessionManager = {
     review.classList.toggle('is-disabled', !toggle.checked);
     review.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
       control.disabled = !toggle.checked;
+    });
+    review.querySelectorAll('.workspace-template-agent-fork-btn').forEach((btn) => {
+      btn.disabled = !toggle.checked;
     });
   },
 
