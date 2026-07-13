@@ -23,6 +23,9 @@
   var TAB_ORDER = ['overview', 'prompt', 'workspaces'];
   var ROLES = ['general', 'orchestrator', 'researcher', 'analyzer', 'synthesizer', 'validator', 'specialist'];
   var REASONING = ['', 'minimal', 'low', 'medium', 'high'];
+  // Agent capability types; these mirror the model catalog's category strings so
+  // the Model picker can be filtered to models that fit the selected type.
+  var TYPES = ['tool-calling', 'general', 'research', 'orchestration'];
 
   var state = {
     agents: [],
@@ -111,10 +114,12 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         state.providers = (data && Array.isArray(data.providers)) ? data.providers : [];
-        // If an agent was already selected and its overview rendered before the
-        // model list arrived (as a text input), re-render so the picker appears.
-        // Guarded by !dirty so we never clobber unsaved edits.
+        // If an agent was already selected and its stage rendered before the model
+        // catalog arrived, refresh the catalog-dependent surfaces: the overview
+        // (picker + notes) and the vitals (legacy badge). Guarded by !dirty so we
+        // never clobber unsaved edits.
         if (state.selected && !state.dirty.overview && state.detailCache[state.selected]) {
+          renderVitals(state.byName[state.selected], state.detailCache[state.selected]);
           renderOverview(state.selected, state.detailCache[state.selected]);
         }
       })
@@ -320,7 +325,26 @@
     if (msgs) vitals.push(vital('Messages', String(msgs)));
     var cost = listItem.statistics && listItem.statistics.total_cost;
     if (cost) vitals.push(vital('Cost', '$' + Number(cost).toFixed(2)));
+    var meta = detail && detail.model ? modelMeta(detail.model) : null;
+    if (meta && meta.is_legacy) {
+      vitals.push('<span class="vital vital--warn" title="This model is past its deprecation date"><span>Model</span><b>⚠ Legacy</b></span>');
+    }
     els.vitals.innerHTML = vitals.join('');
+  }
+
+  // Look up a model in the loaded provider catalog; returns its ProviderModel-ish
+  // entry (pricing, is_legacy, etc.) or null when the catalog isn't loaded / the
+  // model isn't listed.
+  function modelMeta(model) {
+    var providers = state.providers || [];
+    for (var i = 0; i < providers.length; i++) {
+      var models = providers[i] && providers[i].models;
+      if (!Array.isArray(models)) continue;
+      for (var j = 0; j < models.length; j++) {
+        if (models[j] && models[j].value === model) return models[j];
+      }
+    }
+    return null;
   }
 
   /* ---- overview (editable) ------------------------------------------------- */
@@ -343,8 +367,9 @@
     // Offer a model picker when the provider/model catalog is loaded; otherwise
     // fall back to free text so the field always works.
     var hasCatalog = Array.isArray(state.providers) && state.providers.length > 0;
+    var agentType = detail.type || 'tool-calling';
     var modelControl = hasCatalog
-      ? modelSelectInput('ov-model', detail.model || '', detail.provider || '')
+      ? modelSelectInput('ov-model', detail.model || '', detail.provider || '', agentType)
       : textInput('ov-model', detail.model || '');
     // With the picker, provider is derived from the chosen model, so it is shown
     // read-only. Without a catalog (text fallback) it stays editable.
@@ -355,10 +380,15 @@
     els.overviewFacts.innerHTML =
       '<form class="stage-form" id="overviewForm" novalidate>' +
       field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
-      field('Model', modelControl, 'ov-model') +
+      field('Type', selectInput('ov-type', TYPES, agentType, typeLabel), 'ov-type') +
+      field('Model', modelControl + '<p class="model-note" id="ov-model-note" aria-live="polite"></p>', 'ov-model') +
       field('Provider', providerControl, 'ov-provider') +
       field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1'), 'ov-temperature') +
-      field('Reasoning effort', selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; }), 'ov-reasoning') +
+      '<div class="field" id="ov-reasoning-field">' +
+        '<label class="field__label" for="ov-reasoning">Reasoning effort</label>' +
+        '<div class="field__control">' +
+        selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; }) +
+        '</div></div>' +
       field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'), 'ov-maxtokens') +
       field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
       field('Description', textareaInput('ov-description', (detail.metadata && detail.metadata.description) || '', 3), 'ov-description') +
@@ -369,16 +399,79 @@
     wireDirty('overview', document.getElementById('overviewForm'));
     wireSaveBar('overview', function () { saveOverview(name); });
 
-    // When picking a model from the catalog, keep the Provider field in sync with
-    // the model's owning provider so the two never drift out of agreement.
     var modelSel = document.getElementById('ov-model');
     if (modelSel && modelSel.tagName === 'SELECT') {
-      modelSel.addEventListener('change', function () {
+      // Reflect the picked model everywhere derived state depends on it: Provider
+      // (owning provider), the model note (pricing / good-for / legacy warning),
+      // and whether the Reasoning effort field is relevant.
+      var syncFromModel = function () {
         var opt = modelSel.options[modelSel.selectedIndex];
-        var prov = opt && opt.getAttribute('data-provider');
         var provEl = document.getElementById('ov-provider');
+        var prov = opt && opt.getAttribute('data-provider');
         if (prov && provEl) provEl.value = prov;
-      });
+        updateModelNote(opt);
+        updateReasoningVisibility(modelSel.value, detail.reasoning_effort);
+      };
+      modelSel.addEventListener('change', syncFromModel);
+
+      // Changing Type re-scopes the catalog to models that fit that type, keeping
+      // the current selection when it still qualifies.
+      var typeSel = document.getElementById('ov-type');
+      if (typeSel) {
+        typeSel.addEventListener('change', function () {
+          var keep = modelSel.value;
+          modelSel.innerHTML = modelOptionsHTML(keep, val('ov-provider'), typeSel.value);
+          syncFromModel();
+        });
+      }
+
+      // Prime the derived state for the initially-loaded model.
+      updateModelNote(modelSel.options[modelSel.selectedIndex]);
+      updateReasoningVisibility(modelSel.value, detail.reasoning_effort);
+    }
+  }
+
+  // Populate #ov-model-note with the selected option's pricing / good-for hint and
+  // a legacy/deprecation warning when applicable.
+  function updateModelNote(opt) {
+    var note = document.getElementById('ov-model-note');
+    if (!note) return;
+    if (!opt) { note.textContent = ''; note.className = 'model-note'; return; }
+    var bits = [];
+    var goodFor = opt.getAttribute('data-goodfor');
+    if (goodFor) bits.push(goodFor);
+    var pricing = opt.getAttribute('data-pricing');
+    if (pricing) bits.push(pricing);
+    var legacy = opt.getAttribute('data-legacy') === '1';
+    var dep = opt.getAttribute('data-deprecation');
+    note.className = 'model-note' + (legacy ? ' is-legacy' : '');
+    var warn = legacy ? ('⚠ Legacy model' + (dep ? ' — deprecated ' + dep : '') + '. ') : '';
+    note.textContent = warn + bits.join(' · ');
+  }
+
+  // Show Reasoning effort only for models that use it (OpenAI o-series / gpt-5 /
+  // Codex). Always show it when the agent already has an effort set, so existing
+  // configuration is never hidden from view.
+  function updateReasoningVisibility(model, existingEffort) {
+    var wrap = document.getElementById('ov-reasoning-field');
+    if (!wrap) return;
+    var relevant = supportsReasoning(model) || !!(existingEffort && String(existingEffort).trim());
+    wrap.hidden = !relevant;
+  }
+
+  function supportsReasoning(model) {
+    var m = String(model || '').toLowerCase().trim();
+    if (!m) return false;
+    return /^o[1345](-|$)/.test(m) || m.indexOf('gpt-5') !== -1 || m.indexOf('codex') !== -1;
+  }
+
+  function typeLabel(v) {
+    switch (v) {
+      case 'tool-calling': return 'Tool Calling';
+      case 'general': return 'General Purpose';
+      case 'research': return 'Research';
+      case 'orchestration': return 'Orchestration';
+      default: return titleCase(v || '');
     }
   }
 
@@ -398,6 +491,8 @@
     var out = {};
     var role = val('ov-role');
     if (role !== (detail.role || '')) out.role = role;
+    var type = val('ov-type');
+    if (type && type !== (detail.type || '')) out.type = type;
     var model = val('ov-model').trim();
     if (model !== (detail.model || '')) out.model = model;
     var provider = val('ov-provider').trim();
@@ -975,7 +1070,15 @@
   // carries data-provider so the Provider field can follow the chosen model. A
   // model that isn't in the catalog (custom, or a provider without a key) is
   // preserved under a "Current" group so switching to a picker never drops it.
-  function modelSelectInput(id, currentValue, currentProvider) {
+  function modelSelectInput(id, currentValue, currentProvider, typeFilter) {
+    return '<select id="' + id + '">' + modelOptionsHTML(currentValue, currentProvider, typeFilter) + '</select>';
+  }
+  // Build the grouped <option>/<optgroup> markup for the model picker. Each option
+  // carries the data the overview surfaces: provider (for provider sync), pricing
+  // and good-for (the model note), and legacy/deprecation flags (the warning). A
+  // typeFilter scopes options to models whose catalog category matches, and any
+  // off-catalog current model is preserved under a "Current" group.
+  function modelOptionsHTML(currentValue, currentProvider, typeFilter) {
     var providers = state.providers || [];
     var groups = '';
     var matched = false;
@@ -985,21 +1088,43 @@
       var opts = '';
       p.models.forEach(function (m) {
         if (!m || !m.value || seen[m.value]) return;
+        // Filter by agent type when the model declares a category.
+        if (typeFilter && m.type && m.type !== typeFilter) return;
         seen[m.value] = true;
         var sel = m.value === currentValue;
         if (sel) matched = true;
-        opts += '<option value="' + esc(m.value) + '" data-provider="' + esc(m.provider || p.name) + '"' +
-          (sel ? ' selected' : '') + '>' + esc(m.label || m.value) + '</option>';
+        opts += modelOptionHTML(m.value, m.provider || p.name, m, sel);
       });
       if (opts) groups += '<optgroup label="' + esc(p.display_name || p.name) + '">' + opts + '</optgroup>';
     });
+    // Preserve the agent's current model when the type filter excluded it (its real
+    // category differs) or it isn't in the catalog at all. Enrich it from the full
+    // catalog so its note/warning still show even outside the filtered groups.
     if (currentValue && !matched) {
+      var meta = modelMeta(currentValue);
       groups = '<optgroup label="Current">' +
-        '<option value="' + esc(currentValue) + '" data-provider="' + esc(currentProvider || '') + '" selected>' +
-        esc(currentValue) + '</option>' +
+        modelOptionHTML(currentValue, (meta && meta.provider) || currentProvider || '', meta, true) +
         '</optgroup>' + groups;
     }
-    return '<select id="' + id + '">' + groups + '</select>';
+    return groups;
+  }
+  // Render one <option> for the model picker from a catalog entry (meta may be null
+  // for a truly unknown model). Encodes the data the overview reads back.
+  function modelOptionHTML(value, provider, meta, selected) {
+    var pricing = meta && meta.pricing ? meta.pricing : '';
+    var goodFor = meta && Array.isArray(meta.good_for) && meta.good_for.length ? meta.good_for[0] : '';
+    var legacy = !!(meta && meta.is_legacy);
+    var dep = meta && meta.deprecation_date ? meta.deprecation_date : '';
+    var label = (meta && meta.label) || value;
+    return '<option value="' + esc(value) + '"' +
+      ' data-provider="' + esc(provider) + '"' +
+      (pricing ? ' data-pricing="' + esc(pricing) + '"' : '') +
+      (goodFor ? ' data-goodfor="' + esc(goodFor) + '"' : '') +
+      (legacy ? ' data-legacy="1"' : '') +
+      (dep ? ' data-deprecation="' + esc(dep) + '"' : '') +
+      (selected ? ' selected' : '') + '>' +
+      esc(label) + (legacy ? ' ⚠' : '') + (pricing ? ' · ' + esc(pricing) : '') +
+      '</option>';
   }
   function saveBar(tab) {
     return '<div class="save-bar" id="savebar-' + tab + '">' +
