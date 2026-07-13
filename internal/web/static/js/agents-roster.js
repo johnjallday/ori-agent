@@ -61,6 +61,7 @@
       promptBody: document.getElementById('promptBody'),
       workspacesBody: document.getElementById('workspacesBody'),
       stageDelete: document.getElementById('stageDelete'),
+      stageFullPage: document.getElementById('stageFullPage'),
       newAgentBtn: document.getElementById('newAgentBtn'),
       createPanel: document.getElementById('createPanel'),
       createBody: document.getElementById('createBody'),
@@ -263,6 +264,10 @@
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
     els.klass.textContent = titleCase(listItem.role || listItem.type || 'agent');
+    // Deep-link to the full agent detail page (/agents/{name}). The server routes
+    // this to the rich editor for catalog agents and to the dedicated read-only
+    // pages for the built-in Claude Code / Codex CLI agents.
+    els.stageFullPage.href = '/agents/' + encodeURIComponent(name);
 
     els.workspacesBody.innerHTML = '<p class="stage-hint">Loading…</p>';
     els.overviewFacts.innerHTML = '<p class="stage-hint">Loading…</p>';

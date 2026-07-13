@@ -320,10 +320,30 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--primary-color, #4f46e5) 6%, transparent), transparent);
 }
 
-.stage__delete {
+.stage__actions {
   position: absolute;
   top: 16px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage__fullpage {
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+  color: var(--primary-color, #4f46e5);
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.stage__fullpage:hover { background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent); }
+.stage__fullpage:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 2px; }
+
+.stage__delete {
   font-size: 12px;
   border: 1px solid color-mix(in srgb, #dc2626 55%, var(--border-color, #e5e7eb));
   color: #dc2626;
@@ -723,7 +743,7 @@
     padding: 18px 18px 16px;
   }
   .stage__avatar { width: 52px; height: 52px; font-size: 20px; }
-  .stage__delete { top: 12px; right: 14px; }
+  .stage__actions { top: 12px; right: 14px; }
   .stage__panels { padding: 16px; }
   .stage-facts { grid-template-columns: 1fr; gap: 2px 0; }
   .stage-facts dt { margin-top: 8px; }
