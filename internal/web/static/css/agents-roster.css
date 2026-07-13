@@ -320,10 +320,30 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--primary-color, #4f46e5) 6%, transparent), transparent);
 }
 
-.stage__delete {
+.stage__actions {
   position: absolute;
   top: 16px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage__fullpage {
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+  color: var(--primary-color, #4f46e5);
+  background: transparent;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.stage__fullpage:hover { background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent); }
+.stage__fullpage:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 2px; }
+
+.stage__delete {
   font-size: 12px;
   border: 1px solid color-mix(in srgb, #dc2626 55%, var(--border-color, #e5e7eb));
   color: #dc2626;
@@ -521,6 +541,17 @@
 
 .field__control textarea { resize: vertical; line-height: 1.5; }
 
+/* Read-only derived field (e.g. Provider, set by the selected model). */
+.field__control input.field__readonly {
+  background: var(--bg-secondary, #f3f4f6);
+  color: var(--text-secondary, #6b7280);
+  cursor: default;
+}
+.field__control input.field__readonly:focus-visible {
+  outline: none;
+  border-color: var(--border-color, #d1d5db);
+}
+
 .stage-textarea {
   width: 100%;
   resize: vertical;
@@ -632,6 +663,10 @@
 [data-bs-theme="dark"] .stage-textarea {
   background: rgba(255, 255, 255, 0.04);
 }
+[data-bs-theme="dark"] .field__control input.field__readonly {
+  background: rgba(255, 255, 255, 0.015);
+  color: var(--text-secondary, #9ca3af);
+}
 
 @media (max-width: 560px) {
   .field { grid-template-columns: 1fr; gap: 4px; }
@@ -723,7 +758,7 @@
     padding: 18px 18px 16px;
   }
   .stage__avatar { width: 52px; height: 52px; font-size: 20px; }
-  .stage__delete { top: 12px; right: 14px; }
+  .stage__actions { top: 12px; right: 14px; }
   .stage__panels { padding: 16px; }
   .stage-facts { grid-template-columns: 1fr; gap: 2px 0; }
   .stage-facts dt { margin-top: 8px; }

@@ -36,6 +36,7 @@
     dirty: { overview: false, prompt: false, workspaces: false },
     allWorkspaces: null,
     creating: false,
+    providers: null,
   };
 
   var els = {};
@@ -61,6 +62,7 @@
       promptBody: document.getElementById('promptBody'),
       workspacesBody: document.getElementById('workspacesBody'),
       stageDelete: document.getElementById('stageDelete'),
+      stageFullPage: document.getElementById('stageFullPage'),
       newAgentBtn: document.getElementById('newAgentBtn'),
       createPanel: document.getElementById('createPanel'),
       createBody: document.getElementById('createBody'),
@@ -95,10 +97,29 @@
       if (anyDirty()) { e.preventDefault(); e.returnValue = ''; }
     });
 
+    loadProviders();
     loadAgents();
   }
 
   /* ---- data ---------------------------------------------------------------- */
+
+  // Load the available LLM providers + their models so the overview Model field
+  // can offer a picker instead of free text. Fire-and-forget: if it fails or is
+  // slow, renderOverview falls back to a text input.
+  function loadProviders() {
+    fetch('/api/providers')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        state.providers = (data && Array.isArray(data.providers)) ? data.providers : [];
+        // If an agent was already selected and its overview rendered before the
+        // model list arrived (as a text input), re-render so the picker appears.
+        // Guarded by !dirty so we never clobber unsaved edits.
+        if (state.selected && !state.dirty.overview && state.detailCache[state.selected]) {
+          renderOverview(state.selected, state.detailCache[state.selected]);
+        }
+      })
+      .catch(function () { state.providers = []; });
+  }
 
   function loadAgents() {
     fetch('/api/agents/dashboard/list?sort_by=name&order=asc')
@@ -263,6 +284,10 @@
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
     els.klass.textContent = titleCase(listItem.role || listItem.type || 'agent');
+    // Deep-link to the full agent detail page (/agents/{name}). The server routes
+    // this to the rich editor for catalog agents and to the dedicated read-only
+    // pages for the built-in Claude Code / Codex CLI agents.
+    els.stageFullPage.href = '/agents/' + encodeURIComponent(name);
 
     els.workspacesBody.innerHTML = '<p class="stage-hint">Loading…</p>';
     els.overviewFacts.innerHTML = '<p class="stage-hint">Loading…</p>';
@@ -315,11 +340,23 @@
       return;
     }
 
+    // Offer a model picker when the provider/model catalog is loaded; otherwise
+    // fall back to free text so the field always works.
+    var hasCatalog = Array.isArray(state.providers) && state.providers.length > 0;
+    var modelControl = hasCatalog
+      ? modelSelectInput('ov-model', detail.model || '', detail.provider || '')
+      : textInput('ov-model', detail.model || '');
+    // With the picker, provider is derived from the chosen model, so it is shown
+    // read-only. Without a catalog (text fallback) it stays editable.
+    var providerControl = hasCatalog
+      ? readonlyInput('ov-provider', detail.provider || '', 'Set by the selected model')
+      : textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…');
+
     els.overviewFacts.innerHTML =
       '<form class="stage-form" id="overviewForm" novalidate>' +
       field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
-      field('Model', textInput('ov-model', detail.model || ''), 'ov-model') +
-      field('Provider', textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…'), 'ov-provider') +
+      field('Model', modelControl, 'ov-model') +
+      field('Provider', providerControl, 'ov-provider') +
       field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1'), 'ov-temperature') +
       field('Reasoning effort', selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; }), 'ov-reasoning') +
       field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'), 'ov-maxtokens') +
@@ -331,6 +368,18 @@
     els.overviewDesc.innerHTML = '';
     wireDirty('overview', document.getElementById('overviewForm'));
     wireSaveBar('overview', function () { saveOverview(name); });
+
+    // When picking a model from the catalog, keep the Provider field in sync with
+    // the model's owning provider so the two never drift out of agreement.
+    var modelSel = document.getElementById('ov-model');
+    if (modelSel && modelSel.tagName === 'SELECT') {
+      modelSel.addEventListener('change', function () {
+        var opt = modelSel.options[modelSel.selectedIndex];
+        var prov = opt && opt.getAttribute('data-provider');
+        var provEl = document.getElementById('ov-provider');
+        if (prov && provEl) provEl.value = prov;
+      });
+    }
   }
 
   function readonlyFacts(detail) {
@@ -899,6 +948,12 @@
     return '<input id="' + id + '" type="text" value="' + esc(value) + '"' +
       (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '>';
   }
+  // A read-only text input for derived values (e.g. Provider, set by the model).
+  // Kept as an <input> so the form still submits its value, but not user-editable.
+  function readonlyInput(id, value, title) {
+    return '<input id="' + id + '" class="field__readonly" type="text" readonly tabindex="-1" value="' + esc(value) + '"' +
+      (title ? ' title="' + esc(title) + '"' : '') + '>';
+  }
   function numInput(id, value, min, max, step) {
     return '<input id="' + id + '" type="number" value="' + esc(value === '' ? '' : value) + '"' +
       (min !== '' ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '') + '>';
@@ -915,6 +970,36 @@
   }
   function textareaInput(id, value, rows) {
     return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
+  }
+  // Grouped <select> of available models (optgroup per provider). Each option
+  // carries data-provider so the Provider field can follow the chosen model. A
+  // model that isn't in the catalog (custom, or a provider without a key) is
+  // preserved under a "Current" group so switching to a picker never drops it.
+  function modelSelectInput(id, currentValue, currentProvider) {
+    var providers = state.providers || [];
+    var groups = '';
+    var matched = false;
+    providers.forEach(function (p) {
+      if (!p || !Array.isArray(p.models) || p.models.length === 0) return;
+      var seen = {};
+      var opts = '';
+      p.models.forEach(function (m) {
+        if (!m || !m.value || seen[m.value]) return;
+        seen[m.value] = true;
+        var sel = m.value === currentValue;
+        if (sel) matched = true;
+        opts += '<option value="' + esc(m.value) + '" data-provider="' + esc(m.provider || p.name) + '"' +
+          (sel ? ' selected' : '') + '>' + esc(m.label || m.value) + '</option>';
+      });
+      if (opts) groups += '<optgroup label="' + esc(p.display_name || p.name) + '">' + opts + '</optgroup>';
+    });
+    if (currentValue && !matched) {
+      groups = '<optgroup label="Current">' +
+        '<option value="' + esc(currentValue) + '" data-provider="' + esc(currentProvider || '') + '" selected>' +
+        esc(currentValue) + '</option>' +
+        '</optgroup>' + groups;
+    }
+    return '<select id="' + id + '">' + groups + '</select>';
   }
   function saveBar(tab) {
     return '<div class="save-bar" id="savebar-' + tab + '">' +
