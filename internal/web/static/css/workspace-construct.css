@@ -240,6 +240,21 @@
   color: var(--wc-faction);
 }
 
+/* ---------- workspace name hint / inline error ---------- */
+.workspace-create-modal .workspace-create-name-hint {
+  margin-top: 5px;
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-create-name-hint.is-error {
+  color: var(--wc-alert, #e5675b);
+}
+.workspace-create-modal .modern-input.is-invalid {
+  border-color: var(--wc-alert, #e5675b);
+}
+
 /* ---------- wizard stepper (Select Blueprint → Construct) ---------- */
 .workspace-create-modal .workspace-create-stepper {
   display: flex;
@@ -371,6 +386,51 @@
   color: var(--wc-ink-dim);
 }
 
+/* Agent chips: a role-hued dot + name. --wc-agent-dot carries the role hue,
+   defaulting to a neutral for specialists/unknown roles. */
+.workspace-create-modal .workspace-template-briefing-agent-chip {
+  --wc-agent-dot: var(--wc-ink-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 2px 8px 2px 7px;
+  border: 1px solid var(--wc-line);
+  background: var(--wc-panel-2);
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-template-briefing-agent-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--wc-agent-dot);
+  background: transparent;
+}
+/* Role hues. */
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="orchestrator"] { --wc-agent-dot: var(--wc-faction); }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="researcher"] { --wc-agent-dot: #6cb2ff; }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="validator"] { --wc-agent-dot: #e5b567; }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="synthesizer"] { --wc-agent-dot: #b892ff; }
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="analyzer"] { --wc-agent-dot: #5fd0c8; }
+/* Validator reads as a "checkpoint": a mid-filled dot (◉) vs the hollow default. */
+.workspace-create-modal .workspace-template-briefing-agent-chip[data-role="validator"] .workspace-template-briefing-agent-dot {
+  background: color-mix(in srgb, var(--wc-agent-dot) 55%, transparent);
+}
+/* Entry agent: the lead — solid green dot and a brighter chip. */
+.workspace-create-modal .workspace-template-briefing-agent-chip.is-entry {
+  --wc-agent-dot: var(--wc-faction);
+  border-color: var(--wc-line-bright);
+  background: color-mix(in srgb, var(--wc-faction) 9%, transparent);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-template-briefing-agent-chip.is-entry .workspace-template-briefing-agent-dot {
+  background: var(--wc-faction);
+  border-color: var(--wc-faction);
+}
+
 .workspace-create-modal .workspace-template-agent-review {
   background: rgba(70, 211, 154, 0.06);
   border-color: var(--wc-faction-deep);
@@ -437,6 +497,66 @@
   color: #9be2f4;
   background: rgba(78, 197, 230, 0.1);
   border-color: rgba(78, 197, 230, 0.24);
+}
+
+/* Reused agent: a compact "already exists, will be linked" row. Its editable
+   view is hidden until "Make a workspace copy" forks a fresh agent. */
+.workspace-create-modal .workspace-template-agent-reuse {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workspace-create-modal .workspace-template-agent-reuse-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.workspace-create-modal .workspace-template-agent-reuse-head .workspace-template-agent-meta {
+  margin-top: 0;
+}
+.workspace-create-modal .workspace-template-agent-reuse-name {
+  font-weight: 650;
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-template-agent-reuse-sub {
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+  color: var(--wc-ink-dim);
+}
+/* A locked reuse row hides the right-hand model column (the sub-line already
+   names the saved model); forking reveals the full editable layout. */
+.workspace-create-modal .workspace-template-agent-row.is-reuse:not([data-forked="true"]) .workspace-template-agent-model {
+  display: none;
+}
+.workspace-create-modal .workspace-template-agent-fork-btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  color: var(--wc-faction);
+  background: color-mix(in srgb, var(--wc-faction) 8%, transparent);
+  border: 1px solid var(--wc-faction-deep);
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-template-agent-fork-btn:hover {
+  background: color-mix(in srgb, var(--wc-faction) 16%, transparent);
+}
+.workspace-create-modal .workspace-template-agent-fork-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.workspace-create-modal .workspace-template-agent-fork-note {
+  display: none;
+  margin-top: 0.35rem;
+  font-size: 11px;
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-template-agent-row[data-forked="true"] .workspace-template-agent-fork-note {
+  display: block;
 }
 
 /* color picker: keep the swatch colors, tactical active ring */

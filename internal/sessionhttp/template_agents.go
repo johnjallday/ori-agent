@@ -72,6 +72,31 @@ type templateAgentOverride struct {
 	SystemPrompt *string `json:"system_prompt,omitempty"`
 }
 
+// blankWorkspaceEntryAgentName is the reusable entry agent seeded for the Blank
+// blueprint. Like every other template's entry agent (e.g. "Reaper Producer"),
+// it is a normal global agent reused on name-match across blank workspaces.
+const blankWorkspaceEntryAgentName = "Workspace Manager"
+
+const blankWorkspaceEntryPrompt = "You are the workspace manager. Act as the default front door for this workspace: " +
+	"clarify user intent, answer directly when the request only needs shared context, and break work into " +
+	"tasks for specialists when needed."
+
+// blankWorkspaceTemplate is the synthetic single-agent roster for the Blank
+// blueprint. It flows through the normal template-agent plan/seed machinery so a
+// blank workspace ships with a reviewable, editable entry agent — but it carries
+// no skeleton, starter tasks, or project, so only its Agents roster is ever used.
+func blankWorkspaceTemplate() projecttemplates.Template {
+	return projecttemplates.Template{
+		Name: "Blank workspace",
+		Agents: []projecttemplates.AgentSpec{{
+			Name:         blankWorkspaceEntryAgentName,
+			Role:         string(types.RoleOrchestrator),
+			Type:         agent.TypeGeneral,
+			SystemPrompt: blankWorkspaceEntryPrompt,
+		}},
+	}
+}
+
 // validAgentTypes canonicalizes a template-declared agent type to the real
 // vocabulary; an empty/unrecognized value maps to "" so the store applies its
 // own default (PRD FR8).

@@ -56,6 +56,7 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 	var req struct {
 		TemplateID   string `json:"template_id,omitempty"`
 		TemplatePath string `json:"template_path,omitempty"`
+		Blank        bool   `json:"blank,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -66,6 +67,12 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if strings.TrimSpace(req.TemplateID) == "" && strings.TrimSpace(req.TemplatePath) == "" {
+		// The Blank blueprint has no library template; serve its synthetic
+		// single-agent roster so the review panel can show/edit the entry agent.
+		if req.Blank {
+			_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(blankWorkspaceTemplate()))
+			return
+		}
 		_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(projecttemplates.Template{}))
 		return
 	}

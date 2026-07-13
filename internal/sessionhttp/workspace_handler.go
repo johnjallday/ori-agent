@@ -223,6 +223,7 @@ type createWorkspaceRequest struct {
 	Tags                   []string                   `json:"tags,omitempty"`          // Optional initial tags; merged with template tags
 	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
 	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
+	Blank                  bool                       `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
 }
 
 // createWorkspace handles POST /api/workspaces. The flow is staged:
@@ -469,6 +470,18 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 				seed.EntrySet = true
 			}
 		}
+	case req.Blank && kind != session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
+		// Blank blueprint: seed the synthetic single-agent roster (a reusable
+		// "Workspace Manager") so a blank workspace is chat-ready, honoring the
+		// review panel's edits (overrides) and its Create toggle. A seed failure
+		// surfaces a warning and leaves the workspace agent-less — the legacy
+		// no-entry-agent fallback the detail page already handles.
+		blankTpl, err := applyTemplateAgentOverrides(blankWorkspaceTemplate(), req.TemplateAgentOverrides)
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return seed, false
+		}
+		seed = h.seedTemplateAgents(ws, blankTpl)
 	case kind == session.WorkspaceKindGroup:
 		if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
 			setWorkspaceEntryAgent(ws, agentName)

@@ -24,6 +24,19 @@
 
             <!-- ===== STEP 1 · SELECT BLUEPRINT: template grid + user templates ===== -->
             <div id="wizardStep1">
+
+              <!-- Workspace name: the first input users reach. This is the single
+                   canonical #folderNameInput; refreshWizardChrome() relocates the
+                   #wizardNameField wrapper into #wizardStep2NameMount on Construct
+                   so the same field stays editable there (no dueling inputs). -->
+              <div id="wizardStep1NameMount">
+                <div id="wizardNameField" class="workspace-create-name-field mb-3">
+                  <label for="folderNameInput" class="workspace-create-section-title" style="display: block; margin-bottom: 6px;">Workspace name</label>
+                  <input type="text" id="folderNameInput" class="modern-input w-100" placeholder="Name your workspace" aria-describedby="workspaceNameHint">
+                  <div id="workspaceNameHint" class="workspace-create-name-hint" aria-live="polite"></div>
+                </div>
+              </div>
+
               <div id="workspaceCreateBlueprintHeader" class="workspace-create-section-header d-flex align-items-center justify-content-between" style="margin-bottom: 6px;">
                 <span class="workspace-create-section-title">Select Blueprint</span>
                 <button type="button" id="projectTemplateManageLink" class="modern-btn modern-btn-secondary" style="font-size: 11px; padding: 2px 8px; white-space: nowrap;">Manage…</button>
@@ -47,14 +60,14 @@
               </div>
               <div id="templateBriefing" class="workspace-template-briefing mb-2">
                 <div id="templateBriefingDefault" class="workspace-template-briefing-default">
-                  Starting from a blank workspace. You can add tools, agents, and structure after it's created.
+                  Starting from a blank workspace with a Workspace Manager agent. You can add tools, more agents, and structure after it's created.
                 </div>
                 <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
                 <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
                   <div class="workspace-template-briefing-deploys-kicker">Deploys</div>
-                  <div id="templateBriefingAgentsRow" class="workspace-template-briefing-row" hidden>
+                  <div id="templateBriefingAgentsRow" class="workspace-template-briefing-row workspace-template-briefing-row-addons" hidden>
                     <span class="workspace-template-briefing-row-label">Agents</span>
-                    <span id="templateBriefingAgentsValue" class="workspace-template-briefing-row-value"></span>
+                    <div id="templateBriefingAgentsValue" class="workspace-template-briefing-chips workspace-template-briefing-agents"></div>
                   </div>
                   <div id="templateBriefingScaffoldRow" class="workspace-template-briefing-row" hidden>
                     <span class="workspace-template-briefing-row-label">Project folder</span>
@@ -78,6 +91,10 @@
                 <span id="wizardStep2RecapName" class="workspace-create-recap-name">Blank workspace</span>
               </div>
 
+              <!-- Editable workspace name on Construct. #wizardNameField is moved
+                   here from step 1 by refreshWizardChrome(); this is just its mount. -->
+              <div id="wizardStep2NameMount" class="mb-2"></div>
+
               <div id="projectTemplateOpenAfterCreate" class="workspace-setup-card mb-2" hidden>
                 <label class="d-flex align-items-start gap-2 mb-0" for="projectTemplateOpenAfterCreateToggle" style="cursor: pointer;">
                   <input type="checkbox" id="projectTemplateOpenAfterCreateToggle" class="form-check-input mt-1">
@@ -96,7 +113,7 @@
                   </div>
                   <label class="workspace-template-agent-toggle">
                     <input type="checkbox" id="templateAgentReviewToggle" checked>
-                    <span>Create</span>
+                    <span>Attach</span>
                   </label>
                 </div>
                 <div id="templateAgentReviewStatus" class="workspace-template-agent-review-status" aria-live="polite"></div>
@@ -118,13 +135,12 @@
                 <div id="reaperSetupActions" class="reaper-setup-actions d-flex flex-wrap gap-2" style="margin-top: 8px;"></div>
               </div>
 
-              <!-- Designation: name + description feed Ori's setup review. -->
-              <label for="folderNameInput" style="font-size: 12px; color: var(--text-secondary);">Workspace name</label>
-              <input type="text" id="folderNameInput" class="modern-input w-100 mb-2" placeholder="Workspace name">
+              <!-- Designation: name (relocated above via #wizardStep2NameMount) +
+                   description feed Ori's setup review. -->
               <div class="workspace-setup-card mb-2">
                 <div class="workspace-setup-header" style="align-items: flex-start;">
                   <div>
-                    <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description</label>
+                    <label for="folderDescriptionInput" class="workspace-setup-title">Workspace Description <span style="opacity: 0.8; font-weight: 400;">(optional)</span></label>
                     <p class="workspace-setup-help mb-0">Describe what this workspace is for so Ori can review the setup and recommend the right agents, MCPs, and skills.</p>
                   </div>
                 </div>

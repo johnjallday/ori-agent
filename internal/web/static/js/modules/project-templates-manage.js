@@ -527,14 +527,36 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   }
   if (els.briefingDefault) els.briefingDefault.hidden = showBriefing;
 
-  const agents = showBriefing && Array.isArray(template.agents) ? template.agents : [];
-  const agentNames = agents
-    .map((a) => String(a?.name || '').trim())
-    .filter(Boolean);
-  const showAgents = agentNames.length > 0;
+  const agentSpecs = showBriefing && Array.isArray(template.agents) ? template.agents : [];
+  const briefingAgents = agentSpecs
+    .map((a) => ({
+      name: String(a?.name || '').trim(),
+      role: String(a?.role || '').trim().toLowerCase()
+    }))
+    .filter((a) => a.name);
+  const showAgents = briefingAgents.length > 0;
   if (els.briefingAgentsRow) els.briefingAgentsRow.hidden = !showAgents;
-  if (els.briefingAgentsValue && showAgents) {
-    els.briefingAgentsValue.textContent = `${agentNames.length} — ${agentNames.join(', ')}`;
+  if (els.briefingAgentsValue) {
+    els.briefingAgentsValue.innerHTML = '';
+    // One chip per agent: a role-hued dot + name. The first roster entry is the
+    // workspace entry agent (solid dot, brighter chip); the rest are specialists.
+    briefingAgents.forEach((agent, index) => {
+      const isEntry = index === 0;
+      const chip = document.createElement('span');
+      chip.className = 'workspace-template-briefing-agent-chip';
+      if (isEntry) chip.classList.add('is-entry');
+      if (agent.role) chip.dataset.role = agent.role;
+      const roleLabel = isEntry
+        ? `entry agent${agent.role ? ` · ${agent.role}` : ''}`
+        : agent.role;
+      if (roleLabel) chip.title = `${agent.name} — ${roleLabel}`;
+      const dot = document.createElement('span');
+      dot.className = 'workspace-template-briefing-agent-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      chip.appendChild(dot);
+      chip.appendChild(document.createTextNode(agent.name));
+      els.briefingAgentsValue.appendChild(chip);
+    });
   }
 
   const showScaffold = Boolean(showBriefing && template.has_skeleton);

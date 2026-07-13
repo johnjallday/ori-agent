@@ -232,6 +232,24 @@ const sessionManager = {
       if (!this.importModeEnabled) this.goToWizardStep(2);
     });
 
+    // Name field: live folder-slug preview, clear the inline error on edit, and
+    // Enter to advance (step 1) or create (step 2). The field is a single
+    // relocated element, so binding once covers both steps.
+    const workspaceNameInput = document.getElementById('folderNameInput');
+    workspaceNameInput?.addEventListener('input', () => {
+      this.clearWorkspaceNameError();
+      this.updateWorkspaceNameHint();
+    });
+    workspaceNameInput?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (this.importModeEnabled || this.wizardStep === 2) {
+        this.createFolder();
+      } else {
+        this.goToWizardStep(2);
+      }
+    });
+
     // Agent behavior (formerly "Workspace preset"): a manual change marks the
     // value as overridden so picking a Template won't clobber it.
     document.getElementById('folderPresetSelect')?.addEventListener('change', () => {
@@ -247,6 +265,7 @@ const sessionManager = {
       this.workspaceTemplate = template;
       this.prefillTemplateValue(document.getElementById('folderNameInput'), template?.name || '', 'autofillName');
       this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
+      this.updateWorkspaceNameHint();
       this.applyTemplateBehavior(template);
       this.updateWizardRecap(template);
       void this.refreshTemplateAgentPlan();
@@ -3224,6 +3243,7 @@ const sessionManager = {
       String(modalElement.dataset.askOriPostCreate || '') === 'open_workspace_dashboard'
     );
 
+    this.clearWorkspaceNameError();
     if (!keepSeedValues) {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
@@ -3271,6 +3291,9 @@ const sessionManager = {
     this.resetTemplateAgentReview();
     window.ReaperSetupCard?.hide?.();
     this.updateBehaviorHint();
+    // Refresh the folder-slug preview now that the name value is settled (the
+    // ProjectTemplateCard reset above may have re-prefilled it).
+    this.updateWorkspaceNameHint();
   },
 
   resetTemplateAgentReview() {
@@ -3314,9 +3337,14 @@ const sessionManager = {
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
     const templatePath = String(fields.template_path || '').trim();
+    // Blank ships a synthetic single-agent roster (Workspace Manager). It has no
+    // template_id/path, so signal it explicitly — but an ad-hoc folder override
+    // (template_path) takes precedence and is no longer "blank".
+    const isBlank = Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank)
+      && !templateId && !templatePath;
     const requestId = ++this.templateAgentPlanRequestId;
 
-    if (this.importModeEnabled || (!templateId && !templatePath)) {
+    if (this.importModeEnabled || (!templateId && !templatePath && !isBlank)) {
       this.resetTemplateAgentReview();
       return;
     }
@@ -3328,7 +3356,8 @@ const sessionManager = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           template_id: templateId || undefined,
-          template_path: templatePath || undefined
+          template_path: templatePath || undefined,
+          blank: isBlank || undefined
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -3403,17 +3432,19 @@ const sessionManager = {
     const createCount = agents.filter((agent) => agent.action === 'create').length;
     const reuseCount = agents.filter((agent) => agent.action === 'reuse').length;
     const parts = [];
-    if (createCount) parts.push(`${createCount} new`);
     if (reuseCount) parts.push(`${reuseCount} reused`);
+    if (createCount) parts.push(`${createCount} new`);
     if (summary) {
-      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} will be attached to this workspace.`;
+      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} attached to this workspace.`;
     }
     if (status) {
       const provider = String(plan.system_provider || '').trim();
       const model = String(plan.system_model || '').trim();
+      // Applies to any blueprint's roster, not just Blank — the message names
+      // where agents without an explicit model get theirs from.
       status.textContent = provider && model
-        ? `Blank template models resolve to ${provider} / ${model}.`
-        : 'Blank template models use the app default because no system model is configured.';
+        ? `Agents without their own model use ${provider} / ${model}.`
+        : 'Agents without their own model use the app default because no system model is configured.';
     }
     if (list) {
       list.innerHTML = agents.map((agent, index) => this.renderTemplateAgentPlanRow(agent, index)).join('');
@@ -3449,26 +3480,44 @@ const sessionManager = {
       : 'App default';
     const modelOptions = this.renderTemplateAgentModelOptions(agent, editableModel, editableProvider, modelText);
     const promptState = systemPrompt ? 'Prompt set' : 'No prompt';
-    const chips = [
-      `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>`,
+    const isReuse = action === 'reuse';
+    // The role/type chip pair shared by both the compact reuse view and the
+    // editable view. The action chip lives only in the editable view so its
+    // "Reuse -> Create" flip on fork targets a single element.
+    const roleChips = [
       agent?.entry_point ? '<span class="workspace-template-agent-chip entry">Entry</span>' : '<span class="workspace-template-agent-chip">Specialist</span>',
       role ? `<span class="workspace-template-agent-chip">${this.escapeHtml(role)}</span>` : '',
       type ? `<span class="workspace-template-agent-chip">${this.escapeHtml(type)}</span>` : '',
       tools ? `<span class="workspace-template-agent-chip">${this.escapeHtml(tools)}</span>` : ''
     ].filter(Boolean).join('');
-    const reuseNote = action === 'reuse'
-      ? '<div class="workspace-template-agent-note">This name matches an existing agent. Saved settings are reused unless you rename it.</div>'
-      : '';
+    const chips = `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>${roleChips}`;
+
+    // Reuse view: a name-matched agent already exists, so it is linked, not
+    // created. Shown compact and locked; "Make a workspace copy" reveals the
+    // editable view (below) and forks a fresh, workspace-scoped agent.
+    const reuseView = isReuse ? `
+        <div class="workspace-template-agent-reuse">
+          <div class="workspace-template-agent-reuse-head">
+            <span class="workspace-template-agent-reuse-name">${this.escapeHtml(name)}</span>
+            <div class="workspace-template-agent-meta">
+              <span class="workspace-template-agent-chip reuse">Reuse</span>${roleChips}
+            </div>
+          </div>
+          <div class="workspace-template-agent-reuse-sub">Using your existing agent${model ? ` · ${this.escapeHtml(modelText)}` : ''}</div>
+          <button type="button" class="workspace-template-agent-fork-btn">Make a workspace copy</button>
+        </div>` : '';
 
     return `
-      <div class="workspace-template-agent-row"
+      <div class="workspace-template-agent-row${isReuse ? ' is-reuse' : ''}"
            data-template-agent-index="${index}"
+           data-forked="false"
            data-original-action="${this.escapeHtml(action)}"
            data-original-name="${this.escapeHtml(name)}"
            data-original-model="${this.escapeHtml(editableModel)}"
            data-original-provider="${this.escapeHtml(editableProvider)}"
            data-original-system-prompt="${this.escapeHtml(systemPrompt)}">
-        <div class="workspace-template-agent-main">
+        ${reuseView}
+        <div class="workspace-template-agent-main"${isReuse ? ' hidden' : ''}>
           <div class="workspace-template-agent-fields">
             <label class="workspace-template-agent-field">
               <span>Name</span>
@@ -3485,7 +3534,7 @@ const sessionManager = {
             </label>
           </div>
           <div class="workspace-template-agent-meta">${chips}</div>
-          ${reuseNote}
+          ${isReuse ? '<div class="workspace-template-agent-fork-note">New workspace copy — edit freely. Your existing agent is left untouched.</div>' : ''}
           <details class="workspace-template-agent-prompt" open>
             <summary>
               <span>System prompt</span>
@@ -3550,8 +3599,35 @@ const sessionManager = {
         control.addEventListener('input', () => this.updateTemplateAgentReviewRowState(row));
         control.addEventListener('change', () => this.updateTemplateAgentReviewRowState(row));
       });
+      row.querySelector('.workspace-template-agent-fork-btn')
+        ?.addEventListener('click', () => this.forkTemplateAgentRow(row));
       this.updateTemplateAgentReviewRowState(row);
     });
+  },
+
+  // Fork a reused (name-matched) agent into a fresh workspace-scoped copy:
+  // reveal the editable view, suffix the name so it no longer matches the
+  // existing agent (which flips the row to "Create"), and let the existing
+  // rename-fork override path carry the edits. The existing agent is untouched.
+  forkTemplateAgentRow(row) {
+    if (!row) return;
+    const reuseView = row.querySelector('.workspace-template-agent-reuse');
+    const main = row.querySelector('.workspace-template-agent-main');
+    const nameInput = row.querySelector('.workspace-template-agent-name-input');
+    row.dataset.forked = 'true';
+    if (reuseView) reuseView.hidden = true;
+    if (main) main.hidden = false;
+    if (nameInput) {
+      nameInput.value = this.suggestForkedAgentName(row.dataset.originalName || nameInput.value);
+      nameInput.focus();
+      nameInput.select?.();
+    }
+    this.updateTemplateAgentReviewRowState(row);
+  },
+
+  suggestForkedAgentName(base) {
+    const trimmed = String(base || '').trim();
+    return trimmed ? `${trimmed} copy` : 'Agent copy';
   },
 
   updateTemplateAgentReviewRowState(row) {
@@ -3701,6 +3777,9 @@ const sessionManager = {
     review.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
       control.disabled = !toggle.checked;
     });
+    review.querySelectorAll('.workspace-template-agent-fork-btn').forEach((btn) => {
+      btn.disabled = !toggle.checked;
+    });
   },
 
   // Fills a create-modal input from a template default while tracking the
@@ -3770,6 +3849,13 @@ const sessionManager = {
     const nextBtn = document.getElementById('wizardNextBtn');
     const createBtn = document.getElementById('createFolderBtn');
 
+    // The workspace name field is a single element relocated to the visible
+    // step's mount, so it's the first input on Select Blueprint yet stays
+    // editable on Construct (and in import mode's single-step layout).
+    this.relocateWizardNameField(step);
+    // Keep the folder-slug preview in sync with import mode (which hides it).
+    this.updateWorkspaceNameHint();
+
     if (step1) step1.hidden = importMode || step !== 1;
     if (step2) step2.hidden = step !== 2;
     if (stepper) stepper.hidden = importMode;
@@ -3786,6 +3872,52 @@ const sessionManager = {
     // The step-2 recap names the chosen blueprint; import mode has no blueprint.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode;
+  },
+
+  // Moves the single #wizardNameField (which owns #folderNameInput) into the
+  // mount for the given effective step. appendChild preserves the input's value,
+  // focus, and listeners, so no cross-step syncing is needed.
+  relocateWizardNameField(step) {
+    const field = document.getElementById('wizardNameField');
+    if (!field) return;
+    const mount = document.getElementById(step === 2 ? 'wizardStep2NameMount' : 'wizardStep1NameMount');
+    if (mount && field.parentElement !== mount) {
+      mount.appendChild(field);
+    }
+  },
+
+  // Shows the folder the current name will map to on disk, so the name→folder
+  // relationship (and slug conflicts) aren't a surprise at create time. Skipped
+  // in import mode, where the folder name comes from the imported path.
+  updateWorkspaceNameHint() {
+    const hint = document.getElementById('workspaceNameHint');
+    if (!hint) return;
+    if (hint.classList.contains('is-error')) return; // an active error owns the slot
+    const name = document.getElementById('folderNameInput')?.value.trim() || '';
+    if (this.importModeEnabled || !name) {
+      hint.textContent = '';
+      hint.hidden = true;
+      return;
+    }
+    hint.textContent = `Folder: ${this.slugifyWorkspaceName(name)}`;
+    hint.hidden = false;
+  },
+
+  setWorkspaceNameError(message) {
+    const hint = document.getElementById('workspaceNameHint');
+    const input = document.getElementById('folderNameInput');
+    input?.classList.add('is-invalid');
+    if (hint) {
+      hint.textContent = message;
+      hint.hidden = false;
+      hint.classList.add('is-error');
+    }
+  },
+
+  clearWorkspaceNameError() {
+    const hint = document.getElementById('workspaceNameHint');
+    document.getElementById('folderNameInput')?.classList.remove('is-invalid');
+    hint?.classList.remove('is-error');
   },
 
   // Sets the step-2 recap line ("Constructing: <icon> <name>") from the selected
@@ -3928,18 +4060,18 @@ const sessionManager = {
     const name = nameInput?.value.trim() || '';
     const description = descriptionInput?.value.trim() || '';
     if (!name && !importEnabled) {
-      this.showToast('Workspace name is required', 'warning');
+      // Inline error on the field (which is now the first thing on step 1) rather
+      // than a toast that fires only after the user reaches the end.
+      this.setWorkspaceNameError('Workspace name is required');
+      nameInput?.focus();
       return;
     }
     if (importEnabled && !importPath) {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;
     }
-    if (!description) {
-      this.showToast('Workspace description is required', 'warning');
-      descriptionInput?.focus();
-      return;
-    }
+    // Description is optional: a workspace can start with just a name, and Ori
+    // can still review the setup later. It only enriches the setup review.
 
     const parentId = parentSelect?.value?.trim() || '';
     const color = colorBtn?.dataset.color || '';
@@ -3996,7 +4128,14 @@ const sessionManager = {
           // Optional project scaffolding from the template picker
           // (template_id/template_path). The scaffolded project folder name
           // defaults to the workspace name server-side.
-          Object.assign(payload, window.ProjectTemplateCard.getPayloadFields());
+          const templateFields = window.ProjectTemplateCard.getPayloadFields();
+          Object.assign(payload, templateFields);
+          // Blank blueprint (no template_id/path, no ad-hoc folder override):
+          // tell the backend to seed the synthetic single-agent roster.
+          if (window.ProjectTemplateCard.getSelectedTemplate?.()?.blank
+            && !templateFields.template_id && !templateFields.template_path) {
+            payload.blank = true;
+          }
         }
         if (this.templateAgentPlan?.has_agents) {
           const createTemplateAgents = Boolean(document.getElementById('templateAgentReviewToggle')?.checked);
@@ -4630,13 +4769,20 @@ const sessionManager = {
     });
   },
 
+  // Mirrors internal/workspace.Slugify so the folder-name preview and the
+  // rename "folder saved as" check match what the server writes to disk:
+  // lowercase, strip accents, non-alphanumeric to hyphens, collapse/trim
+  // hyphens, cap at 64 chars, "untitled" for empty input.
   slugifyWorkspaceName(value) {
-    return String(value || '')
-      .trim()
+    const s = String(value || '').trim();
+    if (!s) return 'untitled';
+    let slug = s.normalize('NFD').replace(/\p{Mn}/gu, '')
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .replace(/-{2,}/g, '-');
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (slug.length > 64) slug = slug.slice(0, 64).replace(/-+$/g, '');
+    return slug || 'untitled';
   },
 
   buildWorkspaceSlugConflictMessage(conflict) {
