@@ -3886,21 +3886,6 @@ const sessionManager = {
     }
   },
 
-  // Mirrors internal/workspace.Slugify so the folder-name preview matches what
-  // the server will create on disk: lowercase, strip accents, non-alphanumeric
-  // to hyphens, collapse/trim hyphens, cap at 64 chars.
-  slugifyWorkspaceName(name) {
-    const s = String(name || '').trim();
-    if (!s) return 'untitled';
-    let slug = s.normalize('NFD').replace(/\p{Mn}/gu, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, '-')
-      .replace(/-{2,}/g, '-')
-      .replace(/^-+|-+$/g, '');
-    if (slug.length > 64) slug = slug.slice(0, 64).replace(/-+$/g, '');
-    return slug || 'untitled';
-  },
-
   // Shows the folder the current name will map to on disk, so the name→folder
   // relationship (and slug conflicts) aren't a surprise at create time. Skipped
   // in import mode, where the folder name comes from the imported path.
@@ -4784,13 +4769,20 @@ const sessionManager = {
     });
   },
 
+  // Mirrors internal/workspace.Slugify so the folder-name preview and the
+  // rename "folder saved as" check match what the server writes to disk:
+  // lowercase, strip accents, non-alphanumeric to hyphens, collapse/trim
+  // hyphens, cap at 64 chars, "untitled" for empty input.
   slugifyWorkspaceName(value) {
-    return String(value || '')
-      .trim()
+    const s = String(value || '').trim();
+    if (!s) return 'untitled';
+    let slug = s.normalize('NFD').replace(/\p{Mn}/gu, '')
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .replace(/-{2,}/g, '-');
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (slug.length > 64) slug = slug.slice(0, 64).replace(/-+$/g, '');
+    return slug || 'untitled';
   },
 
   buildWorkspaceSlugConflictMessage(conflict) {
