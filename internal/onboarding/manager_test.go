@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -89,6 +90,102 @@ func TestManager_AssistantProgress_BackwardCompatibleLoad(t *testing.T) {
 	}
 	if progress.Rank == "" {
 		t.Error("expected default rank from legacy load")
+	}
+}
+
+// TestManager_Progression_SkippedQuestsPersistenceRoundTrip covers task 3.2:
+// a per-quest skip must survive an app_state.json reload, independent of
+// CompletedQuests and Dismissed.
+func TestManager_Progression_SkippedQuestsPersistenceRoundTrip(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+
+	skippedAt := time.Now().UTC().Truncate(time.Second)
+	err := mgr.SetProgression(types.ProgressionState{
+		CompletedQuests: map[string]time.Time{"t1-first-message": skippedAt},
+		SkippedQuests:   map[string]time.Time{"t2-build-hq": skippedAt},
+		Dismissed:       false,
+	})
+	if err != nil {
+		t.Fatalf("SetProgression: %v", err)
+	}
+
+	reloaded := NewManager(statePath)
+	p := reloaded.GetProgression()
+	if len(p.SkippedQuests) != 1 || p.SkippedQuests["t2-build-hq"].IsZero() {
+		t.Fatalf("expected skipped quest to survive reload, got %#v", p.SkippedQuests)
+	}
+	if len(p.CompletedQuests) != 1 {
+		t.Fatalf("expected completed quest to survive reload independently, got %#v", p.CompletedQuests)
+	}
+}
+
+// TestManager_Progression_LegacyStateWithoutSkippedQuestsLoadsSafely covers
+// task 3.2: an app_state.json written before SkippedQuests existed (nil map)
+// must load without error and default to an unseeded state, not a nil-map
+// panic on later mutation.
+func TestManager_Progression_LegacyStateWithoutSkippedQuestsLoadsSafely(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+
+	legacyState := map[string]any{
+		"onboarding": map[string]any{"completed": true},
+		"progression": map[string]any{
+			"completed_quests": map[string]any{"t1-first-message": time.Now().UTC()},
+			// No skipped_quests key at all — pre-dates the field.
+		},
+		"version": "v0.0.1",
+	}
+	data, err := json.Marshal(legacyState)
+	if err != nil {
+		t.Fatalf("marshal legacy state: %v", err)
+	}
+	if err := os.WriteFile(statePath, data, 0o644); err != nil {
+		t.Fatalf("write legacy state: %v", err)
+	}
+
+	mgr := NewManager(statePath)
+	p := mgr.GetProgression()
+	if len(p.CompletedQuests) != 1 {
+		t.Fatalf("expected the pre-existing completion to load, got %#v", p.CompletedQuests)
+	}
+	if len(p.SkippedQuests) != 0 {
+		t.Fatalf("expected no skipped quests from a legacy file, got %#v", p.SkippedQuests)
+	}
+
+	// Must not panic writing through a nil-map field loaded from legacy JSON.
+	if err := mgr.SetProgression(types.ProgressionState{SkippedQuests: map[string]time.Time{"t2-build-hq": time.Now()}}); err != nil {
+		t.Fatalf("SetProgression after legacy load: %v", err)
+	}
+}
+
+// TestManager_Progression_ClonesMapsOnGetAndSet covers task 3.2: neither
+// GetProgression nor SetProgression may hand back a map the caller can
+// mutate to corrupt persisted state through a shared reference.
+func TestManager_Progression_ClonesMapsOnGetAndSet(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "app_state.json")
+	mgr := NewManager(statePath)
+
+	original := map[string]time.Time{"t2-build-hq": time.Now()}
+	if err := mgr.SetProgression(types.ProgressionState{SkippedQuests: original}); err != nil {
+		t.Fatal(err)
+	}
+	// Mutating the caller's map after Set must not affect persisted state.
+	original["t2-build-hq"] = time.Time{}
+	original["injected"] = time.Now()
+
+	got := mgr.GetProgression()
+	if _, ok := got.SkippedQuests["injected"]; ok {
+		t.Fatal("SetProgression must deep-copy the map, not alias the caller's")
+	}
+	if got.SkippedQuests["t2-build-hq"].IsZero() {
+		t.Fatal("SetProgression must not be affected by post-call mutation of the caller's map")
+	}
+
+	// Mutating the map returned by Get must not affect the manager's state.
+	got.SkippedQuests["t2-build-hq"] = time.Time{}
+	got2 := mgr.GetProgression()
+	if got2.SkippedQuests["t2-build-hq"].IsZero() {
+		t.Fatal("GetProgression must return a copy, not the internal map")
 	}
 }
 

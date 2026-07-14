@@ -330,6 +330,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Progression != nil {
 		mux.HandleFunc("/api/progression", s.Handlers.Progression.GetStatus)
 		mux.HandleFunc("/api/progression/dismiss", s.Handlers.Progression.Dismiss)
+		mux.HandleFunc("/api/progression/skip", s.Handlers.Progression.Skip)
 		mux.HandleFunc("/api/progression/reset", s.Handlers.Progression.Reset)
 	}
 

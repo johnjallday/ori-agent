@@ -828,6 +828,41 @@ body.home-command-page .home-command-bridge * {
   color: var(--hc-signal);
 }
 
+.quest-item-skipped .quest-mark {
+  color: var(--hc-ink-dim);
+}
+
+.quest-status {
+  margin-left: auto;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.quest-resume,
+.quest-skip {
+  padding: 2px 6px;
+  border: 1px solid var(--hc-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.quest-resume:hover,
+.quest-resume:focus-visible,
+.quest-skip:hover,
+.quest-skip:focus-visible {
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 10%, transparent);
+  color: var(--hc-signal);
+  outline: 0;
+}
+
 .quest-title {
   color: inherit;
 }

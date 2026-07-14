@@ -2,8 +2,106 @@
 //
 // Fetches GET /api/progression, renders the current tier's quests + progress,
 // and shows a toast when a quest (or a whole tier) newly completes. Dismissible
-// (POST /api/progression/dismiss) with a restore affordance. Purely additive:
-// no-op on pages without the #questLog element.
+// (POST /api/progression/dismiss) with a restore affordance, and lets an
+// optional quest be Skipped (POST /api/progression/skip) without dismissing
+// the whole widget. Purely additive: no-op on pages without the #questLog
+// element.
+//
+// Pure helpers are exported (loaded as type="module") so progression-widget.test.js
+// can exercise the optional/skipped-quest rendering and toast-suppression
+// decisions without a DOM.
+
+export function currentTier(status) {
+  return (
+    (status.tiers || []).find(tier => tier.tier === status.current_tier) ||
+    (status.tiers || [])[0] ||
+    null
+  );
+}
+
+export function completedCount(tier) {
+  return (tier?.quests || []).filter(quest => quest.status === 'completed').length;
+}
+
+// resolvedCount includes skipped optional quests alongside completed ones, so
+// the meter/progress count advances past a skip without the skipped quest
+// ever being labeled "complete" in its own row (task 3.4/3.8).
+export function resolvedCount(tier) {
+  return (tier?.quests || []).filter(quest => quest.status === 'completed' || quest.status === 'skipped').length;
+}
+
+export function tierInsignia(tier) {
+  const value = Number(tier);
+  return Number.isFinite(value) && value > 0 ? String(value).padStart(2, '0') : '—';
+}
+
+// questRowState derives the pure per-row rendering decision for one quest:
+// which mark/affordances to show. Kept side-effect-free so it can be unit
+// tested without constructing DOM nodes.
+export function questRowState(quest) {
+  const done = quest.status === 'completed';
+  const skipped = quest.status === 'skipped';
+  const resolved = done || skipped;
+  return {
+    done,
+    skipped,
+    resolved,
+    mark: done ? '✓' : skipped ? '⏭' : '○',
+    // A quest renders as a clickable link only while unresolved and it has
+    // a destination; a resolved quest (done or skipped) never does — the
+    // skipped case gets its own separate "Resume" affordance instead.
+    showLink: !resolved && !!quest.action_url,
+    // Skipped quests keep a Resume affordance so they stay reachable
+    // without being a blocking interruption (never shown once truly done).
+    showResume: skipped && !!quest.action_url,
+    // The Skip control appears only for an optional quest that has not yet
+    // resolved either way.
+    showSkip: !resolved && !!quest.optional
+  };
+}
+
+// diffAnnouncements is the pure diff between the previously known state and
+// an incoming status: which quests newly completed and which tiers newly
+// became complete, driving what announceChanges() below actually toasts.
+//
+// A skip must never itself produce a "quest complete" toast (it is not a
+// completion), and a tier is only reported as newly complete here when at
+// least one quest in it actually completed this round — a tier that became
+// complete solely because its last open quest was skipped must not toast,
+// since skipping the optional HQ objective should not read as an
+// achievement.
+export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
+  const completedNow = new Set();
+  (status.tiers || []).forEach(t => {
+    (t.quests || []).forEach(q => {
+      if (q.status === 'completed') completedNow.add(q.id);
+    });
+  });
+
+  const newCompletions = [];
+  const newTierCompletions = [];
+  if (knownCompleted !== null) {
+    (status.tiers || []).forEach(t => {
+      let tierHasNewCompletion = false;
+      (t.quests || []).forEach(q => {
+        if (q.status === 'completed' && !knownCompleted.has(q.id)) {
+          newCompletions.push({ id: q.id, title: q.title });
+          tierHasNewCompletion = true;
+        }
+      });
+      if (t.complete && !knownTierComplete[t.tier] && tierHasNewCompletion) {
+        newTierCompletions.push({ tier: t.tier, name: t.name });
+      }
+    });
+  }
+
+  const nextKnownTierComplete = {};
+  (status.tiers || []).forEach(t => {
+    nextKnownTierComplete[t.tier] = !!t.complete;
+  });
+
+  return { completedNow, nextKnownTierComplete, newCompletions, newTierCompletions };
+}
 
 (function () {
   if (typeof document === 'undefined') return;
@@ -51,61 +149,25 @@
   // Diff the incoming status against what we last knew and toast new wins.
   // Skipped on the very first load so a returning user isn't flooded.
   function announceChanges(status) {
-    const completedNow = new Set();
-    (status.tiers || []).forEach(t => {
-      (t.quests || []).forEach(q => {
-        if (q.status === 'completed') completedNow.add(q.id);
-      });
-    });
+    const diff = diffAnnouncements(status, knownCompleted, knownTierComplete);
+    diff.newCompletions.forEach(q => toast(q.title, 'Quest complete'));
+    diff.newTierCompletions.forEach(t => toast(`Tier complete: ${t.name}`, 'Tier complete'));
 
-    if (knownCompleted !== null) {
-      (status.tiers || []).forEach(t => {
-        (t.quests || []).forEach(q => {
-          if (q.status === 'completed' && !knownCompleted.has(q.id)) {
-            toast(q.title, 'Quest complete');
-          }
-        });
-        if (t.complete && !knownTierComplete[t.tier]) {
-          toast(`Tier complete: ${t.name}`, 'Tier complete');
-        }
-      });
-    }
-
-    knownCompleted = completedNow;
-    knownTierComplete = {};
-    (status.tiers || []).forEach(t => {
-      knownTierComplete[t.tier] = !!t.complete;
-    });
+    knownCompleted = diff.completedNow;
+    knownTierComplete = diff.nextKnownTierComplete;
   }
 
-  function currentTier(status) {
-    return (
-      (status.tiers || []).find(tier => tier.tier === status.current_tier) ||
-      (status.tiers || [])[0] ||
-      null
-    );
-  }
-
-  function completedCount(tier) {
-    return (tier?.quests || []).filter(quest => quest.status === 'completed').length;
-  }
-
-  function setMeter(bar, completed, total) {
+  function setMeter(bar, resolved, total) {
     if (!bar) return;
-    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const percent = total > 0 ? Math.round((resolved / total) * 100) : 0;
     bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
 
     const meter = bar.closest('[role="progressbar"]');
     if (meter) meter.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, percent))));
   }
 
-  function tierInsignia(tier) {
-    const value = Number(tier);
-    return Number.isFinite(value) && value > 0 ? String(value).padStart(2, '0') : '—';
-  }
-
   function renderRestoreBadge(status, current) {
-    const completed = status.all_complete ? status.total_count : completedCount(current);
+    const resolved = status.all_complete ? status.resolved_count : resolvedCount(current);
     const total = status.all_complete ? status.total_count : (current?.quests || []).length;
     const tierLabel = status.all_complete ? 'All tiers complete' : `Tier ${status.current_tier}`;
 
@@ -116,8 +178,64 @@
     if (insignia)
       insignia.textContent = status.all_complete ? '✓' : tierInsignia(status.current_tier);
     if (tier) tier.textContent = tierLabel;
-    if (progress) progress.textContent = `${completed}/${total}`;
-    if (meter) meter.style.width = `${total > 0 ? Math.round((completed / total) * 100) : 0}%`;
+    if (progress) progress.textContent = `${resolved}/${total}`;
+    if (meter) meter.style.width = `${total > 0 ? Math.round((resolved / total) * 100) : 0}%`;
+  }
+
+  async function skipQuest(questID, button) {
+    button.disabled = true;
+    try {
+      const status = await postJSON('/api/progression/skip', { quest_id: questID });
+      render(status);
+    } catch (_) {
+      button.disabled = false;
+    }
+  }
+
+  function renderQuestRow(q) {
+    const state = questRowState(q);
+    const li = document.createElement('li');
+    li.className = 'quest-item' + (state.done ? ' quest-item-done' : '') + (state.skipped ? ' quest-item-skipped' : '');
+
+    const mark = document.createElement('span');
+    mark.className = 'quest-mark';
+    mark.textContent = state.mark; // Distinct glyph per state, not color alone.
+    mark.setAttribute('aria-hidden', 'true');
+
+    const title = document.createElement(state.showLink ? 'a' : 'span');
+    if (state.showLink) {
+      title.href = q.action_url;
+      title.title = q.action_label || q.title;
+    }
+    title.className = 'quest-title';
+    title.textContent = q.title;
+
+    li.append(mark, title);
+
+    if (state.skipped) {
+      const label = document.createElement('span');
+      label.className = 'quest-status quest-status-skipped';
+      label.textContent = 'Skipped';
+      li.append(label);
+    }
+    if (state.showResume) {
+      const resume = document.createElement('a');
+      resume.className = 'quest-resume';
+      resume.href = q.action_url;
+      resume.textContent = q.action_label || 'Resume';
+      li.append(resume);
+    }
+    if (state.showSkip) {
+      const skipBtn = document.createElement('button');
+      skipBtn.type = 'button';
+      skipBtn.className = 'quest-skip';
+      skipBtn.textContent = 'Skip';
+      skipBtn.setAttribute('aria-label', `Skip: ${q.title}`);
+      skipBtn.addEventListener('click', () => skipQuest(q.id, skipBtn));
+      li.append(skipBtn);
+    }
+
+    return li;
   }
 
   function render(status) {
@@ -155,38 +273,14 @@
     el('tier-name').textContent = current.name;
     el('tier-insignia').textContent = tierInsignia(status.current_tier);
     el('progress-label').textContent = `Tier ${status.current_tier} of ${status.total_tiers}`;
-    const complete = completedCount(current);
+    const resolved = resolvedCount(current);
     const total = current.quests.length;
-    el('progress-count').textContent = `${complete}/${total}`;
-    setMeter(el('progress-bar'), complete, total);
+    el('progress-count').textContent = `${resolved}/${total}`;
+    setMeter(el('progress-bar'), resolved, total);
 
     const list = el('quests');
     list.innerHTML = '';
-    current.quests.forEach(q => {
-      const done = q.status === 'completed';
-      const li = document.createElement('li');
-      li.className = 'quest-item' + (done ? ' quest-item-done' : '');
-      const mark = document.createElement('span');
-      mark.className = 'quest-mark';
-      mark.textContent = done ? '✓' : '○';
-      mark.setAttribute('aria-hidden', 'true');
-
-      // An incomplete quest with an action destination renders as a link so the
-      // user can act on it directly; otherwise it's plain text.
-      let title;
-      if (!done && q.action_url) {
-        title = document.createElement('a');
-        title.href = q.action_url;
-        title.title = q.action_label || q.title;
-      } else {
-        title = document.createElement('span');
-      }
-      title.className = 'quest-title';
-      title.textContent = q.title;
-
-      li.append(mark, title);
-      list.appendChild(li);
-    });
+    current.quests.forEach(q => list.appendChild(renderQuestRow(q)));
 
     const why = el('why');
     why.textContent = status.next_quest ? status.next_quest.why : '';

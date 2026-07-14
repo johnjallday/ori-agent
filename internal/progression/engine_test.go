@@ -1,6 +1,7 @@
 package progression
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -172,13 +173,15 @@ func TestBackfill_EstablishedInstall_GrandfathersSilently(t *testing.T) {
 		t.Fatalf("backfill must not fire onComplete, got %d", fires)
 	}
 	// Every backfillable quest should be complete; the two live-only quests
-	// (tool-task, unattended-run) have no Satisfied predicate and remain open.
+	// (tool-task, unattended-run) have no Satisfied predicate and remain
+	// open, and the optional Personal HQ quest's Satisfied predicate is
+	// false because this snapshot has no HasPersonalHQ.
 	st := e.Status()
-	if st.CompletedCount != st.TotalCount-2 {
-		t.Fatalf("expected all but the 2 live-only quests complete, got %d/%d", st.CompletedCount, st.TotalCount)
+	if st.CompletedCount != st.TotalCount-3 {
+		t.Fatalf("expected all but the 2 live-only quests and the unmet Personal HQ quest complete, got %d/%d", st.CompletedCount, st.TotalCount)
 	}
-	if completed(e, "t4-tool-task") || completed(e, "t5-unattended-run") {
-		t.Fatal("live-only quests must not be grandfathered")
+	if completed(e, "t4-tool-task") || completed(e, "t5-unattended-run") || completed(e, "t2-build-hq") {
+		t.Fatal("live-only and unmet-Personal-HQ quests must not be grandfathered")
 	}
 }
 
@@ -257,5 +260,237 @@ func TestDismissPersists(t *testing.T) {
 	}
 	if !New(store).Status().Dismissed {
 		t.Fatal("dismissed flag should persist")
+	}
+}
+
+// questView returns the QuestView for id, or nil.
+func questView(e *Engine, id string) *QuestView {
+	for _, tv := range e.Status().Tiers {
+		for i := range tv.Quests {
+			if tv.Quests[i].ID == id {
+				return &tv.Quests[i]
+			}
+		}
+	}
+	return nil
+}
+
+func TestSkip_RejectsUnknownQuest(t *testing.T) {
+	e := New(&fakeStore{})
+	if err := e.Skip("does-not-exist"); !errors.Is(err, ErrQuestNotFound) {
+		t.Fatalf("expected ErrQuestNotFound, got %v", err)
+	}
+}
+
+func TestSkip_RejectsNonOptionalQuest(t *testing.T) {
+	e := New(&fakeStore{})
+	if err := e.Skip("t1-first-message"); !errors.Is(err, ErrQuestNotOptional) {
+		t.Fatalf("expected ErrQuestNotOptional, got %v", err)
+	}
+}
+
+func TestSkip_MarksSkippedAndIsIdempotent(t *testing.T) {
+	e := New(&fakeStore{})
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatalf("Skip: %v", err)
+	}
+	qv := questView(e, "t2-build-hq")
+	if qv == nil || qv.Status != StatusSkipped || qv.SkippedAt == nil {
+		t.Fatalf("expected skipped status with SkippedAt set, got %+v", qv)
+	}
+	firstSkippedAt := *qv.SkippedAt
+
+	// Skipping again must not error and must not disturb the timestamp.
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatalf("second Skip should be a no-op success, got %v", err)
+	}
+	qv = questView(e, "t2-build-hq")
+	if qv.SkippedAt == nil || !qv.SkippedAt.Equal(firstSkippedAt) {
+		t.Fatalf("re-skipping should not change SkippedAt: before=%v after=%v", firstSkippedAt, qv.SkippedAt)
+	}
+}
+
+func TestSkip_NeverFiresOnComplete(t *testing.T) {
+	fires := 0
+	e := New(&fakeStore{}, WithOnComplete(func(Quest) { fires++ }))
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatal(err)
+	}
+	if fires != 0 {
+		t.Fatalf("Skip must never fire onComplete, got %d calls", fires)
+	}
+}
+
+func TestSkip_DoesNotIncreaseCompletedCountButAdvancesResolvedCount(t *testing.T) {
+	e := New(&fakeStore{})
+	before := e.Status()
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatal(err)
+	}
+	after := e.Status()
+
+	if after.CompletedCount != before.CompletedCount {
+		t.Fatalf("skip must not change CompletedCount: before=%d after=%d", before.CompletedCount, after.CompletedCount)
+	}
+	if after.ResolvedCount != before.ResolvedCount+1 {
+		t.Fatalf("skip must advance ResolvedCount by 1: before=%d after=%d", before.ResolvedCount, after.ResolvedCount)
+	}
+}
+
+// TestSkip_AdvancesCurrentTierPastLockedTier covers the core non-gating
+// requirement: skipping the optional Personal HQ quest must not keep tier 3
+// (or the widget's locked-tier display) stuck behind it once every other
+// tier-2 quest resolves.
+func TestSkip_AdvancesCurrentTierPastLockedTier(t *testing.T) {
+	e := New(&fakeStore{})
+	e.Complete("t1-first-message")
+	e.Complete("t1-personalize")
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceCreated}) // t2-create-workspace
+	e.HandleEvent(ws.Event{Type: ws.EventNoteCreated})      // t2-create-note
+	e.HandleEvent(ws.Event{Type: ws.EventTaskStarted})      // t2-run-task
+
+	// Before skipping, tier 2 is not yet complete and tier 3 is locked.
+	st := e.Status()
+	if st.CurrentTier != 2 {
+		t.Fatalf("precondition: expected current tier 2 before skip, got %d", st.CurrentTier)
+	}
+	if q := questView(e, "t3-second-agent"); q == nil || q.Status != StatusLocked {
+		t.Fatalf("precondition: tier 3 quest should be locked, got %+v", q)
+	}
+
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatal(err)
+	}
+
+	st = e.Status()
+	if st.CurrentTier != 3 {
+		t.Fatalf("expected current tier to advance to 3 after skip, got %d", st.CurrentTier)
+	}
+	var tier2 *TierView
+	for i := range st.Tiers {
+		if st.Tiers[i].Tier == 2 {
+			tier2 = &st.Tiers[i]
+		}
+	}
+	if tier2 == nil || !tier2.Complete {
+		t.Fatalf("tier 2 should be marked complete once its optional quest is skipped, got %+v", tier2)
+	}
+	if q := questView(e, "t3-second-agent"); q == nil || q.Status != StatusAvailable {
+		t.Fatalf("tier 3 quest should now be available (unlocked), got %+v", q)
+	}
+}
+
+// TestSkip_LaterCompletionReplacesSkip covers requirement 3.5: a later real
+// completion must replace a skip outcome, remove it from SkippedQuests, and
+// fire the completion callback for that newly observed action.
+func TestSkip_LaterCompletionReplacesSkip(t *testing.T) {
+	fires := 0
+	e := New(&fakeStore{}, WithOnComplete(func(Quest) { fires++ }))
+
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatal(err)
+	}
+	if fires != 0 {
+		t.Fatalf("skip must not fire onComplete, got %d", fires)
+	}
+
+	if ok := e.Complete("t2-build-hq"); !ok {
+		t.Fatal("expected Complete to report a newly observed completion")
+	}
+	if fires != 1 {
+		t.Fatalf("the later real completion should fire onComplete exactly once, got %d", fires)
+	}
+
+	qv := questView(e, "t2-build-hq")
+	if qv == nil || qv.Status != StatusCompleted || qv.CompletedAt == nil {
+		t.Fatalf("expected completed status after later completion, got %+v", qv)
+	}
+	if qv.SkippedAt != nil {
+		t.Fatalf("SkippedAt must be cleared once the quest is actually completed, got %v", qv.SkippedAt)
+	}
+}
+
+// TestSkip_NoOpWhenAlreadyCompleted covers the reverse direction: a real
+// completion must never be downgraded back to skipped.
+func TestSkip_NoOpWhenAlreadyCompleted(t *testing.T) {
+	e := New(&fakeStore{})
+	e.Complete("t2-build-hq")
+
+	if err := e.Skip("t2-build-hq"); err != nil {
+		t.Fatalf("Skip on an already-completed quest should be a no-op success, got %v", err)
+	}
+	qv := questView(e, "t2-build-hq")
+	if qv == nil || qv.Status != StatusCompleted {
+		t.Fatalf("quest must remain completed, not regress to skipped: %+v", qv)
+	}
+}
+
+// TestBuildHQQuestDoesNotAffectCreateWorkspaceQuest covers requirement 3.6:
+// the new optional Personal HQ quest must be independent of the existing
+// t2-create-workspace quest in both directions.
+func TestBuildHQQuestDoesNotAffectCreateWorkspaceQuest(t *testing.T) {
+	e := New(&fakeStore{})
+
+	// A normal workspace-created event still only completes
+	// t2-create-workspace, matching FR48 (new-HQ creation goes through this
+	// same event and separately calls Complete("t2-build-hq"), which callers
+	// wire outside the engine).
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceCreated})
+	if !completed(e, "t2-create-workspace") {
+		t.Fatal("workspace.created should still complete t2-create-workspace")
+	}
+	if completed(e, "t2-build-hq") {
+		t.Fatal("workspace.created must not implicitly complete t2-build-hq")
+	}
+
+	// Completing the HQ objective directly (as the designate-existing-
+	// workspace path will do, FR49) must not replay t2-create-workspace.
+	e2 := New(&fakeStore{})
+	e2.Complete("t2-build-hq")
+	if completed(e2, "t2-create-workspace") {
+		t.Fatal("completing t2-build-hq directly must not complete t2-create-workspace")
+	}
+}
+
+// TestAllComplete_TreatsSkipAsResolved proves a skipped optional quest can
+// still reach the "all complete" celebratory state without ever being
+// recorded as an actual completion.
+func TestAllComplete_TreatsSkipAsResolved(t *testing.T) {
+	e := New(&fakeStore{})
+	for _, q := range BuiltinQuests() {
+		if q.Optional {
+			if err := e.Skip(q.ID); err != nil {
+				t.Fatalf("Skip(%s): %v", q.ID, err)
+			}
+			continue
+		}
+		e.Complete(q.ID)
+	}
+
+	st := e.Status()
+	if !st.AllComplete {
+		t.Fatalf("expected AllComplete once every quest is completed or skipped, got %+v", st)
+	}
+	if st.ResolvedCount != st.TotalCount {
+		t.Fatalf("ResolvedCount should equal TotalCount, got %d/%d", st.ResolvedCount, st.TotalCount)
+	}
+	if st.CompletedCount >= st.TotalCount {
+		t.Fatalf("CompletedCount must stay below TotalCount when a quest was skipped, got %d/%d", st.CompletedCount, st.TotalCount)
+	}
+}
+
+// TestSkip_PersistsAcrossRestart covers requirement 3.2/3.9: a skip must
+// survive an engine reload from the same store, distinctly from completion.
+func TestSkip_PersistsAcrossRestart(t *testing.T) {
+	store := &fakeStore{}
+	e1 := New(store)
+	if err := e1.Skip("t2-build-hq"); err != nil {
+		t.Fatal(err)
+	}
+
+	e2 := New(store)
+	qv := questView(e2, "t2-build-hq")
+	if qv == nil || qv.Status != StatusSkipped {
+		t.Fatalf("skip should survive reload from the same store, got %+v", qv)
 	}
 }

@@ -133,6 +133,7 @@ export default defineConfig([
       'internal/web/static/js/modules/note-wikilinks.js',
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/plugin-init-banner.js',
+      'internal/web/static/js/modules/progression-widget.js',
       'internal/web/static/js/modules/renderer-connections.js',
       'internal/web/static/js/modules/renderer-nodes.js',
       'internal/web/static/js/modules/renderer-panels.js',

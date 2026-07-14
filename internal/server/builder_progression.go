@@ -6,6 +6,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -65,6 +66,12 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 
 	if profile := b.onboardingMgr.GetUserProfile(); profile != nil && !profile.PersonalizedAt.IsZero() {
 		snap.Personalized = true
+	}
+
+	if b.personalHQService != nil {
+		if status, err := b.personalHQService.Status(context.Background(), userprofile.LocalUserID); err == nil && status.Valid {
+			snap.HasPersonalHQ = true
+		}
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".
