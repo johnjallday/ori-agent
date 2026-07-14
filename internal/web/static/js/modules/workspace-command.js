@@ -22,6 +22,14 @@ import {
   FILTER
 } from './task-presentation.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
+import {
+  parseWorkspaceURLState,
+  sanitizeWorkspaceURLState,
+  statesEqual as urlStatesEqual,
+  resolveEffectiveMode,
+  buildReturnTarget,
+  buildWorkspaceURL
+} from './workspace-url-state.js';
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -42,7 +50,17 @@ export class WorkspaceCommandView {
     this.page = page || null;
     this.container = document.getElementById('workspaceCommandView');
     this.active = false;
-    this.viewMode = this.readCommandViewModePreference();
+    // URL/history restoration (group 6): read the URL once at boot. `mode`
+    // wins over the localStorage preference (FR85); panel/task/agent/run are
+    // held pending until page data is available to sanitize against (FR91).
+    this._urlBootState = typeof window !== 'undefined' ? parseWorkspaceURLState(window.location.search) : null;
+    this._urlStateApplied = false;
+    this._urlSyncEnabled = false;
+    this._lastSyncedURLState = null;
+    this.viewMode = resolveEffectiveMode(
+      this._urlBootState && this._urlBootState.mode,
+      this.readCommandViewModePreference()
+    );
     this.activeRailSection = '';
     this.activeMapWindow = '';
     this.mapInventoryOpen = false;
@@ -97,6 +115,7 @@ export class WorkspaceCommandView {
     this.loadoutError = '';
     this.sharedSurfaceAnchors = {};
     this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
+    this.boundPopState = event => this.handlePopState(event);
     this.setup();
   }
 
@@ -144,6 +163,7 @@ export class WorkspaceCommandView {
     }
     this.restoreSharedSurfaces();
     this.render();
+    this.syncURLState();
     if (!focus || !this.container || typeof this.container.querySelector !== 'function') return;
     const btn = this.container.querySelector('[data-cmd-view-mode="' + nextMode + '"]');
     if (btn && typeof btn.focus === 'function') btn.focus();
@@ -176,6 +196,10 @@ export class WorkspaceCommandView {
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('keydown', this.boundGlobalKeydown);
     }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('popstate', this.boundPopState);
+    }
+    this.applyBootURLState();
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -184,6 +208,216 @@ export class WorkspaceCommandView {
     else if (this.statModalSection) this.renderStatModalBody();
     // Live-refresh the drawer body in place (preserves selection + scroll, FR25).
     if (this.taskDrawerOpen) this.renderTaskDrawerBody();
+    // Data may not have been ready the first time activate() ran; retry once
+    // page.tasks/agents are actually populated (FR90: refresh restores from URL).
+    this.applyBootURLState();
+  }
+
+  // ---------- URL / history restoration (group 6) ----------
+  //
+  // Canonical params: mode, panel, task, agent, run (FR80). URL wins over the
+  // localStorage view-mode preference (FR85, applied in the constructor).
+  // Meaningful transitions (mode/drawer/task/agent/run changes) push or
+  // replace history; presentational changes (scroll, tray collapse) never
+  // touch the URL and are instead captured into history.state (FR86-FR87).
+
+  /** Build the validation context sanitizeWorkspaceURLState needs (FR91). */
+  urlStateContext() {
+    const page = this.page || {};
+    const tasks = Array.isArray(page.tasks) ? page.tasks : [];
+    const validTaskIds = tasks.map(t => String(t?.id || '')).filter(Boolean);
+    let validAgentKeys = [];
+    try {
+      validAgentKeys = this.agentGroups().agents.map(g => this.normalizeAgentKey(g.key || g.name));
+    } catch (_error) {
+      validAgentKeys = [];
+    }
+    return { validTaskIds, validAgentKeys, validRunTaskIds: validTaskIds };
+  }
+
+  /**
+   * Apply the URL state captured at construction, once page data exists to
+   * sanitize against. Idempotent — safe to call from both activate() and
+   * refresh(); only the first call with usable context takes effect.
+   *
+   * WorkspaceCommandView is constructed synchronously right after the page
+   * kicks off its (async) initial data load, so `page.tasks`/agent groups are
+   * still empty on the very first call — merely checking `Array.isArray` is
+   * not enough to tell "no data yet" apart from "genuinely zero tasks." If the
+   * boot URL names a task/agent/run but the currently-known valid set is
+   * completely empty, treat that as "not loaded yet" and retry on the next
+   * refresh() (which the page calls once real data arrives), bounded so a
+   * truly stale link still eventually gets dropped per FR91.
+   */
+  applyBootURLState() {
+    if (this._urlStateApplied || !this._urlBootState) {
+      this._urlSyncEnabled = true;
+      return;
+    }
+    const page = this.page || {};
+    if (!Array.isArray(page.tasks)) return;
+
+    const context = this.urlStateContext();
+    const boot = this._urlBootState;
+    const dataLooksUnready =
+      (boot.task && context.validTaskIds.length === 0) ||
+      (boot.agent && context.validAgentKeys.length === 0) ||
+      (boot.run && (context.validRunTaskIds || context.validTaskIds).length === 0);
+    this._bootApplyAttempts = (this._bootApplyAttempts || 0) + 1;
+    const MAX_BOOT_ATTEMPTS = 20;
+    if (dataLooksUnready && this._bootApplyAttempts < MAX_BOOT_ATTEMPTS) return;
+
+    const { state, dropped } = sanitizeWorkspaceURLState(boot, context);
+    this._urlStateApplied = true;
+
+    if (dropped.length && typeof window !== 'undefined' && window.Toast) {
+      window.Toast.info('Some link details were out of date and were ignored.');
+    }
+
+    const effectiveMode = resolveEffectiveMode(state.mode, this.viewMode, this.viewMode);
+    if (effectiveMode !== this.viewMode) {
+      this.viewMode = effectiveMode;
+      this.persistCommandViewMode(effectiveMode);
+    }
+    if (state.agent) {
+      this.selectedAgentKey = state.agent;
+      this.agentSelectionInitialized = true;
+      this.persistAgentKey(state.agent);
+    }
+    if (state.panel === 'tasks') {
+      this.taskDrawerOpen = true;
+      if (state.task) this.taskDrawerSelectedId = state.task;
+    }
+    if (state.run) this.trackAndShowTray(state.run);
+
+    this._urlSyncEnabled = true;
+    this.render();
+    if (this.taskDrawerOpen) {
+      const el = this.ensureTaskDrawer();
+      if (el) {
+        el.hidden = false;
+        this.renderTaskDrawerBody();
+      }
+    }
+    // Normalize the URL to the sanitized state without adding a history entry.
+    this.syncURLState({ replace: true });
+  }
+
+  /** Current URL-relevant state derived from live view state. */
+  currentURLState() {
+    return {
+      // 'details' is the historical default; omit it so a details-mode URL
+      // stays clean (no ?mode=details noise) and only an explicit `map` needs
+      // to survive reload/sharing.
+      mode: this.viewMode === 'map' ? 'map' : null,
+      panel: this.taskDrawerOpen ? 'tasks' : '',
+      task: this.taskDrawerOpen ? this.taskDrawerSelectedId : '',
+      agent: this.selectedAgentKey || '',
+      run:
+        this.execController && typeof this.execController.getSelectedTaskId === 'function'
+          ? this.execController.getSelectedTaskId()
+          : ''
+    };
+  }
+
+  /** Best-effort selector for the last meaningfully focused control (FR89). */
+  currentFocusSelector() {
+    if (typeof document === 'undefined') return null;
+    const active = document.activeElement;
+    if (!active || typeof active.getAttribute !== 'function') return null;
+    for (const attr of ['data-cmd-map-select-agent', 'data-cmd-drawer-select', 'data-cmd-open-task-drawer']) {
+      const value = active.getAttribute(attr);
+      if (value) return '[' + attr + '="' + value.replace(/"/g, '\\"') + '"]';
+    }
+    return null;
+  }
+
+  /** Snapshot scroll/focus into the CURRENT history entry before navigating away (FR89). */
+  captureHistoryPresentationState() {
+    if (typeof window === 'undefined' || !window.history) return;
+    const current = window.history.state || {};
+    const drawerList =
+      this.taskDrawerEl && typeof this.taskDrawerEl.querySelector === 'function'
+        ? this.taskDrawerEl.querySelector('.ws-cmd-drawer-list')
+        : null;
+    const drawerScroll = drawerList ? drawerList.scrollTop : current.drawerScroll || 0;
+    window.history.replaceState(
+      {
+        ...current,
+        drawerScroll,
+        focusSelector: this.currentFocusSelector() || current.focusSelector || null,
+        trayCollapsed: this.trayCollapsed
+      },
+      '',
+      window.location.href
+    );
+  }
+
+  /**
+   * Push or replace history for the current view state (FR86-FR88). No-op
+   * transitions never create a duplicate entry; the caller decides push vs
+   * replace (replace for normalization, push for a genuine user navigation).
+   */
+  syncURLState({ replace = false } = {}) {
+    if (!this._urlSyncEnabled || typeof window === 'undefined' || !window.history) return;
+    const nextState = this.currentURLState();
+    if (urlStatesEqual(nextState, this._lastSyncedURLState)) return;
+    const url = buildWorkspaceURL(window.location.pathname, nextState);
+    // Nothing to rewrite if the target URL already matches the address bar —
+    // avoids an unnecessary history.replaceState on an already-clean URL.
+    const currentUrl = window.location.pathname + (window.location.search || '');
+    if (url === currentUrl) {
+      this._lastSyncedURLState = nextState;
+      return;
+    }
+    if (!replace) this.captureHistoryPresentationState();
+    const historyEntryState = replace
+      ? { ...(window.history.state || {}) }
+      : { drawerScroll: 0, focusSelector: null, trayCollapsed: this.trayCollapsed };
+    if (replace) window.history.replaceState(historyEntryState, '', url);
+    else window.history.pushState(historyEntryState, '', url);
+    this._lastSyncedURLState = nextState;
+  }
+
+  /** Restore view state from Back/Forward navigation (FR88-FR89). */
+  handlePopState(event) {
+    if (!this._urlSyncEnabled) return;
+    const context = this.urlStateContext();
+    const { state } = sanitizeWorkspaceURLState(parseWorkspaceURLState(window.location.search), context);
+    this._lastSyncedURLState = state;
+
+    const effectiveMode = resolveEffectiveMode(state.mode, this.viewMode, this.viewMode);
+    this.viewMode = effectiveMode;
+    if (state.agent) {
+      this.selectedAgentKey = state.agent;
+      this.agentSelectionInitialized = true;
+    }
+    this.taskDrawerOpen = state.panel === 'tasks';
+    if (this.taskDrawerOpen && state.task) this.taskDrawerSelectedId = state.task;
+    const historyState = (event && event.state) || {};
+    this.trayCollapsed = Boolean(historyState.trayCollapsed);
+    if (state.run) this.trackAndShowTray(state.run);
+
+    this.render();
+    const el = this.taskDrawerOpen ? this.ensureTaskDrawer() : null;
+    if (el) {
+      el.hidden = false;
+      this.renderTaskDrawerBody();
+      const list = el.querySelector('.ws-cmd-drawer-list');
+      if (list && typeof historyState.drawerScroll === 'number') list.scrollTop = historyState.drawerScroll;
+    }
+    if (historyState.focusSelector && this.container && typeof this.container.querySelector === 'function') {
+      const target = this.container.querySelector(historyState.focusSelector);
+      if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    }
+  }
+
+  /** A safe, same-origin `Open Full Task` href carrying a validated return target (FR92). */
+  taskHrefWithReturn(taskId) {
+    const wsId = typeof this.workspaceId === 'function' ? this.workspaceId() : '';
+    const base = '/workspaces/' + encodeURIComponent(wsId) + '/task/' + encodeURIComponent(taskId);
+    const returnTarget = buildReturnTarget(wsId, this.currentURLState());
+    return returnTarget ? base + '?return=' + encodeURIComponent(returnTarget) : base;
   }
 
   handleGlobalKeydown(event) {
@@ -2960,6 +3194,7 @@ export class WorkspaceCommandView {
         }
       }
     }
+    this.syncURLState();
   }
 
   closeTaskDrawer() {
@@ -2974,6 +3209,7 @@ export class WorkspaceCommandView {
       if (fallback && typeof fallback.focus === 'function') target = fallback;
     }
     if (target) target.focus();
+    this.syncURLState();
   }
 
   setDrawerFilter(filter) {
@@ -2994,6 +3230,7 @@ export class WorkspaceCommandView {
     if (!id) return;
     this.taskDrawerSelectedId = id;
     this.renderTaskDrawerBody();
+    this.syncURLState();
   }
 
   drawerSelectedTask() {
@@ -3173,9 +3410,10 @@ export class WorkspaceCommandView {
     const title = String(task.description || task.name || task.title || 'Untitled task');
     const brief = String(task.details || task.brief || task.prompt || '').trim();
     const assignee = pres.assignee || 'Unassigned';
-    const wsId = typeof this.workspaceId === 'function' ? this.workspaceId() : '';
-    const fullHref =
-      '/workspaces/' + encodeURIComponent(wsId) + '/task/' + encodeURIComponent(id);
+    // A safe, same-origin href carrying a validated `return` target so Back To
+    // Workspace (group 7) can restore this exact Map/drawer/task/agent/run
+    // context (FR92-93).
+    const fullHref = this.taskHrefWithReturn(id);
     // Off-filter notice: the selected task is still shown even if it left the
     // current filter mid-interaction (FR26).
     const offFilter = !taskMatchesFilter(task, this.taskDrawerFilter);
@@ -3293,6 +3531,7 @@ export class WorkspaceCommandView {
     this._trayCancelArmed = '';
     el.hidden = false;
     this.renderTrayBody();
+    this.syncURLState();
   }
 
   closeTray() {
@@ -3300,17 +3539,23 @@ export class WorkspaceCommandView {
     // (FR52). Runs keep running in the controller; reopening restores them.
     this.trayOpen = false;
     if (this.trayEl) this.trayEl.hidden = true;
+    this.syncURLState();
   }
 
+  // Collapsing/expanding is presentational (FR87): it never touches the URL,
+  // but is still captured into the current history entry so Back/Forward can
+  // restore it (FR88).
   toggleTrayCollapsed() {
     this.trayCollapsed = !this.trayCollapsed;
     this.renderTrayBody();
+    this.captureHistoryPresentationState();
   }
 
   selectTrayRun(taskId) {
     if (this.execController) this.execController.select(taskId);
     this._trayCancelArmed = '';
     this.renderTrayBody();
+    this.syncURLState();
   }
 
   ensureTray() {
@@ -4797,6 +5042,7 @@ export class WorkspaceCommandView {
     this.agentOverviewScroll = 0;
     if (focus) this.pendingAgentFocusKey = key;
     this.render();
+    this.syncURLState();
   }
 
   setActiveAgentTab(key, { focus = true } = {}) {
