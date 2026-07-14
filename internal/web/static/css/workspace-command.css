@@ -4928,3 +4928,90 @@
     width: auto;
   }
 }
+
+/* ---------- entry-agent command node (group 5) ----------
+   The entry agent renders first, top-centered, and larger than a specialist
+   card — a role frame independent of runtime status color (FR66-FR70, FR79:
+   hierarchy via size/position/text only, no required animation). */
+.ws-cmd-map-command-row {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding-bottom: 22px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.ws-cmd-map-agent.is-command-node {
+  /* ~1.3x a specialist card (152px min-height / 142px min column). */
+  min-width: 200px;
+  min-height: 198px;
+  padding: 18px 16px 14px;
+  border-width: 2px;
+  border-color: var(--ws-keeper);
+  background:
+    linear-gradient(180deg, rgba(232, 181, 75, 0.08), transparent 60%),
+    radial-gradient(circle at 50% 22%, rgba(70, 211, 154, 0.13), rgba(0, 0, 0, 0.16) 62%);
+}
+.ws-cmd-map-agent.is-command-node:hover,
+.ws-cmd-map-agent.is-command-node.is-selected {
+  border-color: var(--ws-keeper);
+  box-shadow: 0 0 0 1px rgba(232, 181, 75, 0.35);
+}
+/* Runtime-status tones still layer on top of the role frame so status color
+   never depends on (and never overrides) the command-node role frame (FR40). */
+.ws-cmd-map-agent.is-command-node.alert {
+  border-color: var(--ws-alert);
+}
+.ws-cmd-map-agent.is-command-node.working {
+  border-color: var(--ws-working);
+}
+.ws-cmd-map-agent.is-command-node.needs-input {
+  border-color: var(--ws-input);
+}
+
+.ws-cmd-map-command-role {
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--ws-keeper);
+}
+
+.ws-cmd-map-command-copy {
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+  text-align: center;
+  max-width: 22ch;
+}
+
+.ws-cmd-map-command-repair {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  border: 1px dashed var(--ws-line-bright);
+  border-radius: var(--ws-clip);
+  text-align: center;
+}
+.ws-cmd-map-command-repair strong {
+  color: var(--ws-ink);
+  font-size: 14px;
+}
+.ws-cmd-map-command-repair span {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  max-width: 42ch;
+}
+
+/* Narrow layouts: the command node stays first and full-width; specialists
+   keep flowing in the existing responsive grid below it (FR76). */
+@media (max-width: 640px) {
+  .ws-cmd-map-agent.is-command-node {
+    width: 100%;
+    max-width: 320px;
+  }
+}
