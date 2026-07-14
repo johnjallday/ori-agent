@@ -284,6 +284,17 @@ func TestSQLiteStore_ListHistoryCollapsesSameDayRevisions(t *testing.T) {
 	if history[0].CurrentRevisionID != "rev-2" {
 		t.Fatalf("expected current revision id rev-2, got %q", history[0].CurrentRevisionID)
 	}
+	// GeneratedAt is a MAX() aggregate, not a direct column reference, so the
+	// driver's own time.Time conversion never kicks in — it must round-trip
+	// through parseSQLiteTime instead (found live: previously always the
+	// zero value because neither prior parse layout matched modernc.org/
+	// sqlite's actual stored format).
+	if history[0].GeneratedAt.IsZero() {
+		t.Fatal("expected GeneratedAt to be parsed from the MAX(generated_at) aggregate, got the zero value")
+	}
+	if history[0].GeneratedAt.Year() < 2020 {
+		t.Fatalf("expected a plausible parsed GeneratedAt, got %v", history[0].GeneratedAt)
+	}
 }
 
 // TestSQLiteStore_PruneHistoryNeverTouchesOtherWorkspaceOrCurrent covers

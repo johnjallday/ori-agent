@@ -1048,3 +1048,209 @@ a.quest-title:focus-visible {
     animation: none;
   }
 }
+
+/*
+ * Daily Brief — the primary Home orientation region once a Personal HQ is
+ * designated (PRD FR97). Shares the Command Bridge panel vocabulary.
+ */
+
+.home-daily-brief {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 10px;
+  padding: 13px 16px;
+  border: 1px solid var(--hc-line);
+  border-radius: 0;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--hc-panel-raised) 78%, transparent),
+    var(--hc-panel)
+  );
+  box-shadow: var(--hc-shadow);
+}
+
+.home-daily-brief-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.home-daily-brief-eyebrow {
+  display: block;
+  color: var(--hc-signal);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.home-daily-brief-title {
+  margin: 2px 0 0;
+  color: var(--hc-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.home-daily-brief-meta {
+  margin: 2px 0 0;
+  color: var(--hc-ink-faint);
+  font-size: 9px;
+}
+
+.home-daily-brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home-daily-brief-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--hc-line-bright);
+  font-size: 9.5px;
+}
+
+.home-daily-brief-banner.is-failed {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
+}
+
+.home-daily-brief-banner.is-partial,
+.home-daily-brief-banner.is-degraded {
+  border-color: var(--hc-amber);
+  color: var(--hc-amber);
+}
+
+.home-daily-brief-banner.is-loading {
+  border-color: var(--hc-idle);
+  color: var(--hc-idle);
+}
+
+.home-daily-brief-placeholder {
+  padding: 8px 0;
+  color: var(--hc-ink-faint);
+  font-size: 9px;
+}
+
+.home-daily-brief-opening {
+  margin: 0 0 10px;
+  color: var(--hc-ink);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.home-daily-brief-gaps {
+  margin: 0 0 10px;
+  color: var(--hc-amber);
+  font-size: 9px;
+}
+
+.home-daily-brief-quiet {
+  color: var(--hc-ink-faint);
+  font-size: 10px;
+}
+
+.home-daily-brief-section {
+  margin-bottom: 12px;
+}
+
+.home-daily-brief-section-title {
+  margin: 0 0 6px;
+  color: var(--hc-ink);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.home-daily-brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-daily-brief-item {
+  padding: 8px 10px;
+  border: 1px solid var(--hc-line);
+}
+
+.home-daily-brief-item-title {
+  color: var(--hc-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-daily-brief-item-title:hover,
+.home-daily-brief-item-title:focus-visible {
+  color: var(--hc-signal);
+  text-decoration: underline;
+}
+
+.home-daily-brief-item-ws {
+  margin-left: 8px;
+  color: var(--hc-ink-faint);
+  font-size: 8.5px;
+}
+
+.home-daily-brief-item-fact {
+  margin: 4px 0 0;
+  color: var(--hc-ink-dim);
+  font-size: 9.5px;
+}
+
+.home-daily-brief-item-why {
+  margin: 4px 0 0;
+  font-size: 9.5px;
+}
+
+/* Suggestions/recommendations are visually distinguished from observed
+   facts without relying on color alone (PRD FR82/FR131). */
+.is-suggestion {
+  font-style: italic;
+}
+
+.is-suggestion::before {
+  margin-right: 4px;
+  font-style: normal;
+  content: "\2192";
+}
+
+.home-daily-brief-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home-daily-brief-settings-form .home-daily-brief-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.home-daily-brief-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.home-daily-brief-history-empty {
+  color: var(--hc-ink-faint);
+}
+
+@media (max-width: 720px) {
+  .home-daily-brief-header {
+    flex-direction: column;
+  }
+}

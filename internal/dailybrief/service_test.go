@@ -161,6 +161,60 @@ func TestService_RequestGeneration_ManualAlwaysCreatesNewRevision(t *testing.T) 
 	}
 }
 
+// TestService_GetActiveGeneration_ObservesManualRefreshInFlight covers a gap
+// found while wiring the HTTP status-polling endpoint (task 7.4): manual
+// refreshes deliberately never dedupe via GetActiveClaim (which excludes
+// trigger_type=manual), so a naive status endpoint built on that method
+// could never see a manual refresh running. GetActiveGeneration must use
+// GetLatestClaim instead so manual refresh polling actually observes
+// pending/running, then the terminal status once it completes.
+func TestService_GetActiveGeneration_ObservesManualRefreshInFlight(t *testing.T) {
+	store := newServiceTestStore(t)
+	block := make(chan struct{})
+	gen := &fakeGenerator{result: GenerationResult{Status: GenerationSucceeded, ContentJSON: "v1"}, block: block}
+	svc := NewService(store, gen)
+	ctx := context.Background()
+	seedConfig(t, store, "ws-1")
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = svc.RequestGenerationNow(ctx, "ws-1", "local", TriggerManual)
+	}()
+
+	// Poll until the in-flight manual claim becomes observable.
+	deadline := time.Now().Add(2 * time.Second)
+	var active *GenerationRequest
+	for time.Now().Before(deadline) {
+		var err error
+		active, err = svc.GetActiveGeneration(ctx, "ws-1")
+		if err != nil {
+			t.Fatalf("GetActiveGeneration: %v", err)
+		}
+		if active != nil && active.Trigger == TriggerManual {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if active == nil || active.Trigger != TriggerManual {
+		t.Fatalf("expected the manual claim to be observable while in flight, got %#v", active)
+	}
+	if active.Status != GenerationPending && active.Status != GenerationRunning {
+		t.Fatalf("expected pending/running while blocked, got %q", active.Status)
+	}
+
+	close(block)
+	<-done
+
+	final, err := svc.GetActiveGeneration(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetActiveGeneration after completion: %v", err)
+	}
+	if final == nil || final.Status != GenerationSucceeded {
+		t.Fatalf("expected the completed manual claim to report succeeded, got %#v", final)
+	}
+}
+
 // TestService_RequestGeneration_FailurePreservesLastSuccessfulCurrent covers
 // PRD 5.12: a failed generation must not erase the last successful brief.
 func TestService_RequestGeneration_FailurePreservesLastSuccessfulCurrent(t *testing.T) {
@@ -225,6 +279,43 @@ func TestService_RequestGeneration_ConcurrentCallsSerializePerWorkspace(t *testi
 	wg.Wait()
 	if firstErr := <-errs; firstErr != nil {
 		t.Fatalf("first call should have succeeded once unblocked: %v", firstErr)
+	}
+}
+
+// TestService_OnRevisionReadyFiresOnlyForSuccessOrPartial covers task 7.11's
+// wiring point: the hook must fire for a succeeded/partial revision (so the
+// caller can notify) and must never fire for a failed one (nothing to
+// notify about, and the failed revision never becomes current).
+func TestService_OnRevisionReadyFiresOnlyForSuccessOrPartial(t *testing.T) {
+	store := newServiceTestStore(t)
+	gen := &fakeGenerator{result: GenerationResult{Status: GenerationSucceeded}}
+	svc := NewService(store, gen)
+	ctx := context.Background()
+	seedConfig(t, store, "ws-1")
+
+	fired := 0
+	var lastRev *Revision
+	svc.SetOnRevisionReady(func(cfg Config, rev *Revision) {
+		fired++
+		lastRev = rev
+	})
+
+	if _, err := svc.RequestGenerationNow(ctx, "ws-1", "local", TriggerScheduled); err != nil {
+		t.Fatalf("RequestGenerationNow: %v", err)
+	}
+	if fired != 1 {
+		t.Fatalf("expected the hook to fire once for a succeeded revision, got %d", fired)
+	}
+	if lastRev == nil || !lastRev.IsCurrent {
+		t.Fatalf("expected the hook to receive the now-current revision, got %#v", lastRev)
+	}
+
+	gen.err = errors.New("boom")
+	if _, err := svc.RequestGenerationNow(ctx, "ws-1", "local", TriggerManual); err == nil {
+		t.Fatal("expected the manual refresh to report the generator's error")
+	}
+	if fired != 1 {
+		t.Fatalf("expected the hook to NOT fire for a failed generation, got %d total fires", fired)
 	}
 }
 

@@ -223,6 +223,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		homeAssistantRouteHandler.SetIntakeTraceStore(traceStore)
 		homeAssistantWorkspaceResolver.SetFeedbackReader(traceStore)
 	}
+	if s.Storage.PersonalHQ != nil {
+		homeAssistantWorkspaceResolver.SetHQProvider(&homeAssistantHQAdapter{
+			service:  s.Storage.PersonalHQ,
+			provider: s.Storage.UserProvider,
+		})
+	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
@@ -349,6 +355,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	registerPersonalHQRoutes(mux, s)
+	registerDailyBriefRoutes(mux, s)
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
@@ -807,6 +814,22 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-hq/designate", s.Handlers.PersonalHQ.Designate)
 		mux.HandleFunc("POST /api/personal-hq/replace", s.Handlers.PersonalHQ.Replace)
 		mux.HandleFunc("POST /api/personal-hq/clear", s.Handlers.PersonalHQ.Clear)
+	}
+}
+
+// registerDailyBriefRoutes registers Personal HQ Daily Brief endpoints.
+func registerDailyBriefRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Daily Brief Endpoints
+	// =============================================================================
+	if s.Handlers.DailyBrief != nil {
+		mux.HandleFunc("GET /api/personal-hq/brief/config", s.Handlers.DailyBrief.GetConfig)
+		mux.HandleFunc("PUT /api/personal-hq/brief/config", s.Handlers.DailyBrief.UpdateConfig)
+		mux.HandleFunc("GET /api/personal-hq/brief/current", s.Handlers.DailyBrief.GetCurrent)
+		mux.HandleFunc("GET /api/personal-hq/brief/history", s.Handlers.DailyBrief.GetHistory)
+		mux.HandleFunc("GET /api/personal-hq/brief/status", s.Handlers.DailyBrief.GetStatus)
+		mux.HandleFunc("POST /api/personal-hq/brief/open", s.Handlers.DailyBrief.RequestFirstOpen)
+		mux.HandleFunc("POST /api/personal-hq/brief/refresh", s.Handlers.DailyBrief.RequestRefresh)
 	}
 }
 

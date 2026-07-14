@@ -23,6 +23,38 @@ func NewSQLiteStore(db *database.DB) *SQLiteStore {
 	return &SQLiteStore{db: db}
 }
 
+// sqliteTimeLayouts are the formats a time column value might come back as
+// when scanned into a plain string rather than through the driver's own
+// time.Time conversion — which only kicks in for a direct column reference,
+// not a SQL aggregate like MAX(generated_at) (task 7 finding: modernc.org/
+// sqlite persists Go's time.Time via its default String() format, e.g.
+// "2026-07-14 22:21:34.444311 +0000 UTC", not RFC3339).
+var sqliteTimeLayouts = []string{
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	time.RFC3339Nano,
+	"2006-01-02 15:04:05.999999999-07:00",
+}
+
+// parseSQLiteTime parses a time column value that came back as a raw string
+// (e.g. from a MAX()/MIN() aggregate), trying every known storage layout.
+// Returns the zero time.Time if none match, rather than erroring — callers
+// treat a HistorySummary with an unparsed timestamp as non-fatal.
+func parseSQLiteTime(value string) time.Time {
+	// A monotonic-clock-carrying time.Time (any value not passed through
+	// .UTC()/.Round(0) before storage) serializes with a trailing
+	// " m=+1.234" reading that no time layout can express — strip it
+	// defensively rather than requiring every caller to remember .UTC().
+	if idx := strings.Index(value, " m="); idx != -1 {
+		value = value[:idx]
+	}
+	for _, layout := range sqliteTimeLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 var _ Store = (*SQLiteStore)(nil)
 
 func isUniqueConstraintError(err error) bool {
@@ -165,6 +197,19 @@ func (s *SQLiteStore) GetActiveClaim(ctx context.Context, workspaceID, localDate
 		SELECT id, workspace_id, local_date, trigger_type, status, revision_id, error, claimed_at, finished_at
 		FROM daily_brief_generation_claim
 		WHERE workspace_id = ? AND local_date = ? AND trigger_type != 'manual'
+		ORDER BY claimed_at DESC LIMIT 1
+	`, workspaceID, localDate)
+	if errors.Is(err, ErrRequestNotFound) {
+		return nil, nil
+	}
+	return claim, err
+}
+
+func (s *SQLiteStore) GetLatestClaim(ctx context.Context, workspaceID, localDate string) (*GenerationRequest, error) {
+	claim, err := s.scanClaim(ctx, `
+		SELECT id, workspace_id, local_date, trigger_type, status, revision_id, error, claimed_at, finished_at
+		FROM daily_brief_generation_claim
+		WHERE workspace_id = ? AND local_date = ?
 		ORDER BY claimed_at DESC LIMIT 1
 	`, workspaceID, localDate)
 	if errors.Is(err, ErrRequestNotFound) {
@@ -347,11 +392,7 @@ func (s *SQLiteStore) ListHistory(ctx context.Context, workspaceID string, limit
 		h.CurrentRevisionID = currentID.String
 		h.Status = GenerationStatus(status)
 		if generatedAt.Valid {
-			if t, err := time.Parse(time.RFC3339Nano, generatedAt.String); err == nil {
-				h.GeneratedAt = t
-			} else if t, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", generatedAt.String); err == nil {
-				h.GeneratedAt = t
-			}
+			h.GeneratedAt = parseSQLiteTime(generatedAt.String)
 		}
 		out = append(out, h)
 	}

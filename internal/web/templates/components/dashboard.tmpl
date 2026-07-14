@@ -39,6 +39,79 @@
     <a href="/workspaces?hq_onboarding=1" id="homeHQResumeLink" class="hq-resume-action">Open workspace launcher</a>
   </div>
 
+  <!-- Daily Brief: the primary Home orientation region once a valid Personal
+       HQ is designated (PRD FR97). Hidden entirely with no HQ — no hidden
+       brief store is created and no workspace is silently selected (FR69).
+       Populated/wired by home-daily-brief.js. -->
+  <section id="homeDailyBrief" class="home-daily-brief" data-state="loading" aria-labelledby="homeDailyBriefTitle" hidden>
+    <header class="home-daily-brief-header">
+      <div class="home-daily-brief-heading">
+        <span class="home-daily-brief-eyebrow">Daily Brief</span>
+        <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
+        <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
+      </div>
+      <div class="home-daily-brief-actions">
+        <a id="homeDailyBriefOpenHQ" href="/workspaces" class="modern-btn modern-btn-secondary modern-btn-sm">Open My HQ</a>
+        <button type="button" id="homeDailyBriefSettingsBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Brief settings</button>
+        <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
+      </div>
+    </header>
+    <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
+    <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
+      <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
+    </div>
+  </section>
+
+  <!-- Brief settings dialog: HQ-owned config + recent history, opened from
+       Home's "Brief settings" action but scoped to the designated HQ
+       workspace's own data (PRD FR99/task 7.7). -->
+  <div class="modal fade" id="homeDailyBriefSettingsModal" tabindex="-1" aria-labelledby="homeDailyBriefSettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 id="homeDailyBriefSettingsModalLabel" class="modal-title">Daily Brief settings</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="homeDailyBriefSettingsForm" class="home-daily-brief-settings-form">
+            <div class="mb-3">
+              <label class="form-label" for="homeDailyBriefTimezone">Timezone</label>
+              <input type="text" class="modern-input" id="homeDailyBriefTimezone" name="timezone" autocomplete="off" placeholder="UTC">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="homeDailyBriefTime">Scheduled time</label>
+              <input type="text" class="modern-input" id="homeDailyBriefTime" name="schedule_time" autocomplete="off" placeholder="08:00">
+            </div>
+            <fieldset class="mb-3">
+              <legend class="form-label">Days</legend>
+              <div class="home-daily-brief-days" role="group" aria-label="Scheduled days">
+                <label><input type="checkbox" value="mon"> Mon</label>
+                <label><input type="checkbox" value="tue"> Tue</label>
+                <label><input type="checkbox" value="wed"> Wed</label>
+                <label><input type="checkbox" value="thu"> Thu</label>
+                <label><input type="checkbox" value="fri"> Fri</label>
+                <label><input type="checkbox" value="sat"> Sat</label>
+                <label><input type="checkbox" value="sun"> Sun</label>
+              </div>
+            </fieldset>
+            <div class="mb-3 form-check">
+              <input type="checkbox" class="form-check-input" id="homeDailyBriefScheduleEnabled" name="schedule_enabled">
+              <label class="form-check-label" for="homeDailyBriefScheduleEnabled">Generate automatically on schedule</label>
+            </div>
+            <div class="mb-3 form-check">
+              <input type="checkbox" class="form-check-input" id="homeDailyBriefNotify" name="notify_on_ready">
+              <label class="form-check-label" for="homeDailyBriefNotify">Notify in Action Center when a scheduled brief is ready</label>
+            </div>
+            <button type="submit" class="modern-btn modern-btn-primary">Save settings</button>
+          </form>
+          <hr>
+          <h6>Recent history</h6>
+          <ul id="homeDailyBriefHistoryList" class="home-daily-brief-history-list"></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="home-command-layout">
     <section id="homeDashboardSections" class="home-dashboard-sections home-operations-board" data-workspace-count="{{.Extra.WorkspaceCount}}" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Operations board">
       <header class="home-operations-header">

@@ -14,6 +14,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
@@ -224,6 +226,11 @@ type ServerBuilder struct {
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
 	personalHQHandler *personalhqhttp.Handler
+
+	// Daily Brief configuration, generation, and scheduling
+	dailyBriefService   *dailybrief.Service
+	dailyBriefHandler   *dailybriefhttp.Handler
+	dailyBriefScheduler *dailybrief.Scheduler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -301,6 +308,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	}
 	b.initializeWorkspaceOrchestrator() // Phase 22
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
+	b.initializeDailyBrief()            // Phase 22.6 — wire personal hq daily brief storage/scheduling/synthesis
 	b.initializeTemplateManager()       // Phase 23
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -354,6 +362,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	// Trigger service shares the workflow facade's lifecycle (started during
 	// mission-bridge init; stopped on Shutdown).
 	b.server.Workflow.TriggerService = b.triggerService
+	b.server.Workflow.DailyBriefScheduler = b.dailyBriefScheduler
 
 	// Integration System Facade
 	b.server.Integration = NewIntegrationSystemFacade(
@@ -405,6 +414,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Skills:           b.skillsHandler,
 		User:             b.userHandler,
 		PersonalHQ:       b.personalHQHandler,
+		DailyBrief:       b.dailyBriefHandler,
 		CLIAgents:        b.cliAgentHandler,
 		CLIAgentRegistry: b.cliAgentRegistry,
 		WorkspaceRuns:    b.workspaceRunHandler,

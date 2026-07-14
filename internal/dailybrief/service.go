@@ -51,11 +51,27 @@ type Service struct {
 	// at once for the same workspace (PRD 5.10).
 	mu       sync.Mutex
 	inFlight map[string]bool
+
+	// onRevisionReady fires (outside any lock) after a revision successfully
+	// or partially succeeds and becomes current, for any trigger. Set
+	// post-construction (mirrors internal/personalhq.Service.SetOnDesignated)
+	// so the server wiring layer can hook Action Center notifications
+	// without this package depending on internal/workspace's opportunity
+	// store.
+	onRevisionReady func(cfg Config, rev *Revision)
 }
 
 // NewService constructs a Daily Brief service.
 func NewService(store Store, generator Generator) *Service {
 	return &Service{store: store, generator: generator, inFlight: map[string]bool{}}
+}
+
+// SetOnRevisionReady registers a callback fired whenever a generation
+// succeeds or partially succeeds and becomes the current revision,
+// regardless of trigger. The callback decides whether/how to notify (e.g.
+// only for TriggerScheduled, per PRD FR63).
+func (s *Service) SetOnRevisionReady(fn func(cfg Config, rev *Revision)) {
+	s.onRevisionReady = fn
 }
 
 // GetConfig returns the current config for workspaceID, or ErrConfigNotFound
@@ -190,6 +206,9 @@ func (s *Service) runGeneration(ctx context.Context, cfg Config, claim *Generati
 			logger.Warn("dailybrief: failed to set current revision", logger.Fields{"revision_id": rev.ID, "error": err})
 		} else {
 			rev.IsCurrent = true
+			if s.onRevisionReady != nil {
+				s.onRevisionReady(cfg, rev)
+			}
 		}
 	}
 
@@ -218,6 +237,23 @@ func (s *Service) GetHistory(ctx context.Context, workspaceID string, limit int)
 // never touching another workspace or the current revision.
 func (s *Service) PruneHistory(ctx context.Context, workspaceID string) error {
 	return s.store.PruneHistory(ctx, workspaceID, MinRetentionDays)
+}
+
+// GetActiveGeneration returns today's most recently claimed generation
+// attempt for workspaceID (first-open, scheduled, or manual), or nil if none
+// has been claimed yet — used by the HTTP layer to let a client poll
+// generation status, including a manual refresh, without blocking on it
+// synchronously (PRD FR56/FR57/task 7.4).
+func (s *Service) GetActiveGeneration(ctx context.Context, workspaceID string) (*GenerationRequest, error) {
+	cfg, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	localDate, err := TodayLocalDate(*cfg)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.GetLatestClaim(ctx, workspaceID, localDate)
 }
 
 // RecordNotificationIfEnabled creates an Action Center notification record

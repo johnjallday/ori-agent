@@ -21,6 +21,30 @@
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
 
+  // The authoritative designated Personal HQ workspace id, if any — drives
+  // the HQ landmark badge on its tile (PRD FR43/FR44: based on the actual
+  // designation, never inferred from name/template, and a template-created
+  // but undesignated workspace never gets it). Fetched lazily once per page
+  // load; a re-mount is triggered if the value changes.
+  var hqWorkspaceId = null;
+  var hqFetched = false;
+
+  function ensureHQWorkspaceId() {
+    if (hqFetched || typeof fetch !== 'function') return;
+    hqFetched = true;
+    fetch('/api/personal-hq/status', { headers: { Accept: 'application/json' } })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        var status = body && body.status;
+        var next = (status && status.valid) ? status.workspace_id : null;
+        if (next !== hqWorkspaceId) {
+          hqWorkspaceId = next;
+          if (lastMount) mount(lastMount.container, lastMount.state);
+        }
+      })
+      .catch(function () { /* non-fatal: badge just won't show */ });
+  }
+
   // Ids checked for a bulk operation (multi-select), remembered across re-mounts.
   // Distinct from selectedId: selectedId drives the Overview preview, while this
   // set drives the multi-select action bar. Only plain workspace tiles (not
@@ -236,6 +260,7 @@
     var openTasks = Number(ws.open_task_count || 0);
     var mode = opsModeLabel(ws.ops_mode);
     var hasKeeper = String(ws.entry_agent_name || '').trim() !== '';
+    var isHQ = !!hqWorkspaceId && ws.id === hqWorkspaceId;
     var isSel = selectedId && ws.id === selectedId;
     var selected = isSel ? ' is-selected' : '';
     var isMulti = !!multiSelected[ws.id];
@@ -250,18 +275,20 @@
     var actionHint = isSel ? '. Selected — activate to open' : '. Activate to select, double-click to open';
 
     return (
-      '<button type="button" class="ws-map-tile' + selected + multiCls + '" ' +
+      '<button type="button" class="ws-map-tile' + selected + multiCls + (isHQ ? ' is-hq' : '') + '" ' +
       'data-ws-id="' + escapeHtml(ws.id) + '" ' +
       'aria-pressed="' + (isSel ? 'true' : 'false') + '" ' +
       'style="left:' + left + 'px;top:' + top + 'px;--i:' + (index || 0) + '" ' +
       'aria-label="' + escapeHtml(ws.name || 'Workspace') + ', ' + meta + ', ' + statusText +
-      (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') + actionHint + '">' +
+      (hasKeeper ? ', entry agent ' + escapeHtml(ws.entry_agent_name) : '') +
+      (isHQ ? ', Personal HQ' : '') + actionHint + '">' +
       '<span class="ws-map-tile-check" data-ws-check role="checkbox" tabindex="-1" ' +
       'aria-checked="' + (isMulti ? 'true' : 'false') + '" ' +
       'aria-label="Select for bulk action" title="Select"></span>' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' + (active ? ' is-working' : '') + '"></span>' +
       escapeHtml(statusText) + '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
+      (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
       structSVG(pal) +
       '<span class="ws-map-tile-name">' + escapeHtml(ws.name || 'Workspace') + '</span>' +
       (mode ? '<span class="ws-map-tile-type">' + escapeHtml(mode) + '</span>' : '') +
@@ -785,6 +812,7 @@
    */
   function mount(container, state) {
     if (!container) return;
+    ensureHQWorkspaceId();
     var workspaces = (state && state.workspaces) || [];
     var incoming = (state && state.selectedId) || '';
     // Keep the current selection if it still exists, else honor an incoming
@@ -830,6 +858,10 @@
     computeMaxCols: computeMaxCols,
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,
-    selBarHTML: selBarHTML
+    selBarHTML: selBarHTML,
+    // Test-only seam: hqWorkspaceId is normally populated by an async fetch
+    // (ensureHQWorkspaceId), which direct tileHTML() calls in unit tests
+    // never trigger. Not used by production code.
+    _setHQWorkspaceIdForTest: function (id) { hqWorkspaceId = id; }
   };
 })();

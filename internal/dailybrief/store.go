@@ -38,8 +38,15 @@ type Store interface {
 	// GetGenerationRequest returns a claim by id, or ErrRequestNotFound.
 	GetGenerationRequest(ctx context.Context, id string) (*GenerationRequest, error)
 	// GetActiveClaim returns the current non-manual claim for
-	// (workspaceID, localDate) if one exists (any status), or nil.
+	// (workspaceID, localDate) if one exists (any status), or nil. Used
+	// internally for first-open/scheduled dedup — manual refreshes are
+	// deliberately invisible here since they never dedupe.
 	GetActiveClaim(ctx context.Context, workspaceID, localDate string) (*GenerationRequest, error)
+	// GetLatestClaim returns the most recently claimed generation attempt for
+	// (workspaceID, localDate) regardless of trigger type, or nil. Unlike
+	// GetActiveClaim, this includes manual claims, so status-polling
+	// endpoints can observe a manual refresh in flight.
+	GetLatestClaim(ctx context.Context, workspaceID, localDate string) (*GenerationRequest, error)
 
 	// NextRevisionNumber returns the next monotonic revision number for
 	// (workspaceID, localDate) — 1 for the first revision of that date.

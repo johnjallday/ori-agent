@@ -9,6 +9,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
@@ -87,6 +89,9 @@ type WorkflowSystemFacade struct {
 	// TriggerService owns event-trigger file watches; closed on Shutdown.
 	// Assigned post-construction by the builder (not a constructor arg).
 	TriggerService *trigger.Service
+	// DailyBriefScheduler polls for due scheduled Daily Brief generations.
+	// Assigned post-construction by the builder (not a constructor arg).
+	DailyBriefScheduler *dailybrief.Scheduler
 }
 
 // IntegrationSystemFacade manages external integrations (MCP, updates)
@@ -142,6 +147,7 @@ type HandlerFacade struct {
 	WorkspaceMemory  *memoryhttp.Handler
 	User             *userhttp.Handler
 	PersonalHQ       *personalhqhttp.Handler
+	DailyBrief       *dailybriefhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade
@@ -243,6 +249,9 @@ func (w *WorkflowSystemFacade) Start() {
 	if w.DirectorySync != nil {
 		w.DirectorySync.Start()
 	}
+	if w.DailyBriefScheduler != nil {
+		w.DailyBriefScheduler.Start()
+	}
 }
 
 // Shutdown gracefully shuts down all workflow system background services
@@ -258,6 +267,9 @@ func (w *WorkflowSystemFacade) Shutdown() {
 	}
 	if w.TaskScheduler != nil {
 		w.TaskScheduler.Stop()
+	}
+	if w.DailyBriefScheduler != nil {
+		w.DailyBriefScheduler.Stop()
 	}
 	if w.NotificationService != nil {
 		w.NotificationService.Shutdown()
