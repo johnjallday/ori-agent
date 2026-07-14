@@ -308,6 +308,109 @@ func TestStatusReportsInvalidReasonAfterWorkspaceDeletion(t *testing.T) {
 	}
 }
 
+// TestStatusReportsInvalidReasonAfterWorkspaceTrashed covers task 8.3: a
+// designated HQ that is later trashed (not deleted outright) must be
+// reported as needing repair, not silently treated as still valid.
+func TestStatusReportsInvalidReasonAfterWorkspaceTrashed(t *testing.T) {
+	svc, _, workspaces := newTestHarness(t)
+	ctx := context.Background()
+	createWorkspace(t, workspaces, "ws-1", "local", session.WorkspaceKindWorkspace, session.WorkspaceStatusActive)
+
+	if _, err := svc.Designate(ctx, "local", "ws-1"); err != nil {
+		t.Fatalf("Designate: %v", err)
+	}
+	ws, err := workspaces.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	ws.Status = session.WorkspaceStatusTrashed
+	if err := workspaces.UpdateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("UpdateWorkspace (trash): %v", err)
+	}
+
+	status, err := svc.Status(ctx, "local")
+	if err != nil {
+		t.Fatalf("Status after trashing should not error: %v", err)
+	}
+	if status.Valid || !status.NeedsRepair() {
+		t.Fatalf("expected NeedsRepair after trashing the designated HQ, got %#v", status)
+	}
+	if status.InvalidReason != InvalidReasonTrashed {
+		t.Fatalf("expected trashed reason, got %q", status.InvalidReason)
+	}
+}
+
+// TestStatusReportsInvalidReasonAfterWorkspaceBecomesGroup covers task 8.3:
+// a designated HQ workspace that is later converted into a group is no
+// longer eligible (groups can contain member workspaces) and must be
+// reported as needing repair.
+func TestStatusReportsInvalidReasonAfterWorkspaceBecomesGroup(t *testing.T) {
+	svc, _, workspaces := newTestHarness(t)
+	ctx := context.Background()
+	createWorkspace(t, workspaces, "ws-1", "local", session.WorkspaceKindWorkspace, session.WorkspaceStatusActive)
+
+	if _, err := svc.Designate(ctx, "local", "ws-1"); err != nil {
+		t.Fatalf("Designate: %v", err)
+	}
+	ws, err := workspaces.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	ws.Kind = session.WorkspaceKindGroup
+	if err := workspaces.UpdateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("UpdateWorkspace (convert to group): %v", err)
+	}
+
+	status, err := svc.Status(ctx, "local")
+	if err != nil {
+		t.Fatalf("Status after conversion to group should not error: %v", err)
+	}
+	if status.Valid || !status.NeedsRepair() {
+		t.Fatalf("expected NeedsRepair after the designated HQ became a group, got %#v", status)
+	}
+	if status.InvalidReason != InvalidReasonGroup {
+		t.Fatalf("expected group reason, got %q", status.InvalidReason)
+	}
+}
+
+// TestStatusReportsInvalidReasonAfterOwnershipChanges covers task 8.3: a
+// designated HQ whose ownership later changes away from the designating
+// user must be reported as inaccessible/needing repair, not silently
+// resolved as if still valid.
+func TestStatusReportsInvalidReasonAfterOwnershipChanges(t *testing.T) {
+	svc, profiles, workspaces := newTestHarness(t)
+	ctx := context.Background()
+	createWorkspace(t, workspaces, "ws-1", "local", session.WorkspaceKindWorkspace, session.WorkspaceStatusActive)
+
+	if _, err := svc.Designate(ctx, "local", "ws-1"); err != nil {
+		t.Fatalf("Designate: %v", err)
+	}
+	// owner_user_id has a FOREIGN KEY on users(id), so the new owner needs a
+	// real profile row first.
+	if err := profiles.Upsert(ctx, &userprofile.UserProfile{ID: "someone-else"}); err != nil {
+		t.Fatalf("seed someone-else profile: %v", err)
+	}
+	ws, err := workspaces.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	ws.OwnerUserID = "someone-else"
+	if err := workspaces.UpdateWorkspace(ctx, ws); err != nil {
+		t.Fatalf("UpdateWorkspace (change owner): %v", err)
+	}
+
+	status, err := svc.Status(ctx, "local")
+	if err != nil {
+		t.Fatalf("Status after ownership change should not error: %v", err)
+	}
+	if status.Valid || !status.NeedsRepair() {
+		t.Fatalf("expected NeedsRepair after ownership changed away, got %#v", status)
+	}
+	if status.InvalidReason != InvalidReasonWrongOwner {
+		t.Fatalf("expected wrong_owner reason, got %q", status.InvalidReason)
+	}
+}
+
 func TestSetOnboardingStateRejectsUnknownValue(t *testing.T) {
 	svc, _, _ := newTestHarness(t)
 	ctx := context.Background()

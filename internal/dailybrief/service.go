@@ -157,6 +157,11 @@ func (s *Service) RequestGeneration(ctx context.Context, cfg Config, userID stri
 }
 
 func (s *Service) runGeneration(ctx context.Context, cfg Config, claim *GenerationRequest) (*Revision, error) {
+	// Bounded, field-only observable event (PRD FR138) — trigger/workspace
+	// id/local date only, never prompt content or brief prose.
+	logger.Info("dailybrief: generation requested", logger.Fields{
+		"workspace_id": cfg.WorkspaceID, "trigger": string(claim.Trigger), "local_date": claim.LocalDate,
+	})
 	if err := s.store.UpdateGenerationStatus(ctx, claim.ID, GenerationRunning, "", ""); err != nil {
 		logger.Warn("dailybrief: failed to mark generation running", logger.Fields{"claim_id": claim.ID, "error": err})
 	}
@@ -215,6 +220,10 @@ func (s *Service) runGeneration(ctx context.Context, cfg Config, claim *Generati
 	if err := s.store.UpdateGenerationStatus(ctx, claim.ID, rev.Status, rev.ID, rev.FailureReason); err != nil {
 		logger.Warn("dailybrief: failed to finalize generation status", logger.Fields{"claim_id": claim.ID, "error": err})
 	}
+
+	logger.Info("dailybrief: generation finished", logger.Fields{
+		"workspace_id": cfg.WorkspaceID, "trigger": string(claim.Trigger), "status": string(rev.Status), "revision_id": rev.ID,
+	})
 
 	if genErr != nil {
 		return rev, genErr

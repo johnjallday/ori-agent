@@ -207,6 +207,18 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 // guided Personal HQ first-launch experience (HQOnboardingUnseen). Degrades
 // to false (normal Home launch) when the Personal HQ service is unavailable,
 // so a degraded dependency never blocks the app from starting (PRD FR136).
+//
+// HQOnboardingUnseen alone is not sufficient: migration030PersonalHQ added
+// the hq_onboarding_state column with a blanket 'unseen' SQL DEFAULT applied
+// retroactively to every pre-existing profile row, so an established user
+// upgrading from a version that predates this feature reads exactly the
+// same "unseen" state as a genuinely brand-new profile. Cross-check two
+// independent, already-durable signals of prior app usage — the separate
+// app-level onboarding flow's completion flag, and workspace history — so
+// an upgraded profile (including one with zero workspaces right now, e.g.
+// after deleting them all) receives only the lightweight resume invitation
+// rather than the full guided construction takeover (PRD FR19/FR116-118,
+// task 8.1).
 func (s *Server) isBrandNewProfile(ctx context.Context) bool {
 	if s.Storage == nil || s.Storage.PersonalHQ == nil {
 		return false
@@ -216,7 +228,18 @@ func (s *Server) isBrandNewProfile(ctx context.Context) bool {
 		logger.Warn("isBrandNewProfile: failed to load personal hq status", logger.Fields{"error": err})
 		return false
 	}
-	return status.OnboardingState == userprofile.HQOnboardingUnseen
+	if status.OnboardingState != userprofile.HQOnboardingUnseen {
+		return false
+	}
+	if s.Storage.OnboardingMgr != nil && s.Storage.OnboardingMgr.IsOnboardingComplete() {
+		return false
+	}
+	if s.Storage.WorkspaceStore != nil {
+		if ids, err := s.Storage.WorkspaceStore.List(); err == nil && len(ids) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {

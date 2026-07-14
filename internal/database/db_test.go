@@ -563,6 +563,146 @@ func TestMigration030UpgradesFromPriorSchema(t *testing.T) {
 	}
 }
 
+// TestMigration030DoesNotTouchExistingWorkspaces covers PRD task 8.2: the
+// migration that adds Personal HQ support to the users table must not
+// rename, rewrite, or infer HQ status for a workspace that already existed
+// (e.g. one created from the pre-rename "Personal Ops" template) — the
+// designation lives only on the users row, and no migration in this
+// feature touches the workspaces table at all. Proves the seeded
+// workspace row is byte-identical after migrating to the latest schema,
+// and that no workspace was auto-designated as the user's HQ.
+func TestMigration030DoesNotTouchExistingWorkspaces(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-030-workspaces-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (29)`); err != nil {
+		t.Fatalf("Failed to seed schema version 29: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL DEFAULT '',
+			locale TEXT NOT NULL DEFAULT '',
+			role_category TEXT NOT NULL DEFAULT '',
+			specializations TEXT NOT NULL DEFAULT '[]',
+			preferences TEXT NOT NULL DEFAULT '{}',
+			about TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy users table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO users (id, created_at, updated_at)
+		VALUES ('local', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy local user: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			kind TEXT DEFAULT 'workspace',
+			description TEXT DEFAULT '',
+			tags TEXT DEFAULT '[]',
+			owner_user_id TEXT NOT NULL DEFAULT 'local',
+			parent_id TEXT,
+			color TEXT,
+			session_count INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			agents TEXT DEFAULT '[]',
+			agent_instances TEXT DEFAULT '[]',
+			shared_data TEXT DEFAULT '{}',
+			status TEXT DEFAULT 'active',
+			layout TEXT,
+			messages_json TEXT DEFAULT '[]',
+			tasks_json TEXT DEFAULT '[]',
+			attachments_json TEXT DEFAULT '[]',
+			folders_json TEXT DEFAULT '[]',
+			scheduled_tasks_json TEXT DEFAULT '[]',
+			store_nodes_json TEXT DEFAULT '[]',
+			workflows_json TEXT DEFAULT '{}',
+			directory_references_json TEXT DEFAULT '[]',
+			mcp_bindings_json TEXT DEFAULT '[]',
+			agent_mcp_access_json TEXT DEFAULT '[]',
+			skill_bindings_json TEXT DEFAULT '[]',
+			agent_skill_access_json TEXT DEFAULT '[]',
+			order_index INTEGER DEFAULT 0,
+			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy workspaces table: %v", err)
+	}
+	const seededSharedData = `{"entry_agent_name":"Personal Chief of Staff","template_id":"personal-ops"}`
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, owner_user_id, shared_data, status, created_at, updated_at)
+		VALUES ('ws-personal-ops', 'Personal Ops', 'local', ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, seededSharedData); err != nil {
+		t.Fatalf("Failed to seed legacy Personal Ops workspace: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var name, ownerUserID, sharedData, status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT name, owner_user_id, shared_data, status FROM workspaces WHERE id = 'ws-personal-ops'
+	`).Scan(&name, &ownerUserID, &sharedData, &status); err != nil {
+		t.Fatalf("Failed to query the seeded workspace after upgrade: %v", err)
+	}
+	if name != "Personal Ops" {
+		t.Errorf("expected the existing workspace's name to be untouched, got %q", name)
+	}
+	if sharedData != seededSharedData {
+		t.Errorf("expected shared_data to be byte-identical after migration, got %q", sharedData)
+	}
+	if status != "active" {
+		t.Errorf("expected status to be untouched, got %q", status)
+	}
+	if ownerUserID != "local" {
+		t.Errorf("expected owner_user_id to be untouched, got %q", ownerUserID)
+	}
+
+	var personalWorkspaceID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT personal_workspace_id FROM users WHERE id = 'local'
+	`).Scan(&personalWorkspaceID); err != nil {
+		t.Fatalf("Failed to query personal_workspace_id after upgrade: %v", err)
+	}
+	if personalWorkspaceID != "" {
+		t.Errorf("expected migration to designate zero existing workspaces as HQ, got personal_workspace_id=%q", personalWorkspaceID)
+	}
+}
+
 func TestInTransaction(t *testing.T) {
 	ctx := context.Background()
 

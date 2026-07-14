@@ -23,6 +23,12 @@ func newRoutesTestHandler(t *testing.T) http.Handler {
 	t.Cleanup(func() {
 		_ = os.Chdir(originalWD)
 	})
+	// DefaultWorkspaceRoot() resolves to $HOME/Ori Workspaces regardless of
+	// CWD, so any test built on this handler that creates a workspace (or
+	// counts existing ones, e.g. first-run classification) would otherwise
+	// read/write the real developer machine's workspace tree. t.Setenv
+	// restores the original HOME after the test.
+	t.Setenv("HOME", tmpDir)
 
 	builder, err := NewServerBuilder()
 	if err != nil {

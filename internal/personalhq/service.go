@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
@@ -193,14 +194,30 @@ func (s *Service) Designate(ctx context.Context, userID, workspaceID string) (*S
 	if current.Valid {
 		return nil, ErrAlreadyDesignated
 	}
-	return s.setDesignation(ctx, userID, workspaceID)
+	status, err := s.setDesignation(ctx, userID, workspaceID)
+	if err == nil {
+		// Bounded, field-only observable event (PRD FR137) — no prompt,
+		// prose, or workspace content, just stable IDs.
+		logger.Info("personal hq: existing workspace designated", logger.Fields{"user_id": userID, "workspace_id": workspaceID})
+	}
+	return status, err
 }
 
 // Replace atomically switches the Personal HQ designation to a different
 // workspace, regardless of whether one is currently designated. The switch
 // is a single-column update, so no intermediate zero-HQ state is observable.
 func (s *Service) Replace(ctx context.Context, userID, workspaceID string) (*Status, error) {
-	return s.setDesignation(ctx, normalizeUserID(userID), workspaceID)
+	userID = normalizeUserID(userID)
+	previous, _ := s.Status(ctx, userID)
+	status, err := s.setDesignation(ctx, userID, workspaceID)
+	if err == nil {
+		fields := logger.Fields{"user_id": userID, "workspace_id": workspaceID}
+		if previous != nil && previous.HasDesignation() {
+			fields["previous_workspace_id"] = previous.WorkspaceID
+		}
+		logger.Info("personal hq: designation replaced", fields)
+	}
+	return status, err
 }
 
 // Clear removes the Personal HQ designation without touching the workspace
@@ -210,8 +227,12 @@ func (s *Service) Clear(ctx context.Context, userID string) (*Status, error) {
 		return nil, errors.New("personal hq service is not configured")
 	}
 	userID = normalizeUserID(userID)
+	previous, _ := s.Status(ctx, userID)
 	if err := s.profiles.SetPersonalWorkspaceID(ctx, userID, ""); err != nil {
 		return nil, err
+	}
+	if previous != nil && previous.HasDesignation() {
+		logger.Info("personal hq: designation cleared", logger.Fields{"user_id": userID, "workspace_id": previous.WorkspaceID})
 	}
 	return s.Status(ctx, userID)
 }
@@ -227,8 +248,14 @@ func (s *Service) SetOnboardingState(ctx context.Context, userID string, state u
 	if _, ok := userprofile.ParseHQOnboardingState(string(state)); !ok {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidOnboardingState, state)
 	}
+	previous, _ := s.Status(ctx, userID)
 	if err := s.profiles.SetHQOnboardingState(ctx, userID, state); err != nil {
 		return nil, err
+	}
+	if previous != nil {
+		logger.Info("personal hq: onboarding state changed", logger.Fields{
+			"user_id": userID, "from": string(previous.OnboardingState), "to": string(state),
+		})
 	}
 	return s.Status(ctx, userID)
 }

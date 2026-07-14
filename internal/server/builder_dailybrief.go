@@ -146,7 +146,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		}
 		if _, _, err := opportunityStore.Upsert(opp); err != nil {
 			logger.Warn("dailybrief: failed to create action center notification", logger.Fields{"revision_id": rev.ID, "error": err})
+			return
 		}
+		// Bounded, field-only observable event (PRD FR138) — IDs only, no
+		// brief prose/summary content.
+		logger.Info("dailybrief: notified", logger.Fields{"workspace_id": cfg.WorkspaceID, "revision_id": rev.ID})
 	})
 
 	b.dailyBriefService = briefService

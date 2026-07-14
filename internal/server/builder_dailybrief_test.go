@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -134,5 +136,108 @@ func TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification(t 
 	}
 	if len(opportunities) != 1 {
 		t.Fatalf("expected manual refresh to create no additional opportunity, got %d: %#v", len(opportunities), opportunities)
+	}
+}
+
+// TestReplaceNeverCopiesBriefHistoryToNewHQ covers task 8.4: replacing the
+// designated HQ must never carry the former HQ's brief config/history onto
+// the new one — dailybrief.Store keys everything by WorkspaceID, but this
+// proves it end-to-end through the real HTTP surface (which resolves
+// "current HQ" dynamically via personalhq.Status on every call) rather than
+// only at the storage layer.
+func TestReplaceNeverCopiesBriefHistoryToNewHQ(t *testing.T) {
+	builder, handler := newDailyBriefTestServer(t)
+	ctx := context.Background()
+
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"Command Post"}`))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status = %d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setupResp struct {
+		Status struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setupResp); err != nil {
+		t.Fatalf("decode setup response: %v", err)
+	}
+	oldHQID := setupResp.Status.WorkspaceID
+
+	openReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/brief/open", nil)
+	openRec := httptest.NewRecorder()
+	handler.ServeHTTP(openRec, openReq)
+	if openRec.Code != http.StatusAccepted {
+		t.Fatalf("open status = %d body=%s", openRec.Code, openRec.Body.String())
+	}
+	var oldRevision *dailybrief.Revision
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		oldRevision, err = builder.dailyBriefService.GetCurrent(ctx, oldHQID)
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if oldRevision == nil {
+		t.Fatalf("expected the original HQ to have a current brief before replacing, last err: %v", err)
+	}
+
+	newHQ := &session.Workspace{
+		ID: "ws-new-hq", Name: "New Command Post", Kind: session.WorkspaceKindWorkspace,
+		OwnerUserID: "local", Status: session.WorkspaceStatusActive,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := builder.sessionStore.CreateWorkspace(ctx, newHQ); err != nil {
+		t.Fatalf("CreateWorkspace(new hq): %v", err)
+	}
+	replaceReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/replace", bytes.NewBufferString(`{"workspace_id":"ws-new-hq"}`))
+	replaceReq.Header.Set("Content-Type", "application/json")
+	replaceRec := httptest.NewRecorder()
+	handler.ServeHTTP(replaceRec, replaceReq)
+	if replaceRec.Code != http.StatusOK {
+		t.Fatalf("replace status = %d body=%s", replaceRec.Code, replaceRec.Body.String())
+	}
+
+	// The HTTP surface resolves "current HQ" dynamically, so it now points
+	// at the new workspace — its brief config/history must be untouched
+	// defaults, never a copy of the old HQ's.
+	configReq := httptest.NewRequest(http.MethodGet, "/api/personal-hq/brief/config", nil)
+	configRec := httptest.NewRecorder()
+	handler.ServeHTTP(configRec, configReq)
+	var configResp struct {
+		Configured bool `json:"configured"`
+	}
+	if err := json.Unmarshal(configRec.Body.Bytes(), &configResp); err != nil {
+		t.Fatalf("decode config response: %v", err)
+	}
+	if configResp.Configured {
+		t.Fatal("expected the new HQ to start with no brief config of its own, not the old HQ's")
+	}
+
+	currentReq := httptest.NewRequest(http.MethodGet, "/api/personal-hq/brief/current", nil)
+	currentRec := httptest.NewRecorder()
+	handler.ServeHTTP(currentRec, currentReq)
+	var currentResp struct {
+		Revision *dailybrief.Revision `json:"revision"`
+	}
+	if err := json.Unmarshal(currentRec.Body.Bytes(), &currentResp); err != nil {
+		t.Fatalf("decode current response: %v", err)
+	}
+	if currentResp.Revision != nil {
+		t.Fatalf("expected the new HQ to have no current brief, got %#v", currentResp.Revision)
+	}
+
+	// The former HQ's own brief history must remain completely intact,
+	// still addressable by its own workspace id.
+	stillThere, err := builder.dailyBriefService.GetCurrent(ctx, oldHQID)
+	if err != nil {
+		t.Fatalf("expected the former HQ's brief to remain intact after replace: %v", err)
+	}
+	if stillThere.ID != oldRevision.ID {
+		t.Fatalf("expected the former HQ's revision to be untouched, got %#v want %#v", stillThere, oldRevision)
 	}
 }
