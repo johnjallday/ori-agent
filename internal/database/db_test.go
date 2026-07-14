@@ -404,6 +404,93 @@ func TestMigration030AddsPersonalHQColumns(t *testing.T) {
 	}
 }
 
+func TestMigration031CreatesDailyBriefSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, table := range []string{"daily_brief_config", "daily_brief_revision", "daily_brief_generation_claim", "daily_brief_notification"} {
+		exists, err := db.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("tableExists(%s): %v", table, err)
+		}
+		if !exists {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+
+	if err := db.runMigration(ctx, 31); err != nil {
+		t.Fatalf("migration 31 should be idempotent: %v", err)
+	}
+}
+
+// TestMigration031EnforcesAtMostOneCurrentRevisionPerWorkspace proves the
+// partial unique index (not just application logic) rejects a second
+// current revision for the same workspace.
+func TestMigration031EnforcesAtMostOneCurrentRevisionPerWorkspace(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	insert := func(id string, isCurrent int) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO daily_brief_revision
+				(id, workspace_id, user_id, local_date, revision_number, is_current, trigger_type, status, created_at)
+			VALUES (?, 'ws-1', 'local', '2026-07-14', 1, ?, 'manual', 'succeeded', CURRENT_TIMESTAMP)
+		`, id, isCurrent)
+		return err
+	}
+	if err := insert("rev-1", 1); err != nil {
+		t.Fatalf("first current revision insert: %v", err)
+	}
+	if err := insert("rev-2", 1); err == nil {
+		t.Fatal("expected a second current revision for the same workspace to be rejected")
+	}
+}
+
+// TestMigration031DedupesNonManualClaimsButNotManual proves the partial
+// unique index allows unlimited manual claims for the same date while
+// rejecting a second first_open/scheduled claim.
+func TestMigration031DedupesNonManualClaimsButNotManual(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	insertClaim := func(id, triggerType, status string) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO daily_brief_generation_claim
+				(id, workspace_id, local_date, trigger_type, status, claimed_at)
+			VALUES (?, 'ws-1', '2026-07-14', ?, ?, CURRENT_TIMESTAMP)
+		`, id, triggerType, status)
+		return err
+	}
+
+	if err := insertClaim("claim-1", "first_open", "succeeded"); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if err := insertClaim("claim-2", "scheduled", "pending"); err == nil {
+		t.Fatal("expected a second non-manual claim for the same date to be rejected")
+	}
+	if err := insertClaim("claim-3", "manual", "succeeded"); err != nil {
+		t.Fatalf("manual claims must never be deduped: %v", err)
+	}
+	if err := insertClaim("claim-4", "manual", "succeeded"); err != nil {
+		t.Fatalf("a second manual claim for the same date must also be allowed: %v", err)
+	}
+}
+
 func TestMigration030UpgradesFromPriorSchema(t *testing.T) {
 	ctx := context.Background()
 

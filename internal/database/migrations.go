@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 30
+const schemaVersion = 31
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -125,6 +125,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration029WorkspaceNativeMCPOptIn(ctx)
 	case 30:
 		return db.migration030PersonalHQ(ctx)
+	case 31:
+		return db.migration031DailyBrief(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1225,6 +1227,86 @@ func (db *DB) migration029WorkspaceNativeMCPOptIn(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN allow_native_mcp_cli INTEGER NOT NULL DEFAULT 0
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace allow_native_mcp_cli column: %w", err)
+	}
+	return nil
+}
+
+// migration031DailyBrief creates the Daily Brief domain tables: HQ-owned
+// configuration, generation claims (in-flight/idempotency tracking),
+// revisions (the generated documents, with at most one current per
+// workspace), and notification records (at most one Action Center
+// notification per revision). Keyed by workspace_id (the designated HQ),
+// not just user_id, so replacing or clearing an HQ never carries
+// configuration or history onto a different workspace.
+func (db *DB) migration031DailyBrief(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS daily_brief_config (
+			workspace_id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			timezone TEXT NOT NULL,
+			schedule_days TEXT NOT NULL DEFAULT '[]',
+			schedule_time TEXT NOT NULL DEFAULT '08:00',
+			schedule_enabled INTEGER NOT NULL DEFAULT 1,
+			scope TEXT NOT NULL DEFAULT 'all',
+			selected_workspace_ids TEXT NOT NULL DEFAULT '[]',
+			include_future_workspaces INTEGER NOT NULL DEFAULT 1,
+			notify_on_ready INTEGER NOT NULL DEFAULT 0,
+			config_revision INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS daily_brief_revision (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			local_date TEXT NOT NULL,
+			revision_number INTEGER NOT NULL,
+			is_current INTEGER NOT NULL DEFAULT 0,
+			trigger_type TEXT NOT NULL,
+			status TEXT NOT NULL,
+			config_revision INTEGER NOT NULL DEFAULT 0,
+			content_json TEXT NOT NULL DEFAULT '',
+			source_window_start DATETIME,
+			source_window_end DATETIME,
+			failure_reason TEXT NOT NULL DEFAULT '',
+			generated_at DATETIME,
+			created_at DATETIME NOT NULL,
+			UNIQUE(workspace_id, local_date, revision_number)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_daily_brief_revision_workspace_date ON daily_brief_revision(workspace_id, local_date)`,
+		// At most one current revision per workspace, enforced at the
+		// database boundary (not just in application code).
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_brief_revision_current ON daily_brief_revision(workspace_id) WHERE is_current = 1`,
+		`CREATE TABLE IF NOT EXISTS daily_brief_generation_claim (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			local_date TEXT NOT NULL,
+			trigger_type TEXT NOT NULL,
+			status TEXT NOT NULL,
+			revision_id TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			claimed_at DATETIME NOT NULL,
+			finished_at DATETIME
+		)`,
+		// Deduplicates first-open/scheduled triggers (never manual, which may
+		// always create a new same-day revision) against each other for the
+		// same workspace/local-date, so at most one non-manual claim is ever
+		// in flight or has already succeeded for that date. A failed claim
+		// does not block a later retry.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_brief_claim_dedupe
+			ON daily_brief_generation_claim(workspace_id, local_date)
+			WHERE trigger_type != 'manual' AND status != 'failed'`,
+		`CREATE INDEX IF NOT EXISTS idx_daily_brief_claim_workspace_date ON daily_brief_generation_claim(workspace_id, local_date)`,
+		`CREATE TABLE IF NOT EXISTS daily_brief_notification (
+			revision_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			notified_at DATETIME NOT NULL
+		)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create daily brief schema: %w", err)
+		}
 	}
 	return nil
 }
