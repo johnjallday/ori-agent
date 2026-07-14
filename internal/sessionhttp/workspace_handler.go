@@ -346,6 +346,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, resolvedTemplate)
 	}
 
+	// Must run after starter-task seeding above — see
+	// persistCreateWorkspaceTemplateProvenance's doc comment for why.
+	h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved)
+
 	// Completeness/ordering backstop: when the workspace was created with an
 	// entry agent, claim any tasks that already exist on the folder workspace
 	// (e.g. import-style seeds). Template starter tasks are assigned at seed
@@ -659,26 +663,39 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 		}
 	}
 
-	// Persist portable template provenance so features (REAPER readiness, repair)
-	// can identify the originating built-in without scanning filenames or task
-	// prose. Best-effort: a failure here never fails creation.
-	if tc.resolved && tc.template.Builtin && strings.TrimSpace(tc.template.ID) != "" && h.workspaceTaskStore != nil {
-		prov := &agentworkspace.TemplateProvenance{
-			TemplateID:   tc.template.ID,
-			TemplateName: tc.template.Name,
-			Builtin:      true,
-			Version:      tc.template.BuiltinVersion,
-			AppliedAt:    time.Now(),
-		}
-		if err := h.workspaceTaskStore.Update(ws.ID, func(w *agentworkspace.Workspace) error {
-			w.SetTemplateProvenance(prov)
-			return nil
-		}); err != nil {
-			logger.Warn("Failed to persist template provenance", logger.Fields{"id": ws.ID, "template": tc.template.ID, "error": err})
-		}
-	}
-
 	return projectWarning
+}
+
+// persistCreateWorkspaceTemplateProvenance records the built-in template a
+// workspace was created from onto its portable workspace.json (features like
+// REAPER readiness and repair identify origin from this rather than scanning
+// filenames or task prose). Best-effort: a failure never fails creation.
+//
+// Must run after starter-task seeding, not from inside
+// applyCreateWorkspaceTemplate. h.workspaceTaskStore is a SyncStore whose
+// primary is the SQLite-backed session store; session.Workspace has no
+// TemplateProvenance column, so every Update on this store round-trips
+// through a conversion that silently drops it before re-saving to disk. Any
+// later Update on the same workspace id — starter-task seeding runs right
+// after template application — would clobber a provenance write made here
+// earlier. Doing it last avoids that.
+func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool) {
+	if !resolved || !tmpl.Builtin || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
+		return
+	}
+	prov := &agentworkspace.TemplateProvenance{
+		TemplateID:   tmpl.ID,
+		TemplateName: tmpl.Name,
+		Builtin:      true,
+		Version:      tmpl.BuiltinVersion,
+		AppliedAt:    time.Now(),
+	}
+	if err := h.workspaceTaskStore.Update(wsID, func(w *agentworkspace.Workspace) error {
+		w.SetTemplateProvenance(prov)
+		return nil
+	}); err != nil {
+		logger.Warn("Failed to persist template provenance", logger.Fields{"id": wsID, "template": tmpl.ID, "error": err})
+	}
 }
 
 func workspacePathsEqual(a, b string) bool {
