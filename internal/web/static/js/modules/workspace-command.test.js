@@ -2288,7 +2288,11 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.doesNotMatch(html, /ws-cmd-map-stations/);
     assert.doesNotMatch(html, /ws-cmd-map-station-node/);
     assert.match(html, /Researcher/);
-    assert.match(html, /ws-cmd-map-entry-badge/);
+    // The sole entry agent renders as the command node (group 5), not the small
+    // entry star badge (which is reserved for a specialist card, never shown
+    // here since there is no specialist in this fixture).
+    assert.match(html, /is-command-node/);
+    assert.match(html, /ws-cmd-map-command-role/);
     assert.match(html, /Entry Agent/);
     assert.doesNotMatch(html, /data-map-zone="mission"/);
     assert.doesNotMatch(html, /data-map-zone="tasks"/);
@@ -2297,7 +2301,9 @@ test('Operations Map renders units first and keeps support panels hidden by defa
 
     commandView.activeMapWindow = 'objectives';
     const windowHTML = commandView.renderOperationsMap();
-    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Objectives"/);
+    // 'objectives' is the panel KEY (unchanged, FR5a); its user-visible label
+    // is now "Tasks" (group 8 terminology sweep, FR4).
+    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Tasks"/);
     assert.match(windowHTML, /Collect sources/);
 
     commandView.activeMapWindow = 'inspector';
@@ -2676,7 +2682,7 @@ test('startMapQuest executes a pending task via the page with skipConfirm', asyn
 
   await view.startMapQuest('q1');
 
-  assert.deepEqual(calls, [['q1', { skipConfirm: true }]]);
+  assert.deepEqual(calls, [['q1', { skipConfirm: true, skipModal: true }]]);
 });
 
 test('startMapQuest reports and refreshes when the quest is no longer pending', async () => {

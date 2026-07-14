@@ -21,6 +21,25 @@
   --ws-line: #262931;
   --ws-line-bright: #363a45;
 
+  /* ---- overlay layer scale ----
+     Single documented z-index scale for the workspace detail surface, mirroring
+     the LAYER constants in workspace-overlay-coordinator.js. New surfaces
+     (drawer/tray/modal/menu/toast) reference these tokens instead of inventing
+     local z-index values. The two `legacy` tokens below preserve the CURRENT
+     stacking (map window 10010 / stat modal 1050) so this change is inert; they
+     get folded into the scale in group 3 when the task drawer replaces the
+     in-map task-manager modal flow and the ordering can be verified end-to-end. */
+  --wsx-layer-map: 100;
+  --wsx-layer-drawer: 200;
+  --wsx-layer-tray: 300;
+  --wsx-layer-popover: 900;
+  --wsx-layer-modal-backdrop: 1000;
+  --wsx-layer-modal: 1010;
+  --wsx-layer-menu: 1100;
+  --wsx-layer-toast: 2000;
+  --wsx-layer-legacy-map-window: 10010;
+  --wsx-layer-legacy-stat-modal: 1050;
+
   /* ink */
   --ws-ink: #d6d9de;
   --ws-ink-dim: #8b909a;
@@ -588,15 +607,17 @@
 .ws-cmd-map-belt-btn:last-child:focus-visible::after {
   transform: translate(0, 0);
 }
-/* Quick "New Quest" composer: floating dock at the map's bottom-right. */
+/* Quick "New Quest" composer: floating dock at the map's top-left. Moved off
+   the bottom-right corner (group 3+) so it never sits under the task drawer
+   or the sticky execution tray, which both dock there. */
 .ws-cmd-map-quest-dock {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
+  left: 18px;
+  top: 18px;
   z-index: 6;
   display: flex;
-  flex-direction: column-reverse;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
 }
 .ws-cmd-map-quest-fab {
@@ -730,7 +751,7 @@
 .ws-cmd-map-window-backdrop {
   position: fixed;
   inset: clamp(76px, 10vh, 112px) 16px 16px;
-  z-index: 10010;
+  z-index: var(--wsx-layer-legacy-map-window);
   display: grid;
   place-items: start center;
   padding: 28px;
@@ -3637,7 +3658,7 @@
 .ws-cmd-modal {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: var(--wsx-layer-legacy-stat-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4244,13 +4265,13 @@
     height: 44px;
   }
   .ws-cmd-map-quest-dock {
-    right: 12px;
-    bottom: 12px;
     left: 12px;
+    top: 12px;
+    right: 12px;
     align-items: stretch;
   }
   .ws-cmd-map-quest-fab {
-    align-self: flex-end;
+    align-self: flex-start;
   }
   .ws-cmd-map-quest-composer {
     width: 100%;
@@ -4388,4 +4409,631 @@
   .ws-cmd-map-window {
     transition: none;
   }
+}
+
+/* ---------- task drawer (group 3) ----------
+   Persistent, NON-modal side panel docked to the right edge of the command
+   view. Replaces the Objectives -> Open Tasks modal stack. No full-page
+   backdrop; the Map stays interactive to its left. */
+.ws-cmd-drawer {
+  position: fixed;
+  top: clamp(76px, 10vh, 112px);
+  right: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip);
+  box-shadow: var(--ws-glow);
+  overflow: hidden;
+  /* tone -> semantic accent */
+  --tone-active: var(--ws-working);
+  --tone-attention: var(--ws-input);
+  --tone-danger: var(--ws-alert);
+  --tone-success: var(--ws-done);
+  --tone-info: var(--ws-idle);
+  --tone-neutral: var(--ws-ink-dim);
+}
+
+.ws-cmd-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.ws-cmd-drawer-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ws-ink);
+}
+.ws-cmd-drawer-title:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 3px;
+}
+
+.ws-cmd-drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-cmd-drawer-add {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-working);
+  background: transparent;
+  border: 1px solid var(--ws-working);
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-drawer-add:hover {
+  background: var(--ws-faction-deep);
+}
+
+.ws-cmd-drawer-close {
+  background: transparent;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-clip-sm);
+  color: var(--ws-ink-dim);
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-cmd-drawer-close:hover {
+  color: var(--ws-ink);
+  border-color: var(--ws-line-bright);
+}
+
+.ws-cmd-drawer-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.ws-cmd-drawer-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-dim);
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ws-cmd-drawer-filter.is-active {
+  color: var(--ws-bg);
+  background: var(--ws-idle);
+  border-color: var(--ws-idle);
+}
+.ws-cmd-drawer-filter-count {
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.ws-cmd-drawer-list {
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-cmd-drawer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-line);
+  border-left: 3px solid var(--tone-neutral);
+  border-radius: var(--ws-clip-sm);
+  color: var(--ws-ink);
+  cursor: pointer;
+}
+.ws-cmd-drawer-row.tone-active {
+  border-left-color: var(--tone-active);
+}
+.ws-cmd-drawer-row.tone-attention {
+  border-left-color: var(--tone-attention);
+}
+.ws-cmd-drawer-row.tone-danger {
+  border-left-color: var(--tone-danger);
+}
+.ws-cmd-drawer-row.tone-success {
+  border-left-color: var(--tone-success);
+}
+.ws-cmd-drawer-row.tone-info {
+  border-left-color: var(--tone-info);
+}
+.ws-cmd-drawer-row.is-selected {
+  border-color: var(--ws-idle);
+  background: var(--ws-panel-2);
+}
+.ws-cmd-drawer-row:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}
+
+.ws-cmd-drawer-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ws-cmd-drawer-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-cmd-drawer-row-meta {
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-drawer-row-state {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--tone-neutral);
+}
+.ws-cmd-drawer-row-state.tone-active {
+  color: var(--tone-active);
+}
+.ws-cmd-drawer-row-state.tone-attention {
+  color: var(--tone-attention);
+}
+.ws-cmd-drawer-row-state.tone-danger {
+  color: var(--tone-danger);
+}
+.ws-cmd-drawer-row-state.tone-success {
+  color: var(--tone-success);
+}
+.ws-cmd-drawer-row-state.tone-info {
+  color: var(--tone-info);
+}
+
+.ws-cmd-drawer-empty,
+.ws-cmd-drawer-preview-empty {
+  padding: 20px 14px;
+  text-align: center;
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+}
+.ws-cmd-drawer-empty strong {
+  display: block;
+  color: var(--ws-ink-dim);
+  margin-bottom: 4px;
+}
+
+.ws-cmd-drawer-preview {
+  flex: 0 0 auto;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 14px 16px;
+  border-top: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+.ws-cmd-drawer-offfilter {
+  font-size: 11px;
+  color: var(--ws-waiting);
+  margin-bottom: 10px;
+}
+.ws-cmd-drawer-reveal {
+  background: none;
+  border: none;
+  color: var(--ws-idle);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.ws-cmd-drawer-preview-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.ws-cmd-drawer-preview-state {
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--tone-neutral);
+}
+.ws-cmd-drawer-preview-state.tone-active {
+  color: var(--tone-active);
+}
+.ws-cmd-drawer-preview-state.tone-attention {
+  color: var(--tone-attention);
+}
+.ws-cmd-drawer-preview-state.tone-danger {
+  color: var(--tone-danger);
+}
+.ws-cmd-drawer-preview-state.tone-success {
+  color: var(--tone-success);
+}
+.ws-cmd-drawer-preview-state.tone-info {
+  color: var(--tone-info);
+}
+.ws-cmd-drawer-preview-title {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ws-ink);
+}
+.ws-cmd-drawer-preview-assignee {
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-drawer-preview-brief {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ws-ink-dim);
+  margin: 8px 0;
+}
+.ws-cmd-drawer-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.ws-cmd-drawer-action {
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ws-bg);
+  background: var(--ws-working);
+  border: none;
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-drawer-openfull {
+  font-size: 12px;
+  color: var(--ws-idle);
+}
+
+/* Narrow layout: the drawer becomes a bottom sheet spanning the width. */
+@media (max-width: 768px) {
+  .ws-cmd-drawer {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 70vh;
+  }
+  .ws-cmd-drawer-preview {
+    max-height: 40%;
+  }
+}
+
+/* ---------- sticky execution tray (group 4) ----------
+   Collapsible mini-player docked bottom-left. Monitoring lives in the execution
+   controller, so collapsing/closing this never stops a run. */
+.ws-cmd-tray {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  width: min(400px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip);
+  box-shadow: var(--ws-glow);
+  overflow: hidden;
+  --tone-active: var(--ws-working);
+  --tone-attention: var(--ws-input);
+  --tone-danger: var(--ws-alert);
+  --tone-success: var(--ws-done);
+  --tone-info: var(--ws-idle);
+  --tone-neutral: var(--ws-ink-dim);
+}
+
+.ws-cmd-tray-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'state title controls' 'meta meta controls';
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--tone-neutral);
+}
+.ws-cmd-tray-head.tone-active {
+  border-left-color: var(--tone-active);
+}
+.ws-cmd-tray-head.tone-attention {
+  border-left-color: var(--tone-attention);
+}
+.ws-cmd-tray-head.tone-danger {
+  border-left-color: var(--tone-danger);
+}
+.ws-cmd-tray-head.tone-success {
+  border-left-color: var(--tone-success);
+}
+.ws-cmd-tray-head.tone-info {
+  border-left-color: var(--tone-info);
+}
+.ws-cmd-tray-state {
+  grid-area: state;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--tone-neutral);
+}
+.ws-cmd-tray-head.tone-active .ws-cmd-tray-state {
+  color: var(--tone-active);
+}
+.ws-cmd-tray-head.tone-attention .ws-cmd-tray-state {
+  color: var(--tone-attention);
+}
+.ws-cmd-tray-head.tone-danger .ws-cmd-tray-state {
+  color: var(--tone-danger);
+}
+.ws-cmd-tray-head.tone-success .ws-cmd-tray-state {
+  color: var(--tone-success);
+}
+.ws-cmd-tray-title {
+  grid-area: title;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ws-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-cmd-tray-meta {
+  grid-area: meta;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-tray-controls {
+  grid-area: controls;
+  display: flex;
+  gap: 4px;
+}
+.ws-cmd-tray-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-clip-sm);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  line-height: 1;
+}
+.ws-cmd-tray-btn:hover {
+  color: var(--ws-ink);
+}
+
+.ws-cmd-tray-collapsed-activity,
+.ws-cmd-tray-attention {
+  padding: 0 12px 10px;
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-tray-attention {
+  color: var(--ws-input);
+}
+
+.ws-cmd-tray-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-tray-run {
+  padding: 3px 9px;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-dim);
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-line);
+  border-left: 2px solid var(--tone-neutral);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ws-cmd-tray-run.tone-active {
+  border-left-color: var(--tone-active);
+}
+.ws-cmd-tray-run.tone-attention {
+  border-left-color: var(--tone-attention);
+}
+.ws-cmd-tray-run.tone-danger {
+  border-left-color: var(--tone-danger);
+}
+.ws-cmd-tray-run.is-selected {
+  color: var(--ws-ink);
+  border-color: var(--ws-idle);
+}
+
+.ws-cmd-tray-log {
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ws-line);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-tray-log-line.is-muted {
+  color: var(--ws-ink-faint);
+}
+
+.ws-cmd-tray-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-tray-action {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ws-bg);
+  background: var(--ws-working);
+  border: none;
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-tray-cancel {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--ws-alert);
+  background: transparent;
+  border: 1px solid var(--ws-alert);
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-tray-cancel.is-armed {
+  color: var(--ws-bg);
+  background: var(--ws-alert);
+}
+.ws-cmd-tray-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .ws-cmd-tray {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+  }
+}
+
+/* ---------- entry-agent command node (group 5) ----------
+   The entry agent renders first, top-centered, and larger than a specialist
+   card — a role frame independent of runtime status color (FR66-FR70, FR79:
+   hierarchy via size/position/text only, no required animation). */
+.ws-cmd-map-command-row {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding-bottom: 22px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.ws-cmd-map-agent.is-command-node {
+  /* ~1.3x a specialist card (152px min-height / 142px min column). */
+  min-width: 200px;
+  min-height: 198px;
+  padding: 18px 16px 14px;
+  border-width: 2px;
+  border-color: var(--ws-keeper);
+  background:
+    linear-gradient(180deg, rgba(232, 181, 75, 0.08), transparent 60%),
+    radial-gradient(circle at 50% 22%, rgba(70, 211, 154, 0.13), rgba(0, 0, 0, 0.16) 62%);
+}
+.ws-cmd-map-agent.is-command-node:hover,
+.ws-cmd-map-agent.is-command-node.is-selected {
+  border-color: var(--ws-keeper);
+  box-shadow: 0 0 0 1px rgba(232, 181, 75, 0.35);
+}
+/* Runtime-status tones still layer on top of the role frame so status color
+   never depends on (and never overrides) the command-node role frame (FR40). */
+.ws-cmd-map-agent.is-command-node.alert {
+  border-color: var(--ws-alert);
+}
+.ws-cmd-map-agent.is-command-node.working {
+  border-color: var(--ws-working);
+}
+.ws-cmd-map-agent.is-command-node.needs-input {
+  border-color: var(--ws-input);
+}
+
+.ws-cmd-map-command-role {
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--ws-keeper);
+}
+
+.ws-cmd-map-command-copy {
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+  text-align: center;
+  max-width: 22ch;
+}
+
+.ws-cmd-map-command-repair {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  margin-bottom: 18px;
+  border: 1px dashed var(--ws-line-bright);
+  border-radius: var(--ws-clip);
+  text-align: center;
+}
+.ws-cmd-map-command-repair strong {
+  color: var(--ws-ink);
+  font-size: 14px;
+}
+.ws-cmd-map-command-repair span {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  max-width: 42ch;
+}
+
+/* Narrow layouts: the command node stays first and full-width; specialists
+   keep flowing in the existing responsive grid below it (FR76). */
+@media (max-width: 640px) {
+  .ws-cmd-map-agent.is-command-node {
+    width: 100%;
+    max-width: 320px;
+  }
+}
+
+/* ---------- group 8: accessibility sweep — missing :focus-visible states ----------
+   The drawer/tray controls added in groups 3-4 didn't all get a visible focus
+   ring (FR125). Added here rather than inline per-control so the pattern is
+   easy to audit in one place; light/dark both use the same idle-accent ring
+   already used throughout this file, so no separate light/dark branch is
+   needed (--ws-idle is theme-aware via the token layer). */
+.ws-cmd-drawer-close:focus-visible,
+.ws-cmd-drawer-add:focus-visible,
+.ws-cmd-drawer-filter:focus-visible,
+.ws-cmd-drawer-action:focus-visible,
+.ws-cmd-drawer-reveal:focus-visible,
+.ws-cmd-drawer-openfull:focus-visible,
+.ws-cmd-tray-btn:focus-visible,
+.ws-cmd-tray-run:focus-visible,
+.ws-cmd-tray-action:focus-visible,
+.ws-cmd-tray-cancel:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
 }

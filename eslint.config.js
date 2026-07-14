@@ -161,9 +161,13 @@ export default defineConfig([
       'internal/web/static/js/modules/task-result-artifacts.js',
       'internal/web/static/js/modules/tag-input.js',
       'internal/web/static/js/modules/tag-filter-bar.js',
+      'internal/web/static/js/modules/task-presentation.js',
       'internal/web/static/js/modules/template-onboarding.js',
       'internal/web/static/js/modules/workspace-tags-card.js',
       'internal/web/static/js/modules/workspace-command.js',
+      'internal/web/static/js/modules/workspace-execution-controller.js',
+      'internal/web/static/js/modules/workspace-overlay-coordinator.js',
+      'internal/web/static/js/modules/workspace-url-state.js',
     ],
     languageOptions: {
       sourceType: 'module'
