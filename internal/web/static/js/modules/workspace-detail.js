@@ -12621,7 +12621,10 @@ export class WorkspaceDetailPage {
       task.execution_mode = selectedStepThrough ? 'step_through' : 'auto';
     }
 
-    this.openTaskExecutionModal(task);
+    // skipModal: the caller (e.g. the command-view sticky tray) owns monitoring,
+    // so suppress the legacy execution modal and its client-side monitor.
+    const useLegacyModal = options.skipModal !== true;
+    if (useLegacyModal) this.openTaskExecutionModal(task);
 
     try {
       const response = await fetch('/api/orchestration/tasks/execute', {
@@ -12645,7 +12648,7 @@ export class WorkspaceDetailPage {
         `${taskId}:dispatched`
       );
       await this.loadTasks();
-      this.startExecutionMonitor(taskId);
+      if (useLegacyModal) this.startExecutionMonitor(taskId);
     } catch (error) {
       console.error('Failed to execute task:', error);
       const message = error && error.message ? error.message : 'Failed to execute task';

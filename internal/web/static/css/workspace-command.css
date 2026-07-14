@@ -4726,3 +4726,205 @@
     max-height: 40%;
   }
 }
+
+/* ---------- sticky execution tray (group 4) ----------
+   Collapsible mini-player docked bottom-left. Monitoring lives in the execution
+   controller, so collapsing/closing this never stops a run. */
+.ws-cmd-tray {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  width: min(400px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip);
+  box-shadow: var(--ws-glow);
+  overflow: hidden;
+  --tone-active: var(--ws-working);
+  --tone-attention: var(--ws-input);
+  --tone-danger: var(--ws-alert);
+  --tone-success: var(--ws-done);
+  --tone-info: var(--ws-idle);
+  --tone-neutral: var(--ws-ink-dim);
+}
+
+.ws-cmd-tray-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'state title controls' 'meta meta controls';
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--tone-neutral);
+}
+.ws-cmd-tray-head.tone-active {
+  border-left-color: var(--tone-active);
+}
+.ws-cmd-tray-head.tone-attention {
+  border-left-color: var(--tone-attention);
+}
+.ws-cmd-tray-head.tone-danger {
+  border-left-color: var(--tone-danger);
+}
+.ws-cmd-tray-head.tone-success {
+  border-left-color: var(--tone-success);
+}
+.ws-cmd-tray-head.tone-info {
+  border-left-color: var(--tone-info);
+}
+.ws-cmd-tray-state {
+  grid-area: state;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--tone-neutral);
+}
+.ws-cmd-tray-head.tone-active .ws-cmd-tray-state {
+  color: var(--tone-active);
+}
+.ws-cmd-tray-head.tone-attention .ws-cmd-tray-state {
+  color: var(--tone-attention);
+}
+.ws-cmd-tray-head.tone-danger .ws-cmd-tray-state {
+  color: var(--tone-danger);
+}
+.ws-cmd-tray-head.tone-success .ws-cmd-tray-state {
+  color: var(--tone-success);
+}
+.ws-cmd-tray-title {
+  grid-area: title;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ws-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-cmd-tray-meta {
+  grid-area: meta;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-tray-controls {
+  grid-area: controls;
+  display: flex;
+  gap: 4px;
+}
+.ws-cmd-tray-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-clip-sm);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  line-height: 1;
+}
+.ws-cmd-tray-btn:hover {
+  color: var(--ws-ink);
+}
+
+.ws-cmd-tray-collapsed-activity,
+.ws-cmd-tray-attention {
+  padding: 0 12px 10px;
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-tray-attention {
+  color: var(--ws-input);
+}
+
+.ws-cmd-tray-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-tray-run {
+  padding: 3px 9px;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-dim);
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-line);
+  border-left: 2px solid var(--tone-neutral);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ws-cmd-tray-run.tone-active {
+  border-left-color: var(--tone-active);
+}
+.ws-cmd-tray-run.tone-attention {
+  border-left-color: var(--tone-attention);
+}
+.ws-cmd-tray-run.tone-danger {
+  border-left-color: var(--tone-danger);
+}
+.ws-cmd-tray-run.is-selected {
+  color: var(--ws-ink);
+  border-color: var(--ws-idle);
+}
+
+.ws-cmd-tray-log {
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--ws-line);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-tray-log-line.is-muted {
+  color: var(--ws-ink-faint);
+}
+
+.ws-cmd-tray-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-tray-action {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ws-bg);
+  background: var(--ws-working);
+  border: none;
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-tray-cancel {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--ws-alert);
+  background: transparent;
+  border: 1px solid var(--ws-alert);
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-tray-cancel.is-armed {
+  color: var(--ws-bg);
+  background: var(--ws-alert);
+}
+.ws-cmd-tray-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .ws-cmd-tray {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+  }
+}
