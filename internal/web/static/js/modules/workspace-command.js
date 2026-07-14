@@ -3544,6 +3544,83 @@ export class WorkspaceCommandView {
     );
   }
 
+  // A single agent "unit" card. `commandNode` renders the entry agent as the
+  // larger, role-framed command node (FR66-67, FR70); otherwise a standard
+  // specialist card. Runtime tone classes (working/waiting/needs-input/done)
+  // apply identically to both, so status color never depends on role (FR40).
+  renderMapAgentUnit(agent, index, commandNode) {
+    const selected = agent.key === this.selectedAgentKey;
+    const destination = agent.destination || 'hub';
+    const statusLabel = agent.status?.label || 'Idle';
+    const entryBadge =
+      agent.entry && !commandNode
+        ? '<span class="ws-cmd-map-entry-badge" title="Entry Agent"><i class="bi bi-star-fill" aria-hidden="true"></i><span>Entry</span></span>'
+        : '';
+    const roleLine = commandNode
+      ? '<span class="ws-cmd-map-command-role">Entry Agent</span>'
+      : '';
+    const orchestrationCopy =
+      commandNode && this._commandNodeOrchestrationCopy
+        ? '<span class="ws-cmd-map-command-copy">' +
+          escapeHtml(this._commandNodeOrchestrationCopy) +
+          '</span>'
+        : '';
+    const accessibleName =
+      'Select ' +
+      escapeHtml(agent.name) +
+      ', ' +
+      (agent.entry ? 'Entry Agent. ' : '') +
+      (commandNode && this._commandNodeOrchestrationCopy
+        ? escapeHtml(this._commandNodeOrchestrationCopy) + '. '
+        : '') +
+      escapeHtml(statusLabel);
+    return (
+      '<button type="button" class="ws-cmd-map-agent ' +
+      escapeHtml(agent.tone) +
+      (selected ? ' is-selected' : '') +
+      (commandNode ? ' is-command-node' : '') +
+      ' toward-' +
+      escapeHtml(destination) +
+      '" data-cmd-map-select-agent="' +
+      escapeHtml(agent.encodedName) +
+      '" data-agent-key="' +
+      escapeHtml(agent.key) +
+      '" style="--agent-map-index:' +
+      index +
+      '" aria-pressed="' +
+      (selected ? 'true' : 'false') +
+      '" aria-label="' +
+      accessibleName +
+      '">' +
+      '<span class="ws-cmd-map-agent-path" aria-hidden="true"></span>' +
+      '<span class="ws-cmd-map-agent-status" aria-hidden="true" title="' +
+      escapeHtml(statusLabel) +
+      '"><span class="ws-cmd-led ' +
+      escapeHtml(agent.tone) +
+      '"></span></span>' +
+      entryBadge +
+      this.agentCharacterHTML(agent, 'roster') +
+      roleLine +
+      '<span class="ws-cmd-map-agent-copy"><strong>' +
+      escapeHtml(agent.name) +
+      '</strong><span>' +
+      escapeHtml(agent.role?.label || 'Agent') +
+      '</span><em>' +
+      escapeHtml(statusLabel) +
+      '</em></span>' +
+      orchestrationCopy +
+      '</button>'
+    );
+  }
+
+  // Specialist count for the command node's orchestration copy: the current
+  // roster excluding the entry agent, unassigned placeholders, and duplicate
+  // records — agentGroups() already dedupes and drops unassigned (FR69).
+  commandNodeOrchestrationCopy(specialistCount) {
+    if (specialistCount <= 0) return 'No specialist agents yet';
+    return 'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's');
+  }
+
   renderMapAgentUnits(agents) {
     if (!agents.length) {
       return (
@@ -3554,61 +3631,43 @@ export class WorkspaceCommandView {
         '</div>'
       );
     }
-    return agents
-      .map((agent, index) => {
-        const selected = agent.key === this.selectedAgentKey;
-        const destination = agent.destination || 'hub';
-        const entryBadge = agent.entry
-          ? '<span class="ws-cmd-map-entry-badge" title="Entry Agent"><i class="bi bi-star-fill" aria-hidden="true"></i><span>Entry</span></span>'
-          : '';
-        const statusLabel = agent.status?.label || 'Idle';
-        return (
-          '<button type="button" class="ws-cmd-map-agent ' +
-          escapeHtml(agent.tone) +
-          (selected ? ' is-selected' : '') +
-          ' toward-' +
-          escapeHtml(destination) +
-          '" data-cmd-map-select-agent="' +
-          escapeHtml(agent.encodedName) +
-          '" data-agent-key="' +
-          escapeHtml(agent.key) +
-          '" style="--agent-map-index:' +
-          index +
-          '" aria-pressed="' +
-          (selected ? 'true' : 'false') +
-          '" aria-label="Select ' +
-          escapeHtml(agent.name) +
-          ', ' +
-          (agent.entry ? 'Entry Agent, ' : '') +
-          escapeHtml(statusLabel) +
-          '">' +
-          '<span class="ws-cmd-map-agent-path" aria-hidden="true"></span>' +
-          '<span class="ws-cmd-map-agent-status" aria-hidden="true" title="' +
-          escapeHtml(statusLabel) +
-          '"><span class="ws-cmd-led ' +
-          escapeHtml(agent.tone) +
-          '"></span></span>' +
-          entryBadge +
-          this.agentCharacterHTML(agent, 'roster') +
-          '<span class="ws-cmd-map-agent-copy"><strong>' +
-          escapeHtml(agent.name) +
-          '</strong><span>' +
-          escapeHtml(agent.role?.label || 'Agent') +
-          '</span><em>' +
-          escapeHtml(statusLabel) +
-          '</em></span></button>'
-        );
-      })
-      .join('');
+
+    const entry = agents.find(a => a.entry);
+    const specialists = agents.filter(a => a !== entry);
+
+    // No valid entry agent: show a repair state at the command position rather
+    // than promoting an arbitrary specialist visually (FR77). Backend routing
+    // and assignment rules are untouched (FR78) — this is presentation only.
+    if (!entry) {
+      return (
+        '<div class="ws-cmd-map-command-repair">' +
+        '<strong>No entry agent</strong>' +
+        '<span>Chats, routing, and task orchestration need an entry agent.</span>' +
+        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Create Entry Agent</button>' +
+        '</div>' +
+        '<div class="ws-cmd-map-agent-field">' +
+        specialists.map((agent, index) => this.renderMapAgentUnit(agent, index, false)).join('') +
+        '</div>'
+      );
+    }
+
+    this._commandNodeOrchestrationCopy = this.commandNodeOrchestrationCopy(specialists.length);
+    return (
+      '<div class="ws-cmd-map-command-row">' +
+      this.renderMapAgentUnit(entry, 0, true) +
+      '</div>' +
+      '<div class="ws-cmd-map-agent-field">' +
+      specialists.map((agent, index) => this.renderMapAgentUnit(agent, index, false)).join('') +
+      '</div>'
+    );
   }
 
   renderMapAgentsZone(agents) {
     return (
       '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
-      '<div class="ws-cmd-map-agent-field">' +
       this.renderMapAgentUnits(agents) +
-      '</div></section>'
+      '</section>'
     );
   }
 
