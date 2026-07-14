@@ -2301,7 +2301,9 @@ test('Operations Map renders units first and keeps support panels hidden by defa
 
     commandView.activeMapWindow = 'objectives';
     const windowHTML = commandView.renderOperationsMap();
-    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Objectives"/);
+    // 'objectives' is the panel KEY (unchanged, FR5a); its user-visible label
+    // is now "Tasks" (group 8 terminology sweep, FR4).
+    assert.match(windowHTML, /role="dialog" aria-modal="true" aria-label="Tasks"/);
     assert.match(windowHTML, /Collect sources/);
 
     commandView.activeMapWindow = 'inspector';

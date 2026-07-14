@@ -5015,3 +5015,23 @@
     max-width: 320px;
   }
 }
+
+/* ---------- group 8: accessibility sweep — missing :focus-visible states ----------
+   The drawer/tray controls added in groups 3-4 didn't all get a visible focus
+   ring (FR125). Added here rather than inline per-control so the pattern is
+   easy to audit in one place; light/dark both use the same idle-accent ring
+   already used throughout this file, so no separate light/dark branch is
+   needed (--ws-idle is theme-aware via the token layer). */
+.ws-cmd-drawer-close:focus-visible,
+.ws-cmd-drawer-add:focus-visible,
+.ws-cmd-drawer-filter:focus-visible,
+.ws-cmd-drawer-action:focus-visible,
+.ws-cmd-drawer-reveal:focus-visible,
+.ws-cmd-drawer-openfull:focus-visible,
+.ws-cmd-tray-btn:focus-visible,
+.ws-cmd-tray-run:focus-visible,
+.ws-cmd-tray-action:focus-visible,
+.ws-cmd-tray-cancel:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}

@@ -427,6 +427,12 @@ export class WorkspaceCommandView {
       this.closeTaskDrawer();
       return;
     }
+    // Collapse (not close) an expanded tray on Escape — collapsing is
+    // reversible and never stops monitoring, unlike closing (FR52, FR123).
+    if (this.trayOpen && !this.trayCollapsed) {
+      this.toggleTrayCollapsed();
+      return;
+    }
     if (this.viewMode === 'map' && this.taskComposerOpen) {
       this.closeTaskComposer();
       return;
@@ -3054,9 +3060,12 @@ export class WorkspaceCommandView {
   }
 
   mapWindowOptions() {
+    // Labels are presentation-only (FR3-5): the underlying panel keys
+    // ('objective'/'objectives') are unchanged so activeMapWindow state and
+    // every reference to them elsewhere keeps working.
     return [
-      { key: 'objective', label: 'Workspace Objective', icon: 'bi-bullseye' },
-      { key: 'objectives', label: 'Objectives', icon: 'bi-list-check' },
+      { key: 'objective', label: 'Workspace Mission', icon: 'bi-bullseye' },
+      { key: 'objectives', label: 'Tasks', icon: 'bi-list-check' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
       { key: 'stations', label: 'Stations', icon: 'bi-cpu' }
     ];
@@ -3095,7 +3104,7 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-window-section is-objective">' +
       '<div class="ws-cmd-map-quest-frame">' +
-      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Objective</strong></div>' +
+      '<div class="ws-cmd-map-quest-frame-head"><span>Main Quest</span><strong>Workspace Mission</strong></div>' +
       this.renderMissionPanel() +
       '</div></div>'
     );
@@ -3142,7 +3151,7 @@ export class WorkspaceCommandView {
       : '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest log clear</strong><span>No active objectives assigned.</span></div>';
     return (
       '<div class="ws-cmd-map-window-section is-objectives">' +
-      this.mapZoneHeaderHTML('Objectives', 'Active Tasks', tasks.length) +
+      this.mapZoneHeaderHTML('Tasks', 'Active Tasks', tasks.length) +
       '<div class="ws-cmd-map-task-list">' +
       rows +
       '</div>' +
@@ -3649,6 +3658,20 @@ export class WorkspaceCommandView {
     }
   }
 
+  // Announce only when the selected run's state actually changes (not on
+  // every poll tick / activity-log line) — a concise polite live region,
+  // distinct from the raw (non-live) activity log below (FR127).
+  trayAnnounceText(run) {
+    if (!run || !run.presentation) return this._trayAnnounceText || '';
+    if (!this._trayAnnouncedStateByTask) this._trayAnnouncedStateByTask = {};
+    const state = run.presentation.state;
+    if (this._trayAnnouncedStateByTask[run.taskId] === state) return this._trayAnnounceText || '';
+    this._trayAnnouncedStateByTask[run.taskId] = state;
+    const title = String((run.task && (run.task.description || run.task.name)) || run.taskId);
+    this._trayAnnounceText = title + ': ' + (run.presentation.label || state);
+    return this._trayAnnounceText;
+  }
+
   trayHTML() {
     const c = this.execController;
     const run = c ? c.getSelected() : null;
@@ -3688,7 +3711,10 @@ export class WorkspaceCommandView {
       (this.trayCollapsed ? '▴' : '▾') +
       '</button>' +
       '<button type="button" class="ws-cmd-tray-btn" data-cmd-tray-close aria-label="Hide execution tray">×</button>' +
-      '</div></div>';
+      '</div></div>' +
+      '<div class="ws-cmd-tray-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
+      escapeHtml(this.trayAnnounceText(run)) +
+      '</div>';
 
     if (this.trayCollapsed) {
       return (
@@ -3728,8 +3754,11 @@ export class WorkspaceCommandView {
         '</div>'
       : '';
 
+    // Not a live region (FR127): raw streaming activity must not be announced
+    // line by line. State-transition announcements are handled separately by
+    // the small polite region below, which updates only on a state change.
     const activityLog =
-      '<div class="ws-cmd-tray-log" role="log" aria-live="polite">' +
+      '<div class="ws-cmd-tray-log" role="log">' +
       (run.activity && run.activity.length
         ? run.activity
             .slice(-8)
