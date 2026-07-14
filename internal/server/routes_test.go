@@ -81,6 +81,42 @@ func TestWorkspaceRunRoutesRegistered(t *testing.T) {
 	}
 }
 
+func TestPersonalHQRoutesRegistered(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected personal hq status to return 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status"`) {
+		t.Fatalf("expected status response body, got %s", rec.Body.String())
+	}
+
+	// Method contract: the status pattern is GET-only at the mux level, so a
+	// mismatched method doesn't match any registered pattern for this exact
+	// path and is a 404 (net/http.ServeMux only synthesizes 405 when another
+	// method is registered on the same path; see handler_test.go in
+	// personalhqhttp for the handler's own RequireMethod 405 behavior).
+	req = httptest.NewRequest(http.MethodPost, "/api/personal-hq/status", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected POST to status to return 404, got %d", rec.Code)
+	}
+
+	// Designating an unknown workspace must return an actionable error, not
+	// a bare 500.
+	body := bytes.NewReader([]byte(`{"workspace_id":"does-not-exist"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/personal-hq/designate", body)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected designate of unknown workspace to return 404, got %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWorkspaceProjectOpenRouteUsesRuntimeHandler(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 

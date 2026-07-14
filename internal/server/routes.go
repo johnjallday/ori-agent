@@ -347,6 +347,8 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/user/profile", s.Handlers.User.Profile)
 	}
 
+	registerPersonalHQRoutes(mux, s)
+
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -789,6 +791,20 @@ func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/regenerate-token", s.Handlers.Triggers.RegenerateToken)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire", s.Handlers.Triggers.TestFire)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}/fires", s.Handlers.Triggers.Fires)
+	}
+}
+
+// registerPersonalHQRoutes registers Personal HQ status/designation endpoints.
+func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Personal HQ Endpoints
+	// =============================================================================
+	if s.Handlers.PersonalHQ != nil {
+		mux.HandleFunc("GET /api/personal-hq/status", s.Handlers.PersonalHQ.Status)
+		mux.HandleFunc("POST /api/personal-hq/onboarding-state", s.Handlers.PersonalHQ.SetOnboardingState)
+		mux.HandleFunc("POST /api/personal-hq/designate", s.Handlers.PersonalHQ.Designate)
+		mux.HandleFunc("POST /api/personal-hq/replace", s.Handlers.PersonalHQ.Replace)
+		mux.HandleFunc("POST /api/personal-hq/clear", s.Handlers.PersonalHQ.Clear)
 	}
 }
 

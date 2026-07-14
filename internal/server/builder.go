@@ -35,6 +35,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
@@ -218,6 +220,10 @@ type ServerBuilder struct {
 
 	// User profile API
 	userHandler *userhttp.Handler
+
+	// Personal HQ designation and onboarding state
+	personalHQService *personalhq.Service
+	personalHQHandler *personalhqhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -397,6 +403,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		ExternalAgents:   b.externalAgentsHandler,
 		Skills:           b.skillsHandler,
 		User:             b.userHandler,
+		PersonalHQ:       b.personalHQHandler,
 		CLIAgents:        b.cliAgentHandler,
 		CLIAgentRegistry: b.cliAgentRegistry,
 		WorkspaceRuns:    b.workspaceRunHandler,

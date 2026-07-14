@@ -25,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
@@ -135,6 +136,7 @@ type HandlerFacade struct {
 	Triggers         *triggerhttp.Handler
 	WorkspaceMemory  *memoryhttp.Handler
 	User             *userhttp.Handler
+	PersonalHQ       *personalhqhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

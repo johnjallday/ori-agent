@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 29
+const schemaVersion = 30
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -123,6 +123,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration028Users(ctx)
 	case 29:
 		return db.migration029WorkspaceNativeMCPOptIn(ctx)
+	case 30:
+		return db.migration030PersonalHQ(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1223,6 +1225,37 @@ func (db *DB) migration029WorkspaceNativeMCPOptIn(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN allow_native_mcp_cli INTEGER NOT NULL DEFAULT 0
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace allow_native_mcp_cli column: %w", err)
+	}
+	return nil
+}
+
+// migration030PersonalHQ adds the per-user Personal HQ designation and
+// onboarding-status columns to the users table. The designation
+// (personal_workspace_id) and the onboarding status are separate columns on
+// purpose: clearing or losing the designated workspace must never reset the
+// user's onboarding history (unseen/in_progress/completed/skipped).
+func (db *DB) migration030PersonalHQ(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "users")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE users ADD COLUMN personal_workspace_id TEXT NOT NULL DEFAULT ''
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add users.personal_workspace_id column: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE users ADD COLUMN hq_onboarding_state TEXT NOT NULL DEFAULT 'unseen'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add users.hq_onboarding_state column: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE users ADD COLUMN hq_onboarding_updated_at DATETIME
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add users.hq_onboarding_updated_at column: %w", err)
 	}
 	return nil
 }

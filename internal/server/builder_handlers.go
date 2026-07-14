@@ -31,6 +31,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
@@ -140,12 +142,18 @@ func (b *ServerBuilder) initializeHandlers() {
 	} else {
 		b.sessionStore = sessionStore
 		b.userProvider = userprofile.LocalUserProvider{}
-		b.userStore = userprofile.NewSQLiteStore(sessionStore.DB())
+		userProfileStore := userprofile.NewSQLiteStore(sessionStore.DB())
+		b.userStore = userProfileStore
 		b.onboardingMgr.SetUserStore(b.userStore)
 		if err := b.onboardingMgr.SeedLocalUserProfile(ctx); err != nil {
 			logger.Warn("Failed to seed local user profile", logger.Fields{"error": err})
 		}
 		b.userHandler = userhttp.NewHandler(b.userStore, b.userProvider)
+		// Personal HQ needs the concrete SQLite store (not the narrower
+		// userprofile.UserStore interface) for its focused designation/
+		// onboarding-state methods; see internal/personalhq.ProfileStore.
+		b.personalHQService = personalhq.NewService(userProfileStore, sessionStore)
+		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, b.userProvider)
 		b.chatHandler.SetUserProfileDeps(b.userStore, b.userProvider)
 		b.sessionHandler = sessionhttp.New(sessionStore)
 		b.sessionHandler.SetWorkspaceRootResolver(func() string {

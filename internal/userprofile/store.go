@@ -104,6 +104,90 @@ func (s *SQLiteStore) Upsert(ctx context.Context, profile *UserProfile) error {
 	return nil
 }
 
+// GetPersonalHQState reads the Personal HQ designation and onboarding status
+// for a user. It intentionally selects only these two columns (not the full
+// profile row) so it stays independent of the generic Get/Upsert round trip
+// and of agent-editable profile fields.
+func (s *SQLiteStore) GetPersonalHQState(ctx context.Context, userID string) (*PersonalHQState, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("user profile store is not configured")
+	}
+	userID = normalizeUserID(userID)
+	var workspaceID, onboardingState string
+	var updatedAtRaw any
+	err := s.db.QueryRowContext(ctx, `
+		SELECT personal_workspace_id, hq_onboarding_state, hq_onboarding_updated_at
+		FROM users
+		WHERE id = ?
+	`, userID).Scan(&workspaceID, &onboardingState, &updatedAtRaw)
+	if err == sql.ErrNoRows {
+		return &PersonalHQState{OnboardingState: HQOnboardingUnseen}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get personal hq state: %w", err)
+	}
+	state := &PersonalHQState{
+		PersonalWorkspaceID: workspaceID,
+		OnboardingState:     NormalizeHQOnboardingState(onboardingState),
+	}
+	if updatedAtRaw != nil {
+		if updatedAt, err := parseTime(updatedAtRaw); err == nil {
+			state.OnboardingUpdatedAt = updatedAt
+		}
+	}
+	return state, nil
+}
+
+// SetPersonalWorkspaceID persists the user's Personal HQ designation as a
+// single-column, atomic update. Passing an empty workspaceID clears the
+// designation. This never touches hq_onboarding_state, so clearing or
+// replacing an HQ never resets onboarding history.
+func (s *SQLiteStore) SetPersonalWorkspaceID(ctx context.Context, userID, workspaceID string) error {
+	if s == nil || s.db == nil {
+		return errors.New("user profile store is not configured")
+	}
+	userID = normalizeUserID(userID)
+	workspaceID = strings.TrimSpace(workspaceID)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (id, personal_workspace_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			personal_workspace_id = excluded.personal_workspace_id,
+			updated_at = excluded.updated_at
+	`, userID, workspaceID, now, now)
+	if err != nil {
+		return fmt.Errorf("failed to set personal workspace id: %w", err)
+	}
+	return nil
+}
+
+// SetHQOnboardingState persists the user's Personal HQ onboarding status as a
+// single-column, atomic update independent of the designation itself.
+func (s *SQLiteStore) SetHQOnboardingState(ctx context.Context, userID string, state HQOnboardingState) error {
+	if s == nil || s.db == nil {
+		return errors.New("user profile store is not configured")
+	}
+	userID = normalizeUserID(userID)
+	normalized, ok := ParseHQOnboardingState(string(state))
+	if !ok {
+		return fmt.Errorf("invalid hq onboarding state: %q", state)
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (id, hq_onboarding_state, hq_onboarding_updated_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			hq_onboarding_state = excluded.hq_onboarding_state,
+			hq_onboarding_updated_at = excluded.hq_onboarding_updated_at,
+			updated_at = excluded.updated_at
+	`, userID, string(normalized), now, now, now)
+	if err != nil {
+		return fmt.Errorf("failed to set hq onboarding state: %w", err)
+	}
+	return nil
+}
+
 func (s *SQLiteStore) SetFields(ctx context.Context, id string, fields map[string]any) (*UserProfile, error) {
 	if len(fields) == 0 {
 		return s.Get(ctx, id)
