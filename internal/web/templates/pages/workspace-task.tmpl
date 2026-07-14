@@ -18,7 +18,7 @@
 
         <section class="workspace-task-page-hero">
           <div class="workspace-task-page-hero-copy">
-            <a href="/workspaces/{{.Extra.WorkspaceID}}" class="workspace-task-page-backlink">
+            <a id="workspace-task-backlink" href="/workspaces/{{.Extra.WorkspaceID}}" class="workspace-task-page-backlink">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
               </svg>
@@ -329,6 +329,32 @@
                 </div>
               </section>
 
+              <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
+                <div class="workspace-task-page-card-header">
+                  <div>
+                    <div class="workspace-task-page-card-kicker">Workflow</div>
+                    <h2>Steps</h2>
+                  </div>
+                  <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
+                    <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
+                    <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
+                  </div>
+                </div>
+                <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
+                  <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
+                  <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
+                </div>
+                <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
+              </section>
+
+          </main>
+
+          <!-- Context column (FR101): schedule/automation+output, recent-run
+               summary, relationships, and the collapsed developer group
+               (raw IDs, run trace, technical context). Every inner element id
+               is unchanged from its previous position inside <main>, so no
+               JS binding or renderX() visibility toggle needed to change. -->
+          <aside class="workspace-task-page-sidebar">
               <!-- Single "Automation & output" card: how/when the task runs,
                    where results are saved, and (for structured tasks) the shape
                    of those results. The schedule card id is kept so renderSchedule
@@ -394,24 +420,6 @@
                 <div id="workspace-task-relationships" class="workspace-task-relationship-groups"></div>
               </section>
 
-              <section id="workspace-task-workflow-card" class="workspace-task-page-card" hidden>
-                <div class="workspace-task-page-card-header">
-                  <div>
-                    <div class="workspace-task-page-card-kicker">Workflow</div>
-                    <h2>Steps</h2>
-                  </div>
-                  <div id="workspace-task-workflow-actions" class="workspace-task-workflow-actions" hidden>
-                    <button type="button" id="workspace-task-workflow-add-step" class="modern-btn modern-btn-secondary workspace-task-workflow-header-btn" title="Add a new step">+ Add step</button>
-                    <button type="button" id="workspace-task-workflow-run-all" class="modern-btn modern-btn-primary workspace-task-workflow-header-btn" title="Run all steps in sequence">▶ Run all</button>
-                  </div>
-                </div>
-                <div id="workspace-task-workflow-empty" class="workspace-task-workflow-empty" hidden>
-                  <div class="workspace-task-workflow-empty-copy">No steps yet. Break this task's result into a runnable list of steps.</div>
-                  <button type="button" id="workspace-task-workflow-generate" class="modern-btn modern-btn-primary workspace-task-workflow-empty-btn">Break this into steps</button>
-                </div>
-                <div id="workspace-task-workflow-steps" class="workspace-task-workflow-list"></div>
-              </section>
-
               <!-- Developer-facing cards (raw IDs, run trace, technical context)
                    grouped and collapsed by default so they stay out of the way
                    of the everyday task view. -->
@@ -472,7 +480,7 @@
                 <div id="workspace-task-context"></div>
               </section>
               </details>
-          </main>
+          </aside>
         </div>
 
         <!-- The slide-out assist panel was retired; its card now renders
@@ -496,7 +504,12 @@
        gradient, no decorative ::after blob, no heavy drop shadow. A single
        surface color and a hairline border. */
     .workspace-task-page-hero {
-      position: relative;
+      /* Sticky command header (FR99): title, canonical state, agent, and the
+         current primary action stay visible while the primary column scrolls.
+         top matches the Map's established navbar-clearance convention. */
+      position: sticky;
+      top: 76px;
+      z-index: 20;
       display: grid;
       grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
       gap: 1.5rem;
@@ -1085,14 +1098,30 @@
       font-weight: 600;
     }
 
+    /* Desktop two-column layout (FR101): a primary work column (current-state
+       action, brief, execution/result, workflow) and a narrower context column
+       (assignment lives in the hero; schedule/automation+output, relationships,
+       and run history/summary live here). Narrow layouts collapse this to one
+       column via the existing max-width:1100px override below (FR102). */
     .workspace-task-page-layout {
-      display: block;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+      gap: 1.5rem;
+      align-items: start;
     }
 
     .workspace-task-page-main {
       display: flex;
       flex-direction: column;
       gap: 1.25rem;
+      min-width: 0;
+    }
+
+    .workspace-task-page-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      min-width: 0;
     }
 
     .workspace-task-page-agent-picker {
@@ -6696,6 +6725,7 @@
 
   <script type="module">
     import { WorkspaceTaskPage } from '/js/modules/workspace-task.js';
+    import { isSafeReturnTarget } from '/js/modules/workspace-url-state.js';
 
     document.addEventListener('DOMContentLoaded', () => {
       const root = document.getElementById('workspaceTaskPageRoot');
@@ -6706,6 +6736,18 @@
         console.error('Missing workspace or task identifier for task page');
         window.location.href = workspaceId ? `/workspaces/${encodeURIComponent(workspaceId)}` : '/workspaces';
         return;
+      }
+
+      // Back To Workspace uses the Map's preserved return context when the
+      // link carries a valid, same-origin, same-workspace `return` param
+      // (FR92-98); otherwise it falls back to the plain workspace route
+      // already set as the anchor's href.
+      const backlink = document.getElementById('workspace-task-backlink');
+      if (backlink) {
+        const rawReturn = new URLSearchParams(window.location.search).get('return');
+        if (rawReturn && isSafeReturnTarget(rawReturn, workspaceId)) {
+          backlink.href = rawReturn;
+        }
       }
 
       window.currentWorkspaceId = workspaceId;

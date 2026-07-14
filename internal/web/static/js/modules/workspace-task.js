@@ -13,6 +13,7 @@ import {
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
+import { resolveTaskState, PRESENTATION_STATE } from './task-presentation.js';
 
 const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
   return String(value ?? '')
@@ -63,23 +64,29 @@ export function getStatusClass(status) {
   return 'pending';
 }
 
+const KNOWN_STATUS_LABELS = {
+  pending: 'Pending',
+  assigned: 'Assigned',
+  in_progress: 'In Progress',
+  waiting_for_choice: 'Waiting for Choice',
+  completed: 'Completed',
+  success: 'Completed',
+  failed: 'Failed',
+  error: 'Failed',
+  blocked: 'Blocked',
+  cancelled: 'Cancelled',
+  skipped: 'Skipped',
+  timeout: 'Timed Out'
+};
+
 export function getDisplayStatus(status) {
   const normalized = String(status || '').trim().toLowerCase();
-  const labels = {
-    pending: 'Pending',
-    assigned: 'Assigned',
-    in_progress: 'In Progress',
-    waiting_for_choice: 'Waiting for Choice',
-    completed: 'Completed',
-    success: 'Completed',
-    failed: 'Failed',
-    error: 'Failed',
-    blocked: 'Blocked',
-    cancelled: 'Cancelled',
-    skipped: 'Skipped',
-    timeout: 'Timed Out'
-  };
-  return labels[normalized] || 'Pending';
+  if (KNOWN_STATUS_LABELS[normalized]) return KNOWN_STATUS_LABELS[normalized];
+  // Shared resolver (FR110) decides only the fallback: a genuinely
+  // unrecognized status is labeled "Unknown", never silently "Pending" (FR38)
+  // — every status this file already knows about is covered above, so this
+  // only changes behavior for a status no caller has ever seen before.
+  return resolveTaskState({ status }) === PRESENTATION_STATE.UNKNOWN ? 'Unknown' : 'Pending';
 }
 
 export function summarizeText(value, maxLength = 220) {
