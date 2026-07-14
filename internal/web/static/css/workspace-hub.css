@@ -5361,3 +5361,188 @@ body.modal-open .hub-support-chat {
 
 @media (max-width: 860px) {
 }
+
+/* ==========================================================================
+   Personal HQ guided first-launch state (personal-hq-onboarding.js)
+   ========================================================================== */
+
+.hq-guided {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 32rem;
+  margin: 2.5rem auto;
+  padding: 2rem 1.5rem;
+  text-align: center;
+}
+
+.hq-guided-site {
+  width: 100%;
+  max-width: 14rem;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 0.75rem;
+}
+
+.hq-guided-site-outline {
+  width: 100%;
+  height: 100%;
+  border: 2px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  opacity: 0.7;
+}
+
+.hq-guided-eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hq-guided-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.hq-guided-copy {
+  margin: 0;
+  max-width: 28rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.hq-guided-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+/* Reduced motion / theme note: this state is intentionally static (a
+   dashed-outline placeholder, no animation), so it needs no additional
+   prefers-reduced-motion override — it already satisfies one. */
+
+.hq-resume {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-resume-text {
+  flex: 1 1 auto;
+  min-width: 12rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.hq-resume-action {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.hq-resume-action:hover,
+.hq-resume-action:focus-visible {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  outline: 0;
+}
+
+.hq-build-intro {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.hq-build-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary-color);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.hq-build-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.hq-build-days label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.hq-build-error {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--bs-danger, #dc3545);
+  border-radius: var(--radius-sm, 0.25rem);
+  color: var(--bs-danger, #dc3545);
+  font-size: 0.82rem;
+}
+
+.hq-choose-intro {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.hq-choose-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.hq-choose-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.hq-choose-item-name {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.hq-choose-empty {
+  padding: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hq-guided,
+  .hq-guided-site-outline {
+    transition: none !important;
+    animation: none !important;
+  }
+}

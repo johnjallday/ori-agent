@@ -1,11 +1,13 @@
 package sessionhttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -224,6 +226,43 @@ type createWorkspaceRequest struct {
 	CreateTemplateAgents   *bool                      `json:"create_template_agents,omitempty"`
 	TemplateAgentOverrides []templateAgentOverride    `json:"template_agent_overrides,omitempty"`
 	Blank                  bool                       `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
+}
+
+// CreateFromTemplate creates a normal (non-group) workspace from a built-in
+// template by ID and returns its new workspace ID. It reuses the exact
+// production POST /api/workspaces path in-process (entry-agent selection,
+// tool binding, scaffold provisioning, starter-task seeding, template
+// provenance) rather than duplicating any of that logic, so callers outside
+// the HTTP layer — such as the Personal HQ setup coordinator — get identical
+// behavior to a user picking the template from the library (PRD FR128).
+func (h *Handler) CreateFromTemplate(ctx context.Context, name, templateID string) (string, error) {
+	body, err := json.Marshal(createWorkspaceRequest{Name: name, TemplateID: templateID})
+	if err != nil {
+		return "", fmt.Errorf("failed to encode workspace creation request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to build workspace creation request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleWorkspaces(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		return "", fmt.Errorf("workspace creation failed (%d): %s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	var resp struct {
+		Folder struct {
+			ID string `json:"id"`
+		} `json:"folder"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		return "", fmt.Errorf("failed to parse workspace creation response: %w", err)
+	}
+	if resp.Folder.ID == "" {
+		return "", errors.New("workspace creation response missing an id")
+	}
+	return resp.Folder.ID, nil
 }
 
 // createWorkspace handles POST /api/workspaces. The flow is staged:

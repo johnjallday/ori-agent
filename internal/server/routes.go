@@ -803,6 +803,7 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.PersonalHQ != nil {
 		mux.HandleFunc("GET /api/personal-hq/status", s.Handlers.PersonalHQ.Status)
 		mux.HandleFunc("POST /api/personal-hq/onboarding-state", s.Handlers.PersonalHQ.SetOnboardingState)
+		mux.HandleFunc("POST /api/personal-hq/setup", s.Handlers.PersonalHQ.Setup)
 		mux.HandleFunc("POST /api/personal-hq/designate", s.Handlers.PersonalHQ.Designate)
 		mux.HandleFunc("POST /api/personal-hq/replace", s.Handlers.PersonalHQ.Replace)
 		mux.HandleFunc("POST /api/personal-hq/clear", s.Handlers.PersonalHQ.Clear)

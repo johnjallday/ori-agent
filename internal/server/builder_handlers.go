@@ -149,11 +149,6 @@ func (b *ServerBuilder) initializeHandlers() {
 			logger.Warn("Failed to seed local user profile", logger.Fields{"error": err})
 		}
 		b.userHandler = userhttp.NewHandler(b.userStore, b.userProvider)
-		// Personal HQ needs the concrete SQLite store (not the narrower
-		// userprofile.UserStore interface) for its focused designation/
-		// onboarding-state methods; see internal/personalhq.ProfileStore.
-		b.personalHQService = personalhq.NewService(userProfileStore, sessionStore)
-		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, b.userProvider)
 		b.chatHandler.SetUserProfileDeps(b.userStore, b.userProvider)
 		b.sessionHandler = sessionhttp.New(sessionStore)
 		b.sessionHandler.SetWorkspaceRootResolver(func() string {
@@ -166,6 +161,15 @@ func (b *ServerBuilder) initializeHandlers() {
 		if b.configManager != nil {
 			b.sessionHandler.SetSystemModelReader(b.configManager)
 		}
+		// Personal HQ needs the concrete SQLite store (not the narrower
+		// userprofile.UserStore interface) for its focused designation/
+		// onboarding-state methods; see internal/personalhq.ProfileStore.
+		// The setup coordinator reuses b.sessionHandler's exact production
+		// workspace-creation path (internal/personalhq.WorkspaceCreator) so
+		// Build My HQ never duplicates that logic.
+		b.personalHQService = personalhq.NewService(userProfileStore, sessionStore)
+		personalHQSetup := personalhq.NewSetupCoordinator(b.personalHQService, b.sessionHandler, sessionStore)
+		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, b.userProvider)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

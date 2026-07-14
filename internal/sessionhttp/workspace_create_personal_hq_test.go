@@ -85,6 +85,60 @@ func TestCreateWorkspaceFromPersonalHQTemplate(t *testing.T) {
 	}
 }
 
+// TestCreateFromTemplateReusesTheProductionCreationPath proves the
+// Personal HQ setup coordinator's workspace-creation hook produces an
+// identical result to a normal POST /api/workspaces call — same entry
+// agent, same starter-task seeding, same provenance — rather than a
+// second, divergent constructor (PRD FR128 / task 4.6/2.5).
+func TestCreateFromTemplateReusesTheProductionCreationPath(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	libDir := handler.templatesRootResolver()
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	wsID, err := handler.CreateFromTemplate(context.Background(), "My HQ", "personal-ops")
+	if err != nil {
+		t.Fatalf("CreateFromTemplate: %v", err)
+	}
+	if wsID == "" {
+		t.Fatal("expected a non-empty workspace id")
+	}
+
+	sessWS, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if sessWS.Name != "My HQ" {
+		t.Fatalf("name = %q, want My HQ", sessWS.Name)
+	}
+	if got := currentWorkspaceEntryAgentName(sessWS); got != "Personal Chief of Staff" {
+		t.Fatalf("entry agent = %q, want Personal Chief of Staff", got)
+	}
+	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 3 {
+		t.Fatalf("expected 3 seeded starter tasks, got %d", len(tasks))
+	}
+}
+
+// TestCreateFromTemplateWithUnknownTemplateStillCreatesAWorkspace matches
+// the existing POST /api/workspaces contract: an unresolvable template_id is
+// non-fatal by design (the workspace is still created, with a
+// generic auto-created manager entry agent, rather than failing outright).
+// CreateFromTemplate must not layer a new hard failure on top of that.
+func TestCreateFromTemplateWithUnknownTemplateStillCreatesAWorkspace(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	wsID, err := handler.CreateFromTemplate(context.Background(), "My HQ", "does-not-exist")
+	if err != nil {
+		t.Fatalf("CreateFromTemplate should not fail on an unresolvable template id, got %v", err)
+	}
+	if wsID == "" {
+		t.Fatal("expected a workspace id even when the template did not resolve")
+	}
+}
+
 // TestLibraryTemplateRefreshNeverRewritesAlreadyCreatedWorkspace covers PRD
 // FR127/FR128 (task 2.4/2.7 migration safety): bumping the shipped Personal
 // HQ manifest's builtin_version (as a later release will) must refresh only

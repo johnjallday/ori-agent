@@ -338,6 +338,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.userProvider,
 		b.onboardingMgr,
 		b.locationManager,
+		b.personalHQService,
 	)
 
 	// Workflow System Facade

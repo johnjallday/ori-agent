@@ -16,16 +16,19 @@ import (
 // Handler serves the Personal HQ API.
 type Handler struct {
 	service  *personalhq.Service
+	setup    *personalhq.SetupCoordinator
 	provider userprofile.UserProvider
 }
 
 // NewHandler constructs a Personal HQ HTTP handler. provider may be nil, in
-// which case requests resolve to the local single-user profile.
-func NewHandler(service *personalhq.Service, provider userprofile.UserProvider) *Handler {
+// which case requests resolve to the local single-user profile. setup may be
+// nil (e.g. in tests exercising only status/designate/clear); Setup then
+// reports 503 rather than panicking.
+func NewHandler(service *personalhq.Service, setup *personalhq.SetupCoordinator, provider userprofile.UserProvider) *Handler {
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{service: service, provider: provider}
+	return &Handler{service: service, setup: setup, provider: provider}
 }
 
 type designateRequest struct {
@@ -128,6 +131,74 @@ func (h *Handler) handleDesignation(w http.ResponseWriter, r *http.Request, repl
 		return
 	}
 	orihttp.Success(w, map[string]any{"status": status})
+}
+
+// setupRequest is the Build My HQ submission body.
+type setupRequest struct {
+	Name                    string   `json:"name"`
+	Timezone                string   `json:"timezone"`
+	ScheduleDays            []string `json:"schedule_days"`
+	ScheduleTime            string   `json:"schedule_time"`
+	Scope                   string   `json:"scope"`
+	SelectedWorkspaceIDs    []string `json:"selected_workspace_ids"`
+	IncludeFutureWorkspaces bool     `json:"include_future_workspaces"`
+	NotifyOnReady           bool     `json:"notify_on_ready"`
+}
+
+// Setup handles POST /api/personal-hq/setup: the Build My HQ flow. Creates
+// the HQ workspace, designates it, and captures the brief configuration, all
+// as one atomic-from-the-user's-perspective operation.
+func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.setup == nil {
+		orihttp.ServiceUnavailable(w, "personal hq setup is unavailable")
+		return
+	}
+	var req setupRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	userID, err := h.currentUserID(r.Context())
+	if err != nil {
+		orihttp.InternalError(w, "Failed to resolve current user: "+err.Error())
+		return
+	}
+	result, err := h.setup.Setup(r.Context(), userID, personalhq.SetupRequest{
+		Name:                    req.Name,
+		Timezone:                req.Timezone,
+		ScheduleDays:            req.ScheduleDays,
+		ScheduleTime:            req.ScheduleTime,
+		Scope:                   req.Scope,
+		SelectedWorkspaceIDs:    req.SelectedWorkspaceIDs,
+		IncludeFutureWorkspaces: req.IncludeFutureWorkspaces,
+		NotifyOnReady:           req.NotifyOnReady,
+	})
+	if err != nil {
+		respondSetupError(w, err)
+		return
+	}
+	orihttp.Success(w, result)
+}
+
+func respondSetupError(w http.ResponseWriter, err error) {
+	var partial *personalhq.SetupPartialFailureError
+	switch {
+	case errors.Is(err, personalhq.ErrInvalidTimezone):
+		orihttp.BadRequest(w, err.Error())
+	case errors.As(err, &partial):
+		// The workspace exists but a later step failed: give the client
+		// enough to offer retry or "keep as a normal workspace" instead of
+		// a bare error (PRD FR30).
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":        err.Error(),
+			"workspace_id": partial.WorkspaceID,
+			"step":         partial.Step,
+		})
+	default:
+		orihttp.InternalError(w, "Failed to set up personal hq: "+err.Error())
+	}
 }
 
 // Clear handles POST /api/personal-hq/clear.

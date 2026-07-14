@@ -117,6 +117,41 @@ func TestPersonalHQRoutesRegistered(t *testing.T) {
 	}
 }
 
+// TestBrandNewProfileRedirectsHomeToGuidedMap covers task 4.1/4.2: a
+// profile that has never seen the guided Personal HQ first-launch
+// experience must land on the workspace launcher (Map mode) instead of
+// Home, and stop redirecting once onboarding is no longer "unseen".
+func TestBrandNewProfileRedirectsHomeToGuidedMap(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect for a brand-new profile, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/workspaces?hq_onboarding=1" {
+		t.Fatalf("expected redirect to the guided Map, got %q", loc)
+	}
+
+	// Once onboarding state moves off "unseen" (e.g. the user skipped),
+	// normal Home launch resumes.
+	skipReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/onboarding-state", strings.NewReader(`{"state":"skipped"}`))
+	skipReq.Header.Set("Content-Type", "application/json")
+	skipRec := httptest.NewRecorder()
+	handler.ServeHTTP(skipRec, skipReq)
+	if skipRec.Code != http.StatusOK {
+		t.Fatalf("expected onboarding-state update to succeed, got %d body=%s", skipRec.Code, skipRec.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected normal Home launch after skipping, got %d", rec2.Code)
+	}
+}
+
 func TestWorkspaceProjectOpenRouteUsesRuntimeHandler(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 

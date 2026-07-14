@@ -26,7 +26,28 @@ func newTestHandler(t *testing.T) (*Handler, *session.SQLiteStore) {
 	profiles := userprofile.NewSQLiteStore(db)
 	workspaces := session.NewSQLiteStore(db)
 	service := personalhq.NewService(profiles, workspaces)
-	return NewHandler(service, userprofile.LocalUserProvider{}), workspaces
+	setup := personalhq.NewSetupCoordinator(service, &fakeWorkspaceCreator{workspaces: workspaces}, workspaces)
+	return NewHandler(service, setup, userprofile.LocalUserProvider{}), workspaces
+}
+
+// fakeWorkspaceCreator stands in for sessionhttp.Handler.CreateFromTemplate:
+// it creates a bare, eligible workspace directly through the same store.
+type fakeWorkspaceCreator struct {
+	workspaces *session.SQLiteStore
+}
+
+func (f *fakeWorkspaceCreator) CreateFromTemplate(ctx context.Context, name, templateID string) (string, error) {
+	ws := &session.Workspace{
+		ID:          "hq-" + name,
+		Name:        name,
+		Kind:        session.WorkspaceKindWorkspace,
+		OwnerUserID: userprofile.LocalUserID,
+		Status:      session.WorkspaceStatusActive,
+	}
+	if err := f.workspaces.CreateWorkspace(ctx, ws); err != nil {
+		return "", err
+	}
+	return ws.ID, nil
 }
 
 func createWorkspace(t *testing.T, store *session.SQLiteStore, id string, kind session.WorkspaceKind, status session.WorkspaceStatus) {
@@ -146,6 +167,68 @@ func TestDesignateThenReplaceThenClear(t *testing.T) {
 	}
 }
 
+func TestSetupCreatesDesignatesAndCompletesOnboarding(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"My HQ","timezone":"America/New_York"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.Setup(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got struct {
+		Status      personalhq.Status      `json:"status"`
+		BriefConfig personalhq.BriefConfig `json:"brief_config"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body=%s)", err, rec.Body.String())
+	}
+	if !got.Status.Valid || got.Status.WorkspaceID == "" {
+		t.Fatalf("expected a valid designated HQ, got %#v", got.Status)
+	}
+	if got.Status.OnboardingState != userprofile.HQOnboardingCompleted {
+		t.Fatalf("expected onboarding state completed, got %q", got.Status.OnboardingState)
+	}
+	if got.BriefConfig.Timezone != "America/New_York" {
+		t.Fatalf("expected timezone to round-trip, got %q", got.BriefConfig.Timezone)
+	}
+}
+
+func TestSetupRejectsInvalidTimezone(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"My HQ","timezone":"Not/AZone"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.Setup(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid timezone, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupRejectsWrongVerb(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/setup", nil)
+	rec := httptest.NewRecorder()
+	handler.Setup(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+}
+
+func TestSetupServiceUnavailableWhenCoordinatorMissing(t *testing.T) {
+	handler := NewHandler(nil, nil, userprofile.LocalUserProvider{})
+	req := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"My HQ"}`))
+	rec := httptest.NewRecorder()
+	handler.Setup(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
 func TestSetOnboardingStateRoundTrips(t *testing.T) {
 	handler, _ := newTestHandler(t)
 
@@ -192,7 +275,7 @@ func TestMethodContractRejectsWrongVerb(t *testing.T) {
 }
 
 func TestStatusDegradesWhenServiceUnavailable(t *testing.T) {
-	handler := NewHandler(nil, userprofile.LocalUserProvider{})
+	handler := NewHandler(nil, nil, userprofile.LocalUserProvider{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/status", nil)
 	rec := httptest.NewRecorder()

@@ -31,6 +31,14 @@
     </div>
   </section>
 
+  <!-- Small non-blocking Personal HQ resume/repair entry; populated/toggled
+       by personal-hq-onboarding.js. Never a full takeover on Home. -->
+  <div id="homeHQResume" class="hq-resume" hidden>
+    <span id="homeHQResumeText" class="hq-resume-text">Set up your Personal HQ</span>
+    <button type="button" id="homeHQResumeBuildBtn" class="hq-resume-action">Build My HQ</button>
+    <a href="/workspaces?hq_onboarding=1" id="homeHQResumeLink" class="hq-resume-action">Open workspace launcher</a>
+  </div>
+
   <div class="home-command-layout">
     <section id="homeDashboardSections" class="home-dashboard-sections home-operations-board" data-workspace-count="{{.Extra.WorkspaceCount}}" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Operations board">
       <header class="home-operations-header">

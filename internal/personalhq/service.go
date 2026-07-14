@@ -111,6 +111,15 @@ func (s *Status) NeedsRepair() bool {
 type Service struct {
 	profiles   ProfileStore
 	workspaces WorkspaceReader
+
+	// onDesignated fires (outside any lock) after a workspace successfully
+	// becomes the user's designated HQ, whether via Designate or Replace —
+	// which covers both "Build My HQ" (a brand new workspace) and
+	// "designate an existing workspace" in one place. Set post-construction
+	// via SetOnDesignated once the progression engine exists (mirrors
+	// smartOnboardingHandler.SetOnPersonalized in internal/server), since
+	// the engine is built after this service during server startup.
+	onDesignated func(ctx context.Context, userID, workspaceID string)
 }
 
 // NewService constructs a Personal HQ service. Both dependencies are
@@ -118,6 +127,14 @@ type Service struct {
 // to initialize (mirrors other optional-dependency handlers in this repo).
 func NewService(profiles ProfileStore, workspaces WorkspaceReader) *Service {
 	return &Service{profiles: profiles, workspaces: workspaces}
+}
+
+// SetOnDesignated registers a callback fired after a workspace becomes the
+// user's designated Personal HQ (Designate or Replace). Used to complete the
+// optional t2-build-hq progression quest without this package importing
+// internal/progression.
+func (s *Service) SetOnDesignated(fn func(ctx context.Context, userID, workspaceID string)) {
+	s.onDesignated = fn
 }
 
 // Status resolves the current Personal HQ designation and onboarding state
@@ -244,6 +261,9 @@ func (s *Service) setDesignation(ctx context.Context, userID, workspaceID string
 	}
 	if err := s.profiles.SetPersonalWorkspaceID(ctx, userID, workspaceID); err != nil {
 		return nil, err
+	}
+	if s.onDesignated != nil {
+		s.onDesignated(ctx, userID, workspaceID)
 	}
 	return s.Status(ctx, userID)
 }

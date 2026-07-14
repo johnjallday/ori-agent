@@ -25,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
@@ -68,6 +69,10 @@ type StorageSystemFacade struct {
 	UserProvider    userprofile.UserProvider
 	OnboardingMgr   *onboarding.Manager
 	LocationManager *location.Manager
+	// PersonalHQ is the raw domain service (not the HTTP handler), so
+	// non-HTTP callers like serveIndex's first-run classification can read
+	// onboarding status directly.
+	PersonalHQ *personalhq.Service
 }
 
 // WorkflowSystemFacade manages workspace orchestration dependencies
@@ -166,6 +171,7 @@ func NewStorageSystemFacade(
 	userProvider userprofile.UserProvider,
 	onboardingMgr *onboarding.Manager,
 	locationManager *location.Manager,
+	personalHQ *personalhq.Service,
 ) *StorageSystemFacade {
 	return &StorageSystemFacade{
 		AgentStore:      agentStore,
@@ -176,6 +182,7 @@ func NewStorageSystemFacade(
 		UserProvider:    userProvider,
 		OnboardingMgr:   onboardingMgr,
 		LocationManager: locationManager,
+		PersonalHQ:      personalHQ,
 	}
 }
 

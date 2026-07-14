@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -202,6 +203,22 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 	orihttp.WriteHTML(w, html)
 }
 
+// isBrandNewProfile reports whether the current user has never seen the
+// guided Personal HQ first-launch experience (HQOnboardingUnseen). Degrades
+// to false (normal Home launch) when the Personal HQ service is unavailable,
+// so a degraded dependency never blocks the app from starting (PRD FR136).
+func (s *Server) isBrandNewProfile(ctx context.Context) bool {
+	if s.Storage == nil || s.Storage.PersonalHQ == nil {
+		return false
+	}
+	status, err := s.Storage.PersonalHQ.Status(ctx, userprofile.LocalUserID)
+	if err != nil {
+		logger.Warn("isBrandNewProfile: failed to load personal hq status", logger.Fields{"error": err})
+		return false
+	}
+	return status.OnboardingState == userprofile.HQOnboardingUnseen
+}
+
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	// Only handle root path, not other paths
 	if r.URL.Path != "/" {
@@ -209,12 +226,26 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A brand-new profile's first visible launch routes to the guided
+	// workspace launcher (Map mode) instead of Home (PRD FR11). "Brand new"
+	// is the authoritative per-user HQ onboarding status, not workspace
+	// count: an established user who deleted every workspace, or upgraded
+	// from a version with no onboarding history, must not be misclassified
+	// as first-run (PRD FR19; task 4.1). Only a GET navigation redirects —
+	// this handler is registered for "/" without a method restriction.
+	if r.Method == http.MethodGet && s.isBrandNewProfile(r.Context()) {
+		http.Redirect(w, r, "/workspaces?hq_onboarding=1", http.StatusSeeOther)
+		return
+	}
+
 	data := s.prepareBasePageData("index")
 
-	// Inject home-dashboard context: the workspace count drives the adaptive
-	// layout (first-run wizard vs returning-user dashboard sections). We
-	// compute it server-side so the template can render the correct shell
-	// without a flash of empty-state from a client-side fetch.
+	// Inject home-dashboard context: the workspace count still drives the
+	// adaptive Home copy (first-visit-feeling placeholder text) for a user
+	// who has moved past the guided launcher (skipped, completed, or an
+	// established user who never saw it). We compute it server-side so the
+	// template can render the correct shell without a flash of empty-state
+	// from a client-side fetch.
 	workspaceCount := 0
 	if s.Storage != nil && s.Storage.WorkspaceStore != nil {
 		if ids, err := s.Storage.WorkspaceStore.List(); err == nil {
@@ -393,6 +424,12 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspaces - Ori Agent"
 	data.BrandText = "Ori Agent"
+	// Authoritative bootstrap hint for the guided Map (PRD FR11/FR20):
+	// avoids a first-paint flash while workspace-hub.js confirms via
+	// GET /api/personal-hq/status. Never a hard requirement — the JS
+	// re-derives this from the API regardless, so a stale/missing hint just
+	// means one extra render pass, not incorrect behavior.
+	data.Extra["HQOnboardingUnseen"] = s.isBrandNewProfile(r.Context())
 	s.renderAndWritePage(w, "workspaces", data)
 }
 

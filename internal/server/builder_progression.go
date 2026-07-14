@@ -37,6 +37,16 @@ func (b *ServerBuilder) initializeProgression() {
 		})
 	}
 
+	// A workspace becoming the user's Personal HQ is not an event either;
+	// this fires for both Build My HQ (a new workspace) and designating an
+	// existing workspace (PRD FR48/FR49), so t2-build-hq completes either
+	// way without replaying unrelated quests.
+	if b.personalHQService != nil {
+		b.personalHQService.SetOnDesignated(func(ctx context.Context, userID, workspaceID string) {
+			engine.Complete("t2-build-hq")
+		})
+	}
+
 	// One-time backfill so established installs are grandfathered silently.
 	if err := engine.Backfill(progression.ScannerFunc(b.scanProgression)); err != nil {
 		logger.Warn("Onboarding progression backfill failed", logger.Fields{"error": err})

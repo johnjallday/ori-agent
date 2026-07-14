@@ -1,4 +1,4 @@
-<div class="workspace-hub" id="workspaceHub" data-state="loading">
+<div class="workspace-hub" id="workspaceHub" data-state="loading" data-hq-onboarding-hint="{{if .Extra.HQOnboardingUnseen}}unseen{{else}}seen{{end}}">
   <section class="workspace-launcher" id="workspaceLauncher" aria-live="polite">
     <div class="launcher-card modern-card">
       <div class="launcher-header">
@@ -137,6 +137,37 @@
         <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
         <!-- Map view mount point; populated by workspace-map.js. -->
         <div id="launcherMap" class="ws-map" hidden></div>
+
+        <!-- Guided first-launch Personal HQ state; populated/toggled by
+             personal-hq-onboarding.js. Hidden by default; the data-hq-onboarding-hint
+             attribute on #workspaceHub above avoids a first-paint flash for a
+             brand-new profile while the JS confirms via GET /api/personal-hq/status. -->
+        <div id="hqOnboardingGuided" class="hq-guided" hidden aria-live="polite">
+          <div class="hq-guided-site" aria-hidden="true">
+            <div class="hq-guided-site-outline"></div>
+          </div>
+          <p class="hq-guided-eyebrow">Ori</p>
+          <h2 class="hq-guided-title">Let's build your Personal HQ</h2>
+          <p class="hq-guided-copy">
+            Your HQ gives me a place to prepare your daily brief, remember follow-ups, and
+            help you resume work. It's a normal workspace — optional, renamable, and yours to
+            change any time.
+          </p>
+          <div class="hq-guided-actions">
+            <button type="button" id="hqGuidedBuildBtn" class="modern-btn modern-btn-primary">Build My HQ</button>
+            <button type="button" id="hqGuidedProjectBtn" class="modern-btn modern-btn-secondary">Start with a Project</button>
+            <button type="button" id="hqGuidedSkipBtn" class="modern-btn modern-btn-ghost">Skip for Now</button>
+          </div>
+        </div>
+
+        <!-- Small non-blocking resume/repair entry for a user who has
+             skipped, started, or lost a valid HQ. Never a full takeover. -->
+        <div id="hqOnboardingResume" class="hq-resume" hidden>
+          <span id="hqResumeText" class="hq-resume-text">Set up your Personal HQ</span>
+          <button type="button" id="hqResumeBuildBtn" class="hq-resume-action">Build My HQ</button>
+          <button type="button" id="hqResumeChooseBtn" class="hq-resume-action" hidden>Choose Existing</button>
+          <button type="button" id="hqResumeClearBtn" class="hq-resume-action" hidden>Clear</button>
+        </div>
       </section>
 
       <section id="launcherSummaryPanel" class="launcher-tab-panel" role="tabpanel" aria-labelledby="launcherTabSummary" hidden>
@@ -976,6 +1007,95 @@
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" id="hubWorkspaceMoveSaveBtn" class="modern-btn modern-btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Build My HQ modal; wired by personal-hq-onboarding.js. Defaults are
+       pre-filled so the default path is: open, confirm, submit. -->
+  <div class="modal fade" id="hqBuildModal" tabindex="-1" aria-labelledby="hqBuildModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hqBuildModalTitle">Build My HQ</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="hq-build-intro">
+            Your HQ uses a curated snapshot of your workspaces for its daily brief — it does
+            not automatically get every project's tools or files.
+          </p>
+          <div class="mb-3">
+            <label for="hqBuildName" class="form-label">Name</label>
+            <input type="text" class="modern-input w-100" id="hqBuildName" value="My HQ" autocomplete="off">
+          </div>
+          <div class="mb-3">
+            <label for="hqBuildTimezone" class="form-label">Timezone</label>
+            <input type="text" class="modern-input w-100" id="hqBuildTimezone" autocomplete="off">
+          </div>
+          <button type="button" id="hqBuildAdvancedToggle" class="hq-build-advanced-toggle" aria-expanded="false" aria-controls="hqBuildAdvanced">
+            Brief schedule &amp; notifications
+          </button>
+          <div id="hqBuildAdvanced" class="hq-build-advanced" hidden>
+            <div class="mb-3">
+              <label class="form-label">Brief days</label>
+              <div class="hq-build-days" role="group" aria-label="Daily brief schedule days">
+                <label><input type="checkbox" value="mon" checked> Mon</label>
+                <label><input type="checkbox" value="tue" checked> Tue</label>
+                <label><input type="checkbox" value="wed" checked> Wed</label>
+                <label><input type="checkbox" value="thu" checked> Thu</label>
+                <label><input type="checkbox" value="fri" checked> Fri</label>
+                <label><input type="checkbox" value="sat"> Sat</label>
+                <label><input type="checkbox" value="sun"> Sun</label>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label for="hqBuildTime" class="form-label">Brief time</label>
+              <input type="time" class="modern-input" id="hqBuildTime" value="08:00">
+            </div>
+            <div class="mb-3">
+              <label for="hqBuildScope" class="form-label">Workspaces covered</label>
+              <select id="hqBuildScope" class="modern-input w-100">
+                <option value="all" selected>All eligible workspaces</option>
+                <option value="selected">Selected workspaces (choose later in HQ settings)</option>
+              </select>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input" id="hqBuildIncludeFuture" checked>
+              <label class="form-check-label" for="hqBuildIncludeFuture">Include new workspaces automatically</label>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input" id="hqBuildNotify">
+              <label class="form-check-label" for="hqBuildNotify">Notify me in Action Center when a brief is ready</label>
+            </div>
+          </div>
+          <div id="hqBuildError" class="hq-build-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="hqBuildSubmitBtn" class="modern-btn modern-btn-primary">Build My HQ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Choose Existing Workspace modal (designate/replace); wired by
+       personal-hq-onboarding.js. -->
+  <div class="modal fade" id="hqChooseExistingModal" tabindex="-1" aria-labelledby="hqChooseExistingModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hqChooseExistingModalTitle">Choose Existing Workspace</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p id="hqChooseExistingIntro" class="hq-choose-intro">
+            Pick a workspace to designate as your Personal HQ. No content is deleted.
+          </p>
+          <ul id="hqChooseExistingList" class="hq-choose-list"></ul>
+          <div id="hqChooseExistingEmpty" class="hq-choose-empty" hidden>No eligible workspaces found.</div>
+          <div id="hqChooseExistingError" class="hq-build-error" hidden></div>
         </div>
       </div>
     </div>
