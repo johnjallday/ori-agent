@@ -3184,11 +3184,6 @@ export class WorkspaceCommandView {
     this.taskDrawerTrigger = trigger || null;
     // Close the Objectives Map window so the drawer never opens beneath it (FR11).
     if (this.activeMapWindow) this.activeMapWindow = '';
-    // The floating "New Quest" composer sits in the same bottom-right corner
-    // as the drawer and would otherwise be hidden behind it, unreachable and
-    // uneditable — close it too (its own Add Task equivalent lives in the
-    // drawer header). Keep the draft text so it isn't lost, only auto-closed.
-    if (this.taskComposerOpen) this.closeTaskComposer({ clearDraft: false });
     this.taskDrawerOpen = true;
     if (!this.taskDrawerSelectedId) {
       const first = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
@@ -4711,10 +4706,6 @@ export class WorkspaceCommandView {
   // Floating "New Quest" button + inline composer. Creating with no assignee lets the
   // server stamp the task onto the workspace's entry agent (entry_agent_default).
   renderMapQuickTask() {
-    // The task drawer docks to the same bottom-right corner and closes this
-    // composer on open (openTaskDrawer); don't render a dead, invisible FAB
-    // underneath it — the drawer's own "+ Add Task" covers the same need.
-    if (this.taskDrawerOpen) return '';
     const open = this.taskComposerOpen;
     const submitting = this.taskComposerSubmitting;
     const button =

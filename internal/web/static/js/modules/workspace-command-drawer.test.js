@@ -39,24 +39,21 @@ test('openTaskDrawer closes the Objectives map window and opens the drawer (FR11
   assert.ok(view.taskDrawerSelectedId, 'a task is auto-selected');
 });
 
-test('openTaskDrawer closes the floating New Quest composer without discarding its draft (overlap regression)', () => {
-  // Both the drawer and the New Quest FAB/composer dock to the same
-  // bottom-right corner; the drawer (higher z-index, fixed) otherwise hides
-  // the composer completely, making it invisible and unusable mid-draft.
+test('the New Quest FAB renders independently of drawer state (moved to top-left, no overlap to work around)', () => {
+  // Earlier fix (auto-close-on-drawer-open + hide-while-open) was reverted in
+  // favor of moving .ws-cmd-map-quest-dock off the bottom-right corner
+  // entirely (CSS), so opening the drawer must NOT touch the composer at all.
   const view = makeView(tasks);
   view.taskComposerOpen = true;
   view.taskComposerDraft = 'a task the user was mid-typing';
   const closeCalls = [];
   view.closeTaskComposer = opts => closeCalls.push(opts);
   view.openTaskDrawer({ focus() {} });
-  assert.deepEqual(closeCalls, [{ clearDraft: false }], 'composer closed, but the draft is preserved');
-});
+  assert.deepEqual(closeCalls, [], 'the composer is left untouched — no spatial conflict to resolve');
+  assert.equal(view.taskComposerOpen, true);
 
-test('the New Quest FAB is not rendered while the drawer is open (overlap regression)', () => {
-  const view = makeView(tasks);
   view.taskDrawerOpen = true;
-  view.taskComposerOpen = false;
-  assert.equal(view.renderMapQuickTask(), '', 'no dead, drawer-hidden button left in the DOM');
+  assert.notEqual(view.renderMapQuickTask(), '', 'the FAB still renders while the drawer is open');
 });
 
 test('drawerTasks excludes subtasks and sorts by resolver priority (FR24)', () => {

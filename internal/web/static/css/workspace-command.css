@@ -607,15 +607,17 @@
 .ws-cmd-map-belt-btn:last-child:focus-visible::after {
   transform: translate(0, 0);
 }
-/* Quick "New Quest" composer: floating dock at the map's bottom-right. */
+/* Quick "New Quest" composer: floating dock at the map's top-left. Moved off
+   the bottom-right corner (group 3+) so it never sits under the task drawer
+   or the sticky execution tray, which both dock there. */
 .ws-cmd-map-quest-dock {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
+  left: 18px;
+  top: 18px;
   z-index: 6;
   display: flex;
-  flex-direction: column-reverse;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
 }
 .ws-cmd-map-quest-fab {
@@ -4263,13 +4265,13 @@
     height: 44px;
   }
   .ws-cmd-map-quest-dock {
-    right: 12px;
-    bottom: 12px;
     left: 12px;
+    top: 12px;
+    right: 12px;
     align-items: stretch;
   }
   .ws-cmd-map-quest-fab {
-    align-self: flex-end;
+    align-self: flex-start;
   }
   .ws-cmd-map-quest-composer {
     width: 100%;
