@@ -2676,7 +2676,7 @@ test('startMapQuest executes a pending task via the page with skipConfirm', asyn
 
   await view.startMapQuest('q1');
 
-  assert.deepEqual(calls, [['q1', { skipConfirm: true }]]);
+  assert.deepEqual(calls, [['q1', { skipConfirm: true, skipModal: true }]]);
 });
 
 test('startMapQuest reports and refreshes when the quest is no longer pending', async () => {

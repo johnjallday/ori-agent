@@ -16,6 +16,8 @@ function makeView(tasks, extraPage = {}) {
   view.render = () => {};
   view.ensureTaskDrawer = () => null;
   view.renderTaskDrawerBody = () => {};
+  // Stub the tray hand-off so drawer tests never spin a real polling controller.
+  view.trackAndShowTray = () => {};
   return view;
 }
 
@@ -118,7 +120,7 @@ test('runDrawerAction routes start/retry to the page executeTask handler', () =>
   const calls = [];
   const view = makeView(tasks, { executeTask: (id, opts) => calls.push([id, opts]) });
   view.runDrawerAction('start', 'd-ready');
-  assert.deepEqual(calls, [['d-ready', { skipConfirm: true }]]);
+  assert.deepEqual(calls, [['d-ready', { skipConfirm: true, skipModal: true }]]);
 });
 
 test('runDrawerAction routes view_result to showTaskResult', () => {

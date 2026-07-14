@@ -21,6 +21,7 @@ import {
   taskShortId,
   FILTER
 } from './task-presentation.js';
+import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -59,6 +60,13 @@ export class WorkspaceCommandView {
     this.taskDrawerFilter = FILTER.ACTIONABLE;
     this.taskDrawerSelectedId = '';
     this._drawerAnnounce = '';
+    // Sticky execution tray (group 4) — a collapsible mini-player that renders
+    // from the workspace-scoped execution controller. Monitoring survives
+    // collapse and any view change (it lives in the controller, not a modal).
+    this.execController = null;
+    this.trayEl = null;
+    this.trayOpen = false;
+    this.trayCollapsed = false;
     // Quick "New Quest" composer on the operations map (create task → entry-agent default).
     this.taskComposerOpen = false;
     this.taskComposerDraft = '';
@@ -728,6 +736,16 @@ export class WorkspaceCommandView {
       if (this.taskDrawerOpen) {
         this.taskDrawerEl.hidden = false;
         this.renderTaskDrawerBody();
+      }
+    }
+
+    // The sticky execution tray survives full re-renders too — monitoring never
+    // depends on the DOM being present (FR50-FR51).
+    if (this.trayEl && this.container && this.container.appendChild) {
+      this.container.appendChild(this.trayEl);
+      if (this.trayOpen) {
+        this.trayEl.hidden = false;
+        this.renderTrayBody();
       }
     }
   }
@@ -3212,7 +3230,12 @@ export class WorkspaceCommandView {
       case 'start':
       case 'assign_start':
       case 'retry':
-        if (typeof page.executeTask === 'function') page.executeTask(id, { skipConfirm: true });
+        // skipModal: the sticky tray owns monitoring, so suppress the legacy
+        // execution modal (FR46). Monitoring is task-ID-keyed and continues
+        // regardless of drawer/tray view state.
+        if (typeof page.executeTask === 'function')
+          page.executeTask(id, { skipConfirm: true, skipModal: true });
+        this.trackAndShowTray(id);
         break;
       case 'view_result':
         if (typeof page.showTaskResult === 'function') page.showTaskResult(id);
@@ -3225,6 +3248,282 @@ export class WorkspaceCommandView {
         if (typeof page.openTask === 'function') page.openTask(id);
         break;
     }
+  }
+
+  // ---------- Sticky execution tray (group 4) ----------
+  //
+  // A collapsible mini-player rendered from the workspace-scoped execution
+  // controller. Starting/retrying a task tracks it in the controller and opens
+  // the tray; collapsing or navigating never stops monitoring, because the
+  // monitor lives in the controller, not in any modal (FR46-FR52).
+
+  ensureExecController() {
+    if (this.execController) return this.execController;
+    const wsId = typeof this.workspaceId === 'function' ? this.workspaceId() : '';
+    const realtime =
+      typeof window !== 'undefined' &&
+      window.workspaceRealtime &&
+      typeof window.workspaceRealtime.subscribeToWorkspace === 'function'
+        ? (workspaceId, handler) => window.workspaceRealtime.subscribeToWorkspace(workspaceId, handler)
+        : null;
+    this.execController = new WorkspaceExecutionController({
+      workspaceId: wsId,
+      fetchTask: async id => {
+        const r = await fetch('/api/orchestration/tasks?id=' + encodeURIComponent(id));
+        return r.ok ? await r.json() : null;
+      },
+      subscribeRealtime: realtime
+    });
+    // Repaint the tray on any controller state change (poll/realtime/terminal).
+    this.execController.subscribe(() => this.renderTrayBody());
+    return this.execController;
+  }
+
+  // Begin monitoring a task and surface it in the tray (FR46). Requires a real
+  // DOM: without one (headless tests) there is nothing to render and no reason
+  // to spin a polling monitor, so this is inert.
+  trackAndShowTray(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    const el = this.ensureTray();
+    if (!el) return;
+    this.ensureExecController().track(id);
+    this.trayOpen = true;
+    this.trayCollapsed = false;
+    this._trayCancelArmed = '';
+    el.hidden = false;
+    this.renderTrayBody();
+  }
+
+  closeTray() {
+    // Closing the tray only hides the launcher — it never stops monitoring
+    // (FR52). Runs keep running in the controller; reopening restores them.
+    this.trayOpen = false;
+    if (this.trayEl) this.trayEl.hidden = true;
+  }
+
+  toggleTrayCollapsed() {
+    this.trayCollapsed = !this.trayCollapsed;
+    this.renderTrayBody();
+  }
+
+  selectTrayRun(taskId) {
+    if (this.execController) this.execController.select(taskId);
+    this._trayCancelArmed = '';
+    this.renderTrayBody();
+  }
+
+  ensureTray() {
+    if (this.trayEl) return this.trayEl;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    const el = document.createElement('section');
+    el.className = 'ws-cmd-tray';
+    el.setAttribute('role', 'region');
+    el.setAttribute('aria-label', 'Active execution');
+    el.hidden = true;
+    el.style.zIndex = 'var(--wsx-layer-tray)';
+    el.addEventListener('click', event => {
+      if (event.target.closest('[data-cmd-tray-collapse]')) {
+        this.toggleTrayCollapsed();
+        return;
+      }
+      if (event.target.closest('[data-cmd-tray-close]')) {
+        this.closeTray();
+        return;
+      }
+      const runChip = event.target.closest('[data-cmd-tray-run]');
+      if (runChip) {
+        this.selectTrayRun(runChip.getAttribute('data-cmd-tray-run'));
+        return;
+      }
+      const cancelBtn = event.target.closest('[data-cmd-tray-cancel]');
+      if (cancelBtn) {
+        this.trayCancel(cancelBtn.getAttribute('data-cmd-tray-cancel'));
+        return;
+      }
+      const actionBtn = event.target.closest('[data-cmd-tray-action]');
+      if (actionBtn) {
+        this.runDrawerAction(
+          actionBtn.getAttribute('data-cmd-tray-action'),
+          actionBtn.getAttribute('data-cmd-tray-task')
+        );
+        return;
+      }
+    });
+    this.trayEl = el;
+    if (this.container && this.container.appendChild) this.container.appendChild(el);
+    return el;
+  }
+
+  renderTrayBody() {
+    const el = this.trayEl;
+    if (!el || !this.trayOpen) return;
+    el.hidden = false;
+    el.classList.toggle('is-collapsed', this.trayCollapsed);
+    el.innerHTML = this.trayHTML();
+  }
+
+  trayElapsedLabel(run) {
+    if (!run || !run.startedAt) return '';
+    const end = run.phase === RUN_PHASE.SETTLED && run.lastActivityAt ? run.lastActivityAt : Date.now();
+    const secs = Math.max(0, Math.round((end - run.startedAt) / 1000));
+    if (secs < 60) return secs + 's';
+    const mins = Math.floor(secs / 60);
+    return mins + 'm ' + (secs % 60) + 's';
+  }
+
+  // Cancel from the tray requires an explicit, task-named confirmation and is
+  // never triggered by dismissing the tray (FR63).
+  trayCancel(taskId) {
+    const id = String(taskId || '').trim();
+    if (this._trayCancelArmed !== id) {
+      this._trayCancelArmed = id;
+      this.renderTrayBody();
+      return;
+    }
+    this._trayCancelArmed = '';
+    this.cancelRun(id);
+    this.renderTrayBody();
+  }
+
+  // Cancel a running task: prefer a page-provided handler, else POST the
+  // authoritative orchestration cancel endpoint. The controller's next poll
+  // reconciles the resulting state.
+  cancelRun(taskId) {
+    const id = String(taskId || '').trim();
+    if (!id) return;
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (page && typeof page.cancelTask === 'function') {
+      page.cancelTask(id);
+      return;
+    }
+    if (typeof fetch === 'function') {
+      fetch('/api/orchestration/tasks/' + encodeURIComponent(id) + '/cancel', { method: 'POST' }).catch(
+        () => {}
+      );
+    }
+  }
+
+  trayHTML() {
+    const c = this.execController;
+    const run = c ? c.getSelected() : null;
+    if (!run) {
+      return '<div class="ws-cmd-tray-empty">No active run.</div>';
+    }
+    const pres = run.presentation || {};
+    const task = run.task || {};
+    const title = String(task.description || task.name || task.title || run.taskId);
+    const assignee = pres.assignee || 'Unassigned';
+    const elapsed = this.trayElapsedLabel(run);
+    const lastActivity = run.activity && run.activity.length ? run.activity[run.activity.length - 1] : null;
+    const activityText = lastActivity ? String(lastActivity.label || lastActivity.state || '') : '';
+    const others = c.getRuns().filter(r => r.taskId !== run.taskId);
+    const attention = c.getAttentionRuns().length;
+
+    const header =
+      '<div class="ws-cmd-tray-head tone-' +
+      escapeHtml(pres.tone || 'neutral') +
+      '">' +
+      '<span class="ws-cmd-tray-state">' +
+      escapeHtml(pres.label || 'Starting') +
+      '</span>' +
+      '<span class="ws-cmd-tray-title">' +
+      escapeHtml(title) +
+      '</span>' +
+      '<span class="ws-cmd-tray-meta">' +
+      escapeHtml(assignee) +
+      (elapsed ? ' · ' + escapeHtml(elapsed) : '') +
+      '</span>' +
+      '<div class="ws-cmd-tray-controls">' +
+      '<button type="button" class="ws-cmd-tray-btn" data-cmd-tray-collapse aria-expanded="' +
+      (this.trayCollapsed ? 'false' : 'true') +
+      '" aria-label="' +
+      (this.trayCollapsed ? 'Expand execution tray' : 'Collapse execution tray') +
+      '">' +
+      (this.trayCollapsed ? '▴' : '▾') +
+      '</button>' +
+      '<button type="button" class="ws-cmd-tray-btn" data-cmd-tray-close aria-label="Hide execution tray">×</button>' +
+      '</div></div>';
+
+    if (this.trayCollapsed) {
+      return (
+        header +
+        (activityText
+          ? '<div class="ws-cmd-tray-collapsed-activity">' + escapeHtml(activityText) + '</div>'
+          : '') +
+        (attention
+          ? '<div class="ws-cmd-tray-attention">' + escapeHtml(String(attention)) + ' need attention</div>'
+          : '')
+      );
+    }
+
+    // Run switcher across concurrent runs (FR53).
+    const switcher = others.length
+      ? '<div class="ws-cmd-tray-switcher" role="group" aria-label="Active runs">' +
+        c
+          .getRuns()
+          .map(r => {
+            const rp = r.presentation || {};
+            const rt = String((r.task && (r.task.description || r.task.name)) || r.taskId);
+            const selected = r.taskId === run.taskId;
+            return (
+              '<button type="button" class="ws-cmd-tray-run tone-' +
+              escapeHtml(rp.tone || 'neutral') +
+              (selected ? ' is-selected' : '') +
+              '" data-cmd-tray-run="' +
+              escapeHtml(r.taskId) +
+              '" aria-current="' +
+              (selected ? 'true' : 'false') +
+              '">' +
+              escapeHtml(rt.slice(0, 24)) +
+              '</button>'
+            );
+          })
+          .join('') +
+        '</div>'
+      : '';
+
+    const activityLog =
+      '<div class="ws-cmd-tray-log" role="log" aria-live="polite">' +
+      (run.activity && run.activity.length
+        ? run.activity
+            .slice(-8)
+            .map(a => '<div class="ws-cmd-tray-log-line">' + escapeHtml(String(a.label || a.state || '')) + '</div>')
+            .join('')
+        : '<div class="ws-cmd-tray-log-line is-muted">Starting…</div>') +
+      '</div>';
+
+    // Actions: terminal/needs-input reuse the shared primary action; a running
+    // task additionally offers a confirmed Cancel.
+    const isRunning = pres.state === 'running';
+    const primary = pres.primaryAction
+      ? '<button type="button" class="ws-cmd-tray-action" data-cmd-tray-action="' +
+        escapeHtml(pres.primaryAction.id) +
+        '" data-cmd-tray-task="' +
+        escapeHtml(run.taskId) +
+        '">' +
+        escapeHtml(pres.primaryAction.label) +
+        '</button>'
+      : '';
+    const cancel = isRunning
+      ? '<button type="button" class="ws-cmd-tray-cancel' +
+        (this._trayCancelArmed === run.taskId ? ' is-armed' : '') +
+        '" data-cmd-tray-cancel="' +
+        escapeHtml(run.taskId) +
+        '">' +
+        (this._trayCancelArmed === run.taskId ? 'Confirm cancel “' + escapeHtml(title.slice(0, 20)) + '”' : 'Cancel') +
+        '</button>'
+      : '';
+
+    return (
+      header +
+      switcher +
+      activityLog +
+      '<div class="ws-cmd-tray-actions">' +
+      primary +
+      cancel +
+      '</div>'
+    );
   }
 
   renderMapStationsPanel() {
@@ -3595,7 +3894,8 @@ export class WorkspaceCommandView {
       return;
     }
     try {
-      await page.executeTask(id, { skipConfirm: true });
+      await page.executeTask(id, { skipConfirm: true, skipModal: true });
+      this.trackAndShowTray(id);
     } catch (_error) {
       if (window.Toast) window.Toast.error('Could not start the quest.');
       if (typeof page.loadTasks === 'function') await page.loadTasks();
