@@ -25,6 +25,16 @@ export function resolveGuidedMode(status) {
   return 'resume';
 }
 
+// wantsGuidedTakeover decides whether the full-screen guided takeover should
+// appear on the workspace launcher. It requires BOTH a brand-new ("unseen")
+// profile AND explicit Mission 01 intent — the "Start mission" CTA navigates
+// here with ?hq_onboarding=1. Merely browsing to the launcher (even as an
+// unseen profile) must not force the takeover, so the user can explore. Pure
+// for unit testing.
+export function wantsGuidedTakeover(hint, hasIntent) {
+  return hint === 'unseen' && !!hasIntent;
+}
+
 // resumeCopy derives the resume/repair banner's text and which action
 // buttons it offers, so the DOM-wiring code has no branching logic of its
 // own to get wrong.
@@ -54,6 +64,16 @@ export function resumeCopy(mode) {
 
   const resume = document.getElementById('hqOnboardingResume');
   const hub = document.getElementById('workspaceHub');
+
+  // True only when the user arrived via the Mission 01 "Start mission" CTA
+  // (?hq_onboarding=1), which is what gates the full-screen guided takeover.
+  function hasOnboardingIntent() {
+    try {
+      return new URLSearchParams(window.location.search).get('hq_onboarding') === '1';
+    } catch (_) {
+      return false;
+    }
+  }
 
   async function fetchStatus() {
     const res = await fetch('/api/personal-hq/status', { headers: { Accept: 'application/json' } });
@@ -169,7 +189,7 @@ export function resumeCopy(mode) {
       return;
     }
     const mode = resolveGuidedMode(status);
-    if (mode === 'guided') {
+    if (mode === 'guided' && hasOnboardingIntent()) {
       showGuided();
     } else {
       hideGuided();
@@ -191,7 +211,10 @@ export function resumeCopy(mode) {
     }
 
     if (homeResume) {
-      updateResumeBar(homeResume, document.getElementById('homeHQResumeText'), mode === 'guided' ? 'resume' : mode);
+      // On Home, the Mission 01 quest-log card is the single first-run invite
+      // for a brand-new ("guided"/unseen) profile, so suppress the redundant
+      // resume bar there. It still surfaces for skipped/resume/repair states.
+      updateResumeBar(homeResume, document.getElementById('homeHQResumeText'), mode === 'guided' ? 'none' : mode);
     }
   }
 
@@ -448,7 +471,7 @@ export function resumeCopy(mode) {
     wireBuildModal();
 
     const hint = hub ? hub.dataset.hqOnboardingHint : null;
-    if (hint === 'unseen') showGuided();
+    if (wantsGuidedTakeover(hint, hasOnboardingIntent())) showGuided();
     refreshResume();
   }
 

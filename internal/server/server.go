@@ -254,18 +254,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A brand-new profile's first visible launch routes to the guided
-	// workspace launcher (Map mode) instead of Home (PRD FR11). "Brand new"
-	// is the authoritative per-user HQ onboarding status, not workspace
-	// count: an established user who deleted every workspace, or upgraded
-	// from a version with no onboarding history, must not be misclassified
-	// as first-run (PRD FR19; task 4.1). Only a GET navigation redirects —
-	// this handler is registered for "/" without a method restriction.
-	if r.Method == http.MethodGet && s.isBrandNewProfile(r.Context()) {
-		http.Redirect(w, r, "/workspaces?hq_onboarding=1", http.StatusSeeOther)
-		return
-	}
-
+	// A brand-new profile lands on Home and is free to explore — first-run
+	// onboarding is a pull invitation (the Mission 01 quest-log card), not a
+	// forced detour. We deliberately do NOT redirect to the guided workspace
+	// launcher here; the guided HQ takeover is reached only when the user
+	// explicitly starts the mission (which navigates to
+	// /workspaces?hq_onboarding=1). isBrandNewProfile still drives adaptive
+	// Home copy below.
 	data := s.prepareBasePageData("index")
 
 	// Inject home-dashboard context: the workspace count still drives the

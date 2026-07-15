@@ -475,6 +475,28 @@
   background: rgba(255, 255, 255, 0.85);
 }
 
+/* The HQ citadel is taller than a standard tile block, so its beacon rises
+   above neighbouring buildings. A warm gold glow (vs. the neutral drop-shadow
+   on ordinary structs) marks it as the map's capital. */
+.ws-map-struct.is-hq-struct {
+  filter:
+    drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55))
+    drop-shadow(0 0 14px rgba(232, 181, 75, 0.45));
+  margin-top: -12px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-struct.is-hq-struct {
+    animation: ws-map-hq-beacon 2.6s ease-in-out infinite;
+  }
+}
+@keyframes ws-map-hq-beacon {
+  50% {
+    filter:
+      drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55))
+      drop-shadow(0 0 20px rgba(232, 181, 75, 0.7));
+  }
+}
+
 /* Multi-select checkbox — subtle until the tile is hovered/focused or checked,
    so it doesn't compete with the tile's status flag and crest at rest. */
 .ws-map-tile-check {
