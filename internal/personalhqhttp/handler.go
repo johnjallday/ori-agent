@@ -19,6 +19,7 @@ type Handler struct {
 	setup         *personalhq.SetupCoordinator
 	upgrade       *personalhq.UpgradeCoordinator
 	mailboxLinker MailboxLinker
+	replies       ReplyService
 	provider      userprofile.UserProvider
 }
 

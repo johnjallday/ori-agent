@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -153,6 +154,21 @@ func (b *Broker) GetProposal(userID, id string) (*ReplyProposal, error) {
 		return nil, ErrProposalNotFound
 	}
 	return p.clone(), nil
+}
+
+// ListProposals returns copies of a user's proposals, most-recently-updated
+// first, excluding cancelled ones.
+func (b *Broker) ListProposals(userID string) []*ReplyProposal {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []*ReplyProposal
+	for _, p := range b.proposals {
+		if p.UserID == userID && p.Status != ProposalCancelled {
+			out = append(out, p.clone())
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out
 }
 
 // EditProposal replaces a draft's payload. Because the payload hash changes, any
