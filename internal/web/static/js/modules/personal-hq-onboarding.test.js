@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy } from './personal-hq-onboarding.js';
+import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover } from './personal-hq-onboarding.js';
 
 function status(overrides) {
   return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
@@ -36,6 +36,17 @@ test('resolveGuidedMode: in_progress with no designation is resume', () => {
 
 test('resolveGuidedMode: completed onboarding but no current designation (e.g. cleared) is resume', () => {
   assert.equal(resolveGuidedMode(status({ hq_onboarding_state: 'completed', valid: false, workspace_id: '' })), 'resume');
+});
+
+test('wantsGuidedTakeover: only an unseen profile WITH explicit intent triggers the takeover', () => {
+  // The home-first flow: a brand-new profile browsing to the launcher must
+  // see the normal launcher; the full-screen takeover appears only after the
+  // user clicks "Start mission" (which arrives with ?hq_onboarding=1).
+  assert.equal(wantsGuidedTakeover('unseen', true), true);
+  assert.equal(wantsGuidedTakeover('unseen', false), false);
+  assert.equal(wantsGuidedTakeover('seen', true), false);
+  assert.equal(wantsGuidedTakeover('seen', false), false);
+  assert.equal(wantsGuidedTakeover(null, true), false);
 });
 
 test('resumeCopy: repair mode offers Build, Choose, and Clear', () => {
