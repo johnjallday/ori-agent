@@ -6165,6 +6165,44 @@ body:has(#workspaceHub.is-hq-guided) #hubSupportChat {
   background: var(--bg-secondary);
 }
 
+/* Personal HQ upgrade card (rendered by personal-hq-onboarding.js into
+   #hqUpgradeMount). Mirrors .hq-resume framing with a subtle accent. */
+.hq-upgrade-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--accent-color, var(--border-color));
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-upgrade-heading {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-upgrade-subtitle {
+  margin: 0.3rem 0 0.2rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.hq-upgrade-card ul {
+  margin: 0.2rem 0 0.5rem;
+  padding-left: 1.1rem;
+}
+
+.hq-upgrade-card li {
+  font-size: 0.83rem;
+  color: var(--text-primary);
+}
+
+.hq-upgrade-preserved {
+  margin: 0.3rem 0 0.6rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
 .hq-resume-text {
   flex: 1 1 auto;
   min-width: 12rem;

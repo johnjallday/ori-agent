@@ -169,7 +169,11 @@ func (b *ServerBuilder) initializeHandlers() {
 		// Build My HQ never duplicates that logic.
 		b.personalHQService = personalhq.NewService(userProfileStore, sessionStore)
 		personalHQSetup := personalhq.NewSetupCoordinator(b.personalHQService, b.sessionHandler, sessionStore)
-		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, b.userProvider)
+		// The upgrade coordinator reuses b.sessionHandler as the specialist
+		// provisioner (EnsureSpecialists), so Build My HQ and Upgrade converge on
+		// one provisioning path (task 2.9).
+		personalHQUpgrade := personalhq.NewUpgradeCoordinator(b.personalHQService, sessionStore, b.sessionHandler)
+		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, personalHQUpgrade, b.userProvider)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

@@ -55,6 +55,37 @@ export function resumeCopy(mode) {
   };
 }
 
+// upgradeView turns an upgrade plan (from GET /api/personal-hq/upgrade/preview)
+// into the view-model the DOM code renders, so all the branching lives here and
+// is unit-testable without a DOM. It deliberately hides itself when there is
+// nothing to do (a current HQ), so it never nags:
+//   - blocked plan  -> show a read-only "unavailable" card with the reasons.
+//   - up to date    -> show:false (nothing to prompt).
+//   - changes due   -> an actionable card listing additions + preserved state,
+//     framed as "Resume/Retry" after a prior partial/failed attempt.
+export function upgradeView(plan) {
+  if (!plan) return { show: false };
+  const blockers = Array.isArray(plan.blockers) ? plan.blockers : [];
+  if (blockers.length) {
+    return { show: true, canApply: false, blocked: true, heading: 'Personal HQ upgrade unavailable', reasons: blockers };
+  }
+  const missing = Array.isArray(plan.missing_roles) ? plan.missing_roles : [];
+  if (plan.up_to_date && missing.length === 0) {
+    return { show: false, upToDate: true };
+  }
+  const retry = !!plan.retryable_prior_failure;
+  return {
+    show: true,
+    canApply: true,
+    blocked: false,
+    retry,
+    heading: retry ? 'Resume your Personal HQ upgrade' : 'Upgrade your Personal HQ',
+    applyLabel: retry ? 'Retry upgrade' : 'Apply upgrade',
+    additions: Array.isArray(plan.additions) ? plan.additions : [],
+    preserved: Array.isArray(plan.preserved_customizations) ? plan.preserved_customizations : []
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -465,6 +496,104 @@ export function resumeCopy(mode) {
     });
   }
 
+  async function fetchUpgradePreview() {
+    const res = await fetch('/api/personal-hq/upgrade/preview', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.plan ? data.plan : null;
+  }
+
+  function renderUpgrade(mount, view) {
+    mount.innerHTML = '';
+    if (!view || !view.show) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+
+    const card = document.createElement('div');
+    card.className = 'hq-upgrade-card';
+    const heading = document.createElement('h4');
+    heading.className = 'hq-upgrade-heading';
+    heading.textContent = view.heading;
+    card.appendChild(heading);
+
+    if (view.blocked) {
+      const ul = document.createElement('ul');
+      (view.reasons || []).forEach(r => {
+        const li = document.createElement('li');
+        li.textContent = r;
+        ul.appendChild(li);
+      });
+      card.appendChild(ul);
+      mount.appendChild(card);
+      return;
+    }
+
+    if (view.additions.length) {
+      const subtitle = document.createElement('p');
+      subtitle.className = 'hq-upgrade-subtitle';
+      subtitle.textContent = 'This will add:';
+      const ul = document.createElement('ul');
+      view.additions.forEach(a => {
+        const li = document.createElement('li');
+        li.textContent = a;
+        ul.appendChild(li);
+      });
+      card.append(subtitle, ul);
+    }
+    if (view.preserved.length) {
+      const preserved = document.createElement('p');
+      preserved.className = 'hq-upgrade-preserved';
+      preserved.textContent = 'Your existing setup is preserved: ' + view.preserved.join('; ');
+      card.appendChild(preserved);
+    }
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    btn.textContent = view.applyLabel;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await postJSON('/api/personal-hq/upgrade/apply');
+        toast('Your Personal HQ is up to date.', 'Upgrade applied', 'success');
+        await wireUpgrade();
+      } catch (_) {
+        toast('The upgrade did not fully complete — you can retry.', 'Upgrade incomplete', 'danger');
+        btn.disabled = false;
+      }
+    });
+    card.appendChild(btn);
+    mount.appendChild(card);
+  }
+
+  // wireUpgrade shows an explicit, confirmable upgrade card for a VALID
+  // designated HQ that is not yet on the current provisioning version. Additive:
+  // a no-op when the page has no #hqUpgradeMount, or when there is no valid HQ,
+  // or when the HQ is already up to date (upgradeView returns show:false).
+  async function wireUpgrade() {
+    const mount = document.getElementById('hqUpgradeMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    let plan;
+    try {
+      plan = await fetchUpgradePreview();
+    } catch (_) {
+      return;
+    }
+    renderUpgrade(mount, upgradeView(plan));
+  }
+
   function init() {
     wireGuided();
     wireResume();
@@ -473,6 +602,7 @@ export function resumeCopy(mode) {
     const hint = hub ? hub.dataset.hqOnboardingHint : null;
     if (wantsGuidedTakeover(hint, hasOnboardingIntent())) showGuided();
     refreshResume();
+    wireUpgrade();
   }
 
   if (document.readyState === 'loading') {

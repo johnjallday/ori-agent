@@ -27,7 +27,7 @@ func newTestHandler(t *testing.T) (*Handler, *session.SQLiteStore) {
 	workspaces := session.NewSQLiteStore(db)
 	service := personalhq.NewService(profiles, workspaces)
 	setup := personalhq.NewSetupCoordinator(service, &fakeWorkspaceCreator{workspaces: workspaces}, workspaces)
-	return NewHandler(service, setup, userprofile.LocalUserProvider{}), workspaces
+	return NewHandler(service, setup, nil, userprofile.LocalUserProvider{}), workspaces
 }
 
 // fakeWorkspaceCreator stands in for sessionhttp.Handler.CreateFromTemplate:
@@ -220,7 +220,7 @@ func TestSetupRejectsWrongVerb(t *testing.T) {
 }
 
 func TestSetupServiceUnavailableWhenCoordinatorMissing(t *testing.T) {
-	handler := NewHandler(nil, nil, userprofile.LocalUserProvider{})
+	handler := NewHandler(nil, nil, nil, userprofile.LocalUserProvider{})
 	req := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"My HQ"}`))
 	rec := httptest.NewRecorder()
 	handler.Setup(rec, req)
@@ -275,7 +275,7 @@ func TestMethodContractRejectsWrongVerb(t *testing.T) {
 }
 
 func TestStatusDegradesWhenServiceUnavailable(t *testing.T) {
-	handler := NewHandler(nil, nil, userprofile.LocalUserProvider{})
+	handler := NewHandler(nil, nil, nil, userprofile.LocalUserProvider{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/status", nil)
 	rec := httptest.NewRecorder()
