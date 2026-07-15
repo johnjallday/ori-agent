@@ -474,6 +474,161 @@ func TestCreateWorkspaceCanSkipTemplateAgentRoster(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceComposesTemplateAndExistingAgentsAtomically(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	if err := handler.agentStore.CreateAgent("Mix Engineer", nil); err != nil {
+		t.Fatalf("CreateAgent Mix Engineer: %v", err)
+	}
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(`{
+		"name":"Roster Template",
+		"agents":[
+			{"name":"Campaign Lead","role":"orchestrator"},
+			{"name":"Copywriter","type":"general"}
+		]
+	}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{
+		"name":"Launch",
+		"template_id":"roster-template",
+		"existing_agent_names":["mix engineer"],
+		"entry_agent_name":"Mix Engineer"
+	}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+	ws, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if got := currentWorkspaceEntryAgentName(ws); got != "Mix Engineer" {
+		t.Fatalf("entry agent = %q, want Mix Engineer", got)
+	}
+	if got, want := len(ws.AgentInstances), 3; got != want {
+		t.Fatalf("agent instances = %d, want %d: %#v", got, want, ws.AgentInstances)
+	}
+	for _, name := range []string{"Campaign Lead", "Copywriter", "Mix Engineer"} {
+		if !wsHasAgent(ws, name) {
+			t.Fatalf("workspace roster missing %q: %#v", name, ws.AgentInstances)
+		}
+	}
+	if _, ok := handler.agentStore.GetAgent("Mix Engineer"); !ok {
+		t.Fatal("existing agent must remain a shared saved definition")
+	}
+}
+
+func TestCreateWorkspaceWithExistingAgentsCanOptOutOfTemplateRoster(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	if err := handler.agentStore.CreateAgent("Mix Engineer", nil); err != nil {
+		t.Fatalf("CreateAgent Mix Engineer: %v", err)
+	}
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(`{
+		"name":"Roster Template",
+		"agents":[{"name":"Campaign Lead","role":"orchestrator"}]
+	}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{
+		"name":"Solo Mix",
+		"template_id":"roster-template",
+		"create_template_agents":false,
+		"existing_agent_names":["Mix Engineer"]
+	}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	wsID := resp["folder"].(map[string]any)["id"].(string)
+	ws, err := handler.store.GetWorkspace(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if got := currentWorkspaceEntryAgentName(ws); got != "Mix Engineer" {
+		t.Fatalf("entry agent = %q, want first existing selection", got)
+	}
+	if len(ws.AgentInstances) != 1 || !wsHasAgent(ws, "Mix Engineer") {
+		t.Fatalf("workspace should only contain selected existing agent, got %#v", ws.AgentInstances)
+	}
+	if _, ok := handler.agentStore.GetAgent("Campaign Lead"); ok {
+		t.Fatal("template roster must not seed when create_template_agents is false")
+	}
+}
+
+func TestCreateWorkspaceRejectsInvalidExistingAgentCompositionBeforePersistence(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "roster-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(`{
+		"name":"Roster Template",
+		"agents":[{"name":"Campaign Lead","role":"orchestrator"}]
+	}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, body := range []string{
+		`{"name":"Invalid Missing","template_id":"roster-template","existing_agent_names":["Missing Agent"]}`,
+		`{"name":"Invalid Duplicate","template_id":"roster-template","existing_agent_names":["Missing Agent","missing agent"]}`,
+	} {
+		w, _ := postCreateWorkspace(t, handler, body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	workspaces, err := handler.store.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) != 0 {
+		t.Fatalf("invalid composition must not persist workspaces: %#v", workspaces)
+	}
+	if _, ok := handler.agentStore.GetAgent("Campaign Lead"); ok {
+		t.Fatal("invalid composition must be rejected before template agents are created")
+	}
+}
+
+func TestCreateWorkspaceRejectsDuplicateExistingAgentNames(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	if err := handler.agentStore.CreateAgent("Mix Engineer", nil); err != nil {
+		t.Fatalf("CreateAgent Mix Engineer: %v", err)
+	}
+
+	w, _ := postCreateWorkspace(t, handler, `{
+		"name":"Duplicate Mix",
+		"blank":true,
+		"existing_agent_names":["Mix Engineer","mix engineer"]
+	}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	workspaces, err := handler.store.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(workspaces) != 0 {
+		t.Fatalf("duplicate composition must not persist workspace: %#v", workspaces)
+	}
+}
+
 func TestCreateProjectForExistingWorkspace(t *testing.T) {
 	handler, baseDir, events, cleanup := templateTestEnv(t)
 	defer cleanup()

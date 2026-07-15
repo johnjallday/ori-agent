@@ -3,9 +3,6 @@ package sessionhttp
 import (
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -420,26 +417,4 @@ func (h *Handler) bindSeededAgentTools(workspaceID string, created []createdAgen
 		}
 	}
 	return warnings
-}
-
-// attachWorkspaceSpecialist adds a non-entry agent to the workspace as a fresh
-// AgentInstance, mirroring the add-agent endpoint. It is a no-op if an instance
-// for the agent already exists.
-func attachWorkspaceSpecialist(ws *session.Workspace, name string) {
-	name = strings.TrimSpace(name)
-	if ws == nil || name == "" {
-		return
-	}
-	for _, inst := range ws.AgentInstances {
-		if strings.EqualFold(strings.TrimSpace(inst.Name), name) {
-			return
-		}
-	}
-	ws.AgentInstances = append(ws.AgentInstances, session.AgentInstance{
-		ID:             uuid.New().String(),
-		Name:           name,
-		InstanceNumber: 1,
-		NodeID:         fmt.Sprintf("%s-1-node-%s", name, uuid.New().String()[:8]),
-		CreatedAt:      time.Now(),
-	})
 }

@@ -43,10 +43,15 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		return
 	}
 
-	if req.AgentName == "" {
+	if strings.TrimSpace(req.AgentName) == "" {
 		_ = orihttp.RespondBadRequest(w, "agent_name is required")
 		return
 	}
+	// This long-standing endpoint can attach a workspace-local definition that
+	// has not yet been persisted in the global store. Create-time composition is
+	// stricter and validates saved definitions before persistence; keep this
+	// endpoint backward compatible while sharing its idempotent instance helper.
+	agentName := strings.TrimSpace(req.AgentName)
 
 	// Get the workspace
 	workspace, err := h.store.GetWorkspace(r.Context(), workspaceID)
@@ -60,38 +65,15 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 		return
 	}
 
-	// Count existing instances of this agent type
-	instanceCount := 0
-	for _, inst := range workspace.AgentInstances {
-		if inst.Name == req.AgentName {
-			instanceCount++
-		}
-	}
-
-	// Create new agent instance
-	instanceNumber := instanceCount + 1
-	nodeID := req.AgentName + "-node-" + uuid.New().String()[:8]
-	if instanceNumber > 1 {
-		nodeID = fmt.Sprintf("%s-%d-node-%s", req.AgentName, instanceNumber, uuid.New().String()[:8])
-	}
-
-	newInstance := session.AgentInstance{
-		ID:             uuid.New().String(),
-		Name:           req.AgentName,
-		InstanceNumber: instanceNumber,
-		NodeID:         nodeID,
-		CreatedAt:      time.Now(),
-	}
-
 	// Add to workspace. Capture the prior agent count first: adding the first
 	// agent to an otherwise-agentless workspace makes it the coordinator (via the
 	// single-agent default), which is when pre-existing unassigned tasks should
 	// be claimed.
 	firstAgentAdded := len(workspace.AgentInstances) == 0
-	workspace.AgentInstances = append(workspace.AgentInstances, newInstance)
+	newInstance, added := attachWorkspaceSpecialist(workspace, agentName)
 
 	if strings.TrimSpace(currentWorkspaceEntryAgentName(workspace)) == "" {
-		setWorkspaceEntryAgent(workspace, req.AgentName)
+		setWorkspaceEntryAgent(workspace, agentName)
 	}
 
 	workspace.UpdatedAt = time.Now()
@@ -110,26 +92,54 @@ func (h *Handler) addWorkspaceAgent(w http.ResponseWriter, r *http.Request, work
 	// template starter tasks) so they are owned, not orphaned. Runs after the
 	// folder-store sync above so the sweep resolves the now-coordinator agent.
 	tasksClaimed := 0
-	if firstAgentAdded {
+	if firstAgentAdded && added {
 		tasksClaimed = h.claimUnassignedTasksForEntryAgentLogged(workspaceID)
 	}
 
 	logger.Info("Agent added to workspace", logger.Fields{
 		"workspace_id":    workspaceID,
-		"agent_name":      req.AgentName,
+		"agent_name":      agentName,
 		"instance_id":     newInstance.ID,
-		"instance_number": instanceNumber,
+		"instance_number": newInstance.InstanceNumber,
 	})
 
 	response := map[string]any{
-		"success":        true,
-		"agent_instance": newInstance,
-		"workspace":      workspace,
+		"success":          true,
+		"agent_instance":   newInstance,
+		"workspace":        workspace,
+		"already_attached": !added,
 	}
 	if tasksClaimed > 0 {
 		response["tasks_claimed"] = tasksClaimed
 	}
 	_ = orihttp.RespondCreated(w, response)
+}
+
+// attachWorkspaceSpecialist attaches a saved definition to a workspace once.
+// It is shared by normal workspace-agent mutation, template roster seeding,
+// and create-time existing-agent composition. Existing definitions can belong
+// to many workspaces, but a single workspace must never receive two instances
+// of the same canonical name.
+func attachWorkspaceSpecialist(ws *session.Workspace, name string) (session.AgentInstance, bool) {
+	name = strings.TrimSpace(name)
+	if ws == nil || name == "" {
+		return session.AgentInstance{}, false
+	}
+	for _, inst := range ws.AgentInstances {
+		if strings.EqualFold(strings.TrimSpace(inst.Name), name) {
+			return inst, false
+		}
+	}
+
+	instance := session.AgentInstance{
+		ID:             uuid.New().String(),
+		Name:           name,
+		InstanceNumber: 1,
+		NodeID:         name + "-1-node-" + uuid.New().String()[:8],
+		CreatedAt:      time.Now(),
+	}
+	ws.AgentInstances = append(ws.AgentInstances, instance)
+	return instance, true
 }
 
 // removeWorkspaceAgent handles DELETE /api/workspaces/{id}/agents/{name}.
