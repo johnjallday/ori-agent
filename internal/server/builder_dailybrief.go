@@ -107,6 +107,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			Workspaces:    workspaceStore,
 			Opportunities: opportunityStore,
 			Sessions:      sessionSource,
+			// Read lazily off the builder: the mailbox source is wired during
+			// vault init, which runs before this resolver is ever invoked.
+			Mailbox: b.dailyBriefMailbox,
 		}
 		snap := dailybrief.BuildSnapshot(ctx, sources, cfg, req.UserID, time.Now())
 		previous, err := store.GetCurrentRevision(ctx, cfg.WorkspaceID)

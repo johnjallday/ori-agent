@@ -231,6 +231,10 @@ type ServerBuilder struct {
 	// vault system initializes it (internal/server/mailbox_access.go).
 	mailboxAccess *mailboxAccess
 
+	// dailyBriefMailbox feeds grounded email attention into the Daily Brief; nil
+	// until the vault system initializes it (internal/server/dailybrief_mailbox.go).
+	dailyBriefMailbox dailybrief.MailboxSource
+
 	// Daily Brief configuration, generation, and scheduling
 	dailyBriefService   *dailybrief.Service
 	dailyBriefHandler   *dailybriefhttp.Handler
