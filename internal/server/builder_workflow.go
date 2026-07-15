@@ -56,6 +56,9 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 		provider.SetProjectTemplateDeps(func() string {
 			return resolveTemplatesRoot(configManager)
 		}, eventBus)
+		if b.mailboxAccess != nil {
+			provider.SetMailboxAccess(b.mailboxAccess)
+		}
 		return provider.Tools()
 	}
 }
