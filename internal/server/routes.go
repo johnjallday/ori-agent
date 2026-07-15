@@ -161,6 +161,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/agents/dashboard/list", dashboardHandler.ListAgentsWithStats)
 	mux.HandleFunc("/api/agents/dashboard/stats", dashboardHandler.GetDashboardStats)
 
+	// Bounded bulk-operation endpoint (delete / add_tags / remove_tags /
+	// set_favorite). Registered as an exact path so it resolves before the
+	// generic /api/agents/ subpath handler and is never read as an agent named
+	// "bulk" (PRD FR46).
+	mux.HandleFunc("/api/agents/bulk", agentHandler.HandleBulk)
+
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		// Route evolution API requests first
 		if s.Handlers.Evolution != nil && strings.HasSuffix(r.URL.Path, "/evolution/path") && r.Method == http.MethodPost {

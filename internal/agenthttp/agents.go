@@ -669,15 +669,29 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.State.DeleteAgent(name); err != nil {
+	// Deletion lifecycle (store delete, session purge, activity log) is shared
+	// with the bulk endpoint so the two paths cannot drift (PRD FR52).
+	if err := h.performAgentDeletion(r.Context(), name); err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// performAgentDeletion runs the deletion lifecycle for an agent whose deletion
+// guards have already passed: remove it from the store, purge any sessions that
+// still reference it, and write a deletion activity event. Shared by the
+// single-agent DELETE handler and the bulk delete operation (PRD FR43/FR52).
+func (h *Handler) performAgentDeletion(ctx context.Context, name string) error {
+	if err := h.State.DeleteAgent(name); err != nil {
+		return err
 	}
 
 	// Remove any sessions still referencing this agent so the UI cannot
 	// restore stale state that resolves to a 404 on /api/agents.
 	if h.sessionPurger != nil {
-		if n, err := h.sessionPurger.DeleteSessionsByAgent(r.Context(), name); err != nil {
+		if n, err := h.sessionPurger.DeleteSessionsByAgent(ctx, name); err != nil {
 			logger.Error("Failed to purge sessions for deleted agent", logger.Fields{"agent": name, "err": err})
 		} else if n > 0 {
 			logger.Info("Purged sessions for deleted agent", logger.Fields{"agent": name, "count": n})
@@ -692,7 +706,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
+	return nil
 }
 
 func normalizeAgentReasoningEffort(providerName, modelName, reasoningEffort string) (string, error) {
