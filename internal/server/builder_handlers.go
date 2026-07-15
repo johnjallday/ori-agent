@@ -245,6 +245,14 @@ func (b *ServerBuilder) initializeHandlers() {
 			if b.chatHandler != nil {
 				b.chatHandler.SetMailboxAccess(b.mailboxAccess)
 			}
+			// Personal HQ email connect/disconnect (task 3.10): manage an email
+			// MCP binding on the designated HQ workspace, with disconnect cache
+			// invalidation.
+			if b.personalHQHandler != nil && b.personalHQService != nil {
+				b.personalHQHandler.SetMailboxLinker(
+					newPersonalHQMailboxLinker(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider),
+				)
+			}
 		}
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
