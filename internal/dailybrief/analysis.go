@@ -2,6 +2,7 @@ package dailybrief
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -40,9 +41,18 @@ func attentionRank(reason string) int {
 		return 4
 	case "waiting_for_choice":
 		return 3
+	// An email thread awaiting the user's reply is a peer of a task waiting for a
+	// choice — both are "you need to act". Ties break by timestamp (below), so
+	// adding email never reorders existing non-email items of a different rank.
+	case "email_waiting_on_user":
+		return 3
 	case "high_priority_opportunity":
 		return 2
 	case "schedule_failing":
+		return 1
+	// Unread inbound mail and threads waiting on someone else are the lowest
+	// attention tier — surfaced only if higher-severity items don't fill the cap.
+	case "email_unread":
 		return 1
 	default:
 		return 0
@@ -80,6 +90,17 @@ func ComputeNeedsAttention(snap Snapshot) []AttentionItem {
 			}
 		}
 	}
+	// Email attention (HQ-scoped, top-level). Each thread keeps its own source
+	// ref so an aggregate claim ("N threads waiting") can be traced back to every
+	// underlying thread (task 4.5) — never a title-only count.
+	for _, e := range snap.EmailThreads {
+		switch {
+		case e.WaitingOnUser:
+			items = append(items, AttentionItem{Ref: e.Ref, Title: emailAttentionTitle(e), WorkspaceName: "Email", Reason: "email_waiting_on_user"})
+		case e.Unread:
+			items = append(items, AttentionItem{Ref: e.Ref, Title: emailAttentionTitle(e), WorkspaceName: "Email", Reason: "email_unread"})
+		}
+	}
 	sort.SliceStable(items, func(i, j int) bool {
 		ri, rj := attentionRank(items[i].Reason), attentionRank(items[j].Reason)
 		if ri != rj {
@@ -91,6 +112,24 @@ func ComputeNeedsAttention(snap Snapshot) []AttentionItem {
 		items = items[:maxAttentionItems]
 	}
 	return items
+}
+
+// emailAttentionTitle renders a bounded, human title for an email attention
+// item from its already-sanitized subject/sender. Falls back gracefully when a
+// field is missing so a thread with no subject still shows something meaningful.
+func emailAttentionTitle(e EmailThreadSnapshot) string {
+	subject := strings.TrimSpace(e.Subject)
+	from := strings.TrimSpace(e.From)
+	switch {
+	case subject != "" && from != "":
+		return subject + " — " + from
+	case subject != "":
+		return subject
+	case from != "":
+		return "(no subject) — " + from
+	default:
+		return "(no subject)"
+	}
 }
 
 // PlanItem is one Today's Plan recommendation: scheduled/in-progress work or

@@ -2,6 +2,7 @@ package dailybrief
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,9 +27,13 @@ const (
 // the set of refs actually present in the snapshot (task 6.12).
 type SourceRef struct {
 	WorkspaceID string    `json:"workspace_id"`
-	EntityType  string    `json:"entity_type"` // task | opportunity | scheduled_task | session
+	EntityType  string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread
 	EntityID    string    `json:"entity_id"`
 	Timestamp   time.Time `json:"timestamp"`
+	// AccountID is set only for email_thread refs: the connected mailbox account
+	// the provider thread belongs to, needed to build a validated open route
+	// (task 4.1). Never a token — just the account's stable ID.
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // Key returns a stable string identity used for allowlist membership.
@@ -86,14 +91,32 @@ type WorkspaceSnapshot struct {
 	RecentSessions []SessionSnapshot
 }
 
+// EmailThreadSnapshot is a bounded projection of one email thread from the
+// designated Personal HQ's connected account. Subject/From are sanitized
+// upstream by the mailbox runtime; the brief treats them as untrusted display
+// text (task 4.6). Email is HQ-scoped, so these live at the Snapshot top level
+// rather than per-workspace.
+type EmailThreadSnapshot struct {
+	Ref           SourceRef
+	Subject       string
+	From          string
+	WaitingOnUser bool
+	Unread        bool
+}
+
 // Snapshot is the bounded, read-only, authorized cross-workspace projection
 // Daily Brief synthesis works from.
 type Snapshot struct {
 	GeneratedAt time.Time
 	Workspaces  []WorkspaceSnapshot
+	// EmailThreads is the bounded email attention projection for the designated
+	// Personal HQ (empty when no HQ, no connected account, or a healthy-empty
+	// inbox — distinct from an unreadable source, which appends a Gap).
+	EmailThreads []EmailThreadSnapshot
 	// Gaps names data sources that could not be read (an inaccessible
-	// workspace, a failed opportunity/session query, ...) so a missing
-	// source is never silently presented as "no activity" (PRD FR86).
+	// workspace, a failed opportunity/session query, a failed email read, ...)
+	// so a missing source is never silently presented as "no activity"
+	// (PRD FR86, task 4.3).
 	Gaps []string
 }
 
@@ -114,6 +137,9 @@ func (s Snapshot) AllRefs() map[string]SourceRef {
 		for _, sess := range ws.RecentSessions {
 			out[sess.Ref.Key()] = sess.Ref
 		}
+	}
+	for _, e := range s.EmailThreads {
+		out[e.Ref.Key()] = e.Ref
 	}
 	return out
 }
@@ -138,6 +164,27 @@ type SessionSource interface {
 	ListSessions(ctx context.Context, filter *session.SessionFilter, opts *session.ListOptions) ([]session.SessionListItem, error)
 }
 
+// MailboxSource is the narrow email contract the brief needs: bounded,
+// authorized email-thread projections for the designated Personal HQ. The
+// implementation (server wiring) resolves the HQ workspace, the connected
+// account, and the most-restrictive access, so the snapshot builder stays
+// provider-neutral and never touches credentials.
+//
+// It distinguishes three outcomes so the brief can honor task 4.3:
+//   - (threads, nil): a healthy read (possibly empty — a real "no mail" state).
+//   - (nil, ErrEmailNotConfigured): no HQ / no connected account — NOT a gap,
+//     the user simply has not set up email.
+//   - (nil, other error): a selected source could not be read — the caller
+//     appends a named data gap.
+type MailboxSource interface {
+	BriefEmailThreads(ctx context.Context, userID string) ([]EmailThreadSnapshot, error)
+}
+
+// ErrEmailNotConfigured signals that email is simply not set up for this user's
+// HQ (no designation or no connected account), so the brief shows no email
+// section and appends NO gap — distinct from an email source that failed to read.
+var ErrEmailNotConfigured = errors.New("dailybrief: email is not configured for this personal hq")
+
 // SnapshotSources bundles the read-only dependencies BuildSnapshot needs.
 // Any field may be nil; a nil source degrades to a named gap rather than a
 // panic or a silently-empty section (PRD FR136).
@@ -145,6 +192,9 @@ type SnapshotSources struct {
 	Workspaces    WorkspaceSource
 	Opportunities OpportunitySource
 	Sessions      SessionSource
+	// Mailbox is optional; nil means the brief has no email integration wired
+	// (no email section, no gap).
+	Mailbox MailboxSource
 }
 
 func isGroupWorkspace(ws *workspace.Workspace) bool {
@@ -215,6 +265,23 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 		wsSnap, gaps := buildWorkspaceSnapshot(ctx, sources, ws)
 		snap.Workspaces = append(snap.Workspaces, wsSnap)
 		snap.Gaps = append(snap.Gaps, gaps...)
+	}
+
+	// Email is HQ-scoped and read through its own most-restrictive access
+	// boundary, so it is collected once (not per workspace). A not-configured
+	// mailbox is NOT a gap; only a selected source that fails to read is
+	// (task 4.3). Email failure degrades only this source — it never blocks the
+	// rest of the brief.
+	if sources.Mailbox != nil {
+		threads, err := sources.Mailbox.BriefEmailThreads(ctx, userID)
+		switch {
+		case errors.Is(err, ErrEmailNotConfigured):
+			// No HQ email set up — no section, no gap.
+		case err != nil:
+			snap.Gaps = append(snap.Gaps, "email attention could not be read")
+		default:
+			snap.EmailThreads = threads
+		}
 	}
 	return snap
 }
