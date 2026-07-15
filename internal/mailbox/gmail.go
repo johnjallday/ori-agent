@@ -283,6 +283,13 @@ func classifyGmailError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return ErrTimeout
 	}
+	// A failed OAuth token refresh (revoked/expired refresh token) surfaces as
+	// an *oauth2.RetrieveError from the transport — map it to expired so the UI
+	// prompts a reconnect rather than a generic failure.
+	var rerr *oauth2.RetrieveError
+	if errors.As(err, &rerr) {
+		return ErrExpired
+	}
 	var gerr *googleapi.Error
 	if errors.As(err, &gerr) {
 		switch gerr.Code {

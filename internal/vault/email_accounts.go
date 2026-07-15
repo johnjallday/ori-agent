@@ -357,6 +357,50 @@ func emailAccountFromRecord(record *Record) (*EmailAccount, error) {
 	}, nil
 }
 
+// EmailOAuthCredentials holds the decrypted OAuth material needed to build a
+// refreshing token source for a connected mailbox. It is returned ONLY to
+// internal server wiring (the mailbox credential resolver) and must never be
+// serialized to an HTTP response, log, or LLM prompt — unlike EmailAccount,
+// which is the sanitized, token-free public view.
+type EmailOAuthCredentials struct {
+	Provider      EmailProvider
+	AuthType      EmailAuthType
+	EmailAddress  string
+	AccessToken   string
+	RefreshToken  string
+	ClientID      string
+	ClientSecret  string
+	TokenEndpoint string
+}
+
+// RevealEmailOAuthCredentials decrypts and returns the OAuth credential material
+// for an email account. The vault decrypts the record payload on read; this
+// method is the single, explicit reveal path so token exposure is auditable and
+// confined. Callers are responsible for never leaking the result.
+func (s *Store) RevealEmailOAuthCredentials(ctx context.Context, id string, access AccessContext) (*EmailOAuthCredentials, error) {
+	record, err := s.GetRecord(ctx, id, access)
+	if err != nil {
+		return nil, err
+	}
+	if normalizeRecordType(record.Type) != RecordTypeEmailAccount {
+		return nil, ErrRecordNotFound
+	}
+	payload, err := decodeEmailAccountPayload(record.Payload)
+	if err != nil {
+		return nil, err
+	}
+	return &EmailOAuthCredentials{
+		Provider:      payload.Provider,
+		AuthType:      payload.AuthType,
+		EmailAddress:  payload.EmailAddress,
+		AccessToken:   payload.AccessToken,
+		RefreshToken:  payload.RefreshToken,
+		ClientID:      payload.ClientID,
+		ClientSecret:  payload.ClientSecret,
+		TokenEndpoint: payload.TokenEndpoint,
+	}, nil
+}
+
 func decodeEmailAccountPayload(data json.RawMessage) (emailAccountPayload, error) {
 	var payload emailAccountPayload
 	if len(data) == 0 {
