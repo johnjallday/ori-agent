@@ -253,6 +253,12 @@ func (b *ServerBuilder) initializeHandlers() {
 					newPersonalHQMailboxLinker(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider),
 				)
 			}
+			// Grounded email attention for the Daily Brief (task 4.8): reads the
+			// HQ's connected account through the same cached provider. No second
+			// brief service/scheduler is introduced.
+			if b.personalHQService != nil {
+				b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider)
+			}
 		}
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
