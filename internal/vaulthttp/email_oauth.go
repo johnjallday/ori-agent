@@ -186,6 +186,27 @@ func providerStatusForRequest(provider vault.EmailProvider, r *http.Request) ema
 	}
 }
 
+// Gmail OAuth scopes are staged for least privilege (contract §3.1): a mailbox
+// connects read-only, and sending requires a separate, explicit scope upgrade
+// requested only when the user first confirms a send. gmail.readonly is
+// sufficient for triage, the brief, and drafting (which is local until the
+// broker sends).
+const (
+	gmailScopeReadonly = "https://www.googleapis.com/auth/gmail.readonly"
+	gmailScopeSend     = "https://www.googleapis.com/auth/gmail.send"
+)
+
+// gmailScopesForStage picks the Gmail scope set for the requested OAuth stage.
+// The default (connect) stage is least-privilege read-only; the "send" stage
+// adds gmail.send on top of read (an incremental-consent upgrade), never
+// requesting the full-mailbox scope.
+func gmailScopesForStage(stage string) []string {
+	if strings.EqualFold(strings.TrimSpace(stage), "send") {
+		return []string{gmailScopeReadonly, gmailScopeSend, "openid", "email", "profile"}
+	}
+	return []string{gmailScopeReadonly, "openid", "email", "profile"}
+}
+
 func loadEmailOAuthProviderConfig(provider vault.EmailProvider, r *http.Request, redirectOverride string) emailOAuthProviderConfig {
 	redirectURL := firstNonEmpty(
 		strings.TrimSpace(redirectOverride),
@@ -195,6 +216,10 @@ func loadEmailOAuthProviderConfig(provider vault.EmailProvider, r *http.Request,
 
 	switch provider {
 	case vault.EmailProviderGmail:
+		stage := ""
+		if r != nil {
+			stage = r.URL.Query().Get("stage")
+		}
 		return emailOAuthProviderConfig{
 			provider:      provider,
 			label:         "Google",
@@ -203,7 +228,7 @@ func loadEmailOAuthProviderConfig(provider vault.EmailProvider, r *http.Request,
 			clientID:      strings.TrimSpace(os.Getenv("ORI_EMAIL_GOOGLE_CLIENT_ID")),
 			clientSecret:  strings.TrimSpace(os.Getenv("ORI_EMAIL_GOOGLE_CLIENT_SECRET")),
 			redirectURL:   redirectURL,
-			scopes:        []string{"https://mail.google.com/", "openid", "email", "profile"},
+			scopes:        gmailScopesForStage(stage),
 			defaultSource: "google-oauth",
 		}
 	case vault.EmailProviderMicrosoft:
