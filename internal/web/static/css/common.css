@@ -2087,6 +2087,36 @@ h3, .h3 {
     text-decoration: line-through;
 }
 
+.quest-item-skipped .quest-mark {
+    color: var(--text-secondary);
+}
+
+.quest-status {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.quest-resume,
+.quest-skip {
+    font-size: 0.78rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--border-color, currentColor);
+    border-radius: 0.25rem;
+    background: transparent;
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.quest-resume:hover,
+.quest-resume:focus-visible,
+.quest-skip:hover,
+.quest-skip:focus-visible {
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+    outline: 0;
+}
+
 a.quest-title {
     color: var(--primary-color);
     text-decoration: none;

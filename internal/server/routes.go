@@ -223,6 +223,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		homeAssistantRouteHandler.SetIntakeTraceStore(traceStore)
 		homeAssistantWorkspaceResolver.SetFeedbackReader(traceStore)
 	}
+	if s.Storage.PersonalHQ != nil {
+		homeAssistantWorkspaceResolver.SetHQProvider(&homeAssistantHQAdapter{
+			service:  s.Storage.PersonalHQ,
+			provider: s.Storage.UserProvider,
+		})
+	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
@@ -330,6 +336,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Progression != nil {
 		mux.HandleFunc("/api/progression", s.Handlers.Progression.GetStatus)
 		mux.HandleFunc("/api/progression/dismiss", s.Handlers.Progression.Dismiss)
+		mux.HandleFunc("/api/progression/skip", s.Handlers.Progression.Skip)
 		mux.HandleFunc("/api/progression/reset", s.Handlers.Progression.Reset)
 	}
 
@@ -346,6 +353,9 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.User != nil {
 		mux.HandleFunc("/api/user/profile", s.Handlers.User.Profile)
 	}
+
+	registerPersonalHQRoutes(mux, s)
+	registerDailyBriefRoutes(mux, s)
 
 	// Theme endpoints
 	mux.HandleFunc("/api/theme", func(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +799,37 @@ func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/regenerate-token", s.Handlers.Triggers.RegenerateToken)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire", s.Handlers.Triggers.TestFire)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}/fires", s.Handlers.Triggers.Fires)
+	}
+}
+
+// registerPersonalHQRoutes registers Personal HQ status/designation endpoints.
+func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Personal HQ Endpoints
+	// =============================================================================
+	if s.Handlers.PersonalHQ != nil {
+		mux.HandleFunc("GET /api/personal-hq/status", s.Handlers.PersonalHQ.Status)
+		mux.HandleFunc("POST /api/personal-hq/onboarding-state", s.Handlers.PersonalHQ.SetOnboardingState)
+		mux.HandleFunc("POST /api/personal-hq/setup", s.Handlers.PersonalHQ.Setup)
+		mux.HandleFunc("POST /api/personal-hq/designate", s.Handlers.PersonalHQ.Designate)
+		mux.HandleFunc("POST /api/personal-hq/replace", s.Handlers.PersonalHQ.Replace)
+		mux.HandleFunc("POST /api/personal-hq/clear", s.Handlers.PersonalHQ.Clear)
+	}
+}
+
+// registerDailyBriefRoutes registers Personal HQ Daily Brief endpoints.
+func registerDailyBriefRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Daily Brief Endpoints
+	// =============================================================================
+	if s.Handlers.DailyBrief != nil {
+		mux.HandleFunc("GET /api/personal-hq/brief/config", s.Handlers.DailyBrief.GetConfig)
+		mux.HandleFunc("PUT /api/personal-hq/brief/config", s.Handlers.DailyBrief.UpdateConfig)
+		mux.HandleFunc("GET /api/personal-hq/brief/current", s.Handlers.DailyBrief.GetCurrent)
+		mux.HandleFunc("GET /api/personal-hq/brief/history", s.Handlers.DailyBrief.GetHistory)
+		mux.HandleFunc("GET /api/personal-hq/brief/status", s.Handlers.DailyBrief.GetStatus)
+		mux.HandleFunc("POST /api/personal-hq/brief/open", s.Handlers.DailyBrief.RequestFirstOpen)
+		mux.HandleFunc("POST /api/personal-hq/brief/refresh", s.Handlers.DailyBrief.RequestRefresh)
 	}
 }
 

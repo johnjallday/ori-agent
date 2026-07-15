@@ -266,6 +266,84 @@ test.describe('Home First Run', () => {
     expect(errors).toEqual([]);
   });
 
+  test('surfaces Mission 01 in progression before the HQ tier unlocks', async ({ page }) => {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 6,
+          total_count: 3,
+          completed_count: 0,
+          resolved_count: 0,
+          dismissed: false,
+          all_complete: false,
+          next_quest: {
+            id: 't1-first-message',
+            title: 'Say hello to Ori',
+            why: 'Send Ori a message on the home page.',
+            status: 'available'
+          },
+          tiers: [
+            {
+              tier: 1,
+              name: 'First Contact',
+              complete: false,
+              quests: [
+                { id: 't1-first-message', title: 'Say hello to Ori', status: 'available' },
+                { id: 't1-personalize', title: 'Personalize Ori', status: 'available' }
+              ]
+            },
+            {
+              tier: 2,
+              name: 'Establish a Base',
+              complete: false,
+              quests: [
+                {
+                  id: 't2-build-hq',
+                  title: 'Build your Personal HQ',
+                  why: 'Give Ori a home base for your daily brief and follow-ups.',
+                  status: 'locked-tier',
+                  action_url: '/workspaces?hq_onboarding=1',
+                  action_label: 'Build your Personal HQ',
+                  optional: true
+                }
+              ]
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+
+    const mission = page.locator('[data-role="first-mission"]');
+    await expect(mission).toBeVisible();
+    await expect(mission).toContainText('Mission 01');
+    await expect(mission).toContainText('Build your Personal HQ');
+    await expect(mission.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
+    await expect(mission.locator('[data-role="first-mission-action"]')).toHaveAttribute(
+      'href',
+      '/workspaces?hq_onboarding=1'
+    );
+
+    await page.setViewportSize({ width: 720, height: 800 });
+    await expect(mission).toBeVisible();
+    const width = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth,
+      viewport: window.innerWidth
+    }));
+    expect(width.page).toBeLessThanOrEqual(width.viewport + 1);
+  });
+
   test('keeps maximum bridge readouts inside a desktop viewport', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.route('**/api/onboarding/status', async route => {

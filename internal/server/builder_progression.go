@@ -6,6 +6,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -33,6 +34,16 @@ func (b *ServerBuilder) initializeProgression() {
 	if b.smartOnboardingHandler != nil {
 		b.smartOnboardingHandler.SetOnPersonalized(func() {
 			engine.Complete("t1-personalize")
+		})
+	}
+
+	// A workspace becoming the user's Personal HQ is not an event either;
+	// this fires for both Build My HQ (a new workspace) and designating an
+	// existing workspace (PRD FR48/FR49), so t2-build-hq completes either
+	// way without replaying unrelated quests.
+	if b.personalHQService != nil {
+		b.personalHQService.SetOnDesignated(func(ctx context.Context, userID, workspaceID string) {
+			engine.Complete("t2-build-hq")
 		})
 	}
 
@@ -65,6 +76,12 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 
 	if profile := b.onboardingMgr.GetUserProfile(); profile != nil && !profile.PersonalizedAt.IsZero() {
 		snap.Personalized = true
+	}
+
+	if b.personalHQService != nil {
+		if status, err := b.personalHQService.Status(context.Background(), userprofile.LocalUserID); err == nil && status.Valid {
+			snap.HasPersonalHQ = true
+		}
 	}
 
 	// Count notes only until we find one — the quest just needs "> 0".

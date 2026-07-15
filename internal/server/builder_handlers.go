@@ -31,6 +31,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
@@ -140,7 +142,8 @@ func (b *ServerBuilder) initializeHandlers() {
 	} else {
 		b.sessionStore = sessionStore
 		b.userProvider = userprofile.LocalUserProvider{}
-		b.userStore = userprofile.NewSQLiteStore(sessionStore.DB())
+		userProfileStore := userprofile.NewSQLiteStore(sessionStore.DB())
+		b.userStore = userProfileStore
 		b.onboardingMgr.SetUserStore(b.userStore)
 		if err := b.onboardingMgr.SeedLocalUserProfile(ctx); err != nil {
 			logger.Warn("Failed to seed local user profile", logger.Fields{"error": err})
@@ -158,6 +161,15 @@ func (b *ServerBuilder) initializeHandlers() {
 		if b.configManager != nil {
 			b.sessionHandler.SetSystemModelReader(b.configManager)
 		}
+		// Personal HQ needs the concrete SQLite store (not the narrower
+		// userprofile.UserStore interface) for its focused designation/
+		// onboarding-state methods; see internal/personalhq.ProfileStore.
+		// The setup coordinator reuses b.sessionHandler's exact production
+		// workspace-creation path (internal/personalhq.WorkspaceCreator) so
+		// Build My HQ never duplicates that logic.
+		b.personalHQService = personalhq.NewService(userProfileStore, sessionStore)
+		personalHQSetup := personalhq.NewSetupCoordinator(b.personalHQService, b.sessionHandler, sessionStore)
+		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, b.userProvider)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

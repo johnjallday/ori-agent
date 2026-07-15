@@ -371,6 +371,338 @@ func TestMigration028CreatesUsersAndWorkspaceOwners(t *testing.T) {
 	}
 }
 
+func TestMigration030AddsPersonalHQColumns(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var workspaceID string
+	var onboardingState string
+	var updatedAt sql.NullString
+	if err := db.QueryRowContext(ctx, `
+		SELECT personal_workspace_id, hq_onboarding_state, hq_onboarding_updated_at
+		FROM users WHERE id = 'local'
+	`).Scan(&workspaceID, &onboardingState, &updatedAt); err != nil {
+		t.Fatalf("Failed to query personal HQ columns: %v", err)
+	}
+	if workspaceID != "" {
+		t.Errorf("expected empty personal_workspace_id default, got %q", workspaceID)
+	}
+	if onboardingState != "unseen" {
+		t.Errorf("expected hq_onboarding_state default 'unseen', got %q", onboardingState)
+	}
+	if updatedAt.Valid {
+		t.Errorf("expected NULL hq_onboarding_updated_at default, got %q", updatedAt.String)
+	}
+
+	if err := db.runMigration(ctx, 30); err != nil {
+		t.Fatalf("migration 30 should be idempotent: %v", err)
+	}
+}
+
+func TestMigration031CreatesDailyBriefSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, table := range []string{"daily_brief_config", "daily_brief_revision", "daily_brief_generation_claim", "daily_brief_notification"} {
+		exists, err := db.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("tableExists(%s): %v", table, err)
+		}
+		if !exists {
+			t.Fatalf("expected table %s to exist", table)
+		}
+	}
+
+	if err := db.runMigration(ctx, 31); err != nil {
+		t.Fatalf("migration 31 should be idempotent: %v", err)
+	}
+}
+
+// TestMigration031EnforcesAtMostOneCurrentRevisionPerWorkspace proves the
+// partial unique index (not just application logic) rejects a second
+// current revision for the same workspace.
+func TestMigration031EnforcesAtMostOneCurrentRevisionPerWorkspace(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	insert := func(id string, isCurrent int) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO daily_brief_revision
+				(id, workspace_id, user_id, local_date, revision_number, is_current, trigger_type, status, created_at)
+			VALUES (?, 'ws-1', 'local', '2026-07-14', 1, ?, 'manual', 'succeeded', CURRENT_TIMESTAMP)
+		`, id, isCurrent)
+		return err
+	}
+	if err := insert("rev-1", 1); err != nil {
+		t.Fatalf("first current revision insert: %v", err)
+	}
+	if err := insert("rev-2", 1); err == nil {
+		t.Fatal("expected a second current revision for the same workspace to be rejected")
+	}
+}
+
+// TestMigration031DedupesNonManualClaimsButNotManual proves the partial
+// unique index allows unlimited manual claims for the same date while
+// rejecting a second first_open/scheduled claim.
+func TestMigration031DedupesNonManualClaimsButNotManual(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	insertClaim := func(id, triggerType, status string) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO daily_brief_generation_claim
+				(id, workspace_id, local_date, trigger_type, status, claimed_at)
+			VALUES (?, 'ws-1', '2026-07-14', ?, ?, CURRENT_TIMESTAMP)
+		`, id, triggerType, status)
+		return err
+	}
+
+	if err := insertClaim("claim-1", "first_open", "succeeded"); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if err := insertClaim("claim-2", "scheduled", "pending"); err == nil {
+		t.Fatal("expected a second non-manual claim for the same date to be rejected")
+	}
+	if err := insertClaim("claim-3", "manual", "succeeded"); err != nil {
+		t.Fatalf("manual claims must never be deduped: %v", err)
+	}
+	if err := insertClaim("claim-4", "manual", "succeeded"); err != nil {
+		t.Fatalf("a second manual claim for the same date must also be allowed: %v", err)
+	}
+}
+
+func TestMigration030UpgradesFromPriorSchema(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-030-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (29)`); err != nil {
+		t.Fatalf("Failed to seed schema version 29: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL DEFAULT '',
+			locale TEXT NOT NULL DEFAULT '',
+			role_category TEXT NOT NULL DEFAULT '',
+			specializations TEXT NOT NULL DEFAULT '[]',
+			preferences TEXT NOT NULL DEFAULT '{}',
+			about TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy users table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO users (id, created_at, updated_at)
+		VALUES ('local', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy local user: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var workspaceID, onboardingState string
+	if err := db.QueryRowContext(ctx, `
+		SELECT personal_workspace_id, hq_onboarding_state FROM users WHERE id = 'local'
+	`).Scan(&workspaceID, &onboardingState); err != nil {
+		t.Fatalf("Failed to query personal HQ columns after upgrade: %v", err)
+	}
+	if workspaceID != "" {
+		t.Errorf("expected empty personal_workspace_id after upgrade, got %q", workspaceID)
+	}
+	if onboardingState != "unseen" {
+		t.Errorf("expected hq_onboarding_state 'unseen' after upgrade, got %q", onboardingState)
+	}
+}
+
+// TestMigration030DoesNotTouchExistingWorkspaces covers PRD task 8.2: the
+// migration that adds Personal HQ support to the users table must not
+// rename, rewrite, or infer HQ status for a workspace that already existed
+// (e.g. one created from the pre-rename "Personal Ops" template) — the
+// designation lives only on the users row, and no migration in this
+// feature touches the workspaces table at all. Proves the seeded
+// workspace row is byte-identical after migrating to the latest schema,
+// and that no workspace was auto-designated as the user's HQ.
+func TestMigration030DoesNotTouchExistingWorkspaces(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-030-workspaces-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (29)`); err != nil {
+		t.Fatalf("Failed to seed schema version 29: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
+			email TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL DEFAULT '',
+			locale TEXT NOT NULL DEFAULT '',
+			role_category TEXT NOT NULL DEFAULT '',
+			specializations TEXT NOT NULL DEFAULT '[]',
+			preferences TEXT NOT NULL DEFAULT '{}',
+			about TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy users table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO users (id, created_at, updated_at)
+		VALUES ('local', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy local user: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			kind TEXT DEFAULT 'workspace',
+			description TEXT DEFAULT '',
+			tags TEXT DEFAULT '[]',
+			owner_user_id TEXT NOT NULL DEFAULT 'local',
+			parent_id TEXT,
+			color TEXT,
+			session_count INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			agents TEXT DEFAULT '[]',
+			agent_instances TEXT DEFAULT '[]',
+			shared_data TEXT DEFAULT '{}',
+			status TEXT DEFAULT 'active',
+			layout TEXT,
+			messages_json TEXT DEFAULT '[]',
+			tasks_json TEXT DEFAULT '[]',
+			attachments_json TEXT DEFAULT '[]',
+			folders_json TEXT DEFAULT '[]',
+			scheduled_tasks_json TEXT DEFAULT '[]',
+			store_nodes_json TEXT DEFAULT '[]',
+			workflows_json TEXT DEFAULT '{}',
+			directory_references_json TEXT DEFAULT '[]',
+			mcp_bindings_json TEXT DEFAULT '[]',
+			agent_mcp_access_json TEXT DEFAULT '[]',
+			skill_bindings_json TEXT DEFAULT '[]',
+			agent_skill_access_json TEXT DEFAULT '[]',
+			order_index INTEGER DEFAULT 0,
+			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy workspaces table: %v", err)
+	}
+	const seededSharedData = `{"entry_agent_name":"Personal Chief of Staff","template_id":"personal-ops"}`
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, owner_user_id, shared_data, status, created_at, updated_at)
+		VALUES ('ws-personal-ops', 'Personal Ops', 'local', ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, seededSharedData); err != nil {
+		t.Fatalf("Failed to seed legacy Personal Ops workspace: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var name, ownerUserID, sharedData, status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT name, owner_user_id, shared_data, status FROM workspaces WHERE id = 'ws-personal-ops'
+	`).Scan(&name, &ownerUserID, &sharedData, &status); err != nil {
+		t.Fatalf("Failed to query the seeded workspace after upgrade: %v", err)
+	}
+	if name != "Personal Ops" {
+		t.Errorf("expected the existing workspace's name to be untouched, got %q", name)
+	}
+	if sharedData != seededSharedData {
+		t.Errorf("expected shared_data to be byte-identical after migration, got %q", sharedData)
+	}
+	if status != "active" {
+		t.Errorf("expected status to be untouched, got %q", status)
+	}
+	if ownerUserID != "local" {
+		t.Errorf("expected owner_user_id to be untouched, got %q", ownerUserID)
+	}
+
+	var personalWorkspaceID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT personal_workspace_id FROM users WHERE id = 'local'
+	`).Scan(&personalWorkspaceID); err != nil {
+		t.Fatalf("Failed to query personal_workspace_id after upgrade: %v", err)
+	}
+	if personalWorkspaceID != "" {
+		t.Errorf("expected migration to designate zero existing workspaces as HQ, got personal_workspace_id=%q", personalWorkspaceID)
+	}
+}
+
 func TestInTransaction(t *testing.T) {
 	ctx := context.Background()
 

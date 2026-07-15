@@ -185,6 +185,12 @@ func (p *AssistantProgress) EnsureDefaults() {
 type ProgressionState struct {
 	// CompletedQuests maps a stable quest ID to the time it was completed.
 	CompletedQuests map[string]time.Time `json:"completed_quests,omitempty"`
+	// SkippedQuests maps a stable *optional* quest ID to the time it was
+	// skipped. Distinct from CompletedQuests (the underlying action was never
+	// observed) and from Dismissed (a skip is per-quest, not whole-widget). A
+	// later real completion removes the quest's entry here and adds it to
+	// CompletedQuests instead — the two maps are never both set for one ID.
+	SkippedQuests map[string]time.Time `json:"skipped_quests,omitempty"`
 	// Dismissed is true when the user has hidden the quest-log widget.
 	Dismissed bool `json:"dismissed,omitempty"`
 	// BackfilledAt is non-zero once the startup backfill scan has run, so it

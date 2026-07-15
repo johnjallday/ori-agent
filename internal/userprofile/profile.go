@@ -31,6 +31,64 @@ var allowedPreferenceKeys = map[string]struct{}{
 
 var preferenceRenderOrder = []string{"response_style", "units", "language"}
 
+// HQOnboardingState is the durable Personal HQ onboarding status for a user.
+// It is stored independently from PersonalWorkspaceID (the designation
+// itself) so that clearing or losing the designated workspace never resets
+// the user's onboarding history back to unseen.
+type HQOnboardingState string
+
+const (
+	// HQOnboardingUnseen is the default state for a profile that has never
+	// been shown the guided first-launch Personal HQ experience.
+	HQOnboardingUnseen HQOnboardingState = "unseen"
+	// HQOnboardingInProgress marks a user who started the Build My HQ setup
+	// flow but has not yet completed or skipped it.
+	HQOnboardingInProgress HQOnboardingState = "in_progress"
+	// HQOnboardingCompleted marks a user who finished HQ setup or explicitly
+	// designated an existing workspace as their HQ.
+	HQOnboardingCompleted HQOnboardingState = "completed"
+	// HQOnboardingSkipped marks a user who deferred HQ setup. Product
+	// features and progression tiers remain fully available in this state.
+	HQOnboardingSkipped HQOnboardingState = "skipped"
+)
+
+// ParseHQOnboardingState validates an external (API) onboarding-state value.
+// Unlike NormalizeHQOnboardingState, it rejects unknown input instead of
+// silently defaulting, since callers here are explicit state-transition
+// requests rather than tolerant reads of persisted data.
+func ParseHQOnboardingState(value string) (HQOnboardingState, bool) {
+	switch HQOnboardingState(strings.TrimSpace(value)) {
+	case HQOnboardingUnseen:
+		return HQOnboardingUnseen, true
+	case HQOnboardingInProgress:
+		return HQOnboardingInProgress, true
+	case HQOnboardingCompleted:
+		return HQOnboardingCompleted, true
+	case HQOnboardingSkipped:
+		return HQOnboardingSkipped, true
+	default:
+		return "", false
+	}
+}
+
+// NormalizeHQOnboardingState defaults unknown or empty persisted values to
+// HQOnboardingUnseen rather than failing, so a stray or pre-migration value
+// never breaks a read.
+func NormalizeHQOnboardingState(value string) HQOnboardingState {
+	if state, ok := ParseHQOnboardingState(value); ok {
+		return state
+	}
+	return HQOnboardingUnseen
+}
+
+// PersonalHQState is the read-time view of a user's Personal HQ designation
+// and onboarding status, as persisted on the user profile row.
+type PersonalHQState struct {
+	PersonalWorkspaceID string            `json:"personal_workspace_id,omitempty"`
+	OnboardingState     HQOnboardingState `json:"hq_onboarding_state"`
+	OnboardingUpdatedAt time.Time         `json:"hq_onboarding_updated_at,omitempty"`
+}
+
 type UserProfile struct {
 	ID              string            `json:"id"`
 	DisplayName     string            `json:"display_name,omitempty"`

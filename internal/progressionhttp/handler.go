@@ -3,6 +3,7 @@
 package progressionhttp
 
 import (
+	"errors"
 	"net/http"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -56,6 +57,44 @@ func (h *Handler) Dismiss(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = orihttp.RespondSuccess(w, h.engine.Status())
+}
+
+// SkipRequest identifies which optional quest to skip.
+type SkipRequest struct {
+	QuestID string `json:"quest_id"`
+}
+
+// Skip marks a single optional quest as explicitly skipped and returns
+// updated status. Kept separate from Dismiss, which hides the whole widget
+// rather than resolving one quest.
+// POST /api/progression/skip  body: {"quest_id": "t2-build-hq"}
+func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h.engine == nil {
+		_ = orihttp.RespondServiceUnavailable(w, "progression is not available")
+		return
+	}
+	var req SkipRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if req.QuestID == "" {
+		_ = orihttp.RespondBadRequest(w, "quest_id is required")
+		return
+	}
+	err := h.engine.Skip(req.QuestID)
+	switch {
+	case err == nil:
+		_ = orihttp.RespondSuccess(w, h.engine.Status())
+	case errors.Is(err, progression.ErrQuestNotFound):
+		_ = orihttp.RespondNotFound(w, err.Error())
+	case errors.Is(err, progression.ErrQuestNotOptional):
+		_ = orihttp.RespondBadRequest(w, err.Error())
+	default:
+		_ = orihttp.RespondInternalError(w, "failed to skip quest: "+err.Error())
+	}
 }
 
 // Reset clears all progression state (dev/test parity with onboarding reset).

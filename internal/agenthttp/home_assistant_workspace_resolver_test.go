@@ -403,3 +403,138 @@ func containsReason(reasons []string, want string) bool {
 	}
 	return false
 }
+
+type homeWorkspaceResolverHQProviderStub struct {
+	workspaceID string
+	ok          bool
+}
+
+func (s *homeWorkspaceResolverHQProviderStub) CurrentHQWorkspaceID(context.Context) (string, bool) {
+	return s.workspaceID, s.ok
+}
+
+// TestHomeAssistantWorkspaceResolver_NoFitDefaultsToHQForUntargetedPrompt
+// covers PRD FR102/FR103 (task 7.10): a prompt that references no
+// workspace's identity at all, with no originating workspace context, may
+// default to the designated Personal HQ rather than reporting no_fit.
+func TestHomeAssistantWorkspaceResolver_NoFitDefaultsToHQForUntargetedPrompt(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+
+	resolver := newHomeWorkspaceResolverForTest(
+		t,
+		st,
+		newHomeWorkspaceResolverTestWorkspace("ws-trip", "Trip Planning", "Plan Portugal travel", "Chief of Staff"),
+		newHomeWorkspaceResolverTestWorkspace("ws-hq", "Command Post", "Personal command center", "Chief of Staff"),
+	)
+	resolver.SetHQProvider(&homeWorkspaceResolverHQProviderStub{workspaceID: "ws-hq", ok: true})
+
+	got := resolver.Resolve("what should I focus on today", normalizedHomeAssistantRouteContext{})
+	if got.State != homeAssistantWorkspaceStateConfident {
+		t.Fatalf("expected state %q, got %#v", homeAssistantWorkspaceStateConfident, got)
+	}
+	if got.SelectedWorkspaceID != "ws-hq" {
+		t.Fatalf("expected the untargeted prompt to default to the HQ, got %q", got.SelectedWorkspaceID)
+	}
+}
+
+// TestHomeAssistantWorkspaceResolver_NamedProjectStillWinsOverHQ covers
+// FR104/FR105: a prompt that names/scores against a real project must stay
+// scoped to it, never hijacked to the HQ merely because one is designated.
+func TestHomeAssistantWorkspaceResolver_NamedProjectStillWinsOverHQ(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	addHomeRouteTestAgent(t, st, "Launch Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+
+	resolver := newHomeWorkspaceResolverForTest(
+		t,
+		st,
+		newHomeWorkspaceResolverTestWorkspace("ws-launch", "Launch Ops", "Ship the launch deck", "Launch Manager"),
+		newHomeWorkspaceResolverTestWorkspace("ws-hq", "Command Post", "Personal command center", "Launch Manager"),
+	)
+	resolver.SetHQProvider(&homeWorkspaceResolverHQProviderStub{workspaceID: "ws-hq", ok: true})
+
+	got := resolver.Resolve("finish the launch deck today", normalizedHomeAssistantRouteContext{})
+	if got.SelectedWorkspaceID != "ws-launch" {
+		t.Fatalf("expected the named project to win over the HQ default, got %q", got.SelectedWorkspaceID)
+	}
+}
+
+// TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenPromptRequestsExplicitSwitch
+// covers FR105: an explicit "switch workspace" request that fails to match
+// anything real must not silently land on the HQ instead.
+func TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenPromptRequestsExplicitSwitch(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+
+	resolver := newHomeWorkspaceResolverForTest(
+		t,
+		st,
+		newHomeWorkspaceResolverTestWorkspace("ws-hq", "Command Post", "Personal command center", "Chief of Staff"),
+	)
+	resolver.SetHQProvider(&homeWorkspaceResolverHQProviderStub{workspaceID: "ws-hq", ok: true})
+
+	got := resolver.Resolve("switch workspace to the nonexistent zeppelin project", normalizedHomeAssistantRouteContext{})
+	if got.State != homeAssistantWorkspaceStateNoFit {
+		t.Fatalf("expected an explicit failed switch to stay no_fit rather than default to HQ, got %#v", got)
+	}
+}
+
+// TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenExplicitContextGiven
+// covers FR104: an active-workspace context that fails to resolve must not
+// fall through to the HQ default — the request originated in a specific
+// (if currently broken) workspace, not an untargeted app-wide prompt.
+func TestHomeAssistantWorkspaceResolver_NoFitIgnoresHQWhenExplicitContextGiven(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	addHomeRouteTestAgent(t, st, "Chief of Staff", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+
+	resolver := newHomeWorkspaceResolverForTest(
+		t,
+		st,
+		newHomeWorkspaceResolverTestWorkspace("ws-hq", "Command Post", "Personal command center", "Chief of Staff"),
+	)
+	resolver.SetHQProvider(&homeWorkspaceResolverHQProviderStub{workspaceID: "ws-hq", ok: true})
+
+	got := resolver.Resolve("review payroll numbers", normalizedHomeAssistantRouteContext{WorkspaceID: "ws-missing"})
+	if got.State != homeAssistantWorkspaceStateNoFit {
+		t.Fatalf("expected a broken explicit workspace context to stay no_fit rather than default to HQ, got %#v", got)
+	}
+}
+
+// TestHomeAssistantWorkspaceResolver_NoFitWhenHQNotReady covers the case
+// where the HQ itself has no usable entry agent: the fallback must not fire
+// with a broken selection, leaving the ordinary no_fit state instead.
+func TestHomeAssistantWorkspaceResolver_NoFitWhenHQNotReady(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+
+	resolver := newHomeWorkspaceResolverForTest(
+		t,
+		st,
+		newHomeWorkspaceResolverTestWorkspace("ws-hq", "Command Post", "Personal command center"), // no entry agent
+	)
+	resolver.SetHQProvider(&homeWorkspaceResolverHQProviderStub{workspaceID: "ws-hq", ok: true})
+
+	got := resolver.Resolve("what should I focus on today", normalizedHomeAssistantRouteContext{})
+	if got.State != homeAssistantWorkspaceStateNoFit {
+		t.Fatalf("expected a not-ready HQ to leave state no_fit, got %#v", got)
+	}
+}
+
+// TestHomeAssistantWorkspaceResolver_NoFitWhenNoHQDesignated covers the
+// baseline (no HQProvider, or one reporting none designated): behavior is
+// unchanged from before task 7.10.
+func TestHomeAssistantWorkspaceResolver_NoFitWhenNoHQDesignated(t *testing.T) {
+	st := newHomeRouteTestStore(t)
+	addHomeRouteTestAgent(t, st, "Travel Manager", &store.CreateAgentConfig{Type: "general"}, "", nil, nil)
+
+	resolver := newHomeWorkspaceResolverForTest(
+		t,
+		st,
+		newHomeWorkspaceResolverTestWorkspace("ws-trip", "Trip Planning", "Plan Portugal travel", "Travel Manager"),
+	)
+	resolver.SetHQProvider(&homeWorkspaceResolverHQProviderStub{ok: false})
+
+	got := resolver.Resolve("review payroll numbers", normalizedHomeAssistantRouteContext{})
+	if got.State != homeAssistantWorkspaceStateNoFit {
+		t.Fatalf("expected state %q with no designated HQ, got %#v", homeAssistantWorkspaceStateNoFit, got)
+	}
+}

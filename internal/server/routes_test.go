@@ -23,6 +23,12 @@ func newRoutesTestHandler(t *testing.T) http.Handler {
 	t.Cleanup(func() {
 		_ = os.Chdir(originalWD)
 	})
+	// DefaultWorkspaceRoot() resolves to $HOME/Ori Workspaces regardless of
+	// CWD, so any test built on this handler that creates a workspace (or
+	// counts existing ones, e.g. first-run classification) would otherwise
+	// read/write the real developer machine's workspace tree. t.Setenv
+	// restores the original HOME after the test.
+	t.Setenv("HOME", tmpDir)
 
 	builder, err := NewServerBuilder()
 	if err != nil {
@@ -78,6 +84,77 @@ func TestWorkspaceRunRoutesRegistered(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid workspace run create to return 400, got %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPersonalHQRoutesRegistered(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected personal hq status to return 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status"`) {
+		t.Fatalf("expected status response body, got %s", rec.Body.String())
+	}
+
+	// Method contract: the status pattern is GET-only at the mux level, so a
+	// mismatched method doesn't match any registered pattern for this exact
+	// path and is a 404 (net/http.ServeMux only synthesizes 405 when another
+	// method is registered on the same path; see handler_test.go in
+	// personalhqhttp for the handler's own RequireMethod 405 behavior).
+	req = httptest.NewRequest(http.MethodPost, "/api/personal-hq/status", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected POST to status to return 404, got %d", rec.Code)
+	}
+
+	// Designating an unknown workspace must return an actionable error, not
+	// a bare 500.
+	body := bytes.NewReader([]byte(`{"workspace_id":"does-not-exist"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/personal-hq/designate", body)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected designate of unknown workspace to return 404, got %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestBrandNewProfileRedirectsHomeToGuidedMap covers task 4.1/4.2: a
+// profile that has never seen the guided Personal HQ first-launch
+// experience must land on the workspace launcher (Map mode) instead of
+// Home, and stop redirecting once onboarding is no longer "unseen".
+func TestBrandNewProfileRedirectsHomeToGuidedMap(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect for a brand-new profile, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/workspaces?hq_onboarding=1" {
+		t.Fatalf("expected redirect to the guided Map, got %q", loc)
+	}
+
+	// Once onboarding state moves off "unseen" (e.g. the user skipped),
+	// normal Home launch resumes.
+	skipReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/onboarding-state", strings.NewReader(`{"state":"skipped"}`))
+	skipReq.Header.Set("Content-Type", "application/json")
+	skipRec := httptest.NewRecorder()
+	handler.ServeHTTP(skipRec, skipReq)
+	if skipRec.Code != http.StatusOK {
+		t.Fatalf("expected onboarding-state update to succeed, got %d body=%s", skipRec.Code, skipRec.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected normal Home launch after skipping, got %d", rec2.Code)
 	}
 }
 

@@ -1,4 +1,4 @@
-<div class="workspace-hub" id="workspaceHub" data-state="loading">
+<div class="workspace-hub" id="workspaceHub" data-state="loading" data-hq-onboarding-hint="{{if .Extra.HQOnboardingUnseen}}unseen{{else}}seen{{end}}">
   <section class="workspace-launcher" id="workspaceLauncher" aria-live="polite">
     <div class="launcher-card modern-card">
       <div class="launcher-header">
@@ -137,6 +137,139 @@
         <div id="launcherEmptyState" class="launcher-empty" style="display: none;">No workspaces yet. Create one to get started.</div>
         <!-- Map view mount point; populated by workspace-map.js. -->
         <div id="launcherMap" class="ws-map" hidden></div>
+
+        <!-- Guided first-launch Personal HQ state; populated/toggled by
+             personal-hq-onboarding.js. Hidden by default; the data-hq-onboarding-hint
+             attribute on #workspaceHub above avoids a first-paint flash for a
+             brand-new profile while the JS confirms via GET /api/personal-hq/status. -->
+        <section
+          id="hqOnboardingGuided"
+          class="hq-guided"
+          hidden
+          role="region"
+          aria-labelledby="hqGuidedTitle"
+          aria-describedby="hqGuidedDescription"
+          aria-live="polite">
+          <div class="hq-guided-grid" aria-hidden="true"></div>
+
+          <div class="hq-guided-shell">
+            <div class="hq-guided-commandline" aria-hidden="true">
+              <span class="hq-guided-mission-chip"><span></span> Mission 01</span>
+              <span class="hq-guided-system-label">Ori Agent // First launch</span>
+              <span class="hq-guided-ready-label">Ready</span>
+            </div>
+
+            <div class="hq-guided-dialogue">
+              <div class="hq-guided-avatar" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+                  <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"/>
+                </svg>
+                <span class="hq-guided-avatar-status"></span>
+              </div>
+              <div class="hq-guided-speech">
+                <span class="hq-guided-speaker">Ori</span>
+                <p><strong>Welcome to Ori Agent.</strong> Let's create your first workspace — a home base for everything we do together.</p>
+              </div>
+            </div>
+
+            <div class="hq-guided-stage">
+              <div class="hq-guided-brief">
+                <p class="hq-guided-eyebrow">Your first mission</p>
+                <h2 class="hq-guided-title" id="hqGuidedTitle">Build your Personal HQ</h2>
+                <p class="hq-guided-copy" id="hqGuidedDescription">
+                  Your HQ is a normal workspace with one special job: keep the big picture in
+                  view while your projects stay focused.
+                </p>
+
+                <div class="hq-guided-outcomes" role="list" aria-label="What Personal HQ adds">
+                  <div class="hq-guided-outcome" role="listitem">
+                    <span class="hq-guided-outcome-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 5h10M7 12h7M7 16h5"/></svg>
+                    </span>
+                    <span><strong>Daily Brief</strong><small>Start oriented, not overwhelmed.</small></span>
+                  </div>
+                  <div class="hq-guided-outcome" role="listitem">
+                    <span class="hq-guided-outcome-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6M5 20h14"/></svg>
+                    </span>
+                    <span><strong>Follow-through</strong><small>Keep decisions and loose ends visible.</small></span>
+                  </div>
+                  <div class="hq-guided-outcome" role="listitem">
+                    <span class="hq-guided-outcome-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="M12 4v6m0 0-5 4m5-4 5 4M7 14v5m10-5v5M4 19h6m4 0h6"/></svg>
+                    </span>
+                    <span><strong>Clear routing</strong><small>Send each task to the right workspace.</small></span>
+                  </div>
+                </div>
+
+                <div class="hq-guided-actions">
+                  <button type="button" id="hqGuidedBuildBtn" class="hq-guided-primary">
+                    <span>Build Personal HQ</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg>
+                  </button>
+                  <span class="hq-guided-action-note">About a minute · safe defaults · change anything later</span>
+                </div>
+
+                <div class="hq-guided-alternatives" aria-label="Other ways to get started">
+                  <button type="button" id="hqGuidedProjectBtn">Create a project instead</button>
+                  <span aria-hidden="true">/</span>
+                  <button type="button" id="hqGuidedSkipBtn">Not now</button>
+                </div>
+              </div>
+
+              <div class="hq-guided-blueprint" aria-hidden="true">
+                <div class="hq-guided-blueprint-head">
+                  <span>Site plan // Personal HQ</span>
+                  <span class="hq-guided-unbuilt"><i></i> Unbuilt</span>
+                </div>
+                <div class="hq-guided-blueprint-canvas">
+                  <svg viewBox="0 0 520 360" preserveAspectRatio="xMidYMid meet">
+                    <defs>
+                      <pattern id="hqBlueprintGrid" width="24" height="24" patternUnits="userSpaceOnUse">
+                        <path d="M24 0H0V24" class="hq-guided-blueprint-gridline"/>
+                      </pattern>
+                      <filter id="hqBlueprintGlow" x="-80%" y="-80%" width="260%" height="260%">
+                        <feGaussianBlur stdDeviation="6" result="blur"/>
+                        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                      </filter>
+                    </defs>
+                    <rect width="520" height="360" fill="url(#hqBlueprintGrid)"/>
+                    <path class="hq-guided-blueprint-orbit" d="M82 260 148 108l194-46 96 128-68 112-198 15Z"/>
+                    <path class="hq-guided-blueprint-structure" d="m153 244 38-105 136-32 49 67-30 84-133 29Z"/>
+                    <path class="hq-guided-blueprint-detail" d="m191 139 55 57 81-89M246 196l100 62M246 196l-33 91M153 244l93-48 130-22"/>
+                    <path class="hq-guided-blueprint-dashed" d="M74 279 174 317M343 62l27 49M438 190l32 12"/>
+                    <g class="hq-guided-blueprint-core" filter="url(#hqBlueprintGlow)">
+                      <path d="m246 163 29 17v33l-29 17-29-17v-33Z"/>
+                      <circle cx="246" cy="196" r="7"/>
+                    </g>
+                    <g class="hq-guided-blueprint-node"><circle cx="191" cy="139" r="5"/><circle cx="327" cy="107" r="5"/><circle cx="346" cy="258" r="5"/><circle cx="213" cy="287" r="5"/></g>
+                    <g class="hq-guided-blueprint-labels">
+                      <text x="54" y="298">ENTRY</text>
+                      <text x="356" y="52">BRIEF</text>
+                      <text x="404" y="221">ROUTE</text>
+                    </g>
+                  </svg>
+                  <div class="hq-guided-scanline"></div>
+                  <div class="hq-guided-blueprint-marker hq-guided-blueprint-marker-one"><span>01</span> Daily orientation</div>
+                  <div class="hq-guided-blueprint-marker hq-guided-blueprint-marker-two"><span>02</span> Cross-workspace view</div>
+                </div>
+                <div class="hq-guided-blueprint-foot">
+                  <span>Workspace type <b>Personal</b></span>
+                  <span>Provisioning <b>On demand</b></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Small non-blocking resume/repair entry for a user who has
+             skipped, started, or lost a valid HQ. Never a full takeover. -->
+        <div id="hqOnboardingResume" class="hq-resume" hidden>
+          <span id="hqResumeText" class="hq-resume-text">Set up your Personal HQ</span>
+          <button type="button" id="hqResumeBuildBtn" class="hq-resume-action">Build My HQ</button>
+          <button type="button" id="hqResumeChooseBtn" class="hq-resume-action" hidden>Choose Existing</button>
+          <button type="button" id="hqResumeClearBtn" class="hq-resume-action" hidden>Clear</button>
+        </div>
       </section>
 
       <section id="launcherSummaryPanel" class="launcher-tab-panel" role="tabpanel" aria-labelledby="launcherTabSummary" hidden>
@@ -976,6 +1109,95 @@
         <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
           <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" id="hubWorkspaceMoveSaveBtn" class="modern-btn modern-btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Build My HQ modal; wired by personal-hq-onboarding.js. Defaults are
+       pre-filled so the default path is: open, confirm, submit. -->
+  <div class="modal fade" id="hqBuildModal" tabindex="-1" aria-labelledby="hqBuildModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hqBuildModalTitle">Build My HQ</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="hq-build-intro">
+            Your HQ uses a curated snapshot of your workspaces for its daily brief — it does
+            not automatically get every project's tools or files.
+          </p>
+          <div class="mb-3">
+            <label for="hqBuildName" class="form-label">Name</label>
+            <input type="text" class="modern-input w-100" id="hqBuildName" value="My HQ" autocomplete="off">
+          </div>
+          <div class="mb-3">
+            <label for="hqBuildTimezone" class="form-label">Timezone</label>
+            <input type="text" class="modern-input w-100" id="hqBuildTimezone" autocomplete="off">
+          </div>
+          <button type="button" id="hqBuildAdvancedToggle" class="hq-build-advanced-toggle" aria-expanded="false" aria-controls="hqBuildAdvanced">
+            Brief schedule &amp; notifications
+          </button>
+          <div id="hqBuildAdvanced" class="hq-build-advanced" hidden>
+            <div class="mb-3">
+              <label class="form-label">Brief days</label>
+              <div class="hq-build-days" role="group" aria-label="Daily brief schedule days">
+                <label><input type="checkbox" value="mon" checked> Mon</label>
+                <label><input type="checkbox" value="tue" checked> Tue</label>
+                <label><input type="checkbox" value="wed" checked> Wed</label>
+                <label><input type="checkbox" value="thu" checked> Thu</label>
+                <label><input type="checkbox" value="fri" checked> Fri</label>
+                <label><input type="checkbox" value="sat"> Sat</label>
+                <label><input type="checkbox" value="sun"> Sun</label>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label for="hqBuildTime" class="form-label">Brief time</label>
+              <input type="time" class="modern-input" id="hqBuildTime" value="08:00">
+            </div>
+            <div class="mb-3">
+              <label for="hqBuildScope" class="form-label">Workspaces covered</label>
+              <select id="hqBuildScope" class="modern-input w-100">
+                <option value="all" selected>All eligible workspaces</option>
+                <option value="selected">Selected workspaces (choose later in HQ settings)</option>
+              </select>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input" id="hqBuildIncludeFuture" checked>
+              <label class="form-check-label" for="hqBuildIncludeFuture">Include new workspaces automatically</label>
+            </div>
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input" id="hqBuildNotify">
+              <label class="form-check-label" for="hqBuildNotify">Notify me in Action Center when a brief is ready</label>
+            </div>
+          </div>
+          <div id="hqBuildError" class="hq-build-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="hqBuildSubmitBtn" class="modern-btn modern-btn-primary">Build My HQ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Choose Existing Workspace modal (designate/replace); wired by
+       personal-hq-onboarding.js. -->
+  <div class="modal fade" id="hqChooseExistingModal" tabindex="-1" aria-labelledby="hqChooseExistingModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="hqChooseExistingModalTitle">Choose Existing Workspace</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p id="hqChooseExistingIntro" class="hq-choose-intro">
+            Pick a workspace to designate as your Personal HQ. No content is deleted.
+          </p>
+          <ul id="hqChooseExistingList" class="hq-choose-list"></ul>
+          <div id="hqChooseExistingEmpty" class="hq-choose-empty" hidden>No eligible workspaces found.</div>
+          <div id="hqChooseExistingError" class="hq-build-error" hidden></div>
         </div>
       </div>
     </div>

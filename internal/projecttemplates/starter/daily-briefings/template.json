@@ -1,10 +1,10 @@
 {
-  "name": "Daily Briefings",
-  "description": "Morning roundup, market summary, news digest.",
-  "icon": "\ud83d\udcca",
+  "name": "Custom Digest",
+  "description": "A recurring digest from your own externally sourced feeds — news, markets, research, or anything else you point it at.",
+  "icon": "📊",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 2,
+  "builtin_version": 3,
   "tags": [
     "briefing"
   ],
@@ -18,10 +18,10 @@
     {
       "name": "Briefing Editor",
       "role": "orchestrator",
-      "system_prompt": "You produce the daily briefing for this workspace. Pull from the configured sources, summarize what changed and why it matters, and keep it skimmable \u2014 lead with the headline, then the detail. Call out anything that needs a decision or follow-up."
+      "system_prompt": "You produce a recurring digest for this workspace from externally sourced feeds the user configures here — news, markets, research, or any other feed they define. This is a project-scoped digest, not the app's Personal HQ Daily Brief. Pull from the configured sources, summarize what changed and why it matters, and keep it skimmable — lead with the headline, then the detail. Call out anything that needs a decision or follow-up."
     }
   ],
-  "tagline": "Morning roundup, market summary, news digest.",
+  "tagline": "External news, markets, and research — on your schedule.",
   "addons": [
     "web search / news MCP",
     "data sources to summarize"

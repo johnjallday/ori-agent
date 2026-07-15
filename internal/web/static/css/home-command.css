@@ -799,6 +799,169 @@ body.home-command-page .home-command-bridge * {
   transition: width 220ms ease;
 }
 
+.quest-log-first-mission {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  margin-top: 11px;
+  padding: 10px 11px 11px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--hc-signal) 62%, var(--hc-line));
+  background:
+    linear-gradient(108deg, color-mix(in srgb, var(--hc-signal) 12%, transparent), transparent 52%),
+    color-mix(in srgb, var(--hc-panel-deep) 68%, var(--hc-panel));
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%);
+}
+
+.quest-log-first-mission[hidden] {
+  display: none;
+}
+
+.quest-log-first-mission::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--hc-signal);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--hc-signal) 70%, transparent);
+  content: "";
+}
+
+.quest-log-first-mission::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 23px,
+    color-mix(in srgb, var(--hc-signal) 5%, transparent) 24px
+  );
+}
+
+.quest-log-first-mission-meta,
+.quest-log-first-mission-body {
+  position: relative;
+  z-index: 1;
+}
+
+.quest-log-first-mission-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quest-log-first-mission-kicker,
+.quest-log-first-mission-status,
+.quest-log-first-mission-action {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.quest-log-first-mission-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hc-signal);
+}
+
+.quest-log-first-mission-signal {
+  width: 5px;
+  height: 5px;
+  background: var(--hc-signal);
+  box-shadow: 0 0 8px var(--hc-signal);
+  animation: home-command-signal 1.8s steps(2, end) infinite;
+}
+
+.quest-log-first-mission-status {
+  color: var(--hc-ink-dim);
+}
+
+.quest-log-first-mission-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.quest-log-first-mission-copy {
+  min-width: 0;
+}
+
+.quest-log-first-mission-title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-family: "Chakra Petch", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.25px;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.quest-log-first-mission-why {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 7px;
+  letter-spacing: 0.25px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.quest-log-first-mission-action {
+  display: inline-flex;
+  min-height: 29px;
+  padding: 6px 8px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 10%, var(--hc-panel));
+  color: var(--hc-signal);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.quest-log-first-mission-action:hover,
+.quest-log-first-mission-action:focus-visible {
+  background: var(--hc-signal);
+  color: var(--hc-panel-deep);
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hc-signal) 18%, transparent);
+}
+
+.quest-log-first-mission.is-paused {
+  border-color: color-mix(in srgb, var(--hc-amber) 55%, var(--hc-line));
+}
+
+.quest-log-first-mission.is-paused::before,
+.quest-log-first-mission.is-paused .quest-log-first-mission-signal {
+  background: var(--hc-amber);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--hc-amber) 70%, transparent);
+}
+
+.quest-log-first-mission.is-paused .quest-log-first-mission-kicker {
+  color: var(--hc-amber);
+}
+
+.quest-log-first-mission.is-complete {
+  grid-template-columns: 1fr;
+  border-color: var(--hc-line-bright);
+  background: color-mix(in srgb, var(--hc-signal) 5%, var(--hc-panel-deep));
+}
+
+.quest-log-first-mission.is-complete .quest-log-first-mission-signal {
+  animation: none;
+}
+
 .quest-log-list {
   min-height: 0;
   margin: 12px 0 0;
@@ -826,6 +989,41 @@ body.home-command-page .home-command-bridge * {
 
 .quest-item-done .quest-mark {
   color: var(--hc-signal);
+}
+
+.quest-item-skipped .quest-mark {
+  color: var(--hc-ink-dim);
+}
+
+.quest-status {
+  margin-left: auto;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.quest-resume,
+.quest-skip {
+  padding: 2px 6px;
+  border: 1px solid var(--hc-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.quest-resume:hover,
+.quest-resume:focus-visible,
+.quest-skip:hover,
+.quest-skip:focus-visible {
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 10%, transparent);
+  color: var(--hc-signal);
+  outline: 0;
 }
 
 .quest-title {
@@ -976,6 +1174,14 @@ a.quest-title:focus-visible {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
+  .quest-log-first-mission-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quest-log-first-mission-action {
+    width: 100%;
+  }
+
   .home-command-execute.modern-btn {
     grid-column: 1 / -1;
     min-height: 34px;
@@ -1009,7 +1215,214 @@ a.quest-title:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .home-command-input:not(:placeholder-shown) + .home-command-execute::before,
   .home-command-form:focus-within .home-command-prompt::after,
-  .home-status-led.is-working {
+  .home-status-led.is-working,
+  .quest-log-first-mission-signal {
     animation: none;
+  }
+}
+
+/*
+ * Daily Brief — the primary Home orientation region once a Personal HQ is
+ * designated (PRD FR97). Shares the Command Bridge panel vocabulary.
+ */
+
+.home-daily-brief {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 10px;
+  padding: 13px 16px;
+  border: 1px solid var(--hc-line);
+  border-radius: 0;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--hc-panel-raised) 78%, transparent),
+    var(--hc-panel)
+  );
+  box-shadow: var(--hc-shadow);
+}
+
+.home-daily-brief-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.home-daily-brief-eyebrow {
+  display: block;
+  color: var(--hc-signal);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.home-daily-brief-title {
+  margin: 2px 0 0;
+  color: var(--hc-ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.home-daily-brief-meta {
+  margin: 2px 0 0;
+  color: var(--hc-ink-faint);
+  font-size: 9px;
+}
+
+.home-daily-brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home-daily-brief-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--hc-line-bright);
+  font-size: 9.5px;
+}
+
+.home-daily-brief-banner.is-failed {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
+}
+
+.home-daily-brief-banner.is-partial,
+.home-daily-brief-banner.is-degraded {
+  border-color: var(--hc-amber);
+  color: var(--hc-amber);
+}
+
+.home-daily-brief-banner.is-loading {
+  border-color: var(--hc-idle);
+  color: var(--hc-idle);
+}
+
+.home-daily-brief-placeholder {
+  padding: 8px 0;
+  color: var(--hc-ink-faint);
+  font-size: 9px;
+}
+
+.home-daily-brief-opening {
+  margin: 0 0 10px;
+  color: var(--hc-ink);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.home-daily-brief-gaps {
+  margin: 0 0 10px;
+  color: var(--hc-amber);
+  font-size: 9px;
+}
+
+.home-daily-brief-quiet {
+  color: var(--hc-ink-faint);
+  font-size: 10px;
+}
+
+.home-daily-brief-section {
+  margin-bottom: 12px;
+}
+
+.home-daily-brief-section-title {
+  margin: 0 0 6px;
+  color: var(--hc-ink);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.home-daily-brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-daily-brief-item {
+  padding: 8px 10px;
+  border: 1px solid var(--hc-line);
+}
+
+.home-daily-brief-item-title {
+  color: var(--hc-ink);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-daily-brief-item-title:hover,
+.home-daily-brief-item-title:focus-visible {
+  color: var(--hc-signal);
+  text-decoration: underline;
+}
+
+.home-daily-brief-item-ws {
+  margin-left: 8px;
+  color: var(--hc-ink-faint);
+  font-size: 8.5px;
+}
+
+.home-daily-brief-item-fact {
+  margin: 4px 0 0;
+  color: var(--hc-ink-dim);
+  font-size: 9.5px;
+}
+
+.home-daily-brief-item-why {
+  margin: 4px 0 0;
+  font-size: 9.5px;
+}
+
+/* Suggestions/recommendations are visually distinguished from observed
+   facts without relying on color alone (PRD FR82/FR131). */
+.is-suggestion {
+  font-style: italic;
+}
+
+.is-suggestion::before {
+  margin-right: 4px;
+  font-style: normal;
+  content: "\2192";
+}
+
+.home-daily-brief-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home-daily-brief-settings-form .home-daily-brief-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.home-daily-brief-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.home-daily-brief-history-empty {
+  color: var(--hc-ink-faint);
+}
+
+@media (max-width: 720px) {
+  .home-daily-brief-header {
+    flex-direction: column;
   }
 }

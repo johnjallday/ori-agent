@@ -450,6 +450,31 @@
   pointer-events: none;
 }
 
+/* Personal HQ landmark badge (PRD FR43/FR44): a restrained pill, not a
+   color-only cue — the "HQ" text label is the actual signal. Authority
+   comes entirely from the fetched designation (workspace-map.js), never
+   from name/template, so an undesignated workspace never shows this. */
+.ws-map-tile-hq-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 5;
+  padding: 1px 5px;
+  border: 1px solid var(--ws-keeper, #e8b54b);
+  border-radius: 3px;
+  background: rgba(12, 13, 16, 0.85);
+  color: var(--ws-keeper, #e8b54b);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+[data-bs-theme="light"] .ws-map-tile-hq-badge {
+  background: rgba(255, 255, 255, 0.85);
+}
+
 /* Multi-select checkbox — subtle until the tile is hovered/focused or checked,
    so it doesn't compete with the tile's status flag and crest at rest. */
 .ws-map-tile-check {

@@ -1,12 +1,21 @@
 package progression
 
 import (
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/types"
 	ws "github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+var (
+	// ErrQuestNotFound is returned by Skip for an unknown quest ID.
+	ErrQuestNotFound = errors.New("progression: quest not found")
+	// ErrQuestNotOptional is returned by Skip when the quest is not marked
+	// Optional — only optional quests may be skipped.
+	ErrQuestNotOptional = errors.New("progression: quest is not optional")
 )
 
 // Engine tracks quest completion for a single install. It owns the in-memory
@@ -38,6 +47,9 @@ func New(store StateStore, opts ...Option) *Engine {
 	}
 	if e.state.CompletedQuests == nil {
 		e.state.CompletedQuests = map[string]time.Time{}
+	}
+	if e.state.SkippedQuests == nil {
+		e.state.SkippedQuests = map[string]time.Time{}
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -119,6 +131,35 @@ func (e *Engine) Complete(questID string) bool {
 	return true
 }
 
+// Skip marks an optional quest as explicitly skipped. It is idempotent:
+// skipping an already-skipped quest is a no-op success, and skipping an
+// already-completed quest is a no-op success too (a real completion is never
+// downgraded). Returns ErrQuestNotFound for an unknown ID and
+// ErrQuestNotOptional when the quest does not allow skipping.
+func (e *Engine) Skip(questID string) error {
+	q, ok := e.questByID(questID)
+	if !ok {
+		return ErrQuestNotFound
+	}
+	if !q.Optional {
+		return ErrQuestNotOptional
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, done := e.state.CompletedQuests[questID]; done {
+		return nil
+	}
+	if _, skipped := e.state.SkippedQuests[questID]; skipped {
+		return nil
+	}
+	if e.state.SkippedQuests == nil {
+		e.state.SkippedQuests = map[string]time.Time{}
+	}
+	e.state.SkippedQuests[questID] = e.now()
+	return e.persistLocked()
+}
+
 // Backfill runs the one-time startup scan: any quest already satisfied by
 // existing state is marked complete SILENTLY (no onComplete). This grandfathers
 // established installs so they never see beginner quests or toasts. It is a
@@ -176,6 +217,7 @@ func (e *Engine) Reset() error {
 	defer e.mu.Unlock()
 	e.state = types.ProgressionState{
 		CompletedQuests: map[string]time.Time{},
+		SkippedQuests:   map[string]time.Time{},
 		BackfilledAt:    e.now(),
 	}
 	return e.persistLocked()
@@ -191,12 +233,15 @@ func (e *Engine) Status() Status {
 
 // --- lock-held helpers ---
 
-// markLocked records a completion. Caller must hold the lock.
+// markLocked records a completion. If the quest was previously skipped, the
+// skip is replaced by the real completion (FR: a later observed action always
+// wins). Caller must hold the lock.
 func (e *Engine) markLocked(questID string) {
 	if e.state.CompletedQuests == nil {
 		e.state.CompletedQuests = map[string]time.Time{}
 	}
 	e.state.CompletedQuests[questID] = e.now()
+	delete(e.state.SkippedQuests, questID)
 }
 
 // persistLocked writes state through the store. Caller must hold the lock.
@@ -212,15 +257,28 @@ func (e *Engine) persistLocked() error {
 	return nil
 }
 
-// currentTierLocked returns the lowest tier that is not fully complete, or
-// TotalTiers when everything is done. Caller must hold the lock.
+// resolvedLocked reports whether a quest is resolved: either completed (its
+// action was actually observed) or, for an optional quest, explicitly
+// skipped. Caller must hold the lock.
+func (e *Engine) resolvedLocked(questID string) bool {
+	if _, done := e.state.CompletedQuests[questID]; done {
+		return true
+	}
+	_, skipped := e.state.SkippedQuests[questID]
+	return skipped
+}
+
+// currentTierLocked returns the lowest tier that is not fully resolved
+// (completed or, for optional quests, skipped), or TotalTiers when everything
+// is done. A skipped optional quest never keeps a later tier locked. Caller
+// must hold the lock.
 func (e *Engine) currentTierLocked() int {
 	for tier := 1; tier <= TotalTiers; tier++ {
 		for _, q := range e.quests {
 			if q.Tier != tier {
 				continue
 			}
-			if _, done := e.state.CompletedQuests[q.ID]; !done {
+			if !e.resolvedLocked(q.ID) {
 				return tier
 			}
 		}
@@ -235,25 +293,38 @@ func (e *Engine) statusLocked() Status {
 	byTier := map[int]*TierView{}
 	order := []int{}
 	completedCount := 0
+	resolvedCount := 0
 	var next *QuestView
 
 	for _, q := range e.quests {
-		at, done := e.state.CompletedQuests[q.ID]
+		completedAt, done := e.state.CompletedQuests[q.ID]
+		skippedAt, skipped := e.state.SkippedQuests[q.ID]
+		resolved := done || skipped
+
 		status := StatusLocked
-		if done {
+		switch {
+		case done:
 			status = StatusCompleted
 			completedCount++
-		} else if q.Tier <= current {
+			resolvedCount++
+		case skipped:
+			status = StatusSkipped
+			resolvedCount++
+		case q.Tier <= current:
 			status = StatusAvailable
 		}
 
 		qv := QuestView{
 			ID: q.ID, Tier: q.Tier, Title: q.Title, Why: q.Why, Status: status,
-			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel,
+			ActionURL: q.ActionURL, ActionLabel: q.ActionLabel, Optional: q.Optional,
 		}
 		if done {
-			completedAt := at
-			qv.CompletedAt = &completedAt
+			at := completedAt
+			qv.CompletedAt = &at
+		}
+		if skipped {
+			at := skippedAt
+			qv.SkippedAt = &at
 		}
 
 		tv, ok := byTier[q.Tier]
@@ -262,7 +333,7 @@ func (e *Engine) statusLocked() Status {
 			byTier[q.Tier] = tv
 			order = append(order, q.Tier)
 		}
-		if !done {
+		if !resolved {
 			tv.Complete = false
 		}
 		tv.Quests = append(tv.Quests, qv)
@@ -284,8 +355,9 @@ func (e *Engine) statusLocked() Status {
 		CurrentTier:    current,
 		TotalTiers:     TotalTiers,
 		CompletedCount: completedCount,
+		ResolvedCount:  resolvedCount,
 		TotalCount:     total,
-		AllComplete:    completedCount == total,
+		AllComplete:    resolvedCount == total,
 		Dismissed:      e.state.Dismissed,
 		NextQuest:      next,
 	}

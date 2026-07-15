@@ -54,11 +54,20 @@ type homeAssistantWorkspaceFeedbackReader interface {
 	RecentWorkspaceCorrections(ctx context.Context, limit int) ([]HomeAssistantWorkspaceCorrection, error)
 }
 
+// homeAssistantHQProvider resolves the caller's current designated Personal
+// HQ workspace, if any (PRD FR102/FR103). Kept as a narrow interface (rather
+// than depending on internal/personalhq directly) so this package's tests
+// can fake it without constructing a real personalhq.Service.
+type homeAssistantHQProvider interface {
+	CurrentHQWorkspaceID(ctx context.Context) (workspaceID string, ok bool)
+}
+
 type HomeAssistantWorkspaceResolver struct {
 	WorkspaceStore  workspace.Store
 	AgentStore      store.Store
 	RuntimeResolver homeAssistantWorkspaceRuntimeResolver
 	FeedbackReader  homeAssistantWorkspaceFeedbackReader
+	HQProvider      homeAssistantHQProvider
 }
 
 func NewHomeAssistantWorkspaceResolver(workspaceStore workspace.Store, agentStore store.Store) *HomeAssistantWorkspaceResolver {
@@ -80,6 +89,13 @@ func (r *HomeAssistantWorkspaceResolver) SetFeedbackReader(reader homeAssistantW
 		return
 	}
 	r.FeedbackReader = reader
+}
+
+func (r *HomeAssistantWorkspaceResolver) SetHQProvider(provider homeAssistantHQProvider) {
+	if r == nil {
+		return
+	}
+	r.HQProvider = provider
 }
 
 func (r *HomeAssistantWorkspaceResolver) Resolve(prompt string, routeContext normalizedHomeAssistantRouteContext) *HomeAssistantWorkspaceResolution {
@@ -104,6 +120,9 @@ func (r *HomeAssistantWorkspaceResolver) Resolve(prompt string, routeContext nor
 
 	active, err := r.WorkspaceStore.ListActive()
 	if err != nil || len(active) == 0 {
+		if resolution, ok := r.hqFallback(prompt, routeContext, nil); ok {
+			return resolution
+		}
 		return &HomeAssistantWorkspaceResolution{State: homeAssistantWorkspaceStateNoFit}
 	}
 
@@ -115,6 +134,9 @@ func (r *HomeAssistantWorkspaceResolver) Resolve(prompt string, routeContext nor
 		candidates = append(candidates, scoreHomeAssistantWorkspace(prompt, ws))
 	}
 	if len(candidates) == 0 {
+		if resolution, ok := r.hqFallback(prompt, routeContext, nil); ok {
+			return resolution
+		}
 		return &HomeAssistantWorkspaceResolution{State: homeAssistantWorkspaceStateNoFit}
 	}
 
@@ -122,7 +144,19 @@ func (r *HomeAssistantWorkspaceResolver) Resolve(prompt string, routeContext nor
 
 	visible := buildHomeAssistantWorkspaceCandidates(candidates)
 	top := candidates[0]
+	// A zero score means the prompt didn't reference any workspace's
+	// identity at all — a genuinely untargeted, app-wide prompt (PRD
+	// FR103). A nonzero-but-below-threshold score means the prompt weakly
+	// referenced a specific project that just didn't clear the confidence
+	// bar; defaulting that to the HQ would risk masking a real (if messy)
+	// project reference (FR104/FR105), so only the zero-score case falls
+	// back to the HQ.
 	if top.Score < homeAssistantWorkspaceMinScore {
+		if top.Score == 0 {
+			if resolution, ok := r.hqFallback(prompt, routeContext, visible); ok {
+				return resolution
+			}
+		}
 		return &HomeAssistantWorkspaceResolution{
 			State:      homeAssistantWorkspaceStateNoFit,
 			Candidates: visible,
@@ -142,6 +176,38 @@ func (r *HomeAssistantWorkspaceResolver) Resolve(prompt string, routeContext nor
 	resolution.Confidence = workspaceScoreConfidence(top.Score)
 	resolution.Candidates = visible
 	return resolution
+}
+
+// hqFallback resolves to the caller's designated Personal HQ when nothing
+// else fit, but only for a genuinely untargeted, app-wide prompt (PRD
+// FR102/FR103): the request carried no originating workspace context and
+// did not explicitly ask to switch elsewhere (FR104 — a request that names
+// or originates in a project stays out of this path entirely, since it
+// either resolves earlier or fails to match a real candidate rather than
+// reaching here with an empty routeContext.WorkspaceID). Returns ok=false
+// whenever the HQ itself isn't available/ready, so the caller's ordinary
+// no_fit handling still applies (FR105 — the HQ is never a forced catch-all).
+func (r *HomeAssistantWorkspaceResolver) hqFallback(prompt string, routeContext normalizedHomeAssistantRouteContext, visible []HomeAssistantWorkspaceCandidate) (*HomeAssistantWorkspaceResolution, bool) {
+	if r == nil || r.HQProvider == nil {
+		return nil, false
+	}
+	if strings.TrimSpace(routeContext.WorkspaceID) != "" || promptRequestsWorkspaceSwitch(prompt) {
+		return nil, false
+	}
+	workspaceID, ok := r.HQProvider.CurrentHQWorkspaceID(context.Background())
+	if !ok || strings.TrimSpace(workspaceID) == "" {
+		return nil, false
+	}
+	ws, err := r.WorkspaceStore.Get(workspaceID)
+	if err != nil || !isHomeAssistantRoutableWorkspace(ws) {
+		return nil, false
+	}
+	resolution := r.resolveSelectedWorkspace(ws, []string{"defaulting to your Personal HQ for an app-wide prompt"})
+	if resolution.State != homeAssistantWorkspaceStateConfident {
+		return nil, false
+	}
+	resolution.Candidates = visible
+	return resolution, true
 }
 
 type homeAssistantWorkspaceScore struct {

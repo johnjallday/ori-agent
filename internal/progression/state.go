@@ -34,6 +34,9 @@ type Snapshot struct {
 	// Personalized is true when the user has filled out their profile
 	// (interests / work style) on the Personalize page.
 	Personalized bool
+	// HasPersonalHQ is true when the user already has a valid Personal HQ
+	// designation, grandfathering the optional t2-build-hq quest.
+	HasPersonalHQ bool
 }
 
 // Scanner produces a Snapshot of existing state for the backfill scan. The
@@ -61,6 +64,10 @@ const (
 	// (shown dimmed). Note: detection still runs for locked quests, so a user
 	// who jumps ahead completes them immediately regardless of this status.
 	StatusLocked QuestStatus = "locked-tier"
+	// StatusSkipped means an optional quest was explicitly skipped. It counts
+	// as resolved for current-tier/TierView/AllComplete purposes but never as
+	// completed — a later real action replaces it with StatusCompleted.
+	StatusSkipped QuestStatus = "skipped"
 )
 
 // QuestView is the API representation of a quest.
@@ -71,27 +78,39 @@ type QuestView struct {
 	Why         string      `json:"why"`
 	Status      QuestStatus `json:"status"`
 	CompletedAt *time.Time  `json:"completed_at,omitempty"`
+	SkippedAt   *time.Time  `json:"skipped_at,omitempty"`
 	ActionURL   string      `json:"action_url,omitempty"`
 	ActionLabel string      `json:"action_label,omitempty"`
+	// Optional mirrors Quest.Optional so the UI can offer Skip only where
+	// valid.
+	Optional bool `json:"optional,omitempty"`
 }
 
 // TierView groups a tier's quests for the API.
 type TierView struct {
-	Tier     int         `json:"tier"`
-	Name     string      `json:"name"`
+	Tier int    `json:"tier"`
+	Name string `json:"name"`
+	// Complete is true when every quest in the tier is resolved: completed or
+	// (for optional quests) skipped.
 	Complete bool        `json:"complete"`
 	Quests   []QuestView `json:"quests"`
 }
 
 // Status is the full progression snapshot returned by the API.
 type Status struct {
-	Tiers          []TierView `json:"tiers"`
-	CurrentTier    int        `json:"current_tier"`
-	TotalTiers     int        `json:"total_tiers"`
-	CompletedCount int        `json:"completed_count"`
-	TotalCount     int        `json:"total_count"`
-	AllComplete    bool       `json:"all_complete"`
-	Dismissed      bool       `json:"dismissed"`
+	Tiers       []TierView `json:"tiers"`
+	CurrentTier int        `json:"current_tier"`
+	TotalTiers  int        `json:"total_tiers"`
+	// CompletedCount is the number of quests whose underlying action was
+	// actually observed (live event, backfill, or direct Complete). It never
+	// counts a skipped optional quest.
+	CompletedCount int `json:"completed_count"`
+	// ResolvedCount is CompletedCount plus skipped optional quests — the
+	// total the widget meter and tier/AllComplete advancement are driven by.
+	ResolvedCount int  `json:"resolved_count"`
+	TotalCount    int  `json:"total_count"`
+	AllComplete   bool `json:"all_complete"`
+	Dismissed     bool `json:"dismissed"`
 	// NextQuest is the next actionable quest (lowest tier, first incomplete),
 	// or nil when everything is complete.
 	NextQuest *QuestView `json:"next_quest,omitempty"`

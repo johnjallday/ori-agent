@@ -38,6 +38,13 @@ type Quest struct {
 	// happens inline (e.g. the home chat box) with no separate destination.
 	ActionURL   string
 	ActionLabel string
+	// Optional marks a quest the user may explicitly skip via Engine.Skip
+	// instead of completing. Skipping a non-optional quest is rejected. A
+	// skipped optional quest counts as resolved for current-tier/TierView
+	// completion so it never keeps later tiers locked, but it is never
+	// recorded in CompletedQuests — only a real observed action (live event,
+	// backfill, or direct Complete call) does that.
+	Optional bool
 }
 
 // tierNames maps a tier number to its display name.
@@ -121,6 +128,19 @@ func BuiltinQuests() []Quest {
 			Satisfied:   func(s Snapshot) bool { return s.Workspaces > 0 },
 			ActionURL:   "/workspaces?create=1",
 			ActionLabel: "Create a workspace",
+		},
+		{
+			ID: "t2-build-hq", Tier: 2,
+			Title:     "Build your Personal HQ",
+			Why:       "Give Ori a home base — a place to prepare your daily brief, track follow-ups, and help you resume work.",
+			Optional:  true,
+			Satisfied: func(s Snapshot) bool { return s.HasPersonalHQ },
+			// Mission 01 is featured from the Home progression panel even before
+			// Tier 2 unlocks. Route straight into the guided HQ briefing instead
+			// of the generic workspace launcher so the action is useful at every
+			// progression tier.
+			ActionURL:   "/workspaces?hq_onboarding=1",
+			ActionLabel: "Build your Personal HQ",
 		},
 		{
 			ID: "t2-create-note", Tier: 2,

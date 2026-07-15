@@ -335,6 +335,30 @@ test('overviewBodyHTML labels the delete action "Delete group" for group workspa
   assert.match(html, /data-ws-delete="grp-1"[^>]*>✕ Delete group</);
 });
 
+test('tileHTML marks the designated Personal HQ workspace with a badge, aria-label, and class', () => {
+  const api = loadOriWorkspaceMap();
+  api._setHQWorkspaceIdForTest('ws-hq');
+
+  const hqTile = api.tileHTML({ ws: { id: 'ws-hq', name: 'Command Post' }, col: 0, row: 0 });
+  assert.match(hqTile, /ws-map-tile is-hq/);
+  assert.match(hqTile, /ws-map-tile-hq-badge/);
+  assert.match(hqTile, />HQ</);
+  assert.match(hqTile, /, Personal HQ/);
+
+  const otherTile = api.tileHTML({ ws: { id: 'ws-other', name: 'Side Project' }, col: 0, row: 0 });
+  assert.doesNotMatch(otherTile, /is-hq/);
+  assert.doesNotMatch(otherTile, /ws-map-tile-hq-badge/);
+  assert.doesNotMatch(otherTile, /, Personal HQ/);
+});
+
+test('tileHTML shows no HQ badge for any workspace when no HQ is designated', () => {
+  const api = loadOriWorkspaceMap();
+  api._setHQWorkspaceIdForTest(null);
+  const html = api.tileHTML({ ws: { id: 'ws-anything', name: 'Untouched' }, col: 0, row: 0 });
+  assert.doesNotMatch(html, /is-hq/);
+  assert.doesNotMatch(html, /ws-map-tile-hq-badge/);
+});
+
 test('selBarHTML offers group, delete, and clear actions for the multi-select set', () => {
   const { selBarHTML } = loadOriWorkspaceMap();
   const html = selBarHTML();

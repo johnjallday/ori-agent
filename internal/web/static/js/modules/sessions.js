@@ -127,7 +127,22 @@ const sessionManager = {
     // Try to restore active session, or prompt to create workspace
     const restored = await this.restoreActiveSession();
     const isWorkspacePage = document.body.classList.contains('home-hub');
-    if (!restored && this.sessions.length === 0 && this.folders.length === 0 && isWorkspacePage) {
+    // Personal HQ owns the true first-run choice on the workspace launcher.
+    // Do not stack the generic create-workspace modal over Ori's mission
+    // briefing; its "Create a project instead" action opens that same modal
+    // deliberately when the user chooses it.
+    const isHQFirstMission =
+      document.getElementById('workspaceHub')?.dataset.hqOnboardingHint === 'unseen';
+    const isHQOnboardingRoute =
+      new URLSearchParams(window.location.search).get('hq_onboarding') === '1';
+    if (
+      !restored &&
+      this.sessions.length === 0 &&
+      this.folders.length === 0 &&
+      isWorkspacePage &&
+      !isHQFirstMission &&
+      !isHQOnboardingRoute
+    ) {
       // Show create workspace modal when no workspaces exist (only on workspaces page)
       this.showAddWorkspaceModal();
     } else if (!restored && this.sessions.length > 0) {
