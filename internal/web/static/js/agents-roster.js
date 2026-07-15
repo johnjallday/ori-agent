@@ -40,6 +40,13 @@
     allWorkspaces: null,
     creating: false,
     providers: null,
+    // Checked agents: the session-only bulk-selection set, kept entirely separate
+    // from `selected` (the focused agent driving the stage). Never persisted to
+    // URL or localStorage; a reload starts empty (PRD FR1/FR12/FR13).
+    checked: new Set(),
+    // Anchor index (into the current sorted+filtered roster) for Shift-click and
+    // Shift+Space contiguous range selection (PRD FR10).
+    rangeAnchor: -1,
   };
 
   var els = {};
@@ -71,6 +78,16 @@
       createPanel: document.getElementById('createPanel'),
       createBody: document.getElementById('createBody'),
       createCancel: document.getElementById('createCancel'),
+      selectAll: document.getElementById('rosterSelectAll'),
+      clearSelection: document.getElementById('rosterClearSelection'),
+      bulkBar: document.getElementById('bulkBar'),
+      bulkCount: document.getElementById('bulkCount'),
+      bulkLive: document.getElementById('bulkLive'),
+      bulkAddTags: document.getElementById('bulkAddTags'),
+      bulkRemoveTags: document.getElementById('bulkRemoveTags'),
+      bulkFavorite: document.getElementById('bulkFavorite'),
+      bulkUnfavorite: document.getElementById('bulkUnfavorite'),
+      bulkDelete: document.getElementById('bulkDelete'),
     };
 
     els.search.addEventListener('input', onSearch);
@@ -82,9 +99,13 @@
     });
     els.list.addEventListener('click', onListClick);
     els.list.addEventListener('keydown', onListKeydown);
+    els.list.addEventListener('change', onListChange);
     els.newAgentBtn.addEventListener('click', openCreate);
     els.createCancel.addEventListener('click', closeCreate);
     els.stageDelete.addEventListener('click', onDeleteClick);
+
+    els.selectAll.addEventListener('click', selectAllVisible);
+    els.clearSelection.addEventListener('click', function () { clearSelection(true); });
 
     var tabs = document.querySelectorAll('.stage__tab');
     tabs.forEach(function (tab) {
@@ -138,6 +159,7 @@
         state.agents = agents;
         state.byName = {};
         agents.forEach(function (a) { state.byName[a.name] = a; });
+        pruneChecked();
         applyFilterSort();
         restoreSelection();
       })
@@ -145,6 +167,15 @@
         els.count.textContent = 'Could not load agents.';
         console.error('[roster] load failed', err);
       });
+  }
+
+  // Drop checked names that no longer exist in the roster (e.g. after a reload or
+  // a bulk delete) so counts and the action bar never reference missing agents.
+  function pruneChecked() {
+    if (state.checked.size === 0) return;
+    var stale = [];
+    state.checked.forEach(function (name) { if (!state.byName[name]) stale.push(name); });
+    stale.forEach(function (name) { state.checked.delete(name); });
   }
 
   function fetchDetail(name, force) {
@@ -193,6 +224,7 @@
     if (shown === 0) {
       els.empty.hidden = false;
       els.count.textContent = total === 0 ? 'No agents yet.' : '0 of ' + total + ' agents';
+      updateBulkBar();
       return;
     }
     els.empty.hidden = true;
@@ -204,6 +236,7 @@
     });
     els.list.appendChild(frag);
     highlightSelected();
+    updateBulkBar();
   }
 
   // At-a-glance status summary over ALL agents (not the filtered view). Mirrors
@@ -240,10 +273,8 @@
   function buildCard(agent, idx) {
     var li = document.createElement('li');
     li.className = 'roster-card' + (isPermanent(agent) ? ' is-permanent' : '');
-    li.setAttribute('role', 'option');
-    li.id = 'roster-opt-' + idx;
     li.dataset.name = agent.name;
-    li.setAttribute('aria-selected', 'false');
+    li.dataset.index = idx;
 
     var status = healthKind(agent);
     var metaBits = [];
@@ -252,32 +283,46 @@
     metaBits.push(wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's'));
 
     var permanent = isPermanent(agent);
+    var isChecked = state.checked.has(agent.name);
 
     // Concise spoken label so screen readers don't read the raw dot markup.
     var wcLabel = wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
-    li.setAttribute('aria-label', agent.name + (permanent ? ', built-in' : '') + ', ' + status + ', ' + wcLabel);
+    var openLabel = agent.name + (permanent ? ', built-in' : '') + ', ' + status + ', ' + wcLabel;
 
     var badge = permanent
       ? '<span class="roster-card__badge" title="Built-in agent — always available and cannot be deleted">Built-in</span>'
       : '';
+
+    // A labeled checkbox and a separate open/focus button are siblings — never
+    // nested — so the checkbox is not a child of an interactive element and the
+    // two actions stay independent (PRD FR2/FR3/FR4).
     li.innerHTML =
+      '<label class="roster-card__checkwrap">' +
+      '<span class="visually-hidden">Select ' + esc(agent.name) + '</span>' +
+      '<input type="checkbox" class="roster-card__check" data-check="' + esc(agent.name) + '"' + (isChecked ? ' checked' : '') + '>' +
+      '</label>' +
+      '<button type="button" class="roster-card__open" data-open="' + esc(agent.name) + '" aria-label="' + esc(openLabel) + '">' +
       avatarMarkup(agent, 'roster-card__avatar') +
-      '<div class="roster-card__body">' +
-      '<div class="roster-card__namerow">' +
+      '<span class="roster-card__body">' +
+      '<span class="roster-card__namerow">' +
       '<span class="roster-card__name">' + esc(agent.name) + '</span>' + badge +
-      '</div>' +
-      '<p class="roster-card__meta">' + esc(metaBits.join(' · ')) + '</p>' +
-      '</div>' +
-      '<span class="roster-card__status is-' + status + '" title="' + esc(status) + '"></span>';
+      '</span>' +
+      '<span class="roster-card__meta">' + esc(metaBits.join(' · ')) + '</span>' +
+      '</span>' +
+      '<span class="roster-card__status is-' + status + '" title="' + esc(status) + '"></span>' +
+      '</button>';
+
+    if (isChecked) li.classList.add('is-checked');
     return li;
   }
 
   function highlightSelected() {
-    var options = els.list.querySelectorAll('.roster-card');
-    options.forEach(function (opt) {
-      var isSel = opt.dataset.name === state.selected;
-      opt.setAttribute('aria-selected', isSel ? 'true' : 'false');
-      if (isSel) els.list.setAttribute('aria-activedescendant', opt.id);
+    var cards = els.list.querySelectorAll('.roster-card');
+    cards.forEach(function (card) {
+      var open = card.querySelector('.roster-card__open');
+      var isSel = card.dataset.name === state.selected;
+      card.classList.toggle('is-focused', isSel);
+      if (open) open.setAttribute('aria-current', isSel ? 'true' : 'false');
     });
   }
 
@@ -856,6 +901,7 @@
         state.byName = {};
         agents.forEach(function (a) { state.byName[a.name] = a; });
         state.detailCache = {};
+        pruneChecked();
         applyFilterSort();
         if (name && state.byName[name]) selectAgent(name, { push: true });
         else if (state.filtered[0]) selectAgent(state.filtered[0].name, { push: false });
@@ -1037,27 +1083,171 @@
 
   /* ---- roster interaction -------------------------------------------------- */
 
+  // Clicking a card's open button focuses that agent (drives the stage) without
+  // touching its checkbox. The checkbox is handled by onListChange so a plain
+  // click there only changes bulk-selection state (PRD FR3/FR4).
   function onListClick(e) {
-    var card = e.target.closest('.roster-card');
-    if (card && card.dataset.name) selectAgent(card.dataset.name);
+    var open = e.target.closest('.roster-card__open');
+    if (open && open.dataset.open) { selectAgent(open.dataset.open); return; }
+
+    // Shift-click on (or near) a checkbox extends a contiguous range from the
+    // anchor. The native toggle still fires via onListChange; here we only widen
+    // the range when Shift is held.
+    var check = e.target.closest('.roster-card__check');
+    if (check && e.shiftKey) {
+      e.preventDefault();
+      var card = check.closest('.roster-card');
+      var idx = card ? Number(card.dataset.index) : -1;
+      if (idx >= 0) { rangeSelectTo(idx); }
+    }
+  }
+
+  function onListChange(e) {
+    var check = e.target.closest('.roster-card__check');
+    if (!check) return;
+    var name = check.dataset.check;
+    var card = check.closest('.roster-card');
+    var idx = card ? Number(card.dataset.index) : -1;
+    setChecked(name, check.checked);
+    state.rangeAnchor = idx;
+    if (card) card.classList.toggle('is-checked', check.checked);
+    updateBulkBar();
   }
 
   function onListKeydown(e) {
+    // Roving focus over the open buttons; Space toggles the row's checkbox
+    // without moving focus (PRD FR83). Shift+Space extends a range from the
+    // anchor — the documented keyboard equivalent of Shift-click (PRD FR10).
+    var open = e.target.closest('.roster-card__open');
     var n = state.filtered.length;
     if (n === 0) return;
-    var idx = state.focusIndex < 0 ? 0 : state.focusIndex;
-    if (e.key === 'ArrowDown') { e.preventDefault(); selectByIndex(Math.min(idx + 1, n - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); selectByIndex(Math.max(idx - 1, 0)); }
-    else if (e.key === 'Home') { e.preventDefault(); selectByIndex(0); }
-    else if (e.key === 'End') { e.preventDefault(); selectByIndex(n - 1); }
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+      if (!open) return;
+      e.preventDefault();
+      var card = open.closest('.roster-card');
+      var idx = card ? Number(card.dataset.index) : 0;
+      var next = idx;
+      if (e.key === 'ArrowDown') next = Math.min(idx + 1, n - 1);
+      else if (e.key === 'ArrowUp') next = Math.max(idx - 1, 0);
+      else if (e.key === 'Home') next = 0;
+      else next = n - 1;
+      focusRow(next);
+      return;
+    }
+
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      if (!open) return;
+      e.preventDefault();
+      var c = open.closest('.roster-card');
+      var i = c ? Number(c.dataset.index) : -1;
+      if (i < 0) return;
+      if (e.shiftKey) { rangeSelectTo(i); }
+      else {
+        var name = c.dataset.name;
+        var nowChecked = !state.checked.has(name);
+        setChecked(name, nowChecked);
+        state.rangeAnchor = i;
+        var box = c.querySelector('.roster-card__check');
+        if (box) box.checked = nowChecked;
+        c.classList.toggle('is-checked', nowChecked);
+        updateBulkBar();
+      }
+    }
   }
 
-  function selectByIndex(i) {
+  // Move keyboard focus to the open button of the row at filtered index i.
+  function focusRow(i) {
     var agent = state.filtered[i];
     if (!agent) return;
-    selectAgent(agent.name);
-    var opt = els.list.querySelector('.roster-card[data-name="' + cssEscape(agent.name) + '"]');
-    if (opt && opt.scrollIntoView) opt.scrollIntoView({ block: 'nearest' });
+    var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(agent.name) + '"]');
+    if (!card) return;
+    var open = card.querySelector('.roster-card__open');
+    if (open) open.focus();
+    if (card.scrollIntoView) card.scrollIntoView({ block: 'nearest' });
+  }
+
+  /* ---- bulk selection ------------------------------------------------------ */
+
+  function setChecked(name, on) {
+    if (!name) return;
+    if (on) state.checked.add(name);
+    else state.checked.delete(name);
+  }
+
+  // Check every agent in the current filtered result set — and only those, never
+  // agents hidden by the active filters (PRD FR7).
+  function selectAllVisible() {
+    state.filtered.forEach(function (a) { state.checked.add(a.name); });
+    reflectCheckedInDom();
+    updateBulkBar();
+    announce(state.checked.size + ' agent' + (state.checked.size === 1 ? '' : 's') + ' selected.');
+  }
+
+  function clearSelection(focusControl) {
+    state.checked.clear();
+    state.rangeAnchor = -1;
+    reflectCheckedInDom();
+    updateBulkBar();
+    announce('Selection cleared.');
+    if (focusControl && els.selectAll) els.selectAll.focus();
+  }
+
+  // Select the contiguous range between the anchor and index i in the current
+  // sorted+filtered order, adding every row in between to the checked set.
+  function rangeSelectTo(i) {
+    var anchor = state.rangeAnchor;
+    if (anchor < 0 || anchor >= state.filtered.length) anchor = i;
+    var lo = Math.min(anchor, i);
+    var hi = Math.max(anchor, i);
+    for (var k = lo; k <= hi; k++) {
+      var a = state.filtered[k];
+      if (a) state.checked.add(a.name);
+    }
+    state.rangeAnchor = i;
+    reflectCheckedInDom();
+    updateBulkBar();
+  }
+
+  // Sync checkbox + card classes to the checked set without a full re-render.
+  function reflectCheckedInDom() {
+    els.list.querySelectorAll('.roster-card').forEach(function (card) {
+      var on = state.checked.has(card.dataset.name);
+      var box = card.querySelector('.roster-card__check');
+      if (box) box.checked = on;
+      card.classList.toggle('is-checked', on);
+    });
+  }
+
+  // Count checked agents that are not in the current filtered result set, so the
+  // action bar can disclose "N selected · M hidden by filters" (PRD FR9).
+  function hiddenCheckedCount() {
+    if (state.checked.size === 0) return 0;
+    var visible = {};
+    state.filtered.forEach(function (a) { visible[a.name] = true; });
+    var hidden = 0;
+    state.checked.forEach(function (name) { if (!visible[name]) hidden++; });
+    return hidden;
+  }
+
+  function updateBulkBar() {
+    var total = state.checked.size;
+    if (els.clearSelection) els.clearSelection.hidden = total === 0;
+    if (!els.bulkBar) return;
+    if (total === 0) {
+      els.bulkBar.hidden = true;
+      els.bulkCount.textContent = '';
+      return;
+    }
+    els.bulkBar.hidden = false;
+    var hidden = hiddenCheckedCount();
+    var label = total + ' selected';
+    if (hidden > 0) label += ' · ' + hidden + ' hidden by filters';
+    els.bulkCount.textContent = label;
+  }
+
+  function announce(msg) {
+    if (els.bulkLive) els.bulkLive.textContent = msg;
   }
 
   function onSearch() { state.query = els.search.value || ''; applyFilterSort(); }

@@ -46,9 +46,27 @@
             </label>
           </div>
 
-          <ul class="roster-list" id="rosterList" role="listbox" aria-label="Agents" tabindex="0" aria-activedescendant="">
+          <div class="roster-selectbar" role="group" aria-label="Bulk selection">
+            <button type="button" id="rosterSelectAll" class="roster-linkbtn">Select all visible</button>
+            <button type="button" id="rosterClearSelection" class="roster-linkbtn" hidden>Clear selection</button>
+          </div>
+
+          <ul class="roster-list" id="rosterList" role="list" aria-label="Agents">
             <!-- roster cards injected here -->
           </ul>
+
+          <!-- Bulk action bar: revealed when at least one agent is checked. -->
+          <div class="bulk-bar" id="bulkBar" role="region" aria-label="Bulk actions" hidden>
+            <div class="bulk-bar__count" id="bulkCount" aria-live="polite"></div>
+            <div class="bulk-bar__actions">
+              <button type="button" class="bulk-bar__btn" id="bulkAddTags">Add tags</button>
+              <button type="button" class="bulk-bar__btn" id="bulkRemoveTags">Remove tags</button>
+              <button type="button" class="bulk-bar__btn" id="bulkFavorite">Favorite</button>
+              <button type="button" class="bulk-bar__btn" id="bulkUnfavorite">Unfavorite</button>
+              <button type="button" class="bulk-bar__btn bulk-bar__btn--danger" id="bulkDelete">Delete</button>
+            </div>
+          </div>
+          <p class="visually-hidden" id="bulkLive" role="status" aria-live="polite"></p>
 
           <div class="roster-empty" id="rosterEmpty" hidden>
             <p>No agents match your search.</p>

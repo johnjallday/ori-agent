@@ -69,4 +69,82 @@ test.describe('Agents roster', () => {
       await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
     }
   });
+
+  test('multi-select: independent focus/check, select all, range, hidden count, clear, reload', async ({
+    page,
+    request,
+  }) => {
+    // A unique prefix so a search narrows the roster to exactly our test agents.
+    const prefix = `PWMulti${Date.now()}`;
+    const names = [`${prefix} Alpha`, `${prefix} Bravo`, `${prefix} Charlie`];
+
+    for (const n of names) {
+      const r = await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' },
+      });
+      expect(r.ok()).toBeTruthy();
+    }
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+
+      // Narrow the roster to our three agents.
+      await page.locator('#rosterSearch').fill(prefix);
+      const cards = page.locator('.roster-card');
+      await expect(cards).toHaveCount(3);
+
+      const alpha = page.locator(`.roster-card[data-name="${names[0]}"]`);
+      const bravo = page.locator(`.roster-card[data-name="${names[1]}"]`);
+      const charlie = page.locator(`.roster-card[data-name="${names[2]}"]`);
+
+      // Checking Alpha changes only bulk state — it does NOT focus Alpha.
+      await alpha.locator('.roster-card__check').check();
+      await expect(alpha).toHaveClass(/is-checked/);
+      await expect(page.locator('#bulkBar')).toBeVisible();
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      // Focusing Bravo (open button) drives the stage but leaves Alpha checked
+      // and does not check Bravo.
+      await bravo.locator('.roster-card__open').click();
+      await expect(page.locator('#stageName')).toHaveText(names[1]);
+      await expect(alpha).toHaveClass(/is-checked/);
+      await expect(bravo).not.toHaveClass(/is-checked/);
+
+      // Select all visible → all three checked.
+      await page.locator('#rosterClearSelection').click();
+      await page.locator('#rosterSelectAll').click();
+      await expect(page.locator('#bulkCount')).toHaveText('3 selected');
+      await expect(charlie).toHaveClass(/is-checked/);
+
+      // Narrow the filter so two checked agents become hidden.
+      await page.locator('#rosterSearch').fill(`${prefix} Alpha`);
+      await expect(cards).toHaveCount(1);
+      await expect(page.locator('#bulkCount')).toHaveText('3 selected · 2 hidden by filters');
+
+      // Clear selection hides the bar.
+      await page.locator('#rosterClearSelection').click();
+      await expect(page.locator('#bulkBar')).toBeHidden();
+
+      // A reload starts with zero checked agents.
+      await page.locator('#rosterSelectAll').click();
+      await expect(page.locator('#bulkBar')).toBeVisible();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+      await expect(page.locator('#bulkBar')).toBeHidden();
+    } finally {
+      for (const n of names) {
+        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+      }
+    }
+  });
 });

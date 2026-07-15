@@ -148,22 +148,68 @@
   outline-offset: 2px;
 }
 
-/* Roster card */
+/* Roster card: a checkbox (bulk selection) + an open button (focus/stage), as
+   sibling controls so the two selection concepts never nest or collide. */
 .roster-card {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 11px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px 10px 6px 8px;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 12px;
   background: var(--bg-primary, #fff);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.05s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .roster-card:hover {
   border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+}
+
+/* Checkbox column */
+.roster-card__checkwrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  margin: 0;
+  cursor: pointer;
+  align-self: stretch;
+}
+
+.roster-card__check {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-color, #4f46e5);
+}
+
+.roster-card__check:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+/* Open/focus button: a full-width, unstyled button that carries the card's
+   avatar + body + status. Button reset so it reads as a card, not a control. */
+.roster-card__open {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.roster-card__open:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
 }
 
 /* Built-in "permanent residency" agents (CLI + Ori): a warm amber tint sets
@@ -183,10 +229,26 @@
   background: color-mix(in srgb, #f59e0b 20%, var(--bg-primary, #1f2430));
 }
 
-.roster-card[aria-selected="true"] {
+/* Focused agent (drives the stage): a left edge-bar + subtle tint. Distinct from
+   the checked cue below so a card can show focused, checked, both, or neither
+   without relying on color alone (PRD FR5). */
+.roster-card.is-focused {
   border-color: var(--primary-color, #4f46e5);
   background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, var(--bg-primary, #fff));
   box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5);
+}
+
+/* Checked agent (bulk target): a ring around the whole card, driven by the
+   checkbox, independent of focus. */
+.roster-card.is-checked {
+  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 70%, var(--border-color, #e5e7eb));
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 5%, var(--bg-primary, #fff));
+}
+
+/* Focused AND checked: combine the edge-bar (focus) with the checked ring. */
+.roster-card.is-focused.is-checked {
+  box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5),
+    0 0 0 1px color-mix(in srgb, var(--primary-color, #4f46e5) 55%, transparent);
 }
 
 .roster-card__avatar {
@@ -204,6 +266,8 @@
 
 .roster-card__body {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .roster-card__namerow {
@@ -278,6 +342,94 @@
   cursor: pointer;
   font-size: 13px;
   text-decoration: underline;
+}
+
+.roster-linkbtn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---- Bulk selection controls + action bar --------------------------------- */
+
+.roster-selectbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 4px;
+  min-height: 20px;
+}
+
+/* Contextual bulk action bar, revealed when >=1 agent is checked. Sticks to the
+   bottom of the roster rail so it stays reachable without covering the stage
+   (PRD FR16/FR21). */
+.bulk-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  margin: 8px 4px 0;
+  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 6%, var(--bg-primary, #fff));
+  box-shadow: 0 -4px 12px color-mix(in srgb, #000 8%, transparent);
+}
+
+.bulk-bar__count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bulk-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bulk-bar__btn {
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.bulk-bar__btn:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.bulk-bar__btn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.bulk-bar__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bulk-bar__btn--danger {
+  border-color: color-mix(in srgb, #ef4444 55%, var(--border-color, #d1d5db));
+  color: #b91c1c;
+}
+
+.bulk-bar__btn--danger:hover {
+  border-color: #ef4444;
+  background: color-mix(in srgb, #ef4444 8%, var(--bg-primary, #fff));
+}
+
+[data-bs-theme="dark"] .bulk-bar__btn--danger {
+  color: #f87171;
 }
 
 /* ---- Stage ---------------------------------------------------------------- */
