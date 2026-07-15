@@ -11,7 +11,9 @@ import {
 } from './home-daily-brief.js';
 
 test('parseContent decodes a revision content_json, degrading to {} on garbage', () => {
-  assert.deepEqual(parseContent({ content_json: '{"opening_summary":"hi"}' }), { opening_summary: 'hi' });
+  assert.deepEqual(parseContent({ content_json: '{"opening_summary":"hi"}' }), {
+    opening_summary: 'hi'
+  });
   assert.deepEqual(parseContent({ content_json: 'not json' }), {});
   assert.deepEqual(parseContent({ content_json: '' }), {});
   assert.deepEqual(parseContent(null), {});
@@ -19,10 +21,22 @@ test('parseContent decodes a revision content_json, degrading to {} on garbage',
 });
 
 test('hrefForRef routes tasks to their deep-link page and everything else to the owning workspace', () => {
-  assert.equal(hrefForRef({ workspace_id: 'ws-1', entity_type: 'task', entity_id: 't-1' }), '/workspaces/ws-1/task/t-1');
-  assert.equal(hrefForRef({ workspace_id: 'ws-1', entity_type: 'session', entity_id: 's-1' }), '/workspaces/ws-1');
-  assert.equal(hrefForRef({ workspace_id: 'ws-1', entity_type: 'scheduled_task', entity_id: 'sc-1' }), '/workspaces/ws-1');
-  assert.equal(hrefForRef({ workspace_id: 'ws 1', entity_type: 'task', entity_id: 't/1' }), '/workspaces/ws%201/task/t%2F1');
+  assert.equal(
+    hrefForRef({ workspace_id: 'ws-1', entity_type: 'task', entity_id: 't-1' }),
+    '/workspaces/ws-1/task/t-1'
+  );
+  assert.equal(
+    hrefForRef({ workspace_id: 'ws-1', entity_type: 'session', entity_id: 's-1' }),
+    '/workspaces/ws-1'
+  );
+  assert.equal(
+    hrefForRef({ workspace_id: 'ws-1', entity_type: 'scheduled_task', entity_id: 'sc-1' }),
+    '/workspaces/ws-1'
+  );
+  assert.equal(
+    hrefForRef({ workspace_id: 'ws 1', entity_type: 'task', entity_id: 't/1' }),
+    '/workspaces/ws%201/task/t%2F1'
+  );
 });
 
 test('hrefForRef falls back to # for a ref with no workspace', () => {
@@ -103,7 +117,12 @@ test('renderContent renders a quiet-day confirmation instead of empty section he
 test('renderContent renders Needs Attention items with a real link built from the stable ref', () => {
   const html = renderContent({
     needs_attention: [
-      { ref: { workspace_id: 'ws-1', entity_type: 'task', entity_id: 't-1' }, title: 'Approve deploy', workspace_name: 'Ops', reason: 'Waiting on your approval.' }
+      {
+        ref: { workspace_id: 'ws-1', entity_type: 'task', entity_id: 't-1' },
+        title: 'Approve deploy',
+        workspace_name: 'Ops',
+        reason: 'Waiting on your approval.'
+      }
     ]
   });
   assert.match(html, /href="\/workspaces\/ws-1\/task\/t-1"/);
@@ -114,14 +133,24 @@ test('renderContent renders Needs Attention items with a real link built from th
 test('renderContent visually distinguishes suggestion text (why_suggested\\/next_step) from facts', () => {
   const html = renderContent({
     todays_plan: [
-      { ref: { workspace_id: 'ws-1' }, title: 'Ship the release', workspace_name: 'Ops', reason: 'In progress', why_suggested: 'Blocks two dependents' }
+      {
+        ref: { workspace_id: 'ws-1' },
+        title: 'Ship the release',
+        workspace_name: 'Ops',
+        reason: 'In progress',
+        why_suggested: 'Blocks two dependents'
+      }
     ]
   });
   assert.match(html, /is-suggestion">Blocks two dependents/);
 });
 
 test('renderContent surfaces data gaps distinctly and omits sections with no items', () => {
-  const html = renderContent({ opening_summary: 'Hi', data_gaps: ['workspace-x unavailable'], needs_attention: [{ ref: {}, title: 'A', workspace_name: 'W', reason: 'R' }] });
+  const html = renderContent({
+    opening_summary: 'Hi',
+    data_gaps: ['workspace-x unavailable'],
+    needs_attention: [{ ref: {}, title: 'A', workspace_name: 'W', reason: 'R' }]
+  });
   assert.match(html, /Data gaps: workspace-x unavailable/);
   assert.match(html, /Needs Attention/);
   assert.doesNotMatch(html, /Since Last Brief/);
@@ -129,7 +158,13 @@ test('renderContent surfaces data gaps distinctly and omits sections with no ite
 
 test('renderContent renders suggested actions as real links carrying their ref, not the label alone', () => {
   const html = renderContent({
-    suggested_actions: [{ ref: { workspace_id: 'ws-2', entity_type: 'task', entity_id: 't-9' }, label: 'Retry the failed run', action_type: 'retry' }]
+    suggested_actions: [
+      {
+        ref: { workspace_id: 'ws-2', entity_type: 'task', entity_id: 't-9' },
+        label: 'Retry the failed run',
+        action_type: 'retry'
+      }
+    ]
   });
   assert.match(html, /href="\/workspaces\/ws-2\/task\/t-9"/);
   assert.match(html, /Retry the failed run/);
@@ -138,7 +173,9 @@ test('renderContent renders suggested actions as real links carrying their ref, 
 
 test('renderContent escapes untrusted title/reason text', () => {
   const html = renderContent({
-    needs_attention: [{ ref: {}, title: '<script>alert(1)</script>', workspace_name: 'W', reason: 'x' }]
+    needs_attention: [
+      { ref: {}, title: '<script>alert(1)</script>', workspace_name: 'W', reason: 'x' }
+    ]
   });
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /&lt;script&gt;/);

@@ -212,13 +212,21 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 // the hq_onboarding_state column with a blanket 'unseen' SQL DEFAULT applied
 // retroactively to every pre-existing profile row, so an established user
 // upgrading from a version that predates this feature reads exactly the
-// same "unseen" state as a genuinely brand-new profile. Cross-check two
-// independent, already-durable signals of prior app usage — the separate
-// app-level onboarding flow's completion flag, and workspace history — so
-// an upgraded profile (including one with zero workspaces right now, e.g.
-// after deleting them all) receives only the lightweight resume invitation
-// rather than the full guided construction takeover (PRD FR19/FR116-118,
-// task 8.1).
+// same "unseen" state as a genuinely brand-new profile. Cross-check
+// workspace history — an established user (including one with zero
+// workspaces right now, e.g. after deleting them all, as long as they ever
+// had one) receives only the lightweight resume invitation rather than the
+// full guided construction takeover (PRD FR19/FR116-118, task 8.1).
+//
+// Deliberately NOT cross-checked against the separate app-level onboarding
+// wizard's completion flag, despite that being a tempting second signal: it
+// completes on a genuinely brand-new profile's very first session too, so
+// using it here would wrongly suppress the HQ takeover the moment a new
+// user dismisses that unrelated wizard and reloads, before ever reaching HQ
+// setup — trading a common regression for a narrower edge case (a
+// long-established user who has deleted every workspace and never engaged
+// with HQ) that would need a dedicated "profile first seen" timestamp,
+// independent of any onboarding flow's completion, to close properly.
 func (s *Server) isBrandNewProfile(ctx context.Context) bool {
 	if s.Storage == nil || s.Storage.PersonalHQ == nil {
 		return false
@@ -229,9 +237,6 @@ func (s *Server) isBrandNewProfile(ctx context.Context) bool {
 		return false
 	}
 	if status.OnboardingState != userprofile.HQOnboardingUnseen {
-		return false
-	}
-	if s.Storage.OnboardingMgr != nil && s.Storage.OnboardingMgr.IsOnboardingComplete() {
 		return false
 	}
 	if s.Storage.WorkspaceStore != nil {

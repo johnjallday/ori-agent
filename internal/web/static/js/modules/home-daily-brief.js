@@ -43,7 +43,9 @@ export function hrefForRef(ref) {
 // server relies on.
 export function localDateInZone(timezone, date) {
   try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone || 'UTC' }).format(date || new Date());
+    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone || 'UTC' }).format(
+      date || new Date()
+    );
   } catch (_) {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(date || new Date());
   }
@@ -54,7 +56,11 @@ function formatClock(iso, timezone) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   try {
-    return d.toLocaleString(undefined, { timeZone: timezone || 'UTC', hour: 'numeric', minute: '2-digit' });
+    return d.toLocaleString(undefined, {
+      timeZone: timezone || 'UTC',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
   } catch (_) {
     return d.toLocaleString();
   }
@@ -95,11 +101,19 @@ export function computeBanner(revision, latestClaim) {
   }
   if (!revision) return null;
   if (revision.status === 'partial') {
-    return { kind: 'partial', text: 'Some sources were unavailable — this brief may be incomplete.', showRetry: false };
+    return {
+      kind: 'partial',
+      text: 'Some sources were unavailable — this brief may be incomplete.',
+      showRetry: false
+    };
   }
   const content = parseContent(revision);
   if (content.degraded) {
-    return { kind: 'degraded', text: 'AI synthesis was unavailable — showing a simplified, fact-only brief.', showRetry: false };
+    return {
+      kind: 'degraded',
+      text: 'AI synthesis was unavailable — showing a simplified, fact-only brief.',
+      showRetry: false
+    };
   }
   return null;
 }
@@ -108,17 +122,27 @@ export function computeBanner(revision, latestClaim) {
 // opening summary already says so; the body should not also render five
 // empty section headers (PRD FR83).
 export function isQuietDay(content) {
-  return !(content.needs_attention && content.needs_attention.length) &&
+  return (
+    !(content.needs_attention && content.needs_attention.length) &&
     !(content.since_last_brief && content.since_last_brief.length) &&
     !(content.todays_plan && content.todays_plan.length) &&
     !(content.resume && content.resume.length) &&
-    !(content.suggested_actions && content.suggested_actions.length);
+    !(content.suggested_actions && content.suggested_actions.length)
+  );
 }
 
 function escapeHtml(str) {
-  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[c]));
+  return String(str == null ? '' : str).replace(
+    /[&<>"']/g,
+    c =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[c]
+  );
 }
 
 function listSection(title, items, renderItem) {
@@ -140,51 +164,83 @@ export function renderContent(content) {
     parts.push(`<p class="home-daily-brief-opening">${escapeHtml(content.opening_summary)}</p>`);
   }
   if (content.data_gaps && content.data_gaps.length) {
-    parts.push(`<p class="home-daily-brief-gaps">Data gaps: ${escapeHtml(content.data_gaps.join('; '))}</p>`);
+    parts.push(
+      `<p class="home-daily-brief-gaps">Data gaps: ${escapeHtml(content.data_gaps.join('; '))}</p>`
+    );
   }
   if (isQuietDay(content)) {
-    parts.push('<p class="home-daily-brief-quiet">Nothing else needs your attention right now.</p>');
+    parts.push(
+      '<p class="home-daily-brief-quiet">Nothing else needs your attention right now.</p>'
+    );
     return parts.join('');
   }
 
-  parts.push(listSection('Needs Attention', content.needs_attention, (item) => `
+  parts.push(
+    listSection(
+      'Needs Attention',
+      content.needs_attention,
+      item => `
       <li class="home-daily-brief-item">
         <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(item.title)}</a>
         <span class="home-daily-brief-item-ws">${escapeHtml(item.workspace_name)}</span>
         <p class="home-daily-brief-item-fact">${escapeHtml(item.reason)}</p>
-      </li>`));
+      </li>`
+    )
+  );
 
-  parts.push(listSection('Since Last Brief', content.since_last_brief, (item) => `
+  parts.push(
+    listSection(
+      'Since Last Brief',
+      content.since_last_brief,
+      item => `
       <li class="home-daily-brief-item">
         <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(item.title)}</a>
         <span class="home-daily-brief-item-ws">${escapeHtml(item.workspace_name)}</span>
         ${item.summary ? `<p class="home-daily-brief-item-fact is-suggestion">${escapeHtml(item.summary)}</p>` : ''}
-      </li>`));
+      </li>`
+    )
+  );
 
-  parts.push(listSection("Today's Plan", content.todays_plan, (item) => `
+  parts.push(
+    listSection(
+      "Today's Plan",
+      content.todays_plan,
+      item => `
       <li class="home-daily-brief-item">
         <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(item.title)}</a>
         <span class="home-daily-brief-item-ws">${escapeHtml(item.workspace_name)}</span>
         <p class="home-daily-brief-item-fact">${escapeHtml(item.reason)}</p>
         ${item.why_suggested ? `<p class="home-daily-brief-item-why is-suggestion">${escapeHtml(item.why_suggested)}</p>` : ''}
-      </li>`));
+      </li>`
+    )
+  );
 
-  parts.push(listSection('Resume', content.resume, (item) => `
+  parts.push(
+    listSection(
+      'Resume',
+      content.resume,
+      item => `
       <li class="home-daily-brief-item">
         <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(item.title)}</a>
         <span class="home-daily-brief-item-ws">${escapeHtml(item.workspace_name)}</span>
         ${item.last_known_state ? `<p class="home-daily-brief-item-fact">${escapeHtml(item.last_known_state)}</p>` : ''}
         ${item.next_step ? `<p class="home-daily-brief-item-why is-suggestion">${escapeHtml(item.next_step)}</p>` : ''}
-      </li>`));
+      </li>`
+    )
+  );
 
   if (content.suggested_actions && content.suggested_actions.length) {
     parts.push(`
         <section class="home-daily-brief-section home-daily-brief-actions-section">
           <h3 class="home-daily-brief-section-title">Suggested Next Actions</h3>
           <div class="home-daily-brief-action-row">
-            ${content.suggested_actions.map((a) => `
+            ${content.suggested_actions
+              .map(
+                a => `
               <a href="${hrefForRef(a.ref)}" class="modern-btn modern-btn-secondary modern-btn-sm is-suggestion" data-action-type="${escapeHtml(a.action_type)}">${escapeHtml(a.label)}</a>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         </section>`);
   }
@@ -212,13 +268,16 @@ export function renderContent(content) {
   let polling = false;
 
   async function fetchJSON(url, options) {
-    const res = await fetch(url, Object.assign({ headers: { Accept: 'application/json' } }, options || {}));
+    const res = await fetch(
+      url,
+      Object.assign({ headers: { Accept: 'application/json' } }, options || {})
+    );
     if (!res.ok) throw new Error(`${url} -> ${res.status}`);
     return res.json();
   }
 
   function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   function renderBanner(banner) {
@@ -230,8 +289,11 @@ export function renderContent(content) {
     }
     bannerEl.hidden = false;
     bannerEl.className = `home-daily-brief-banner is-${banner.kind}`;
-    bannerEl.innerHTML = `<span>${escapeHtml(banner.text)}</span>` +
-      (banner.showRetry ? '<button type="button" class="modern-btn modern-btn-sm" data-role="retry">Retry</button>' : '');
+    bannerEl.innerHTML =
+      `<span>${escapeHtml(banner.text)}</span>` +
+      (banner.showRetry
+        ? '<button type="button" class="modern-btn modern-btn-sm" data-role="retry">Retry</button>'
+        : '');
     if (banner.showRetry) {
       const retryBtn = bannerEl.querySelector('[data-role="retry"]');
       if (retryBtn) retryBtn.addEventListener('click', () => runRefresh());
@@ -244,16 +306,22 @@ export function renderContent(content) {
       if (metaEl) metaEl.textContent = '';
       renderBanner(computeBanner(null, latestClaim));
       if (bodyEl) {
-        bodyEl.innerHTML = (latestClaim && latestClaim.status === 'failed')
-          ? '<div class="home-daily-brief-placeholder">Your Daily Brief could not be generated.</div>'
-          : '<div class="home-daily-brief-placeholder">Generating your Daily Brief…</div>';
+        bodyEl.innerHTML =
+          latestClaim && latestClaim.status === 'failed'
+            ? '<div class="home-daily-brief-placeholder">Your Daily Brief could not be generated.</div>'
+            : '<div class="home-daily-brief-placeholder">Generating your Daily Brief…</div>';
       }
       return;
     }
-    if (titleEl) titleEl.textContent = revision.local_date === localDateInZone((config && config.timezone) || 'UTC') ? 'Today' : revision.local_date;
-    const relativeTimeFn = window.RelativeTime && typeof window.RelativeTime.formatRelativeTime === 'function'
-      ? window.RelativeTime.formatRelativeTime
-      : null;
+    if (titleEl)
+      titleEl.textContent =
+        revision.local_date === localDateInZone((config && config.timezone) || 'UTC')
+          ? 'Today'
+          : revision.local_date;
+    const relativeTimeFn =
+      window.RelativeTime && typeof window.RelativeTime.formatRelativeTime === 'function'
+        ? window.RelativeTime.formatRelativeTime
+        : null;
     if (metaEl) metaEl.textContent = formatMeta(revision, config, relativeTimeFn);
     renderBanner(computeBanner(revision, latestClaim));
     if (bodyEl) bodyEl.innerHTML = renderContent(parseContent(revision));
@@ -324,10 +392,14 @@ export function renderContent(content) {
       if (timeInput) timeInput.value = cfg.schedule_time || '';
       if (scheduleEnabled) scheduleEnabled.checked = !!cfg.schedule_enabled;
       if (notify) notify.checked = !!cfg.notify_on_ready;
-      const days = (cfg.schedule_days || []);
-      document.querySelectorAll('#homeDailyBriefSettingsForm .home-daily-brief-days input[type="checkbox"]').forEach((box) => {
-        box.checked = days.indexOf(box.value) !== -1;
-      });
+      const days = cfg.schedule_days || [];
+      document
+        .querySelectorAll(
+          '#homeDailyBriefSettingsForm .home-daily-brief-days input[type="checkbox"]'
+        )
+        .forEach(box => {
+          box.checked = days.indexOf(box.value) !== -1;
+        });
     } catch (_) {
       // settings form just stays at its defaults
     }
@@ -337,7 +409,9 @@ export function renderContent(content) {
       if (list) {
         const history = historyResp.history || [];
         list.innerHTML = history.length
-          ? history.map((h) => `<li>${escapeHtml(h.local_date)} — ${escapeHtml(h.status)}</li>`).join('')
+          ? history
+              .map(h => `<li>${escapeHtml(h.local_date)} — ${escapeHtml(h.status)}</li>`)
+              .join('')
           : '<li class="home-daily-brief-history-empty">No history yet.</li>';
       }
     } catch (_) {
@@ -348,9 +422,11 @@ export function renderContent(content) {
   function wireSettingsForm() {
     const form = document.getElementById('homeDailyBriefSettingsForm');
     if (!form) return;
-    form.addEventListener('submit', async (evt) => {
+    form.addEventListener('submit', async evt => {
       evt.preventDefault();
-      const days = Array.from(form.querySelectorAll('.home-daily-brief-days input:checked')).map((b) => b.value);
+      const days = Array.from(form.querySelectorAll('.home-daily-brief-days input:checked')).map(
+        b => b.value
+      );
       const body = {
         timezone: document.getElementById('homeDailyBriefTimezone').value.trim(),
         schedule_time: document.getElementById('homeDailyBriefTime').value.trim(),

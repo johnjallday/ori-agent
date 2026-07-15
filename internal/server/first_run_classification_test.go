@@ -70,14 +70,16 @@ func TestIsBrandNewProfile_GenuinelyFreshInstallIsBrandNew(t *testing.T) {
 	}
 }
 
-// TestIsBrandNewProfile_CompletedAppOnboardingIsNotBrandNew covers task 8.1:
-// migration030PersonalHQ backfills hq_onboarding_state='unseen' onto every
-// pre-existing profile row with a blanket SQL DEFAULT, so an established
-// user upgrading from a pre-HQ version reads exactly the same "unseen"
-// state as a brand-new profile. The separate app-level onboarding
-// completion flag (independent of HQ, tracked since long before this
-// feature existed) must be enough to rule out brand-new.
-func TestIsBrandNewProfile_CompletedAppOnboardingIsNotBrandNew(t *testing.T) {
+// TestIsBrandNewProfile_CompletedAppOnboardingAloneDoesNotSuppressBrandNew
+// covers a regression found while writing this feature's Playwright
+// coverage: the separate app-level onboarding wizard ("what should we call
+// each other?") also completes on a genuinely brand-new profile's very
+// first session, before the user has ever seen HQ setup. An earlier version
+// of this fix treated that completion flag as evidence of "established
+// user," which would have wrongly suppressed the HQ guided takeover the
+// moment a brand-new user dismissed the unrelated wizard and reloaded —
+// deliberately NOT the current behavior.
+func TestIsBrandNewProfile_CompletedAppOnboardingAloneDoesNotSuppressBrandNew(t *testing.T) {
 	builder, _ := newFirstRunTestServer(t)
 	if builder.server.Storage.OnboardingMgr == nil {
 		t.Fatal("expected OnboardingMgr to be wired")
@@ -86,31 +88,8 @@ func TestIsBrandNewProfile_CompletedAppOnboardingIsNotBrandNew(t *testing.T) {
 		t.Fatalf("CompleteOnboarding: %v", err)
 	}
 
-	if builder.server.isBrandNewProfile(context.Background()) {
-		t.Fatal("expected an upgraded profile with completed app onboarding to NOT be classified brand-new, even though hq_onboarding_state reads unseen")
-	}
-}
-
-// TestIsBrandNewProfile_ZeroWorkspacesWithCompletedOnboardingIsNotBrandNew
-// covers the PRD's explicit example: "an existing profile with zero
-// workspaces is not automatically treated as brand new" — e.g. a
-// long-time user who deleted every workspace. Workspace count alone is
-// zero, but completed app onboarding still proves prior real usage.
-func TestIsBrandNewProfile_ZeroWorkspacesWithCompletedOnboardingIsNotBrandNew(t *testing.T) {
-	builder, _ := newFirstRunTestServer(t)
-	if err := builder.server.Storage.OnboardingMgr.CompleteOnboarding(); err != nil {
-		t.Fatalf("CompleteOnboarding: %v", err)
-	}
-	ids, err := builder.server.Storage.WorkspaceStore.List()
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(ids) != 0 {
-		t.Fatalf("expected a fresh temp data dir to start with zero workspaces, got %d", len(ids))
-	}
-
-	if builder.server.isBrandNewProfile(context.Background()) {
-		t.Fatal("expected zero current workspaces + completed app onboarding to still NOT be classified brand-new")
+	if !builder.server.isBrandNewProfile(context.Background()) {
+		t.Fatal("expected completing the unrelated app-level wizard alone (no workspaces yet) to NOT suppress the HQ brand-new classification")
 	}
 }
 
