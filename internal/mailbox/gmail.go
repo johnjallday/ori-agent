@@ -114,6 +114,68 @@ func (g *GmailProvider) GetThread(ctx context.Context, account Account, threadID
 	return mapThread(account, full, true), nil
 }
 
+var _ MailSender = (*GmailProvider)(nil)
+
+// SendReply sends a reply through Gmail (Users.Messages.Send). It builds a
+// minimal RFC 5322 message with reply threading headers (In-Reply-To /
+// References) and sets ThreadId so Gmail files it in the source thread. Send
+// requires the gmail.send scope; a read-only account surfaces as ErrExpired /
+// ErrPermissionDenied via classifyGmailError.
+func (g *GmailProvider) SendReply(ctx context.Context, account Account, payload ReplyPayload) (SendResult, error) {
+	recipients := payload.Recipients()
+	if len(recipients) == 0 {
+		return SendResult{}, fmt.Errorf("%w: no recipients", ErrProvider)
+	}
+	svc, err := g.service(ctx, account)
+	if err != nil {
+		return SendResult{}, err
+	}
+
+	raw := buildRFC822(account.EmailAddress, recipients, payload)
+	msg := &gmailapi.Message{
+		Raw:      base64.URLEncoding.EncodeToString([]byte(raw)),
+		ThreadId: strings.TrimSpace(payload.SourceThreadID),
+	}
+	sent, err := svc.Users.Messages.Send("me", msg).Context(ctx).Do()
+	if err != nil {
+		return SendResult{}, classifyGmailError(err)
+	}
+	return SendResult{
+		ProviderMessageID: sent.Id,
+		ThreadID:          sent.ThreadId,
+		SentAt:            time.Now().UTC(),
+	}, nil
+}
+
+// buildRFC822 renders a minimal reply message. Header values are sanitized to a
+// single line to prevent header injection from a crafted subject/recipient.
+func buildRFC822(from string, to []string, payload ReplyPayload) string {
+	var b strings.Builder
+	if from = strings.TrimSpace(from); from != "" {
+		b.WriteString("From: " + headerSafe(from) + "\r\n")
+	}
+	b.WriteString("To: " + headerSafe(strings.Join(to, ", ")) + "\r\n")
+	b.WriteString("Subject: " + headerSafe(payload.Subject) + "\r\n")
+	if id := strings.TrimSpace(payload.InReplyToMessageID); id != "" {
+		b.WriteString("In-Reply-To: " + headerSafe(id) + "\r\n")
+	}
+	if refs := strings.TrimSpace(payload.References); refs != "" {
+		b.WriteString("References: " + headerSafe(refs) + "\r\n")
+	}
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(payload.Body)
+	return b.String()
+}
+
+// headerSafe strips CR/LF from a header value to prevent header injection.
+func headerSafe(v string) string {
+	v = strings.ReplaceAll(v, "\r", " ")
+	v = strings.ReplaceAll(v, "\n", " ")
+	return strings.TrimSpace(v)
+}
+
 // threadMetadata fetches a lightweight metadata projection of a thread.
 func (g *GmailProvider) threadMetadata(ctx context.Context, svc *gmailapi.Service, account Account, threadID string) (Thread, error) {
 	t, err := svc.Users.Threads.Get("me", threadID).

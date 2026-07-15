@@ -159,6 +159,68 @@ func TestGmailDisconnectedResolver(t *testing.T) {
 	}
 }
 
+func TestGmailSendReplyBuildsThreadedMessage(t *testing.T) {
+	var gotRaw string
+	var gotThreadID string
+	g := newTestGmail(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var msg gmailapi.Message
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		gotThreadID = msg.ThreadId
+		if b, err := base64.URLEncoding.DecodeString(msg.Raw); err == nil {
+			gotRaw = string(b)
+		}
+		_ = json.NewEncoder(w).Encode(gmailapi.Message{Id: "sent-1", ThreadId: msg.ThreadId})
+	})
+
+	res, err := g.SendReply(context.Background(), testAccount(), ReplyPayload{
+		AccountID: "acct-1", SourceThreadID: "t1", InReplyToMessageID: "<msg-9@x>", References: "<msg-9@x>",
+		To: []string{"dana@partner.com"}, Subject: "Re: Need your review", Body: "Looks good to me.",
+	})
+	if err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+	if res.ProviderMessageID != "sent-1" || res.ThreadID != "t1" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if gotThreadID != "t1" {
+		t.Fatalf("send must set the source ThreadId, got %q", gotThreadID)
+	}
+	for _, want := range []string{"To: dana@partner.com", "Subject: Re: Need your review", "In-Reply-To: <msg-9@x>", "References: <msg-9@x>", "Looks good to me."} {
+		if !strings.Contains(gotRaw, want) {
+			t.Errorf("sent message missing %q:\n%s", want, gotRaw)
+		}
+	}
+}
+
+func TestGmailSendRejectsHeaderInjection(t *testing.T) {
+	var gotRaw string
+	g := newTestGmail(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var msg gmailapi.Message
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if b, err := base64.URLEncoding.DecodeString(msg.Raw); err == nil {
+			gotRaw = string(b)
+		}
+		_ = json.NewEncoder(w).Encode(gmailapi.Message{Id: "sent-1"})
+	})
+	// A subject containing CRLF must not inject a Bcc header.
+	_, err := g.SendReply(context.Background(), testAccount(), ReplyPayload{
+		AccountID: "acct-1", To: []string{"dana@partner.com"},
+		Subject: "Hi\r\nBcc: victim@x.com", Body: "hello",
+	})
+	if err != nil {
+		t.Fatalf("SendReply: %v", err)
+	}
+	// The injected header must appear only folded into the Subject line, never as
+	// its own Bcc header line.
+	for _, line := range strings.Split(gotRaw, "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "bcc:") {
+			t.Fatalf("header injection succeeded: %q", line)
+		}
+	}
+}
+
 func TestGmailEmptyInboxIsHealthy(t *testing.T) {
 	g := newTestGmail(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
