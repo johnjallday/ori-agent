@@ -17,18 +17,19 @@ import (
 type Handler struct {
 	service  *personalhq.Service
 	setup    *personalhq.SetupCoordinator
+	upgrade  *personalhq.UpgradeCoordinator
 	provider userprofile.UserProvider
 }
 
 // NewHandler constructs a Personal HQ HTTP handler. provider may be nil, in
-// which case requests resolve to the local single-user profile. setup may be
-// nil (e.g. in tests exercising only status/designate/clear); Setup then
-// reports 503 rather than panicking.
-func NewHandler(service *personalhq.Service, setup *personalhq.SetupCoordinator, provider userprofile.UserProvider) *Handler {
+// which case requests resolve to the local single-user profile. setup and
+// upgrade may be nil (e.g. in tests exercising only status/designate/clear);
+// the corresponding endpoints then report 503 rather than panicking.
+func NewHandler(service *personalhq.Service, setup *personalhq.SetupCoordinator, upgrade *personalhq.UpgradeCoordinator, provider userprofile.UserProvider) *Handler {
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{service: service, setup: setup, provider: provider}
+	return &Handler{service: service, setup: setup, upgrade: upgrade, provider: provider}
 }
 
 type designateRequest struct {
