@@ -30,8 +30,9 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	if !tpl.Builtin {
 		t.Fatal("personal-ops must remain a built-in template")
 	}
-	if tpl.BuiltinVersion < 3 {
-		t.Fatalf("personal-ops builtin_version = %d, want at least 3", tpl.BuiltinVersion)
+	// The v1 assistant roster bumped the manifest to version 4.
+	if tpl.BuiltinVersion < 4 {
+		t.Fatalf("personal-ops builtin_version = %d, want at least 4", tpl.BuiltinVersion)
 	}
 
 	// Display metadata now presents this as Personal HQ.
@@ -42,11 +43,26 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		t.Fatalf("description must describe a personal command center, got %q", tpl.Description)
 	}
 
-	// Roster: the Personal Chief of Staff must be present and, being the
-	// only declared agent, is first (the entry agent).
-	if len(tpl.Agents) != 1 || tpl.Agents[0].Name != "Personal Chief of Staff" {
-		t.Fatalf("expected Personal Chief of Staff as the sole/entry agent, got %+v", tpl.Agents)
+	// Roster: the v1 operational assistant roster is Personal Chief of Staff
+	// (entry/orchestrator) + Inbox + Journal specialists. No Calendar role
+	// ships in v1 — calendar behavior is deferred (contract §5.3), and an
+	// inert role would re-introduce the cosmetic-promise problem this feature
+	// removes.
+	wantRoster := []string{"Personal Chief of Staff", "Inbox", "Journal"}
+	if len(tpl.Agents) != len(wantRoster) {
+		t.Fatalf("expected %d agents %v, got %d: %+v", len(wantRoster), wantRoster, len(tpl.Agents), tpl.Agents)
 	}
+	for i, want := range wantRoster {
+		if tpl.Agents[i].Name != want {
+			t.Fatalf("agent[%d] = %q, want %q (order is preserved; first is the entry agent)", i, tpl.Agents[i].Name, want)
+		}
+	}
+	for _, a := range tpl.Agents {
+		if strings.EqualFold(a.Name, "Calendar") {
+			t.Errorf("no Calendar role should ship in v1, found %+v", a)
+		}
+	}
+
 	prompt := tpl.Agents[0].SystemPrompt
 	for _, want := range []string{"prioriti", "brief", "follow-up", "route the user"} {
 		if !strings.Contains(strings.ToLower(prompt), want) {
@@ -57,6 +73,19 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		!strings.Contains(strings.ToLower(prompt), "not take it on yourself") &&
 		!strings.Contains(strings.ToLower(prompt), "route the user to the right project workspace") {
 		t.Errorf("Chief of Staff prompt must not claim ownership of specialist project work: %s", prompt)
+	}
+
+	// The Inbox specialist must state the never-send-without-confirmation and
+	// untrusted-content guarantees (contract §3, §4).
+	inboxPrompt := strings.ToLower(tpl.Agents[1].SystemPrompt)
+	if !strings.Contains(inboxPrompt, "confirm") || !strings.Contains(inboxPrompt, "untrusted") {
+		t.Errorf("Inbox prompt must promise explicit send confirmation and treat mail as untrusted: %s", tpl.Agents[1].SystemPrompt)
+	}
+	// The Journal specialist must state that memory promotion is user-driven,
+	// never automatic (contract §7).
+	journalPrompt := strings.ToLower(tpl.Agents[2].SystemPrompt)
+	if !strings.Contains(journalPrompt, "memory") || !strings.Contains(journalPrompt, "never") {
+		t.Errorf("Journal prompt must state memory promotion is never automatic: %s", tpl.Agents[2].SystemPrompt)
 	}
 
 	// Starter tasks: a small set, at most one (here exactly one) marked
