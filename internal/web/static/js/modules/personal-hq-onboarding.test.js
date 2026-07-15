@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView } from './personal-hq-onboarding.js';
+import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView } from './personal-hq-onboarding.js';
 
 function status(overrides) {
   return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
@@ -103,4 +103,26 @@ test('upgradeView: a blocked plan is read-only with reasons and no apply', () =>
   assert.equal(view.blocked, true);
   assert.equal(view.canApply, false);
   assert.deepEqual(view.reasons, ['group workspaces cannot be a Personal HQ']);
+});
+
+test('emailStatusView: a connected account shows the address and a Disconnect action', () => {
+  const view = emailStatusView({ connected: true, email_address: 'me@example.com' });
+  assert.equal(view.state, 'connected');
+  assert.equal(view.detail, 'me@example.com');
+  assert.equal(view.action, 'disconnect');
+});
+
+test('emailStatusView: a stale binding (account_id but not connected) offers Reconnect', () => {
+  const view = emailStatusView({ connected: false, account_id: 'acct-1', health: 'disconnected' });
+  assert.equal(view.state, 'repair');
+  assert.equal(view.action, 'connect');
+  assert.match(view.actionLabel, /reconnect/i);
+});
+
+test('emailStatusView: never-connected offers Connect and promises read-only + confirmation', () => {
+  const view = emailStatusView(null);
+  assert.equal(view.state, 'disconnected');
+  assert.equal(view.action, 'connect');
+  assert.match(view.detail, /read-only/i);
+  assert.match(view.detail, /confirmation/i);
 });

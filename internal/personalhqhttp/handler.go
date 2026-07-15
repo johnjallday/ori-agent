@@ -15,10 +15,11 @@ import (
 
 // Handler serves the Personal HQ API.
 type Handler struct {
-	service  *personalhq.Service
-	setup    *personalhq.SetupCoordinator
-	upgrade  *personalhq.UpgradeCoordinator
-	provider userprofile.UserProvider
+	service       *personalhq.Service
+	setup         *personalhq.SetupCoordinator
+	upgrade       *personalhq.UpgradeCoordinator
+	mailboxLinker MailboxLinker
+	provider      userprofile.UserProvider
 }
 
 // NewHandler constructs a Personal HQ HTTP handler. provider may be nil, in

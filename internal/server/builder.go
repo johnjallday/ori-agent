@@ -227,6 +227,10 @@ type ServerBuilder struct {
 	personalHQService *personalhq.Service
 	personalHQHandler *personalhqhttp.Handler
 
+	// mailboxAccess gates the read-only Personal HQ mail tools; nil until the
+	// vault system initializes it (internal/server/mailbox_access.go).
+	mailboxAccess *mailboxAccess
+
 	// Daily Brief configuration, generation, and scheduling
 	dailyBriefService   *dailybrief.Service
 	dailyBriefHandler   *dailybriefhttp.Handler

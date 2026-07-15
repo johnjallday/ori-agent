@@ -46,6 +46,10 @@ type WorkspaceToolProvider struct {
 	// Optional dependencies for project-template tools
 	templatesRootResolver func() string
 	projectEventBus       *workspace.EventBus
+
+	// mailboxAccess, when set, enables the read-only Personal HQ mail tools for
+	// authorized agents (internal/chathttp/workspace_mail_tools.go).
+	mailboxAccess MailboxAccess
 }
 
 // mcpServerLister allows listing available MCP servers.
@@ -139,6 +143,12 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 	}
 	if p.skillsManager != nil {
 		tools = append(tools, p.manageSkillsTool())
+	}
+
+	// Personal HQ mail tools (read-only), exposed only to an agent the mailbox
+	// access boundary authorizes for this workspace (tasks 3.8/3.9).
+	if p.mailToolsEnabled() {
+		tools = append(tools, p.mailSearchThreadsTool(), p.mailGetThreadTool())
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.

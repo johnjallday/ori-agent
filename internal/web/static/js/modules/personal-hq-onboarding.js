@@ -86,6 +86,40 @@ export function upgradeView(plan) {
   };
 }
 
+// emailStatusView turns the Personal HQ email status (from GET
+// /api/personal-hq/email/status) into the view-model the connect/grant/repair UI
+// renders, so all branching is unit-testable. Three states:
+//   - connected: show the address + a Disconnect action.
+//   - repair: a binding exists but the account is gone/expired — offer Reconnect.
+//   - disconnected: never connected — offer Connect.
+export function emailStatusView(status) {
+  if (status && status.connected) {
+    return {
+      state: 'connected',
+      heading: 'Email connected',
+      detail: status.email_address || '',
+      action: 'disconnect',
+      actionLabel: 'Disconnect'
+    };
+  }
+  if (status && status.account_id) {
+    return {
+      state: 'repair',
+      heading: 'Reconnect your email',
+      detail: 'Your connected email needs to be reconnected before the assistant can read it.',
+      action: 'connect',
+      actionLabel: 'Reconnect'
+    };
+  }
+  return {
+    state: 'disconnected',
+    heading: 'Connect your email',
+    detail: 'Let your Inbox specialist surface threads that need attention and help draft replies. Read-only — nothing is ever sent without your explicit confirmation.',
+    action: 'connect',
+    actionLabel: 'Connect email'
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -594,6 +628,107 @@ export function upgradeView(plan) {
     renderUpgrade(mount, upgradeView(plan));
   }
 
+  async function fetchEmailStatus() {
+    const res = await fetch('/api/personal-hq/email/status', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.status ? data.status : null;
+  }
+
+  // connectEmail opens the existing Vault email OAuth popup (least-privilege
+  // read scope) and, on success, links the returned account to the HQ. It
+  // depends on the Vault email OAuth being configured; failures surface as a
+  // toast rather than a broken flow.
+  function connectEmail() {
+    const popup = window.open('/api/vault/email/oauth/start?provider=gmail', 'ori-hq-email', 'width=520,height=680');
+    if (!popup) {
+      toast('Allow pop-ups to connect your email.', 'Popup blocked', 'danger');
+      return;
+    }
+    const onMessage = async (event) => {
+      const data = event && event.data;
+      if (!data || data.type !== 'ori:vault-email-oauth') return;
+      window.removeEventListener('message', onMessage);
+      if (!data.success || !data.account || !data.account.id) {
+        toast(data && data.error ? data.error : 'Could not connect your email.', 'Connect failed', 'danger');
+        return;
+      }
+      try {
+        await postJSON('/api/personal-hq/email/link', { account_id: data.account.id });
+        toast('Email connected to your Personal HQ.', 'Connected', 'success');
+        await wireEmail();
+      } catch (_) {
+        toast('Connected the account but could not link it to your HQ.', 'Link failed', 'danger');
+      }
+    };
+    window.addEventListener('message', onMessage);
+  }
+
+  function renderEmail(mount, view) {
+    mount.innerHTML = '';
+    mount.hidden = false;
+    const card = document.createElement('div');
+    card.className = 'hq-email-card hq-email-' + view.state;
+
+    const heading = document.createElement('h4');
+    heading.className = 'hq-email-heading';
+    heading.textContent = view.heading;
+    card.appendChild(heading);
+
+    if (view.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'hq-email-detail';
+      detail.textContent = view.detail;
+      card.appendChild(detail);
+    }
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
+    btn.textContent = view.actionLabel;
+    btn.addEventListener('click', async () => {
+      if (view.action === 'disconnect') {
+        btn.disabled = true;
+        try {
+          await postJSON('/api/personal-hq/email/unlink');
+          toast('Email disconnected.', 'Disconnected', 'success');
+          await wireEmail();
+        } catch (_) {
+          toast('Could not disconnect the email account.', 'Error', 'danger');
+          btn.disabled = false;
+        }
+      } else {
+        connectEmail();
+      }
+    });
+    card.appendChild(btn);
+    mount.appendChild(card);
+  }
+
+  // wireEmail shows the email connect/grant/repair card for a valid designated
+  // HQ. Additive: a no-op when the page has no #hqEmailMount or no valid HQ.
+  async function wireEmail() {
+    const mount = document.getElementById('hqEmailMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    let emailStatus;
+    try {
+      emailStatus = await fetchEmailStatus();
+    } catch (_) {
+      return;
+    }
+    renderEmail(mount, emailStatusView(emailStatus));
+  }
+
   function init() {
     wireGuided();
     wireResume();
@@ -603,6 +738,7 @@ export function upgradeView(plan) {
     if (wantsGuidedTakeover(hint, hasOnboardingIntent())) showGuided();
     refreshResume();
     wireUpgrade();
+    wireEmail();
   }
 
   if (document.readyState === 'loading') {

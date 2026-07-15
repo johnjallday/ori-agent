@@ -816,6 +816,9 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/personal-hq/clear", s.Handlers.PersonalHQ.Clear)
 		mux.HandleFunc("GET /api/personal-hq/upgrade/preview", s.Handlers.PersonalHQ.UpgradePreview)
 		mux.HandleFunc("POST /api/personal-hq/upgrade/apply", s.Handlers.PersonalHQ.UpgradeApply)
+		mux.HandleFunc("GET /api/personal-hq/email/status", s.Handlers.PersonalHQ.MailboxStatusHandler)
+		mux.HandleFunc("POST /api/personal-hq/email/link", s.Handlers.PersonalHQ.LinkMailbox)
+		mux.HandleFunc("POST /api/personal-hq/email/unlink", s.Handlers.PersonalHQ.UnlinkMailbox)
 	}
 }
 

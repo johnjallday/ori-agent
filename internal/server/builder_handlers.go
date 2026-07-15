@@ -26,6 +26,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
+	"github.com/johnjallday/ori-agent/internal/mailbox"
+	"github.com/johnjallday/ori-agent/internal/mailboxvault"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
@@ -232,6 +234,25 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.settingsHandler.SetVaultRootUpdater(vaultStore.SetManagedVaultRoot)
 		if b.workspaceHandler != nil {
 			b.workspaceHandler.SetEmailAccountStore(vaultStore)
+		}
+		// Wire the Personal HQ mailbox read runtime: a Gmail provider over a
+		// Vault-backed credential resolver, gated by the most-restrictive access
+		// policy. Exposed to authorized HQ agents via the workspace tool factory.
+		if b.workspaceStore != nil {
+			gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(vaultStore))
+			cachedProvider := mailbox.NewCachingProvider(gmailProvider)
+			b.mailboxAccess = newMailboxAccess(b.workspaceStore, vaultStore, cachedProvider)
+			if b.chatHandler != nil {
+				b.chatHandler.SetMailboxAccess(b.mailboxAccess)
+			}
+			// Personal HQ email connect/disconnect (task 3.10): manage an email
+			// MCP binding on the designated HQ workspace, with disconnect cache
+			// invalidation.
+			if b.personalHQHandler != nil && b.personalHQService != nil {
+				b.personalHQHandler.SetMailboxLinker(
+					newPersonalHQMailboxLinker(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider),
+				)
+			}
 		}
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
