@@ -88,6 +88,14 @@
       bulkFavorite: document.getElementById('bulkFavorite'),
       bulkUnfavorite: document.getElementById('bulkUnfavorite'),
       bulkDelete: document.getElementById('bulkDelete'),
+      bulkResult: document.getElementById('bulkResult'),
+      bulkResultSummary: document.getElementById('bulkResultSummary'),
+      bulkResultList: document.getElementById('bulkResultList'),
+      bulkResultDismiss: document.getElementById('bulkResultDismiss'),
+      bulkDeleteDialog: document.getElementById('bulkDeleteDialog'),
+      bulkDeleteBody: document.getElementById('bulkDeleteBody'),
+      bulkDeleteCancel: document.getElementById('bulkDeleteCancel'),
+      bulkDeleteConfirm: document.getElementById('bulkDeleteConfirm'),
     };
 
     els.search.addEventListener('input', onSearch);
@@ -106,6 +114,13 @@
 
     els.selectAll.addEventListener('click', selectAllVisible);
     els.clearSelection.addEventListener('click', function () { clearSelection(true); });
+
+    els.bulkDelete.addEventListener('click', openBulkDelete);
+    els.bulkDeleteCancel.addEventListener('click', function () { closeBulkDelete(); });
+    els.bulkDeleteConfirm.addEventListener('click', runBulkDelete);
+    els.bulkResultDismiss.addEventListener('click', dismissBulkResult);
+    // Native <dialog> fires 'cancel' on Escape; keep our teardown consistent.
+    els.bulkDeleteDialog.addEventListener('cancel', function (e) { e.preventDefault(); closeBulkDelete(); });
 
     var tabs = document.querySelectorAll('.stage__tab');
     tabs.forEach(function (tab) {
@@ -1248,6 +1263,184 @@
 
   function announce(msg) {
     if (els.bulkLive) els.bulkLive.textContent = msg;
+  }
+
+  /* ---- bulk delete --------------------------------------------------------- */
+
+  // Advisory client-side eligibility. The server re-checks and is authoritative
+  // (PRD FR40); this only drives the preview grouping and the eligible count.
+  function deleteEligibility(agent) {
+    if (!agent) return { eligible: false, reason: 'Agent not found.' };
+    if (isPermanent(agent)) {
+      var role = String(agent.role || '').toLowerCase();
+      var source = String(agent.source || '').toLowerCase();
+      if (source === 'cli' || role === 'cli_agent') return { eligible: false, reason: 'Built-in CLI agent.' };
+      return { eligible: false, reason: 'System assistant.' };
+    }
+    if ((agent.workspace_count || 0) > 0) {
+      return { eligible: false, reason: 'Attached to ' + agent.workspace_count + ' workspace' + (agent.workspace_count === 1 ? '' : 's') + '.' };
+    }
+    return { eligible: true, reason: '' };
+  }
+
+  function openBulkDelete() {
+    if (state.checked.size === 0) return;
+    // Deleting the focused agent will replace the stage; guard unsaved edits
+    // before we commit to the flow (PRD FR15).
+    var names = Array.from(state.checked);
+    var eligible = [];
+    var skipped = [];
+    names.forEach(function (name) {
+      var agent = state.byName[name];
+      var e = deleteEligibility(agent);
+      (e.eligible ? eligible : skipped).push({ name: name, reason: e.reason });
+    });
+
+    var body = '';
+    body += deleteGroupHTML('To delete', eligible, true);
+    if (skipped.length) body += deleteGroupHTML('Will be skipped', skipped, false);
+    if (eligible.length === 0) {
+      body += '<p class="bulk-dialog__none">None of the selected agents can be deleted.</p>';
+    }
+    els.bulkDeleteBody.innerHTML = body;
+
+    els.bulkDeleteConfirm.disabled = eligible.length === 0;
+    els.bulkDeleteConfirm.textContent = eligible.length
+      ? 'Delete ' + eligible.length + ' agent' + (eligible.length === 1 ? '' : 's')
+      : 'Delete';
+    // Stash the authoritative-request payload: send ALL checked names so the
+    // server returns a result per agent and eligibility changes are caught.
+    els.bulkDeleteConfirm.dataset.names = JSON.stringify(names);
+    els.bulkDeleteConfirm.dataset.eligible = String(eligible.length);
+
+    if (typeof els.bulkDeleteDialog.showModal === 'function') els.bulkDeleteDialog.showModal();
+    else els.bulkDeleteDialog.setAttribute('open', '');
+  }
+
+  function deleteGroupHTML(title, rows, danger) {
+    if (!rows.length) return '';
+    var items = rows.map(function (r) {
+      var agent = state.byName[r.name];
+      var reason = r.reason ? '<span class="bulk-dialog__reason">' + esc(r.reason) + '</span>' : '';
+      var wsLink = '';
+      if (agent && Array.isArray(agent.workspaces) && agent.workspaces.length) {
+        var ws = agent.workspaces[0];
+        if (ws && ws.id) wsLink = ' <a class="bulk-dialog__wslink" href="/workspaces/' + encodeURIComponent(ws.id) + '">' + esc(ws.name || 'workspace') + '</a>';
+      }
+      return '<li><span class="bulk-dialog__agent">' + esc(r.name) + '</span>' + reason + wsLink + '</li>';
+    }).join('');
+    return '<div class="bulk-dialog__group' + (danger ? ' is-danger' : '') + '">' +
+      '<h3 class="bulk-dialog__grouptitle">' + esc(title) + ' (' + rows.length + ')</h3>' +
+      '<ul class="bulk-dialog__grouplist">' + items + '</ul></div>';
+  }
+
+  function closeBulkDelete() {
+    if (els.bulkDeleteDialog.open && typeof els.bulkDeleteDialog.close === 'function') els.bulkDeleteDialog.close();
+    else els.bulkDeleteDialog.removeAttribute('open');
+    // Return focus to a stable control rather than a possibly-removed card.
+    if (els.selectAll) els.selectAll.focus();
+  }
+
+  function runBulkDelete() {
+    var btn = els.bulkDeleteConfirm;
+    if (btn.disabled || btn.dataset.busy === '1') return; // prevent double submit
+    var names;
+    try { names = JSON.parse(btn.dataset.names || '[]'); } catch (e) { names = []; }
+    if (!names.length) { closeBulkDelete(); return; }
+
+    // If the focused agent is among those being deleted, honor the unsaved guard.
+    if (state.selected && names.indexOf(state.selected) !== -1 && !guardUnsaved()) return;
+
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    var restoreLabel = btn.textContent;
+    btn.textContent = 'Deleting…';
+    announce('Deleting agents…');
+
+    fetch('/api/agents/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation: 'delete', agent_names: names }),
+    })
+      .then(function (r) { return r.json().catch(function () { return null; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (res) {
+        btn.dataset.busy = '';
+        btn.textContent = restoreLabel;
+        if (res.status < 200 || res.status >= 300 || !res.data || !Array.isArray(res.data.results)) {
+          // Do NOT claim any deletion happened on a malformed/error response.
+          announce('Bulk delete failed.');
+          els.bulkDeleteBody.insertAdjacentHTML('afterbegin',
+            '<p class="bulk-dialog__error" role="alert">Delete failed (' + res.status + '). No agents were changed.</p>');
+          btn.disabled = false;
+          return;
+        }
+        applyBulkDeleteResults(res.data);
+      })
+      .catch(function (err) {
+        btn.dataset.busy = '';
+        btn.disabled = false;
+        btn.textContent = restoreLabel;
+        announce('Network error — no agents deleted.');
+        els.bulkDeleteBody.insertAdjacentHTML('afterbegin',
+          '<p class="bulk-dialog__error" role="alert">Network error — no agents were deleted.</p>');
+        console.error('[roster] bulk delete failed', err);
+      });
+  }
+
+  function applyBulkDeleteResults(payload) {
+    var results = payload.results || [];
+    var summary = payload.summary || {};
+
+    // Drop successfully deleted agents from the checked set; skipped/failed stay
+    // checked and inspectable (PRD FR44).
+    var focusedDeleted = false;
+    results.forEach(function (r) {
+      if (r.status === 'succeeded') {
+        state.checked.delete(r.name);
+        if (r.name === state.selected) focusedDeleted = true;
+      }
+    });
+
+    closeBulkDelete();
+    renderBulkResult(summary, results);
+
+    // Reload from the server (authoritative): deleted agents vanish, skipped
+    // survive and remain checked via pruneChecked. Keep the focused agent when
+    // it survived; otherwise fall back predictably.
+    reloadThenSelect(focusedDeleted ? null : state.selected);
+
+    var msg = (summary.succeeded || 0) + ' deleted';
+    if (summary.skipped) msg += ', ' + summary.skipped + ' skipped';
+    if (summary.failed) msg += ', ' + summary.failed + ' failed';
+    announce(msg + '.');
+  }
+
+  function renderBulkResult(summary, results) {
+    if (!els.bulkResult) return;
+    var parts = [];
+    parts.push((summary.requested || results.length) + ' requested');
+    parts.push((summary.succeeded || 0) + ' deleted');
+    if (summary.skipped) parts.push(summary.skipped + ' skipped');
+    if (summary.failed) parts.push(summary.failed + ' failed');
+    els.bulkResultSummary.textContent = parts.join(' · ');
+
+    // List only non-success results — those are the ones worth inspecting.
+    var rows = results.filter(function (r) { return r.status !== 'succeeded'; }).map(function (r) {
+      var reason = r.message ? esc(r.message) : esc(r.reason_code || r.status);
+      return '<li class="bulk-result__item is-' + esc(r.status) + '">' +
+        '<span class="bulk-result__name">' + esc(r.name) + '</span>' +
+        '<span class="bulk-result__reason">' + reason + '</span></li>';
+    }).join('');
+    els.bulkResultList.innerHTML = rows;
+    els.bulkResult.hidden = false;
+  }
+
+  function dismissBulkResult() {
+    if (!els.bulkResult) return;
+    els.bulkResult.hidden = true;
+    els.bulkResultList.innerHTML = '';
+    els.bulkResultSummary.textContent = '';
+    if (els.selectAll) els.selectAll.focus();
   }
 
   function onSearch() { state.query = els.search.value || ''; applyFilterSort(); }

@@ -147,4 +147,73 @@ test.describe('Agents roster', () => {
       }
     }
   });
+
+  test('bulk delete: mixed selection deletes eligible and reports skipped', async ({ page, request }) => {
+    const prefix = `PWDel${Date.now()}`;
+    // Two plain (deletable) agents + one attached agent (skipped).
+    const loose1 = `${prefix} Loose1`;
+    const loose2 = `${prefix} Loose2`;
+    const attached = `${prefix} Attached`;
+    const names = [loose1, loose2, attached];
+    for (const n of names) {
+      const r = await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' },
+      });
+      expect(r.ok()).toBeTruthy();
+    }
+
+    // Attach one agent to a fresh workspace so it is protected from deletion.
+    let wsId = '';
+    const wsResp = await request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: `${prefix} WS`, entry_agent_name: attached },
+    });
+    if (wsResp.ok()) {
+      const wsJson = await wsResp.json();
+      wsId = wsJson?.folder?.id || wsJson?.id || '';
+    }
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(3);
+
+      // Check all three, open the confirmation dialog.
+      await page.locator('#rosterSelectAll').click();
+      await page.locator('#bulkDelete').click();
+      const dialog = page.locator('#bulkDeleteDialog');
+      await expect(dialog).toBeVisible();
+      // Two eligible → button names the eligible count.
+      await expect(page.locator('#bulkDeleteConfirm')).toHaveText(/Delete 2 agents/);
+      await expect(page.locator('#bulkDeleteBody')).toContainText('Will be skipped');
+
+      await page.locator('#bulkDeleteConfirm').click();
+
+      // Result surface reports the skipped agent and stays inspectable.
+      await expect(page.locator('#bulkResult')).toBeVisible();
+      await expect(page.locator('#bulkResultSummary')).toContainText('2 deleted');
+      await expect(page.locator('#bulkResultList')).toContainText(attached);
+
+      // Server persistence: loose agents gone (404), attached survives (200).
+      await expect
+        .poll(async () => (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(loose1)}/detail`)).status())
+        .toBe(404);
+      await expect
+        .poll(async () => (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(attached)}/detail`)).status())
+        .toBe(200);
+    } finally {
+      if (wsId) await request.delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`).catch(() => undefined);
+      for (const n of names) {
+        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+      }
+    }
+  });
 });

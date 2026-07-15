@@ -68,6 +68,28 @@
           </div>
           <p class="visually-hidden" id="bulkLive" role="status" aria-live="polite"></p>
 
+          <!-- Persistent bulk-result surface: partial-success results stay
+               inspectable here until dismissed (PRD FR44/FR45). -->
+          <div class="bulk-result" id="bulkResult" role="region" aria-label="Bulk action results" hidden>
+            <div class="bulk-result__head">
+              <span class="bulk-result__summary" id="bulkResultSummary"></span>
+              <button type="button" class="roster-linkbtn" id="bulkResultDismiss">Dismiss</button>
+            </div>
+            <ul class="bulk-result__list" id="bulkResultList"></ul>
+          </div>
+
+          <!-- Bulk-delete confirmation. Native <dialog> traps focus and closes on
+               Escape before submission (PRD FR34/FR85). -->
+          <dialog class="bulk-dialog" id="bulkDeleteDialog" aria-labelledby="bulkDeleteTitle">
+            <h2 class="bulk-dialog__title" id="bulkDeleteTitle">Delete agents</h2>
+            <p class="bulk-dialog__lead">Deleting an agent is permanent and cannot be undone.</p>
+            <div class="bulk-dialog__body" id="bulkDeleteBody"></div>
+            <div class="bulk-dialog__actions">
+              <button type="button" class="btn-ghost" id="bulkDeleteCancel">Cancel</button>
+              <button type="button" class="btn-danger" id="bulkDeleteConfirm">Delete</button>
+            </div>
+          </dialog>
+
           <div class="roster-empty" id="rosterEmpty" hidden>
             <p>No agents match your search.</p>
             <button type="button" id="rosterClearSearch" class="roster-linkbtn">Clear search</button>

@@ -432,6 +432,183 @@
   color: #f87171;
 }
 
+/* ---- Bulk result surface -------------------------------------------------- */
+
+.bulk-result {
+  margin: 8px 4px 0;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--bg-primary, #fff);
+  padding: 10px 12px;
+}
+
+.bulk-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.bulk-result__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bulk-result__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text-secondary, #6b7280) 8%, transparent);
+}
+
+.bulk-result__item.is-failed {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+}
+
+.bulk-result__name {
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  flex: none;
+}
+
+.bulk-result__reason {
+  color: var(--text-secondary, #6b7280);
+  min-width: 0;
+}
+
+[data-bs-theme="dark"] .bulk-result { background: var(--bg-primary, #1f2430); }
+
+/* ---- Bulk-delete confirmation dialog -------------------------------------- */
+
+.bulk-dialog {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  padding: 22px 24px;
+  max-width: 460px;
+  width: calc(100vw - 32px);
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+}
+
+.bulk-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.bulk-dialog__title {
+  margin: 0 0 4px;
+  font-size: 19px;
+}
+
+.bulk-dialog__lead {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.bulk-dialog__body {
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bulk-dialog__group {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.bulk-dialog__group.is-danger {
+  border-color: color-mix(in srgb, #ef4444 40%, var(--border-color, #e5e7eb));
+}
+
+.bulk-dialog__grouptitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary, #6b7280);
+}
+
+.bulk-dialog__grouplist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.bulk-dialog__grouplist li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.bulk-dialog__agent {
+  font-weight: 600;
+}
+
+.bulk-dialog__reason,
+.bulk-dialog__wslink {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.bulk-dialog__none {
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+  margin: 0;
+}
+
+.bulk-dialog__error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.bulk-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.btn-danger {
+  border: 1px solid #ef4444;
+  background: #ef4444;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-danger:hover:not(:disabled) { background: #dc2626; }
+.btn-danger:focus-visible { outline: 2px solid #ef4444; outline-offset: 2px; }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+[data-bs-theme="dark"] .bulk-dialog { background: var(--bg-primary, #1f2430); }
+
 /* ---- Stage ---------------------------------------------------------------- */
 
 .roster-stage {
