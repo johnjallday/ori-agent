@@ -27,12 +27,48 @@ export function completedCount(tier) {
 // the meter/progress count advances past a skip without the skipped quest
 // ever being labeled "complete" in its own row (task 3.4/3.8).
 export function resolvedCount(tier) {
-  return (tier?.quests || []).filter(quest => quest.status === 'completed' || quest.status === 'skipped').length;
+  return (tier?.quests || []).filter(
+    quest => quest.status === 'completed' || quest.status === 'skipped'
+  ).length;
 }
 
 export function tierInsignia(tier) {
   const value = Number(tier);
   return Number.isFinite(value) && value > 0 ? String(value).padStart(2, '0') : '—';
+}
+
+export const FIRST_MISSION_QUEST_ID = 't2-build-hq';
+
+// Mission 01 is intentionally reachable before Tier 2 unlocks. The existing
+// HQ quest remains the source of truth for status and completion; this helper
+// only derives the featured Home presentation from that same quest record.
+export function firstMissionView(status) {
+  const quest = (status?.tiers || [])
+    .flatMap(tier => tier.quests || [])
+    .find(candidate => candidate.id === FIRST_MISSION_QUEST_ID);
+
+  if (!quest || status?.all_complete) return { visible: false };
+
+  const completed = quest.status === 'completed';
+  const skipped = quest.status === 'skipped';
+  return {
+    visible: true,
+    completed,
+    skipped,
+    title: quest.title,
+    why: quest.why || '',
+    statusLabel: completed ? 'Complete' : skipped ? 'Paused' : 'Ready',
+    actionLabel: skipped ? 'Resume mission' : 'Start mission',
+    actionURL: quest.action_url || '/workspaces?hq_onboarding=1',
+    showAction: !completed
+  };
+}
+
+// The HQ quest is rendered as the featured Mission 01 card, so omit it from
+// the ordinary tier list when Tier 2 becomes current rather than showing the
+// same objective twice.
+export function tierQuestRows(tier) {
+  return (tier?.quests || []).filter(quest => quest.id !== FIRST_MISSION_QUEST_ID);
 }
 
 // questRowState derives the pure per-row rendering decision for one quest:
@@ -195,7 +231,10 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
   function renderQuestRow(q) {
     const state = questRowState(q);
     const li = document.createElement('li');
-    li.className = 'quest-item' + (state.done ? ' quest-item-done' : '') + (state.skipped ? ' quest-item-skipped' : '');
+    li.className =
+      'quest-item' +
+      (state.done ? ' quest-item-done' : '') +
+      (state.skipped ? ' quest-item-skipped' : '');
 
     const mark = document.createElement('span');
     mark.className = 'quest-mark';
@@ -238,6 +277,35 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     return li;
   }
 
+  function renderFirstMission(status) {
+    const mission = el('first-mission');
+    if (!mission) return;
+
+    const view = firstMissionView(status);
+    if (!view.visible) {
+      mission.hidden = true;
+      return;
+    }
+
+    mission.classList.toggle('is-complete', view.completed);
+    mission.classList.toggle('is-paused', view.skipped);
+    const title = el('first-mission-title');
+    const why = el('first-mission-why');
+    const state = el('first-mission-status');
+    const action = el('first-mission-action');
+    const actionLabel = el('first-mission-action-label');
+
+    if (title) title.textContent = view.title;
+    if (why) why.textContent = view.why;
+    if (state) state.textContent = view.statusLabel;
+    if (action) {
+      action.hidden = !view.showAction;
+      action.href = view.actionURL;
+    }
+    if (actionLabel) actionLabel.textContent = view.actionLabel;
+    mission.hidden = false;
+  }
+
   function render(status) {
     if (!widget) return;
     latestStatus = status;
@@ -254,6 +322,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     // All quests complete: compact congratulatory state.
     if (status.all_complete) {
+      renderFirstMission(status);
       el('tier-name').textContent = 'All quests complete';
       el('tier-insignia').textContent = '✓';
       el('progress-label').textContent = 'Tier complete';
@@ -266,9 +335,12 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     }
 
     if (!current) {
+      renderFirstMission(status);
       widget.hidden = true;
       return;
     }
+
+    renderFirstMission(status);
 
     el('tier-name').textContent = current.name;
     el('tier-insignia').textContent = tierInsignia(status.current_tier);
@@ -280,7 +352,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     const list = el('quests');
     list.innerHTML = '';
-    current.quests.forEach(q => list.appendChild(renderQuestRow(q)));
+    tierQuestRows(current).forEach(q => list.appendChild(renderQuestRow(q)));
 
     const why = el('why');
     why.textContent = status.next_quest ? status.next_quest.why : '';

@@ -138,11 +138,13 @@ export function resumeCopy(mode) {
   function hideGuided() {
     if (!guided) return;
     guided.hidden = true;
+    hub?.classList.remove('is-hq-guided');
     setLauncherContentHidden(false);
   }
 
   function showGuided() {
     if (!guided) return; // Home has no full-screen takeover, only the resume bar.
+    hub?.classList.add('is-hq-guided');
     guided.hidden = false;
     setLauncherContentHidden(true);
     if (resume) resume.hidden = true;

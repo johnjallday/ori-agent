@@ -731,7 +731,7 @@ export class OnboardingManager {
     const name = this.userName || 'friend';
     const doneSpeech = document.getElementById('doneSpeech');
     if (doneSpeech) {
-      doneSpeech.textContent = `All set, ${name}! I’m ready to help. Let’s create your first workspace.`;
+      doneSpeech.textContent = `All set, ${name}! Your first mission is ready: let’s build the Personal HQ we’ll use to run everything else.`;
     }
 
     this.showPhase(2);

@@ -24,58 +24,45 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
-  // Covers the server-side decision (PRD FR19/FR116-118, task 8.1): a
-  // truly brand-new profile's very first `GET /` redirects to the guided
-  // workspace launcher rather than Home. Deliberately scoped to just the
-  // redirect, proven directly against the real server/API — this is the
-  // one moment in the whole file with a fully virgin profile, before
-  // anything else on the page has had a chance to run.
-  //
-  // Not asserted here: the guided takeover's own visible rendering. On a
-  // truly fresh profile the separate app-level onboarding wizard AND an
-  // independent empty-workspace-list auto-open of the create-workspace
-  // modal both also compete for the same page — closing both was proven
-  // reachable, but a further, pre-existing timing interaction between
-  // workspace-hub.js's empty-state render and personal-hq-onboarding.js's
-  // own reveal logic (neither touched by this feature) meant the guided
-  // panel still didn't reliably show afterward. That rendering path is
-  // exercised more directly by the next test, which loads the guided
-  // launcher URL on a profile that has already cleared the unrelated
-  // wizard — a real, worthwhile finding for a follow-up look at
-  // workspace-hub.js, but out of scope to chase further here.
-  test('a brand-new profile redirects Home to the guided workspace launcher', async ({
+  // Covers the complete first visible moment (PRD FR19/FR116-118, task
+  // 4.14/8.1): Home redirects to the launcher, the generic create-workspace
+  // modal stays out of the way, and Ori's first mission renders even with
+  // motion disabled. The app-level profile/model wizard is intentionally
+  // completed through its real API, then the same page is reloaded to reveal
+  // the mission waiting directly behind it.
+  test('a brand-new profile is welcomed into Ori’s visible first mission', async ({
     page,
     request
   }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/');
     await expect(page).toHaveURL(/\/workspaces\?hq_onboarding=1/);
 
-    // Clear the unrelated app-level wizard so later tests in this file
-    // aren't blocked by it.
+    // Clear the separate profile/model wizard so the mission underneath can
+    // be asserted directly without bypassing the real first-launch route.
     const res = await request.post('/api/onboarding/skip');
     expect(res.ok()).toBeTruthy();
+    await page.reload();
+
+    const mission = page.locator('#hqOnboardingGuided');
+    await expect(mission).toBeVisible();
+    await expect(mission).toContainText('Welcome to Ori Agent');
+    await expect(page.locator('#hqGuidedTitle')).toHaveText('Build your Personal HQ');
+    await expect(page.locator('#hqGuidedBuildBtn')).toHaveText(/Build Personal HQ/);
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('.launcher-header')).toBeHidden();
   });
 
-  // Covers the outcome PRD FR101 cares about: once HQ setup is skipped,
-  // Home shows only the lightweight resume entry, never the full takeover,
-  // and product features stay ungated. Skipped via the real API rather
-  // than clicking #hqGuidedSkipBtn directly — on this exact page, an
-  // independent empty-workspace-list auto-open of the create-workspace
-  // modal races workspace-hub.js's own empty-state render against
-  // personal-hq-onboarding.js's guided-panel reveal (a pre-existing
-  // interaction between two modules this feature doesn't own, found while
-  // writing this file; worth a follow-up look at workspace-hub.js) closely
-  // enough that the guided panel doesn't reliably end up clickable — but
-  // the state transition and its Home-facing result are exactly the same
-  // either way, so this still proves the behavior that matters.
+  // Covers the outcome PRD FR101 cares about through the visible mission UI:
+  // once HQ setup is skipped, Home shows only the lightweight resume entry,
+  // never the full takeover, and product features stay ungated.
   test('Skip for Now stays on the launcher and Home shows only the lightweight resume entry, never the full takeover', async ({
-    page,
-    request
+    page
   }) => {
-    const res = await request.post('/api/personal-hq/onboarding-state', {
-      data: { state: 'skipped' }
-    });
-    expect(res.ok()).toBeTruthy();
+    await page.goto('/workspaces?hq_onboarding=1');
+    await expect(page.locator('#hqOnboardingGuided')).toBeVisible();
+    await page.locator('#hqGuidedSkipBtn').click();
+    await expect(page.locator('#hqOnboardingGuided')).toBeHidden();
 
     await page.goto('/');
     await expect(page).toHaveURL(/\/$/);
@@ -83,22 +70,24 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(page.locator('#homeDailyBrief')).toBeHidden();
   });
 
-  // The resume bar's own "Build My HQ" button opens the identical modal
-  // and calls the identical POST /api/personal-hq/setup as the guided
-  // takeover's button (personal-hq-onboarding.js's openBuildModal/submit
-  // handler is shared by both entry points) — driven directly via the real
-  // API here rather than through the launcher page, which shares the same
-  // pre-existing empty-state-vs-reveal race noted above for the resume bar
-  // itself. What matters for this feature is proven either way: a
-  // completed Build My HQ makes Home show the Daily Brief.
+  // Exercises the default setup path through the actual resume and modal UI.
+  // This also proves the same module is active on /workspaces (where the
+  // mission lives), not only on Home.
   test('Build My HQ with defaults creates the workspace and Home shows the Daily Brief', async ({
-    page,
-    request
+    page
   }) => {
-    const setupRes = await request.post('/api/personal-hq/setup', { data: { name: 'My HQ' } });
-    expect(setupRes.ok()).toBeTruthy();
-
     await page.goto('/');
+    await expect(page.locator('#homeHQResume')).toBeVisible();
+    await page.locator('#homeHQResumeBuildBtn').click();
+    await expect(page).toHaveURL(/\/workspaces\?hq_onboarding=1/);
+    await expect(page.locator('#hqOnboardingResume')).toBeVisible();
+    await page.locator('#hqResumeBuildBtn').click();
+    await expect(page.locator('#hqBuildModal')).toBeVisible();
+    await expect(page.locator('#hqBuildName')).toHaveValue('My HQ');
+    await expect(page.locator('#hqBuildTimezone')).not.toHaveValue('');
+    await page.locator('#hqBuildSubmitBtn').click();
+
+    await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
     await expect(page.locator('#homeDailyBrief')).toBeVisible();
     await expect(page.locator('#homeHQResume')).toBeHidden();
 

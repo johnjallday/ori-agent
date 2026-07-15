@@ -131,11 +131,15 @@ func BuiltinQuests() []Quest {
 		},
 		{
 			ID: "t2-build-hq", Tier: 2,
-			Title:       "Build your Personal HQ",
-			Why:         "Give Ori a home base — a place to prepare your daily brief, track follow-ups, and help you resume work.",
-			Optional:    true,
-			Satisfied:   func(s Snapshot) bool { return s.HasPersonalHQ },
-			ActionURL:   "/workspaces?hq=1",
+			Title:     "Build your Personal HQ",
+			Why:       "Give Ori a home base — a place to prepare your daily brief, track follow-ups, and help you resume work.",
+			Optional:  true,
+			Satisfied: func(s Snapshot) bool { return s.HasPersonalHQ },
+			// Mission 01 is featured from the Home progression panel even before
+			// Tier 2 unlocks. Route straight into the guided HQ briefing instead
+			// of the generic workspace launcher so the action is useful at every
+			// progression tier.
+			ActionURL:   "/workspaces?hq_onboarding=1",
 			ActionLabel: "Build your Personal HQ",
 		},
 		{

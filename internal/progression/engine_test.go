@@ -479,6 +479,19 @@ func TestAllComplete_TreatsSkipAsResolved(t *testing.T) {
 	}
 }
 
+func TestBuiltinQuests_PersonalHQActionStartsGuidedMission(t *testing.T) {
+	for _, q := range BuiltinQuests() {
+		if q.ID != "t2-build-hq" {
+			continue
+		}
+		if q.ActionURL != "/workspaces?hq_onboarding=1" {
+			t.Fatalf("Personal HQ action URL = %q, want guided Mission 01 route", q.ActionURL)
+		}
+		return
+	}
+	t.Fatal("t2-build-hq quest not found")
+}
+
 // TestSkip_PersistsAcrossRestart covers requirement 3.2/3.9: a skip must
 // survive an engine reload from the same store, distinctly from completion.
 func TestSkip_PersistsAcrossRestart(t *testing.T) {

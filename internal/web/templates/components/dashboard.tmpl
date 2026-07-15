@@ -175,6 +175,22 @@
           <div class="quest-log-meter" role="progressbar" aria-label="Current tier progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <span class="quest-log-meter-fill" data-role="progress-bar"></span>
           </div>
+          <section class="quest-log-first-mission" data-role="first-mission" aria-labelledby="questFirstMissionTitle" hidden>
+            <div class="quest-log-first-mission-meta">
+              <span class="quest-log-first-mission-kicker"><span class="quest-log-first-mission-signal" aria-hidden="true"></span>Mission 01</span>
+              <span class="quest-log-first-mission-status" data-role="first-mission-status">Ready</span>
+            </div>
+            <div class="quest-log-first-mission-body">
+              <div class="quest-log-first-mission-copy">
+                <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build your Personal HQ</h3>
+                <p class="quest-log-first-mission-why" data-role="first-mission-why"></p>
+              </div>
+              <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/workspaces?hq_onboarding=1">
+                <span data-role="first-mission-action-label">Start mission</span>
+                <span aria-hidden="true">&#8594;</span>
+              </a>
+            </div>
+          </section>
           <ul class="quest-log-list" data-role="quests"></ul>
           <p class="quest-log-why" data-role="why"></p>
         </div>
