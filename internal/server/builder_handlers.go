@@ -240,7 +240,8 @@ func (b *ServerBuilder) initializeHandlers() {
 		// policy. Exposed to authorized HQ agents via the workspace tool factory.
 		if b.workspaceStore != nil {
 			gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(vaultStore))
-			b.mailboxAccess = newMailboxAccess(b.workspaceStore, vaultStore, gmailProvider)
+			cachedProvider := mailbox.NewCachingProvider(gmailProvider)
+			b.mailboxAccess = newMailboxAccess(b.workspaceStore, vaultStore, cachedProvider)
 			if b.chatHandler != nil {
 				b.chatHandler.SetMailboxAccess(b.mailboxAccess)
 			}
