@@ -251,6 +251,37 @@
     );
   }
 
+  // Personal HQ landmark: a grander gold citadel — a wide base block topped by a
+  // central tower, beacon spire, and pennant — so the designated HQ reads as a
+  // capital building on the map, not just another tile. Fixed gold palette
+  // (independent of the per-workspace hash) so it's instantly recognizable.
+  function structSVGHQ() {
+    return (
+      '<svg class="ws-map-struct is-hq-struct" width="118" height="104" viewBox="0 0 118 110" aria-hidden="true">' +
+      // ground pad
+      '<polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
+      // base block
+      '<polygon points="19,72 19,88 59,108 59,92" fill="#4c3c17"/>' +
+      '<polygon points="99,72 99,88 59,108 59,92" fill="#372c11"/>' +
+      '<polygon points="59,52 99,72 59,92 19,72" fill="#7a5f22" stroke="#e8b54b" stroke-opacity=".35"/>' +
+      // tower walls
+      '<polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
+      '<polygon points="81,40 81,68 59,79 59,51" fill="#785e22"/>' +
+      // tower windows (lit)
+      '<circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
+      '<circle cx="46" cy="62" r="1.5" fill="#ffe08a"/>' +
+      '<circle cx="72" cy="53" r="1.5" fill="#ffe08a"/>' +
+      '<circle cx="72" cy="62" r="1.5" fill="#ffe08a"/>' +
+      // gold roof
+      '<polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
+      // spire + pennant + beacon
+      '<line x1="59" y1="29" x2="59" y2="10" stroke="#ffd469" stroke-width="2.4" stroke-linecap="round"/>' +
+      '<polygon points="59,12 74,17 59,22" fill="#ffd469"/>' +
+      '<circle cx="59" cy="9" r="3.4" fill="#ffe08a" stroke="#ffd469"/>' +
+      '</svg>'
+    );
+  }
+
   function tileHTML(tile, selectedId, index) {
     var ws = tile.ws || {};
     var pal = paletteFor(ws.id);
@@ -289,7 +320,7 @@
       escapeHtml(statusText) + '</span>' +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
-      structSVG(pal) +
+      (isHQ ? structSVGHQ() : structSVG(pal)) +
       '<span class="ws-map-tile-name">' + escapeHtml(ws.name || 'Workspace') + '</span>' +
       (mode ? '<span class="ws-map-tile-type">' + escapeHtml(mode) + '</span>' : '') +
       '<span class="ws-map-tile-meta">' + escapeHtml(meta) + '</span>' +
