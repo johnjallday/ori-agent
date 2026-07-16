@@ -57,9 +57,9 @@ export function firstMissionView(status) {
     skipped,
     title: quest.title,
     why: quest.why || '',
-    statusLabel: completed ? 'Complete' : skipped ? 'Paused' : 'Ready',
-    actionLabel: skipped ? 'Resume mission' : 'Start mission',
-    actionURL: quest.action_url || '/workspaces?hq_onboarding=1',
+    statusLabel: completed ? 'Complete' : skipped ? 'Not set up' : 'Ready',
+    actionLabel: quest.action_label || 'Build My HQ',
+    actionURL: quest.action_url || '/workspaces?view=map&focus=personal-hq',
     showAction: !completed
   };
 }

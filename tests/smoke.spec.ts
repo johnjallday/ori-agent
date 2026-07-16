@@ -104,19 +104,35 @@ test.describe('Onboarding', () => {
         body: JSON.stringify({ success: true })
       });
     });
+    await page.route('**/api/settings/workspace-root', async route => {
+      const confirmed = route.request().method() === 'POST';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: confirmed || undefined,
+          workspace_root: confirmed ? '/tmp/ori-test-workspaces' : '',
+          effective_workspace_root: confirmed ? '/tmp/ori-test-workspaces' : '',
+          default_workspace_root: '/tmp/ori-test-workspaces',
+          source: confirmed ? 'settings' : 'unconfirmed',
+          confirmed
+        })
+      });
+    });
   }
 
-  test('keeps the first step focused on naming and shows progress', async ({ page }) => {
+  test('collects identity and explicit workspace-directory consent on the first step', async ({ page }) => {
     await installBaseOnboardingRoutes(page);
     await page.goto('/');
 
     await expect(page.locator('#onboardingModal')).toBeVisible();
     await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 3');
-    await expect(page.locator('#onboardingWorkspaceRoot')).toHaveCount(0);
+    await expect(page.locator('#onboardingWorkspaceRootInput')).toHaveValue('/tmp/ori-test-workspaces');
     await expect(page.locator('#onboardingVaultRoot')).toHaveCount(0);
     await expect(
-      page.getByText('Storage locations can be changed later in Settings when you need them.')
+      page.getByText('Ori only scans the workspace directory you confirm. You can change it later in Settings.')
     ).toBeVisible();
+    await expect(page.locator('#onboardingWorkspaceRootStatus')).toContainText('will not scan');
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
   });
 
@@ -201,6 +217,10 @@ test.describe('Home First Run', () => {
     await expect(page.getByRole('button', { name: 'Create a workspace' })).toBeVisible();
     await expect(page.locator('#sidebar')).toHaveCount(1);
     await expect(page.locator('#sidebarToggle')).toBeVisible();
+
+    await page.goto('/workspaces');
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('[data-hq-site], .ws-map-empty-cluster').first()).toBeVisible();
   });
 
   test('keeps the command-strip interaction contract on home', async ({ page }) => {
@@ -309,11 +329,11 @@ test.describe('Home First Run', () => {
               quests: [
                 {
                   id: 't2-build-hq',
-                  title: 'Build your Personal HQ',
+                  title: 'Build My HQ',
                   why: 'Give Ori a home base for your daily brief and follow-ups.',
                   status: 'locked-tier',
-                  action_url: '/workspaces?hq_onboarding=1',
-                  action_label: 'Build your Personal HQ',
+                  action_url: '/workspaces?view=map&focus=personal-hq',
+                  action_label: 'Build My HQ',
                   optional: true
                 }
               ]
@@ -328,11 +348,11 @@ test.describe('Home First Run', () => {
     const mission = page.locator('[data-role="first-mission"]');
     await expect(mission).toBeVisible();
     await expect(mission).toContainText('Mission 01');
-    await expect(mission).toContainText('Build your Personal HQ');
+    await expect(mission).toContainText('Build My HQ');
     await expect(mission.locator('[data-role="first-mission-status"]')).toHaveText('Ready');
     await expect(mission.locator('[data-role="first-mission-action"]')).toHaveAttribute(
       'href',
-      '/workspaces?hq_onboarding=1'
+      '/workspaces?view=map&focus=personal-hq'
     );
 
     await page.setViewportSize({ width: 720, height: 800 });
@@ -450,6 +470,47 @@ test.describe('Home First Run', () => {
       expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewport + 1);
       expect(dimensions.bodyHeight).toBeLessThanOrEqual(dimensions.viewport + 1);
     }
+  });
+
+  test('keeps the optional Daily Brief in its own row without overlapping Operations', async ({
+    page
+  }) => {
+    await page.setViewportSize({ width: 1512, height: 805 });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ current_tier: 1, total_tiers: 1, tiers: [] })
+      });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#homeHQResume')).toHaveCount(0);
+    await page.locator('#homeDailyBrief').evaluate(element => {
+      element.hidden = false;
+    });
+
+    const layout = await page.evaluate(() => {
+      const command = document.getElementById('homeAssistantCard')?.getBoundingClientRect();
+      const brief = document.getElementById('homeDailyBrief')?.getBoundingClientRect();
+      const operations = document.querySelector('.home-command-layout')?.getBoundingClientRect();
+      return {
+        commandBottom: command?.bottom || 0,
+        briefTop: brief?.top || 0,
+        briefBottom: brief?.bottom || 0,
+        operationsTop: operations?.top || 0
+      };
+    });
+
+    expect(layout.briefTop).toBeGreaterThanOrEqual(layout.commandBottom);
+    expect(layout.operationsTop).toBeGreaterThanOrEqual(layout.briefBottom);
   });
 
   test('collapses the quest log to a progress badge and restores it', async ({ page }) => {

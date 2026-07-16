@@ -72,10 +72,11 @@ test('firstMissionView exposes the HQ quest before its tier unlocks', () => {
         quests: [
           quest({
             id: 't2-build-hq',
-            title: 'Build your Personal HQ',
+            title: 'Build My HQ',
             why: 'Give Ori a home base.',
             status: 'locked-tier',
-            action_url: '/workspaces?hq_onboarding=1'
+            action_url: '/workspaces?view=map&focus=personal-hq',
+            action_label: 'Build My HQ'
           })
         ]
       })
@@ -86,11 +87,11 @@ test('firstMissionView exposes the HQ quest before its tier unlocks', () => {
     visible: true,
     completed: false,
     skipped: false,
-    title: 'Build your Personal HQ',
+    title: 'Build My HQ',
     why: 'Give Ori a home base.',
     statusLabel: 'Ready',
-    actionLabel: 'Start mission',
-    actionURL: '/workspaces?hq_onboarding=1',
+    actionLabel: 'Build My HQ',
+    actionURL: '/workspaces?view=map&focus=personal-hq',
     showAction: true
   });
 });
@@ -103,7 +104,8 @@ test('firstMissionView turns a skipped HQ quest into a resumable mission', () =>
           quest({
             id: 't2-build-hq',
             status: 'skipped',
-            action_url: '/workspaces?hq_onboarding=1'
+            action_url: '/workspaces?view=map&focus=personal-hq',
+            action_label: 'Build My HQ'
           })
         ]
       })
@@ -111,8 +113,8 @@ test('firstMissionView turns a skipped HQ quest into a resumable mission', () =>
   };
 
   const view = firstMissionView(status);
-  assert.equal(view.statusLabel, 'Paused');
-  assert.equal(view.actionLabel, 'Resume mission');
+  assert.equal(view.statusLabel, 'Not set up');
+  assert.equal(view.actionLabel, 'Build My HQ');
   assert.equal(view.showAction, true);
 });
 
@@ -171,7 +173,7 @@ test('questRowState: a skipped quest is not "done", offers Resume instead of a t
       status: 'skipped',
       optional: true,
       action_url: '/workspaces?hq=1',
-      action_label: 'Build your Personal HQ'
+      action_label: 'Build My HQ'
     })
   );
   assert.equal(state.done, false, 'a skip must never be labeled as the action being completed');

@@ -67,12 +67,17 @@ body.home-command-page .home-command-bridge * {
 
 .home-command-bridge {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   width: min(1680px, 100%);
   margin: 0 auto;
   color: var(--hc-ink);
   font-family: "Chakra Petch", system-ui, sans-serif;
+}
+
+.home-orientation-slot {
+  min-width: 0;
+  min-height: 0;
 }
 
 .home-command-strip,

@@ -95,9 +95,10 @@ type Settings struct {
 	SpeechLanguage string `json:"speech_language,omitempty"` // BCP-47 tag or "auto"
 
 	// Workspace settings
-	WorkspaceRoot string `json:"workspace_root,omitempty"` // Default directory for new workspace folders (e.g., ~/Documents/Ori Workspaces)
-	VaultRoot     string `json:"vault_root,omitempty"`     // Default directory for new managed vault files
-	TemplatesRoot string `json:"templates_root,omitempty"` // Directory holding project template folders (defaults to <app data>/templates)
+	WorkspaceRoot          string `json:"workspace_root,omitempty"` // Default directory for new workspace folders (e.g., ~/Documents/Ori Workspaces)
+	WorkspaceRootConfirmed bool   `json:"workspace_root_confirmed"` // True only after the user or operator explicitly accepts a workspace root
+	VaultRoot              string `json:"vault_root,omitempty"`     // Default directory for new managed vault files
+	TemplatesRoot          string `json:"templates_root,omitempty"` // Directory holding project template folders (defaults to <app data>/templates)
 
 	// Native utility settings
 	Utility UtilitySettings `json:"utility,omitempty"`
@@ -154,6 +155,18 @@ func (m *Manager) Load() error {
 
 	if err := json.Unmarshal(data, &m.settings); err != nil {
 		return fmt.Errorf("failed to parse config file %s: %w", m.filePath, err)
+	}
+
+	// This consent flag is new. A settings file written by an older Ori version
+	// represents an established installation that already used its workspace
+	// root, so grandfather it instead of suddenly hiding existing workspaces.
+	// Brand-new settings written by this version always include the explicit
+	// false value until onboarding confirms a directory.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err == nil {
+		if _, present := raw["workspace_root_confirmed"]; !present {
+			m.settings.WorkspaceRootConfirmed = true
+		}
 	}
 
 	return m.validate()
@@ -257,6 +270,14 @@ func DefaultWorkspaceRoot() string {
 		return "workspaces"
 	}
 	return filepath.Join(home, "Ori Workspaces")
+}
+
+// UnconfirmedWorkspaceRoot is an app-owned staging location used before a
+// brand-new user has approved a workspace directory. Keeping the initial file
+// store here prevents Ori from scanning or adopting folders under
+// ~/Ori Workspaces merely because that conventional path already exists.
+func UnconfirmedWorkspaceRoot() string {
+	return filepath.Join(DefaultDataDir(), "workspace-staging")
 }
 
 // DefaultVaultRoot returns the fallback directory used for new managed vault files.
@@ -547,6 +568,16 @@ func (m *Manager) GetWorkspaceRoot() string {
 	return normalized
 }
 
+// IsWorkspaceRootConfirmed reports whether the user has explicitly accepted a
+// workspace directory. A stored custom path is treated as confirmed for
+// compatibility with callers that populated settings before the consent flag
+// existed.
+func (m *Manager) IsWorkspaceRootConfirmed() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings.WorkspaceRootConfirmed || strings.TrimSpace(m.settings.WorkspaceRoot) != ""
+}
+
 // GetVaultRoot returns the explicitly configured vault root, if any.
 func (m *Manager) GetVaultRoot() string {
 	m.mu.RLock()
@@ -623,6 +654,7 @@ func (m *Manager) SetWorkspaceRoot(path string) error {
 
 	m.mu.Lock()
 	m.settings.WorkspaceRoot = normalized
+	m.settings.WorkspaceRootConfirmed = true
 	m.mu.Unlock()
 	return nil
 }

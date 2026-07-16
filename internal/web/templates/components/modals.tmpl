@@ -767,6 +767,36 @@
     line-height: 1.45;
   }
 
+  .onboarding-workspace-root {
+    padding: 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--primary-color) 30%, var(--border-color));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--primary-color) 5%, var(--bg-secondary));
+  }
+
+  .onboarding-workspace-root-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .onboarding-workspace-root-row .form-control {
+    min-width: 0;
+    font-family: "SFMono-Regular", SFMono-Regular, Consolas, monospace;
+    font-size: 0.84rem;
+  }
+
+  .onboarding-workspace-root-status,
+  .onboarding-workspace-root-error {
+    display: block;
+    margin-top: 0.45rem;
+    font-size: 0.76rem;
+    line-height: 1.4;
+  }
+
+  .onboarding-workspace-root-status.is-confirmed { color: var(--primary-color); }
+  .onboarding-workspace-root-status.is-unconfirmed { color: var(--text-secondary); }
+  .onboarding-workspace-root-error { color: var(--bs-danger, #dc3545); }
+
   .onboarding-actions {
     display: flex;
     align-items: center;
@@ -800,7 +830,7 @@
 </style>
 
 <div class="modal fade" id="onboardingModal" tabindex="-1" aria-labelledby="onboardingModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false" role="dialog" aria-modal="true">
-  <div class="modal-dialog" role="document">
+  <div class="modal-dialog modal-dialog-scrollable" role="document">
     <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 16px; overflow: hidden;">
       <div class="modal-body" style="color: var(--text-primary); padding: 2rem;">
         <div class="onboarding-progress-shell">
@@ -884,13 +914,23 @@
               <option value="">Detecting timezone…</option>
             </select>
           </div>
-          <div class="mb-4 ori-hatch-reveal" id="welcomeAssistantReveal">
+          <div class="mb-3 ori-hatch-reveal" id="welcomeAssistantReveal">
             <label for="onboardingAssistantName" class="form-label" style="font-size: 0.85rem; font-weight: 500; color: var(--text-secondary);">Assistant name</label>
             <input type="text" class="form-control" id="onboardingAssistantName" name="assistant_name" autocomplete="off" spellcheck="false" placeholder="Ori…" value="Ori" style="font-size: 1rem; padding: 10px 14px;">
           </div>
 
+          <div class="mb-3 onboarding-workspace-root ori-hatch-reveal" id="welcomeWorkspaceRootReveal">
+            <label for="onboardingWorkspaceRootInput" class="form-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Workspace directory</label>
+            <div class="onboarding-workspace-root-row">
+              <input type="text" class="form-control" id="onboardingWorkspaceRootInput" autocomplete="off" spellcheck="false" placeholder="Choose where Ori workspaces live">
+              <button type="button" class="btn btn-outline-secondary" id="onboardingWorkspaceRootBrowseBtn">Browse</button>
+            </div>
+            <small id="onboardingWorkspaceRootStatus" class="onboarding-workspace-root-status is-unconfirmed" aria-live="polite">Loading suggested directory…</small>
+            <small id="onboardingWorkspaceRootError" class="onboarding-workspace-root-error" role="alert" hidden></small>
+          </div>
+
           <div class="mb-4 onboarding-footnote ori-hatch-reveal" id="welcomeFootnoteReveal">
-            Storage locations can be changed later in Settings when you need them.
+            Ori only scans the workspace directory you confirm. You can change it later in Settings.
           </div>
 
           <div class="onboarding-actions onboarding-actions-end ori-hatch-reveal" id="welcomeBtnReveal">
@@ -1024,7 +1064,7 @@
           <div class="onboarding-actions">
             <button type="button" class="btn btn-outline-secondary" id="doneBackBtn">Back</button>
             <button type="button" class="btn btn-primary onboarding-next-btn" id="startBtn" style="padding: 8px 28px;">
-              View First Mission
+              Build My HQ
             </button>
           </div>
         </div>

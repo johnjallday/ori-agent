@@ -33,6 +33,7 @@ const sessionManager = {
   importDuplicateWorkspaceId: '',
   importDuplicateWorkspaceName: '',
   importEntryPoint: 'workspace_hub_create',
+  workspacePostCreateAction: '',
 
   // Create-workspace "Starting point" template currently picked in the modal.
   // Populated when the modal opens (defaults to the first/Blank template).
@@ -135,28 +136,10 @@ const sessionManager = {
     await this.loadFolders();
     await this.loadTags();
 
-    // Try to restore active session, or prompt to create workspace
+    // Try to restore an active session. An empty workspace launcher owns its
+    // inline empty state; opening Create Workspace requires an explicit click.
     const restored = await this.restoreActiveSession();
-    const isWorkspacePage = document.body.classList.contains('home-hub');
-    // Personal HQ owns the true first-run choice on the workspace launcher.
-    // Do not stack the generic create-workspace modal over Ori's mission
-    // briefing; its "Create a project instead" action opens that same modal
-    // deliberately when the user chooses it.
-    const isHQFirstMission =
-      document.getElementById('workspaceHub')?.dataset.hqOnboardingHint === 'unseen';
-    const isHQOnboardingRoute =
-      new URLSearchParams(window.location.search).get('hq_onboarding') === '1';
-    if (
-      !restored &&
-      this.sessions.length === 0 &&
-      this.folders.length === 0 &&
-      isWorkspacePage &&
-      !isHQFirstMission &&
-      !isHQOnboardingRoute
-    ) {
-      // Show create workspace modal when no workspaces exist (only on workspaces page)
-      this.showAddWorkspaceModal();
-    } else if (!restored && this.sessions.length > 0) {
+    if (!restored && this.sessions.length > 0) {
       // No saved session but sessions exist - use the first one
       // Pass false to not auto-open the chat panel on page load
       await this.switchToSession(this.sessions[0].id, false);
@@ -428,12 +411,28 @@ const sessionManager = {
     });
 
     const openExistingBtn = document.getElementById('folderImportOpenExistingBtn');
-    openExistingBtn?.addEventListener('click', () => {
+    openExistingBtn?.addEventListener('click', async () => {
       if (!this.importDuplicateWorkspaceId) {
         return;
       }
       this.emitImportDuplicateActionTelemetry('suggestion_accepted', importPathInput?.value || '');
-      window.location.href = `/workspaces/${encodeURIComponent(this.importDuplicateWorkspaceId)}`;
+      try {
+        const postCreate = await this.applyWorkspacePostCreateAction(
+          this.importDuplicateWorkspaceId
+        );
+        const destination =
+          postCreate.destination ||
+          `/workspaces/${encodeURIComponent(this.importDuplicateWorkspaceId)}`;
+        const modal = bootstrap.Modal.getInstance(addFolderModal);
+        modal?.hide();
+        this.resetAddWorkspaceModalForm();
+        window.location.href = destination;
+      } catch (error) {
+        this.showToast(
+          error && error.message ? error.message : 'Could not use this workspace as Personal HQ',
+          'error'
+        );
+      }
     });
 
     const proceedDuplicateBtn = document.getElementById('folderImportProceedDuplicateBtn');
@@ -470,16 +469,23 @@ const sessionManager = {
       const entryPoint = String(
         trigger?.dataset?.workspaceEntryPoint || addFolderModal.dataset.pendingEntryPoint || ''
       ).trim();
+      const postCreateAction = String(
+        trigger?.dataset?.workspacePostCreateAction ||
+          addFolderModal.dataset.pendingPostCreateAction ||
+          ''
+      ).trim();
 
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
+      this.workspacePostCreateAction = postCreateAction;
       if (importMode) {
         this.setImportModeEnabled(true);
       }
 
       delete addFolderModal.dataset.pendingImportMode;
       delete addFolderModal.dataset.pendingEntryPoint;
+      delete addFolderModal.dataset.pendingPostCreateAction;
     });
 
     // Close dropdowns when clicking outside
@@ -3270,8 +3276,15 @@ const sessionManager = {
     }
   },
 
+  isPersonalHQImport() {
+    return (
+      this.importModeEnabled && this.workspacePostCreateAction === 'designate_personal_hq'
+    );
+  },
+
   setImportModeEnabled(enabled) {
     this.importModeEnabled = Boolean(enabled);
+    const personalHQImport = this.isPersonalHQImport();
     const modal = document.getElementById('addFolderModal');
     if (modal) {
       modal.dataset.importMode = this.importModeEnabled ? 'true' : 'false';
@@ -3284,7 +3297,35 @@ const sessionManager = {
 
     const title = document.getElementById('folderModalTitle');
     if (title) {
-      title.textContent = this.importModeEnabled ? 'Import Folder' : 'Create Workspace';
+      title.textContent = personalHQImport
+        ? 'Import HQ'
+        : this.importModeEnabled
+          ? 'Import Folder'
+          : 'Create Workspace';
+    }
+
+    const importCardTitle = document.getElementById('folderImportCardTitle');
+    if (importCardTitle) {
+      importCardTitle.textContent = personalHQImport ? 'Import Personal HQ' : 'Import Folder';
+    }
+
+    const importHelp = document.getElementById('folderImportHelp');
+    if (importHelp) {
+      importHelp.textContent = personalHQImport
+        ? 'Restore an Ori workspace folder and make it your Personal HQ.'
+        : 'Link a local folder so this workspace starts with real project context.';
+    }
+
+    const importPathHelp = document.getElementById('folderImportPathHelp');
+    if (importPathHelp) {
+      importPathHelp.textContent = personalHQImport
+        ? 'Choose an Ori workspace folder. Ori will restore or import it, then designate it as your Personal HQ.'
+        : 'Enter an absolute path to import. Workspace name defaults to the folder name, and you can edit it.';
+    }
+
+    const openExistingBtn = document.getElementById('folderImportOpenExistingBtn');
+    if (openExistingBtn) {
+      openExistingBtn.textContent = personalHQImport ? 'Use as HQ' : 'Open Existing';
     }
 
     const card = document.getElementById('folderImportCard');
@@ -3299,7 +3340,11 @@ const sessionManager = {
 
     const createBtn = document.getElementById('createFolderBtn');
     if (createBtn && !this.isCreatingFolder) {
-      createBtn.textContent = this.importModeEnabled ? 'Import Folder' : 'Create Workspace';
+      createBtn.textContent = personalHQImport
+        ? 'Import HQ'
+        : this.importModeEnabled
+          ? 'Import Folder'
+          : 'Create Workspace';
     }
 
     if (!this.importModeEnabled) {
@@ -3387,7 +3432,9 @@ const sessionManager = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'Select Folder to Import as Workspace'
+          title: this.isPersonalHQImport()
+            ? 'Select Personal HQ Folder'
+            : 'Select Folder to Import as Workspace'
         })
       });
 
@@ -3448,6 +3495,46 @@ const sessionManager = {
     });
   },
 
+  async applyWorkspacePostCreateAction(workspaceId) {
+    const id = String(workspaceId || '').trim();
+    const action = String(this.workspacePostCreateAction || '').trim();
+    const workspaceDestination = id ? `/workspaces/${encodeURIComponent(id)}` : '/workspaces';
+    if (!action) {
+      return { applied: false, destination: workspaceDestination };
+    }
+    if (!id) {
+      throw new Error('Workspace imported, but Ori could not identify it as Personal HQ.');
+    }
+    if (action !== 'designate_personal_hq') {
+      throw new Error(`Unsupported workspace follow-up action: ${action}`);
+    }
+
+    const replaceResponse = await fetch('/api/personal-hq/replace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspace_id: id })
+    });
+    const replaceResult = await replaceResponse.json().catch(() => ({}));
+    if (!replaceResponse.ok || replaceResult.error) {
+      throw new Error(replaceResult.error || 'Could not designate the imported workspace as HQ.');
+    }
+
+    const stateResponse = await fetch('/api/personal-hq/onboarding-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: 'completed' })
+    });
+    const stateResult = await stateResponse.json().catch(() => ({}));
+    if (!stateResponse.ok || stateResult.error) {
+      throw new Error(stateResult.error || 'Personal HQ was designated, but setup could not finish.');
+    }
+
+    return {
+      applied: true,
+      destination: '/workspaces?view=map&focus=personal-hq'
+    };
+  },
+
   resetAddWorkspaceModalForm(options = {}) {
     const { preserveAskOri = false } = options;
     // Every open starts on step 1; setImportModeEnabled(false) below re-renders
@@ -3498,6 +3585,7 @@ const sessionManager = {
     if (importToggle) importToggle.checked = false;
     if (importPathInput) importPathInput.value = '';
     this.importEntryPoint = 'workspace_hub_create';
+    this.workspacePostCreateAction = '';
     this.importAllowDuplicate = false;
     this.setImportBrowseLoading(false);
     this.setImportModeEnabled(false);
@@ -4902,7 +4990,9 @@ const sessionManager = {
       if (!this.isCreatingFolder) {
         const selected = window.ProjectTemplateCard?.getSelectedTemplate?.();
         createBtn.textContent = importMode
-          ? 'Import Folder'
+          ? this.isPersonalHQImport()
+            ? 'Import HQ'
+            : 'Import Folder'
           : selected?.blank || !selected?.name
             ? 'Create Workspace'
             : `Create ${selected.name}`;
@@ -5391,8 +5481,19 @@ const sessionManager = {
       // Starter tasks are seeded server-side during workspace creation
       // (assigned to the entry agent); the create response reports how many.
       const seededStarterTasks = Number(result?.seeded_starter_tasks) || 0;
+      let postCreateResult = { applied: false, destination: '' };
+      let postCreateError = null;
+      if (createdWorkspaceId && this.workspacePostCreateAction) {
+        try {
+          postCreateResult = await this.applyWorkspacePostCreateAction(createdWorkspaceId);
+        } catch (error) {
+          postCreateError = error;
+        }
+      }
 
-      if (
+      if (postCreateResult.applied) {
+        this.showToast('Personal HQ imported successfully', 'success');
+      } else if (
         bootstrapApplyResult.invitedAgents > 0 ||
         bootstrapApplyResult.boundMCPs > 0 ||
         bootstrapApplyResult.attachedSkills > 0 ||
@@ -5446,6 +5547,13 @@ const sessionManager = {
         );
       }
 
+      if (postCreateError) {
+        this.showToast(
+          `Workspace imported, but Personal HQ setup did not finish. ${postCreateError.message || ''}`.trim(),
+          'warning'
+        );
+      }
+
       if (createdWorkspaceId && openProjectAfterCreate) {
         try {
           await this.openProjectAfterWorkspaceCreate(createdWorkspaceId);
@@ -5462,7 +5570,8 @@ const sessionManager = {
 
       // Navigate to the new workspace once the reviewed setup has been applied
       if (createdWorkspaceId) {
-        window.location.href = `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
+        window.location.href =
+          postCreateResult.destination || `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
         return;
       }
 

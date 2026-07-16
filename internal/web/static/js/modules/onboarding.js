@@ -48,6 +48,29 @@ const FALLBACK_TIMEZONES = [
   'Pacific/Honolulu'
 ];
 
+export function workspaceRootSetupView(state) {
+  const source = String(state?.source || 'unconfirmed')
+    .trim()
+    .toLowerCase();
+  const configuredRoot = String(state?.workspace_root || '').trim();
+  const effectiveRoot = String(state?.effective_workspace_root || '').trim();
+  const suggestedRoot = String(state?.default_workspace_root || '').trim();
+  const confirmed =
+    state?.confirmed === true ||
+    source === 'settings' ||
+    source === 'environment' ||
+    source === 'default';
+
+  return {
+    source,
+    confirmed,
+    path: configuredRoot || effectiveRoot || suggestedRoot,
+    status: confirmed
+      ? 'Confirmed. Ori will scan only this directory.'
+      : 'Suggested location — Ori will not scan it until you continue.'
+  };
+}
+
 export class OnboardingManager {
   constructor() {
     this.currentPhase = 0;
@@ -58,6 +81,7 @@ export class OnboardingManager {
     this.userName = '';
     this.assistantName = 'Ori';
     this.timezone = '';
+    this.workspaceRootState = null;
   }
 
   async init() {
@@ -79,6 +103,7 @@ export class OnboardingManager {
     this.timezone = status.timezone || this.detectTimezone();
     this.populateTimezoneSelect();
     if (status.needs_onboarding) {
+      await this.loadWorkspaceRoot();
       setTimeout(() => this.showOnboarding(), 500);
     }
   }
@@ -115,7 +140,7 @@ export class OnboardingManager {
     // Skip link
     const skipLink = document.getElementById('skipOnboardingLink');
     if (skipLink) {
-      skipLink.addEventListener('click', (e) => {
+      skipLink.addEventListener('click', e => {
         e.preventDefault();
         this.skipOnboarding();
       });
@@ -135,7 +160,7 @@ export class OnboardingManager {
     // Provider change handler
     const providerSelect = document.getElementById('onboardingSystemProvider');
     if (providerSelect) {
-      providerSelect.addEventListener('change', async (e) => {
+      providerSelect.addEventListener('change', async e => {
         this.clearModelError();
         this.updateReasoningVisibility(e.target.value);
         await this.loadModels(e.target.value);
@@ -153,7 +178,7 @@ export class OnboardingManager {
     // Enter key on name inputs advances
     const nameInput = document.getElementById('onboardingUserName');
     if (nameInput) {
-      nameInput.addEventListener('keydown', (e) => {
+      nameInput.addEventListener('keydown', e => {
         if (e.key === 'Enter') {
           e.preventDefault();
           const timezoneSelect = document.getElementById('onboardingTimezone');
@@ -164,18 +189,38 @@ export class OnboardingManager {
 
     const timezoneSelect = document.getElementById('onboardingTimezone');
     if (timezoneSelect) {
-      timezoneSelect.addEventListener('change', (e) => {
+      timezoneSelect.addEventListener('change', e => {
         this.timezone = e.target.value || '';
       });
     }
 
     const assistantNameInput = document.getElementById('onboardingAssistantName');
     if (assistantNameInput) {
-      assistantNameInput.addEventListener('keydown', (e) => {
+      assistantNameInput.addEventListener('keydown', e => {
         if (e.key === 'Enter') {
           e.preventDefault();
           this.advanceFromWelcome();
         }
+      });
+    }
+
+    const workspaceRootBrowseBtn = document.getElementById('onboardingWorkspaceRootBrowseBtn');
+    if (workspaceRootBrowseBtn) {
+      workspaceRootBrowseBtn.addEventListener('click', () => this.browseWorkspaceRoot());
+    }
+    const workspaceRootInput = document.getElementById('onboardingWorkspaceRootInput');
+    if (workspaceRootInput) {
+      workspaceRootInput.addEventListener('input', () => {
+        const status = document.getElementById('onboardingWorkspaceRootStatus');
+        const savedPath = workspaceRootSetupView(this.workspaceRootState).path;
+        if (!status) return;
+        if (workspaceRootInput.value.trim() === savedPath) {
+          this.renderWorkspaceRootState();
+          return;
+        }
+        status.textContent = 'Changed. Continue to confirm this directory.';
+        status.classList.remove('is-confirmed');
+        status.classList.add('is-unconfirmed');
       });
     }
   }
@@ -248,6 +293,101 @@ export class OnboardingManager {
     }
   }
 
+  renderWorkspaceRootState() {
+    const view = workspaceRootSetupView(this.workspaceRootState);
+    const input = document.getElementById('onboardingWorkspaceRootInput');
+    const status = document.getElementById('onboardingWorkspaceRootStatus');
+    if (input && !input.value) input.value = view.path;
+    if (status) {
+      status.textContent = view.status;
+      status.classList.toggle('is-confirmed', view.confirmed);
+      status.classList.toggle('is-unconfirmed', !view.confirmed);
+    }
+  }
+
+  showWorkspaceRootError(message) {
+    const error = document.getElementById('onboardingWorkspaceRootError');
+    if (!error) return;
+    error.textContent = message || '';
+    error.hidden = !message;
+  }
+
+  async loadWorkspaceRoot() {
+    try {
+      const response = await fetch('/api/settings/workspace-root', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error('Failed to load workspace directory');
+      this.workspaceRootState = await response.json();
+      this.renderWorkspaceRootState();
+      return this.workspaceRootState;
+    } catch (error) {
+      console.error('Error loading workspace directory:', error);
+      this.showWorkspaceRootError(
+        'Could not load the suggested directory. Choose a folder to continue.'
+      );
+      return null;
+    }
+  }
+
+  async browseWorkspaceRoot() {
+    const button = document.getElementById('onboardingWorkspaceRootBrowseBtn');
+    if (button) button.disabled = true;
+    this.showWorkspaceRootError('');
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose Workspace Directory' })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success)
+        throw new Error(result.error || 'Folder picker unavailable');
+      if (result.selected && result.path) {
+        const input = document.getElementById('onboardingWorkspaceRootInput');
+        const status = document.getElementById('onboardingWorkspaceRootStatus');
+        if (input) input.value = result.path;
+        if (status) {
+          status.textContent = 'Selected. Continue to confirm this directory.';
+          status.classList.remove('is-confirmed');
+          status.classList.add('is-unconfirmed');
+        }
+      }
+    } catch (error) {
+      this.showWorkspaceRootError(error.message || 'Could not open the folder picker.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async saveWorkspaceRoot() {
+    const input = document.getElementById('onboardingWorkspaceRootInput');
+    const workspaceRoot = input?.value?.trim() || '';
+    if (!workspaceRoot) {
+      this.showWorkspaceRootError('Choose a workspace directory before continuing.');
+      if (input) input.focus();
+      return false;
+    }
+
+    this.showWorkspaceRootError('');
+    try {
+      const response = await fetch('/api/settings/workspace-root', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_root: workspaceRoot })
+      });
+      if (!response.ok)
+        throw new Error((await response.text()) || 'Failed to save workspace directory');
+      this.workspaceRootState = await response.json();
+      this.renderWorkspaceRootState();
+      return true;
+    } catch (error) {
+      console.error('Error saving workspace directory:', error);
+      this.showWorkspaceRootError(error.message || 'Could not save the workspace directory.');
+      return false;
+    }
+  }
+
   detectTimezone() {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
@@ -269,11 +409,7 @@ export class OnboardingManager {
       }
     }
 
-    const preferred = [
-      this.timezone,
-      this.detectTimezone(),
-      'UTC'
-    ].filter(Boolean);
+    const preferred = [this.timezone, this.detectTimezone(), 'UTC'].filter(Boolean);
 
     const allZones = new Set([...preferred, ...zones]);
     return Array.from(allZones).sort((a, b) => {
@@ -287,7 +423,10 @@ export class OnboardingManager {
     if (!timezone || timezone === 'UTC') {
       return timezone || '';
     }
-    return timezone.split('/').map(part => part.replace(/_/g, ' ')).join(' / ');
+    return timezone
+      .split('/')
+      .map(part => part.replace(/_/g, ' '))
+      .join(' / ');
   }
 
   populateTimezoneSelect() {
@@ -305,7 +444,7 @@ export class OnboardingManager {
       select.appendChild(placeholder);
     }
 
-    zones.forEach((zone) => {
+    zones.forEach(zone => {
       const option = document.createElement('option');
       option.value = zone;
       option.textContent = this.formatTimezoneLabel(zone);
@@ -343,7 +482,9 @@ export class OnboardingManager {
 
       // Populate provider dropdown
       providerSelect.innerHTML = '<option value="">Select a provider…</option>';
-      const preferredLocalProvider = available.find(p => ['ollama', 'lmstudio', 'mlx_lm'].includes(p.name));
+      const preferredLocalProvider = available.find(p =>
+        ['ollama', 'lmstudio', 'mlx_lm'].includes(p.name)
+      );
 
       available.forEach(provider => {
         const option = document.createElement('option');
@@ -372,7 +513,8 @@ export class OnboardingManager {
     if (modelSection) modelSection.classList.add('d-none');
     if (apiKeySection) apiKeySection.classList.remove('d-none');
     if (speechBubble) {
-      speechBubble.textContent = "I need an AI connection to work. Add an API key below, or run Ollama, LM Studio, or MLX-LM for local AI.";
+      speechBubble.textContent =
+        'I need an AI connection to work. Add an API key below, or run Ollama, LM Studio, or MLX-LM for local AI.';
     }
     this.updateModelStepState();
   }
@@ -392,7 +534,9 @@ export class OnboardingManager {
     }
 
     try {
-      const response = await fetch(`/api/settings/available-models?provider=${encodeURIComponent(providerName)}`);
+      const response = await fetch(
+        `/api/settings/available-models?provider=${encodeURIComponent(providerName)}`
+      );
       if (!response.ok) throw new Error('Failed to fetch models');
       const data = await response.json();
 
@@ -430,8 +574,9 @@ export class OnboardingManager {
         .filter(option => option && typeof option.id === 'string' && option.id.length > 0)
         .map(option => ({
           id: option.id,
-          label: (typeof option.label === 'string' && option.label.length > 0) ? option.label : option.id,
-          description: (typeof option.description === 'string') ? option.description : '',
+          label:
+            typeof option.label === 'string' && option.label.length > 0 ? option.label : option.id,
+          description: typeof option.description === 'string' ? option.description : '',
           recommended: Boolean(option.recommended)
         }));
     }
@@ -503,7 +648,7 @@ export class OnboardingManager {
 
     const provider = providerSelect?.value;
     const model = modelSelect?.value;
-    const reasoning_effort = provider === 'codex' ? (reasoningSelect?.value || 'medium') : '';
+    const reasoning_effort = provider === 'codex' ? reasoningSelect?.value || 'medium' : '';
 
     if (!provider || !model) {
       this.showModelError('Choose a provider and model before continuing, or use Set Up Later.');
@@ -521,7 +666,8 @@ export class OnboardingManager {
 
       const successAlert = document.getElementById('onboardingSystemModelSuccess');
       if (successAlert) {
-        const label = this.availableProviders.find(p => p.name === provider)?.display_name || provider;
+        const label =
+          this.availableProviders.find(p => p.name === provider)?.display_name || provider;
         const aName = this.assistantName || 'Ori';
         successAlert.textContent = `${aName} will use ${label} (${model}).`;
         successAlert.classList.remove('d-none');
@@ -620,6 +766,7 @@ export class OnboardingManager {
     if (timezoneInput) {
       this.populateTimezoneSelect();
     }
+    this.renderWorkspaceRootState();
 
     this.showPhase(0);
     this.modalInstance.show();
@@ -634,14 +781,15 @@ export class OnboardingManager {
     const container = document.getElementById('oriEggContainer');
     if (!container) return;
     const phase0 = document.getElementById('onboarding-phase-0');
-    const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion =
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reducedMotion) {
       container.classList.add('egg-hatching');
       if (phase0) phase0.classList.add('egg-hatched');
       return;
     }
 
-    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     // Keep the character moment, but get users to the first action quickly.
     await wait(120);
@@ -702,6 +850,22 @@ export class OnboardingManager {
   }
 
   async advanceFromWelcome() {
+    const nextButton = document.getElementById('welcomeNextBtn');
+    const originalLabel = nextButton?.textContent || 'Continue';
+    if (nextButton) {
+      nextButton.disabled = true;
+      nextButton.textContent = 'Confirming…';
+    }
+
+    const workspaceRootSaved = await this.saveWorkspaceRoot();
+    if (!workspaceRootSaved) {
+      if (nextButton) {
+        nextButton.disabled = false;
+        nextButton.textContent = originalLabel;
+      }
+      return;
+    }
+
     await this.saveNames();
     await this.saveTimezone();
     await this.completeStep('step-welcome');
@@ -718,6 +882,10 @@ export class OnboardingManager {
 
     // Load providers when entering model phase
     await this.loadProviders();
+    if (nextButton) {
+      nextButton.disabled = false;
+      nextButton.textContent = originalLabel;
+    }
   }
 
   async advanceFromModel() {
@@ -765,6 +933,7 @@ export class OnboardingManager {
       if (!response.ok) throw new Error('Failed to complete onboarding');
 
       if (this.modalInstance) this.modalInstance.hide();
+      window.location.href = '/workspaces?view=map&focus=personal-hq';
     } catch (error) {
       console.error('Error completing onboarding:', error);
     }

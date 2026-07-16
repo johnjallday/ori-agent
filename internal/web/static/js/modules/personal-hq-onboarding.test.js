@@ -1,67 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, chipStateLabel, replyProposalView, followUpView, followUpCategoryLabel, journalPromptView } from './personal-hq-onboarding.js';
+import {
+  upgradeView,
+  emailStatusView,
+  chipStateLabel,
+  replyProposalView,
+  followUpView,
+  followUpCategoryLabel,
+  journalPromptView,
+  hqWorkspaceRootView
+} from './personal-hq-onboarding.js';
 
-function status(overrides) {
-  return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
-}
-
-test('resolveGuidedMode: no status at all resolves to none (degrade safely)', () => {
-  assert.equal(resolveGuidedMode(null), 'none');
-  assert.equal(resolveGuidedMode(undefined), 'none');
+test('hqWorkspaceRootView requires confirmation before Build My HQ', () => {
+  const view = hqWorkspaceRootView({
+    default_workspace_root: '/Users/test/Ori Workspaces',
+    source: 'unconfirmed',
+    confirmed: false
+  });
+  assert.equal(view.path, '/Users/test/Ori Workspaces');
+  assert.equal(view.confirmed, false);
+  assert.match(view.status, /confirm/i);
 });
 
-test('resolveGuidedMode: brand-new profile (unseen, no designation) is guided', () => {
-  assert.equal(resolveGuidedMode(status({ hq_onboarding_state: 'unseen' })), 'guided');
-});
-
-test('resolveGuidedMode: a valid designated HQ is none, regardless of onboarding state', () => {
-  assert.equal(resolveGuidedMode(status({ workspace_id: 'ws-1', valid: true, hq_onboarding_state: 'unseen' })), 'none');
-  assert.equal(resolveGuidedMode(status({ workspace_id: 'ws-1', valid: true, hq_onboarding_state: 'completed' })), 'none');
-});
-
-test('resolveGuidedMode: a stale designation (workspace_id set, not valid) is repair even when unseen', () => {
-  // Defensive precedence: a broken reference must never re-show the
-  // full-screen guided takeover as if nothing had ever happened.
-  assert.equal(resolveGuidedMode(status({ workspace_id: 'ws-1', valid: false, hq_onboarding_state: 'unseen' })), 'repair');
-});
-
-test('resolveGuidedMode: skipped with no designation is resume, not guided', () => {
-  assert.equal(resolveGuidedMode(status({ hq_onboarding_state: 'skipped' })), 'resume');
-});
-
-test('resolveGuidedMode: in_progress with no designation is resume', () => {
-  assert.equal(resolveGuidedMode(status({ hq_onboarding_state: 'in_progress' })), 'resume');
-});
-
-test('resolveGuidedMode: completed onboarding but no current designation (e.g. cleared) is resume', () => {
-  assert.equal(resolveGuidedMode(status({ hq_onboarding_state: 'completed', valid: false, workspace_id: '' })), 'resume');
-});
-
-test('wantsGuidedTakeover: only an unseen profile WITH explicit intent triggers the takeover', () => {
-  // The home-first flow: a brand-new profile browsing to the launcher must
-  // see the normal launcher; the full-screen takeover appears only after the
-  // user clicks "Start mission" (which arrives with ?hq_onboarding=1).
-  assert.equal(wantsGuidedTakeover('unseen', true), true);
-  assert.equal(wantsGuidedTakeover('unseen', false), false);
-  assert.equal(wantsGuidedTakeover('seen', true), false);
-  assert.equal(wantsGuidedTakeover('seen', false), false);
-  assert.equal(wantsGuidedTakeover(null, true), false);
-});
-
-test('resumeCopy: repair mode offers Build, Choose, and Clear', () => {
-  const copy = resumeCopy('repair');
-  assert.equal(copy.showBuild, true);
-  assert.equal(copy.showChoose, true);
-  assert.equal(copy.showClear, true);
-  assert.match(copy.text, /needs attention/i);
-});
-
-test('resumeCopy: resume mode offers Build and Choose but not Clear (nothing to clear)', () => {
-  const copy = resumeCopy('resume');
-  assert.equal(copy.showBuild, true);
-  assert.equal(copy.showChoose, true);
-  assert.equal(copy.showClear, false);
+test('hqWorkspaceRootView shows an active confirmed path', () => {
+  const view = hqWorkspaceRootView({
+    workspace_root: '/Volumes/Studio/Ori',
+    effective_workspace_root: '/Volumes/Studio/Ori',
+    source: 'settings',
+    confirmed: true
+  });
+  assert.equal(view.path, '/Volumes/Studio/Ori');
+  assert.equal(view.confirmed, true);
+  assert.match(view.status, /scan only/i);
 });
 
 test('upgradeView: no plan hides the card', () => {
@@ -151,7 +121,9 @@ test('chipStateLabel maps loadout states to short words', () => {
 
 test('replyProposalView: a draft is sendable and carries the exact reviewed payload hash', () => {
   const view = replyProposalView({
-    id: 'p1', status: 'draft', payload_hash: 'abc',
+    id: 'p1',
+    status: 'draft',
+    payload_hash: 'abc',
     payload: { to: ['dana@x.com', 'sam@x.com'], subject: 'Re: hi', body: 'Sounds good.' }
   });
   assert.equal(view.canSend, true);
@@ -184,7 +156,13 @@ test('followUpCategoryLabel maps v1 categories to friendly labels', () => {
 });
 
 test('followUpView: an active item is actionable (Done/Snooze), not a candidate', () => {
-  const view = followUpView({ id: 'f1', status: 'active', category: 'waiting_on', title: "Dana's quote", counterparty: 'Dana' });
+  const view = followUpView({
+    id: 'f1',
+    status: 'active',
+    category: 'waiting_on',
+    title: "Dana's quote",
+    counterparty: 'Dana'
+  });
   assert.equal(view.isCandidate, false);
   assert.equal(view.category, 'Waiting on');
   assert.equal(view.counterparty, 'Dana');
@@ -192,12 +170,22 @@ test('followUpView: an active item is actionable (Done/Snooze), not a candidate'
 });
 
 test('followUpView: a candidate is flagged for confirm/dismiss', () => {
-  const view = followUpView({ id: 'f2', status: 'candidate', category: 'i_owe', title: 'Maybe send deck' });
+  const view = followUpView({
+    id: 'f2',
+    status: 'candidate',
+    category: 'i_owe',
+    title: 'Maybe send deck'
+  });
   assert.equal(view.isCandidate, true);
 });
 
 test('journalPromptView: carries the editable draft and degraded flag', () => {
-  const view = journalPromptView({ local_date: '2026-07-15', draft: '# End of day', degraded: true, gaps: ['x'] });
+  const view = journalPromptView({
+    local_date: '2026-07-15',
+    draft: '# End of day',
+    degraded: true,
+    gaps: ['x']
+  });
   assert.equal(view.localDate, '2026-07-15');
   assert.equal(view.draft, '# End of day');
   assert.equal(view.degraded, true);
@@ -209,4 +197,3 @@ test('journalPromptView: degrades safely with no proposal', () => {
   assert.equal(view.draft, '');
   assert.equal(view.degraded, false);
 });
-

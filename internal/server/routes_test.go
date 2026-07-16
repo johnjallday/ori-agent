@@ -124,15 +124,13 @@ func TestPersonalHQRoutesRegistered(t *testing.T) {
 }
 
 // TestBrandNewProfileLandsOnHome covers the home-first onboarding direction:
-// a brand-new profile (never-seen HQ onboarding) must land on Home and be
-// free to explore, NOT be force-redirected to the guided workspace launcher.
-// The Mission 01 quest-log card is the pull invitation; the guided takeover is
-// reached only when the user explicitly starts the mission (which navigates to
-// /workspaces?hq_onboarding=1).
+// a brand-new profile must land on Home and be free to explore. Mission 01 is
+// the pull invitation and routes into the normal workspace Map rather than a
+// forced setup page.
 func TestBrandNewProfileLandsOnHome(t *testing.T) {
 	// A freshly built handler runs against an empty temp-HOME profile: it is
 	// brand-new by construction (this is exactly the profile that previously
-	// produced a 303 to /workspaces?hq_onboarding=1). Asserting a 200 Home
+	// once produced a 303 to the workspace launcher). Asserting a 200 Home
 	// render with no redirect proves the forced first-run detour is gone.
 	handler := newRoutesTestHandler(t)
 

@@ -24,72 +24,85 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
-  // Covers the complete first visible moment (PRD FR19/FR116-118, task
-  // 4.14/8.1): Home redirects to the launcher, the generic create-workspace
-  // modal stays out of the way, and Ori's first mission renders even with
-  // motion disabled. The app-level profile/model wizard is intentionally
-  // completed through its real API, then the same page is reloaded to reveal
-  // the mission waiting directly behind it.
-  test('a brand-new profile is welcomed into Ori’s visible first mission', async ({
+  // Home remains the first surface. Mission 01 is a pull invitation into the
+  // normal workspace Map, where the absent HQ appears as a selected blueprint
+  // landmark rather than a full-screen takeover.
+  test('Mission 01 focuses the unbuilt Personal HQ landmark on the Map', async ({
     page,
     request
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('/');
-    await expect(page).toHaveURL(/\/workspaces\?hq_onboarding=1/);
-
-    // Clear the separate profile/model wizard so the mission underneath can
-    // be asserted directly without bypassing the real first-launch route.
     const res = await request.post('/api/onboarding/skip');
     expect(res.ok()).toBeTruthy();
-    await page.reload();
+    await page.goto('/');
 
-    const mission = page.locator('#hqOnboardingGuided');
+    const mission = page.locator('[data-role="first-mission"]');
     await expect(mission).toBeVisible();
-    await expect(mission).toContainText('Welcome to Ori Agent');
-    await expect(page.locator('#hqGuidedTitle')).toHaveText('Build your Personal HQ');
-    await expect(page.locator('#hqGuidedBuildBtn')).toHaveText(/Build Personal HQ/);
+    await expect(mission).toContainText('Build My HQ');
+    await mission.locator('[data-role="first-mission-action"]').click();
+
+    await expect(page).toHaveURL(/\/workspaces\?view=map&focus=personal-hq/);
+    await expect(page.locator('#hqOnboardingGuided')).toHaveCount(0);
+    const site = page.locator('[data-hq-site]');
+    await expect(site).toBeVisible();
+    await expect(site).toHaveClass(/is-selected/);
+    await expect(site).toContainText('Not created');
+    await expect(page.locator('.ws-map-overview-body')).toContainText(
+      'Personal HQ has not been created'
+    );
+    await expect(page.locator('[data-hq-action="build"]')).toBeVisible();
+    await expect(page.locator('[data-hq-action="import"]')).toBeVisible();
     await expect(page.locator('#addFolderModal')).toBeHidden();
-    await expect(page.locator('.launcher-header')).toBeHidden();
+
+    await page.locator('[data-hq-action="import"]').click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#folderModalTitle')).toHaveText('Import HQ');
+    await expect(page.locator('#folderImportHelp')).toContainText('Personal HQ');
+    await expect(page.locator('#createFolderBtn')).toHaveText('Import HQ');
+    await page.locator('#addFolderModal').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
   });
 
-  // Covers the outcome PRD FR101 cares about through the visible mission UI:
-  // once HQ setup is skipped, Home shows only the lightweight resume entry,
-  // never the full takeover, and product features stay ungated.
-  test('Skip for Now stays on the launcher and Home shows only the lightweight resume entry, never the full takeover', async ({
+  // "Not now" suppresses the active invitation without hiding reality from
+  // the Map: the unbuilt site remains visible, while Home has no duplicate HQ
+  // banner competing with the progression card.
+  test('Not now keeps the unbuilt HQ on the Map without a duplicate Home banner', async ({
     page
   }) => {
-    await page.goto('/workspaces?hq_onboarding=1');
-    await expect(page.locator('#hqOnboardingGuided')).toBeVisible();
-    await page.locator('#hqGuidedSkipBtn').click();
-    await expect(page.locator('#hqOnboardingGuided')).toBeHidden();
+    await page.goto('/workspaces?view=map&focus=personal-hq');
+    await expect(page.locator('[data-hq-site]')).toBeVisible();
+    await page.locator('[data-hq-action="skip"]').click();
+    await expect(page.locator('[data-hq-site]')).toBeVisible();
+    await expect(page.locator('[data-hq-action="skip"]')).toHaveCount(0);
 
     await page.goto('/');
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.locator('#homeHQResume')).toBeVisible();
+    await expect(page.locator('#homeHQResume')).toHaveCount(0);
     await expect(page.locator('#homeDailyBrief')).toBeHidden();
+    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Not set up');
   });
 
-  // Exercises the default setup path through the actual resume and modal UI.
-  // This also proves the same module is active on /workspaces (where the
-  // mission lives), not only on Home.
+  // The Map-native action hands off to the existing setup modal and then
+  // replaces the blueprint with the authoritative designated HQ landmark.
   test('Build My HQ with defaults creates the workspace and Home shows the Daily Brief', async ({
     page
   }) => {
-    await page.goto('/');
-    await expect(page.locator('#homeHQResume')).toBeVisible();
-    await page.locator('#homeHQResumeBuildBtn').click();
-    await expect(page).toHaveURL(/\/workspaces\?hq_onboarding=1/);
-    await expect(page.locator('#hqOnboardingResume')).toBeVisible();
-    await page.locator('#hqResumeBuildBtn').click();
+    await page.goto('/workspaces?view=map&focus=personal-hq');
+    await expect(page.locator('[data-hq-site]')).toBeVisible();
+    await page.locator('[data-hq-action="build"]').click();
     await expect(page.locator('#hqBuildModal')).toBeVisible();
+    await expect(page.locator('#hqBuildWorkspaceRoot')).not.toHaveValue('');
+    await expect(page.locator('#hqBuildWorkspaceRootStatus')).toContainText(/confirm|scan only/i);
     await expect(page.locator('#hqBuildName')).toHaveValue('My HQ');
     await expect(page.locator('#hqBuildTimezone')).not.toHaveValue('');
     await page.locator('#hqBuildSubmitBtn').click();
 
     await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
+    const rootResponse = await page.request.get('/api/settings/workspace-root');
+    expect(rootResponse.ok()).toBeTruthy();
+    expect((await rootResponse.json()).confirmed).toBe(true);
     await expect(page.locator('#homeDailyBrief')).toBeVisible();
-    await expect(page.locator('#homeHQResume')).toBeHidden();
+    await expect(page.locator('#homeHQResume')).toHaveCount(0);
 
     // First-open generation runs in the background; the placeholder or the
     // finished brief should appear, never a blank body.

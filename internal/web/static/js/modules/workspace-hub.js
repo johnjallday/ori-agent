@@ -512,7 +512,8 @@ console.log('[workspace-hub.js] FILE LOADED');
   function getLauncherWorkspaceRootDraftValue() {
     const configuredRoot = String(launcherWorkspaceRootState?.workspace_root || '').trim();
     const effectiveRoot = String(launcherWorkspaceRootState?.effective_workspace_root || '').trim();
-    return configuredRoot || effectiveRoot;
+    const suggestedRoot = String(launcherWorkspaceRootState?.default_workspace_root || '').trim();
+    return configuredRoot || effectiveRoot || suggestedRoot;
   }
 
   function setLauncherWorkspaceRootButtonLoading(button, isLoading, loadingLabel) {
@@ -533,6 +534,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function syncLauncherWorkspaceRootEditorControls() {
     const hasCustomRoot = Boolean(String(launcherWorkspaceRootState?.workspace_root || '').trim());
+    const isConfirmed = launcherWorkspaceRootState?.confirmed === true;
     const defaultRoot = String(launcherWorkspaceRootState?.default_workspace_root || '').trim();
 
     if (elements.launcherWorkspaceRootEditBtn) {
@@ -546,7 +548,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherWorkspaceRootResetBtn) {
       elements.launcherWorkspaceRootResetBtn.disabled = !hasCustomRoot;
-      elements.launcherWorkspaceRootResetBtn.textContent = hasCustomRoot ? 'Clear Custom' : 'Using Default';
+      elements.launcherWorkspaceRootResetBtn.textContent = hasCustomRoot
+        ? 'Clear Custom'
+        : (isConfirmed ? 'Using Default' : 'Not Confirmed');
     }
   }
 
@@ -608,7 +612,12 @@ console.log('[workspace-hub.js] FILE LOADED');
     let summary = 'Using the built-in workspace location for new workspaces.';
     let meta = 'This is where new workspaces will be created unless you override it.';
 
-    if (source === 'settings') {
+    if (source === 'unconfirmed') {
+      badgeLabel = 'Needs setup';
+      badgeClass = 'is-unconfirmed';
+      summary = 'Choose a workspace directory before Ori scans for workspaces.';
+      meta = 'No folders are being adopted yet.';
+    } else if (source === 'settings') {
       badgeLabel = 'Custom';
       badgeClass = 'is-settings';
       summary = 'A custom workspace directory is active.';
