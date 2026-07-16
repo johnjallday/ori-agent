@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   parseContent,
   hrefForRef,
+  humanizeReason,
   localDateInZone,
   formatMeta,
   computeBanner,
@@ -42,6 +43,26 @@ test('hrefForRef routes tasks to their deep-link page and everything else to the
 test('hrefForRef falls back to # for a ref with no workspace', () => {
   assert.equal(hrefForRef(null), '#');
   assert.equal(hrefForRef({}), '#');
+});
+
+test('hrefForRef opens an email thread in Gmail by its thread id (no token, fixed host)', () => {
+  const href = hrefForRef({ entity_type: 'email_thread', entity_id: 'abc123' });
+  assert.equal(href, 'https://mail.google.com/mail/u/0/#all/abc123');
+  // Email refs need no workspace_id and must not fall through to '#'.
+  assert.notEqual(href, '#');
+  // The thread id is URL-encoded (no arbitrary-destination injection).
+  assert.equal(
+    hrefForRef({ entity_type: 'email_thread', entity_id: 'a/b#c' }),
+    'https://mail.google.com/mail/u/0/#all/a%2Fb%23c'
+  );
+});
+
+test('humanizeReason maps email reasons to friendly labels and passes others through', () => {
+  assert.equal(humanizeReason('email_waiting_on_user'), 'Waiting on your reply');
+  assert.equal(humanizeReason('email_unread'), 'Unread email');
+  assert.equal(humanizeReason('This is a model-written sentence.'), 'This is a model-written sentence.');
+  assert.equal(humanizeReason('failed'), 'failed');
+  assert.equal(humanizeReason(undefined), '');
 });
 
 test('localDateInZone matches the server LocalDateKey convention (YYYY-MM-DD) for a fixed instant', () => {

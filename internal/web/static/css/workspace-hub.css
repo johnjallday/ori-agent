@@ -6203,6 +6203,226 @@ body:has(#workspaceHub.is-hq-guided) #hubSupportChat {
   color: var(--text-secondary);
 }
 
+/* Personal HQ email connect/grant/repair card (rendered by
+   personal-hq-onboarding.js into #hqEmailMount). */
+.hq-email-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-email-card.hq-email-repair {
+  border-color: var(--warning-color, var(--accent-color, var(--border-color)));
+}
+
+.hq-email-heading {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-email-detail {
+  margin: 0 0 0.6rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+/* Personal HQ loadout chip — a first-class equipped-capability item (email in
+   v1). Rendered into #hqEmailMount. */
+.hq-loadout-chip {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-loadout-chip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.hq-loadout-chip-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.hq-loadout-chip-state {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, var(--bg-primary));
+  color: var(--text-secondary);
+}
+
+.hq-loadout-chip-state-equipped {
+  color: var(--success-color, #2e7d32);
+}
+
+.hq-loadout-chip-state-repair {
+  color: var(--warning-color, #b26a00);
+}
+
+.hq-loadout-chip-detail {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* Personal HQ confirm-gated reply review cards (#hqMailReviewMount). */
+.hq-reply-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--accent-color, var(--border-color));
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-reply-heading {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-reply-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.6rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+}
+
+.hq-reply-meta dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.hq-reply-meta dd {
+  margin: 0;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.hq-reply-body {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  background: var(--bg-primary, transparent);
+  border-radius: var(--radius-sm, 0.25rem);
+}
+
+.hq-reply-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-reply-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Personal HQ Home follow-up projection (#hqFollowUpMount). */
+.hq-followup-heading {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-followup-card {
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-followup-category {
+  display: inline-block;
+  margin-bottom: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.hq-followup-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.hq-followup-detail {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-followup-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Personal HQ end-of-day journal (#hqJournalMount). */
+.hq-journal-launch {
+  margin: 0.75rem 0;
+}
+
+.hq-journal-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-journal-heading {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-journal-note {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-journal-editor {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  background: var(--bg-primary, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 0.25rem);
+  resize: vertical;
+}
+
+.hq-journal-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .hq-resume-text {
   flex: 1 1 auto;
   min-width: 12rem;

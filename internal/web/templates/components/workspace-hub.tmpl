@@ -274,6 +274,18 @@
              when a valid designated HQ is behind the current provisioning
              version. Additive; stays hidden otherwise. -->
         <div id="hqUpgradeMount" class="hq-upgrade-mount" hidden></div>
+        <!-- Personal HQ email connect/grant/repair card: shown for a valid
+             designated HQ. Additive; stays hidden otherwise. -->
+        <div id="hqEmailMount" class="hq-email-mount" hidden></div>
+        <!-- Personal HQ confirm-gated reply review: renders draft replies the
+             Inbox agent prepared, for explicit user confirmation. Additive. -->
+        <div id="hqMailReviewMount" class="hq-reply-mount" hidden></div>
+        <!-- Personal HQ follow-up projection: bounded due/stale follow-ups with
+             quick actions. Additive; hidden when there are none. -->
+        <div id="hqFollowUpMount" class="hq-followup-mount" hidden></div>
+        <!-- Personal HQ end-of-day journal: on-demand launcher + editor.
+             Additive; hidden without a valid HQ. -->
+        <div id="hqJournalMount" class="hq-journal-mount" hidden></div>
       </section>
 
       <section id="launcherSummaryPanel" class="launcher-tab-panel" role="tabpanel" aria-labelledby="launcherTabSummary" hidden>

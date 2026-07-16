@@ -108,6 +108,14 @@
               </span>
               <span class="settings-nav-item-text">External Agents</span>
             </a>
+            <a href="#personal-hq-email" class="settings-nav-item" data-section="personal-hq-email">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6A2,2 0 0,0 20,4M20,8L12,13L4,8V6L12,11L20,6V8Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Personal HQ Email</span>
+            </a>
             <a href="#mcp-servers" class="settings-nav-item" data-section="mcp-servers">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -874,6 +882,42 @@
                 </svg>
                 <span style="color: var(--text-secondary); font-size: 0.85rem;">External agents are visible in the <a href="/agents" style="color: var(--primary-color);">Agents dashboard</a></span>
               </div>
+            </div>
+          </section>
+
+          <!-- Personal HQ Email (Google OAuth) Section -->
+          <section id="personal-hq-email" class="settings-section modern-card p-4">
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6A2,2 0 0,0 20,4M20,8L12,13L4,8V6L12,11L20,6V8Z"/>
+                </svg>
+              </span>
+              <h2 class="settings-section-title">Personal HQ Email</h2>
+              <span class="settings-section-subtitle">(Google OAuth)</span>
+            </div>
+
+            <p class="settings-section-description">
+              To let your Personal HQ connect Gmail, register a Google OAuth 2.0 <strong>Web application</strong>
+              client (Google Cloud Console → Credentials; enable the Gmail API), add
+              <code id="hqEmailRedirectHint">this server's <em>/api/vault/email/oauth/callback</em></code> as an
+              authorized redirect URI, then paste the client ID and secret below. Read-only Gmail access is
+              requested; nothing is sent without your explicit confirmation.
+            </p>
+
+            <div class="settings-field">
+              <label class="settings-label" for="hqEmailClientId">Client ID</label>
+              <input type="text" id="hqEmailClientId" class="form-control settings-input"
+                     placeholder="…apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="settings-field">
+              <label class="settings-label" for="hqEmailClientSecret">Client Secret</label>
+              <input type="password" id="hqEmailClientSecret" class="form-control settings-input"
+                     placeholder="Enter to set or replace" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2">
+              <button type="button" id="hqEmailSaveBtn" class="modern-btn modern-btn-primary modern-btn-sm">Save credentials</button>
+              <span id="hqEmailStatus" class="settings-field-hint" role="status" aria-live="polite"></span>
             </div>
           </section>
 
@@ -1703,6 +1747,65 @@
   <script defer src="/js/modules/toast.js"></script>
   {{template "theme-init.tmpl" .}}
   <script>
+    // Personal HQ Email (Google OAuth) credentials
+    (function() {
+      const idInput = document.getElementById('hqEmailClientId');
+      const secretInput = document.getElementById('hqEmailClientSecret');
+      const saveBtn = document.getElementById('hqEmailSaveBtn');
+      const statusEl = document.getElementById('hqEmailStatus');
+      const redirectHint = document.getElementById('hqEmailRedirectHint');
+      if (!idInput || !saveBtn) return;
+
+      if (redirectHint) {
+        redirectHint.textContent = window.location.origin + '/api/vault/email/oauth/callback';
+      }
+
+      function setStatus(text, isError) {
+        if (!statusEl) return;
+        statusEl.textContent = text;
+        statusEl.style.color = isError ? 'var(--danger-color, #d33)' : 'var(--text-secondary)';
+      }
+
+      async function load() {
+        try {
+          const res = await fetch('/api/settings/email-oauth', { headers: { Accept: 'application/json' } });
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data.client_id) idInput.value = data.client_id;
+          if (data.has_client_secret) secretInput.placeholder = 'Saved — enter to replace';
+          setStatus(data.configured ? 'Configured — the Connect Email button is enabled.' : 'Not configured yet.', false);
+        } catch (_) { /* ignore */ }
+      }
+
+      saveBtn.addEventListener('click', async () => {
+        const clientId = idInput.value.trim();
+        const clientSecret = secretInput.value.trim();
+        if (!clientId || !clientSecret) {
+          setStatus('Enter both the client ID and client secret.', true);
+          return;
+        }
+        saveBtn.disabled = true;
+        try {
+          const res = await fetch('/api/settings/email-oauth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ client_id: clientId, client_secret: clientSecret })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error((data && (data.error || data.message)) || 'Save failed');
+          secretInput.value = '';
+          secretInput.placeholder = 'Saved — enter to replace';
+          setStatus('Saved — the Connect Email button is now enabled.', false);
+        } catch (e) {
+          setStatus(e && e.message ? e.message : 'Could not save.', true);
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      load();
+    })();
+
     // External Agents Settings
     (function() {
       const claudeToggle = document.getElementById('claudeAgentsToggle');

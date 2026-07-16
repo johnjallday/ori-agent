@@ -71,7 +71,13 @@ type Handler struct {
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
 	templatesRootResolver func() string
 	workspaceEventBus     *workspace.EventBus
-	evolutionSvc          interface {
+
+	// mailboxAccess, when set, enables the read-only Personal HQ mail tools for
+	// authorized agents in chat (see SetMailboxAccess).
+	mailboxAccess MailboxAccess
+	// mailDrafter, when set, enables the mail_draft_reply tool in chat.
+	mailDrafter  MailDrafter
+	evolutionSvc interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
 	}
 	skillsManager interface {
@@ -146,6 +152,17 @@ func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 // SetFileStore sets the folder-based workspace store for syncing notes to disk.
 func (h *Handler) SetFileStore(fs *workspace.FileStore) {
 	h.fileStore = fs
+}
+
+// SetMailboxAccess wires the Personal HQ mailbox access boundary so authorized
+// agents get the read-only mail tools in chat.
+func (h *Handler) SetMailboxAccess(access MailboxAccess) {
+	h.mailboxAccess = access
+}
+
+// SetMailDrafter wires the reply-drafting capability (mail_draft_reply) in chat.
+func (h *Handler) SetMailDrafter(drafter MailDrafter) {
+	h.mailDrafter = drafter
 }
 
 func (h *Handler) SetUserProfileDeps(store userprofile.UserStore, provider userprofile.UserProvider) {

@@ -28,12 +28,34 @@ export function parseContent(revision) {
 // mutation from Home (PRD FR95) — they route to where the user can act
 // through the workspace's own authorized controls.
 export function hrefForRef(ref) {
-  if (!ref || !ref.workspace_id) return '#';
+  if (!ref) return '#';
+  // Email threads open in Gmail's web UI by their provider thread ID — a fixed,
+  // known-safe destination (no account token, not an arbitrary URL). Email refs
+  // are HQ-scoped and may not carry a workspace_id, so they are handled before
+  // the workspace-id guard (task 4.9).
+  if (ref.entity_type === 'email_thread' && ref.entity_id) {
+    return `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(ref.entity_id)}`;
+  }
+  if (!ref.workspace_id) return '#';
   const wsId = encodeURIComponent(ref.workspace_id);
   if (ref.entity_type === 'task' && ref.entity_id) {
     return `/workspaces/${wsId}/task/${encodeURIComponent(ref.entity_id)}`;
   }
   return `/workspaces/${wsId}`;
+}
+
+// humanizeReason turns the deterministic machine reason tags for email
+// attention into friendly labels. Non-email reasons (and model-written prose
+// reasons) pass through unchanged, so existing rendering is untouched.
+export function humanizeReason(reason) {
+  switch (reason) {
+    case 'email_waiting_on_user':
+      return 'Waiting on your reply';
+    case 'email_unread':
+      return 'Unread email';
+    default:
+      return reason || '';
+  }
 }
 
 // localDateInZone returns "YYYY-MM-DD" for `date` (defaults to now) as
@@ -183,7 +205,7 @@ export function renderContent(content) {
       <li class="home-daily-brief-item">
         <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(item.title)}</a>
         <span class="home-daily-brief-item-ws">${escapeHtml(item.workspace_name)}</span>
-        <p class="home-daily-brief-item-fact">${escapeHtml(item.reason)}</p>
+        <p class="home-daily-brief-item-fact">${escapeHtml(humanizeReason(item.reason))}</p>
       </li>`
     )
   );
@@ -209,7 +231,7 @@ export function renderContent(content) {
       <li class="home-daily-brief-item">
         <a href="${hrefForRef(item.ref)}" class="home-daily-brief-item-title">${escapeHtml(item.title)}</a>
         <span class="home-daily-brief-item-ws">${escapeHtml(item.workspace_name)}</span>
-        <p class="home-daily-brief-item-fact">${escapeHtml(item.reason)}</p>
+        <p class="home-daily-brief-item-fact">${escapeHtml(humanizeReason(item.reason))}</p>
         ${item.why_suggested ? `<p class="home-daily-brief-item-why is-suggestion">${escapeHtml(item.why_suggested)}</p>` : ''}
       </li>`
     )

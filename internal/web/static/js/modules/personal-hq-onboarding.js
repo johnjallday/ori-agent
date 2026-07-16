@@ -86,6 +86,120 @@ export function upgradeView(plan) {
   };
 }
 
+// emailStatusView turns the Personal HQ email status (GET /email/status) plus
+// whether the server has Google OAuth credentials (oauthConfigured) into the
+// loadout-chip view-model. Email is a first-class HQ inventory item — equipped,
+// not required — so the chip owns its own setup routing. States:
+//   - connected: equipped; show the address + Disconnect.
+//   - setup:     the server has no OAuth client yet — route to Settings.
+//   - repair:    a binding exists but the account is gone/expired — Reconnect.
+//   - disconnected: OAuth is configured but no account connected — Connect.
+// oauthConfigured defaults to true (backward compatible) unless explicitly false.
+export function emailStatusView(status, oauthConfigured) {
+  const configured = oauthConfigured !== false;
+  if (status && status.connected) {
+    return {
+      state: 'connected', chip: 'Email', chipState: 'equipped',
+      heading: 'Email connected', detail: status.email_address || '',
+      action: 'disconnect', actionLabel: 'Disconnect'
+    };
+  }
+  if (!configured) {
+    return {
+      state: 'setup', chip: 'Email', chipState: 'empty',
+      heading: 'Set up email', detail: 'Add your Google OAuth credentials in Settings to enable Personal HQ email.',
+      action: 'settings', actionLabel: 'Set up in Settings'
+    };
+  }
+  if (status && status.account_id) {
+    return {
+      state: 'repair', chip: 'Email', chipState: 'repair',
+      heading: 'Reconnect your email', detail: 'Your connected email needs to be reconnected before the assistant can read it.',
+      action: 'connect', actionLabel: 'Reconnect'
+    };
+  }
+  return {
+    state: 'disconnected', chip: 'Email', chipState: 'empty',
+    heading: 'Connect your email', detail: 'Let your Inbox specialist surface threads that need attention and help draft replies. Read-only — nothing is ever sent without your explicit confirmation.',
+    action: 'connect', actionLabel: 'Connect email'
+  };
+}
+
+// chipStateLabel renders the short inventory-chip status word.
+export function chipStateLabel(chipState) {
+  switch (chipState) {
+    case 'equipped': return 'Connected';
+    case 'repair': return 'Needs repair';
+    default: return 'Not set up';
+  }
+}
+
+// replyProposalView turns a reply proposal (from the mail broker) into the
+// confirm-gated review view-model. Only draft/failed proposals are actionable
+// (sendable); everything else is terminal. The exact reviewed payload_hash is
+// carried so a send binds to precisely what the user saw.
+export function replyProposalView(p) {
+  if (!p) return { show: false };
+  const status = p.status || 'draft';
+  const payload = p.payload || {};
+  const view = {
+    show: true,
+    id: p.id,
+    status,
+    to: Array.isArray(payload.to) ? payload.to.join(', ') : '',
+    subject: payload.subject || '',
+    body: payload.body || '',
+    payloadHash: p.payload_hash || '',
+    canSend: status === 'draft' || status === 'failed',
+    actionLabel: status === 'failed' ? 'Retry send' : 'Send'
+  };
+  if (status === 'failed') view.statusNote = 'The last send attempt failed — you can retry.';
+  else if (status === 'sent') view.statusNote = 'Sent';
+  else if (status === 'expired') view.statusNote = 'This draft expired.';
+  else view.statusNote = '';
+  return view;
+}
+
+// followUpCategoryLabel maps a follow-up category to a friendly label.
+export function followUpCategoryLabel(category) {
+  switch (category) {
+    case 'i_owe': return 'You owe';
+    case 'waiting_on': return 'Waiting on';
+    case 'needs_decision': return 'Needs decision';
+    case 'recurring_check_in': return 'Check-in';
+    default: return 'Follow-up';
+  }
+}
+
+// journalPromptView turns an end-of-day journal proposal into the editor
+// view-model: the prefilled editable draft plus a degraded flag when grounding
+// was incomplete. Pure and unit-testable.
+export function journalPromptView(proposal) {
+  if (!proposal) return { draft: '', degraded: false, localDate: '' };
+  return {
+    localDate: proposal.local_date || '',
+    draft: proposal.draft || '',
+    degraded: !!proposal.degraded,
+    gaps: Array.isArray(proposal.gaps) ? proposal.gaps : []
+  };
+}
+
+// followUpView turns a follow-up record into a Home projection card view-model.
+// A candidate (inferred, unconfirmed) offers Confirm/Dismiss; an active item
+// offers Done/Snooze.
+export function followUpView(f) {
+  if (!f) return null;
+  const status = f.status || 'active';
+  return {
+    id: f.id,
+    title: f.title || '',
+    detail: f.detail || '',
+    counterparty: f.counterparty || '',
+    category: followUpCategoryLabel(f.category),
+    isCandidate: status === 'candidate'
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -594,6 +708,450 @@ export function upgradeView(plan) {
     renderUpgrade(mount, upgradeView(plan));
   }
 
+  async function fetchEmailStatus() {
+    const res = await fetch('/api/personal-hq/email/status', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.status ? data.status : null;
+  }
+
+  // connectEmail opens the existing Vault email OAuth popup (least-privilege
+  // read scope) and, on success, links the returned account to the HQ. It
+  // depends on the Vault email OAuth being configured; failures surface as a
+  // toast rather than a broken flow.
+  function connectEmail() {
+    const popup = window.open('/api/vault/email/oauth/start?provider=gmail', 'ori-hq-email', 'width=520,height=680');
+    if (!popup) {
+      toast('Allow pop-ups to connect your email.', 'Popup blocked', 'danger');
+      return;
+    }
+    const onMessage = async (event) => {
+      const data = event && event.data;
+      if (!data || data.type !== 'ori:vault-email-oauth') return;
+      window.removeEventListener('message', onMessage);
+      if (!data.success || !data.account || !data.account.id) {
+        toast(data && data.error ? data.error : 'Could not connect your email.', 'Connect failed', 'danger');
+        return;
+      }
+      try {
+        await postJSON('/api/personal-hq/email/link', { account_id: data.account.id });
+        toast('Email connected to your Personal HQ.', 'Connected', 'success');
+        await wireEmail();
+      } catch (_) {
+        toast('Connected the account but could not link it to your HQ.', 'Link failed', 'danger');
+      }
+    };
+    window.addEventListener('message', onMessage);
+  }
+
+  async function fetchOAuthConfigured() {
+    try {
+      const res = await fetch('/api/settings/email-oauth', { headers: { Accept: 'application/json' } });
+      if (!res.ok) return true; // assume configured; the connect flow will surface a real error
+      const data = await res.json();
+      return !!data.configured;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // renderEmail renders the Email inventory chip — a first-class HQ loadout item
+  // with its own state and setup routing. The chip's action routes correctly:
+  // 'settings' (server has no OAuth client) opens Settings, 'connect' opens the
+  // OAuth popup, 'disconnect' unlinks.
+  function renderEmail(mount, view) {
+    mount.innerHTML = '';
+    mount.hidden = false;
+
+    const card = document.createElement('div');
+    card.className = 'hq-loadout-chip hq-email-' + view.state;
+
+    const head = document.createElement('div');
+    head.className = 'hq-loadout-chip-head';
+    const name = document.createElement('span');
+    name.className = 'hq-loadout-chip-name';
+    name.textContent = view.chip || 'Email';
+    const state = document.createElement('span');
+    state.className = 'hq-loadout-chip-state hq-loadout-chip-state-' + (view.chipState || 'empty');
+    state.textContent = chipStateLabel(view.chipState);
+    head.append(name, state);
+    card.appendChild(head);
+
+    if (view.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'hq-loadout-chip-detail';
+      detail.textContent = view.detail;
+      card.appendChild(detail);
+    }
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
+    btn.textContent = view.actionLabel;
+    btn.addEventListener('click', async () => {
+      if (view.action === 'settings') {
+        window.location.href = '/settings#personal-hq-email';
+        return;
+      }
+      if (view.action === 'disconnect') {
+        btn.disabled = true;
+        try {
+          await postJSON('/api/personal-hq/email/unlink');
+          toast('Email disconnected.', 'Disconnected', 'success');
+          await wireEmail();
+        } catch (_) {
+          toast('Could not disconnect the email account.', 'Error', 'danger');
+          btn.disabled = false;
+        }
+        return;
+      }
+      connectEmail();
+    });
+    card.appendChild(btn);
+    mount.appendChild(card);
+  }
+
+  // wireEmail renders the Email loadout chip for a valid designated HQ. Additive:
+  // a no-op when the page has no #hqEmailMount or no valid HQ.
+  async function wireEmail() {
+    const mount = document.getElementById('hqEmailMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    const [emailStatus, oauthConfigured] = await Promise.all([
+      fetchEmailStatus().catch(() => null),
+      fetchOAuthConfigured()
+    ]);
+    renderEmail(mount, emailStatusView(emailStatus, oauthConfigured));
+  }
+
+  async function fetchProposals() {
+    const res = await fetch('/api/personal-hq/mail/proposals', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.proposals) ? data.proposals : [];
+  }
+
+  // renderReplyCard builds one confirm-gated review card using textContent for
+  // all user/email-derived fields (never innerHTML), so untrusted recipients,
+  // subject, and body can never inject markup.
+  function renderReplyCard(view) {
+    const card = document.createElement('div');
+    card.className = 'hq-reply-card';
+
+    const heading = document.createElement('h4');
+    heading.className = 'hq-reply-heading';
+    heading.textContent = 'Review reply before sending';
+    card.appendChild(heading);
+
+    const meta = document.createElement('dl');
+    meta.className = 'hq-reply-meta';
+    [['To', view.to], ['Subject', view.subject]].forEach(([label, value]) => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      meta.append(dt, dd);
+    });
+    card.appendChild(meta);
+
+    const body = document.createElement('pre');
+    body.className = 'hq-reply-body';
+    body.textContent = view.body;
+    card.appendChild(body);
+
+    if (view.statusNote) {
+      const note = document.createElement('p');
+      note.className = 'hq-reply-note';
+      note.textContent = view.statusNote;
+      card.appendChild(note);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'hq-reply-actions';
+
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    sendBtn.textContent = view.actionLabel;
+    sendBtn.addEventListener('click', async () => {
+      sendBtn.disabled = true;
+      try {
+        await postJSON('/api/personal-hq/mail/confirm', { id: view.id, expected_hash: view.payloadHash });
+        toast('Your reply was sent.', 'Sent', 'success');
+        await wireMailReview();
+      } catch (e) {
+        toast(e && e.message ? e.message : 'The reply could not be sent.', 'Send failed', 'danger');
+        sendBtn.disabled = false;
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    cancelBtn.textContent = 'Discard';
+    cancelBtn.addEventListener('click', async () => {
+      try {
+        await postJSON('/api/personal-hq/mail/cancel', { id: view.id });
+        await wireMailReview();
+      } catch (_) {
+        toast('Could not discard the draft.', 'Error', 'danger');
+      }
+    });
+
+    actions.append(sendBtn, cancelBtn);
+    card.appendChild(actions);
+    return card;
+  }
+
+  // wireMailReview shows confirm-gated review cards for actionable reply drafts.
+  // Additive: a no-op without #hqMailReviewMount or a valid HQ.
+  async function wireMailReview() {
+    const mount = document.getElementById('hqMailReviewMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    let proposals;
+    try {
+      proposals = await fetchProposals();
+    } catch (_) {
+      return;
+    }
+    const actionable = proposals.filter(p => p.status === 'draft' || p.status === 'failed');
+    mount.innerHTML = '';
+    if (!actionable.length) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    actionable.forEach(p => mount.appendChild(renderReplyCard(replyProposalView(p))));
+  }
+
+  async function fetchHomeFollowUps() {
+    const res = await fetch('/api/personal-hq/followups/home', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.followups) ? data.followups : [];
+  }
+
+  function renderFollowUpCard(view) {
+    const card = document.createElement('div');
+    card.className = 'hq-followup-card';
+
+    const cat = document.createElement('span');
+    cat.className = 'hq-followup-category';
+    cat.textContent = view.counterparty ? `${view.category}: ${view.counterparty}` : view.category;
+    card.appendChild(cat);
+
+    const title = document.createElement('p');
+    title.className = 'hq-followup-title';
+    title.textContent = view.title;
+    card.appendChild(title);
+
+    if (view.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'hq-followup-detail';
+      detail.textContent = view.detail;
+      card.appendChild(detail);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'hq-followup-actions';
+
+    const act = async (url, body, label) => {
+      try {
+        await postJSON(url, body);
+        await wireFollowUps();
+      } catch (_) {
+        toast(`Could not ${label} the follow-up.`, 'Error', 'danger');
+      }
+    };
+
+    if (view.isCandidate) {
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+      confirmBtn.textContent = 'Track this';
+      confirmBtn.addEventListener('click', () => act('/api/personal-hq/followups/confirm', { id: view.id }, 'confirm'));
+      const dismissBtn = document.createElement('button');
+      dismissBtn.type = 'button';
+      dismissBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+      dismissBtn.textContent = 'Not a follow-up';
+      dismissBtn.addEventListener('click', () => act('/api/personal-hq/followups/dismiss', { id: view.id }, 'dismiss'));
+      actions.append(confirmBtn, dismissBtn);
+    } else {
+      const doneBtn = document.createElement('button');
+      doneBtn.type = 'button';
+      doneBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+      doneBtn.textContent = 'Done';
+      doneBtn.addEventListener('click', () => act('/api/personal-hq/followups/complete', { id: view.id }, 'complete'));
+      const snoozeBtn = document.createElement('button');
+      snoozeBtn.type = 'button';
+      snoozeBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+      snoozeBtn.textContent = 'Snooze 1 day';
+      snoozeBtn.addEventListener('click', () => {
+        const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        act('/api/personal-hq/followups/snooze', { id: view.id, until }, 'snooze');
+      });
+      actions.append(doneBtn, snoozeBtn);
+    }
+    card.appendChild(actions);
+    return card;
+  }
+
+  // wireFollowUps renders the bounded Home follow-up projection. Additive:
+  // no-op without #hqFollowUpMount or a valid HQ.
+  async function wireFollowUps() {
+    const mount = document.getElementById('hqFollowUpMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    let items;
+    try {
+      items = await fetchHomeFollowUps();
+    } catch (_) {
+      return;
+    }
+    mount.innerHTML = '';
+    if (!items.length) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    const heading = document.createElement('h4');
+    heading.className = 'hq-followup-heading';
+    heading.textContent = 'Follow-ups';
+    mount.appendChild(heading);
+    items.forEach(f => {
+      const view = followUpView(f);
+      if (view) mount.appendChild(renderFollowUpCard(view));
+    });
+  }
+
+  function renderJournalEditor(mount, view) {
+    mount.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'hq-journal-card';
+
+    const heading = document.createElement('h4');
+    heading.className = 'hq-journal-heading';
+    heading.textContent = 'End-of-day journal';
+    card.appendChild(heading);
+
+    if (view.degraded) {
+      const note = document.createElement('p');
+      note.className = 'hq-journal-note';
+      note.textContent = 'Some activity could not be loaded — the draft may be incomplete.';
+      card.appendChild(note);
+    }
+
+    const editor = document.createElement('textarea');
+    editor.className = 'hq-journal-editor';
+    editor.rows = 10;
+    editor.value = view.draft;
+    editor.setAttribute('aria-label', 'End-of-day journal draft');
+    card.appendChild(editor);
+
+    const actions = document.createElement('div');
+    actions.className = 'hq-journal-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    saveBtn.textContent = 'Save journal';
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      try {
+        await postJSON('/api/personal-hq/journal/save', { local_date: view.localDate, content: editor.value });
+        toast('Your journal was saved.', 'Saved', 'success');
+        mount.innerHTML = '';
+        mount.appendChild(journalLauncher(mount));
+      } catch (e) {
+        toast(e && e.message ? e.message : 'Could not save the journal.', 'Save failed', 'danger');
+        saveBtn.disabled = false;
+      }
+    });
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    dismissBtn.textContent = 'Not now';
+    dismissBtn.addEventListener('click', async () => {
+      // Dismiss is a pure no-op server-side; just collapse the editor.
+      try { await postJSON('/api/personal-hq/journal/dismiss'); } catch (_) { /* no-op */ }
+      mount.innerHTML = '';
+      mount.appendChild(journalLauncher(mount));
+    });
+
+    actions.append(saveBtn, dismissBtn);
+    card.appendChild(actions);
+    mount.appendChild(card);
+    editor.focus();
+  }
+
+  function journalLauncher(mount) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modern-btn modern-btn-secondary modern-btn-sm hq-journal-launch';
+    btn.textContent = 'Write your end-of-day journal';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/personal-hq/journal/propose', { headers: { Accept: 'application/json' } });
+        const data = res.ok ? await res.json() : null;
+        renderJournalEditor(mount, journalPromptView(data && data.proposal));
+      } catch (_) {
+        toast('Could not open the journal.', 'Error', 'danger');
+        btn.disabled = false;
+      }
+    });
+    return btn;
+  }
+
+  // wireJournal shows an on-demand end-of-day journal launcher. Additive: no-op
+  // without #hqJournalMount or a valid HQ. (A scheduled prompt is a future add.)
+  async function wireJournal() {
+    const mount = document.getElementById('hqJournalMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    mount.innerHTML = '';
+    mount.appendChild(journalLauncher(mount));
+  }
+
   function init() {
     wireGuided();
     wireResume();
@@ -603,6 +1161,10 @@ export function upgradeView(plan) {
     if (wantsGuidedTakeover(hint, hasOnboardingIntent())) showGuided();
     refreshResume();
     wireUpgrade();
+    wireEmail();
+    wireMailReview();
+    wireFollowUps();
+    wireJournal();
   }
 
   if (document.readyState === 'loading') {

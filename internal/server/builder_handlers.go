@@ -23,9 +23,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
+	"github.com/johnjallday/ori-agent/internal/mailbox"
+	"github.com/johnjallday/ori-agent/internal/mailboxvault"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
@@ -174,6 +177,17 @@ func (b *ServerBuilder) initializeHandlers() {
 		// one provisioning path (task 2.9).
 		personalHQUpgrade := personalhq.NewUpgradeCoordinator(b.personalHQService, sessionStore, b.sessionHandler)
 		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, personalHQUpgrade, b.userProvider)
+		// Structured follow-ups (Group 6): a dedicated SQLite domain over the
+		// shared database.
+		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))
+		b.personalHQHandler.SetFollowUps(b.followUpService)
+		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
+		// saved as a dated Personal HQ note (never MEMORY.md by default).
+		b.personalHQHandler.SetJournal(personalhq.NewJournalService(
+			b.personalHQService,
+			&journalSnapshotBuilder{followups: b.followUpService},
+			sessionStore,
+		))
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification
@@ -229,9 +243,64 @@ func (b *ServerBuilder) initializeHandlers() {
 			ManagedVaultRoot: resolveVaultRoot(b.configManager),
 		})
 		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		// Let in-app Settings supply the Google email OAuth client credentials,
+		// taking precedence over ORI_EMAIL_GOOGLE_* env vars, so a self-hosted
+		// user can enable Personal HQ email without editing the environment.
+		if b.configManager != nil {
+			vaulthttp.EmailOAuthCredentialOverride = func(provider vault.EmailProvider) (string, string) {
+				if provider == vault.EmailProviderGmail {
+					return b.configManager.GetEmailGoogleOAuth()
+				}
+				return "", ""
+			}
+		}
 		b.settingsHandler.SetVaultRootUpdater(vaultStore.SetManagedVaultRoot)
 		if b.workspaceHandler != nil {
 			b.workspaceHandler.SetEmailAccountStore(vaultStore)
+		}
+		// Wire the Personal HQ mailbox read runtime: a Gmail provider over a
+		// Vault-backed credential resolver, gated by the most-restrictive access
+		// policy. Exposed to authorized HQ agents via the workspace tool factory.
+		if b.workspaceStore != nil {
+			gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(vaultStore))
+			cachedProvider := mailbox.NewCachingProvider(gmailProvider)
+			b.mailboxAccess = newMailboxAccess(b.workspaceStore, vaultStore, cachedProvider)
+			if b.chatHandler != nil {
+				b.chatHandler.SetMailboxAccess(b.mailboxAccess)
+			}
+			// Personal HQ email connect/disconnect (task 3.10): manage an email
+			// MCP binding on the designated HQ workspace, with disconnect cache
+			// invalidation.
+			if b.personalHQHandler != nil && b.personalHQService != nil {
+				b.personalHQHandler.SetMailboxLinker(
+					newPersonalHQMailboxLinker(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider),
+				)
+			}
+			// Grounded email attention for the Daily Brief (task 4.8): reads the
+			// HQ's connected account through the same cached provider. No second
+			// brief service/scheduler is introduced.
+			if b.personalHQService != nil {
+				b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider)
+			}
+			// Confirm-gated send broker (task 5.3): the ONLY send path. The raw
+			// (uncached) Gmail provider is the sender; sends re-authorize via the
+			// send policy and emit metadata-only audit events.
+			if b.personalHQService != nil {
+				broker := mailbox.NewBroker(
+					gmailProvider,
+					&sendAuthorizer{hq: b.personalHQService, workspaces: b.workspaceStore},
+					logAuditSink{},
+				)
+				replies := newReplyService(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider, broker)
+				if b.personalHQHandler != nil {
+					b.personalHQHandler.SetReplyService(replies)
+				}
+				// The reply service is also the agent-facing drafter (mail_draft_reply).
+				b.mailDrafter = replies
+				if b.chatHandler != nil {
+					b.chatHandler.SetMailDrafter(replies)
+				}
+			}
 		}
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
