@@ -181,6 +181,13 @@ func (b *ServerBuilder) initializeHandlers() {
 		// shared database.
 		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))
 		b.personalHQHandler.SetFollowUps(b.followUpService)
+		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
+		// saved as a dated Personal HQ note (never MEMORY.md by default).
+		b.personalHQHandler.SetJournal(personalhq.NewJournalService(
+			b.personalHQService,
+			&journalSnapshotBuilder{followups: b.followUpService},
+			sessionStore,
+		))
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

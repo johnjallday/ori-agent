@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, chipStateLabel, replyProposalView, followUpView, followUpCategoryLabel } from './personal-hq-onboarding.js';
+import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, chipStateLabel, replyProposalView, followUpView, followUpCategoryLabel, journalPromptView } from './personal-hq-onboarding.js';
 
 function status(overrides) {
   return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
@@ -195,3 +195,18 @@ test('followUpView: a candidate is flagged for confirm/dismiss', () => {
   const view = followUpView({ id: 'f2', status: 'candidate', category: 'i_owe', title: 'Maybe send deck' });
   assert.equal(view.isCandidate, true);
 });
+
+test('journalPromptView: carries the editable draft and degraded flag', () => {
+  const view = journalPromptView({ local_date: '2026-07-15', draft: '# End of day', degraded: true, gaps: ['x'] });
+  assert.equal(view.localDate, '2026-07-15');
+  assert.equal(view.draft, '# End of day');
+  assert.equal(view.degraded, true);
+  assert.deepEqual(view.gaps, ['x']);
+});
+
+test('journalPromptView: degrades safely with no proposal', () => {
+  const view = journalPromptView(null);
+  assert.equal(view.draft, '');
+  assert.equal(view.degraded, false);
+});
+
