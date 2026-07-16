@@ -120,6 +120,32 @@ export function emailStatusView(status) {
   };
 }
 
+// replyProposalView turns a reply proposal (from the mail broker) into the
+// confirm-gated review view-model. Only draft/failed proposals are actionable
+// (sendable); everything else is terminal. The exact reviewed payload_hash is
+// carried so a send binds to precisely what the user saw.
+export function replyProposalView(p) {
+  if (!p) return { show: false };
+  const status = p.status || 'draft';
+  const payload = p.payload || {};
+  const view = {
+    show: true,
+    id: p.id,
+    status,
+    to: Array.isArray(payload.to) ? payload.to.join(', ') : '',
+    subject: payload.subject || '',
+    body: payload.body || '',
+    payloadHash: p.payload_hash || '',
+    canSend: status === 'draft' || status === 'failed',
+    actionLabel: status === 'failed' ? 'Retry send' : 'Send'
+  };
+  if (status === 'failed') view.statusNote = 'The last send attempt failed — you can retry.';
+  else if (status === 'sent') view.statusNote = 'Sent';
+  else if (status === 'expired') view.statusNote = 'This draft expired.';
+  else view.statusNote = '';
+  return view;
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -729,6 +755,116 @@ export function emailStatusView(status) {
     renderEmail(mount, emailStatusView(emailStatus));
   }
 
+  async function fetchProposals() {
+    const res = await fetch('/api/personal-hq/mail/proposals', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.proposals) ? data.proposals : [];
+  }
+
+  // renderReplyCard builds one confirm-gated review card using textContent for
+  // all user/email-derived fields (never innerHTML), so untrusted recipients,
+  // subject, and body can never inject markup.
+  function renderReplyCard(view) {
+    const card = document.createElement('div');
+    card.className = 'hq-reply-card';
+
+    const heading = document.createElement('h4');
+    heading.className = 'hq-reply-heading';
+    heading.textContent = 'Review reply before sending';
+    card.appendChild(heading);
+
+    const meta = document.createElement('dl');
+    meta.className = 'hq-reply-meta';
+    [['To', view.to], ['Subject', view.subject]].forEach(([label, value]) => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      meta.append(dt, dd);
+    });
+    card.appendChild(meta);
+
+    const body = document.createElement('pre');
+    body.className = 'hq-reply-body';
+    body.textContent = view.body;
+    card.appendChild(body);
+
+    if (view.statusNote) {
+      const note = document.createElement('p');
+      note.className = 'hq-reply-note';
+      note.textContent = view.statusNote;
+      card.appendChild(note);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'hq-reply-actions';
+
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    sendBtn.textContent = view.actionLabel;
+    sendBtn.addEventListener('click', async () => {
+      sendBtn.disabled = true;
+      try {
+        await postJSON('/api/personal-hq/mail/confirm', { id: view.id, expected_hash: view.payloadHash });
+        toast('Your reply was sent.', 'Sent', 'success');
+        await wireMailReview();
+      } catch (e) {
+        toast(e && e.message ? e.message : 'The reply could not be sent.', 'Send failed', 'danger');
+        sendBtn.disabled = false;
+      }
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    cancelBtn.textContent = 'Discard';
+    cancelBtn.addEventListener('click', async () => {
+      try {
+        await postJSON('/api/personal-hq/mail/cancel', { id: view.id });
+        await wireMailReview();
+      } catch (_) {
+        toast('Could not discard the draft.', 'Error', 'danger');
+      }
+    });
+
+    actions.append(sendBtn, cancelBtn);
+    card.appendChild(actions);
+    return card;
+  }
+
+  // wireMailReview shows confirm-gated review cards for actionable reply drafts.
+  // Additive: a no-op without #hqMailReviewMount or a valid HQ.
+  async function wireMailReview() {
+    const mount = document.getElementById('hqMailReviewMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    let proposals;
+    try {
+      proposals = await fetchProposals();
+    } catch (_) {
+      return;
+    }
+    const actionable = proposals.filter(p => p.status === 'draft' || p.status === 'failed');
+    mount.innerHTML = '';
+    if (!actionable.length) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    actionable.forEach(p => mount.appendChild(renderReplyCard(replyProposalView(p))));
+  }
+
   function init() {
     wireGuided();
     wireResume();
@@ -739,6 +875,7 @@ export function emailStatusView(status) {
     refreshResume();
     wireUpgrade();
     wireEmail();
+    wireMailReview();
   }
 
   if (document.readyState === 'loading') {

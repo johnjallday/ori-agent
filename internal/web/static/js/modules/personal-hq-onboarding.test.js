@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView } from './personal-hq-onboarding.js';
+import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, replyProposalView } from './personal-hq-onboarding.js';
 
 function status(overrides) {
   return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
@@ -125,4 +125,30 @@ test('emailStatusView: never-connected offers Connect and promises read-only + c
   assert.equal(view.action, 'connect');
   assert.match(view.detail, /read-only/i);
   assert.match(view.detail, /confirmation/i);
+});
+
+test('replyProposalView: a draft is sendable and carries the exact reviewed payload hash', () => {
+  const view = replyProposalView({
+    id: 'p1', status: 'draft', payload_hash: 'abc',
+    payload: { to: ['dana@x.com', 'sam@x.com'], subject: 'Re: hi', body: 'Sounds good.' }
+  });
+  assert.equal(view.canSend, true);
+  assert.equal(view.actionLabel, 'Send');
+  assert.equal(view.to, 'dana@x.com, sam@x.com');
+  assert.equal(view.subject, 'Re: hi');
+  assert.equal(view.body, 'Sounds good.');
+  assert.equal(view.payloadHash, 'abc');
+});
+
+test('replyProposalView: a failed draft is retryable', () => {
+  const view = replyProposalView({ id: 'p1', status: 'failed', payload: {} });
+  assert.equal(view.canSend, true);
+  assert.equal(view.actionLabel, 'Retry send');
+  assert.match(view.statusNote, /failed/i);
+});
+
+test('replyProposalView: a sent proposal is terminal (not sendable)', () => {
+  const view = replyProposalView({ id: 'p1', status: 'sent', payload: {} });
+  assert.equal(view.canSend, false);
+  assert.equal(view.statusNote, 'Sent');
 });

@@ -24,6 +24,28 @@ type ReplyService interface {
 // SetReplyService wires the reply/send broker surface.
 func (h *Handler) SetReplyService(svc ReplyService) { h.replies = svc }
 
+// proposalView embeds the proposal and adds its current payload_hash, which the
+// client echoes back on confirm to bind the send to exactly what was reviewed.
+type proposalView struct {
+	*mailbox.ReplyProposal
+	PayloadHash string `json:"payload_hash"`
+}
+
+func viewProposal(p *mailbox.ReplyProposal) proposalView {
+	if p == nil {
+		return proposalView{}
+	}
+	return proposalView{ReplyProposal: p, PayloadHash: p.Hash()}
+}
+
+func viewProposals(ps []*mailbox.ReplyProposal) []proposalView {
+	out := make([]proposalView, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, viewProposal(p))
+	}
+	return out
+}
+
 // DraftReply handles POST /api/personal-hq/mail/draft: compose a LOCAL reply
 // proposal from a source thread. Never sends.
 func (h *Handler) DraftReply(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +72,7 @@ func (h *Handler) DraftReply(w http.ResponseWriter, r *http.Request) {
 		respondReplyError(w, err)
 		return
 	}
-	orihttp.Success(w, map[string]any{"proposal": p})
+	orihttp.Success(w, map[string]any{"proposal": viewProposal(p)})
 }
 
 // ListProposals handles GET /api/personal-hq/mail/proposals.
@@ -62,7 +84,7 @@ func (h *Handler) ListProposals(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	orihttp.Success(w, map[string]any{"proposals": h.replies.ListProposals(userID)})
+	orihttp.Success(w, map[string]any{"proposals": viewProposals(h.replies.ListProposals(userID))})
 }
 
 // EditReply handles POST /api/personal-hq/mail/edit: replace a draft's editable
@@ -93,7 +115,7 @@ func (h *Handler) EditReply(w http.ResponseWriter, r *http.Request) {
 		respondReplyError(w, err)
 		return
 	}
-	orihttp.Success(w, map[string]any{"proposal": p})
+	orihttp.Success(w, map[string]any{"proposal": viewProposal(p)})
 }
 
 // CancelReply handles POST /api/personal-hq/mail/cancel.
@@ -144,7 +166,7 @@ func (h *Handler) ConfirmSend(w http.ResponseWriter, r *http.Request) {
 		respondReplyError(w, err)
 		return
 	}
-	orihttp.Success(w, map[string]any{"proposal": p})
+	orihttp.Success(w, map[string]any{"proposal": viewProposal(p)})
 }
 
 func (h *Handler) replyReady(w http.ResponseWriter, r *http.Request, method string) bool {

@@ -45,6 +45,40 @@ func providerWithMail(access MailboxAccess, agent string) *WorkspaceToolProvider
 	return p
 }
 
+type fakeDrafter struct{ called bool }
+
+func (f *fakeDrafter) DraftReply(ctx context.Context, userID, threadID, body string) (*mailbox.ReplyProposal, error) {
+	f.called = true
+	return &mailbox.ReplyProposal{ID: "p1", Payload: mailbox.ReplyPayload{To: []string{"dana@x.com"}, Subject: "Re: hi", Body: body}}, nil
+}
+
+func TestMailDraftReplyToolCreatesLocalProposal(t *testing.T) {
+	prov := fakeMailProvider{}
+	p := providerWithMail(fakeMailAccess{provider: prov, canAccess: true}, "Inbox")
+	drafter := &fakeDrafter{}
+	p.SetMailDrafter(drafter)
+
+	if !toolNames(p)["mail_draft_reply"] {
+		t.Fatal("authorized agent with a drafter should see mail_draft_reply")
+	}
+	tool := findTool(t, p, "mail_draft_reply")
+	out, err := tool.Call(context.Background(), `{"thread_id":"t1","body":"Sounds good."}`)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if !drafter.called || !strings.Contains(out, "proposal_id") || !strings.Contains(out, "confirm") {
+		t.Fatalf("draft tool should create a proposal and note confirmation, got %s", out)
+	}
+}
+
+func TestMailDraftReplyHiddenWithoutDrafter(t *testing.T) {
+	prov := fakeMailProvider{}
+	p := providerWithMail(fakeMailAccess{provider: prov, canAccess: true}, "Inbox")
+	if toolNames(p)["mail_draft_reply"] {
+		t.Fatal("mail_draft_reply must not appear without a drafter wired")
+	}
+}
+
 func TestMailToolsExposedOnlyWhenAuthorized(t *testing.T) {
 	prov := fakeMailProvider{}
 	// Authorized: tools present.

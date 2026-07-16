@@ -6229,6 +6229,65 @@ body:has(#workspaceHub.is-hq-guided) #hubSupportChat {
   color: var(--text-secondary);
 }
 
+/* Personal HQ confirm-gated reply review cards (#hqMailReviewMount). */
+.hq-reply-card {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--accent-color, var(--border-color));
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-reply-heading {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-reply-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.6rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+}
+
+.hq-reply-meta dt {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.hq-reply-meta dd {
+  margin: 0;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.hq-reply-body {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  background: var(--bg-primary, transparent);
+  border-radius: var(--radius-sm, 0.25rem);
+}
+
+.hq-reply-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-reply-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .hq-resume-text {
   flex: 1 1 auto;
   min-width: 12rem;
