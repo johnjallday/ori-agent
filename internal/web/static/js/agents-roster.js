@@ -51,6 +51,12 @@
 
   var els = {};
 
+  // Active OriTagInput instance for the focused agent's Overview tab (rebuilt on
+  // each render); read back in overviewEdits.
+  var overviewTagsInput = null;
+  // OriTagInput instance for the Create panel; read back in submitCreate.
+  var createTagsInput = null;
+
   document.addEventListener('DOMContentLoaded', init);
 
   function init() {
@@ -96,6 +102,11 @@
       bulkDeleteBody: document.getElementById('bulkDeleteBody'),
       bulkDeleteCancel: document.getElementById('bulkDeleteCancel'),
       bulkDeleteConfirm: document.getElementById('bulkDeleteConfirm'),
+      bulkTagsDialog: document.getElementById('bulkTagsDialog'),
+      bulkTagsTitle: document.getElementById('bulkTagsTitle'),
+      bulkTagsBody: document.getElementById('bulkTagsBody'),
+      bulkTagsCancel: document.getElementById('bulkTagsCancel'),
+      bulkTagsConfirm: document.getElementById('bulkTagsConfirm'),
     };
 
     els.search.addEventListener('input', onSearch);
@@ -121,6 +132,14 @@
     els.bulkResultDismiss.addEventListener('click', dismissBulkResult);
     // Native <dialog> fires 'cancel' on Escape; keep our teardown consistent.
     els.bulkDeleteDialog.addEventListener('cancel', function (e) { e.preventDefault(); closeBulkDelete(); });
+
+    els.bulkAddTags.addEventListener('click', function () { openBulkTags('add'); });
+    els.bulkRemoveTags.addEventListener('click', function () { openBulkTags('remove'); });
+    els.bulkTagsCancel.addEventListener('click', closeBulkTags);
+    els.bulkTagsConfirm.addEventListener('click', runBulkTags);
+    els.bulkTagsDialog.addEventListener('cancel', function (e) { e.preventDefault(); closeBulkTags(); });
+    els.bulkFavorite.addEventListener('click', function () { runBulkFavorite(true); });
+    els.bulkUnfavorite.addEventListener('click', function () { runBulkFavorite(false); });
 
     var tabs = document.querySelectorAll('.stage__tab');
     tabs.forEach(function (tab) {
@@ -292,21 +311,36 @@
     li.dataset.index = idx;
 
     var status = healthKind(agent);
+    var statusText = titleCase(String(agent.status || 'idle'));
     var metaBits = [];
+    var role = titleCase(agent.role || '');
+    if (role) metaBits.push(role);
     if (agent.model) metaBits.push(agent.model);
     var wc = agent.workspace_count || 0;
     metaBits.push(wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's'));
+    var active = lastActiveLabel(agent);
+    if (active) metaBits.push(active);
 
     var permanent = isPermanent(agent);
     var isChecked = state.checked.has(agent.name);
+    var favorite = !!(agent.metadata && agent.metadata.favorite);
+    var tags = (agent.metadata && Array.isArray(agent.metadata.tags)) ? agent.metadata.tags : [];
 
-    // Concise spoken label so screen readers don't read the raw dot markup.
+    // Concise spoken label so screen readers don't read the raw dot markup, and
+    // it carries the FULL tag list even when the visible chips are truncated
+    // (PRD FR59).
     var wcLabel = wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
-    var openLabel = agent.name + (permanent ? ', built-in' : '') + ', ' + status + ', ' + wcLabel;
+    var openLabel = agent.name + (permanent ? ', built-in' : '') +
+      (favorite ? ', favorite' : '') + ', ' + statusText + ', ' + wcLabel +
+      (tags.length ? ', tags: ' + tags.join(', ') : '');
 
     var badge = permanent
       ? '<span class="roster-card__badge" title="Built-in agent — always available and cannot be deleted">Built-in</span>'
       : '';
+    var star = favorite
+      ? '<span class="roster-card__fav" title="Favorite" aria-hidden="true">★</span>'
+      : '';
+    var tagsRow = tagsRowHTML(tags);
 
     // A labeled checkbox and a separate open/focus button are siblings — never
     // nested — so the checkbox is not a child of an interactive element and the
@@ -320,15 +354,28 @@
       avatarMarkup(agent, 'roster-card__avatar') +
       '<span class="roster-card__body">' +
       '<span class="roster-card__namerow">' +
-      '<span class="roster-card__name">' + esc(agent.name) + '</span>' + badge +
+      '<span class="roster-card__name">' + esc(agent.name) + '</span>' + star + badge +
+      '<span class="roster-card__statuslabel is-' + status + '">' + esc(statusText) + '</span>' +
       '</span>' +
       '<span class="roster-card__meta">' + esc(metaBits.join(' · ')) + '</span>' +
+      tagsRow +
       '</span>' +
-      '<span class="roster-card__status is-' + status + '" title="' + esc(status) + '"></span>' +
+      '<span class="roster-card__status is-' + status + '" title="' + esc(statusText) + '" aria-hidden="true"></span>' +
       '</button>';
 
     if (isChecked) li.classList.add('is-checked');
     return li;
+  }
+
+  // Up to two visible tag chips + a "+N" indicator when more exist. The full list
+  // still reaches assistive tech via the open button's aria-label (PRD FR58/FR59).
+  function tagsRowHTML(tags) {
+    if (!tags || tags.length === 0) return '';
+    var shown = tags.slice(0, 2).map(function (t) {
+      return '<span class="roster-card__tag">' + esc(t) + '</span>';
+    }).join('');
+    var more = tags.length > 2 ? '<span class="roster-card__tag roster-card__tag--more">+' + (tags.length - 2) + '</span>' : '';
+    return '<span class="roster-card__tags" aria-hidden="true">' + shown + more + '</span>';
   }
 
   function highlightSelected() {
@@ -471,6 +518,7 @@
       ? readonlyInput('ov-provider', detail.provider || '', 'Set by the selected model')
       : textInput('ov-provider', detail.provider || '', 'openai / anthropic / ollama…');
 
+    var md = detail.metadata || {};
     els.overviewFacts.innerHTML =
       '<form class="stage-form" id="overviewForm" novalidate>' +
       field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
@@ -485,11 +533,19 @@
         '</div></div>' +
       field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'), 'ov-maxtokens') +
       field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
-      field('Description', textareaInput('ov-description', (detail.metadata && detail.metadata.description) || '', 3), 'ov-description') +
+      field('Description', textareaInput('ov-description', md.description || '', 3), 'ov-description') +
+      field('Favorite', '<label class="check"><input id="ov-favorite" type="checkbox"' + (md.favorite ? ' checked' : '') + '> Favorited</label>') +
+      field('Tags', '<div id="ov-tags-host"></div>', 'ov-tags-host') +
+      field('Avatar color', colorInput('ov-avatarcolor', md.avatar_color || colorFor(name)), 'ov-avatarcolor') +
+      '<div class="field"><span class="field__label">Avatar image</span><div class="field__control" id="ov-avatar-control"></div></div>' +
       '</form>' +
+      readonlyMetaHTML(detail) +
       saveBar('overview');
 
     els.overviewDesc.innerHTML = '';
+    wireOverviewTags(name, md.tags || []);
+    wireAvatarControl(name, md);
+    wireColorInput('ov-avatarcolor');
     wireDirty('overview', document.getElementById('overviewForm'));
     wireSaveBar('overview', function () { saveOverview(name); });
 
@@ -600,9 +656,125 @@
     if (!isNaN(maxNum) && maxNum !== Number(detail.max_output_tokens || 0)) out.max_output_tokens = maxNum;
     var web = checked('ov-websearch');
     if (web !== !!detail.allow_web_search) out.allow_web_search = web;
+    var md = detail.metadata || {};
     var desc = val('ov-description');
-    if (desc !== ((detail.metadata && detail.metadata.description) || '')) out.description = desc;
+    if (desc !== (md.description || '')) out.description = desc;
+    var fav = checked('ov-favorite');
+    if (fav !== !!md.favorite) out.favorite = fav;
+    var color = val('ov-avatarcolor');
+    if (color && color !== (md.avatar_color || '')) out.avatar_color = color;
+    // Tags: compare case-insensitively so re-saving unchanged tags is a no-op.
+    if (overviewTagsInput) {
+      var nextTags = overviewTagsInput.getTags();
+      if (tagsDiffer(nextTags, md.tags || [])) out.tags = nextTags;
+    }
     return out;
+  }
+
+  function tagsDiffer(a, b) {
+    var na = (a || []).map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean).sort();
+    var nb = (b || []).map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean).sort();
+    if (na.length !== nb.length) return true;
+    for (var i = 0; i < na.length; i++) { if (na[i] !== nb[i]) return true; }
+    return false;
+  }
+
+  function wireOverviewTags(name, initial) {
+    overviewTagsInput = null;
+    var host = document.getElementById('ov-tags-host');
+    if (!host) return;
+    if (window.OriTagInput) {
+      overviewTagsInput = window.OriTagInput.createTagInput({
+        container: host,
+        initialTags: initial,
+        onChange: function () { markDirty('overview', true); },
+      });
+    } else {
+      host.innerHTML = '<input id="ov-tags-text" type="text" value="' + esc((initial || []).join(', ')) + '" placeholder="tag1, tag2">';
+    }
+  }
+
+  // Avatar upload/remove control, reusing the existing avatar endpoints. Uploads
+  // apply immediately (multipart) and refresh the card + stage avatar.
+  function wireAvatarControl(name, md) {
+    var host = document.getElementById('ov-avatar-control');
+    if (!host) return;
+    var hasImage = !!(md && md.avatar_image);
+    host.innerHTML =
+      '<div class="avatar-control">' +
+      '<input type="file" id="ov-avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
+      (hasImage ? '<button type="button" class="btn-ghost avatar-control__remove" id="ov-avatar-remove">Remove image</button>' : '') +
+      '<span class="avatar-control__status" id="ov-avatar-status" aria-live="polite"></span>' +
+      '</div>';
+    var file = document.getElementById('ov-avatar-file');
+    if (file) file.addEventListener('change', function () { uploadAvatar(name, file.files && file.files[0]); });
+    var remove = document.getElementById('ov-avatar-remove');
+    if (remove) remove.addEventListener('click', function () { removeAvatar(name); });
+  }
+
+  function uploadAvatar(name, fileObj) {
+    if (!fileObj) return;
+    var status = document.getElementById('ov-avatar-status');
+    if (status) status.textContent = 'Uploading…';
+    var form = new FormData();
+    form.append('avatar', fileObj);
+    fetch('/api/agents/' + encodeURIComponent(name) + '/avatar', { method: 'POST', body: form })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (res) {
+        if (res.status >= 200 && res.status < 300) afterAvatarChange(name, status, 'Uploaded.');
+        else if (status) status.textContent = (res.data && res.data.message) || 'Upload failed.';
+      })
+      .catch(function () { if (status) status.textContent = 'Network error.'; });
+  }
+
+  function removeAvatar(name) {
+    var status = document.getElementById('ov-avatar-status');
+    if (status) status.textContent = 'Removing…';
+    fetch('/api/agents/' + encodeURIComponent(name) + '/avatar', { method: 'DELETE' })
+      .then(function (r) { return r.status; })
+      .then(function (code) {
+        if (code >= 200 && code < 300) afterAvatarChange(name, status, 'Removed.');
+        else if (status) status.textContent = 'Remove failed.';
+      })
+      .catch(function () { if (status) status.textContent = 'Network error.'; });
+  }
+
+  function afterAvatarChange(name, status, msg) {
+    fetchDetail(name, true).then(function (detail) {
+      if (status) status.textContent = msg;
+      if (state.selected !== name) return;
+      // Re-render avatar + card from the fresh metadata.
+      var item = state.byName[name];
+      if (item && detail.metadata) item.metadata = Object.assign({}, item.metadata, detail.metadata);
+      els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar');
+      els.avatar = document.getElementById('stageAvatar');
+      refreshRosterMeta(name, detail);
+      wireAvatarControl(name, detail.metadata || {});
+    });
+  }
+
+  // Read-only created / updated / last-active timestamps below the editable form.
+  function readonlyMetaHTML(detail) {
+    var s = detail.statistics || {};
+    var rows = [
+      ['Created', fmtDate(s.created_at)],
+      ['Updated', fmtDate(s.updated_at)],
+      ['Last active', fmtDate(s.last_active)],
+    ].filter(function (r) { return r[1]; });
+    if (rows.length === 0) return '';
+    return '<dl class="stage-meta">' + rows.map(function (r) {
+      return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>';
+    }).join('') + '</dl>';
+  }
+
+  var dateFmt = (typeof Intl !== 'undefined' && Intl.DateTimeFormat)
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    : null;
+  function fmtDate(v) {
+    if (!v) return '';
+    var t = Date.parse(v);
+    if (isNaN(t) || t <= 0) return '';
+    return dateFmt ? dateFmt.format(new Date(t)) : new Date(t).toLocaleString();
   }
 
   function saveOverview(name) {
@@ -859,12 +1031,23 @@
       field('Role', selectInput('cr-role', ROLES, 'general', titleCase), 'cr-role') +
       field('Model', textInput('cr-model', 'gpt-4o-mini'), 'cr-model') +
       field('Description', textareaInput('cr-description', '', 3), 'cr-description') +
+      field('Favorite', '<label class="check"><input id="cr-favorite" type="checkbox"> Favorited</label>') +
+      field('Tags', '<div id="cr-tags-host"></div>', 'cr-tags-host') +
+      field('Avatar color', colorInput('cr-avatarcolor', '#4f46e5'), 'cr-avatarcolor') +
       '</form>' +
       '<div class="save-bar" id="savebar-create">' +
       '<span class="save-status is-muted"></span>' +
       '<button type="button" class="btn-ghost" id="createCancel2">Cancel</button>' +
       '<button type="button" class="btn-primary" id="createSubmit">Create agent</button>' +
       '</div>';
+    createTagsInput = null;
+    var tagHost = document.getElementById('cr-tags-host');
+    if (window.OriTagInput && tagHost) {
+      createTagsInput = window.OriTagInput.createTagInput({ container: tagHost, placeholder: 'Add tag…' });
+    } else if (tagHost) {
+      tagHost.innerHTML = '<input id="cr-tags-text" type="text" placeholder="tag1, tag2">';
+    }
+    wireColorInput('cr-avatarcolor');
     document.getElementById('createSubmit').addEventListener('click', submitCreate);
     document.getElementById('createCancel2').addEventListener('click', closeCreate);
     var nameInput = document.getElementById('cr-name');
@@ -882,12 +1065,17 @@
     var name = val('cr-name').trim();
     var status = document.querySelector('#savebar-create .save-status');
     if (!name) { status.textContent = 'Name is required.'; status.className = 'save-status is-error'; return; }
+    var crTags = createTagsInput ? createTagsInput.getTags()
+      : (val('cr-tags-text') ? val('cr-tags-text').split(',').map(function (t) { return t.trim(); }).filter(Boolean) : []);
     var body = {
       name: name,
       type: 'tool-calling',
       role: val('cr-role'),
       model: val('cr-model').trim(),
       description: val('cr-description'),
+      tags: crTags,
+      favorite: checked('cr-favorite'),
+      avatar_color: val('cr-avatarcolor'),
     };
     var submit = document.getElementById('createSubmit');
     submit.disabled = true; submit.textContent = 'Creating…';
@@ -953,12 +1141,16 @@
     var item = state.byName[name];
     if (!item) return;
     if (detail.model) item.model = detail.model;
-    if (detail.metadata) item.metadata = Object.assign({}, item.metadata, { description: (detail.metadata.description || '') });
+    // Merge the full metadata snapshot (description, tags, favorite, avatar) so
+    // the rebuilt card reflects every edit, not just the description.
+    if (detail.metadata) item.metadata = Object.assign({}, item.metadata, detail.metadata);
+    if (detail.role) item.role = detail.role;
     var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(name) + '"]');
     if (card) {
-      var meta = card.querySelector('.roster-card__meta');
-      var wc = item.workspace_count || 0;
-      if (meta) meta.textContent = [detail.model, wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's')].filter(Boolean).join(' · ');
+      var idx = Number(card.dataset.index);
+      var rebuilt = buildCard(item, isNaN(idx) ? 0 : idx);
+      if (card.classList.contains('is-focused')) rebuilt.classList.add('is-focused');
+      card.replaceWith(rebuilt);
     }
   }
 
@@ -1443,6 +1635,174 @@
     if (els.selectAll) els.selectAll.focus();
   }
 
+  /* ---- bulk tags + favorite ------------------------------------------------ */
+
+  var bulkTagsInput = null; // active OriTagInput instance for the add flow
+
+  function openBulkTags(mode) {
+    if (state.checked.size === 0) return;
+    if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
+    var dlg = els.bulkTagsDialog;
+    dlg.dataset.mode = mode;
+    els.bulkTagsTitle.textContent = mode === 'add' ? 'Add tags' : 'Remove tags';
+    els.bulkTagsConfirm.disabled = false;
+    els.bulkTagsConfirm.textContent = mode === 'add' ? 'Add tags' : 'Remove tags';
+    bulkTagsInput = null;
+
+    if (mode === 'add') {
+      els.bulkTagsBody.innerHTML =
+        '<p class="bulk-dialog__lead">Tags are added to every eligible selected agent; existing tags are kept.</p>' +
+        '<div id="bulkTagsInputHost"></div>';
+      var host = document.getElementById('bulkTagsInputHost');
+      if (window.OriTagInput && host) {
+        bulkTagsInput = window.OriTagInput.createTagInput({ container: host, placeholder: 'Add tag…' });
+      } else if (host) {
+        host.innerHTML = '<input id="bulkTagsText" type="text" class="bulk-dialog__text" placeholder="tag1, tag2">';
+      }
+    } else {
+      // Remove: offer the union of tags across the checked set as a checklist so
+      // the user picks from values that actually exist (PRD FR27).
+      var union = tagsUnion(Array.from(state.checked));
+      if (union.length === 0) {
+        els.bulkTagsBody.innerHTML = '<p class="bulk-dialog__none">The selected agents have no tags to remove.</p>';
+        els.bulkTagsConfirm.disabled = true;
+      } else {
+        els.bulkTagsBody.innerHTML =
+          '<p class="bulk-dialog__lead">Remove these tags from every selected agent that has them.</p>' +
+          '<div class="bulk-tags-checklist">' + union.map(function (t) {
+            return '<label class="bulk-tags-checklist__item"><input type="checkbox" value="' + esc(t) + '"> ' + esc(t) + '</label>';
+          }).join('') + '</div>';
+      }
+    }
+    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+
+  function closeBulkTags() {
+    var dlg = els.bulkTagsDialog;
+    if (dlg.open && typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+    bulkTagsInput = null;
+    if (els.selectAll) els.selectAll.focus();
+  }
+
+  // Union of tags across the given agents (case-insensitive, original casing).
+  function tagsUnion(names) {
+    var seen = {};
+    var out = [];
+    names.forEach(function (name) {
+      var a = state.byName[name];
+      var tags = (a && a.metadata && a.metadata.tags) || [];
+      tags.forEach(function (t) {
+        var key = String(t).toLowerCase();
+        if (!seen[key]) { seen[key] = true; out.push(t); }
+      });
+    });
+    out.sort(function (a, b) { return String(a).localeCompare(String(b)); });
+    return out;
+  }
+
+  function runBulkTags() {
+    var btn = els.bulkTagsConfirm;
+    if (btn.disabled || btn.dataset.busy === '1') return;
+    var mode = els.bulkTagsDialog.dataset.mode;
+    var tags = [];
+    if (mode === 'add') {
+      if (bulkTagsInput) tags = bulkTagsInput.getTags();
+      else {
+        var txt = document.getElementById('bulkTagsText');
+        tags = txt ? txt.value.split(',') : [];
+      }
+    } else {
+      els.bulkTagsBody.querySelectorAll('input[type="checkbox"]:checked').forEach(function (c) { tags.push(c.value); });
+    }
+    tags = tags.map(function (t) { return String(t).trim(); }).filter(Boolean);
+    if (tags.length === 0) {
+      els.bulkTagsBody.insertAdjacentHTML('afterbegin', '<p class="bulk-dialog__error" role="alert">Enter at least one tag.</p>');
+      return;
+    }
+    var op = mode === 'add' ? 'add_tags' : 'remove_tags';
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    var restore = btn.textContent;
+    btn.textContent = 'Working…';
+    submitBulkMetadata({ operation: op, agent_names: Array.from(state.checked), tags: tags }, function () {
+      btn.dataset.busy = ''; btn.disabled = false; btn.textContent = restore;
+    }, closeBulkTags);
+  }
+
+  function runBulkFavorite(favorite) {
+    if (state.checked.size === 0) return;
+    if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
+    var btns = [els.bulkFavorite, els.bulkUnfavorite];
+    btns.forEach(function (b) { b.disabled = true; });
+    announce(favorite ? 'Favoriting…' : 'Unfavoriting…');
+    submitBulkMetadata({ operation: 'set_favorite', agent_names: Array.from(state.checked), favorite: favorite }, function () {
+      btns.forEach(function (b) { b.disabled = false; });
+    }, null);
+  }
+
+  // Shared bulk-metadata POST with shared-definition confirmation retry. `always`
+  // runs on completion; `onDone` (optional) runs only on a successful response
+  // (e.g. to close a dialog).
+  function submitBulkMetadata(payload, always, onDone) {
+    fetch('/api/agents/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) { return r.json().catch(function () { return null; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (res) {
+        if (always) always();
+        if (res.status < 200 || res.status >= 300 || !res.data || !Array.isArray(res.data.results)) {
+          announce('Bulk update failed.');
+          return;
+        }
+        var results = res.data.results;
+        // Any agent needing shared-definition confirmation → ask once, resend
+        // with confirm_shared_edit for the whole batch (PRD FR31).
+        var needsConfirm = results.some(function (r) { return r.reason_code === 'shared_edit_requires_confirmation'; });
+        if (needsConfirm && !payload.confirm_shared_edit) {
+          var n = results.filter(function (r) { return r.reason_code === 'shared_edit_requires_confirmation'; }).length;
+          if (window.confirm(n + ' selected agent(s) are attached to multiple workspaces. This change affects all of them. Apply it?')) {
+            submitBulkMetadata(Object.assign({}, payload, { confirm_shared_edit: true }), always, onDone);
+            return;
+          }
+        }
+        if (onDone) onDone();
+        renderBulkMetadataResult(res.data);
+        // Refresh roster data so cards/overview/filters reflect the change,
+        // keeping the focused agent and (via pruneChecked) the checked set.
+        reloadThenSelect(state.selected);
+      })
+      .catch(function (err) {
+        if (always) always();
+        announce('Network error — no changes applied.');
+        console.error('[roster] bulk metadata failed', err);
+      });
+  }
+
+  function renderBulkMetadataResult(payload) {
+    var summary = payload.summary || {};
+    var results = payload.results || [];
+    if (!els.bulkResult) return;
+    var parts = [];
+    parts.push((summary.requested || results.length) + ' requested');
+    parts.push((summary.succeeded || 0) + ' updated');
+    if (summary.skipped) parts.push(summary.skipped + ' skipped');
+    if (summary.failed) parts.push(summary.failed + ' failed');
+    els.bulkResultSummary.textContent = parts.join(' · ');
+    var rows = results.filter(function (r) { return r.status !== 'succeeded'; }).map(function (r) {
+      var reason = r.message ? esc(r.message) : esc(r.reason_code || r.status);
+      return '<li class="bulk-result__item is-' + esc(r.status) + '">' +
+        '<span class="bulk-result__name">' + esc(r.name) + '</span>' +
+        '<span class="bulk-result__reason">' + reason + '</span></li>';
+    }).join('');
+    els.bulkResultList.innerHTML = rows;
+    els.bulkResult.hidden = false;
+    var msg = (summary.succeeded || 0) + ' updated';
+    if (summary.skipped) msg += ', ' + summary.skipped + ' skipped';
+    announce(msg + '.');
+  }
+
   function onSearch() { state.query = els.search.value || ''; applyFilterSort(); }
   function onSort() { state.sort = els.sort.value || 'name-asc'; applyFilterSort(); if (state.selected) highlightSelected(); }
 
@@ -1482,6 +1842,24 @@
   }
   function textareaInput(id, value, rows) {
     return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
+  }
+  // Color picker + hex text, kept in sync, for the avatar color field.
+  function colorInput(id, value) {
+    var v = /^#[0-9a-fA-F]{6}$/.test(String(value)) ? value : '#4f46e5';
+    return '<span class="color-input">' +
+      '<input id="' + id + '" type="color" value="' + esc(v) + '">' +
+      '<input id="' + id + '-hex" type="text" class="color-input__hex" value="' + esc(v) + '" maxlength="7" spellcheck="false" aria-label="Avatar color hex">' +
+      '</span>';
+  }
+  // Keep the color picker and its hex text field in sync (either drives the other).
+  function wireColorInput(id) {
+    var picker = document.getElementById(id);
+    var hex = document.getElementById(id + '-hex');
+    if (!picker || !hex) return;
+    picker.addEventListener('input', function () { hex.value = picker.value; });
+    hex.addEventListener('input', function () {
+      if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) picker.value = hex.value;
+    });
   }
   // Grouped <select> of available models (optgroup per provider). Each option
   // carries data-provider so the Provider field can follow the chosen model. A
@@ -1610,6 +1988,33 @@
     var v = agent && agent.statistics && agent.statistics.last_active;
     var t = v ? Date.parse(v) : 0;
     return isNaN(t) ? 0 : t;
+  }
+
+  // Locale-aware relative "last active" so the Recently Active sort is legible
+  // (PRD FR60). Returns '' when there's no usable timestamp. A zero/epoch value
+  // (never active) is treated as missing rather than "55 years ago".
+  var relTimeFmt = (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat)
+    ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+    : null;
+  function lastActiveLabel(agent) {
+    var t = lastActive(agent);
+    if (!t) return '';
+    var diffMs = t - Date.now();
+    var absMin = Math.abs(diffMs) / 60000;
+    if (absMin < 1) return 'Active now';
+    if (!relTimeFmt) return '';
+    var units = [
+      ['year', 525600], ['month', 43200], ['week', 10080],
+      ['day', 1440], ['hour', 60], ['minute', 1],
+    ];
+    for (var i = 0; i < units.length; i++) {
+      var perUnit = units[i][1];
+      if (absMin >= perUnit || units[i][0] === 'minute') {
+        var value = Math.round(diffMs / 60000 / perUnit);
+        return relTimeFmt.format(value, units[i][0]);
+      }
+    }
+    return '';
   }
 
   function titleCase(s) {

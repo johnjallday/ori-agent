@@ -216,4 +216,104 @@ test.describe('Agents roster', () => {
       }
     }
   });
+
+  test('bulk metadata: add tags and favorite across a selection', async ({ page, request }) => {
+    const prefix = `PWMeta${Date.now()}`;
+    const names = [`${prefix} One`, `${prefix} Two`];
+    for (const n of names) {
+      const r = await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini', tags: ['keep'] },
+      });
+      expect(r.ok()).toBeTruthy();
+    }
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      // Select both, favorite them.
+      await page.locator('#rosterSelectAll').click();
+      await page.locator('#bulkFavorite').click();
+      await expect
+        .poll(async () => {
+          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(names[0])}/detail`);
+          return (await r.json()).metadata?.favorite;
+        })
+        .toBe(true);
+
+      // Re-select (reload cleared selection) and add a tag.
+      await page.locator('#rosterSearch').fill(prefix);
+      await page.locator('#rosterSelectAll').click();
+      await page.locator('#bulkAddTags').click();
+      await expect(page.locator('#bulkTagsDialog')).toBeVisible();
+      // Type into the shared tag input and commit with Enter.
+      const tagField = page.locator('#bulkTagsInputHost .tag-input-field');
+      await tagField.fill('content');
+      await tagField.press('Enter');
+      await page.locator('#bulkTagsConfirm').click();
+
+      await expect
+        .poll(async () => {
+          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(names[1])}/detail`);
+          const tags = (await r.json()).metadata?.tags || [];
+          return tags.slice().sort().join(',');
+        })
+        .toBe('content,keep');
+    } finally {
+      for (const n of names) {
+        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+      }
+    }
+  });
+
+  test('single-agent overview: edit tags and favorite persist', async ({ page, request }) => {
+    const name = `PWOv ${Date.now()}`;
+    const create = await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' },
+    });
+    expect(create.ok()).toBeTruthy();
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#stageName')).toHaveText(name);
+
+      // Favorite + add a tag via the Overview form.
+      await page.locator('#ov-favorite').check();
+      const tagField = page.locator('#ov-tags-host .tag-input-field');
+      await tagField.fill('research');
+      await tagField.press('Enter');
+      const save = page.locator('#savebar-overview [data-role="save"]');
+      await expect(save).toBeEnabled();
+      await save.click();
+
+      await expect
+        .poll(async () => {
+          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
+          const d = await r.json();
+          return `${d.metadata?.favorite}:${(d.metadata?.tags || []).join(',')}`;
+        })
+        .toBe('true:research');
+    } finally {
+      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
+    }
+  });
 });

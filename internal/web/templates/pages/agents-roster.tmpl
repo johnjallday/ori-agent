@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head.tmpl" .}}
+<link rel="stylesheet" href="/css/tag-input.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
 
 <body class="bg-light agents-roster-page" data-sidebar-default="hidden">
@@ -90,6 +91,17 @@
             </div>
           </dialog>
 
+          <!-- Bulk tag add/remove. Body is rebuilt per mode (add = tag entry,
+               remove = checklist of tags across the checked set). -->
+          <dialog class="bulk-dialog" id="bulkTagsDialog" aria-labelledby="bulkTagsTitle">
+            <h2 class="bulk-dialog__title" id="bulkTagsTitle">Tags</h2>
+            <div class="bulk-dialog__body" id="bulkTagsBody"></div>
+            <div class="bulk-dialog__actions">
+              <button type="button" class="btn-ghost" id="bulkTagsCancel">Cancel</button>
+              <button type="button" class="btn-primary" id="bulkTagsConfirm">Apply</button>
+            </div>
+          </dialog>
+
           <div class="roster-empty" id="rosterEmpty" hidden>
             <p>No agents match your search.</p>
             <button type="button" id="rosterClearSearch" class="roster-linkbtn">Clear search</button>
@@ -159,6 +171,9 @@
   <script defer src="/js/app.js"></script>
   <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
+  <!-- Shared tag-entry widget (exposes window.OriTagInput). Loaded as a module so
+       the roster's Overview + bulk tag flows reuse it instead of duplicating. -->
+  <script type="module" src="/js/modules/tag-input.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 

@@ -328,6 +328,59 @@
 .roster-card__status.is-error { background: #ef4444; }
 .roster-card__status.is-disabled { background: #d1d5db; }
 
+/* Favorite star + textual status label + tag chips on the card. Status is
+   conveyed by text, never by the dot's color alone (PRD FR55). */
+.roster-card__fav {
+  color: #f59e0b;
+  font-size: 13px;
+  flex: none;
+}
+
+.roster-card__statuslabel {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--text-secondary, #6b7280);
+  background: color-mix(in srgb, var(--text-secondary, #6b7280) 12%, transparent);
+}
+.roster-card__statuslabel.is-active {
+  color: #15803d;
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+.roster-card__statuslabel.is-error {
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+}
+[data-bs-theme="dark"] .roster-card__statuslabel.is-active { color: #4ade80; }
+[data-bs-theme="dark"] .roster-card__statuslabel.is-error { color: #f87171; }
+
+.roster-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.roster-card__tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--text-secondary, #6b7280);
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 20%, transparent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-card__tag--more {
+  background: none;
+  border-color: var(--border-color, #e5e7eb);
+}
+
 .roster-empty {
   text-align: center;
   color: var(--text-secondary, #6b7280);
@@ -608,6 +661,88 @@
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 [data-bs-theme="dark"] .bulk-dialog { background: var(--bg-primary, #1f2430); }
+
+.bulk-dialog__text {
+  width: 100%;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+}
+
+.bulk-tags-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bulk-tags-checklist__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* ---- Overview metadata controls ------------------------------------------- */
+
+.color-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-input input[type="color"] {
+  width: 38px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.color-input__hex {
+  width: 92px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+}
+
+.avatar-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.avatar-control__status {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.stage-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  font-size: 12px;
+}
+.stage-meta dt {
+  color: var(--text-secondary, #6b7280);
+  font-weight: 600;
+}
+.stage-meta dd {
+  margin: 0;
+  color: var(--text-primary, #111827);
+}
 
 /* ---- Stage ---------------------------------------------------------------- */
 

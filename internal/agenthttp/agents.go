@@ -281,6 +281,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		Description     string                     `json:"description,omitempty"`
 		Tags            []string                   `json:"tags,omitempty"`
 		AvatarColor     string                     `json:"avatar_color,omitempty"`
+		Favorite        bool                       `json:"favorite,omitempty"`
 		LLMProvider     string                     `json:"llm_provider,omitempty"`
 		ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 		MaxOutputTokens int                        `json:"max_output_tokens,omitempty"`
@@ -334,7 +335,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set metadata if provided
-	if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" || req.RoutingProfile != nil {
+	if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" || req.Favorite || req.RoutingProfile != nil {
 		agent, ok := h.State.GetAgent(req.Name)
 		if ok && agent != nil {
 			if agent.Metadata == nil {
@@ -343,6 +344,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 			agent.Metadata.Description = req.Description
 			agent.Metadata.Tags = req.Tags
 			agent.Metadata.AvatarColor = req.AvatarColor
+			agent.Metadata.Favorite = req.Favorite
 			agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
 			if err := h.State.SetAgent(req.Name, agent); err != nil {
 				logger.Error("Failed to set metadata", logger.Fields{"err": err})
