@@ -129,6 +129,40 @@ func TestRenderCreateWorkspaceProjectOpenOption(t *testing.T) {
 	}
 }
 
+func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	html, err := r.RenderTemplate("workspaces", TemplateData{Title: "Workspaces - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(workspaces) failed: %v", err)
+	}
+	for _, want := range []string{
+		`id="wizardStep1"`,
+		`id="wizardStep2"`,
+		`id="wizardStep3"`,
+		`aria-current="step"`,
+		`Choose Blueprint`,
+		`Workspace Details`,
+		`Review &amp; Create`,
+		`id="workspaceTeamLiveRegion"`,
+		`id="addExistingAgentBtn"`,
+		`id="existingAgentRosterPanel"`,
+		`aria-label="Close create workspace"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered Create Workspace wizard missing %q", want)
+		}
+	}
+	for _, gone := range []string{"Select Blueprint", "Construct", "Template Agents"} {
+		if strings.Contains(html, gone) {
+			t.Errorf("rendered Create Workspace wizard contains stale copy %q", gone)
+		}
+	}
+}
+
 func TestRenderAgentsDetailDefaultsSidebarHidden(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {

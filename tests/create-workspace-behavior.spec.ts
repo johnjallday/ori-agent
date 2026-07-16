@@ -29,10 +29,29 @@ async function openCreateModal(page: Page) {
   await expect(cardByLabel(page, 'Content Production')).toBeVisible();
 }
 
+async function advanceToWorkspaceDetails(page: Page) {
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+}
+
+async function advanceToReview(page: Page) {
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+}
+
+async function returnToBlueprints(page: Page) {
+  await page.evaluate(() => {
+    (
+      window as unknown as { sessionManager: { goToWizardStep: (step: number) => void } }
+    ).sessionManager.goToWizardStep(1);
+  });
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+}
+
 function cardByLabel(page: Page, label: string) {
-  return page
-    .locator('#templatePicker .workspace-template-card')
-    .filter({ has: page.locator('.workspace-template-card-label', { hasText: new RegExp(`^${label}$`) }) });
+  return page.locator('#templatePicker .workspace-template-card').filter({
+    has: page.locator('.workspace-template-card-label', { hasText: new RegExp(`^${label}$`) })
+  });
 }
 
 async function routeProjectEntryTemplates(page: Page) {
@@ -43,9 +62,19 @@ async function routeProjectEntryTemplates(page: Page) {
       body: JSON.stringify({
         templates_root: '/tmp/templates',
         templates: [
-          { id: 'research-project', name: 'Research Project', builtin: true, behavior_profile: 'research' },
+          {
+            id: 'research-project',
+            name: 'Research Project',
+            builtin: true,
+            behavior_profile: 'research'
+          },
           { id: 'travels', name: 'Travels', builtin: true, behavior_profile: 'general' },
-          { id: 'content-production', name: 'Content Production', builtin: true, behavior_profile: 'general' },
+          {
+            id: 'content-production',
+            name: 'Content Production',
+            builtin: true,
+            behavior_profile: 'general'
+          },
           {
             id: 'auto-project',
             name: 'Auto Project',
@@ -81,7 +110,13 @@ async function stubWorkspaceReview(page: Page) {
     const w = window as unknown as { WorkspaceBootstrapReview?: Record<string, unknown> };
     const r = (w.WorkspaceBootstrapReview = w.WorkspaceBootstrapReview || {});
     r.ensureReviewed = async () => ({ ready: true });
-    r.applyPlan = async () => ({ invitedAgents: 0, boundMCPs: 0, attachedSkills: 0, addedPlugins: 0, failures: [] });
+    r.applyPlan = async () => ({
+      invitedAgents: 0,
+      boundMCPs: 0,
+      attachedSkills: 0,
+      addedPlugins: 0,
+      failures: []
+    });
   });
 }
 
@@ -92,8 +127,11 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/workspaces');
 });
 
-test('starting point sets Agent behavior; manual override is preserved; reopen resets', async ({ page }) => {
+test('starting point sets Agent behavior; manual override is preserved; reopen resets', async ({
+  page
+}) => {
   await openCreateModal(page);
+  await advanceToWorkspaceDetails(page);
 
   const sel = page.locator('#folderPresetSelect');
   const hint = page.locator('#folderBehaviorHint');
@@ -106,7 +144,9 @@ test('starting point sets Agent behavior; manual override is preserved; reopen r
 
   // Pick Research Project -> research, hint updates (value/hint update even
   // while the Advanced section is collapsed).
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Research Project').click();
+  await advanceToWorkspaceDetails(page);
   await expect(sel).toHaveValue('research');
   await expect(hint).toHaveText('Agent behavior: Research');
 
@@ -120,7 +160,9 @@ test('starting point sets Agent behavior; manual override is preserved; reopen r
   await expect(hint).toHaveText('Agent behavior: Software Project');
 
   // Pick Travels (maps to general) -> override is preserved.
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Travels').click();
+  await advanceToWorkspaceDetails(page);
   await expect(sel).toHaveValue('software_project');
 
   // Close + reopen -> reset to defaults, disclosure collapsed.
@@ -132,12 +174,15 @@ test('starting point sets Agent behavior; manual override is preserved; reopen r
   await expect(page.locator('#addFolderModal')).toBeHidden();
 
   await openCreateModal(page);
+  await advanceToWorkspaceDetails(page);
   await expect(sel).toHaveValue('general');
   await expect(hint).toHaveText('Agent behavior: General');
   await expect(disclosure).toHaveJSProperty('open', false);
 });
 
-test('switching starting points updates auto-filled name, but never typed input', async ({ page }) => {
+test('switching starting points updates auto-filled name, but never typed input', async ({
+  page
+}) => {
   await openCreateModal(page);
   const name = page.locator('#folderNameInput');
 
@@ -150,20 +195,27 @@ test('switching starting points updates auto-filled name, but never typed input'
   await cardByLabel(page, 'Content Production').click();
   await expect(name).toHaveValue('Content Production');
 
+  await advanceToWorkspaceDetails(page);
+
   // Typed input is never clobbered by a later card switch.
   await name.fill('My Custom Name');
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Research Project').click();
   await expect(name).toHaveValue('My Custom Name');
 
   // Blank clears an auto-filled value (clean slate) but leaves typed input.
+  await advanceToWorkspaceDetails(page);
   await name.fill('');
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Travels').click();
   await expect(name).toHaveValue('Travels');
   await cardByLabel(page, 'Blank').click();
   await expect(name).toHaveValue('');
 });
 
-test('project-open option follows template defaults and resets for non-library flows', async ({ page }) => {
+test('project-open option follows template defaults and resets for non-library flows', async ({
+  page
+}) => {
   await routeProjectEntryTemplates(page);
   await openCreateModal(page);
 
@@ -173,27 +225,43 @@ test('project-open option follows template defaults and resets for non-library f
   await expect(toggle).not.toBeChecked();
 
   await cardByLabel(page, 'Auto Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(panel).toBeVisible();
   await expect(toggle).toBeChecked();
 
   await toggle.uncheck();
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Manual Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(panel).toBeVisible();
   await expect(toggle).not.toBeChecked();
   await toggle.check();
 
   // Every template change reapplies that template's own default.
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Auto Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(toggle).toBeChecked();
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Manual Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(toggle).not.toBeChecked();
 
+  await returnToBlueprints(page);
   await cardByLabel(page, 'No Entry').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(panel).toBeHidden();
   await expect(toggle).not.toBeChecked();
 
   // An ad-hoc path overrides the selected library template and clears launch.
+  await returnToBlueprints(page);
   await cardByLabel(page, 'Auto Project').click();
+  await advanceToWorkspaceDetails(page);
   await page.locator('#folderAdvancedDisclosure .workspace-advanced-summary').click();
   await page.locator('#projectTemplatePathInput').fill('/tmp/ad-hoc-template');
   await expect(panel).toBeHidden();
@@ -201,8 +269,9 @@ test('project-open option follows template defaults and resets for non-library f
 
   // Import mode never carries a launch choice.
   await page.evaluate(() => {
-    (window as unknown as { sessionManager: { setImportModeEnabled: (enabled: boolean) => void } })
-      .sessionManager.setImportModeEnabled(true);
+    (
+      window as unknown as { sessionManager: { setImportModeEnabled: (enabled: boolean) => void } }
+    ).sessionManager.setImportModeEnabled(true);
   });
   await expect(panel).toBeHidden();
   await expect(toggle).not.toBeChecked();
@@ -214,11 +283,14 @@ test('project-open option follows template defaults and resets for non-library f
   });
   await expect(page.locator('#addFolderModal')).toBeHidden();
   await openCreateModal(page);
+  await advanceToWorkspaceDetails(page);
   await expect(panel).toBeHidden();
   await expect(toggle).not.toBeChecked();
 });
 
-test('live Reaper Song defaults to launch, supports keyboard opt-out, and never opens on reload', async ({ page }) => {
+test('live Reaper Song defaults to launch, supports keyboard opt-out, and never opens on reload', async ({
+  page
+}) => {
   let openCalls = 0;
   await page.route('**/api/workspaces/**/project/open', async route => {
     openCalls += 1;
@@ -227,6 +299,8 @@ test('live Reaper Song defaults to launch, supports keyboard opt-out, and never 
 
   await openCreateModal(page);
   await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
 
   const panel = page.locator('#projectTemplateOpenAfterCreate');
   const toggle = page.locator('#projectTemplateOpenAfterCreateToggle');
@@ -242,7 +316,9 @@ test('live Reaper Song defaults to launch, supports keyboard opt-out, and never 
   await expect.poll(() => openCalls).toBe(0);
 });
 
-test('checked project-open option posts exactly once after create and before navigation', async ({ page }) => {
+test('checked project-open option posts exactly once after create and before navigation', async ({
+  page
+}) => {
   await routeProjectEntryTemplates(page);
   await openCreateModal(page);
   await stubWorkspaceReview(page);
@@ -250,7 +326,11 @@ test('checked project-open option posts exactly once after create and before nav
   const calls: string[] = [];
   await page.route('**/api/workspaces/created-open/project/open', async route => {
     calls.push('open');
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ message: 'ok' }) });
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'ok' })
+    });
   });
   await page.route('**/api/workspaces', async route => {
     calls.push('create');
@@ -262,6 +342,8 @@ test('checked project-open option posts exactly once after create and before nav
   });
 
   await cardByLabel(page, 'Auto Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).toBeChecked();
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/created-open');
@@ -269,7 +351,9 @@ test('checked project-open option posts exactly once after create and before nav
   await expect.poll(() => calls).toEqual(['create', 'open']);
 });
 
-test('unchecked project-open option creates and navigates without an open request', async ({ page }) => {
+test('unchecked project-open option creates and navigates without an open request', async ({
+  page
+}) => {
   await routeProjectEntryTemplates(page);
   await openCreateModal(page);
   await stubWorkspaceReview(page);
@@ -288,6 +372,8 @@ test('unchecked project-open option creates and navigates without an open reques
   });
 
   await cardByLabel(page, 'Manual Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/created-closed');
@@ -317,6 +403,8 @@ test('project-open failure still navigates and shows a one-time retry notice', a
   });
 
   await cardByLabel(page, 'Auto Project').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/created-failure');
   const retryNotice = page.locator('.toast-message', { hasText: 'Use Open Project to try again' });
@@ -337,25 +425,44 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
     const w = window as unknown as { WorkspaceBootstrapReview?: Record<string, unknown> };
     const r = (w.WorkspaceBootstrapReview = w.WorkspaceBootstrapReview || {});
     r.ensureReviewed = async () => ({ ready: true });
-    r.applyPlan = async () => ({ invitedAgents: 0, boundMCPs: 0, attachedSkills: 0, addedPlugins: 0, failures: [] });
+    r.applyPlan = async () => ({
+      invitedAgents: 0,
+      boundMCPs: 0,
+      attachedSkills: 0,
+      addedPlugins: 0,
+      failures: []
+    });
   });
 
   const captured: Record<string, string | undefined> = {};
   // Register import first so the more specific path wins for that URL.
-  await page.route('**/api/workspaces/import', async (route) => {
+  await page.route('**/api/workspaces/import', async route => {
     captured.import = route.request().postDataJSON()?.workspace_preset;
-    await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'stubbed' }) });
+    await route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'stubbed' })
+    });
   });
-  await page.route('**/api/workspaces', async (route) => {
+  await page.route('**/api/workspaces', async route => {
     captured.create = route.request().postDataJSON()?.workspace_preset;
-    await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'stubbed' }) });
+    await route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'stubbed' })
+    });
   });
 
   // CREATE: Research Project -> expect workspace_preset 'research'.
   await cardByLabel(page, 'Research Project').click();
+  await advanceToWorkspaceDetails(page);
   await page.fill('#folderNameInput', 'E2E Preset WS');
   await page.fill('#folderDescriptionInput', 'e2e preset submission test');
-  await page.evaluate(() => (window as unknown as { sessionManager: { createFolder: () => Promise<void> } }).sessionManager.createFolder());
+  await page.evaluate(() =>
+    (
+      window as unknown as { sessionManager: { createFolder: () => Promise<void> } }
+    ).sessionManager.createFolder()
+  );
   await expect.poll(() => captured.create).toBe('research');
 
   // IMPORT: enable import mode + a path, then submit again.
@@ -367,6 +474,67 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
     const pathInput = document.getElementById('folderImportPathInput') as HTMLInputElement | null;
     if (pathInput) pathInput.value = '/tmp/e2e-folder';
   });
-  await page.evaluate(() => (window as unknown as { sessionManager: { createFolder: () => Promise<void> } }).sessionManager.createFolder());
+  await page.evaluate(() =>
+    (
+      window as unknown as { sessionManager: { createFolder: () => Promise<void> } }
+    ).sessionManager.createFolder()
+  );
   await expect.poll(() => captured.import).toBe('research');
+});
+
+test('review attaches a saved agent and submits the complete team atomically', async ({ page }) => {
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+    });
+  });
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        agents: [
+          { name: 'Research Scout', model: 'gpt-5.5', workspace_count: 2 },
+          { name: 'Data Miner', model: 'gpt-5.5-mini', workspace_count: 0 }
+        ]
+      })
+    });
+  });
+  await openCreateModal(page);
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Atomic Team');
+  await advanceToReview(page);
+
+  await page.locator('#addExistingAgentBtn').click();
+  await expect(page.locator('#existingAgentRosterPanel')).toBeVisible();
+  await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await expect(page.locator('#existingAgentTeamList')).toContainText('Research Scout');
+  await expect(page.locator('#existingAgentTeamList')).toContainText('Primary assistant');
+  await page.locator('[data-existing-agent-name="Data Miner"]').evaluate(card => {
+    const data = new DataTransfer();
+    data.setData('application/x-ori-agent-name', 'Data Miner');
+    document
+      .getElementById('workspaceTeamDropZone')
+      ?.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data })
+      );
+  });
+  await expect(page.locator('#existingAgentTeamList')).toContainText('Data Miner');
+
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/workspaces', async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'atomic-team' }, seeded_starter_tasks: 0 })
+    });
+  });
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/atomic-team');
+  expect(payload?.existing_agent_names).toEqual(['Research Scout', 'Data Miner']);
+  expect(payload?.entry_agent_name).toBe('Research Scout');
 });
