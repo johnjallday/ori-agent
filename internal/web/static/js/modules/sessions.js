@@ -38,14 +38,25 @@ const sessionManager = {
   // Populated when the modal opens (defaults to the first/Blank template).
   workspaceTemplate: null,
   templateAgentPlan: null,
+  templateAgentPlanError: '',
   templateAgentPlanRequestId: 0,
   templateAgentPlanTimer: null,
+  // Overrides chosen while explicitly saving a blueprint agent from step 1.
+  // They must accompany final workspace creation so it attaches the exact
+  // global definition the user just named and configured.
+  templateAgentPrecreateOverrides: new Map(),
+  existingAgentRoster: [],
+  existingAgentRosterLoaded: false,
+  existingAgentRosterLoading: false,
+  existingAgentRosterError: '',
+  existingAgentSelections: [],
+  existingAgentPrimaryName: '',
   // True once the user manually changes "Agent behavior", so selecting a
   // Starting point no longer overwrites their choice. Reset on modal open.
   behaviorOverridden: false,
 
-  // Create-workspace wizard step (1 = Select Blueprint, 2 = Construct). Import
-  // mode is single-step and always renders the step-2 layout. Reset on open.
+  // Create-workspace wizard step (1 = Choose Blueprint, 2 = Workspace Details,
+  // 3 = Review & Create). Import mode remains a single-step details layout.
   wizardStep: 1,
 
   // Auto mode state
@@ -167,60 +178,68 @@ const sessionManager = {
   // Bind all event listeners
   bindEvents() {
     // New chat button - show modal
-    document.getElementById('newChatBtn')?.addEventListener('click', (e) => {
+    document.getElementById('newChatBtn')?.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       this.showCreateChatModal();
     });
 
     // New note button - open note modal (workspace selectable)
-    document.getElementById('newNoteBtn')?.addEventListener('click', (e) => {
+    document.getElementById('newNoteBtn')?.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       this.openNoteCreateModal(this.activeFolder || null);
     });
 
     // New task button - open task modal (workspace can be selected in modal if not active)
-    document.getElementById('newTaskBtn')?.addEventListener('click', (e) => {
+    document.getElementById('newTaskBtn')?.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       // Open task modal - if no active folder, user can select workspace in the modal
       this.openTaskModalForWorkspace(this.activeFolder || null);
     });
 
-    document.getElementById('createFirstSessionBtn')?.addEventListener('click', () => this.handleEmptyStateAction());
+    document
+      .getElementById('createFirstSessionBtn')
+      ?.addEventListener('click', () => this.handleEmptyStateAction());
 
     // Create chat modal - create button
-    document.getElementById('createChatBtn')?.addEventListener('click', () => this.handleCreateChatFromModal());
+    document
+      .getElementById('createChatBtn')
+      ?.addEventListener('click', () => this.handleCreateChatFromModal());
 
     // Toggle sidebar (from inside session sidebar)
-    document.getElementById('toggleSessionSidebarBtn')?.addEventListener('click', () => this.toggleSidebar());
+    document
+      .getElementById('toggleSessionSidebarBtn')
+      ?.addEventListener('click', () => this.toggleSidebar());
 
     // Toggle sidebar (from navbar)
-    document.getElementById('sessionsToggle')?.addEventListener('click', () => this.toggleSidebar());
+    document
+      .getElementById('sessionsToggle')
+      ?.addEventListener('click', () => this.toggleSidebar());
 
     // Search input
     const searchInput = document.getElementById('sessionSearchInput');
-    searchInput?.addEventListener('input', (e) => this.handleSearchInput(e.target.value));
+    searchInput?.addEventListener('input', e => this.handleSearchInput(e.target.value));
 
     const clearSearch = document.getElementById('clearSessionSearch');
     clearSearch?.addEventListener('click', () => this.clearSearch());
 
     // Sort dropdown
-    document.getElementById('sortDropdownBtn')?.addEventListener('click', (e) => {
+    document.getElementById('sortDropdownBtn')?.addEventListener('click', e => {
       e.stopPropagation();
       this.toggleDropdown('sortDropdown');
     });
 
     // Filter dropdown
-    document.getElementById('filterDropdownBtn')?.addEventListener('click', (e) => {
+    document.getElementById('filterDropdownBtn')?.addEventListener('click', e => {
       e.stopPropagation();
       this.toggleDropdown('filterDropdown');
     });
 
     // Sort options
     document.querySelectorAll('#sortDropdown .session-dropdown-item').forEach(item => {
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         const sort = e.target.dataset.sort;
         this.setSortOrder(sort);
         this.closeDropdowns();
@@ -228,24 +247,37 @@ const sessionManager = {
     });
 
     // Folder tree toggle
-    document.getElementById('folderTreeToggle')?.addEventListener('click', () => this.toggleFolderTree());
+    document
+      .getElementById('folderTreeToggle')
+      ?.addEventListener('click', () => this.toggleFolderTree());
 
     // Add folder button
-    document.getElementById('addFolderBtn')?.addEventListener('click', (e) => {
+    document.getElementById('addFolderBtn')?.addEventListener('click', e => {
       e.stopPropagation();
       this.showAddWorkspaceModal();
     });
 
     // Create folder button
-    document.getElementById('createFolderBtn')?.addEventListener('click', () => this.createFolder());
+    document
+      .getElementById('createFolderBtn')
+      ?.addEventListener('click', () => this.createFolder());
 
-    // Wizard navigation (Select Blueprint → Construct).
-    document.getElementById('wizardNextBtn')?.addEventListener('click', () => this.goToWizardStep(2));
-    document.getElementById('wizardBackBtn')?.addEventListener('click', () => this.goToWizardStep(1));
-    // Double-clicking a blueprint selects it and jumps straight to Construct.
-    document.getElementById('addFolderModal')?.addEventListener('workspace-template-advance', () => {
-      if (!this.importModeEnabled) this.goToWizardStep(2);
-    });
+    // Wizard navigation (Choose Blueprint → Details → Review).
+    document
+      .getElementById('wizardNextBtn')
+      ?.addEventListener('click', () => this.goToWizardStep(this.wizardStep + 1));
+    document
+      .getElementById('wizardBackBtn')
+      ?.addEventListener('click', () => this.goToWizardStep(this.wizardStep - 1));
+    document
+      .getElementById('wizardEditBlueprintBtn')
+      ?.addEventListener('click', () => this.goToWizardStep(1));
+    // Double-clicking a blueprint still skips only to the Details step.
+    document
+      .getElementById('addFolderModal')
+      ?.addEventListener('workspace-template-advance', () => {
+        if (!this.importModeEnabled) this.goToWizardStep(2);
+      });
 
     // Name field: live folder-slug preview, clear the inline error on edit, and
     // Enter to advance (step 1) or create (step 2). The field is a single
@@ -255,13 +287,13 @@ const sessionManager = {
       this.clearWorkspaceNameError();
       this.updateWorkspaceNameHint();
     });
-    workspaceNameInput?.addEventListener('keydown', (event) => {
+    workspaceNameInput?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
-      if (this.importModeEnabled || this.wizardStep === 2) {
+      if (this.importModeEnabled || this.wizardStep === 3) {
         this.createFolder();
       } else {
-        this.goToWizardStep(2);
+        this.goToWizardStep(this.wizardStep + 1);
       }
     });
 
@@ -275,21 +307,96 @@ const sessionManager = {
     // Unified Template picker selection (dispatched by ProjectTemplateCard):
     // prefill name/description (never clobbering typed input) and apply the
     // template's Agent-behavior default.
-    document.getElementById('addFolderModal')?.addEventListener('workspace-template-selected', (event) => {
-      const template = event?.detail?.template || null;
-      this.workspaceTemplate = template;
-      this.prefillTemplateValue(document.getElementById('folderNameInput'), template?.name || '', 'autofillName');
-      this.prefillTemplateValue(document.getElementById('folderDescriptionInput'), template?.description || '', 'autofillDescription');
-      this.updateWorkspaceNameHint();
-      this.applyTemplateBehavior(template);
-      this.updateWizardRecap(template);
-      void this.refreshTemplateAgentPlan();
-      // Show the REAPER Setup card only for the Reaper Song template.
-      window.ReaperSetupCard?.showForTemplate?.(template);
-    });
+    document
+      .getElementById('addFolderModal')
+      ?.addEventListener('workspace-template-selected', event => {
+        const template = event?.detail?.template || null;
+        this.templateAgentPrecreateOverrides = new Map();
+        this.closeTemplateAgentSetup();
+        this.workspaceTemplate = template;
+        this.prefillTemplateValue(
+          document.getElementById('folderNameInput'),
+          template?.name || '',
+          'autofillName'
+        );
+        this.prefillTemplateValue(
+          document.getElementById('folderDescriptionInput'),
+          template?.description || '',
+          'autofillDescription'
+        );
+        this.updateWorkspaceNameHint();
+        this.applyTemplateBehavior(template);
+        this.updateWizardRecap(template);
+        void this.refreshTemplateAgentPlan();
+        this.refreshWorkspaceReview();
+        // Show the REAPER Setup card only for the Reaper Song template.
+        window.ReaperSetupCard?.showForTemplate?.(template);
+      });
 
     document.getElementById('templateAgentReviewToggle')?.addEventListener('change', () => {
       this.updateTemplateAgentReviewDisabledState();
+      this.refreshWorkspaceReview();
+    });
+
+    document
+      .getElementById('workspaceAgentMapAvatarAction')
+      ?.addEventListener('click', () => this.openTemplateAgentSetup());
+    document.getElementById('workspaceAgentMapSpecialists')?.addEventListener('click', event => {
+      const action = event.target.closest('[data-template-agent-index]');
+      const agentIndex = Number.parseInt(action?.dataset.templateAgentIndex || '', 10);
+      if (Number.isInteger(agentIndex)) this.openTemplateAgentSetup(agentIndex);
+    });
+    document
+      .getElementById('workspaceAgentMapCreateAll')
+      ?.addEventListener('click', () => this.createAllTemplateAgentsFromPreview());
+    document
+      .getElementById('workspaceTemplateAgentSetupForm')
+      ?.addEventListener('submit', event => {
+        event.preventDefault();
+        void this.saveTemplateAgentFromSetup();
+      });
+    document
+      .getElementById('workspaceTemplateAgentSetupCancel')
+      ?.addEventListener('click', () => this.closeTemplateAgentSetup());
+    document
+      .getElementById('workspaceTemplateAgentSetupBack')
+      ?.addEventListener('click', () => this.closeTemplateAgentSetup());
+
+    document.getElementById('addExistingAgentBtn')?.addEventListener('click', () => {
+      void this.openExistingAgentRoster();
+    });
+    document.getElementById('closeExistingAgentRosterBtn')?.addEventListener('click', () => {
+      this.closeExistingAgentRoster();
+    });
+    document.getElementById('existingAgentRosterSearch')?.addEventListener('input', () => {
+      this.renderExistingAgentRoster();
+    });
+    document.getElementById('existingAgentRosterList')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-existing-agent-add]');
+      if (button) this.addExistingAgent(button.dataset.existingAgentAdd || '');
+    });
+    document.getElementById('existingAgentTeamList')?.addEventListener('click', event => {
+      const remove = event.target.closest('[data-existing-agent-remove]');
+      if (remove) this.removeExistingAgent(remove.dataset.existingAgentRemove || '');
+      const primary = event.target.closest('[data-existing-agent-primary]');
+      if (primary) this.requestExistingAgentPrimary(primary.dataset.existingAgentPrimary || '');
+    });
+    document.getElementById('workspaceReviewSummary')?.addEventListener('click', event => {
+      const edit = event.target.closest('[data-wizard-edit-step]');
+      if (edit) this.goToWizardStep(Number(edit.dataset.wizardEditStep));
+    });
+    const dropZone = document.getElementById('workspaceTeamDropZone');
+    dropZone?.addEventListener('dragover', event => {
+      event.preventDefault();
+      dropZone.classList.add('is-drag-over');
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    });
+    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('is-drag-over'));
+    dropZone?.addEventListener('drop', event => {
+      event.preventDefault();
+      dropZone.classList.remove('is-drag-over');
+      const agentName = event.dataTransfer?.getData('application/x-ori-agent-name') || '';
+      this.addExistingAgent(agentName, { announceDrop: true });
     });
 
     document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
@@ -297,7 +404,7 @@ const sessionManager = {
     });
 
     const importToggle = document.getElementById('folderImportToggle');
-    importToggle?.addEventListener('change', (event) => {
+    importToggle?.addEventListener('change', event => {
       const checked = Boolean(event?.currentTarget?.checked);
       this.setImportModeEnabled(checked);
       if (!checked) {
@@ -306,12 +413,12 @@ const sessionManager = {
     });
 
     const importPathInput = document.getElementById('folderImportPathInput');
-    importPathInput?.addEventListener('input', (event) => {
+    importPathInput?.addEventListener('input', event => {
       this.importAllowDuplicate = false;
       this.clearImportDuplicateWarning();
       this.prefillWorkspaceNameFromImportPath(event?.target?.value || '');
     });
-    importPathInput?.addEventListener('blur', (event) => {
+    importPathInput?.addEventListener('blur', event => {
       void this.checkImportDuplicate(event?.target?.value || '');
     });
 
@@ -338,7 +445,7 @@ const sessionManager = {
 
     // Folder color options
     document.querySelectorAll('.folder-color-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', e => {
         document.querySelectorAll('.folder-color-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         this.updateBehaviorHint();
@@ -355,19 +462,18 @@ const sessionManager = {
     });
 
     const addFolderModal = document.getElementById('addFolderModal');
-    addFolderModal?.addEventListener('show.bs.modal', (event) => {
+    addFolderModal?.addEventListener('show.bs.modal', event => {
       const trigger = event?.relatedTarget || null;
       const pendingImportMode = String(addFolderModal.dataset.pendingImportMode || '') === 'true';
       const triggerImportMode = String(trigger?.dataset?.workspaceImportMode || '') === 'true';
       const importMode = trigger ? triggerImportMode : pendingImportMode;
       const entryPoint = String(
-        trigger?.dataset?.workspaceEntryPoint ||
-        addFolderModal.dataset.pendingEntryPoint ||
-        ''
+        trigger?.dataset?.workspaceEntryPoint || addFolderModal.dataset.pendingEntryPoint || ''
       ).trim();
 
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
-      this.importEntryPoint = entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
+      this.importEntryPoint =
+        entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       if (importMode) {
         this.setImportModeEnabled(true);
       }
@@ -384,7 +490,7 @@ const sessionManager = {
 
     // Session context menu actions
     document.querySelectorAll('#sessionContextMenu .session-context-item').forEach(item => {
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         const action = e.currentTarget.dataset.action;
         this.handleSessionContextAction(action);
       });
@@ -392,7 +498,7 @@ const sessionManager = {
 
     // Folder context menu actions
     document.querySelectorAll('#folderContextMenu .session-context-item').forEach(item => {
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         e.stopPropagation();
         const action = e.currentTarget.dataset.action;
         this.handleFolderContextAction(action);
@@ -403,8 +509,9 @@ const sessionManager = {
     this.setupResizeHandle();
 
     // Session list scroll (for virtual scroll)
-    document.getElementById('sessionListContainer')?.addEventListener('scroll',
-      () => this.handleScroll());
+    document
+      .getElementById('sessionListContainer')
+      ?.addEventListener('scroll', () => this.handleScroll());
 
     // Session files panel toggle
     document.getElementById('sessionFilesToggle')?.addEventListener('click', () => {
@@ -424,14 +531,14 @@ const sessionManager = {
     });
 
     // Chat mode toggle - Manual
-    document.getElementById('chatConfigModeManual')?.addEventListener('change', function() {
+    document.getElementById('chatConfigModeManual')?.addEventListener('change', function () {
       if (this.checked) {
         sessionManager.handleChatModeChange('manual');
       }
     });
 
     // Chat mode toggle - Auto
-    document.getElementById('chatConfigModeAuto')?.addEventListener('change', async function() {
+    document.getElementById('chatConfigModeAuto')?.addEventListener('change', async function () {
       if (this.checked) {
         await sessionManager.checkChatLlmAvailability();
         sessionManager.handleChatModeChange('auto');
@@ -441,7 +548,7 @@ const sessionManager = {
 
   // Setup keyboard shortcuts
   setupKeyboardShortcuts() {
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       // Ctrl/Cmd + N - New session
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
@@ -516,7 +623,7 @@ const sessionManager = {
     const workspaceIds = [...new Set(this.sessions.map(s => s.folder_id).filter(Boolean))];
 
     // Fetch stats for each unique workspace
-    const fetchPromises = workspaceIds.map(async (workspaceId) => {
+    const fetchPromises = workspaceIds.map(async workspaceId => {
       try {
         const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
         if (response.ok) {
@@ -641,7 +748,7 @@ const sessionManager = {
 
       const data = await response.json();
       this.tags = (data.tags || [])
-        .map((tag) => (typeof tag === 'string' ? tag : tag?.name))
+        .map(tag => (typeof tag === 'string' ? tag : tag?.name))
         .filter(Boolean);
       this.renderTagFilters();
     } catch (error) {
@@ -696,7 +803,7 @@ const sessionManager = {
       ${rootSessions.map(session => this.renderSessionItem(session)).join('')}
     `;
 
-    container.onclick = (e) => {
+    container.onclick = e => {
       if (e.target === container) {
         this.clearSelection();
       }
@@ -719,7 +826,9 @@ const sessionManager = {
           <span>Notes (${this.noteSearchResults.length})</span>
         </div>
         <div class="search-notes-list">
-          ${this.noteSearchResults.map(note => `
+          ${this.noteSearchResults
+            .map(
+              note => `
             <div class="search-note-result" data-note-id="${note.id}">
               <svg class="search-note-result-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
@@ -730,7 +839,9 @@ const sessionManager = {
                 ${note.snippets && note.snippets.length > 0 ? `<div class="search-note-result-snippet">${note.snippets[0]}</div>` : ''}
               </div>
             </div>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
       </div>
     `;
@@ -759,14 +870,23 @@ const sessionManager = {
         </div>
         <div class="session-item-footer">
           <span class="session-preview">${this.escapeHtml(preview)}</span>
-          ${tags.length > 0 ? `
+          ${
+            tags.length > 0
+              ? `
             <div class="session-tags">
-              ${tags.slice(0, 3).map(tag => `
+              ${tags
+                .slice(0, 3)
+                .map(
+                  tag => `
                 <span class="session-tag" data-color="${this.getTagColor(tag)}">${this.escapeHtml(tag)}</span>
-              `).join('')}
+              `
+                )
+                .join('')}
               ${tags.length > 3 ? `<span class="session-tag" data-color="0">+${tags.length - 3}</span>` : ''}
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
     `;
@@ -789,19 +909,19 @@ const sessionManager = {
       const folderId = item.dataset.folderId;
 
       // Click to collapse/expand folder sessions
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         e.stopPropagation();
         this.toggleFolderSessions(folderId);
       });
 
       // Right-click context menu
-      item.addEventListener('contextmenu', (e) => {
+      item.addEventListener('contextmenu', e => {
         e.preventDefault();
         this.showFolderContextMenu(e, folderId);
       });
 
       // Drop target
-      item.addEventListener('dragover', (e) => {
+      item.addEventListener('dragover', e => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         item.classList.add('drag-over');
@@ -815,7 +935,7 @@ const sessionManager = {
         item.classList.remove('drag-over');
       });
 
-      item.addEventListener('drop', async (e) => {
+      item.addEventListener('drop', async e => {
         e.preventDefault();
         e.stopPropagation();
         item.classList.remove('drag-over');
@@ -829,7 +949,8 @@ const sessionManager = {
           }
           item.classList.add('drop-success');
           setTimeout(() => item.classList.remove('drop-success'), 700);
-          const fileText = files.length === 1 ? 'file reference' : `${files.length} file references`;
+          const fileText =
+            files.length === 1 ? 'file reference' : `${files.length} file references`;
           this.showToast(`Created ${fileText} in ${folderName}`, 'success');
           return;
         }
@@ -865,7 +986,7 @@ const sessionManager = {
     // Toggle nested sessions visibility
     container.querySelectorAll('.folder-collapse-btn').forEach(button => {
       const folderId = button.dataset.folderId;
-      button.addEventListener('click', (e) => {
+      button.addEventListener('click', e => {
         e.stopPropagation();
         this.toggleFolderSessions(folderId);
       });
@@ -875,7 +996,7 @@ const sessionManager = {
 
     // Bind task section events
     container.querySelectorAll('.folder-tasks-header').forEach(header => {
-      header.addEventListener('click', (e) => {
+      header.addEventListener('click', e => {
         if (e.target.closest('.folder-tasks-add-btn')) return; // Don't open on add click
         e.stopPropagation();
         const workspaceId = header.dataset.workspaceId;
@@ -884,7 +1005,7 @@ const sessionManager = {
     });
 
     container.querySelectorAll('.folder-tasks-add-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', e => {
         e.stopPropagation();
         const workspaceId = btn.dataset.workspaceId;
         this.openTaskModalForWorkspace(workspaceId);
@@ -893,7 +1014,7 @@ const sessionManager = {
 
     // Bind scheduled tasks section events
     container.querySelectorAll('.folder-schedules-header').forEach(header => {
-      header.addEventListener('click', (e) => {
+      header.addEventListener('click', e => {
         e.stopPropagation();
         const workspaceId = header.dataset.workspaceId;
         this.openScheduledTasksPanel(workspaceId);
@@ -903,27 +1024,29 @@ const sessionManager = {
 
   // Render folder items recursively
   renderFolderItems(folders, depth = 0) {
-    return folders.map(folder => {
-      const isActive = folder.id === this.activeFolder;
-      const colorStyle = folder.color ? `color: ${folder.color};` : '';
-      const children = folder.children || [];
-      const folderSessions = this.sessionsByFolder?.get(folder.id) || [];
-      const isCollapsed = this.collapsedFolderIds.has(folder.id);
-      
-      const hasAccent = Boolean(folder.color);
-      const accentStyles = hasAccent
-        ? `data-has-accent="true" style="--folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
-        : ``;
-      // Get notes for this folder
-      const folderNotes = this.notesByFolder?.get(folder.id) || [];
-      // Get tasks for this workspace
-      const workspaceTasks = this.tasksByWorkspace?.get(folder.id) || [];
-      const taskCount = workspaceTasks.length;
-      const hasContent = folderSessions.length > 0 || folderNotes.length > 0;
+    return folders
+      .map(folder => {
+        const isActive = folder.id === this.activeFolder;
+        const colorStyle = folder.color ? `color: ${folder.color};` : '';
+        const children = folder.children || [];
+        const folderSessions = this.sessionsByFolder?.get(folder.id) || [];
+        const isCollapsed = this.collapsedFolderIds.has(folder.id);
 
-      // Tasks section - clickable header that opens the task modal
-      const tasksHtml = taskCount > 0
-        ? `
+        const hasAccent = Boolean(folder.color);
+        const accentStyles = hasAccent
+          ? `data-has-accent="true" style="--folder-accent-bg: ${this.hexToRgba(folder.color, 0.12)}; --folder-accent-bg-hover: ${this.hexToRgba(folder.color, 0.18)}; --folder-accent-border: ${this.hexToRgba(folder.color, 0.35)};"`
+          : ``;
+        // Get notes for this folder
+        const folderNotes = this.notesByFolder?.get(folder.id) || [];
+        // Get tasks for this workspace
+        const workspaceTasks = this.tasksByWorkspace?.get(folder.id) || [];
+        const taskCount = workspaceTasks.length;
+        const hasContent = folderSessions.length > 0 || folderNotes.length > 0;
+
+        // Tasks section - clickable header that opens the task modal
+        const tasksHtml =
+          taskCount > 0
+            ? `
           <div class="folder-tasks-wrapper ${isCollapsed ? 'collapsed' : ''}">
             <div class="folder-tasks-header" data-workspace-id="${folder.id}">
               <svg class="folder-tasks-header-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -939,16 +1062,17 @@ const sessionManager = {
             </div>
           </div>
         `
-        : '';
+            : '';
 
-      // Get scheduled tasks for this workspace
-      const workspaceScheduledTasks = this.scheduledTasksByWorkspace?.get(folder.id) || [];
-      const scheduledTaskCount = workspaceScheduledTasks.length;
-      const enabledScheduleCount = workspaceScheduledTasks.filter(st => st.enabled).length;
+        // Get scheduled tasks for this workspace
+        const workspaceScheduledTasks = this.scheduledTasksByWorkspace?.get(folder.id) || [];
+        const scheduledTaskCount = workspaceScheduledTasks.length;
+        const enabledScheduleCount = workspaceScheduledTasks.filter(st => st.enabled).length;
 
-      // Schedules section - clickable header that opens the scheduled tasks panel
-      const schedulesHtml = scheduledTaskCount > 0
-        ? `
+        // Schedules section - clickable header that opens the scheduled tasks panel
+        const schedulesHtml =
+          scheduledTaskCount > 0
+            ? `
           <div class="folder-schedules-wrapper ${isCollapsed ? 'collapsed' : ''}">
             <div class="folder-schedules-header" data-workspace-id="${folder.id}">
               <svg class="folder-schedules-header-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -959,41 +1083,51 @@ const sessionManager = {
             </div>
           </div>
         `
-        : '';
+            : '';
 
-      const sessionsHtml = folderSessions.length > 0
-        ? `
+        const sessionsHtml =
+          folderSessions.length > 0
+            ? `
           <div class="folder-sessions ${isCollapsed ? 'collapsed' : ''}" ${accentStyles}>
             ${folderSessions.map(session => this.renderSessionItem(session)).join('')}
           </div>
         `
-        : '';
+            : '';
 
-      const notesHtml = folderNotes.length > 0
-        ? `
+        const notesHtml =
+          folderNotes.length > 0
+            ? `
           <div class="folder-notes-section ${isCollapsed ? 'collapsed' : ''}">
-            ${folderNotes.map(note => `
+            ${folderNotes
+              .map(
+                note => `
               <div class="folder-note-item" data-note-id="${note.id}" data-folder-id="${folder.id}" draggable="true">
                 <svg class="folder-note-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
                 </svg>
                 <span class="folder-note-name">${this.escapeHtml(note.name)}</span>
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         `
-        : '';
+            : '';
 
-      const folderTitle = folder.description ? this.escapeHtml(folder.description) : folder.name;
-      return `
+        const folderTitle = folder.description ? this.escapeHtml(folder.description) : folder.name;
+        return `
         <div class="folder-item ${isActive ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}" style="padding-left: ${8 + depth * 12}px;" title="${folderTitle}">
-          ${hasContent ? `
+          ${
+            hasContent
+              ? `
             <button class="folder-collapse-btn" data-folder-id="${folder.id}" title="${isCollapsed ? 'Show content' : 'Hide content'}">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/>
               </svg>
             </button>
-          ` : '<span class="folder-collapse-spacer"></span>'}
+          `
+              : '<span class="folder-collapse-spacer"></span>'
+          }
           <svg class="folder-icon" viewBox="0 0 24 24" fill="currentColor" style="${colorStyle}">
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
@@ -1006,7 +1140,8 @@ const sessionManager = {
         ${schedulesHtml}
         ${children.length > 0 ? `<div class="folder-children">${this.renderFolderItems(children, depth + 1)}</div>` : ''}
       `;
-    }).join('');
+      })
+      .join('');
   },
 
   // Bind events for session items in a container
@@ -1015,10 +1150,10 @@ const sessionManager = {
       const sessionId = item.dataset.sessionId;
 
       // Click to switch session or multi-select
-      item.addEventListener('click', (e) => this.handleSessionClick(e, sessionId));
+      item.addEventListener('click', e => this.handleSessionClick(e, sessionId));
 
       // Right-click context menu
-      item.addEventListener('contextmenu', (e) => {
+      item.addEventListener('contextmenu', e => {
         e.preventDefault();
         if (!this.selectedSessionIds.includes(sessionId)) {
           this.setSelection([sessionId], this.getSessionIndex(sessionId));
@@ -1028,7 +1163,7 @@ const sessionManager = {
 
       // Drag and drop
       item.setAttribute('draggable', 'true');
-      item.addEventListener('dragstart', (e) => this.handleDragStart(e, sessionId));
+      item.addEventListener('dragstart', e => this.handleDragStart(e, sessionId));
       item.addEventListener('dragend', () => this.handleDragEnd());
     });
   },
@@ -1073,7 +1208,10 @@ const sessionManager = {
 
   // Persist collapsed folder state
   saveCollapsedFolders() {
-    localStorage.setItem('sessionFolderCollapsed', JSON.stringify(Array.from(this.collapsedFolderIds)));
+    localStorage.setItem(
+      'sessionFolderCollapsed',
+      JSON.stringify(Array.from(this.collapsedFolderIds))
+    );
   },
 
   // Update empty state copy and visibility
@@ -1113,7 +1251,6 @@ const sessionManager = {
     this.showCreateChatModal();
   },
 
-
   // Render loading state
   renderLoadingState() {
     const loadingState = document.getElementById('sessionsLoading');
@@ -1143,14 +1280,18 @@ const sessionManager = {
       return;
     }
 
-    container.innerHTML = this.tags.map(tag => `
+    container.innerHTML = this.tags
+      .map(
+        tag => `
       <button class="session-dropdown-item ${this.filterTags.includes(tag) ? 'active' : ''}" data-tag="${this.escapeHtml(tag)}">
         <span class="session-tag" data-color="${this.getTagColor(tag)}" style="margin-right: 6px;">${this.escapeHtml(tag)}</span>
       </button>
-    `).join('');
+    `
+      )
+      .join('');
 
     container.querySelectorAll('.session-dropdown-item').forEach(item => {
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         const tag = e.currentTarget.dataset.tag;
         this.toggleTagFilter(tag);
       });
@@ -1183,20 +1324,22 @@ const sessionManager = {
     const llmWarningMessage = document.getElementById('chatLlmWarningMessage');
     const createBtnText = document.getElementById('createChatBtnText');
 
-    this.chatAutoMode = (mode === 'auto');
+    this.chatAutoMode = mode === 'auto';
 
     if (mode === 'auto') {
       // Inside a workspace, "auto" means the workspace entry agent — not the
       // generic system assistant — so label it as a plain chat. Prefer the
       // explicit workspaceId; fall back to the live select for user toggles.
-      const inWorkspace = workspaceId !== undefined
-        ? Boolean(String(workspaceId).trim())
-        : Boolean(document.getElementById('chatWorkspaceSelect')?.value);
+      const inWorkspace =
+        workspaceId !== undefined
+          ? Boolean(String(workspaceId).trim())
+          : Boolean(document.getElementById('chatWorkspaceSelect')?.value);
       if (this.chatLlmAvailable) {
         if (manualSection) manualSection.classList.add('d-none');
         if (autoSection) autoSection.classList.remove('d-none');
         if (llmWarning) llmWarning.classList.add('d-none');
-        if (createBtnText) createBtnText.textContent = inWorkspace ? 'Start Chat' : 'Start Assistant';
+        if (createBtnText)
+          createBtnText.textContent = inWorkspace ? 'Start Chat' : 'Start Assistant';
       } else {
         // LLM not available - show warning with action button
         if (manualSection) manualSection.classList.add('d-none');
@@ -1205,9 +1348,11 @@ const sessionManager = {
         if (createBtnText) createBtnText.textContent = 'Go to Settings';
         if (llmWarningMessage) {
           if (!this.chatSystemModelConfigured) {
-            llmWarningMessage.textContent = 'Assistant mode requires a System Model to be configured.';
+            llmWarningMessage.textContent =
+              'Assistant mode requires a System Model to be configured.';
           } else {
-            llmWarningMessage.textContent = 'Assistant mode requires an LLM provider. Please set up an API key or install Ollama.';
+            llmWarningMessage.textContent =
+              'Assistant mode requires an LLM provider. Please set up an API key or install Ollama.';
           }
         }
       }
@@ -1224,7 +1369,9 @@ const sessionManager = {
     if (!agentSelect) return;
 
     const normalizedAgents = Array.isArray(agents) ? agents : [];
-    const availableAgents = normalizedAgents.filter((agent) => String(agent?.status || '') !== 'disabled');
+    const availableAgents = normalizedAgents.filter(
+      agent => String(agent?.status || '') !== 'disabled'
+    );
     if (availableAgents.length === 0) {
       agentSelect.innerHTML = `<option value="">${this.escapeHtml(emptyLabel)}</option>`;
       agentSelect.disabled = true;
@@ -1232,7 +1379,10 @@ const sessionManager = {
     }
 
     agentSelect.innerHTML = availableAgents
-      .map((agent) => `<option value="${this.escapeHtml(agent.name)}">${this.escapeHtml(agent.name)}</option>`)
+      .map(
+        agent =>
+          `<option value="${this.escapeHtml(agent.name)}">${this.escapeHtml(agent.name)}</option>`
+      )
       .join('');
     agentSelect.disabled = false;
   },
@@ -1242,11 +1392,13 @@ const sessionManager = {
     if (!autoModeText) return;
 
     if (workspaceId) {
-      autoModeText.textContent = "You'll chat with this workspace's entry agent, which has the workspace context by default. Switch to Direct agent chat to talk to a different workspace agent.";
+      autoModeText.textContent =
+        "You'll chat with this workspace's entry agent, which has the workspace context by default. Switch to Direct agent chat to talk to a different workspace agent.";
       return;
     }
 
-    autoModeText.textContent = 'Assistant starts as the system assistant. Pick a workspace to keep context scoped, or continue here before deciding where the work belongs.';
+    autoModeText.textContent =
+      'Assistant starts as the system assistant. Pick a workspace to keep context scoped, or continue here before deciding where the work belongs.';
   },
 
   buildAssistantSessionTitle(initialMessage) {
@@ -1388,9 +1540,7 @@ const sessionManager = {
       this.populateChatAgentSelect(
         agentSelect,
         agents,
-        workspaceId
-          ? 'No direct-chat agents in this workspace'
-          : 'No direct-chat agents available'
+        workspaceId ? 'No direct-chat agents in this workspace' : 'No direct-chat agents available'
       );
 
       // Show the modal
@@ -1428,9 +1578,9 @@ const sessionManager = {
 
     // Get initial messages before closing modal
     const autoMessageInput = document.getElementById('chatAutoMessage');
-    const autoInitialMessage = this.chatAutoMode ? (autoMessageInput?.value?.trim() || '') : '';
+    const autoInitialMessage = this.chatAutoMode ? autoMessageInput?.value?.trim() || '' : '';
     const manualMessageInput = document.getElementById('chatManualMessage');
-    const manualInitialMessage = !this.chatAutoMode ? (manualMessageInput?.value?.trim() || '') : '';
+    const manualInitialMessage = !this.chatAutoMode ? manualMessageInput?.value?.trim() || '' : '';
 
     // Validate message in auto mode
     if (this.chatAutoMode && this.chatLlmAvailable && !autoInitialMessage) {
@@ -1484,9 +1634,11 @@ const sessionManager = {
 
       if (!agentName) {
         if (window.Toast) {
-          Toast.warning(workspaceId
-            ? "No direct-chat agent is available in this workspace. Add an agent, or switch to auto mode to use the workspace's entry agent."
-            : 'No direct-chat agent is available. Add an agent or use Assistant.');
+          Toast.warning(
+            workspaceId
+              ? "No direct-chat agent is available in this workspace. Add an agent, or switch to auto mode to use the workspace's entry agent."
+              : 'No direct-chat agent is available. Add an agent or use Assistant.'
+          );
         }
         return;
       }
@@ -1538,17 +1690,17 @@ const sessionManager = {
       newDropZone.addEventListener('click', () => {
         document.getElementById('chatFileInput')?.click();
       });
-      newDropZone.addEventListener('dragover', (e) => {
+      newDropZone.addEventListener('dragover', e => {
         e.preventDefault();
         e.stopPropagation();
         newDropZone.classList.add('drag-active');
       });
-      newDropZone.addEventListener('dragleave', (e) => {
+      newDropZone.addEventListener('dragleave', e => {
         e.preventDefault();
         e.stopPropagation();
         newDropZone.classList.remove('drag-active');
       });
-      newDropZone.addEventListener('drop', (e) => {
+      newDropZone.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
         newDropZone.classList.remove('drag-active');
@@ -1563,7 +1715,7 @@ const sessionManager = {
       const newFileInput = fileInput.cloneNode(true);
       fileInput.parentNode.replaceChild(newFileInput, fileInput);
 
-      newFileInput.addEventListener('change', (e) => {
+      newFileInput.addEventListener('change', e => {
         const files = e.target?.files;
         if (files && files.length > 0) {
           this.addChatFiles(Array.from(files));
@@ -1576,7 +1728,7 @@ const sessionManager = {
   addChatFiles(files) {
     const maxSize = 10 * 1024 * 1024; // 10MB
 
-    files.forEach((file) => {
+    files.forEach(file => {
       if (file.size > maxSize) {
         if (window.Toast) {
           Toast.warning(`${file.name} exceeds 10MB limit`);
@@ -1584,7 +1736,7 @@ const sessionManager = {
         return;
       }
       // Avoid duplicates
-      if (!this.chatPendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+      if (!this.chatPendingFiles.some(f => f.name === file.name && f.size === file.size)) {
         this.chatPendingFiles.push(file);
       }
     });
@@ -1604,14 +1756,15 @@ const sessionManager = {
 
     container.style.display = 'block';
 
-    const formatSize = (bytes) => {
+    const formatSize = bytes => {
       if (!bytes) return '';
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     };
 
-    const items = this.chatPendingFiles.map((file, index) => `
+    const items = this.chatPendingFiles.map(
+      (file, index) => `
       <div class="chat-selected-file-item" data-index="${index}">
         <span class="chat-file-name">${this.escapeHtml(file.name)}</span>
         <span class="chat-file-size">${formatSize(file.size)}</span>
@@ -1621,13 +1774,14 @@ const sessionManager = {
           </svg>
         </button>
       </div>
-    `);
+    `
+    );
 
     container.innerHTML = items.join('');
 
     // Bind remove buttons
-    container.querySelectorAll('.chat-file-remove').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    container.querySelectorAll('.chat-file-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
         e.stopPropagation();
         const index = parseInt(btn.dataset.index, 10);
         this.chatPendingFiles.splice(index, 1);
@@ -1672,7 +1826,7 @@ const sessionManager = {
     const result = [];
     const seen = new Set();
 
-    source.forEach((agent) => {
+    source.forEach(agent => {
       const isString = typeof agent === 'string';
       const name = String(isString ? agent : agent?.name || '').trim();
       if (!name) return;
@@ -1727,14 +1881,16 @@ const sessionManager = {
     if (!workspaceId) return globalAgents;
 
     try {
-      const response = await fetch(`/api/orchestration/workspace?id=${encodeURIComponent(workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/workspace?id=${encodeURIComponent(workspaceId)}`
+      );
       if (!response.ok) return globalAgents;
 
       const workspace = await response.json();
       const names = [];
       const seen = new Set();
 
-      const addName = (value) => {
+      const addName = value => {
         const name = String(value || '').trim();
         if (!name) return;
         const key = name.toLowerCase();
@@ -1744,16 +1900,20 @@ const sessionManager = {
       };
 
       if (Array.isArray(workspace?.agent_instances)) {
-        workspace.agent_instances.forEach((instance) => addName(instance?.name));
+        workspace.agent_instances.forEach(instance => addName(instance?.name));
       }
       if (Array.isArray(workspace?.agents)) {
-        workspace.agents.forEach((name) => addName(name));
+        workspace.agents.forEach(name => addName(name));
       }
 
       if (names.length === 0) return globalAgents;
 
-      const globalByName = new Map(globalAgents.map((agent) => [String(agent.name || '').toLowerCase(), agent]));
-      return names.map((name) => globalByName.get(name.toLowerCase()) || { name, model: '', description: '' });
+      const globalByName = new Map(
+        globalAgents.map(agent => [String(agent.name || '').toLowerCase(), agent])
+      );
+      return names.map(
+        name => globalByName.get(name.toLowerCase()) || { name, model: '', description: '' }
+      );
     } catch (error) {
       console.error('Failed to fetch workspace agents:', error);
       return globalAgents;
@@ -1783,7 +1943,9 @@ const sessionManager = {
             </div>
             <div class="modal-body">
               <div class="list-group list-group-flush">
-                ${agents.map(agent => `
+                ${agents
+                  .map(
+                    agent => `
                   <button type="button" class="list-group-item list-group-item-action bg-dark text-light border-secondary agent-picker-item ${agent.name === currentAgentName ? 'active' : ''}"
                           data-agent-name="${this.escapeHtml(agent.name)}">
                     <div class="d-flex justify-content-between align-items-center">
@@ -1795,7 +1957,9 @@ const sessionManager = {
                     </div>
                     ${agent.description ? `<small class="text-muted d-block mt-1">${this.escapeHtml(agent.description)}</small>` : ''}
                   </button>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
             </div>
             <div class="modal-footer border-secondary">
@@ -1947,12 +2111,16 @@ const sessionManager = {
           </div>
           <div class="modal-body">
             <div class="agent-picker-list">
-              ${agents.map(agent => `
+              ${agents
+                .map(
+                  agent => `
                 <button class="agent-picker-item modern-btn modern-btn-secondary w-100 mb-2 text-start" data-agent="${agent.name}">
                   <span class="agent-name">${this.escapeHtml(agent.name)}</span>
                   ${agent.description ? `<small class="text-muted d-block">${this.escapeHtml(agent.description)}</small>` : ''}
                 </button>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
         </div>
@@ -1972,7 +2140,7 @@ const sessionManager = {
 
     // Handle close
     modal.querySelector('.btn-close').addEventListener('click', () => modal.remove());
-    modal.addEventListener('click', (e) => {
+    modal.addEventListener('click', e => {
       if (e.target === modal) modal.remove();
     });
   },
@@ -2265,7 +2433,7 @@ const sessionManager = {
     const editBtn = document.getElementById('chatEditAgentBtn');
     if (editBtn && !editBtn.dataset.bound) {
       editBtn.dataset.bound = 'true';
-      editBtn.addEventListener('click', (event) => {
+      editBtn.addEventListener('click', event => {
         event.preventDefault();
         const agentName = editBtn.dataset.agentName || this.getActiveSession()?.agent_name;
         if (!agentName) {
@@ -2294,7 +2462,7 @@ const sessionManager = {
 
     const form = document.getElementById('editAgentForm');
     if (form) {
-      form.addEventListener('submit', (event) => event.preventDefault());
+      form.addEventListener('submit', event => event.preventDefault());
     }
 
     const saveBtn = document.getElementById('editAgentSaveBtn');
@@ -2304,20 +2472,26 @@ const sessionManager = {
 
     const tagsInput = document.getElementById('editAgentTagsInput');
     if (tagsInput) {
-      tagsInput.addEventListener('keydown', (event) => {
+      tagsInput.addEventListener('keydown', event => {
         if (event.key === 'Enter' && tagsInput.value.trim()) {
           event.preventDefault();
           this.addEditAgentTag(tagsInput.value.trim());
           tagsInput.value = '';
-        } else if (event.key === 'Backspace' && !tagsInput.value && this.editAgentSelectedTags.length > 0) {
-          this.removeEditAgentTag(this.editAgentSelectedTags[this.editAgentSelectedTags.length - 1]);
+        } else if (
+          event.key === 'Backspace' &&
+          !tagsInput.value &&
+          this.editAgentSelectedTags.length > 0
+        ) {
+          this.removeEditAgentTag(
+            this.editAgentSelectedTags[this.editAgentSelectedTags.length - 1]
+          );
         }
       });
     }
 
     const tagsContainer = document.getElementById('editAgentTagsContainer');
     if (tagsContainer && tagsInput) {
-      tagsContainer.addEventListener('click', (event) => {
+      tagsContainer.addEventListener('click', event => {
         if (event.target === tagsContainer) {
           tagsInput.focus();
         }
@@ -2326,7 +2500,7 @@ const sessionManager = {
 
     const colorInput = document.getElementById('editAgentAvatarColor');
     if (colorInput) {
-      colorInput.addEventListener('input', (event) => {
+      colorInput.addEventListener('input', event => {
         this.updateEditAgentColorPreview(event.target.value);
       });
     }
@@ -2334,7 +2508,7 @@ const sessionManager = {
     // Listen for Type changes to update Model options
     const typeSelect = document.getElementById('editAgentTypeSelect');
     if (typeSelect) {
-      typeSelect.addEventListener('change', (event) => {
+      typeSelect.addEventListener('change', event => {
         const modelSelect = document.getElementById('editAgentModelSelect');
         const currentModel = modelSelect?.value;
         this.updateEditAgentModelOptions(event.target.value, currentModel);
@@ -2433,7 +2607,7 @@ const sessionManager = {
     const seen = new Set();
     const normalized = [];
 
-    servers.forEach((server) => {
+    servers.forEach(server => {
       let record = null;
 
       if (typeof server === 'string') {
@@ -2450,10 +2624,13 @@ const sessionManager = {
         const name = typeof server.name === 'string' ? server.name.trim() : '';
         if (name) {
           const enabled = server.enabled !== false;
-          const statusRaw = typeof server.status === 'string' ? server.status.trim().toLowerCase() : '';
+          const statusRaw =
+            typeof server.status === 'string' ? server.status.trim().toLowerCase() : '';
           const toolCount = Number.isFinite(server.tool_count)
             ? server.tool_count
-            : (Number.isFinite(server.toolCount) ? server.toolCount : 0);
+            : Number.isFinite(server.toolCount)
+              ? server.toolCount
+              : 0;
 
           record = {
             name,
@@ -2490,7 +2667,8 @@ const sessionManager = {
     if (!container) return;
 
     if (options.workspaceScoped) {
-      container.innerHTML = '<span class="agent-edit-mcp-empty">Workspace-scoped. Configure MCP bindings from the target workspace.</span>';
+      container.innerHTML =
+        '<span class="agent-edit-mcp-empty">Workspace-scoped. Configure MCP bindings from the target workspace.</span>';
       return;
     }
 
@@ -2500,25 +2678,28 @@ const sessionManager = {
     }
 
     if (options.error) {
-      container.innerHTML = '<span class="agent-edit-mcp-error">Could not load MCP server status.</span>';
+      container.innerHTML =
+        '<span class="agent-edit-mcp-error">Could not load MCP server status.</span>';
       return;
     }
 
     const enabledServers = this.normalizeEditAgentMCPServers(servers, true);
     if (enabledServers.length === 0) {
-      container.innerHTML = '<span class="agent-edit-mcp-empty">No MCP preferences saved for this agent.</span>';
+      container.innerHTML =
+        '<span class="agent-edit-mcp-empty">No MCP preferences saved for this agent.</span>';
       return;
     }
 
-    container.innerHTML = enabledServers.map((server) => {
-      const statusClass = this.getEditAgentMCPStatusClass(server.status);
-      const statusLabel = statusClass === 'configured' ? 'configured' : (server.status || 'configured');
-      const toolCount = Number.isFinite(server.tool_count) ? server.tool_count : 0;
-      const toolText = toolCount > 0
-        ? `${toolCount} tool${toolCount === 1 ? '' : 's'}`
-        : 'tool count unknown';
+    container.innerHTML = enabledServers
+      .map(server => {
+        const statusClass = this.getEditAgentMCPStatusClass(server.status);
+        const statusLabel =
+          statusClass === 'configured' ? 'configured' : server.status || 'configured';
+        const toolCount = Number.isFinite(server.tool_count) ? server.tool_count : 0;
+        const toolText =
+          toolCount > 0 ? `${toolCount} tool${toolCount === 1 ? '' : 's'}` : 'tool count unknown';
 
-      return `
+        return `
         <span class="agent-edit-mcp-pill">
           <span class="agent-edit-mcp-name">${this.escapeHtml(server.name)}</span>
           <span class="agent-edit-mcp-meta">
@@ -2527,7 +2708,8 @@ const sessionManager = {
           </span>
         </span>
       `;
-    }).join('');
+      })
+      .join('');
   },
 
   async ensureEditAgentModelOptions() {
@@ -2540,24 +2722,26 @@ const sessionManager = {
 
     // Set default fallback models if no providers loaded
     if (!this.editAgentProvidersData || this.editAgentProvidersData.length === 0) {
-      this.editAgentProvidersData = [{
-        name: 'default',
-        display_name: 'Default',
-        models: [
-          { value: 'gpt-5', label: 'gpt-5', type: 'research' },
-          { value: 'gpt-5-mini', label: 'gpt-5-mini', type: 'general' },
-          { value: 'gpt-5-nano', label: 'gpt-5-nano', type: 'tool-calling' },
-          { value: 'gpt-4o', label: 'gpt-4o', type: 'general' },
-          { value: 'gpt-4o-mini', label: 'gpt-4o-mini', type: 'tool-calling' },
-          { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet', type: 'general' },
-          { value: 'claude-3-haiku-20240307', label: 'claude-3-haiku', type: 'tool-calling' },
-          { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash', type: 'tool-calling' },
-          { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro', type: 'research' },
-          { value: 'llama3.2', label: 'llama3.2', type: 'tool-calling' },
-          { value: 'mistral', label: 'mistral', type: 'tool-calling' },
-          { value: 'codellama', label: 'codellama', type: 'general' }
-        ]
-      }];
+      this.editAgentProvidersData = [
+        {
+          name: 'default',
+          display_name: 'Default',
+          models: [
+            { value: 'gpt-5', label: 'gpt-5', type: 'research' },
+            { value: 'gpt-5-mini', label: 'gpt-5-mini', type: 'general' },
+            { value: 'gpt-5-nano', label: 'gpt-5-nano', type: 'tool-calling' },
+            { value: 'gpt-4o', label: 'gpt-4o', type: 'general' },
+            { value: 'gpt-4o-mini', label: 'gpt-4o-mini', type: 'tool-calling' },
+            { value: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet', type: 'general' },
+            { value: 'claude-3-haiku-20240307', label: 'claude-3-haiku', type: 'tool-calling' },
+            { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash', type: 'tool-calling' },
+            { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro', type: 'research' },
+            { value: 'llama3.2', label: 'llama3.2', type: 'tool-calling' },
+            { value: 'mistral', label: 'mistral', type: 'tool-calling' },
+            { value: 'codellama', label: 'codellama', type: 'general' }
+          ]
+        }
+      ];
     }
 
     this.editAgentModelOptionsLoaded = true;
@@ -2573,11 +2757,11 @@ const sessionManager = {
     if (!this.editAgentProvidersData) return;
 
     // Group models by provider
-    this.editAgentProvidersData.forEach((provider) => {
+    this.editAgentProvidersData.forEach(provider => {
       if (!provider.models || provider.models.length === 0) return;
 
       // Filter models by agent type
-      const filteredModels = provider.models.filter((model) => {
+      const filteredModels = provider.models.filter(model => {
         // If model has no type, include it for all agent types
         if (!model.type) return true;
         return model.type === agentType;
@@ -2589,7 +2773,7 @@ const sessionManager = {
       const optgroup = document.createElement('optgroup');
       optgroup.label = provider.display_name || provider.name;
 
-      filteredModels.forEach((model) => {
+      filteredModels.forEach(model => {
         const option = document.createElement('option');
         option.value = model.value;
         option.textContent = model.label || model.value;
@@ -2618,7 +2802,7 @@ const sessionManager = {
 
   ensureEditAgentSelectOption(selectEl, value) {
     if (!selectEl || !value) return;
-    const exists = Array.from(selectEl.options).some((option) => option.value === value);
+    const exists = Array.from(selectEl.options).some(option => option.value === value);
     if (exists) return;
     const option = document.createElement('option');
     option.value = value;
@@ -2638,9 +2822,9 @@ const sessionManager = {
     const input = document.getElementById('editAgentTagsInput');
     if (!container || !input) return;
 
-    container.querySelectorAll('.agent-edit-tag').forEach((tag) => tag.remove());
+    container.querySelectorAll('.agent-edit-tag').forEach(tag => tag.remove());
 
-    this.editAgentSelectedTags.forEach((tag) => {
+    this.editAgentSelectedTags.forEach(tag => {
       const tagEl = document.createElement('span');
       tagEl.className = 'agent-edit-tag';
 
@@ -2652,7 +2836,7 @@ const sessionManager = {
       removeBtn.className = 'agent-edit-tag-remove';
       removeBtn.setAttribute('aria-label', `Remove tag ${tag}`);
       removeBtn.textContent = 'x';
-      removeBtn.addEventListener('click', (event) => {
+      removeBtn.addEventListener('click', event => {
         event.stopPropagation();
         this.removeEditAgentTag(tag);
       });
@@ -2673,7 +2857,7 @@ const sessionManager = {
   },
 
   removeEditAgentTag(tag) {
-    this.editAgentSelectedTags = this.editAgentSelectedTags.filter((item) => item !== tag);
+    this.editAgentSelectedTags = this.editAgentSelectedTags.filter(item => item !== tag);
     this.renderEditAgentTags();
   },
 
@@ -2691,9 +2875,22 @@ const sessionManager = {
     const role = roleSelect?.value;
     const model = modelSelect?.value;
     const selectedModelOption = modelSelect?.selectedOptions?.[0] || null;
-    const selectedProvider = String(selectedModelOption?.getAttribute('data-provider') || this.editAgentCurrentProvider || '').trim();
-    const validProviders = new Set(['openai', 'codex', 'claude_code', 'claude', 'gemini', 'ollama', 'lmstudio', 'mlx_lm']);
-    const resolvedProvider = validProviders.has(selectedProvider) ? selectedProvider : String(this.editAgentCurrentProvider || '').trim();
+    const selectedProvider = String(
+      selectedModelOption?.getAttribute('data-provider') || this.editAgentCurrentProvider || ''
+    ).trim();
+    const validProviders = new Set([
+      'openai',
+      'codex',
+      'claude_code',
+      'claude',
+      'gemini',
+      'ollama',
+      'lmstudio',
+      'mlx_lm'
+    ]);
+    const resolvedProvider = validProviders.has(selectedProvider)
+      ? selectedProvider
+      : String(this.editAgentCurrentProvider || '').trim();
 
     if (!newName) {
       this.showEditAgentError('Name is required.');
@@ -2728,17 +2925,21 @@ const sessionManager = {
     const originalText = saveBtn?.innerHTML;
     if (saveBtn) {
       saveBtn.disabled = true;
-      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Saving...';
+      saveBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Saving...';
     }
 
     try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(this.editAgentOriginalName)}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
+      const response = await fetch(
+        `/api/agents/${encodeURIComponent(this.editAgentOriginalName)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        }
+      );
 
       if (!response.ok) {
         let errorMessage = 'Failed to update agent.';
@@ -2757,7 +2958,7 @@ const sessionManager = {
       this.editAgentOriginalName = updatedName;
       this.editAgentCurrentProvider = resolvedProvider || this.editAgentCurrentProvider;
 
-      this.sessions.forEach((session) => {
+      this.sessions.forEach(session => {
         if (session.agent_name === previousName) {
           session.agent_name = updatedName;
         }
@@ -2806,7 +3007,7 @@ const sessionManager = {
   setEditAgentFormEnabled(enabled) {
     const form = document.getElementById('editAgentForm');
     if (form) {
-      form.querySelectorAll('input, select, textarea, button').forEach((element) => {
+      form.querySelectorAll('input, select, textarea, button').forEach(element => {
         element.disabled = !enabled;
       });
     }
@@ -2973,15 +3174,17 @@ const sessionManager = {
     if (ids.length === 0) return;
 
     try {
-      await Promise.all(ids.map(async (id) => {
-        const response = await fetch(`/api/sessions/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ folder_id: folderId })
-        });
+      await Promise.all(
+        ids.map(async id => {
+          const response = await fetch(`/api/sessions/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_id: folderId })
+          });
 
-        if (!response.ok) throw new Error('Failed to move session');
-      }));
+          if (!response.ok) throw new Error('Failed to move session');
+        })
+      );
 
       // Refresh sessions and folders
       await this.loadSessions();
@@ -3020,14 +3223,16 @@ const sessionManager = {
   },
 
   getWorkspaceBootstrapFromModal() {
-    const description = String(document.getElementById('folderDescriptionInput')?.value || '').trim();
+    const description = String(
+      document.getElementById('folderDescriptionInput')?.value || ''
+    ).trim();
     const systems = String(document.getElementById('folderSystemsInput')?.value || '').trim();
     const context = String(document.getElementById('folderContextInput')?.value || '').trim();
     const systemsList = systems
       ? systems
-        .split(/[\n,;]+/)
-        .map((value) => value.trim())
-        .filter(Boolean)
+          .split(/[\n,;]+/)
+          .map(value => value.trim())
+          .filter(Boolean)
       : [];
 
     return {
@@ -3042,7 +3247,9 @@ const sessionManager = {
   },
 
   extractFolderNameFromPath(pathValue) {
-    const trimmed = String(pathValue || '').trim().replace(/[\\/]+$/, '');
+    const trimmed = String(pathValue || '')
+      .trim()
+      .replace(/[\\/]+$/, '');
     if (!trimmed) return '';
     const parts = trimmed.split(/[\\/]/);
     return parts[parts.length - 1] || '';
@@ -3101,6 +3308,7 @@ const sessionManager = {
       this.scheduleTemplateAgentPlanRefresh();
     } else {
       this.resetTemplateAgentReview();
+      this.resetExistingAgentTeam();
     }
     window.ProjectTemplateCard?.syncState?.();
     this.refreshWizardChrome();
@@ -3235,7 +3443,7 @@ const sessionManager = {
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: true
-    }).catch((error) => {
+    }).catch(error => {
       console.debug('Failed to send import duplicate telemetry:', error);
     });
   },
@@ -3275,9 +3483,12 @@ const sessionManager = {
       parentSelect.value = '';
       groupOptions.setWorkspaceParentSelectState(parentSelect, groups.length);
     }
-    document.querySelectorAll('#addFolderModal .folder-color-btn').forEach((btn) => btn.classList.remove('active'));
-    const defaultColorBtn = document.querySelector('#addFolderModal .folder-color-btn[data-color=""]')
-      || document.querySelector('#addFolderModal .folder-color-btn');
+    document
+      .querySelectorAll('#addFolderModal .folder-color-btn')
+      .forEach(btn => btn.classList.remove('active'));
+    const defaultColorBtn =
+      document.querySelector('#addFolderModal .folder-color-btn[data-color=""]') ||
+      document.querySelector('#addFolderModal .folder-color-btn');
     if (defaultColorBtn) {
       defaultColorBtn.classList.add('active');
     }
@@ -3304,6 +3515,7 @@ const sessionManager = {
     this.workspaceTemplate = null;
     window.ProjectTemplateCard?.reset?.();
     this.resetTemplateAgentReview();
+    this.resetExistingAgentTeam();
     window.ReaperSetupCard?.hide?.();
     this.updateBehaviorHint();
     // Refresh the folder-slug preview now that the name value is settled (the
@@ -3313,6 +3525,9 @@ const sessionManager = {
 
   resetTemplateAgentReview() {
     this.templateAgentPlan = null;
+    this.templateAgentPlanError = '';
+    this.templateAgentPrecreateOverrides = new Map();
+    this.closeTemplateAgentSetup();
     this.templateAgentPlanRequestId += 1;
     if (this.templateAgentPlanTimer) {
       clearTimeout(this.templateAgentPlanTimer);
@@ -3336,6 +3551,7 @@ const sessionManager = {
       warnings.innerHTML = '';
     }
     if (toggle) toggle.checked = true;
+    this.refreshWorkspaceReview();
   },
 
   scheduleTemplateAgentPlanRefresh() {
@@ -3355,8 +3571,10 @@ const sessionManager = {
     // Blank ships a synthetic single-agent roster (Workspace Manager). It has no
     // template_id/path, so signal it explicitly — but an ad-hoc folder override
     // (template_path) takes precedence and is no longer "blank".
-    const isBlank = Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank)
-      && !templateId && !templatePath;
+    const isBlank =
+      Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank) &&
+      !templateId &&
+      !templatePath;
     const requestId = ++this.templateAgentPlanRequestId;
 
     if (this.importModeEnabled || (!templateId && !templatePath && !isBlank)) {
@@ -3378,7 +3596,7 @@ const sessionManager = {
       const data = await response.json().catch(() => ({}));
       if (requestId !== this.templateAgentPlanRequestId) return;
       if (!response.ok || data.error) {
-        this.renderTemplateAgentPlanError(data.error || 'Could not load template agents.');
+        this.renderTemplateAgentPlanError(data.error || 'Could not load blueprint agents.');
         return;
       }
       this.templateAgentPlan = data;
@@ -3388,11 +3606,13 @@ const sessionManager = {
     } catch (error) {
       if (requestId !== this.templateAgentPlanRequestId) return;
       console.error('Failed to load template agent plan:', error);
-      this.renderTemplateAgentPlanError('Could not load template agents.');
+      this.renderTemplateAgentPlanError('Could not load blueprint agents.');
     }
   },
 
   setTemplateAgentReviewLoading() {
+    this.templateAgentPlan = null;
+    this.templateAgentPlanError = '';
     const review = document.getElementById('templateAgentReview');
     const summary = document.getElementById('templateAgentReviewSummary');
     const status = document.getElementById('templateAgentReviewStatus');
@@ -3402,17 +3622,19 @@ const sessionManager = {
       review.hidden = false;
       review.classList.remove('is-disabled');
     }
-    if (summary) summary.textContent = 'Checking template roster...';
+    if (summary) summary.textContent = 'Checking reusable agents...';
     if (status) status.textContent = '';
     if (list) list.innerHTML = '';
     if (warnings) {
       warnings.hidden = true;
       warnings.innerHTML = '';
     }
+    this.renderWorkspaceAgentMapPreview();
   },
 
   renderTemplateAgentPlanError(message) {
     this.templateAgentPlan = null;
+    this.templateAgentPlanError = message || 'Could not load blueprint agents.';
     const review = document.getElementById('templateAgentReview');
     const summary = document.getElementById('templateAgentReviewSummary');
     const status = document.getElementById('templateAgentReviewStatus');
@@ -3422,10 +3644,11 @@ const sessionManager = {
       review.hidden = false;
       review.classList.remove('is-disabled');
     }
-    if (summary) summary.textContent = 'Template agents could not be checked.';
-    if (status) status.textContent = message || 'Could not load template agents.';
+    if (summary) summary.textContent = 'Blueprint agents could not be checked.';
+    if (status) status.textContent = message || 'Could not load blueprint agents.';
     if (list) list.innerHTML = '';
     if (toggle) toggle.checked = true;
+    this.renderWorkspaceAgentMapPreview();
   },
 
   renderTemplateAgentPlan(plan) {
@@ -3444,37 +3667,47 @@ const sessionManager = {
     if (review) review.hidden = false;
     if (toggle) toggle.checked = true;
 
-    const createCount = agents.filter((agent) => agent.action === 'create').length;
-    const reuseCount = agents.filter((agent) => agent.action === 'reuse').length;
+    const createCount = agents.filter(agent => agent.action === 'create').length;
+    const reuseCount = agents.filter(agent => agent.action === 'reuse').length;
     const parts = [];
-    if (reuseCount) parts.push(`${reuseCount} reused`);
-    if (createCount) parts.push(`${createCount} new`);
+    if (reuseCount) {
+      parts.push(`${reuseCount} saved agent${reuseCount === 1 ? '' : 's'} will be attached`);
+    }
+    if (createCount) {
+      parts.push(
+        `${createCount} reusable agent${createCount === 1 ? '' : 's'} will be added to Your Agents and attached`
+      );
+    }
     if (summary) {
-      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} attached to this workspace.`;
+      summary.textContent = parts.join(' · ');
     }
     if (status) {
       const provider = String(plan.system_provider || '').trim();
       const model = String(plan.system_model || '').trim();
       // Applies to any blueprint's roster, not just Blank — the message names
       // where agents without an explicit model get theirs from.
-      status.textContent = provider && model
-        ? `Agents without their own model use ${provider} / ${model}.`
-        : 'Agents without their own model use the app default because no system model is configured.';
+      status.textContent =
+        provider && model
+          ? `Agents without their own model use ${provider} / ${model}.`
+          : 'Agents without their own model use the app default because no system model is configured.';
     }
     if (list) {
-      list.innerHTML = agents.map((agent, index) => this.renderTemplateAgentPlanRow(agent, index)).join('');
+      list.innerHTML = agents
+        .map((agent, index) => this.renderTemplateAgentPlanRow(agent, index))
+        .join('');
     }
-    const warningMessages = [
-      ...(Array.isArray(plan.warnings) ? plan.warnings : [])
-    ].filter((msg) => typeof msg === 'string' && msg.trim());
+    const warningMessages = [...(Array.isArray(plan.warnings) ? plan.warnings : [])].filter(
+      msg => typeof msg === 'string' && msg.trim()
+    );
     if (warnings) {
       warnings.hidden = warningMessages.length === 0;
       warnings.innerHTML = warningMessages
-        .map((msg) => `<div>${this.escapeHtml(msg)}</div>`)
+        .map(msg => `<div>${this.escapeHtml(msg)}</div>`)
         .join('');
     }
     this.bindTemplateAgentReviewInputs();
     this.updateTemplateAgentReviewDisabledState();
+    this.refreshWorkspaceReview();
   },
 
   renderTemplateAgentPlanRow(agent, index) {
@@ -3488,39 +3721,53 @@ const sessionManager = {
     const tools = this.templateAgentToolsLabel(agent?.tools);
     const name = String(agent?.name || '').trim();
     const systemPrompt = String(agent?.system_prompt || '').trim();
-    const editableModel = ['template', 'existing'].includes(String(agent?.model_source || '').trim()) ? model : '';
+    const editableModel = ['template', 'existing'].includes(
+      String(agent?.model_source || '').trim()
+    )
+      ? model
+      : '';
     const editableProvider = editableModel ? provider : '';
-    const modelText = model
-      ? `${provider ? `${provider} / ` : ''}${model}`
-      : 'App default';
-    const modelOptions = this.renderTemplateAgentModelOptions(agent, editableModel, editableProvider, modelText);
+    const modelText = model ? `${provider ? `${provider} / ` : ''}${model}` : 'App default';
+    const modelOptions = this.renderTemplateAgentModelOptions(
+      agent,
+      editableModel,
+      editableProvider,
+      modelText
+    );
     const promptState = systemPrompt ? 'Prompt set' : 'No prompt';
     const isReuse = action === 'reuse';
     // The role/type chip pair shared by both the compact reuse view and the
     // editable view. The action chip lives only in the editable view so its
     // "Reuse -> Create" flip on fork targets a single element.
     const roleChips = [
-      agent?.entry_point ? '<span class="workspace-template-agent-chip entry">Entry</span>' : '<span class="workspace-template-agent-chip">Specialist</span>',
+      agent?.entry_point
+        ? '<span class="workspace-template-agent-chip entry">Entry</span>'
+        : '<span class="workspace-template-agent-chip">Specialist</span>',
       role ? `<span class="workspace-template-agent-chip">${this.escapeHtml(role)}</span>` : '',
       type ? `<span class="workspace-template-agent-chip">${this.escapeHtml(type)}</span>` : '',
       tools ? `<span class="workspace-template-agent-chip">${this.escapeHtml(tools)}</span>` : ''
-    ].filter(Boolean).join('');
+    ]
+      .filter(Boolean)
+      .join('');
     const chips = `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>${roleChips}`;
 
-    // Reuse view: a name-matched agent already exists, so it is linked, not
-    // created. Shown compact and locked; "Make a workspace copy" reveals the
-    // editable view (below) and forks a fresh, workspace-scoped agent.
-    const reuseView = isReuse ? `
-        <div class="workspace-template-agent-reuse">
-          <div class="workspace-template-agent-reuse-head">
-            <span class="workspace-template-agent-reuse-name">${this.escapeHtml(name)}</span>
-            <div class="workspace-template-agent-meta">
-              <span class="workspace-template-agent-chip reuse">Reuse</span>${roleChips}
-            </div>
+    const designation = agent?.entry_point ? 'Primary workspace agent' : 'Workspace specialist';
+    const provision = isReuse
+      ? 'Saved agent · Will be attached'
+      : 'New reusable agent · Added to Your Agents and attached';
+    const summaryAction = isReuse
+      ? '<button type="button" class="workspace-template-agent-fork-btn">Make a workspace copy</button>'
+      : '<button type="button" class="workspace-wizard-inline-action workspace-template-agent-customize-btn" aria-expanded="false">Customize</button>';
+    const summaryView = `
+        <div class="workspace-template-agent-summary-card">
+          ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
+          <div class="workspace-template-agent-summary-copy">
+            <strong>${this.escapeHtml(name)}</strong>
+            <span>${provision}</span>
+            <small>${designation} · ${this.escapeHtml(modelText)} · ${this.escapeHtml(source)}</small>
           </div>
-          <div class="workspace-template-agent-reuse-sub">Using your existing agent${model ? ` · ${this.escapeHtml(modelText)}` : ''}</div>
-          <button type="button" class="workspace-template-agent-fork-btn">Make a workspace copy</button>
-        </div>` : '';
+          <div class="workspace-template-agent-summary-action">${summaryAction}</div>
+        </div>`;
 
     return `
       <div class="workspace-template-agent-row${isReuse ? ' is-reuse' : ''}"
@@ -3531,8 +3778,8 @@ const sessionManager = {
            data-original-model="${this.escapeHtml(editableModel)}"
            data-original-provider="${this.escapeHtml(editableProvider)}"
            data-original-system-prompt="${this.escapeHtml(systemPrompt)}">
-        ${reuseView}
-        <div class="workspace-template-agent-main"${isReuse ? ' hidden' : ''}>
+        ${summaryView}
+        <div class="workspace-template-agent-main" hidden>
           <div class="workspace-template-agent-fields">
             <label class="workspace-template-agent-field">
               <span>Name</span>
@@ -3560,29 +3807,26 @@ const sessionManager = {
                       placeholder="Optional system prompt">${this.escapeHtml(systemPrompt)}</textarea>
           </details>
         </div>
-        <div class="workspace-template-agent-model">
-          <strong>${this.escapeHtml(modelText)}</strong>
-          <span class="workspace-template-agent-model-source">${this.escapeHtml(source)}</span>
-        </div>
       </div>
     `;
   },
 
   renderTemplateAgentModelOptions(agent, currentModel, currentProvider, inheritedLabel) {
     const source = String(agent?.model_source || '').trim();
-    const inheritedText = source === 'system'
-      ? `Use system model (${inheritedLabel})`
-      : `Use default (${inheritedLabel})`;
+    const inheritedText =
+      source === 'system'
+        ? `Use system model (${inheritedLabel})`
+        : `Use default (${inheritedLabel})`;
     const options = [
       `<option value="" data-provider=""${currentModel ? '' : ' selected'}>${this.escapeHtml(inheritedText)}</option>`
     ];
     let foundCurrent = !currentModel;
     const providers = Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [];
-    providers.forEach((provider) => {
+    providers.forEach(provider => {
       const models = Array.isArray(provider?.models) ? provider.models : [];
       if (models.length === 0) return;
       const groupOptions = [];
-      models.forEach((model) => {
+      models.forEach(model => {
         const value = String(model?.value || model?.id || '').trim();
         if (!value) return;
         const optionProvider = String(model?.provider || provider?.name || '').trim();
@@ -3599,7 +3843,9 @@ const sessionManager = {
       );
     });
     if (currentModel && !foundCurrent) {
-      options.splice(1, 0,
+      options.splice(
+        1,
+        0,
         `<option value="${this.escapeHtml(currentModel)}" data-provider="${this.escapeHtml(currentProvider)}" selected>${this.escapeHtml(currentModel)} (current)</option>`
       );
     }
@@ -3609,13 +3855,17 @@ const sessionManager = {
   bindTemplateAgentReviewInputs() {
     const list = document.getElementById('templateAgentReviewList');
     if (!list) return;
-    list.querySelectorAll('.workspace-template-agent-row').forEach((row) => {
-      row.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
+    list.querySelectorAll('.workspace-template-agent-row').forEach(row => {
+      row.querySelectorAll('.workspace-template-agent-control').forEach(control => {
         control.addEventListener('input', () => this.updateTemplateAgentReviewRowState(row));
         control.addEventListener('change', () => this.updateTemplateAgentReviewRowState(row));
       });
-      row.querySelector('.workspace-template-agent-fork-btn')
+      row
+        .querySelector('.workspace-template-agent-fork-btn')
         ?.addEventListener('click', () => this.forkTemplateAgentRow(row));
+      row
+        .querySelector('.workspace-template-agent-customize-btn')
+        ?.addEventListener('click', () => this.toggleTemplateAgentCustomization(row));
       this.updateTemplateAgentReviewRowState(row);
     });
   },
@@ -3626,11 +3876,11 @@ const sessionManager = {
   // rename-fork override path carry the edits. The existing agent is untouched.
   forkTemplateAgentRow(row) {
     if (!row) return;
-    const reuseView = row.querySelector('.workspace-template-agent-reuse');
+    const summaryView = row.querySelector('.workspace-template-agent-summary-card');
     const main = row.querySelector('.workspace-template-agent-main');
     const nameInput = row.querySelector('.workspace-template-agent-name-input');
     row.dataset.forked = 'true';
-    if (reuseView) reuseView.hidden = true;
+    if (summaryView) summaryView.hidden = true;
     if (main) main.hidden = false;
     if (nameInput) {
       nameInput.value = this.suggestForkedAgentName(row.dataset.originalName || nameInput.value);
@@ -3638,6 +3888,16 @@ const sessionManager = {
       nameInput.select?.();
     }
     this.updateTemplateAgentReviewRowState(row);
+  },
+
+  toggleTemplateAgentCustomization(row) {
+    const main = row?.querySelector('.workspace-template-agent-main');
+    const button = row?.querySelector('.workspace-template-agent-customize-btn');
+    if (!main || !button) return;
+    main.hidden = !main.hidden;
+    button.setAttribute('aria-expanded', String(!main.hidden));
+    button.textContent = main.hidden ? 'Customize' : 'Hide details';
+    if (!main.hidden) row.querySelector('.workspace-template-agent-name-input')?.focus();
   },
 
   suggestForkedAgentName(base) {
@@ -3659,9 +3919,15 @@ const sessionManager = {
     const originalPrompt = row.dataset.originalSystemPrompt || '';
     const name = String(nameInput?.value || '').trim();
     const model = String(modelInput?.value || '').trim();
-    const provider = String(modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || '').trim();
+    const provider = String(
+      modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
+    ).trim();
     const prompt = String(promptInput?.value || '').trim();
-    const dirty = name !== originalName || model !== originalModel || provider !== originalProvider || prompt !== originalPrompt;
+    const dirty =
+      name !== originalName ||
+      model !== originalModel ||
+      provider !== originalProvider ||
+      prompt !== originalPrompt;
     row.classList.toggle('is-edited', dirty);
 
     if (actionChip && row.dataset.originalAction === 'reuse') {
@@ -3671,9 +3937,10 @@ const sessionManager = {
       actionChip.classList.toggle('reuse', !renamed);
     }
     if (sourceLabel && modelInput) {
-      sourceLabel.textContent = model !== originalModel || provider !== originalProvider
-        ? 'Custom model'
-        : this.templateAgentModelSourceLabel(this.findTemplateAgentPlanItemSource(row));
+      sourceLabel.textContent =
+        model !== originalModel || provider !== originalProvider
+          ? 'Custom model'
+          : this.templateAgentModelSourceLabel(this.findTemplateAgentPlanItemSource(row));
     }
     if (promptState) {
       promptState.textContent = prompt ? 'Prompt set' : 'No prompt';
@@ -3686,7 +3953,9 @@ const sessionManager = {
 
   findTemplateAgentPlanItem(row) {
     const index = Number.parseInt(row?.dataset?.templateAgentIndex || '', 10);
-    const agents = Array.isArray(this.templateAgentPlan?.agents) ? this.templateAgentPlan.agents : [];
+    const agents = Array.isArray(this.templateAgentPlan?.agents)
+      ? this.templateAgentPlan.agents
+      : [];
     return Number.isInteger(index) && agents[index] ? agents[index] : null;
   },
 
@@ -3696,7 +3965,7 @@ const sessionManager = {
     if (!review || !toggle || !toggle.checked) return [];
 
     const rows = Array.from(review.querySelectorAll('.workspace-template-agent-row'));
-    const overrides = [];
+    const overridesByIndex = new Map(this.templateAgentPrecreateOverrides || []);
     const names = new Map();
     for (const row of rows) {
       const index = Number.parseInt(row.dataset.templateAgentIndex || '', 10);
@@ -3706,7 +3975,9 @@ const sessionManager = {
       const promptInput = row.querySelector('.workspace-template-agent-prompt-input');
       const name = String(nameInput?.value || '').trim();
       const model = String(modelInput?.value || '').trim();
-      const provider = String(modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || '').trim();
+      const provider = String(
+        modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
+      ).trim();
       const systemPrompt = String(promptInput?.value || '').trim();
       if (!name) {
         nameInput?.focus();
@@ -3714,7 +3985,9 @@ const sessionManager = {
       }
       if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
         nameInput?.focus();
-        throw new Error('Template agent names can use letters, numbers, spaces, underscores, and hyphens.');
+        throw new Error(
+          'Template agent names can use letters, numbers, spaces, underscores, and hyphens.'
+        );
       }
       const duplicateKey = name.toLowerCase();
       if (names.has(duplicateKey)) {
@@ -3732,7 +4005,9 @@ const sessionManager = {
       const promptChanged = systemPrompt !== originalPrompt;
       if (row.dataset.originalAction === 'reuse' && !renamed && (modelChanged || promptChanged)) {
         nameInput?.focus();
-        throw new Error(`Rename "${name}" before changing its model or prompt. Existing shared agents are reused as-is.`);
+        throw new Error(
+          `Rename "${name}" before changing its model or prompt. Existing shared agents are reused as-is.`
+        );
       }
 
       const override = { index };
@@ -3753,10 +4028,10 @@ const sessionManager = {
       }
       if (promptChanged) override.system_prompt = systemPrompt;
       if (Object.keys(override).length > 1) {
-        overrides.push(override);
+        overridesByIndex.set(index, { ...overridesByIndex.get(index), ...override });
       }
     }
-    return overrides;
+    return Array.from(overridesByIndex.values()).sort((left, right) => left.index - right.index);
   },
 
   templateAgentModelSourceLabel(source) {
@@ -3784,15 +4059,738 @@ const sessionManager = {
     return parts.join(' / ');
   },
 
+  resetExistingAgentTeam() {
+    this.existingAgentSelections = [];
+    this.existingAgentPrimaryName = '';
+    this.existingAgentRosterError = '';
+    const panel = document.getElementById('existingAgentRosterPanel');
+    if (panel) panel.hidden = true;
+    const search = document.getElementById('existingAgentRosterSearch');
+    if (search) search.value = '';
+    const list = document.getElementById('existingAgentTeamList');
+    if (list) list.innerHTML = '';
+    this.refreshWorkspaceReview();
+  },
+
+  existingAgentKey(name) {
+    return String(name || '')
+      .trim()
+      .toLocaleLowerCase();
+  },
+
+  findExistingRosterAgent(name) {
+    const key = this.existingAgentKey(name);
+    return (
+      this.existingAgentRoster.find(agent => this.existingAgentKey(agent?.name) === key) || null
+    );
+  },
+
+  isExistingAgentAttachable(agent) {
+    return Boolean(agent?.name) && String(agent?.source || 'user').toLowerCase() !== 'cli';
+  },
+
+  templateAgentIsAlreadyIncluded(name) {
+    const key = this.existingAgentKey(name);
+    return (this.templateAgentPlan?.agents || []).some(
+      agent =>
+        String(agent?.action || '').toLowerCase() === 'reuse' &&
+        this.existingAgentKey(agent?.name) === key
+    );
+  },
+
+  async openExistingAgentRoster() {
+    const panel = document.getElementById('existingAgentRosterPanel');
+    if (panel) panel.hidden = false;
+    const search = document.getElementById('existingAgentRosterSearch');
+    search?.focus();
+    if (!this.existingAgentRosterLoaded && !this.existingAgentRosterLoading) {
+      await this.loadExistingAgentRoster();
+    } else {
+      this.renderExistingAgentRoster();
+    }
+  },
+
+  closeExistingAgentRoster() {
+    const panel = document.getElementById('existingAgentRosterPanel');
+    if (panel) panel.hidden = true;
+  },
+
+  async loadExistingAgentRoster() {
+    this.existingAgentRosterLoading = true;
+    this.existingAgentRosterError = '';
+    this.renderExistingAgentRoster();
+    try {
+      const response = await fetch('/api/agents/dashboard/list?sort_by=name&order=asc');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+      const items = Array.isArray(data) ? data : Array.isArray(data?.agents) ? data.agents : [];
+      this.existingAgentRoster = items.filter(agent => String(agent?.name || '').trim());
+      this.existingAgentRosterLoaded = true;
+    } catch (error) {
+      console.warn('Failed to load existing agent roster:', error);
+      this.existingAgentRosterError =
+        'Your saved agents could not be loaded. You can still create the included workspace setup.';
+    } finally {
+      this.existingAgentRosterLoading = false;
+      this.renderExistingAgentRoster();
+    }
+  },
+
+  renderExistingAgentRoster() {
+    const list = document.getElementById('existingAgentRosterList');
+    const status = document.getElementById('existingAgentRosterStatus');
+    if (!list || !status) return;
+    if (this.existingAgentRosterLoading) {
+      status.textContent = 'Loading your saved agents…';
+      list.innerHTML = '';
+      return;
+    }
+    if (this.existingAgentRosterError) {
+      status.innerHTML = `${this.escapeHtml(this.existingAgentRosterError)} <button type="button" class="workspace-wizard-inline-action" data-existing-agent-retry>Retry</button>`;
+      list.innerHTML = '';
+      status.querySelector('[data-existing-agent-retry]')?.addEventListener('click', () => {
+        this.existingAgentRosterLoaded = false;
+        void this.loadExistingAgentRoster();
+      });
+      return;
+    }
+    const query = String(document.getElementById('existingAgentRosterSearch')?.value || '')
+      .trim()
+      .toLowerCase();
+    const matches = this.existingAgentRoster.filter(agent => {
+      const haystack =
+        `${agent?.name || ''} ${agent?.role || ''} ${agent?.model || ''}`.toLowerCase();
+      return !query || haystack.includes(query);
+    });
+    status.textContent = matches.length
+      ? `${matches.length} saved agent${matches.length === 1 ? '' : 's'}`
+      : 'No matching saved agents.';
+    list.innerHTML = matches.map(agent => this.renderExistingAgentRosterCard(agent)).join('');
+    list.querySelectorAll('[draggable="true"]').forEach(card => {
+      card.addEventListener('dragstart', event => {
+        const name = card.dataset.existingAgentName || '';
+        event.dataTransfer?.setData('application/x-ori-agent-name', name);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+      });
+    });
+  },
+
+  renderExistingAgentRosterCard(agent) {
+    const name = String(agent?.name || '').trim();
+    const key = this.existingAgentKey(name);
+    const selected = this.existingAgentSelections.some(
+      selectedName => this.existingAgentKey(selectedName) === key
+    );
+    const alreadyIncluded = this.templateAgentIsAlreadyIncluded(name);
+    const attachable = this.isExistingAgentAttachable(agent);
+    const disabled = selected || alreadyIncluded || !attachable;
+    const reason = selected
+      ? 'Added to this workspace'
+      : alreadyIncluded
+        ? 'Already included by this blueprint'
+        : !attachable
+          ? 'Built-in CLI agents cannot be attached'
+          : '';
+    const workspaceCount = Number(agent?.workspace_count) || 0;
+    return `
+      <article class="workspace-existing-agent-card" ${attachable && !selected && !alreadyIncluded ? 'draggable="true"' : ''} data-existing-agent-name="${this.escapeHtml(name)}">
+        ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
+        <div class="workspace-existing-agent-card-copy">
+          <strong>${this.escapeHtml(name)}</strong>
+          <span>${this.escapeHtml(agent?.model || 'Uses saved agent model')} · ${workspaceCount === 1 ? '1 workspace' : `${workspaceCount} workspaces`}</span>
+          ${reason ? `<small>${this.escapeHtml(reason)}</small>` : ''}
+        </div>
+        <button type="button" class="modern-btn modern-btn-secondary" data-existing-agent-add="${this.escapeHtml(name)}" ${disabled ? 'disabled' : ''} aria-label="Add ${this.escapeHtml(name)} to this workspace">${selected ? 'Added' : alreadyIncluded ? 'Included' : attachable ? 'Add' : 'Unavailable'}</button>
+      </article>`;
+  },
+
+  renderAgentAvatar(name, className = '') {
+    const initials =
+      String(name || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(part => part[0])
+        .join('')
+        .toUpperCase() || 'A';
+    return `<span class="${className}" aria-hidden="true">${this.escapeHtml(initials)}</span>`;
+  },
+
+  addExistingAgent(name, options = {}) {
+    const agent = this.findExistingRosterAgent(name);
+    if (!agent || !this.isExistingAgentAttachable(agent)) return;
+    const canonicalName = String(agent.name).trim();
+    if (this.templateAgentIsAlreadyIncluded(canonicalName)) return;
+    if (
+      this.existingAgentSelections.some(
+        selectedName => this.existingAgentKey(selectedName) === this.existingAgentKey(canonicalName)
+      )
+    )
+      return;
+    this.existingAgentSelections.push(canonicalName);
+    if (!this.includedTemplateHasEntryAgent() && !this.existingAgentPrimaryName) {
+      this.existingAgentPrimaryName = canonicalName;
+    }
+    this.renderExistingAgentRoster();
+    this.refreshWorkspaceReview();
+    if (options.announceDrop)
+      this.announceWorkspaceTeamChange(`${canonicalName} will be attached to this workspace.`);
+  },
+
+  removeExistingAgent(name) {
+    const key = this.existingAgentKey(name);
+    const removedPrimary = this.existingAgentKey(this.existingAgentPrimaryName) === key;
+    this.existingAgentSelections = this.existingAgentSelections.filter(
+      selectedName => this.existingAgentKey(selectedName) !== key
+    );
+    if (removedPrimary) {
+      this.existingAgentPrimaryName = this.includedTemplateHasEntryAgent()
+        ? ''
+        : this.existingAgentSelections[0] || '';
+      if (this.existingAgentPrimaryName)
+        this.announceWorkspaceTeamChange(
+          `${this.existingAgentPrimaryName} is now this workspace's primary agent.`
+        );
+    }
+    this.renderExistingAgentRoster();
+    this.refreshWorkspaceReview();
+  },
+
+  requestExistingAgentPrimary(name) {
+    const agent = this.findExistingRosterAgent(name);
+    if (
+      !agent ||
+      !this.existingAgentSelections.some(
+        selectedName => this.existingAgentKey(selectedName) === this.existingAgentKey(name)
+      )
+    )
+      return;
+    const confirmed = window.confirm(
+      `${agent.name} will become this workspace's primary routing agent and receive new starter and setup tasks. Its saved prompt, model, and tools stay reusable. Make it primary?`
+    );
+    if (!confirmed) return;
+    this.existingAgentPrimaryName = String(agent.name).trim();
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange(`${agent.name} is now this workspace's primary agent.`);
+  },
+
+  includedTemplateAgents() {
+    const included = Boolean(document.getElementById('templateAgentReviewToggle')?.checked);
+    return included && Array.isArray(this.templateAgentPlan?.agents)
+      ? this.templateAgentPlan.agents
+      : [];
+  },
+
+  includedTemplateHasEntryAgent() {
+    return this.includedTemplateAgents().some(agent => Boolean(agent?.entry_point));
+  },
+
+  resolvedWorkspacePrimaryName() {
+    if (this.existingAgentPrimaryName) return this.existingAgentPrimaryName;
+    const templateEntry = this.includedTemplateAgents().find(agent => Boolean(agent?.entry_point));
+    return String(templateEntry?.name || this.existingAgentSelections[0] || '').trim();
+  },
+
+  renderExistingAgentTeam() {
+    const list = document.getElementById('existingAgentTeamList');
+    if (!list) return;
+    const primary = this.resolvedWorkspacePrimaryName();
+    list.innerHTML = this.existingAgentSelections
+      .map(name => {
+        const agent = this.findExistingRosterAgent(name) || { name };
+        const isPrimary = this.existingAgentKey(name) === this.existingAgentKey(primary);
+        return `
+        <article class="workspace-team-agent-card">
+          ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
+          <div class="workspace-team-agent-copy">
+            <strong>${this.escapeHtml(name)}</strong>
+            <span>${isPrimary ? 'Primary workspace agent' : 'Workspace specialist'} · Saved agent · Will be attached</span>
+            <small>${this.escapeHtml(agent?.model || 'Uses existing agent model')}</small>
+          </div>
+          <div class="workspace-team-agent-actions">
+            ${isPrimary ? '' : `<button type="button" class="workspace-wizard-inline-action" data-existing-agent-primary="${this.escapeHtml(name)}">Make Primary</button>`}
+            <button type="button" class="workspace-wizard-inline-action" data-existing-agent-remove="${this.escapeHtml(name)}">Remove</button>
+          </div>
+        </article>`;
+      })
+      .join('');
+  },
+
+  // The map is a compact visual preview rather than a second canvas. Missing
+  // agents expose a deliberate + action that opens the setup card below it.
+  renderWorkspaceAgentMapPreview() {
+    const node = document.getElementById('workspaceAgentMapNode');
+    const state = document.getElementById('workspaceAgentMapState');
+    const title = document.getElementById('workspaceAgentMapPreviewTitle');
+    const canvas = document.querySelector('.workspace-agent-map-canvas');
+    const specialists = document.getElementById('workspaceAgentMapSpecialists');
+    const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
+    const createAll = document.getElementById('workspaceAgentMapCreateAll');
+    const kicker = document.getElementById('workspaceAgentMapNodeKicker');
+    const name = document.getElementById('workspaceAgentMapNodeName');
+    const detail = document.getElementById('workspaceAgentMapNodeDetail');
+    const status = document.getElementById('workspaceAgentMapStatus');
+    if (
+      !node ||
+      !state ||
+      !title ||
+      !canvas ||
+      !specialists ||
+      !avatarAction ||
+      !createAll ||
+      !kicker ||
+      !name ||
+      !detail ||
+      !status
+    )
+      return;
+
+    const team = [];
+    const teamNames = new Set();
+    const addTeamMember = member => {
+      const memberName = String(member?.name || '').trim();
+      const key = this.existingAgentKey(memberName);
+      if (!memberName || teamNames.has(key)) return;
+      teamNames.add(key);
+      team.push({ ...member, name: memberName });
+    };
+    this.includedTemplateAgents().forEach((agent, templateAgentIndex) =>
+      addTeamMember({ ...agent, source: 'blueprint', templateAgentIndex })
+    );
+    this.existingAgentSelections.forEach(selectedName => {
+      const savedAgent = this.findExistingRosterAgent(selectedName);
+      addTeamMember({
+        name: savedAgent?.name || selectedName,
+        action: 'reuse',
+        source: 'existing'
+      });
+    });
+
+    const primaryName = this.resolvedWorkspacePrimaryName();
+    const primary = team.find(
+      agent => this.existingAgentKey(agent.name) === this.existingAgentKey(primaryName)
+    );
+    const teamSpecialists = primary
+      ? team.filter(
+          agent => this.existingAgentKey(agent.name) !== this.existingAgentKey(primary.name)
+        )
+      : [];
+    const createdAgents = team.filter(
+      agent => String(agent.action || '').toLowerCase() === 'create'
+    );
+    const canCreatePrimary = Boolean(
+      primary &&
+      primary.source === 'blueprint' &&
+      String(primary.action || '').toLowerCase() === 'create' &&
+      Number.isInteger(primary.templateAgentIndex)
+    );
+    const memberLifecycle = agent => {
+      if (String(agent.action || '').toLowerCase() === 'create') return 'New reusable agent';
+      return agent.source === 'existing'
+        ? 'Saved agent · Will be attached'
+        : 'Saved reusable agent';
+    };
+    const specialistMarkup = teamSpecialists
+      .map(agent => {
+        const isNew = String(agent.action || '').toLowerCase() === 'create';
+        const initials =
+          String(agent.name || '')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map(part => part[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase() || 'A';
+        const avatar = isNew
+          ? `<button type="button" class="workspace-agent-map-specialist-avatar" data-template-agent-index="${agent.templateAgentIndex}" aria-label="Set up ${this.escapeHtml(agent.name)} as a reusable agent">${this.escapeHtml(initials)}<span class="workspace-agent-map-specialist-create-badge" aria-hidden="true">+</span></button>`
+          : `<span class="workspace-agent-map-specialist-avatar" aria-hidden="true">${this.escapeHtml(initials)}</span>`;
+        return `
+          <div class="workspace-agent-map-specialist${isNew ? ' is-new' : ''}">
+            ${avatar}
+            <strong>${this.escapeHtml(agent.name)}</strong>
+            <small>Workspace specialist · ${this.escapeHtml(memberLifecycle(agent))}</small>
+          </div>`;
+      })
+      .join('');
+
+    let next = {
+      state: 'checking',
+      label: 'Checking',
+      kicker: 'AGENT SETUP',
+      name: 'Checking agent setup',
+      detail: 'This workspace needs a primary agent.',
+      status: 'Checking the reusable agent for this workspace…'
+    };
+
+    if (this.templateAgentPlanError) {
+      next = {
+        state: 'missing',
+        label: 'Needs attention',
+        kicker: 'AGENT SETUP',
+        name: 'Agent setup unavailable',
+        detail: 'Could not check blueprint agent',
+        status: this.templateAgentPlanError
+      };
+    } else if (primary) {
+      const agentName = primary.name;
+      const isNew = String(primary.action || '').toLowerCase() === 'create';
+      const specialistNames = teamSpecialists.map(agent => agent.name);
+      const createdNames = createdAgents
+        .filter(
+          agent =>
+            !isNew || this.existingAgentKey(agent.name) !== this.existingAgentKey(primary.name)
+        )
+        .map(agent => agent.name);
+      const specialistSentence = specialistNames.length
+        ? ` ${specialistNames.join(', ')} will join as workspace specialist${
+            specialistNames.length === 1 ? '' : 's'
+          }.`
+        : '';
+      const creationSentence = createdNames.length
+        ? ` ${createdNames.join(', ')} ${
+            createdNames.length === 1 ? 'is' : 'are'
+          } not in Your Agents yet and will be added when you create the workspace.`
+        : '';
+      if (!isNew) {
+        next = {
+          state: 'ready',
+          label: 'Ready',
+          kicker: 'PRIMARY WORKSPACE AGENT',
+          name: agentName,
+          detail: memberLifecycle(primary),
+          status: `${agentName} will be this workspace's primary agent.${specialistSentence}${creationSentence}`
+        };
+      } else {
+        next = {
+          state: 'new',
+          label: 'Create agent',
+          kicker: 'PRIMARY WORKSPACE AGENT',
+          name: agentName,
+          detail: 'Not in Your Agents yet · Create reusable agent',
+          status: `${agentName} is not in Your Agents yet. Select its + avatar to set up and save this reusable agent.${specialistSentence}${creationSentence}`
+        };
+      }
+    } else if (this.templateAgentPlan) {
+      next = {
+        state: 'missing',
+        label: 'No agent selected',
+        kicker: 'PRIMARY WORKSPACE AGENT',
+        name: 'Choose an agent',
+        detail: 'No primary agent staged',
+        status:
+          'No primary workspace agent is selected. You can add a saved agent in Review & Create; otherwise starter tasks will remain unassigned.'
+      };
+    }
+
+    node.className = `workspace-agent-map-node is-${next.state}${
+      canCreatePrimary ? ' is-actionable' : ''
+    }`;
+    canvas.classList.toggle('is-team', teamSpecialists.length > 0);
+    canvas.classList.toggle('has-many-specialists', teamSpecialists.length > 3);
+    state.className = `workspace-agent-map-state is-${next.state}`;
+    title.textContent =
+      team.length > 1 ? `Workspace team · ${team.length} agents` : 'Primary workspace agent';
+    specialists.innerHTML = specialistMarkup;
+    createAll.hidden = createdAgents.length < 2;
+    createAll.disabled = false;
+    createAll.textContent = `Create all defaults (${createdAgents.length})`;
+    avatarAction.disabled = !canCreatePrimary;
+    avatarAction.dataset.templateAgentIndex = canCreatePrimary
+      ? String(primary.templateAgentIndex)
+      : '';
+    avatarAction.setAttribute(
+      'aria-label',
+      canCreatePrimary
+        ? `Set up ${primary.name} as a reusable agent. It will remain in Your Agents if you cancel this workspace.`
+        : `${next.name} is this workspace's primary agent`
+    );
+    state.textContent = next.label;
+    kicker.textContent = next.kicker;
+    name.textContent = next.name;
+    detail.textContent = next.detail;
+    status.textContent = next.status;
+  },
+
+  openTemplateAgentSetup(requestedAgentIndex) {
+    const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
+    const agentIndex = Number.isInteger(requestedAgentIndex)
+      ? requestedAgentIndex
+      : Number.parseInt(avatarAction?.dataset.templateAgentIndex || '', 10);
+    const plannedAgent = this.includedTemplateAgents()[agentIndex];
+    if (
+      !Number.isInteger(agentIndex) ||
+      !plannedAgent ||
+      String(plannedAgent.action || '').toLowerCase() !== 'create'
+    )
+      return;
+
+    const card = document.getElementById('workspaceTemplateAgentSetup');
+    const index = document.getElementById('workspaceTemplateAgentSetupIndex');
+    const title = document.getElementById('workspaceTemplateAgentSetupTitle');
+    const description = document.getElementById('workspaceTemplateAgentSetupDescription');
+    const name = document.getElementById('workspaceTemplateAgentSetupName');
+    const model = document.getElementById('workspaceTemplateAgentSetupModel');
+    const prompt = document.getElementById('workspaceTemplateAgentSetupPrompt');
+    const save = document.getElementById('workspaceTemplateAgentSetupSave');
+    const status = document.getElementById('workspaceTemplateAgentSetupStatus');
+    if (!card || !index || !title || !description || !name || !model || !prompt || !save || !status)
+      return;
+
+    index.value = String(agentIndex);
+    title.textContent = `Create ${plannedAgent.name}`;
+    description.textContent = `${plannedAgent.name} will be saved in Your Agents and can be reused in future workspaces. You can still cancel this workspace afterward.`;
+    name.value = String(plannedAgent.name || '');
+    const modelSource = String(plannedAgent.model_source || '').trim();
+    const explicitModel = ['template', 'existing'].includes(modelSource)
+      ? String(plannedAgent.model || '').trim()
+      : '';
+    const explicitProvider = explicitModel ? String(plannedAgent.provider || '').trim() : '';
+    const inheritedModel = String(plannedAgent.model || '').trim();
+    const inheritedLabel = inheritedModel
+      ? `${String(plannedAgent.provider || '').trim() ? `${plannedAgent.provider} / ` : ''}${inheritedModel}`
+      : 'App default';
+    model.innerHTML = this.renderTemplateAgentModelOptions(
+      plannedAgent,
+      explicitModel,
+      explicitProvider,
+      inheritedLabel
+    );
+    prompt.value = String(plannedAgent.system_prompt || '');
+    save.textContent = `Save ${plannedAgent.name}`;
+    save.disabled = false;
+    status.textContent = '';
+    status.classList.remove('is-error');
+    card.hidden = false;
+    requestAnimationFrame(() => {
+      card.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+      name.focus();
+      name.select();
+    });
+  },
+
+  closeTemplateAgentSetup() {
+    const card = document.getElementById('workspaceTemplateAgentSetup');
+    const status = document.getElementById('workspaceTemplateAgentSetupStatus');
+    if (card) card.hidden = true;
+    if (status) {
+      status.textContent = '';
+      status.classList.remove('is-error');
+    }
+  },
+
+  async saveTemplateAgentFromSetup() {
+    const indexInput = document.getElementById('workspaceTemplateAgentSetupIndex');
+    const nameInput = document.getElementById('workspaceTemplateAgentSetupName');
+    const modelInput = document.getElementById('workspaceTemplateAgentSetupModel');
+    const promptInput = document.getElementById('workspaceTemplateAgentSetupPrompt');
+    const status = document.getElementById('workspaceTemplateAgentSetupStatus');
+    const save = document.getElementById('workspaceTemplateAgentSetupSave');
+    const agentIndex = Number.parseInt(indexInput?.value || '', 10);
+    const name = String(nameInput?.value || '').trim();
+    if (!Number.isInteger(agentIndex) || !this.includedTemplateAgents()[agentIndex]) return;
+    if (!name) {
+      if (status) {
+        status.textContent = 'Enter a name for this reusable agent.';
+        status.classList.add('is-error');
+      }
+      nameInput?.focus();
+      return;
+    }
+    if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
+      if (status) {
+        status.textContent = 'Names can use letters, numbers, spaces, underscores, and hyphens.';
+        status.classList.add('is-error');
+      }
+      nameInput?.focus();
+      return;
+    }
+
+    const selectedModel = String(modelInput?.value || '').trim();
+    const selectedProvider = String(
+      modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
+    ).trim();
+    const override = {
+      index: agentIndex,
+      name,
+      system_prompt: String(promptInput?.value || '').trim()
+    };
+    // An empty picker value intentionally means "inherit the blueprint/system
+    // default". Omit it from the override so that default survives creation.
+    if (selectedModel) {
+      override.model = selectedModel;
+      override.provider = selectedProvider;
+    }
+    if (save) save.disabled = true;
+    if (status) {
+      status.textContent = `Saving ${name} to Your Agents…`;
+      status.classList.remove('is-error');
+    }
+    const created = await this.createTemplateAgentFromPreview(agentIndex, { override });
+    if (!created) {
+      if (save) save.disabled = false;
+      return;
+    }
+    this.closeTemplateAgentSetup();
+  },
+
+  async createTemplateAgentFromPreview(requestedAgentIndex, options = {}) {
+    const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
+    const agentIndex = Number.isInteger(requestedAgentIndex)
+      ? requestedAgentIndex
+      : Number.parseInt(avatarAction?.dataset.templateAgentIndex || '', 10);
+    const plannedAgent = this.includedTemplateAgents()[agentIndex];
+    const trigger = document.querySelector(
+      `[data-template-agent-index="${Number.isInteger(agentIndex) ? agentIndex : ''}"]`
+    );
+    if (!Number.isInteger(agentIndex) || !plannedAgent || (trigger && trigger.disabled)) return false;
+
+    const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
+    const templateId = String(fields.template_id || '').trim();
+    const templatePath = String(fields.template_path || '').trim();
+    const isBlank =
+      Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank) &&
+      !templateId &&
+      !templatePath;
+    const agentName = String(plannedAgent.name || 'agent').trim();
+
+    if (trigger) trigger.disabled = true;
+    if (trigger === avatarAction) avatarAction.setAttribute('aria-label', `Creating ${agentName}…`);
+    try {
+      const response = await fetch('/api/workspaces/template-agent-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: templateId || undefined,
+          template_path: templatePath || undefined,
+          blank: isBlank || undefined,
+          agent_index: agentIndex,
+          override: options.override || undefined
+        })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        throw new Error(result.error || `Could not create ${agentName}.`);
+      }
+
+      if (result.plan) {
+        this.templateAgentPlan = result.plan;
+        this.templateAgentPlanError = '';
+        if (options.override) {
+          this.templateAgentPrecreateOverrides.set(agentIndex, options.override);
+        }
+        this.renderTemplateAgentPlan(result.plan);
+      } else {
+        await this.refreshTemplateAgentPlan();
+      }
+      const savedName = String(result.agent?.name || agentName || 'Agent').trim();
+      const message = result.created
+        ? `${savedName} is now saved in Your Agents and ready for this workspace.`
+        : `${savedName} is already saved in Your Agents and ready for this workspace.`;
+      if (!options.silent) {
+        this.announceWorkspaceTeamChange(message);
+        this.showToast(message, 'success');
+      }
+      return true;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Could not create the reusable agent.';
+      if (!options.silent) {
+        this.announceWorkspaceTeamChange(message);
+        this.showToast(message, 'error');
+      }
+      this.renderWorkspaceAgentMapPreview();
+      return false;
+    }
+  },
+
+  async createAllTemplateAgentsFromPreview() {
+    const agentIndexes = this.includedTemplateAgents()
+      .map((agent, index) => ({ agent, index }))
+      .filter(({ agent }) => String(agent?.action || '').toLowerCase() === 'create')
+      .map(({ index }) => index);
+    if (agentIndexes.length < 2) return;
+
+    const createAll = document.getElementById('workspaceAgentMapCreateAll');
+    if (createAll) createAll.disabled = true;
+    let createdCount = 0;
+    for (const agentIndex of agentIndexes) {
+      if (await this.createTemplateAgentFromPreview(agentIndex, { silent: true }))
+        createdCount += 1;
+    }
+    if (createdCount > 0) {
+      const message = `${createdCount} reusable agent${createdCount === 1 ? '' : 's'} ${
+        createdCount === 1 ? 'is' : 'are'
+      } now saved in Your Agents and ready for this workspace.`;
+      this.announceWorkspaceTeamChange(message);
+      this.showToast(message, 'success');
+    }
+  },
+
+  refreshWorkspaceReview() {
+    const summary = document.getElementById('workspaceReviewSummary');
+    const heading = document.getElementById('workspaceTeamHeading');
+    const teamSummary = document.getElementById('workspaceTeamSummary');
+    const selectedTemplate = window.ProjectTemplateCard?.getSelectedTemplate?.();
+    const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    const templateAgents = this.includedTemplateAgents();
+    const existingCount = this.existingAgentSelections.length;
+    const total = templateAgents.length + existingCount;
+    const created = templateAgents.filter(agent => String(agent?.action || '') === 'create').length;
+    const reused = templateAgents.filter(agent => String(agent?.action || '') === 'reuse').length;
+    if (heading) heading.textContent = total === 1 ? 'Workspace Assistant' : 'Workspace Team';
+    if (teamSummary) {
+      const parts = [];
+      if (created) {
+        parts.push(
+          `${created} reusable agent${created === 1 ? '' : 's'} will be added to Your Agents and attached`
+        );
+      }
+      if (existingCount)
+        parts.push(
+          `${existingCount} saved agent${existingCount === 1 ? '' : 's'} will be attached`
+        );
+      if (reused)
+        parts.push(
+          `${reused} blueprint agent${reused === 1 ? '' : 's'} already saved and attached`
+        );
+      teamSummary.textContent =
+        parts.join(' · ') ||
+        'No agent will be attached. Starter tasks will remain unassigned until you add one.';
+    }
+    if (summary) {
+      const blueprint =
+        selectedTemplate?.blank || !selectedTemplate?.name
+          ? 'Blank workspace'
+          : selectedTemplate.name;
+      const slug = name ? this.slugifyWorkspaceName(name) : 'Set a workspace name';
+      summary.innerHTML = `
+        <div class="workspace-review-summary-row">
+          <div><span>Blueprint</span><strong>${this.escapeHtml(blueprint)}</strong></div>
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="1">Edit</button>
+        </div>
+        <div class="workspace-review-summary-row">
+          <div><span>Workspace</span><strong>${this.escapeHtml(name || 'Untitled workspace')}</strong><small>Folder: ${this.escapeHtml(slug)}</small></div>
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>`;
+    }
+    this.renderExistingAgentTeam();
+    this.renderWorkspaceAgentMapPreview();
+  },
+
+  announceWorkspaceTeamChange(message) {
+    const region = document.getElementById('workspaceTeamLiveRegion');
+    if (region && message) region.textContent = message;
+  },
+
   updateTemplateAgentReviewDisabledState() {
     const review = document.getElementById('templateAgentReview');
     const toggle = document.getElementById('templateAgentReviewToggle');
     if (!review || !toggle) return;
     review.classList.toggle('is-disabled', !toggle.checked);
-    review.querySelectorAll('.workspace-template-agent-control').forEach((control) => {
+    review.querySelectorAll('.workspace-template-agent-control').forEach(control => {
       control.disabled = !toggle.checked;
     });
-    review.querySelectorAll('.workspace-template-agent-fork-btn').forEach((btn) => {
+    review.querySelectorAll('.workspace-template-agent-fork-btn').forEach(btn => {
       btn.disabled = !toggle.checked;
     });
   },
@@ -3815,10 +4813,13 @@ const sessionManager = {
   // Friendly label for an Agent behavior profile value.
   behaviorProfileLabel(profile) {
     switch (profile) {
-      case 'research': return 'Research';
-      case 'software_project': return 'Software Project';
+      case 'research':
+        return 'Research';
+      case 'software_project':
+        return 'Software Project';
       case 'general':
-      default: return 'General';
+      default:
+        return 'General';
     }
   },
 
@@ -3848,57 +4849,85 @@ const sessionManager = {
     hint.textContent = parts.join(' · ');
   },
 
-  // ----- Create-workspace wizard (Select Blueprint → Construct) -----
+  // ----- Create-workspace wizard (Choose Blueprint → Details → Review) -----
 
-  // Renders the wizard chrome for the current mode + step: which step panel is
-  // visible, the stepper, and which footer buttons show. Import mode is a
-  // single step that always shows the step-2 layout with no stepper/Back/Next.
+  // Renders the wizard chrome for the current mode + step. Import remains a
+  // single-step workflow and never exposes Create-only progress or review UI.
   refreshWizardChrome() {
     const importMode = Boolean(this.importModeEnabled);
     const step = importMode ? 2 : this.wizardStep;
 
     const step1 = document.getElementById('wizardStep1');
     const step2 = document.getElementById('wizardStep2');
+    const step3 = document.getElementById('wizardStep3');
     const stepper = document.getElementById('wizardStepper');
     const backBtn = document.getElementById('wizardBackBtn');
     const nextBtn = document.getElementById('wizardNextBtn');
     const createBtn = document.getElementById('createFolderBtn');
 
-    // The workspace name field is a single element relocated to the visible
-    // step's mount, so it's the first input on Select Blueprint yet stays
-    // editable on Construct (and in import mode's single-step layout).
-    this.relocateWizardNameField(step);
-    // Keep the folder-slug preview in sync with import mode (which hides it).
+    this.relocateWizardReviewFields();
     this.updateWorkspaceNameHint();
 
-    if (step1) step1.hidden = importMode || step !== 1;
-    if (step2) step2.hidden = step !== 2;
-    if (stepper) stepper.hidden = importMode;
-    stepper?.querySelectorAll('.workspace-create-step').forEach((el) => {
-      el.classList.toggle('is-active', String(el.dataset.step || '') === String(step));
+    if (step1) {
+      step1.hidden = importMode || step !== 1;
+      step1.setAttribute('aria-hidden', String(step1.hidden));
+    }
+    if (step2) {
+      step2.hidden = step !== 2;
+      step2.setAttribute('aria-hidden', String(step2.hidden));
+    }
+    if (step3) {
+      step3.hidden = importMode || step !== 3;
+      step3.setAttribute('aria-hidden', String(step3.hidden));
+    }
+    if (stepper) {
+      stepper.hidden = importMode;
+      stepper.setAttribute('aria-hidden', String(importMode));
+    }
+    stepper?.querySelectorAll('.workspace-create-step').forEach(el => {
+      const current = String(el.dataset.step || '') === String(step);
+      el.classList.toggle('is-active', current);
+      if (current) el.setAttribute('aria-current', 'step');
+      else el.removeAttribute('aria-current');
     });
 
     const onStep1 = !importMode && step === 1;
-    if (nextBtn) nextBtn.hidden = !onStep1;
-    if (backBtn) backBtn.hidden = importMode || step !== 2;
-    // createFolderBtn stays hidden on step 1; its disabled state is owned by the
-    // REAPER setup card, so only toggle visibility here.
-    if (createBtn) createBtn.hidden = onStep1;
+    if (nextBtn) {
+      nextBtn.hidden = importMode || step === 3;
+      nextBtn.textContent = onStep1 ? 'Continue →' : 'Review & Create →';
+    }
+    if (backBtn) backBtn.hidden = importMode || onStep1;
+    if (createBtn) {
+      createBtn.hidden = !importMode && step !== 3;
+      if (!this.isCreatingFolder) {
+        const selected = window.ProjectTemplateCard?.getSelectedTemplate?.();
+        createBtn.textContent = importMode
+          ? 'Import Folder'
+          : selected?.blank || !selected?.name
+            ? 'Create Workspace'
+            : `Create ${selected.name}`;
+      }
+    }
     // The step-2 recap names the chosen blueprint; import mode has no blueprint.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode;
+    if (!importMode && step === 3) this.refreshWorkspaceReview();
   },
 
-  // Moves the single #wizardNameField (which owns #folderNameInput) into the
-  // mount for the given effective step. appendChild preserves the input's value,
-  // focus, and listeners, so no cross-step syncing is needed.
-  relocateWizardNameField(step) {
-    const field = document.getElementById('wizardNameField');
-    if (!field) return;
-    const mount = document.getElementById(step === 2 ? 'wizardStep2NameMount' : 'wizardStep1NameMount');
-    if (mount && field.parentElement !== mount) {
-      mount.appendChild(field);
-    }
+  // Keep the source controls single-instance while moving their review-only
+  // cards into Step 3. This preserves their values, event listeners, and the
+  // existing REAPER readiness controller without shadow inputs.
+  relocateWizardReviewFields() {
+    const mount = document.getElementById('wizardStep3ReviewMount');
+    if (!mount) return;
+    ['projectTemplateOpenAfterCreate', 'reaperSetupCard'].forEach(id => {
+      const field = document.getElementById(id);
+      if (field && field.parentElement !== mount) mount.appendChild(field);
+    });
+    const templateMount = document.getElementById('templateAgentReviewMount');
+    const review = document.getElementById('templateAgentReview');
+    if (review && templateMount && review.parentElement !== templateMount)
+      templateMount.appendChild(review);
   },
 
   // Shows the folder the current name will map to on disk, so the name→folder
@@ -3935,28 +4964,37 @@ const sessionManager = {
     hint?.classList.remove('is-error');
   },
 
-  // Sets the step-2 recap line ("Constructing: <icon> <name>") from the selected
+  // Sets the step-2 recap line from the selected
   // blueprint, falling back to a Blank-workspace label.
   updateWizardRecap(template) {
     const nameEl = document.getElementById('wizardStep2RecapName');
     const iconEl = document.getElementById('wizardStep2RecapIcon');
     const isBlank = !template || template.blank || !template.id;
-    if (nameEl) nameEl.textContent = isBlank ? 'Blank workspace' : (template.name || template.id);
-    if (iconEl) iconEl.textContent = (template && template.icon) ? template.icon : '✍';
+    if (nameEl) nameEl.textContent = isBlank ? 'Blank workspace' : template.name || template.id;
+    if (iconEl) iconEl.textContent = template && template.icon ? template.icon : '✍';
   },
 
   // Moves the wizard to a step and re-renders chrome. Scrolls the modal body to
   // the top and moves focus to the step's primary control.
   goToWizardStep(step) {
-    this.wizardStep = step === 2 ? 2 : 1;
+    const targetStep = Math.max(1, Math.min(3, Number(step) || 1));
+    if (!this.importModeEnabled && targetStep >= 3) {
+      const name = document.getElementById('folderNameInput')?.value.trim() || '';
+      if (!name) {
+        this.wizardStep = 2;
+        this.refreshWizardChrome();
+        this.setWorkspaceNameError('Workspace name is required');
+        document.getElementById('folderNameInput')?.focus();
+        return;
+      }
+    }
+    this.wizardStep = targetStep;
     this.refreshWizardChrome();
     const body = document.querySelector('#addFolderModal .modal-body');
     if (body) body.scrollTop = 0;
-    if (this.wizardStep === 2) {
-      document.getElementById('folderNameInput')?.focus();
-    } else {
-      document.querySelector('#templateBuiltinGrid .workspace-template-card.is-selected')?.focus();
-    }
+    const heading = document.getElementById(`wizardStep${this.wizardStep}Title`);
+    if (heading) heading.focus();
+    else if (this.wizardStep === 2) document.getElementById('folderNameInput')?.focus();
   },
 
   // Applies a Template's default Agent behavior to the select, unless the user
@@ -4043,13 +5081,16 @@ const sessionManager = {
   async openProjectAfterWorkspaceCreate(workspaceId) {
     const id = String(workspaceId || '').trim();
     if (!id) return;
-    const response = await fetch(
-      `/api/workspaces/${encodeURIComponent(id)}/project/open`,
-      { method: 'POST' }
-    );
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(id)}/project/open`, {
+      method: 'POST'
+    });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.error) {
-      throw new Error(result.error || result.message || 'The system default application did not accept the project file.');
+      throw new Error(
+        result.error ||
+          result.message ||
+          'The system default application did not accept the project file.'
+      );
     }
   },
 
@@ -4115,11 +5156,17 @@ const sessionManager = {
       // Agent behavior profile (mapped from the Starting point or manually
       // overridden). Sent for both create and import; the backend maps it via
       // workspacesettings.ProfileDefaults.
-      payload.workspace_preset = document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
-      const buildSlugConflictMessage = (conflict) => {
-        const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
-        const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
-        const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+      payload.workspace_preset =
+        document.getElementById('folderPresetSelect')?.value?.trim() || 'general';
+      const buildSlugConflictMessage = conflict => {
+        const requestedSlug =
+          typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+        const suggestedSlug =
+          typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+        const location =
+          typeof conflict?.location === 'string'
+            ? conflict.location.trim().replace(/[\\/]+$/, '')
+            : '';
         const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
         const parts = [
           `A workspace folder named "${requestedSlug || 'this workspace'}" already exists on disk.`
@@ -4147,13 +5194,18 @@ const sessionManager = {
           Object.assign(payload, templateFields);
           // Blank blueprint (no template_id/path, no ad-hoc folder override):
           // tell the backend to seed the synthetic single-agent roster.
-          if (window.ProjectTemplateCard.getSelectedTemplate?.()?.blank
-            && !templateFields.template_id && !templateFields.template_path) {
+          if (
+            window.ProjectTemplateCard.getSelectedTemplate?.()?.blank &&
+            !templateFields.template_id &&
+            !templateFields.template_path
+          ) {
             payload.blank = true;
           }
         }
         if (this.templateAgentPlan?.has_agents) {
-          const createTemplateAgents = Boolean(document.getElementById('templateAgentReviewToggle')?.checked);
+          const createTemplateAgents = Boolean(
+            document.getElementById('templateAgentReviewToggle')?.checked
+          );
           payload.create_template_agents = createTemplateAgents;
           if (createTemplateAgents) {
             const templateAgentOverrides = this.collectTemplateAgentOverrides();
@@ -4161,6 +5213,15 @@ const sessionManager = {
               payload.template_agent_overrides = templateAgentOverrides;
             }
           }
+        }
+        if (this.existingAgentSelections.length > 0) {
+          payload.existing_agent_names = [...this.existingAgentSelections];
+          const selectedPrimary = this.existingAgentSelections.find(
+            agentName =>
+              this.existingAgentKey(agentName) ===
+              this.existingAgentKey(this.existingAgentPrimaryName)
+          );
+          if (selectedPrimary) payload.entry_agent_name = selectedPrimary;
         }
         if (window.WorkspaceTagsCard) {
           Object.assign(payload, window.WorkspaceTagsCard.getPayloadFields());
@@ -4186,14 +5247,18 @@ const sessionManager = {
 
         if (response.status === 409 && importEnabled && result.duplicate) {
           this.showImportDuplicateWarning(result.duplicate);
-          this.showToast('This folder is already imported. Open the existing workspace or click "Import Anyway".', 'warning');
+          this.showToast(
+            'This folder is already imported. Open the existing workspace or click "Import Anyway".',
+            'warning'
+          );
           return;
         }
 
         if (response.status === 409 && !importEnabled && result.conflict?.type === 'folder_slug') {
-          const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
-            ? result.conflict.suggested_slug.trim()
-            : '';
+          const suggestedSlug =
+            typeof result.conflict.suggested_slug === 'string'
+              ? result.conflict.suggested_slug.trim()
+              : '';
           if (!suggestedSlug) {
             throw new Error(result.error || 'Failed to create workspace');
           }
@@ -4232,7 +5297,9 @@ const sessionManager = {
       }
 
       if (!response.ok || result.error) {
-        const fallbackMessage = importEnabled ? 'Failed to import folder as workspace' : 'Failed to create workspace';
+        const fallbackMessage = importEnabled
+          ? 'Failed to import folder as workspace'
+          : 'Failed to create workspace';
         throw new Error(result.error || fallbackMessage);
       }
 
@@ -4244,25 +5311,28 @@ const sessionManager = {
       // Seeded template agents that could not be created surface here (non-fatal).
       if (Array.isArray(result.agent_warnings)) {
         result.agent_warnings
-          .filter((msg) => typeof msg === 'string' && msg)
-          .forEach((msg) => this.showToast(msg, 'warning'));
+          .filter(msg => typeof msg === 'string' && msg)
+          .forEach(msg => this.showToast(msg, 'warning'));
       }
       // A roster entry matched an existing agent by name; the existing
       // definition was reused instead of the template's (PRD FR7).
       if (Array.isArray(result.agent_reuse_notices)) {
         result.agent_reuse_notices
-          .filter((msg) => typeof msg === 'string' && msg)
-          .forEach((msg) => this.showToast(msg, 'info'));
+          .filter(msg => typeof msg === 'string' && msg)
+          .forEach(msg => this.showToast(msg, 'info'));
       }
       if (window.ProjectTemplateCard) window.ProjectTemplateCard.reset();
       if (window.WorkspaceTagsCard) window.WorkspaceTagsCard.reset();
       window.OriTagInput?.clearTagPoolCache?.();
 
-      const createdWorkspaceId = result && result.folder && result.folder.id
-        ? String(result.folder.id)
+      const createdWorkspaceId =
+        result && result.folder && result.folder.id ? String(result.folder.id) : '';
+      const askOriSeedNoteRaw = modalElement
+        ? String(modalElement.dataset.askOriSeedNote || '')
         : '';
-      const askOriSeedNoteRaw = modalElement ? String(modalElement.dataset.askOriSeedNote || '') : '';
-      const askOriSeedTaskRaw = modalElement ? String(modalElement.dataset.askOriSeedTask || '') : '';
+      const askOriSeedTaskRaw = modalElement
+        ? String(modalElement.dataset.askOriSeedTask || '')
+        : '';
       if (modalElement) {
         delete modalElement.dataset.askOriPostCreate;
         delete modalElement.dataset.askOriSeedNote;
@@ -4322,7 +5392,6 @@ const sessionManager = {
       // (assigned to the entry agent); the create response reports how many.
       const seededStarterTasks = Number(result?.seeded_starter_tasks) || 0;
 
-
       if (
         bootstrapApplyResult.invitedAgents > 0 ||
         bootstrapApplyResult.boundMCPs > 0 ||
@@ -4333,28 +5402,48 @@ const sessionManager = {
         seededStarterTasks > 0
       ) {
         const summaryParts = [];
-        if (bootstrapApplyResult.invitedAgents > 0) summaryParts.push(`${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`);
-        if (bootstrapApplyResult.boundMCPs > 0) summaryParts.push(`${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`);
-        if (bootstrapApplyResult.attachedSkills > 0) summaryParts.push(`${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`);
-        if (bootstrapApplyResult.addedPlugins > 0) summaryParts.push(`${bootstrapApplyResult.addedPlugins} plugin${bootstrapApplyResult.addedPlugins === 1 ? '' : 's'} added`);
-        if (askOriSeedResult.tasksCreated > 0) summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
-        if (askOriSeedResult.notesCreated > 0) summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
-        if (seededStarterTasks > 0) summaryParts.push(`${seededStarterTasks} starter task${seededStarterTasks === 1 ? '' : 's'} added`);
+        if (bootstrapApplyResult.invitedAgents > 0)
+          summaryParts.push(
+            `${bootstrapApplyResult.invitedAgents} agent${bootstrapApplyResult.invitedAgents === 1 ? '' : 's'} invited`
+          );
+        if (bootstrapApplyResult.boundMCPs > 0)
+          summaryParts.push(
+            `${bootstrapApplyResult.boundMCPs} MCP${bootstrapApplyResult.boundMCPs === 1 ? '' : 's'} bound`
+          );
+        if (bootstrapApplyResult.attachedSkills > 0)
+          summaryParts.push(
+            `${bootstrapApplyResult.attachedSkills} skill${bootstrapApplyResult.attachedSkills === 1 ? '' : 's'} attached`
+          );
+        if (bootstrapApplyResult.addedPlugins > 0)
+          summaryParts.push(
+            `${bootstrapApplyResult.addedPlugins} plugin${bootstrapApplyResult.addedPlugins === 1 ? '' : 's'} added`
+          );
+        if (askOriSeedResult.tasksCreated > 0)
+          summaryParts.push(`${askOriSeedResult.tasksCreated} Assistant task`);
+        if (askOriSeedResult.notesCreated > 0)
+          summaryParts.push(`${askOriSeedResult.notesCreated} Assistant note`);
+        if (seededStarterTasks > 0)
+          summaryParts.push(
+            `${seededStarterTasks} starter task${seededStarterTasks === 1 ? '' : 's'} added`
+          );
         const summaryText = summaryParts.join(', ');
-        if (
-          askOriSeedResult.errors.length > 0 ||
-          bootstrapApplyResult.failures.length > 0
-        ) {
+        if (askOriSeedResult.errors.length > 0 || bootstrapApplyResult.failures.length > 0) {
           const firstFailure = bootstrapApplyResult.failures[0];
           this.showToast(
             `${importEnabled ? 'Workspace imported' : 'Workspace created'} with partial setup (${summaryText}).${firstFailure ? ` ${firstFailure}` : ''}`,
             'warning'
           );
         } else {
-          this.showToast(`${importEnabled ? 'Workspace imported' : 'Workspace created'} with setup (${summaryText}).`, 'success');
+          this.showToast(
+            `${importEnabled ? 'Workspace imported' : 'Workspace created'} with setup (${summaryText}).`,
+            'success'
+          );
         }
       } else {
-        this.showToast(importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully', 'success');
+        this.showToast(
+          importEnabled ? 'Workspace imported successfully' : 'Workspace created successfully',
+          'success'
+        );
       }
 
       if (createdWorkspaceId && openProjectAfterCreate) {
@@ -4384,7 +5473,10 @@ const sessionManager = {
       }
     } catch (error) {
       console.error('Failed to create folder:', error);
-      this.showToast(error && error.message ? error.message : 'Failed to create workspace', 'error');
+      this.showToast(
+        error && error.message ? error.message : 'Failed to create workspace',
+        'error'
+      );
     } finally {
       this.isCreatingFolder = false;
       if (createBtn) {
@@ -4396,7 +5488,8 @@ const sessionManager = {
 
   // Delete folder
   async deleteFolder(folderId) {
-    if (!confirm('Are you sure you want to delete this workspace? Sessions will be moved to root.')) return;
+    if (!confirm('Are you sure you want to delete this workspace? Sessions will be moved to root.'))
+      return;
 
     try {
       const response = await fetch(`/api/workspaces/${folderId}`, {
@@ -4731,7 +5824,7 @@ const sessionManager = {
     };
 
     input.addEventListener('blur', saveRename);
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
         input.blur();
@@ -4773,7 +5866,7 @@ const sessionManager = {
     };
 
     input.addEventListener('blur', saveRename);
-    input.addEventListener('keydown', (e) => {
+    input.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
         input.blur();
@@ -4791,7 +5884,9 @@ const sessionManager = {
   slugifyWorkspaceName(value) {
     const s = String(value || '').trim();
     if (!s) return 'untitled';
-    let slug = s.normalize('NFD').replace(/\p{Mn}/gu, '')
+    let slug = s
+      .normalize('NFD')
+      .replace(/\p{Mn}/gu, '')
       .toLowerCase()
       .replace(/[^a-z0-9-]+/g, '-')
       .replace(/-{2,}/g, '-')
@@ -4801,9 +5896,12 @@ const sessionManager = {
   },
 
   buildWorkspaceSlugConflictMessage(conflict) {
-    const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
-    const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
-    const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+    const requestedSlug =
+      typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+    const suggestedSlug =
+      typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+    const location =
+      typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
     const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
 
     const parts = [
@@ -4833,10 +5931,14 @@ const sessionManager = {
       });
       const result = await response.json().catch(() => ({}));
       if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
-        const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
-          ? result.conflict.suggested_slug.trim()
-          : '';
-        if (suggestedSlug && window.confirm(this.buildWorkspaceSlugConflictMessage(result.conflict))) {
+        const suggestedSlug =
+          typeof result.conflict.suggested_slug === 'string'
+            ? result.conflict.suggested_slug.trim()
+            : '';
+        if (
+          suggestedSlug &&
+          window.confirm(this.buildWorkspaceSlugConflictMessage(result.conflict))
+        ) {
           return this.renameFolder(folderId, newName, suggestedSlug);
         }
         const cancelled = new Error(result?.error || 'Workspace rename cancelled');
@@ -4924,7 +6026,7 @@ const sessionManager = {
     });
 
     // Close on click outside
-    const closePopup = (e) => {
+    const closePopup = e => {
       if (!popup.contains(e.target)) {
         popup.remove();
         document.removeEventListener('click', closePopup);
@@ -4991,14 +6093,18 @@ const sessionManager = {
         </svg>
         No Workspace
       </div>
-      ${assignableFolders.map(folder => `
+      ${assignableFolders
+        .map(
+          folder => `
         <div class="move-folder-item ${folder.id === currentFolderId ? 'selected' : ''}" data-folder-id="${folder.id}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="${folder.color || 'currentColor'}" class="me-2">
             <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
           </svg>
           ${this.escapeHtml(`${folder.depth > 0 ? `${'--'.repeat(folder.depth)} ` : ''}${folder.name}`)}
         </div>
-      `).join('')}
+      `
+        )
+        .join('')}
     `;
 
     // Bind click handlers
@@ -5167,7 +6273,9 @@ const sessionManager = {
             <div class="modal-body">
               <p class="text-muted small mb-3">Select a new agent for this session. Future messages will use the selected agent.</p>
               <div class="list-group list-group-flush">
-                ${agents.map(agent => `
+                ${agents
+                  .map(
+                    agent => `
                   <button type="button" class="list-group-item list-group-item-action bg-dark text-light border-secondary change-agent-item ${agent.name === session.agent_name ? 'active' : ''}"
                           data-agent-name="${this.escapeHtml(agent.name)}">
                     <div class="d-flex justify-content-between align-items-center">
@@ -5178,7 +6286,9 @@ const sessionManager = {
                       ${agent.name === session.agent_name ? '<span class="badge bg-success">Current</span>' : ''}
                     </div>
                   </button>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
             </div>
             <div class="modal-footer border-secondary">
@@ -5285,7 +6395,7 @@ const sessionManager = {
     let startX = 0;
     let startWidth = 0;
 
-    handle.addEventListener('mousedown', (e) => {
+    handle.addEventListener('mousedown', e => {
       isResizing = true;
       startX = e.clientX;
       startWidth = sidebar.offsetWidth;
@@ -5294,7 +6404,7 @@ const sessionManager = {
       document.body.style.userSelect = 'none';
     });
 
-    document.addEventListener('mousemove', (e) => {
+    document.addEventListener('mousemove', e => {
       if (!isResizing) return;
 
       const width = startWidth + (e.clientX - startX);
@@ -5326,7 +6436,10 @@ const sessionManager = {
       this.setSelection([sessionId], this.getSessionIndex(sessionId));
     }
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('application/x-ori-session-ids', JSON.stringify(this.selectedSessionIds));
+    e.dataTransfer.setData(
+      'application/x-ori-session-ids',
+      JSON.stringify(this.selectedSessionIds)
+    );
     e.dataTransfer.setData('text/plain', String(sessionId));
     e.currentTarget.classList.add('dragging');
     document.getElementById('folderTreeSection')?.classList.add('dragging');
@@ -5627,7 +6740,9 @@ const sessionManager = {
             message += ` to workspace "${result.workspace_name}"`;
           }
           if (result.agent_name) {
-            message += result.workspace_name ? ` with agent "${result.agent_name}"` : ` to agent "${result.agent_name}"`;
+            message += result.workspace_name
+              ? ` with agent "${result.agent_name}"`
+              : ` to agent "${result.agent_name}"`;
           }
           Toast.success(message);
         }
@@ -5680,7 +6795,9 @@ const sessionManager = {
   },
 
   // Escape HTML
-  escapeHtml(text) { return window.NoteEditor?.escapeHtml(text) ?? String(text ?? ''); },
+  escapeHtml(text) {
+    return window.NoteEditor?.escapeHtml(text) ?? String(text ?? '');
+  },
 
   // Convert hex color to rgba string
   hexToRgba(hex, alpha) {
@@ -5730,7 +6847,12 @@ const sessionManager = {
   // Show toast notification
   showToast(message, type = 'info') {
     const normalizedType = (type || 'info').toLowerCase();
-    const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
+    const toastType =
+      normalizedType === 'danger'
+        ? 'error'
+        : normalizedType === 'warn'
+          ? 'warning'
+          : normalizedType;
 
     if (typeof window.notifyToast === 'function') {
       window.notifyToast(message, toastType);
@@ -5773,28 +6895,62 @@ const sessionManager = {
   noteModalHideInProgress: false,
   noteModalAllowHide: false,
   noteAIGeneratedDraft: null,
-  get noteLive() { return this._ensureMount()?.live ?? null; },
-  set noteLive(_v) { /* no-op — mount owns the live instance */ },
+  get noteLive() {
+    return this._ensureMount()?.live ?? null;
+  },
+  set noteLive(_v) {
+    /* no-op — mount owns the live instance */
+  },
   // Back-compat: the original sessionManager exposed `noteLiveState` as a
   // bare object. That alias still resolves to the controller's state.
-  get noteLiveState() { return this._ensureLive()?.state; },
+  get noteLiveState() {
+    return this._ensureLive()?.state;
+  },
   // Field-level back-compat. Callers that read/write `this.noteLive*` keep
   // working — the getters/setters target the controller's state.
-  get noteLiveActiveLineIndex() { return this._ensureLive()?.state.activeLineIndex ?? null; },
-  set noteLiveActiveLineIndex(v) { const s = this._ensureLive()?.state; if (s) s.activeLineIndex = v; },
-  get noteLiveActiveRange() { return this._ensureLive()?.state.activeRange ?? null; },
-  set noteLiveActiveRange(v) { const s = this._ensureLive()?.state; if (s) s.activeRange = v; },
-  get noteLiveSelectionAnchorIndex() { return this._ensureLive()?.state.selectionAnchorIndex ?? null; },
-  set noteLiveSelectionAnchorIndex(v) { const s = this._ensureLive()?.state; if (s) s.selectionAnchorIndex = v; },
-  get noteLiveSelectionFocusIndex() { return this._ensureLive()?.state.selectionFocusIndex ?? null; },
-  set noteLiveSelectionFocusIndex(v) { const s = this._ensureLive()?.state; if (s) s.selectionFocusIndex = v; },
-  get noteLivePointerDown() { return this._ensureLive()?.state.pointerDown ?? null; },
-  set noteLivePointerDown(v) { const s = this._ensureLive()?.state; if (s) s.pointerDown = v; },
+  get noteLiveActiveLineIndex() {
+    return this._ensureLive()?.state.activeLineIndex ?? null;
+  },
+  set noteLiveActiveLineIndex(v) {
+    const s = this._ensureLive()?.state;
+    if (s) s.activeLineIndex = v;
+  },
+  get noteLiveActiveRange() {
+    return this._ensureLive()?.state.activeRange ?? null;
+  },
+  set noteLiveActiveRange(v) {
+    const s = this._ensureLive()?.state;
+    if (s) s.activeRange = v;
+  },
+  get noteLiveSelectionAnchorIndex() {
+    return this._ensureLive()?.state.selectionAnchorIndex ?? null;
+  },
+  set noteLiveSelectionAnchorIndex(v) {
+    const s = this._ensureLive()?.state;
+    if (s) s.selectionAnchorIndex = v;
+  },
+  get noteLiveSelectionFocusIndex() {
+    return this._ensureLive()?.state.selectionFocusIndex ?? null;
+  },
+  set noteLiveSelectionFocusIndex(v) {
+    const s = this._ensureLive()?.state;
+    if (s) s.selectionFocusIndex = v;
+  },
+  get noteLivePointerDown() {
+    return this._ensureLive()?.state.pointerDown ?? null;
+  },
+  set noteLivePointerDown(v) {
+    const s = this._ensureLive()?.state;
+    if (s) s.pointerDown = v;
+  },
   get noteLiveCollapsedHeadings() {
     const s = this._ensureLive()?.state;
     return s ? s.collapsedHeadings : new Set();
   },
-  set noteLiveCollapsedHeadings(v) { const s = this._ensureLive()?.state; if (s) s.collapsedHeadings = v; },
+  set noteLiveCollapsedHeadings(v) {
+    const s = this._ensureLive()?.state;
+    if (s) s.collapsedHeadings = v;
+  },
 
   // _ensureMount builds the four-controller bundle on first access. The
   // mount factory wires history/autosave/toc/live to a shared sub-host.
@@ -5807,40 +6963,57 @@ const sessionManager = {
     // _readNoteSelection).
     this.noteMount = window.NoteEditor.mount({
       getContent: () => this.getNoteContentValue(),
-      setContent: (v) => this.setNoteContentValue(v),
+      setContent: v => this.setNoteContentValue(v),
       getContentLines: () => this.getNoteContentLines(),
-      setContentLines: (lines) => this.setNoteContentLines(lines),
+      setContentLines: lines => this.setNoteContentLines(lines),
       isPreviewMode: () => this.isNotePreviewMode,
       onAutosaveFlush: () => this.autoSaveNote(),
       aiAssist: {
         readSelection: () => this._readNoteSelection(),
-        showToast: (msg, kind) => this.showToast?.(msg, kind),
-      },
+        showToast: (msg, kind) => this.showToast?.(msg, kind)
+      }
     });
     window.NoteWikilinks?.setWorkspaceContext(
-      () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
+      () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null
     );
     // Left-rail Notes tab: lazy-init the list. The rail is always shown when
     // the editor is in preview mode, so the user can switch to Notes even
     // when this note has no headings.
     window.NoteRailNotes?.initRail({
-      workspaceIdResolver: () => this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
-      activeNoteId: this.currentNote?.id || null,
+      workspaceIdResolver: () =>
+        this.noteModalWorkspaceId || this.currentNote?.workspace_id || null,
+      activeNoteId: this.currentNote?.id || null
     });
     return this.noteMount;
   },
 
-  _ensureLive() { return this._ensureMount()?.live ?? null; },
+  _ensureLive() {
+    return this._ensureMount()?.live ?? null;
+  },
   // Compat alias kept for any sites that still spell it _ensureLiveState.
-  _ensureLiveState() { return this._ensureLive()?.state; },
+  _ensureLiveState() {
+    return this._ensureLive()?.state;
+  },
   // History / autosave / toc all live in the mount bundle. Backward-compat
   // getters/setters keep call sites that read `this.note*` working.
-  get noteHistory() { return this._ensureMount()?.history ?? null; },
-  set noteHistory(_v) { /* no-op — mount owns it */ },
-  get noteAutoSave() { return this._ensureMount()?.autosave ?? null; },
-  set noteAutoSave(_v) { /* no-op — mount owns it */ },
-  get noteToc() { return this._ensureMount()?.toc ?? null; },
-  set noteToc(_v) { /* no-op — mount owns it */ },
+  get noteHistory() {
+    return this._ensureMount()?.history ?? null;
+  },
+  set noteHistory(_v) {
+    /* no-op — mount owns it */
+  },
+  get noteAutoSave() {
+    return this._ensureMount()?.autosave ?? null;
+  },
+  set noteAutoSave(_v) {
+    /* no-op — mount owns it */
+  },
+  get noteToc() {
+    return this._ensureMount()?.toc ?? null;
+  },
+  set noteToc(_v) {
+    /* no-op — mount owns it */
+  },
 
   // Load notes for a folder
   async loadFolderNotes(folderId) {
@@ -5860,9 +7033,8 @@ const sessionManager = {
   async createFileReferenceNote(folderId, file) {
     const name = `📎 ${file.name}`;
     const sizeKB = (file.size / 1024).toFixed(1);
-    const sizeStr = file.size > 1024 * 1024
-      ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-      : `${sizeKB} KB`;
+    const sizeStr =
+      file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(1)} MB` : `${sizeKB} KB`;
 
     // Upload file to server
     let serverPath = '';
@@ -5890,11 +7062,24 @@ const sessionManager = {
 
     let content = `**File:** ${file.name}\n**Size:** ${sizeStr}\n**Type:** ${file.type || 'unknown'}\n**Path:** ${serverPath}`;
 
-    const textExtensions = ['txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'csv', 'yaml', 'yml'];
+    const textExtensions = [
+      'txt',
+      'md',
+      'json',
+      'xml',
+      'html',
+      'css',
+      'js',
+      'ts',
+      'csv',
+      'yaml',
+      'yml'
+    ];
     const ext = file.name.split('.').pop()?.toLowerCase();
 
     // For text files, include readable preview
-    if (textExtensions.includes(ext) && file.size < 50 * 1024) { // Under 50KB
+    if (textExtensions.includes(ext) && file.size < 50 * 1024) {
+      // Under 50KB
       try {
         const text = await file.text();
         const preview = text.length > 2000 ? text.substring(0, 2000) + '\n...' : text;
@@ -6102,14 +7287,18 @@ const sessionManager = {
 
     return `
       <div class="folder-notes-section">
-        ${notes.map(note => `
+        ${notes
+          .map(
+            note => `
           <div class="folder-note-item" data-note-id="${note.id}" data-folder-id="${folderId}" draggable="true">
             <svg class="folder-note-icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13"/>
             </svg>
             <span class="folder-note-name">${this.escapeHtml(note.name)}</span>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     `;
   },
@@ -6122,7 +7311,7 @@ const sessionManager = {
   bindNoteEvents() {
     // Note click to open editor (folder tree items). Routes via openNote so
     // it respects the user's notes_open_behavior preference.
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', e => {
       const noteItem = e.target.closest('.folder-note-item');
       if (noteItem) {
         e.preventDefault();
@@ -6139,11 +7328,10 @@ const sessionManager = {
         const noteId = searchNoteItem.dataset.noteId;
         this.openNote(noteId);
       }
-
     });
 
     // Note context menu
-    document.addEventListener('contextmenu', (e) => {
+    document.addEventListener('contextmenu', e => {
       const noteItem = e.target.closest('.folder-note-item');
       if (noteItem) {
         e.preventDefault();
@@ -6156,7 +7344,7 @@ const sessionManager = {
 
     // Note context menu actions
     document.querySelectorAll('#noteContextMenu .session-context-item').forEach(item => {
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', e => {
         e.stopPropagation();
         const action = e.currentTarget.dataset.action;
         this.handleNoteContextAction(action);
@@ -6165,11 +7353,17 @@ const sessionManager = {
 
     // Note editor save button
     document.getElementById('saveNoteBtn')?.addEventListener('click', () => this.saveCurrentNote());
-    document.getElementById('noteCopyBtn')?.addEventListener('click', () => this.copyCurrentNoteContent());
-    document.getElementById('noteOpenInPageBtn')?.addEventListener('click', () => this.openCurrentNoteAsPage());
+    document
+      .getElementById('noteCopyBtn')
+      ?.addEventListener('click', () => this.copyCurrentNoteContent());
+    document
+      .getElementById('noteOpenInPageBtn')
+      ?.addEventListener('click', () => this.openCurrentNoteAsPage());
 
     // Auto-save: listen for input changes on note title and content
-    document.getElementById('noteNameInput')?.addEventListener('input', () => this.scheduleNoteAutoSave());
+    document
+      .getElementById('noteNameInput')
+      ?.addEventListener('input', () => this.scheduleNoteAutoSave());
     document.getElementById('noteContentInput')?.addEventListener('input', () => {
       this.scheduleNoteAutoSave();
       if (this.isNotePreviewMode) {
@@ -6180,7 +7374,7 @@ const sessionManager = {
 
     // Auto-save before modal close (if there are unsaved changes). The hide
     // event is cancellable; hidden.bs.modal is too late to protect edits.
-    document.getElementById('noteEditorModal')?.addEventListener('hide.bs.modal', (event) => {
+    document.getElementById('noteEditorModal')?.addEventListener('hide.bs.modal', event => {
       this.handleNoteModalBeforeHide(event);
     });
     document.getElementById('noteEditorModal')?.addEventListener('hidden.bs.modal', () => {
@@ -6188,13 +7382,13 @@ const sessionManager = {
     });
 
     // Note workspace selector
-    document.getElementById('noteWorkspaceChange')?.addEventListener('click', (e) => {
+    document.getElementById('noteWorkspaceChange')?.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       this.showNoteWorkspaceSelector();
     });
 
-    document.getElementById('noteWorkspaceSelect')?.addEventListener('change', (e) => {
+    document.getElementById('noteWorkspaceSelect')?.addEventListener('change', e => {
       const workspaceId = e.target.value;
       if (!workspaceId) {
         this.noteModalWorkspaceId = null;
@@ -6205,25 +7399,41 @@ const sessionManager = {
     });
 
     // Note preview toggle
-    document.getElementById('notePreviewToggle')?.addEventListener('click', () => this.toggleNotePreview());
+    document
+      .getElementById('notePreviewToggle')
+      ?.addEventListener('click', () => this.toggleNotePreview());
 
     // Note AI generation toggle
     window.NoteEditor?.bindGenerateToggleButton?.();
 
     // Rail collapse toggles (TOC + AI Assist). The buttons stay hidden until
     // the corresponding feature (tasks 3.0 / 4.0) reveals them.
-    document.getElementById('noteTocToggle')?.addEventListener('click', () => this.toggleNoteTocRail());
-    document.getElementById('noteAssistToggle')?.addEventListener('click', () => this.toggleNoteAssistRail());
+    document
+      .getElementById('noteTocToggle')
+      ?.addEventListener('click', () => this.toggleNoteTocRail());
+    document
+      .getElementById('noteAssistToggle')
+      ?.addEventListener('click', () => this.toggleNoteAssistRail());
 
     // Note AI generation buttons
-    document.getElementById('noteAIGenerateBtn')?.addEventListener('click', () => this.generateNoteWithAI());
-    document.getElementById('noteAICancelBtn')?.addEventListener('click', () => this.hideNoteAIPanel());
-    document.getElementById('noteAIReplaceBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('replace'));
-    document.getElementById('noteAIAppendBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('append'));
-    document.getElementById('noteAIInsertBtn')?.addEventListener('click', () => this.applyGeneratedNoteDraft('insert'));
+    document
+      .getElementById('noteAIGenerateBtn')
+      ?.addEventListener('click', () => this.generateNoteWithAI());
+    document
+      .getElementById('noteAICancelBtn')
+      ?.addEventListener('click', () => this.hideNoteAIPanel());
+    document
+      .getElementById('noteAIReplaceBtn')
+      ?.addEventListener('click', () => this.applyGeneratedNoteDraft('replace'));
+    document
+      .getElementById('noteAIAppendBtn')
+      ?.addEventListener('click', () => this.applyGeneratedNoteDraft('append'));
+    document
+      .getElementById('noteAIInsertBtn')
+      ?.addEventListener('click', () => this.applyGeneratedNoteDraft('insert'));
 
     // Note drag start
-    document.addEventListener('dragstart', (e) => {
+    document.addEventListener('dragstart', e => {
       const noteItem = e.target.closest('.folder-note-item');
       if (noteItem) {
         const noteId = noteItem.dataset.noteId;
@@ -6237,7 +7447,7 @@ const sessionManager = {
     });
 
     // Note drag end
-    document.addEventListener('dragend', (e) => {
+    document.addEventListener('dragend', e => {
       const noteItem = e.target.closest('.folder-note-item');
       if (noteItem) {
         noteItem.classList.remove('dragging');
@@ -6322,7 +7532,10 @@ const sessionManager = {
       return;
     }
 
-    this.showToast('No attached file found in this note. Re-drop the file to enable this feature.', 'error');
+    this.showToast(
+      'No attached file found in this note. Re-drop the file to enable this feature.',
+      'error'
+    );
   },
 
   // Attach file from server storage
@@ -6415,7 +7628,7 @@ const sessionManager = {
       window.NoteAIAssist?.onNoteOpened({
         noteId: null,
         workspaceId: workspaceId || null,
-        agentId: this._resolveWorkspaceAgentId(),
+        agentId: this._resolveWorkspaceAgentId()
       });
     });
 
@@ -6457,9 +7670,15 @@ const sessionManager = {
     if (changeBtn) changeBtn.style.display = allowChange ? 'inline-flex' : 'none';
   },
 
-  normalizeNoteVaultReference(ref) { return window.NoteEditor?.normalizeVaultReference(ref) ?? null; },
-  showNoteVaultReferenceBadge(ref) { window.NoteEditor?.showVaultReferenceBadge(ref); },
-  hideNoteVaultReferenceBadge() { window.NoteEditor?.hideVaultReferenceBadge(); },
+  normalizeNoteVaultReference(ref) {
+    return window.NoteEditor?.normalizeVaultReference(ref) ?? null;
+  },
+  showNoteVaultReferenceBadge(ref) {
+    window.NoteEditor?.showVaultReferenceBadge(ref);
+  },
+  hideNoteVaultReferenceBadge() {
+    window.NoteEditor?.hideVaultReferenceBadge();
+  },
 
   showNoteWorkspaceSelector() {
     const badge = document.getElementById('noteWorkspaceBadge');
@@ -6538,11 +7757,13 @@ const sessionManager = {
       const elsewhere = await window.NotePresence?.isOpenElsewhere?.(noteId);
       if (elsewhere?.open && elsewhere.surface === 'page') {
         const proceed = window.confirm(
-          'This note is already open in another browser tab. Open it here too?',
+          'This note is already open in another browser tab. Open it here too?'
         );
         if (!proceed) return;
       }
-    } catch (_) { /* non-fatal */ }
+    } catch (_) {
+      /* non-fatal */
+    }
 
     const note = await this.getNote(noteId);
     if (!note) return;
@@ -6630,7 +7851,7 @@ const sessionManager = {
       window.NoteAIAssist?.onNoteOpened({
         noteId: note.id,
         workspaceId: this.noteModalWorkspaceId,
-        agentId: this._resolveWorkspaceAgentId(),
+        agentId: this._resolveWorkspaceAgentId()
       });
     });
     // Backlinks: notes referencing this one via [[wikilinks]]. Hidden when none.
@@ -6695,7 +7916,7 @@ const sessionManager = {
         isPreviewMode: this.isNotePreviewMode,
         textareaLen: (contentInput.value || '').length,
         previewDisplay: previewContent.style.display,
-        previewInnerHTMLLen: previewContent.innerHTML.length,
+        previewInnerHTMLLen: previewContent.innerHTML.length
       });
       this.setNotePreviewMode(false);
     }
@@ -6797,7 +8018,8 @@ const sessionManager = {
         this.showNoteWorkspaceBadge(workspaceId, false);
         window.NoteBacklinks?.announceNoteSaved?.(created.id, noteContent.includes('[['));
         const lastSaved = document.getElementById('noteLastSaved');
-        if (lastSaved) lastSaved.textContent = `Last saved: ${this.formatDateTime(created.updated_at || created.created_at)}`;
+        if (lastSaved)
+          lastSaved.textContent = `Last saved: ${this.formatDateTime(created.updated_at || created.created_at)}`;
       } else {
         this.updateNoteSaveStatus('error');
       }
@@ -6815,7 +8037,8 @@ const sessionManager = {
       this.noteAutoSave?.markClean();
       this.showToast('Note saved', 'success');
       const lastSaved = document.getElementById('noteLastSaved');
-      if (lastSaved) lastSaved.textContent = `Last saved: ${this.formatDateTime(updated.updated_at || this.currentNote.updated_at)}`;
+      if (lastSaved)
+        lastSaved.textContent = `Last saved: ${this.formatDateTime(updated.updated_at || this.currentNote.updated_at)}`;
 
       // Refresh folder tree to show updated note name
       this.renderFolderTree();
@@ -6829,9 +8052,13 @@ const sessionManager = {
   // =============================================================================
 
   // Schedule auto-save with debounce
-  _ensureNoteAutoSave() { return this._ensureMount()?.autosave ?? null; },
+  _ensureNoteAutoSave() {
+    return this._ensureMount()?.autosave ?? null;
+  },
 
-  scheduleNoteAutoSave() { this._ensureNoteAutoSave()?.schedule(); },
+  scheduleNoteAutoSave() {
+    this._ensureNoteAutoSave()?.schedule();
+  },
 
   // Performs one autosave attempt. Called by the timer or by handleNoteModalClose.
   async autoSaveNote() {
@@ -6851,7 +8078,10 @@ const sessionManager = {
           this.currentNote = { ...this.currentNote, ...updated };
           this.renderFolderTree();
           // Notify other tabs so any open Backlinks panel can re-fetch.
-          window.NoteBacklinks?.announceNoteSaved?.(this.currentNote.id, noteContent.includes('[['));
+          window.NoteBacklinks?.announceNoteSaved?.(
+            this.currentNote.id,
+            noteContent.includes('[[')
+          );
           return true;
         } else {
           return false;
@@ -6884,10 +8114,9 @@ const sessionManager = {
     const saveBtn = document.getElementById('saveNoteBtn');
     if (!saveBtn) return;
     const isCreate = !this.currentNote?.id;
-    saveBtn.textContent = isCreate
-      ? 'Create note'
-      : (status === 'error' ? 'Retry save' : 'Save now');
-    saveBtn.hidden = !isCreate && !(status === 'unsaved' || status === 'error' || status === 'saving');
+    saveBtn.textContent = isCreate ? 'Create note' : status === 'error' ? 'Retry save' : 'Save now';
+    saveBtn.hidden =
+      !isCreate && !(status === 'unsaved' || status === 'error' || status === 'saving');
     saveBtn.disabled = status === 'saving';
   },
 
@@ -6907,22 +8136,26 @@ const sessionManager = {
     if (this.noteModalHideInProgress) return;
     this.noteModalHideInProgress = true;
 
-    timer.flushImmediate().then((saved) => {
-      if (saved === false) {
+    timer
+      .flushImmediate()
+      .then(saved => {
+        if (saved === false) {
+          this.showToast('Save failed. Retry save before closing this note.', 'error');
+          this.updateNoteSaveStatus('error');
+          return;
+        }
+        this.noteModalAllowHide = true;
+        const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
+        modal?.hide();
+      })
+      .catch(error => {
+        console.error('Auto-save before modal close failed:', error);
         this.showToast('Save failed. Retry save before closing this note.', 'error');
         this.updateNoteSaveStatus('error');
-        return;
-      }
-      this.noteModalAllowHide = true;
-      const modal = bootstrap.Modal.getInstance(document.getElementById('noteEditorModal'));
-      modal?.hide();
-    }).catch((error) => {
-      console.error('Auto-save before modal close failed:', error);
-      this.showToast('Save failed. Retry save before closing this note.', 'error');
-      this.updateNoteSaveStatus('error');
-    }).finally(() => {
-      this.noteModalHideInProgress = false;
-    });
+      })
+      .finally(() => {
+        this.noteModalHideInProgress = false;
+      });
   },
 
   handleNoteModalHidden() {
@@ -6930,7 +8163,9 @@ const sessionManager = {
     this.noteModalHideInProgress = false;
   },
 
-  resetNoteAutoSaveState() { this._ensureNoteAutoSave()?.reset(); },
+  resetNoteAutoSaveState() {
+    this._ensureNoteAutoSave()?.reset();
+  },
 
   // =============================================================================
   // Note Editor Rails (TOC + AI Assist)
@@ -6939,14 +8174,30 @@ const sessionManager = {
   // showNoteTocRail() / showNoteAssistRail() once they have content to display.
   // The collapse toggle is per-rail and persisted in localStorage.
 
-  _applyNoteRailState() { window.NoteEditor?.applyAllRailState(); },
-  _applyNoteRailCollapsed(rail) { window.NoteEditor?.applyRailCollapsed(rail); },
-  toggleNoteTocRail() { window.NoteEditor?.toggleRail('toc'); },
-  toggleNoteAssistRail() { window.NoteEditor?.toggleRail('assist'); },
-  showNoteTocRail() { window.NoteEditor?.showRail('toc'); },
-  hideNoteTocRail() { window.NoteEditor?.hideRail('toc'); },
-  showNoteAssistRail() { window.NoteEditor?.showRail('assist'); },
-  hideNoteAssistRail() { window.NoteEditor?.hideRail('assist'); },
+  _applyNoteRailState() {
+    window.NoteEditor?.applyAllRailState();
+  },
+  _applyNoteRailCollapsed(rail) {
+    window.NoteEditor?.applyRailCollapsed(rail);
+  },
+  toggleNoteTocRail() {
+    window.NoteEditor?.toggleRail('toc');
+  },
+  toggleNoteAssistRail() {
+    window.NoteEditor?.toggleRail('assist');
+  },
+  showNoteTocRail() {
+    window.NoteEditor?.showRail('toc');
+  },
+  hideNoteTocRail() {
+    window.NoteEditor?.hideRail('toc');
+  },
+  showNoteAssistRail() {
+    window.NoteEditor?.showRail('assist');
+  },
+  hideNoteAssistRail() {
+    window.NoteEditor?.hideRail('assist');
+  },
 
   // =============================================================================
   // Note AI Assist (selection action bar + sidebar wiring)
@@ -6955,17 +8206,23 @@ const sessionManager = {
   // AI Assist is now wired through the mount() call (see _ensureMount).
   // _initNoteAIAssist stays as a no-op for any historical callers; the
   // first time `_ensureMount` runs, NoteAIAssist is hooked up.
-  _initNoteAIAssist() { this._ensureMount(); },
+  _initNoteAIAssist() {
+    this._ensureMount();
+  },
 
   async _setNoteAIAgentDefault(workspaceId) {
     return window.NoteEditor?.applyAgentDefaultForWorkspace(workspaceId);
   },
 
-  _wireNoteAIAgentChange() { window.NoteEditor?.wireAgentChangeHandler(); },
-  _resolveWorkspaceAgentId() { return window.NoteEditor?.getSelectedAgentId() ?? null; },
+  _wireNoteAIAgentChange() {
+    window.NoteEditor?.wireAgentChangeHandler();
+  },
+  _resolveWorkspaceAgentId() {
+    return window.NoteEditor?.getSelectedAgentId() ?? null;
+  },
   _wireNoteSelectionTracking() {
     window.NoteEditor?.wireSelectionTracking({
-      onChange: () => window.NoteAIAssist?.onSelectionChanged(this._readNoteSelection()),
+      onChange: () => window.NoteAIAssist?.onSelectionChanged(this._readNoteSelection())
     });
   },
 
@@ -6974,10 +8231,12 @@ const sessionManager = {
   _readNoteSelection() {
     const modal = document.getElementById('noteEditorModal');
     if (!modal || !modal.classList.contains('show')) return null;
-    return window.NoteEditor?.readSelection({
-      getContent: () => this.getNoteContentValue(),
-      isPreviewMode: () => this.isNotePreviewMode,
-    }) ?? null;
+    return (
+      window.NoteEditor?.readSelection({
+        getContent: () => this.getNoteContentValue(),
+        isPreviewMode: () => this.isNotePreviewMode
+      }) ?? null
+    );
   },
 
   // =============================================================================
@@ -6989,18 +8248,30 @@ const sessionManager = {
 
   // Debounced wrapper called from the input listener — TOC rebuild is cheap
   // but we still avoid running on every keystroke.
-  _ensureNoteToc() { return this._ensureMount()?.toc ?? null; },
+  _ensureNoteToc() {
+    return this._ensureMount()?.toc ?? null;
+  },
 
-  _scheduleNoteTocRebuild() { this._ensureNoteToc()?.scheduleRebuild(); },
-  _renderNoteTocOutline() { this._ensureNoteToc()?.rebuild(); },
+  _scheduleNoteTocRebuild() {
+    this._ensureNoteToc()?.scheduleRebuild();
+  },
+  _renderNoteTocOutline() {
+    this._ensureNoteToc()?.rebuild();
+  },
   _scrollNoteToHeading(position) {
     window.NoteEditor?.scrollToHeadingPosition(this.getNoteContentValue(), position);
   },
   _findRenderedHeadingByPosition(position) {
-    return window.NoteEditor?.findRenderedHeadingByPosition(this.getNoteContentValue(), position) ?? null;
+    return (
+      window.NoteEditor?.findRenderedHeadingByPosition(this.getNoteContentValue(), position) ?? null
+    );
   },
-  _attachNoteTocActiveObserver() { this._ensureNoteToc()?.attachObserver(); },
-  _teardownNoteTocActiveObserver() { this.noteToc?.detachObserver(); },
+  _attachNoteTocActiveObserver() {
+    this._ensureNoteToc()?.attachObserver();
+  },
+  _teardownNoteTocActiveObserver() {
+    this.noteToc?.detachObserver();
+  },
   _setActiveTocEntry(lineIndex) {
     window.NoteEditor?.setActiveTocEntry(lineIndex, this.getNoteContentValue());
   },
@@ -7009,8 +8280,12 @@ const sessionManager = {
   // Note AI Generation
   // =============================================================================
 
-  _openGeneratePanelByDefault() { window.NoteEditor?.openGeneratePanelByDefault(); },
-  toggleNoteAIPanel() { window.NoteEditor?.toggleGeneratePanel(); },
+  _openGeneratePanelByDefault() {
+    window.NoteEditor?.openGeneratePanelByDefault();
+  },
+  toggleNoteAIPanel() {
+    window.NoteEditor?.toggleGeneratePanel();
+  },
   hideNoteAIPanel() {
     this.noteAIGeneratedDraft = null;
     window.NoteEditor?.closeGeneratePanel();
@@ -7020,7 +8295,11 @@ const sessionManager = {
   // so the dropdown filters to that workspace's bound agents instead of every
   // agent in the system.
   async loadNoteAIAgents() {
-    const workspaceId = this.noteModalWorkspaceId || this.currentNote?.workspace_id || this.currentNote?.folder_id || '';
+    const workspaceId =
+      this.noteModalWorkspaceId ||
+      this.currentNote?.workspace_id ||
+      this.currentNote?.folder_id ||
+      '';
     return window.NoteEditor?.loadAgentsIntoDropdown(workspaceId);
   },
 
@@ -7041,7 +8320,9 @@ const sessionManager = {
     if (panelSelection && panelSelection.text) {
       const ok = window.NoteAIAssist?.dispatchAsk?.(panelSelection, prompt);
       if (!ok) {
-        window.NoteEditor?.setGenerateError?.('Could not dispatch — select a workspace agent first.');
+        window.NoteEditor?.setGenerateError?.(
+          'Could not dispatch — select a workspace agent first.'
+        );
         return;
       }
       window.NoteEditor?.closeGeneratePanel?.();
@@ -7050,7 +8331,11 @@ const sessionManager = {
 
     const agentSelect = document.getElementById('noteAIAgentSelect');
     const agentId = agentSelect?.value || '';
-    const workspaceId = this.noteModalWorkspaceId || this.currentNote?.workspace_id || this.currentNote?.folder_id || '';
+    const workspaceId =
+      this.noteModalWorkspaceId ||
+      this.currentNote?.workspace_id ||
+      this.currentNote?.folder_id ||
+      '';
 
     window.NoteEditor?.setGenerateError?.('');
     window.NoteEditor?.setGenerateStatus?.('');
@@ -7070,20 +8355,24 @@ const sessionManager = {
 
       if (!response.ok) {
         let payload = null;
-        try { payload = await response.json(); } catch (_) {}
+        try {
+          payload = await response.json();
+        } catch (_) {}
         throw new Error(payload?.error || 'Failed to generate note');
       }
 
       const result = await response.json();
       this.noteAIGeneratedDraft = {
         title: result.title || '',
-        content: result.content || '',
+        content: result.content || ''
       };
       window.NoteEditor?.setGenerateDraft?.(this.noteAIGeneratedDraft);
       this.showToast('AI draft generated', 'success');
     } catch (error) {
       console.error('Note AI generation failed:', error);
-      window.NoteEditor?.setGenerateError?.(error.message || 'Failed to generate note content. Please try again.');
+      window.NoteEditor?.setGenerateError?.(
+        error.message || 'Failed to generate note content. Please try again.'
+      );
     } finally {
       window.NoteEditor?.setGenerateBusy?.(false);
     }
@@ -7112,7 +8401,9 @@ const sessionManager = {
         ? `${currentContent.replace(/\s+$/, '')}\n\n${draftContent}`
         : draftContent;
     } else if (mode === 'insert') {
-      const start = Number.isInteger(contentInput.selectionStart) ? contentInput.selectionStart : currentContent.length;
+      const start = Number.isInteger(contentInput.selectionStart)
+        ? contentInput.selectionStart
+        : currentContent.length;
       const end = Number.isInteger(contentInput.selectionEnd) ? contentInput.selectionEnd : start;
       nextContent = `${currentContent.slice(0, start)}${draftContent}${currentContent.slice(end)}`;
       const cursor = start + draftContent.length;
@@ -7254,8 +8545,12 @@ const sessionManager = {
     this.noteLiveCollapsedHeadings = new Set();
   },
 
-  getNoteContentValue() { return window.NoteEditor?.getContentValue() ?? ''; },
-  setNoteContentValue(value) { window.NoteEditor?.setContentValue(value); },
+  getNoteContentValue() {
+    return window.NoteEditor?.getContentValue() ?? '';
+  },
+  setNoteContentValue(value) {
+    window.NoteEditor?.setContentValue(value);
+  },
 
   pushNoteUndoState() {
     if (!this.noteHistory) this.resetNoteHistory();
@@ -7275,7 +8570,9 @@ const sessionManager = {
       this.renderNoteLiveEditor();
       const lines = this.getNoteContentLines();
       const focusIndex = Math.max(0, Math.min(options.focusLineIndex ?? 0, lines.length - 1));
-      const focusLine = document.querySelector(`.note-live-line-rendered[data-line-index="${focusIndex}"]`);
+      const focusLine = document.querySelector(
+        `.note-live-line-rendered[data-line-index="${focusIndex}"]`
+      );
       focusLine?.focus({ preventScroll: true });
     }
   },
@@ -7296,8 +8593,12 @@ const sessionManager = {
     return true;
   },
 
-  isNoteUndoShortcut(event) { return window.NoteEditor?.isUndoShortcut(event) ?? false; },
-  isNoteRedoShortcut(event) { return window.NoteEditor?.isRedoShortcut(event) ?? false; },
+  isNoteUndoShortcut(event) {
+    return window.NoteEditor?.isUndoShortcut(event) ?? false;
+  },
+  isNoteRedoShortcut(event) {
+    return window.NoteEditor?.isRedoShortcut(event) ?? false;
+  },
 
   handleNoteHistoryShortcut(event) {
     if (this.isNoteUndoShortcut(event)) {
@@ -7323,15 +8624,25 @@ const sessionManager = {
     this.renderNoteLiveEditor();
   },
 
-  getNoteContentLines() { return window.NoteEditor?.getContentLines() ?? ['']; },
-  setNoteContentLines(lines) { window.NoteEditor?.setContentLines(lines); },
+  getNoteContentLines() {
+    return window.NoteEditor?.getContentLines() ?? [''];
+  },
+  setNoteContentLines(lines) {
+    window.NoteEditor?.setContentLines(lines);
+  },
 
   // The following four helpers were moved to note-editor.js as the first slice
   // of the v2 task 1.0 extraction. The thin delegators stay here so existing
   // callers (this.noteHeadingLevel(...), etc.) keep working untouched.
-  noteHeadingLevel(line) { return window.NoteEditor?.parseHeadingLevel(line) ?? 0; },
-  noteLineKindClass(line) { return window.NoteEditor?.lineKindClass(line) ?? ''; },
-  parseNoteTaskLine(line) { return window.NoteEditor?.parseTaskLine(line) ?? null; },
+  noteHeadingLevel(line) {
+    return window.NoteEditor?.parseHeadingLevel(line) ?? 0;
+  },
+  noteLineKindClass(line) {
+    return window.NoteEditor?.lineKindClass(line) ?? '';
+  },
+  parseNoteTaskLine(line) {
+    return window.NoteEditor?.parseTaskLine(line) ?? null;
+  },
   normalizeCompactTaskListMarkdown(text) {
     return window.NoteEditor?.normalizeCompactTaskListMarkdown(text) ?? String(text || '');
   },
@@ -7340,7 +8651,9 @@ const sessionManager = {
     window.NoteEditor?.pruneCollapsedHeadings(lines, this.noteLiveCollapsedHeadings);
   },
 
-  renderNoteLiveEditor(options = {}) { this._ensureMount()?.render(options); },
+  renderNoteLiveEditor(options = {}) {
+    this._ensureMount()?.render(options);
+  },
 
   renderNoteLiveInputLine(line, index) {
     return window.NoteEditor?.renderEditingLine(line, index) ?? '';
@@ -7361,7 +8674,9 @@ const sessionManager = {
     return window.NoteEditor?.renderTaskLine(line, index) ?? '';
   },
 
-  bindNoteLiveEditorEvents(previewContent) { this._ensureLive()?.bindEvents(previewContent); },
+  bindNoteLiveEditorEvents(previewContent) {
+    this._ensureLive()?.bindEvents(previewContent);
+  },
 
   noteLiveSelectionContains(container, node) {
     return window.NoteEditor?.selectionContains(container, node) ?? false;
@@ -7386,44 +8701,69 @@ const sessionManager = {
     return window.NoteEditor?.getSelectedLineRange(container) ?? null;
   },
 
-  isNoteLivePrintableKey(event) { return window.NoteEditor?.isPrintableKey(event) ?? false; },
+  isNoteLivePrintableKey(event) {
+    return window.NoteEditor?.isPrintableKey(event) ?? false;
+  },
 
   toggleNoteHeadingFold(lineIndex) {
     this._ensureLive()?.toggleHeadingFold(lineIndex);
     // Restore focus to the fold button so keyboard users keep their place.
-    document.querySelector(`.note-heading-fold[data-line-index="${lineIndex}"]`)
+    document
+      .querySelector(`.note-heading-fold[data-line-index="${lineIndex}"]`)
       ?.focus({ preventScroll: true });
   },
 
   toggleNoteTaskLine(lineIndex, checked) {
     this._ensureLive()?.toggleTaskLine(lineIndex, checked);
-    document.querySelector(`.note-task-checkbox[data-line-index="${lineIndex}"]`)
+    document
+      .querySelector(`.note-task-checkbox[data-line-index="${lineIndex}"]`)
       ?.focus({ preventScroll: true });
   },
 
-  deleteNoteLiveLineRange(range) { this._ensureLive()?.deleteRange(range); },
-  replaceNoteLiveLineRange(range, replacement) { this._ensureLive()?.replaceRange(range, replacement); },
-  editNoteLiveLineRange(range) { this._ensureLive()?.editRange(range); },
+  deleteNoteLiveLineRange(range) {
+    this._ensureLive()?.deleteRange(range);
+  },
+  replaceNoteLiveLineRange(range, replacement) {
+    this._ensureLive()?.replaceRange(range, replacement);
+  },
+  editNoteLiveLineRange(range) {
+    this._ensureLive()?.editRange(range);
+  },
   activateNoteLiveLine(lineIndex, cursorPosition = null) {
     this._ensureLive()?.activate(lineIndex, cursorPosition);
   },
 
+  handleNoteLiveInputChange(input) {
+    this._ensureLive()?.handleInputChange(input);
+  },
+  handleNoteLiveRangeInputChange(input) {
+    this._ensureLive()?.handleRangeInputChange(input);
+  },
+  handleNoteLiveRangeInputKeydown(event, input) {
+    this._ensureLive()?.handleRangeInputKeydown(event, input);
+  },
+  handleNoteLiveInputKeydown(event, input) {
+    this._ensureLive()?.handleInputKeydown(event, input);
+  },
+  resizeNoteLiveInput(input) {
+    window.NoteEditor?.resizeLiveInput(input);
+  },
 
-  handleNoteLiveInputChange(input) { this._ensureLive()?.handleInputChange(input); },
-  handleNoteLiveRangeInputChange(input) { this._ensureLive()?.handleRangeInputChange(input); },
-  handleNoteLiveRangeInputKeydown(event, input) { this._ensureLive()?.handleRangeInputKeydown(event, input); },
-  handleNoteLiveInputKeydown(event, input) { this._ensureLive()?.handleInputKeydown(event, input); },
-  resizeNoteLiveInput(input) { window.NoteEditor?.resizeLiveInput(input); },
-
-  renderMarkdownLine(line) { return window.NoteEditor?.renderMarkdownLine(line) ?? ''; },
-  renderInlineMarkdown(text) { return window.NoteEditor?.renderInlineMarkdown(text) ?? ''; },
+  renderMarkdownLine(line) {
+    return window.NoteEditor?.renderMarkdownLine(line) ?? '';
+  },
+  renderInlineMarkdown(text) {
+    return window.NoteEditor?.renderInlineMarkdown(text) ?? '';
+  },
 
   // Toggle preview mode
   toggleNotePreview() {
     this.setNotePreviewMode(!this.isNotePreviewMode);
   },
 
-  renderMarkdown(text) { return window.NoteEditor?.renderMarkdown(text) ?? ''; },
+  renderMarkdown(text) {
+    return window.NoteEditor?.renderMarkdown(text) ?? '';
+  },
 
   // Prompt to rename note
   async promptRenameNote(noteId) {
@@ -7636,7 +8976,9 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (this.currentTaskWorkspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`);
+        const tasksResponse = await fetch(
+          `/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`
+        );
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -7676,19 +9018,27 @@ const sessionManager = {
   // Initialize main task panel events
   initMainTaskPanel() {
     // Tasks button in chat header
-    document.getElementById('chatTasksBtn')?.addEventListener('click', () => this.toggleMainTaskPanel());
+    document
+      .getElementById('chatTasksBtn')
+      ?.addEventListener('click', () => this.toggleMainTaskPanel());
 
     // Close button
-    document.getElementById('mainTaskPanelClose')?.addEventListener('click', () => this.closeMainTaskPanel());
+    document
+      .getElementById('mainTaskPanelClose')
+      ?.addEventListener('click', () => this.closeMainTaskPanel());
 
     // Backdrop click to close
-    document.getElementById('mainTaskModalBackdrop')?.addEventListener('click', () => this.closeMainTaskPanel());
+    document
+      .getElementById('mainTaskModalBackdrop')
+      ?.addEventListener('click', () => this.closeMainTaskPanel());
 
     // Add task button - opens modal
-    document.getElementById('mainTaskAddBtn')?.addEventListener('click', () => this.openTaskModal());
+    document
+      .getElementById('mainTaskAddBtn')
+      ?.addEventListener('click', () => this.openTaskModal());
 
     // Input enter key - opens modal with prefilled title
-    document.getElementById('mainTaskInput')?.addEventListener('keydown', (e) => {
+    document.getElementById('mainTaskInput')?.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         const input = document.getElementById('mainTaskInput');
@@ -7704,13 +9054,21 @@ const sessionManager = {
     );
     if (!hasSharedTaskController) {
       // Task modal event handlers
-      document.getElementById('taskModalClose')?.addEventListener('click', () => this.closeTaskModal());
-      document.getElementById('taskModalCancel')?.addEventListener('click', () => this.closeTaskModal());
-      document.getElementById('taskModalSave')?.addEventListener('click', () => this.saveTaskFromModal());
-      document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.closeTaskModal());
+      document
+        .getElementById('taskModalClose')
+        ?.addEventListener('click', () => this.closeTaskModal());
+      document
+        .getElementById('taskModalCancel')
+        ?.addEventListener('click', () => this.closeTaskModal());
+      document
+        .getElementById('taskModalSave')
+        ?.addEventListener('click', () => this.saveTaskFromModal());
+      document
+        .querySelector('.task-modal-backdrop')
+        ?.addEventListener('click', () => this.closeTaskModal());
 
       // Schedule fields toggle
-      document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
+      document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', e => {
         const scheduleFields = document.getElementById('taskModalScheduleFields');
         if (scheduleFields) {
           scheduleFields.style.display = e.target.checked ? 'block' : 'none';
@@ -7723,7 +9081,7 @@ const sessionManager = {
       });
 
       // Modal escape key for task modal
-      document.getElementById('taskModal')?.addEventListener('keydown', (e) => {
+      document.getElementById('taskModal')?.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
           this.closeTaskModal();
         }
@@ -7731,7 +9089,7 @@ const sessionManager = {
     }
 
     // Escape key for main task modal
-    document.getElementById('mainTaskModal')?.addEventListener('keydown', (e) => {
+    document.getElementById('mainTaskModal')?.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         this.closeMainTaskPanel();
       }
@@ -7904,26 +9262,26 @@ const sessionManager = {
       `;
 
       // Bind click for details
-      itemEl.addEventListener('click', (e) => {
+      itemEl.addEventListener('click', e => {
         if (!e.target.closest('button')) {
           this.showScheduledTaskDetails(st);
         }
       });
 
       // Toggle button
-      itemEl.querySelector('.scheduled-task-toggle')?.addEventListener('click', (e) => {
+      itemEl.querySelector('.scheduled-task-toggle')?.addEventListener('click', e => {
         e.stopPropagation();
         this.toggleScheduledTaskEnabled(st.id, !st.enabled);
       });
 
       // Trigger button
-      itemEl.querySelector('.scheduled-task-trigger')?.addEventListener('click', (e) => {
+      itemEl.querySelector('.scheduled-task-trigger')?.addEventListener('click', e => {
         e.stopPropagation();
         this.triggerScheduledTask(st.id);
       });
 
       // Delete button
-      itemEl.querySelector('.scheduled-task-delete')?.addEventListener('click', (e) => {
+      itemEl.querySelector('.scheduled-task-delete')?.addEventListener('click', e => {
         e.stopPropagation();
         this.deleteScheduledTask(st.id);
       });
@@ -7952,7 +9310,9 @@ const sessionManager = {
         return `Every ${minutes} minute${minutes > 1 ? 's' : ''}`;
       }
       case 'once':
-        return schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'Once';
+        return schedule.execute_at
+          ? `Once at ${new Date(schedule.execute_at).toLocaleString()}`
+          : 'Once';
       case 'cron':
         return `Cron: ${schedule.cron_expr || 'custom'}`;
       default:
@@ -7971,12 +9331,20 @@ const sessionManager = {
 
     const statusEl = document.getElementById('scheduleDetailStatus');
     statusEl.textContent = st.enabled ? 'Enabled' : 'Disabled';
-    statusEl.className = 'schedule-detail-badge ' + (st.enabled ? 'badge-enabled' : 'badge-disabled');
+    statusEl.className =
+      'schedule-detail-badge ' + (st.enabled ? 'badge-enabled' : 'badge-disabled');
 
-    document.getElementById('scheduleDetailSchedule').textContent = this.getScheduleDescription(st.schedule);
-    document.getElementById('scheduleDetailNextRun').textContent = st.next_run ? new Date(st.next_run).toLocaleString() : 'Not scheduled';
-    document.getElementById('scheduleDetailLastRun').textContent = st.last_run ? new Date(st.last_run).toLocaleString() : 'Never';
-    document.getElementById('scheduleDetailExecutions').textContent = `${st.execution_count || 0} total, ${st.failure_count || 0} failures`;
+    document.getElementById('scheduleDetailSchedule').textContent = this.getScheduleDescription(
+      st.schedule
+    );
+    document.getElementById('scheduleDetailNextRun').textContent = st.next_run
+      ? new Date(st.next_run).toLocaleString()
+      : 'Not scheduled';
+    document.getElementById('scheduleDetailLastRun').textContent = st.last_run
+      ? new Date(st.last_run).toLocaleString()
+      : 'Never';
+    document.getElementById('scheduleDetailExecutions').textContent =
+      `${st.execution_count || 0} total, ${st.failure_count || 0} failures`;
 
     // Render execution history
     this.renderExecutionHistory(st.execution_history || []);
@@ -8005,13 +9373,17 @@ const sessionManager = {
     // Show last 10 executions (reversed to show most recent first)
     const recentHistory = history.slice().reverse().slice(0, 10);
 
-    container.innerHTML = recentHistory.map(exec => `
+    container.innerHTML = recentHistory
+      .map(
+        exec => `
       <div class="history-item ${exec.status}">
         <span class="history-time">${new Date(exec.executed_at).toLocaleString()}</span>
         <span class="history-status">${exec.status === 'success' ? '✓' : '✗'}</span>
         ${exec.error ? `<span class="history-error" title="${this.escapeHtml(exec.error)}">${this.escapeHtml(exec.error.substring(0, 30))}...</span>` : ''}
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   },
 
   // Toggle scheduled task enabled/disabled
@@ -8033,7 +9405,8 @@ const sessionManager = {
       // Reload and refresh
       if (this.currentScheduledTaskWorkspaceId) {
         await this.loadWorkspaceScheduledTasks(this.currentScheduledTaskWorkspaceId);
-        const tasks = this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
+        const tasks =
+          this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
         this.renderScheduledTasksList(tasks);
         this.renderFolderTree();
       }
@@ -8068,7 +9441,12 @@ const sessionManager = {
 
   // Delete/clear schedule from a task
   async deleteScheduledTask(taskId) {
-    if (!confirm('Are you sure you want to delete this schedule? The task itself will remain but will no longer run on a schedule.')) return;
+    if (
+      !confirm(
+        'Are you sure you want to delete this schedule? The task itself will remain but will no longer run on a schedule.'
+      )
+    )
+      return;
 
     try {
       const response = await fetch(`/api/orchestration/tasks/${taskId}`, {
@@ -8089,7 +9467,8 @@ const sessionManager = {
       // Reload and refresh the scheduled tasks list
       if (this.currentScheduledTaskWorkspaceId) {
         await this.loadWorkspaceScheduledTasks(this.currentScheduledTaskWorkspaceId);
-        const tasks = this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
+        const tasks =
+          this.scheduledTasksByWorkspace.get(this.currentScheduledTaskWorkspaceId) || [];
         this.renderScheduledTasksList(tasks);
         this.renderFolderTree();
       }
@@ -8119,12 +9498,20 @@ const sessionManager = {
   // Initialize scheduled tasks modal events
   initScheduledTasksModal() {
     // Close buttons
-    document.getElementById('scheduledTasksModalClose')?.addEventListener('click', () => this.closeScheduledTasksModal());
-    document.getElementById('scheduledTasksModalBackdrop')?.addEventListener('click', () => this.closeScheduledTasksModal());
+    document
+      .getElementById('scheduledTasksModalClose')
+      ?.addEventListener('click', () => this.closeScheduledTasksModal());
+    document
+      .getElementById('scheduledTasksModalBackdrop')
+      ?.addEventListener('click', () => this.closeScheduledTasksModal());
 
     // Detail modal close
-    document.getElementById('scheduleDetailClose')?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
-    document.getElementById('scheduleDetailBackdrop')?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
+    document
+      .getElementById('scheduleDetailClose')
+      ?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
+    document
+      .getElementById('scheduleDetailBackdrop')
+      ?.addEventListener('click', () => this.closeScheduledTaskDetailModal());
 
     // Detail modal actions
     document.getElementById('scheduleDetailToggleBtn')?.addEventListener('click', () => {
@@ -8154,14 +9541,22 @@ const sessionManager = {
     });
 
     // Escape key handlers (document-level for reliable closing)
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         const detailModal = document.getElementById('scheduledTaskDetailModal');
         const listModal = document.getElementById('scheduledTasksModal');
         // Close detail modal first if visible, then list modal
-        if (detailModal && detailModal.style.display !== 'none' && detailModal.style.display !== '') {
+        if (
+          detailModal &&
+          detailModal.style.display !== 'none' &&
+          detailModal.style.display !== ''
+        ) {
           this.closeScheduledTaskDetailModal();
-        } else if (listModal && listModal.style.display !== 'none' && listModal.style.display !== '') {
+        } else if (
+          listModal &&
+          listModal.style.display !== 'none' &&
+          listModal.style.display !== ''
+        ) {
           this.closeScheduledTasksModal();
         }
       }
@@ -8301,19 +9696,19 @@ const sessionManager = {
       });
 
       // Edit click
-      taskEl.querySelector('.main-task-edit')?.addEventListener('click', (e) => {
+      taskEl.querySelector('.main-task-edit')?.addEventListener('click', e => {
         e.stopPropagation();
         this.openTaskModal(task.id);
       });
 
       // Execute click
-      taskEl.querySelector('.main-task-execute')?.addEventListener('click', (e) => {
+      taskEl.querySelector('.main-task-execute')?.addEventListener('click', e => {
         e.stopPropagation();
         this.executeTask(task.id);
       });
 
       // Delete click
-      taskEl.querySelector('.main-task-delete')?.addEventListener('click', (e) => {
+      taskEl.querySelector('.main-task-delete')?.addEventListener('click', e => {
         e.stopPropagation();
         this.deleteMainTask(task.id);
       });
@@ -8337,7 +9732,9 @@ const sessionManager = {
       if (this.activeSessionId) {
         await this.loadSessionTasks();
       } else if (this.currentTaskWorkspaceId) {
-        const tasksResponse = await fetch(`/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`);
+        const tasksResponse = await fetch(
+          `/api/orchestration/tasks?workspace_id=${this.currentTaskWorkspaceId}`
+        );
         if (tasksResponse.ok) {
           const data = await tasksResponse.json();
           this.workspaceTasks = data.tasks || [];
@@ -8614,8 +10011,12 @@ const sessionManager = {
         break;
       case 'interval': {
         // Combine value and unit into interval_minutes
-        const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
-        const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
+        const intervalValue = parseInt(
+          document.getElementById('taskModalScheduleIntervalValue')?.value || '1',
+          10
+        );
+        const intervalUnit =
+          document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
         let intervalMinutes = intervalValue;
         if (intervalUnit === 'hours') {
           intervalMinutes = intervalValue * 60;
@@ -8808,7 +10209,9 @@ document.addEventListener('DOMContentLoaded', () => {
       window.history.replaceState(null, '', cleanUrl);
       sessionManager.openNoteEditor(openNoteId);
     }
-  } catch (_) { /* non-fatal */ }
+  } catch (_) {
+    /* non-fatal */
+  }
 
   // ?create=1 opens the Create Workspace modal after navigation (home-page
   // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
@@ -8822,7 +10225,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
-      requestAnimationFrame(() => sessionManager.showAddWorkspaceModal({ entryPoint: 'home_first_run' }));
+      requestAnimationFrame(() =>
+        sessionManager.showAddWorkspaceModal({ entryPoint: 'home_first_run' })
+      );
     }
-  } catch (_) { /* non-fatal */ }
+  } catch (_) {
+    /* non-fatal */
+  }
 });

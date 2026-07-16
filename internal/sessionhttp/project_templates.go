@@ -86,6 +86,101 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 	_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(tpl))
 }
 
+// handleTemplateAgentCreate immediately saves one template-declared agent as a
+// reusable global definition. It deliberately does not create or mutate a
+// workspace: the wizard will attach the saved definition through its normal
+// atomic workspace-create request. This lets a first-time template user make a
+// reusable agent explicit before they commit to a workspace.
+func (h *Handler) handleTemplateAgentCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		TemplateID   string                 `json:"template_id,omitempty"`
+		TemplatePath string                 `json:"template_path,omitempty"`
+		Blank        bool                   `json:"blank,omitempty"`
+		AgentIndex   int                    `json:"agent_index"`
+		Override     *templateAgentOverride `json:"override,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.TemplateID) != "" && strings.TrimSpace(req.TemplatePath) != "" {
+		_ = orihttp.RespondBadRequest(w, "specify either template_id or template_path, not both")
+		return
+	}
+
+	var (
+		tpl projecttemplates.Template
+		err error
+	)
+	switch {
+	case strings.TrimSpace(req.TemplateID) != "" || strings.TrimSpace(req.TemplatePath) != "":
+		tpl, err = h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
+	case req.Blank:
+		tpl = blankWorkspaceTemplate()
+	default:
+		_ = orihttp.RespondBadRequest(w, "choose a blueprint before creating an agent")
+		return
+	}
+	if err != nil {
+		h.respondWorkspaceProjectError(w, err)
+		return
+	}
+	if req.AgentIndex < 0 || req.AgentIndex >= len(tpl.Agents) {
+		_ = orihttp.RespondBadRequest(w, "template agent index is out of range")
+		return
+	}
+	if req.Override != nil {
+		if req.Override.Index == nil {
+			index := req.AgentIndex
+			req.Override.Index = &index
+		}
+		if *req.Override.Index != req.AgentIndex {
+			_ = orihttp.RespondBadRequest(w, "agent override must match the selected template agent")
+			return
+		}
+		tpl, err = applyTemplateAgentOverrides(tpl, []templateAgentOverride{*req.Override})
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+	}
+	if h.agentStore == nil {
+		_ = orihttp.RespondInternalError(w, "agent store is unavailable")
+		return
+	}
+
+	spec := tpl.Agents[req.AgentIndex]
+	name := strings.TrimSpace(spec.Name)
+	if name == "" {
+		_ = orihttp.RespondBadRequest(w, "template agent name is required")
+		return
+	}
+	created := false
+	if _, exists := h.agentStore.GetAgent(name); !exists {
+		cfg, _ := h.templateAgentCreateConfig(spec)
+		if err := h.agentStore.CreateAgent(name, cfg); err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+		created = true
+	}
+
+	plan := h.buildTemplateAgentPlan(tpl)
+	_ = orihttp.RespondSuccess(w, struct {
+		Created bool                  `json:"created"`
+		Agent   templateAgentPlanItem `json:"agent"`
+		Plan    templateAgentPlan     `json:"plan"`
+	}{
+		Created: created,
+		Agent:   plan.Agents[req.AgentIndex],
+		Plan:    plan,
+	})
+}
+
 // instantiateWorkspaceProject creates a project folder from a template inside
 // the workspace's folder, persists ProjectPath in both the session store and
 // the folder store, and publishes project.created. On any failure after the

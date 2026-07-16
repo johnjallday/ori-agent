@@ -3,9 +3,6 @@ package sessionhttp
 import (
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -48,7 +45,12 @@ type templateAgentPlan struct {
 }
 
 type templateAgentPlanItem struct {
-	Name            string                        `json:"name"`
+	Name string `json:"name"`
+	// Scope is intentionally explicit in the plan so the UI never describes a
+	// template agent as workspace-only. Template agents are global reusable
+	// definitions; a workspace gets an attachment with its own role, context,
+	// and custom instructions.
+	Scope           string                        `json:"scope"`
 	Action          string                        `json:"action"`
 	EntryPoint      bool                          `json:"entry_point"`
 	Role            string                        `json:"role,omitempty"`
@@ -354,6 +356,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 	name := strings.TrimSpace(spec.Name)
 	item := templateAgentPlanItem{
 		Name:       name,
+		Scope:      "reusable",
 		Action:     "create",
 		EntryPoint: entryPoint,
 		Tools:      spec.Tools,
@@ -420,26 +423,4 @@ func (h *Handler) bindSeededAgentTools(workspaceID string, created []createdAgen
 		}
 	}
 	return warnings
-}
-
-// attachWorkspaceSpecialist adds a non-entry agent to the workspace as a fresh
-// AgentInstance, mirroring the add-agent endpoint. It is a no-op if an instance
-// for the agent already exists.
-func attachWorkspaceSpecialist(ws *session.Workspace, name string) {
-	name = strings.TrimSpace(name)
-	if ws == nil || name == "" {
-		return
-	}
-	for _, inst := range ws.AgentInstances {
-		if strings.EqualFold(strings.TrimSpace(inst.Name), name) {
-			return
-		}
-	}
-	ws.AgentInstances = append(ws.AgentInstances, session.AgentInstance{
-		ID:             uuid.New().String(),
-		Name:           name,
-		InstanceNumber: 1,
-		NodeID:         fmt.Sprintf("%s-1-node-%s", name, uuid.New().String()[:8]),
-		CreatedAt:      time.Now(),
-	})
 }

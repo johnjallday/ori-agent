@@ -65,6 +65,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "template-agent-plan":
 		h.handleTemplateAgentPlan(w, r)
 		return
+	case "template-agent-create":
+		h.handleTemplateAgentCreate(w, r)
+		return
 	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout
@@ -207,17 +210,22 @@ func splitWorkspaceBootstrapValues(raw string) []string {
 
 // createWorkspaceRequest is the JSON body of POST /api/workspaces.
 type createWorkspaceRequest struct {
-	Name                   string                     `json:"name"`
-	Kind                   string                     `json:"kind,omitempty"`
-	WorkspacePreset        string                     `json:"workspace_preset,omitempty"`
-	Description            string                     `json:"description,omitempty"`
-	ParentID               string                     `json:"parent_id,omitempty"`
-	OrderIndex             *int                       `json:"order_index,omitempty"`
-	Color                  string                     `json:"color,omitempty"`
-	ProjectPath            string                     `json:"project_path,omitempty"`
-	FolderSlug             string                     `json:"folder_slug,omitempty"`
-	Location               string                     `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
-	EntryAgentName         string                     `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
+	Name            string `json:"name"`
+	Kind            string `json:"kind,omitempty"`
+	WorkspacePreset string `json:"workspace_preset,omitempty"`
+	Description     string `json:"description,omitempty"`
+	ParentID        string `json:"parent_id,omitempty"`
+	OrderIndex      *int   `json:"order_index,omitempty"`
+	Color           string `json:"color,omitempty"`
+	ProjectPath     string `json:"project_path,omitempty"`
+	FolderSlug      string `json:"folder_slug,omitempty"`
+	Location        string `json:"location,omitempty"`         // Optional custom directory for workspace folder (overrides default root)
+	EntryAgentName  string `json:"entry_agent_name,omitempty"` // Optional existing agent name; otherwise a workspace manager is created automatically
+	// ExistingAgentNames is an optional ordered roster of saved definitions to
+	// attach while the workspace is created. A nil slice preserves the legacy
+	// entry-agent-only behavior; a present (including empty) slice opts into the
+	// additive template-plus-existing composition contract.
+	ExistingAgentNames     []string                   `json:"existing_agent_names,omitempty"`
 	WorkspaceBootstrap     *workspaceBootstrapRequest `json:"workspace_bootstrap,omitempty"`
 	TemplateID             string                     `json:"template_id,omitempty"`   // Optional project template from the library
 	TemplatePath           string                     `json:"template_path,omitempty"` // Optional arbitrary folder used as a project template. NOT restricted to the templates library: resolveProjectTemplate/LoadFolder will stat and copy from any path the caller supplies. Acceptable for this admin-facing, local-first, single-user app; do not expose this endpoint to untrusted callers without adding a path allowlist.
@@ -335,6 +343,16 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	composition, err := h.validateCreateWorkspaceAgentComposition(req)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
+	}
+	if composition.usesExistingAgentRoster {
+		req.ExistingAgentNames = composition.existingAgentNames
+		req.EntryAgentName = composition.entryAgentName
 	}
 
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
@@ -474,15 +492,57 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 	return ws
 }
 
-// selectCreateWorkspaceEntryAgent applies the create-time entry-agent policy:
-// an explicitly named agent wins; otherwise a template roster seeds agents
-// (first = entry agent), with a "<Name> Manager" auto-created when the
-// template declares no roster; otherwise groups auto-create a "<Name>
-// Manager". Concrete non-template workspaces stay agent-less so the UI can
-// prompt the user to create one with their choice of model/provider.
+// selectCreateWorkspaceEntryAgent applies the create-time entry-agent policy.
+// Legacy callers that omit existing_agent_names keep their historical explicit
+// entry-agent behavior. Callers that include it compose a template/Blank roster
+// first, then attach the validated existing definitions, and only then apply an
+// explicit primary. This keeps creation atomic and never requires best-effort
+// post-create attachment requests.
 // Returns ok=false when an error response has already been written.
 func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *session.Workspace, req createWorkspaceRequest, kind session.WorkspaceKind, tmpl projecttemplates.Template, templateResolved bool) (seedAgentsResult, bool) {
 	var seed seedAgentsResult
+	usesExistingAgentRoster := req.ExistingAgentNames != nil
+
+	if usesExistingAgentRoster {
+		switch {
+		case templateResolved && createTemplateAgentsEnabled(req):
+			if tmpl.HasAgents() {
+				seed = h.seedTemplateAgents(ws, tmpl)
+			}
+			if !seed.EntrySet {
+				if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+					setWorkspaceEntryAgent(ws, agentName)
+					seed.EntrySet = true
+				}
+			}
+		case req.Blank && kind != session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
+			blankTpl, err := applyTemplateAgentOverrides(blankWorkspaceTemplate(), req.TemplateAgentOverrides)
+			if err != nil {
+				_ = orihttp.RespondBadRequest(w, err.Error())
+				return seed, false
+			}
+			seed = h.seedTemplateAgents(ws, blankTpl)
+		case kind == session.WorkspaceKindGroup:
+			if agentName := h.autoCreateManagerEntryAgent(ws); agentName != "" {
+				setWorkspaceEntryAgent(ws, agentName)
+				seed.EntrySet = true
+			}
+		}
+
+		for _, name := range req.ExistingAgentNames {
+			attachWorkspaceSpecialist(ws, name)
+		}
+
+		if req.EntryAgentName != "" {
+			setWorkspaceEntryAgent(ws, req.EntryAgentName)
+			seed.EntrySet = true
+		} else if !seed.EntrySet && len(req.ExistingAgentNames) > 0 {
+			setWorkspaceEntryAgent(ws, req.ExistingAgentNames[0])
+			seed.EntrySet = true
+		}
+		return seed, true
+	}
+
 	switch {
 	case req.EntryAgentName != "":
 		entryAgentName, err := h.validateWorkspaceEntryAgent(req.EntryAgentName)
@@ -536,6 +596,56 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 
 func createTemplateAgentsEnabled(req createWorkspaceRequest) bool {
 	return req.CreateTemplateAgents == nil || *req.CreateTemplateAgents
+}
+
+type createWorkspaceAgentComposition struct {
+	usesExistingAgentRoster bool
+	existingAgentNames      []string
+	entryAgentName          string
+}
+
+// validateCreateWorkspaceAgentComposition canonicalizes saved-agent selections
+// before any workspace or template agent is persisted. A nil slice is a legacy
+// request and intentionally takes the old entry-agent selection path.
+func (h *Handler) validateCreateWorkspaceAgentComposition(req createWorkspaceRequest) (createWorkspaceAgentComposition, error) {
+	composition := createWorkspaceAgentComposition{
+		usesExistingAgentRoster: req.ExistingAgentNames != nil,
+	}
+	if !composition.usesExistingAgentRoster {
+		return composition, nil
+	}
+
+	composition.existingAgentNames = make([]string, 0, len(req.ExistingAgentNames))
+	seen := make(map[string]string, len(req.ExistingAgentNames))
+	for index, requestedName := range req.ExistingAgentNames {
+		requestedName = strings.TrimSpace(requestedName)
+		if requestedName == "" {
+			return composition, fmt.Errorf("existing_agent_names[%d] cannot be empty", index)
+		}
+		canonicalName, err := h.validateAttachableWorkspaceAgent(requestedName)
+		if err != nil {
+			return composition, err
+		}
+		key := strings.ToLower(strings.TrimSpace(canonicalName))
+		if original, alreadySelected := seen[key]; alreadySelected {
+			return composition, fmt.Errorf("existing agent %q duplicates %q", requestedName, original)
+		}
+		seen[key] = canonicalName
+		composition.existingAgentNames = append(composition.existingAgentNames, canonicalName)
+	}
+
+	if requestedPrimary := strings.TrimSpace(req.EntryAgentName); requestedPrimary != "" {
+		canonicalPrimary, err := h.validateAttachableWorkspaceAgent(requestedPrimary)
+		if err != nil {
+			return composition, fmt.Errorf("entry agent %q does not exist or cannot be attached", requestedPrimary)
+		}
+		if _, selected := seen[strings.ToLower(strings.TrimSpace(canonicalPrimary))]; !selected {
+			return composition, fmt.Errorf("entry_agent_name %q must also be selected in existing_agent_names", requestedPrimary)
+		}
+		composition.entryAgentName = canonicalPrimary
+	}
+
+	return composition, nil
 }
 
 // createTemplateContext bundles the template-resolution results that folder

@@ -281,19 +281,40 @@ func toWorkspaceAgentInstances(items []session.AgentInstance) []agentworkspace.A
 }
 
 func (h *Handler) validateWorkspaceEntryAgent(requestedAgentName string) (string, error) {
+	requested := strings.TrimSpace(requestedAgentName)
+	if requested == "" {
+		return "", nil
+	}
+	canonical, err := h.validateAttachableWorkspaceAgent(requested)
+	if err != nil {
+		return "", fmt.Errorf("entry agent %q does not exist", requested)
+	}
+	return canonical, nil
+}
+
+// validateAttachableWorkspaceAgent resolves a saved agent name using the
+// canonical casing from the agent store. CLI agents are deliberately absent
+// from this store, so they are rejected alongside any other non-persisted or
+// read-only source.
+func (h *Handler) validateAttachableWorkspaceAgent(requestedAgentName string) (string, error) {
 	if h == nil || h.agentStore == nil {
 		return "", fmt.Errorf("agent store is unavailable")
 	}
 
 	requested := strings.TrimSpace(requestedAgentName)
 	if requested == "" {
-		return "", nil
+		return "", fmt.Errorf("agent name cannot be empty")
 	}
 
-	if existing, ok := h.agentStore.GetAgent(requested); !ok || existing == nil {
-		return "", fmt.Errorf("entry agent %q does not exist", requested)
+	for _, name := range h.agentStore.ListAgents() {
+		if !strings.EqualFold(strings.TrimSpace(name), requested) {
+			continue
+		}
+		if existing, ok := h.agentStore.GetAgent(name); ok && existing != nil {
+			return name, nil
+		}
 	}
-	return requested, nil
+	return "", fmt.Errorf("agent %q does not exist or cannot be attached", requested)
 }
 
 func (h *Handler) defaultSessionAgentNameForWorkspace(ctx context.Context, workspaceID string) string {
