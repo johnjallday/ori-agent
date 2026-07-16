@@ -1799,6 +1799,132 @@ test.describe('Floating Workspace Assistant', () => {
   });
 });
 
+test.describe('Home Advisory Routing', () => {
+  async function installCompletedOnboarding(page) {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+  }
+
+  async function installAssistantPreferredOriRoute(page) {
+    await page.route('**/api/home-assistant/route', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          intent: 'general_task',
+          intent_label: 'general task',
+          routing_policy: 'assistant_preferred',
+          context_mode: 'direct',
+          handoff_policy: 'assistant',
+          matched_agent: 'Ori',
+          score: 5,
+          requires_creation: false,
+          workspace_recommended: false,
+          route_mode: 'specialist_handoff',
+          target_surface: 'chat',
+          reasons: ['fallback to system assistant'],
+          suggested_agent_name: 'Task Assistant',
+          suggested_agent_type: 'general'
+        })
+      });
+    });
+  }
+
+  test('answers implementation advisory questions inline with Ori', async ({ page }) => {
+    let chatCalls = 0;
+    let chatQuestion = '';
+    await installCompletedOnboarding(page);
+    await installAssistantPreferredOriRoute(page);
+    await page.route('**/api/chat', async route => {
+      chatCalls += 1;
+      chatQuestion = String(route.request().postDataJSON().question || '');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          response:
+            'Use the existing task and worktree records as the source of truth, then add a read-only implementation status projection.'
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.evaluate(() => {
+      (window as any).__assistantChatOpens = 0;
+      (window as any).chatPanel = {
+        open() {
+          (window as any).__assistantChatOpens += 1;
+        }
+      };
+      (window as any).sessionManager = {
+        sessions: [],
+        activeSessionId: '',
+        async createSessionWithAgent(agentName: string) {
+          const session = { id: 'sess-ori-advisory', agent_name: agentName };
+          this.sessions.push(session);
+          this.activeSessionId = session.id;
+          return session;
+        }
+      };
+      (window as any).sendMessageToChat = async () => {};
+    });
+
+    const prompt =
+      'How should we improve visibility into ongoing implementations in the Ori DevOps workspace?';
+    await page.locator('#homeAssistantInput').fill(prompt);
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect.poll(() => chatCalls).toBe(1);
+    expect(chatQuestion).toContain(prompt);
+    await expect(page.locator('#homeAssistantConversation')).toContainText(
+      'Use the existing task and worktree records as the source of truth'
+    );
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText(
+      'Answered inline with "Ori".'
+    );
+
+    const actions = page.locator('#homeAssistantActions');
+    await expect(actions.getByText('Create Workspace', { exact: true })).toHaveCount(0);
+    const continueButton = actions.getByText('Continue in Chat', { exact: true });
+    await expect(continueButton).toBeEnabled();
+    await continueButton.click();
+    await expect.poll(() => page.evaluate(() => (window as any).__assistantChatOpens)).toBe(1);
+  });
+
+  test('keeps explicit implementation commands in the workspace capability flow', async ({
+    page
+  }) => {
+    let chatCalls = 0;
+    await installCompletedOnboarding(page);
+    await installAssistantPreferredOriRoute(page);
+    await page.route('**/api/chat', async route => {
+      chatCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ response: 'unexpected' })
+      });
+    });
+
+    await page.goto('/');
+    await page
+      .locator('#homeAssistantInput')
+      .fill('Implement support for deployment status in Ori');
+    await page.locator('#homeAssistantSendBtn').click();
+
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Workspace Available');
+    await expect(
+      page.locator('#homeAssistantActions').getByText('Create Workspace', { exact: true })
+    ).toBeVisible();
+    expect(chatCalls).toBe(0);
+  });
+});
+
 test.describe('Home Workspace Routing', () => {
   async function installWorkspaceAssistantMocks(
     page,
