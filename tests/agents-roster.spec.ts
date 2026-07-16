@@ -368,4 +368,57 @@ test.describe('Agents roster', () => {
       await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(plain)}`).catch(() => undefined);
     }
   });
+
+  test('edge cases: no-eligible delete disabled, focused-agent deletion falls back', async ({ page, request }) => {
+    const prefix = `PWEdge${Date.now()}`;
+    const a = `${prefix} A`;
+    const b = `${prefix} B`;
+    for (const n of [a, b]) {
+      const r = await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' },
+      });
+      expect(r.ok()).toBeTruthy();
+    }
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+        })
+      );
+
+      // No-eligible delete: select only Ori (protected) → Delete button disabled.
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await page.locator('#rosterSearch').fill('Ori');
+      const ori = page.locator('.roster-card[data-name="Ori"]');
+      await expect(ori).toHaveCount(1);
+      await ori.locator('.roster-card__check').check();
+      await page.locator('#bulkDelete').click();
+      await expect(page.locator('#bulkDeleteConfirm')).toBeDisabled();
+      await expect(page.locator('#bulkDeleteBody')).toContainText('None of the selected agents can be deleted');
+      await page.locator('#bulkDeleteCancel').click();
+
+      // Focused-agent deletion: focus A, select A, delete → stage falls back.
+      await page.locator('#rosterSearch').fill(prefix);
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(a);
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__check`).check();
+      await page.locator('#bulkDelete').click();
+      await expect(page.locator('#bulkDeleteConfirm')).toHaveText(/Delete 1 agent/);
+      await page.locator('#bulkDeleteConfirm').click();
+
+      // A is gone from the server; the stage no longer shows A.
+      await expect
+        .poll(async () => (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(a)}/detail`)).status())
+        .toBe(404);
+      await expect(page.locator('#stageName')).not.toHaveText(a);
+    } finally {
+      for (const n of [a, b]) {
+        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+      }
+    }
+  });
 });

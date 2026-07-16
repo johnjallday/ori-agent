@@ -864,7 +864,7 @@
     var hasImage = !!(md && md.avatar_image);
     host.innerHTML =
       '<div class="avatar-control">' +
-      '<input type="file" id="ov-avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
+      '<input type="file" id="ov-avatar-file" aria-label="Upload avatar image" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
       (hasImage ? '<button type="button" class="btn-ghost avatar-control__remove" id="ov-avatar-remove">Remove image</button>' : '') +
       '<span class="avatar-control__status" id="ov-avatar-status" aria-live="polite"></span>' +
       '</div>';

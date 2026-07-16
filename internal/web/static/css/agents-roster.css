@@ -395,6 +395,8 @@
   flex: none;
 }
 
+/* Solid (opaque) pill colors so contrast is predictable on any card background,
+   including the amber built-in cards (WCAG AA, PRD FR55/FR87). */
 .roster-card__statuslabel {
   flex: none;
   font-size: 10px;
@@ -403,19 +405,20 @@
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 999px;
-  color: var(--text-secondary, #6b7280);
-  background: color-mix(in srgb, var(--text-secondary, #6b7280) 12%, transparent);
+  color: #374151;
+  background: #e5e7eb;
 }
 .roster-card__statuslabel.is-active {
-  color: #15803d;
-  background: color-mix(in srgb, #22c55e 16%, transparent);
+  color: #14532d;
+  background: #bbf7d0;
 }
 .roster-card__statuslabel.is-error {
-  color: #b91c1c;
-  background: color-mix(in srgb, #ef4444 14%, transparent);
+  color: #7f1d1d;
+  background: #fecaca;
 }
-[data-bs-theme="dark"] .roster-card__statuslabel.is-active { color: #4ade80; }
-[data-bs-theme="dark"] .roster-card__statuslabel.is-error { color: #f87171; }
+[data-bs-theme="dark"] .roster-card__statuslabel { color: #1f2937; background: #cbd5e1; }
+[data-bs-theme="dark"] .roster-card__statuslabel.is-active { color: #14532d; background: #86efac; }
+[data-bs-theme="dark"] .roster-card__statuslabel.is-error { color: #7f1d1d; background: #fca5a5; }
 
 .roster-card__tags {
   display: flex;
@@ -704,8 +707,8 @@
 }
 
 .btn-danger {
-  border: 1px solid #ef4444;
-  background: #ef4444;
+  border: 1px solid #b91c1c;
+  background: #b91c1c; /* white text meets WCAG AA (contrast > 5:1) */
   color: #fff;
   border-radius: 8px;
   padding: 8px 16px;
@@ -715,8 +718,8 @@
   transition: background 0.15s ease;
 }
 
-.btn-danger:hover:not(:disabled) { background: #dc2626; }
-.btn-danger:focus-visible { outline: 2px solid #ef4444; outline-offset: 2px; }
+.btn-danger:hover:not(:disabled) { background: #991b1b; }
+.btn-danger:focus-visible { outline: 2px solid #b91c1c; outline-offset: 2px; }
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 [data-bs-theme="dark"] .bulk-dialog { background: var(--bg-primary, #1f2430); }
@@ -1304,6 +1307,16 @@
   .roster-list {
     max-height: 44vh;
   }
+  /* Stack the bulk bar so its count and actions never overflow the narrow rail
+     or force horizontal page scrolling (PRD FR21). */
+  .bulk-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bulk-bar__actions {
+    justify-content: flex-start;
+  }
+  .roster-filter select { max-width: none; flex: 1 1 auto; }
   .stage__hero {
     grid-template-columns: 52px minmax(0, 1fr);
     padding: 18px 18px 16px;
@@ -1317,8 +1330,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .roster-card,
+  .roster-card__open,
+  .roster-stat,
+  .bulk-bar__btn,
+  .bulk-bar__btn--danger,
   .btn-primary,
-  .btn-ghost {
+  .btn-ghost,
+  .btn-danger {
     transition: none;
   }
 }
