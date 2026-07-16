@@ -13,6 +13,7 @@
 #   wt ls                   # List worktrees
 #   wt status               # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
+#   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
 #   wt merge [name]         # Local merge into dev (legacy; prefer wt pr)
 #
 # Planning docs live in the dev worktree's tasks/ folder (gitignored). Create
@@ -628,6 +629,31 @@ function wt_dispatch {
   ls)
     git worktree list
     ;;
+  demo)
+    # Build the CURRENT worktree and serve it from an isolated demo sandbox,
+    # so a feature branch can be seen running (and manually tested) before its
+    # PR ever opens. Isolation rules (see repo CLAUDE.md "Smoke Testing"):
+    #   - HOME is overridden so "Ori Workspaces" never touches the real tree
+    #   - ORI_DATA_DIR is overridden so DB/vaults/templates are sandboxed
+    #   - the server is launched from INSIDE the sandbox because the plugin
+    #     store resolves relative to the launch directory
+    # Foreground process: Ctrl-C stops it. The sandbox is a throwaway temp dir.
+    local demo_root
+    demo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+    if [[ -z "$demo_root" ]]; then
+      echo "wt demo must run inside a git worktree"
+      return 1
+    fi
+    local demo_port="${2:-8931}"
+    echo "Building $demo_root ..."
+    (cd "$demo_root" && go build -o bin/ori-agent ./cmd/server) || return 1
+    local demo_dir
+    demo_dir="$(mktemp -d "${TMPDIR:-/tmp}/ori-demo.XXXXXX")" || return 1
+    echo "Demo sandbox: $demo_dir   (safe to rm -rf when done)"
+    echo "Branch:       $(git -C "$demo_root" branch --show-current)"
+    echo "URL:          http://localhost:$demo_port   (Ctrl-C to stop)"
+    (cd "$demo_dir" && HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" "$demo_root/bin/ori-agent")
+    ;;
   cd)
     local name="$2"
     if [[ -z "$name" ]]; then
@@ -859,6 +885,7 @@ function wt_dispatch {
     echo "  wt ls            - List worktrees"
     echo "  wt status        - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
+    echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;
   esac
