@@ -94,6 +94,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
       fetchJSON('/api/settings/email-oauth')
     ]);
     const status = statusResp && statusResp.status ? statusResp.status : null;
+    if (window.OriHQEmailSetup) {
+      window.OriHQEmailSetup.connected = !!(status && status.connected);
+      window.OriHQEmailSetup.address = (status && status.email_address) || '';
+    }
     const view = emailStatusView(status, oauth ? !!oauth.configured : true);
 
     body.innerHTML = '';
@@ -150,6 +154,16 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     const status = data && data.status;
     if (status && status.valid && String(status.workspace_id) === wsId) {
       btn.hidden = false;
+      // Publish a tiny global so the command view's Map inventory can show an
+      // Email slot and open this modal (workspace-command.js is a non-module
+      // script and cannot import from here).
+      const shared = (window.OriHQEmailSetup = window.OriHQEmailSetup || {});
+      shared.isHQ = true;
+      shared.open = openModal;
+      const emailResp = await fetchJSON('/api/personal-hq/email/status');
+      const emailStatus = emailResp && emailResp.status;
+      shared.connected = !!(emailStatus && emailStatus.connected);
+      shared.address = (emailStatus && emailStatus.email_address) || '';
     }
   }
 

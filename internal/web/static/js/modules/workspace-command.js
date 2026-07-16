@@ -2046,6 +2046,11 @@ export class WorkspaceCommandView {
   }
 
   openRailItem(sectionKey, id, source) {
+    // Personal HQ email slots open the setup modal; no page object required.
+    if (String(sectionKey || '') === 'email') {
+      this.openHQEmailSetup();
+      return;
+    }
     const page = this.page || window.workspaceDetail;
     if (!page || !id) return;
 
@@ -4450,7 +4455,7 @@ export class WorkspaceCommandView {
     const page = this.page || {};
     const folders = this.folderRowData();
     const files = this.fileRowData();
-    return [
+    const groups = [
       {
         key: 'notes',
         label: 'Notes',
@@ -4537,6 +4542,31 @@ export class WorkspaceCommandView {
         }))
       }
     ];
+    // Personal HQ only: email is a first-class inventory item (equipped, not
+    // required). State is published by personal-hq-email-setup.js, whose modal
+    // owns the actual connect/repair/disconnect flow.
+    const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
+    if (hqEmail && hqEmail.isHQ) {
+      groups.push({
+        key: 'email',
+        label: 'Email',
+        icon: 'bi-envelope',
+        count: hqEmail.connected ? 1 : 0,
+        action: hqEmail.connected ? 'Manage Email' : 'Set up Email',
+        slotLabel: 'Email',
+        items: hqEmail.connected
+          ? [
+              {
+                label: hqEmail.address || 'Connected account',
+                meta: 'Connected',
+                section: 'email',
+                id: 'hq-email'
+              }
+            ]
+          : []
+      });
+    }
+    return groups;
   }
 
   renderMapInventoryItems(group) {
@@ -4826,7 +4856,19 @@ export class WorkspaceCommandView {
       this.openSystemTab(this.activeSystemTab || 'memory');
       return;
     }
+    if (section === 'email') {
+      this.openHQEmailSetup();
+      return;
+    }
     this.runRailPrimaryAction(section, triggerButton);
+  }
+
+  // openHQEmailSetup opens the Personal HQ email modal owned by
+  // personal-hq-email-setup.js (present on the detail page for the designated
+  // HQ). No-op when the module has not published its opener.
+  openHQEmailSetup() {
+    const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
+    if (hqEmail && typeof hqEmail.open === 'function') hqEmail.open();
   }
 
   bindOperationsMap() {
