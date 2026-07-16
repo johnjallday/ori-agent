@@ -577,9 +577,17 @@ test('review explains a first-use template agent as reusable and workspace-prima
   await expect(preview).toContainText('New agent');
   await expect(preview).toContainText('not in Your Agents yet');
   await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-new/);
+  await expect(page.locator('.workspace-agent-map-avatar-create-badge')).toHaveCSS(
+    'display',
+    'grid'
+  );
 
   await review.locator('.workspace-template-agent-advanced summary').click();
   await review.locator('#templateAgentReviewToggle').uncheck();
   await expect(preview).toContainText('No agent selected');
   await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-missing/);
+  await expect(page.locator('.workspace-agent-map-avatar-placeholder')).toHaveCSS(
+    'display',
+    'block'
+  );
 });
