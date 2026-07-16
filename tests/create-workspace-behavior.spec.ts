@@ -677,3 +677,53 @@ test('primary avatar immediately creates a reusable template agent', async ({ pa
   await expect(page.locator('#workspaceAgentMapNodeDetail')).toHaveText('Saved reusable agent');
   expect(createPayload).toMatchObject({ agent_index: 0 });
 });
+
+test('team preview creates every missing reusable agent', async ({ page }) => {
+  const createdIndexes: number[] = [];
+  const agentNames = ['Research Lead', 'Source Scout', 'Synthesis Writer'];
+  const plan = () => ({
+    has_agents: true,
+    agents: agentNames.map((name, index) => ({
+      name,
+      scope: 'reusable',
+      action: createdIndexes.includes(index) || index === 2 ? 'reuse' : 'create',
+      entry_point: index === 0,
+      role: index === 0 ? 'orchestrator' : 'specialist',
+      model_source: 'agent_default'
+    })),
+    warnings: []
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(plan())
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-create', async route => {
+    const payload = route.request().postDataJSON();
+    createdIndexes.push(payload.agent_index);
+    const nextPlan = plan();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        created: true,
+        agent: nextPlan.agents[payload.agent_index],
+        plan: nextPlan
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Research Project').click();
+  const createAll = page.locator('#workspaceAgentMapCreateAll');
+  await expect(createAll).toBeVisible();
+  await expect(createAll).toHaveText('Create all 2');
+  await createAll.click();
+
+  await expect.poll(() => createdIndexes.length).toBe(2);
+  expect(createdIndexes).toEqual([0, 1]);
+  await expect(createAll).toBeHidden();
+  await expect(page.locator('#workspaceAgentMapState')).toHaveText('Ready');
+});

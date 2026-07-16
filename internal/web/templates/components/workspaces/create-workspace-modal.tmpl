@@ -87,7 +87,10 @@
                     <span class="workspace-wizard-eyebrow">Workspace preview</span>
                     <h3 id="workspaceAgentMapPreviewTitle">Primary workspace agent</h3>
                   </div>
-                  <span id="workspaceAgentMapState" class="workspace-agent-map-state">Checking</span>
+                  <div class="workspace-agent-map-preview-actions">
+                    <button id="workspaceAgentMapCreateAll" type="button" class="workspace-agent-map-create-all" hidden></button>
+                    <span id="workspaceAgentMapState" class="workspace-agent-map-state">Checking</span>
+                  </div>
                 </div>
                 <div class="workspace-agent-map-canvas">
                   <div id="workspaceAgentMapNode" class="workspace-agent-map-node is-loading">
@@ -109,7 +112,7 @@
                     <strong id="workspaceAgentMapNodeName">Checking agent setup</strong>
                     <span id="workspaceAgentMapNodeDetail">This workspace needs a primary agent.</span>
                   </div>
-                  <div id="workspaceAgentMapSpecialists" class="workspace-agent-map-specialists" aria-hidden="true"></div>
+                  <div id="workspaceAgentMapSpecialists" class="workspace-agent-map-specialists"></div>
                 </div>
                 <p id="workspaceAgentMapStatus" class="workspace-agent-map-status" aria-live="polite">Checking the reusable agent for this workspace…</p>
               </section>

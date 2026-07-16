@@ -335,6 +335,14 @@ const sessionManager = {
     document
       .getElementById('workspaceAgentMapAvatarAction')
       ?.addEventListener('click', () => this.createTemplateAgentFromPreview());
+    document.getElementById('workspaceAgentMapSpecialists')?.addEventListener('click', event => {
+      const action = event.target.closest('[data-template-agent-index]');
+      const agentIndex = Number.parseInt(action?.dataset.templateAgentIndex || '', 10);
+      if (Number.isInteger(agentIndex)) void this.createTemplateAgentFromPreview(agentIndex);
+    });
+    document
+      .getElementById('workspaceAgentMapCreateAll')
+      ?.addEventListener('click', () => this.createAllTemplateAgentsFromPreview());
 
     document.getElementById('addExistingAgentBtn')?.addEventListener('click', () => {
       void this.openExistingAgentRoster();
@@ -4298,6 +4306,7 @@ const sessionManager = {
     const canvas = document.querySelector('.workspace-agent-map-canvas');
     const specialists = document.getElementById('workspaceAgentMapSpecialists');
     const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
+    const createAll = document.getElementById('workspaceAgentMapCreateAll');
     const kicker = document.getElementById('workspaceAgentMapNodeKicker');
     const name = document.getElementById('workspaceAgentMapNodeName');
     const detail = document.getElementById('workspaceAgentMapNodeDetail');
@@ -4309,6 +4318,7 @@ const sessionManager = {
       !canvas ||
       !specialists ||
       !avatarAction ||
+      !createAll ||
       !kicker ||
       !name ||
       !detail ||
@@ -4372,11 +4382,12 @@ const sessionManager = {
             .join('')
             .slice(0, 2)
             .toUpperCase() || 'A';
+        const avatar = isNew
+          ? `<button type="button" class="workspace-agent-map-specialist-avatar" data-template-agent-index="${agent.templateAgentIndex}" aria-label="Create ${this.escapeHtml(agent.name)} as a reusable agent now">${this.escapeHtml(initials)}<span class="workspace-agent-map-specialist-create-badge" aria-hidden="true">+</span></button>`
+          : `<span class="workspace-agent-map-specialist-avatar" aria-hidden="true">${this.escapeHtml(initials)}</span>`;
         return `
           <div class="workspace-agent-map-specialist${isNew ? ' is-new' : ''}">
-            <span class="workspace-agent-map-specialist-avatar">${this.escapeHtml(initials)}${
-              isNew ? '<span class="workspace-agent-map-specialist-create-badge">+</span>' : ''
-            }</span>
+            ${avatar}
             <strong>${this.escapeHtml(agent.name)}</strong>
             <small>Workspace specialist · ${this.escapeHtml(memberLifecycle(agent))}</small>
           </div>`;
@@ -4461,6 +4472,9 @@ const sessionManager = {
     title.textContent =
       team.length > 1 ? `Workspace team · ${team.length} agents` : 'Primary workspace agent';
     specialists.innerHTML = specialistMarkup;
+    createAll.hidden = createdAgents.length < 2;
+    createAll.disabled = false;
+    createAll.textContent = `Create all ${createdAgents.length}`;
     avatarAction.disabled = !canCreatePrimary;
     avatarAction.dataset.templateAgentIndex = canCreatePrimary
       ? String(primary.templateAgentIndex)
@@ -4478,10 +4492,22 @@ const sessionManager = {
     status.textContent = next.status;
   },
 
-  async createTemplateAgentFromPreview() {
+  async createTemplateAgentFromPreview(requestedAgentIndex, options = {}) {
     const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
-    const agentIndex = Number.parseInt(avatarAction?.dataset.templateAgentIndex || '', 10);
-    if (!Number.isInteger(agentIndex) || !avatarAction || avatarAction.disabled) return;
+    const agentIndex = Number.isInteger(requestedAgentIndex)
+      ? requestedAgentIndex
+      : Number.parseInt(avatarAction?.dataset.templateAgentIndex || '', 10);
+    const plannedAgent = this.includedTemplateAgents()[agentIndex];
+    const trigger = document.querySelector(
+      `[data-template-agent-index="${Number.isInteger(agentIndex) ? agentIndex : ''}"]`
+    );
+    if (
+      !Number.isInteger(agentIndex) ||
+      !plannedAgent ||
+      (!trigger && !options.silent) ||
+      (trigger && trigger.disabled)
+    )
+      return false;
 
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
@@ -4490,12 +4516,10 @@ const sessionManager = {
       Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank) &&
       !templateId &&
       !templatePath;
-    const primaryName = String(
-      document.getElementById('workspaceAgentMapNodeName')?.textContent || ''
-    ).trim();
+    const agentName = String(plannedAgent.name || 'agent').trim();
 
-    avatarAction.disabled = true;
-    avatarAction.setAttribute('aria-label', `Creating ${primaryName || 'agent'}…`);
+    if (trigger) trigger.disabled = true;
+    if (trigger === avatarAction) avatarAction.setAttribute('aria-label', `Creating ${agentName}…`);
     try {
       const response = await fetch('/api/workspaces/template-agent-create', {
         method: 'POST',
@@ -4509,7 +4533,7 @@ const sessionManager = {
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.error) {
-        throw new Error(result.error || `Could not create ${primaryName || 'agent'}.`);
+        throw new Error(result.error || `Could not create ${agentName}.`);
       }
 
       if (result.plan) {
@@ -4519,18 +4543,47 @@ const sessionManager = {
       } else {
         await this.refreshTemplateAgentPlan();
       }
-      const savedName = String(result.agent?.name || primaryName || 'Agent').trim();
+      const savedName = String(result.agent?.name || agentName || 'Agent').trim();
       const message = result.created
         ? `${savedName} is now saved in Your Agents and ready for this workspace.`
         : `${savedName} is already saved in Your Agents and ready for this workspace.`;
-      this.announceWorkspaceTeamChange(message);
-      this.showToast(message, 'success');
+      if (!options.silent) {
+        this.announceWorkspaceTeamChange(message);
+        this.showToast(message, 'success');
+      }
+      return true;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Could not create the reusable agent.';
-      this.announceWorkspaceTeamChange(message);
-      this.showToast(message, 'error');
+      if (!options.silent) {
+        this.announceWorkspaceTeamChange(message);
+        this.showToast(message, 'error');
+      }
       this.renderWorkspaceAgentMapPreview();
+      return false;
+    }
+  },
+
+  async createAllTemplateAgentsFromPreview() {
+    const agentIndexes = this.includedTemplateAgents()
+      .map((agent, index) => ({ agent, index }))
+      .filter(({ agent }) => String(agent?.action || '').toLowerCase() === 'create')
+      .map(({ index }) => index);
+    if (agentIndexes.length < 2) return;
+
+    const createAll = document.getElementById('workspaceAgentMapCreateAll');
+    if (createAll) createAll.disabled = true;
+    let createdCount = 0;
+    for (const agentIndex of agentIndexes) {
+      if (await this.createTemplateAgentFromPreview(agentIndex, { silent: true }))
+        createdCount += 1;
+    }
+    if (createdCount > 0) {
+      const message = `${createdCount} reusable agent${createdCount === 1 ? '' : 's'} ${
+        createdCount === 1 ? 'is' : 'are'
+      } now saved in Your Agents and ready for this workspace.`;
+      this.announceWorkspaceTeamChange(message);
+      this.showToast(message, 'success');
     }
   },
 

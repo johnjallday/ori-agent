@@ -805,6 +805,31 @@
   font-size: 14px;
   line-height: 1.2;
 }
+.workspace-create-modal .workspace-agent-map-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.workspace-create-modal .workspace-agent-map-create-all {
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid rgba(232, 181, 75, 0.72);
+  background: rgba(72, 54, 19, 0.24);
+  color: #f7d27a;
+  font-family: var(--wc-font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-agent-map-create-all:hover:not(:disabled) {
+  background: rgba(232, 181, 75, 0.16);
+}
+.workspace-create-modal .workspace-agent-map-create-all:focus-visible {
+  outline: 2px solid var(--wc-ink-heading);
+  outline-offset: 2px;
+}
 .workspace-create-modal .workspace-agent-map-state {
   display: inline-flex;
   align-items: center;
@@ -1126,6 +1151,20 @@
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.6px;
+}
+button.workspace-agent-map-specialist-avatar {
+  padding: 0;
+  appearance: none;
+  cursor: pointer;
+}
+button.workspace-agent-map-specialist-avatar:hover {
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, currentColor 10%, transparent),
+    0 0 22px color-mix(in srgb, currentColor 34%, transparent);
+}
+button.workspace-agent-map-specialist-avatar:focus-visible {
+  outline: 2px solid var(--wc-ink-heading);
+  outline-offset: 4px;
 }
 .workspace-create-modal .workspace-agent-map-specialist-avatar::before,
 .workspace-create-modal .workspace-agent-map-specialist-avatar::after {
