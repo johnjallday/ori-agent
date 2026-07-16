@@ -129,6 +129,15 @@ type Workspace struct {
 	// defaults OFF; an agent must also opt in (Settings.AllowNativeMCPTools).
 	AllowNativeMCPCLI bool `json:"allow_native_mcp_cli,omitempty"`
 
+	// Designation is a synced projection of the personalhq designation records
+	// (internal/personalhq), not the source of truth itself. The per-user
+	// designation record — "who has designated which workspace" — lives in the
+	// personalhq store; this field mirrors that onto the workspace so backend
+	// and UI code can branch on the workspace directly. Valid values: "" (none)
+	// and "personal_hq". Written/cleared by personalhq.Service on
+	// designate/replace/clear and healed on startup by the designation backfill.
+	Designation string `json:"designation,omitempty"`
+
 	// TemplateProvenance records the built-in template this workspace was created
 	// from (portable metadata; see template_provenance.go). Nil for workspaces
 	// created without a template or before provenance was recorded.
