@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head.tmpl" .}}
+<link rel="stylesheet" href="/css/tag-input.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
 
 <body class="bg-light agents-roster-page" data-sidebar-default="hidden">
@@ -46,13 +47,97 @@
             </label>
           </div>
 
-          <ul class="roster-list" id="rosterList" role="listbox" aria-label="Agents" tabindex="0" aria-activedescendant="">
+          <div class="roster-filters" role="group" aria-label="Filter agents">
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by role</span>
+              <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
+            </label>
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by source</span>
+              <select id="filterSource" aria-label="Filter by source">
+                <option value="">All sources</option>
+                <option value="user">User</option>
+                <option value="cli">Built-in</option>
+              </select>
+            </label>
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by assignment</span>
+              <select id="filterAssignment" aria-label="Filter by assignment">
+                <option value="">Library &amp; assigned</option>
+                <option value="library">Library only</option>
+                <option value="assigned">Assigned only</option>
+              </select>
+            </label>
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by tag</span>
+              <select id="filterTag" aria-label="Filter by tag"><option value="">All tags</option></select>
+            </label>
+            <button type="button" id="filterFavorite" class="roster-filter-toggle" aria-pressed="false">★ Favorites</button>
+            <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+          </div>
+
+          <div class="roster-selectbar" role="group" aria-label="Bulk selection">
+            <button type="button" id="rosterSelectAll" class="roster-linkbtn">Select all visible</button>
+            <button type="button" id="rosterClearSelection" class="roster-linkbtn" hidden>Clear selection</button>
+          </div>
+
+          <ul class="roster-list" id="rosterList" role="list" aria-label="Agents">
             <!-- roster cards injected here -->
           </ul>
 
+          <!-- Bulk action bar: revealed when at least one agent is checked. -->
+          <div class="bulk-bar" id="bulkBar" role="region" aria-label="Bulk actions" hidden>
+            <div class="bulk-bar__count" id="bulkCount" aria-live="polite"></div>
+            <div class="bulk-bar__actions">
+              <button type="button" class="bulk-bar__btn" id="bulkAddTags">Add tags</button>
+              <button type="button" class="bulk-bar__btn" id="bulkRemoveTags">Remove tags</button>
+              <button type="button" class="bulk-bar__btn" id="bulkFavorite">Favorite</button>
+              <button type="button" class="bulk-bar__btn" id="bulkUnfavorite">Unfavorite</button>
+              <button type="button" class="bulk-bar__btn bulk-bar__btn--danger" id="bulkDelete">Delete</button>
+            </div>
+          </div>
+          <p class="visually-hidden" id="bulkLive" role="status" aria-live="polite"></p>
+
+          <!-- Persistent bulk-result surface: partial-success results stay
+               inspectable here until dismissed (PRD FR44/FR45). -->
+          <div class="bulk-result" id="bulkResult" role="region" aria-label="Bulk action results" hidden>
+            <div class="bulk-result__head">
+              <span class="bulk-result__summary" id="bulkResultSummary"></span>
+              <button type="button" class="roster-linkbtn" id="bulkResultDismiss">Dismiss</button>
+            </div>
+            <ul class="bulk-result__list" id="bulkResultList"></ul>
+          </div>
+
+          <!-- Bulk-delete confirmation. Native <dialog> traps focus and closes on
+               Escape before submission (PRD FR34/FR85). -->
+          <dialog class="bulk-dialog" id="bulkDeleteDialog" aria-labelledby="bulkDeleteTitle">
+            <h2 class="bulk-dialog__title" id="bulkDeleteTitle">Delete agents</h2>
+            <p class="bulk-dialog__lead">Deleting an agent is permanent and cannot be undone.</p>
+            <div class="bulk-dialog__body" id="bulkDeleteBody"></div>
+            <div class="bulk-dialog__actions">
+              <button type="button" class="btn-ghost" id="bulkDeleteCancel">Cancel</button>
+              <button type="button" class="btn-danger" id="bulkDeleteConfirm">Delete</button>
+            </div>
+          </dialog>
+
+          <!-- Bulk tag add/remove. Body is rebuilt per mode (add = tag entry,
+               remove = checklist of tags across the checked set). -->
+          <dialog class="bulk-dialog" id="bulkTagsDialog" aria-labelledby="bulkTagsTitle">
+            <h2 class="bulk-dialog__title" id="bulkTagsTitle">Tags</h2>
+            <div class="bulk-dialog__body" id="bulkTagsBody"></div>
+            <div class="bulk-dialog__actions">
+              <button type="button" class="btn-ghost" id="bulkTagsCancel">Cancel</button>
+              <button type="button" class="btn-primary" id="bulkTagsConfirm">Apply</button>
+            </div>
+          </dialog>
+
           <div class="roster-empty" id="rosterEmpty" hidden>
-            <p>No agents match your search.</p>
-            <button type="button" id="rosterClearSearch" class="roster-linkbtn">Clear search</button>
+            <p id="rosterEmptyMsg">No agents match your search.</p>
+            <div class="roster-empty__actions">
+              <button type="button" id="rosterClearSearch" class="roster-linkbtn" hidden>Clear search</button>
+              <button type="button" id="rosterEmptyClearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+              <button type="button" id="rosterEmptyCreate" class="roster-linkbtn" hidden>Create your first agent</button>
+            </div>
           </div>
         </section>
 
@@ -119,6 +204,9 @@
   <script defer src="/js/app.js"></script>
   <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
+  <!-- Shared tag-entry widget (exposes window.OriTagInput). Loaded as a module so
+       the roster's Overview + bulk tag flows reuse it instead of duplicating. -->
+  <script type="module" src="/js/modules/tag-input.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 

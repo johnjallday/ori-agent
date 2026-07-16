@@ -73,12 +73,71 @@
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 10px;
   background: var(--bg-secondary, #f9fafb);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
+.roster-stat:hover { border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb)); }
+.roster-stat:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 2px; }
+/* Selected health filter: ring + check glyph, not color alone. */
+.roster-stat.is-selected {
+  border-color: var(--primary-color, #4f46e5);
+  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
+}
+.roster-stat.is-selected .roster-stat__label::after { content: " ✓"; }
 .roster-stat__value { font-size: 18px; font-weight: 700; line-height: 1.1; color: var(--text-primary, #111827); }
 .roster-stat__label { font-size: 11px; color: var(--text-secondary, #6b7280); }
 .roster-stat--needs .roster-stat__value { color: #dc2626; }
 .roster-stat--needs.roster-stat--zero .roster-stat__value,
 .roster-stat--disabled.roster-stat--zero .roster-stat__value { color: var(--text-primary, #111827); }
+
+/* ---- Filter controls ------------------------------------------------------ */
+.roster-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.roster-filter select {
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  cursor: pointer;
+  max-width: 140px;
+}
+.roster-filter select:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 1px; }
+.roster-filter-toggle {
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  cursor: pointer;
+}
+.roster-filter-toggle:hover { border-color: var(--primary-color, #4f46e5); }
+.roster-filter-toggle:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 1px; }
+.roster-filter-toggle.is-active {
+  border-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: #b45309;
+}
+[data-bs-theme="dark"] .roster-filter-toggle.is-active { color: #fbbf24; }
+
+.roster-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 6px;
+}
+[data-bs-theme="dark"] .roster-filter select,
+[data-bs-theme="dark"] .roster-filter-toggle { background: var(--bg-primary, #1f2430); }
 
 .roster-rail__actions {
   display: flex;
@@ -148,22 +207,68 @@
   outline-offset: 2px;
 }
 
-/* Roster card */
+/* Roster card: a checkbox (bulk selection) + an open button (focus/stage), as
+   sibling controls so the two selection concepts never nest or collide. */
 .roster-card {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 11px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px 10px 6px 8px;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 12px;
   background: var(--bg-primary, #fff);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.05s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .roster-card:hover {
   border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+}
+
+/* Checkbox column */
+.roster-card__checkwrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  margin: 0;
+  cursor: pointer;
+  align-self: stretch;
+}
+
+.roster-card__check {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary-color, #4f46e5);
+}
+
+.roster-card__check:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+/* Open/focus button: a full-width, unstyled button that carries the card's
+   avatar + body + status. Button reset so it reads as a card, not a control. */
+.roster-card__open {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.roster-card__open:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
 }
 
 /* Built-in "permanent residency" agents (CLI + Ori): a warm amber tint sets
@@ -183,10 +288,26 @@
   background: color-mix(in srgb, #f59e0b 20%, var(--bg-primary, #1f2430));
 }
 
-.roster-card[aria-selected="true"] {
+/* Focused agent (drives the stage): a left edge-bar + subtle tint. Distinct from
+   the checked cue below so a card can show focused, checked, both, or neither
+   without relying on color alone (PRD FR5). */
+.roster-card.is-focused {
   border-color: var(--primary-color, #4f46e5);
   background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, var(--bg-primary, #fff));
   box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5);
+}
+
+/* Checked agent (bulk target): a ring around the whole card, driven by the
+   checkbox, independent of focus. */
+.roster-card.is-checked {
+  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 70%, var(--border-color, #e5e7eb));
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 5%, var(--bg-primary, #fff));
+}
+
+/* Focused AND checked: combine the edge-bar (focus) with the checked ring. */
+.roster-card.is-focused.is-checked {
+  box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5),
+    0 0 0 1px color-mix(in srgb, var(--primary-color, #4f46e5) 55%, transparent);
 }
 
 .roster-card__avatar {
@@ -204,6 +325,8 @@
 
 .roster-card__body {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .roster-card__namerow {
@@ -264,6 +387,62 @@
 .roster-card__status.is-error { background: #ef4444; }
 .roster-card__status.is-disabled { background: #d1d5db; }
 
+/* Favorite star + textual status label + tag chips on the card. Status is
+   conveyed by text, never by the dot's color alone (PRD FR55). */
+.roster-card__fav {
+  color: #f59e0b;
+  font-size: 13px;
+  flex: none;
+}
+
+/* Solid (opaque) pill colors so contrast is predictable on any card background,
+   including the amber built-in cards (WCAG AA, PRD FR55/FR87). */
+.roster-card__statuslabel {
+  flex: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: #374151;
+  background: #e5e7eb;
+}
+.roster-card__statuslabel.is-active {
+  color: #14532d;
+  background: #bbf7d0;
+}
+.roster-card__statuslabel.is-error {
+  color: #7f1d1d;
+  background: #fecaca;
+}
+[data-bs-theme="dark"] .roster-card__statuslabel { color: #1f2937; background: #cbd5e1; }
+[data-bs-theme="dark"] .roster-card__statuslabel.is-active { color: #14532d; background: #86efac; }
+[data-bs-theme="dark"] .roster-card__statuslabel.is-error { color: #7f1d1d; background: #fca5a5; }
+
+.roster-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.roster-card__tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--text-secondary, #6b7280);
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 20%, transparent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-card__tag--more {
+  background: none;
+  border-color: var(--border-color, #e5e7eb);
+}
+
 .roster-empty {
   text-align: center;
   color: var(--text-secondary, #6b7280);
@@ -278,6 +457,353 @@
   cursor: pointer;
   font-size: 13px;
   text-decoration: underline;
+}
+
+.roster-linkbtn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---- Bulk selection controls + action bar --------------------------------- */
+
+.roster-selectbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 4px;
+  min-height: 20px;
+}
+
+/* Contextual bulk action bar, revealed when >=1 agent is checked. Sticks to the
+   bottom of the roster rail so it stays reachable without covering the stage
+   (PRD FR16/FR21). */
+.bulk-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  margin: 8px 4px 0;
+  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 6%, var(--bg-primary, #fff));
+  box-shadow: 0 -4px 12px color-mix(in srgb, #000 8%, transparent);
+}
+
+.bulk-bar__count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bulk-bar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bulk-bar__btn {
+  border: 1px solid var(--border-color, #d1d5db);
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.bulk-bar__btn:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.bulk-bar__btn:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.bulk-bar__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bulk-bar__btn--danger {
+  border-color: color-mix(in srgb, #ef4444 55%, var(--border-color, #d1d5db));
+  color: #b91c1c;
+}
+
+.bulk-bar__btn--danger:hover {
+  border-color: #ef4444;
+  background: color-mix(in srgb, #ef4444 8%, var(--bg-primary, #fff));
+}
+
+[data-bs-theme="dark"] .bulk-bar__btn--danger {
+  color: #f87171;
+}
+
+/* ---- Bulk result surface -------------------------------------------------- */
+
+.bulk-result {
+  margin: 8px 4px 0;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--bg-primary, #fff);
+  padding: 10px 12px;
+}
+
+.bulk-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.bulk-result__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bulk-result__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text-secondary, #6b7280) 8%, transparent);
+}
+
+.bulk-result__item.is-failed {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+}
+
+.bulk-result__name {
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  flex: none;
+}
+
+.bulk-result__reason {
+  color: var(--text-secondary, #6b7280);
+  min-width: 0;
+}
+
+[data-bs-theme="dark"] .bulk-result { background: var(--bg-primary, #1f2430); }
+
+/* ---- Bulk-delete confirmation dialog -------------------------------------- */
+
+.bulk-dialog {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  padding: 22px 24px;
+  max-width: 460px;
+  width: calc(100vw - 32px);
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+}
+
+.bulk-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.bulk-dialog__title {
+  margin: 0 0 4px;
+  font-size: 19px;
+}
+
+.bulk-dialog__lead {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.bulk-dialog__body {
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.bulk-dialog__group {
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.bulk-dialog__group.is-danger {
+  border-color: color-mix(in srgb, #ef4444 40%, var(--border-color, #e5e7eb));
+}
+
+.bulk-dialog__grouptitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary, #6b7280);
+}
+
+.bulk-dialog__grouplist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.bulk-dialog__grouplist li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.bulk-dialog__agent {
+  font-weight: 600;
+}
+
+.bulk-dialog__reason,
+.bulk-dialog__wslink {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.bulk-dialog__none {
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+  margin: 0;
+}
+
+.bulk-dialog__error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.bulk-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.btn-danger {
+  border: 1px solid #b91c1c;
+  background: #b91c1c; /* white text meets WCAG AA (contrast > 5:1) */
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-danger:hover:not(:disabled) { background: #991b1b; }
+.btn-danger:focus-visible { outline: 2px solid #b91c1c; outline-offset: 2px; }
+.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+[data-bs-theme="dark"] .bulk-dialog { background: var(--bg-primary, #1f2430); }
+
+.bulk-dialog__text {
+  width: 100%;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+}
+
+.bulk-tags-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bulk-tags-checklist__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* ---- Overview metadata controls ------------------------------------------- */
+
+.color-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-input input[type="color"] {
+  width: 38px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+.color-input__hex {
+  width: 92px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+}
+
+.avatar-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.avatar-control__status {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+}
+
+.stage-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  font-size: 12px;
+}
+.stage-meta dt {
+  color: var(--text-secondary, #6b7280);
+  font-weight: 600;
+}
+.stage-meta dd {
+  margin: 0;
+  color: var(--text-primary, #111827);
 }
 
 /* ---- Stage ---------------------------------------------------------------- */
@@ -781,6 +1307,16 @@
   .roster-list {
     max-height: 44vh;
   }
+  /* Stack the bulk bar so its count and actions never overflow the narrow rail
+     or force horizontal page scrolling (PRD FR21). */
+  .bulk-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .bulk-bar__actions {
+    justify-content: flex-start;
+  }
+  .roster-filter select { max-width: none; flex: 1 1 auto; }
   .stage__hero {
     grid-template-columns: 52px minmax(0, 1fr);
     padding: 18px 18px 16px;
@@ -794,8 +1330,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .roster-card,
+  .roster-card__open,
+  .roster-stat,
+  .bulk-bar__btn,
+  .bulk-bar__btn--danger,
   .btn-primary,
-  .btn-ghost {
+  .btn-ghost,
+  .btn-danger {
     transition: none;
   }
 }
