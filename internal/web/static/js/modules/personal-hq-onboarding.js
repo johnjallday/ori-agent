@@ -146,6 +146,33 @@ export function replyProposalView(p) {
   return view;
 }
 
+// followUpCategoryLabel maps a follow-up category to a friendly label.
+export function followUpCategoryLabel(category) {
+  switch (category) {
+    case 'i_owe': return 'You owe';
+    case 'waiting_on': return 'Waiting on';
+    case 'needs_decision': return 'Needs decision';
+    case 'recurring_check_in': return 'Check-in';
+    default: return 'Follow-up';
+  }
+}
+
+// followUpView turns a follow-up record into a Home projection card view-model.
+// A candidate (inferred, unconfirmed) offers Confirm/Dismiss; an active item
+// offers Done/Snooze.
+export function followUpView(f) {
+  if (!f) return null;
+  const status = f.status || 'active';
+  return {
+    id: f.id,
+    title: f.title || '',
+    detail: f.detail || '',
+    counterparty: f.counterparty || '',
+    category: followUpCategoryLabel(f.category),
+    isCandidate: status === 'candidate'
+  };
+}
+
 (function () {
   if (typeof document === 'undefined') return;
 
@@ -865,6 +892,115 @@ export function replyProposalView(p) {
     actionable.forEach(p => mount.appendChild(renderReplyCard(replyProposalView(p))));
   }
 
+  async function fetchHomeFollowUps() {
+    const res = await fetch('/api/personal-hq/followups/home', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.followups) ? data.followups : [];
+  }
+
+  function renderFollowUpCard(view) {
+    const card = document.createElement('div');
+    card.className = 'hq-followup-card';
+
+    const cat = document.createElement('span');
+    cat.className = 'hq-followup-category';
+    cat.textContent = view.counterparty ? `${view.category}: ${view.counterparty}` : view.category;
+    card.appendChild(cat);
+
+    const title = document.createElement('p');
+    title.className = 'hq-followup-title';
+    title.textContent = view.title;
+    card.appendChild(title);
+
+    if (view.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'hq-followup-detail';
+      detail.textContent = view.detail;
+      card.appendChild(detail);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'hq-followup-actions';
+
+    const act = async (url, body, label) => {
+      try {
+        await postJSON(url, body);
+        await wireFollowUps();
+      } catch (_) {
+        toast(`Could not ${label} the follow-up.`, 'Error', 'danger');
+      }
+    };
+
+    if (view.isCandidate) {
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+      confirmBtn.textContent = 'Track this';
+      confirmBtn.addEventListener('click', () => act('/api/personal-hq/followups/confirm', { id: view.id }, 'confirm'));
+      const dismissBtn = document.createElement('button');
+      dismissBtn.type = 'button';
+      dismissBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+      dismissBtn.textContent = 'Not a follow-up';
+      dismissBtn.addEventListener('click', () => act('/api/personal-hq/followups/dismiss', { id: view.id }, 'dismiss'));
+      actions.append(confirmBtn, dismissBtn);
+    } else {
+      const doneBtn = document.createElement('button');
+      doneBtn.type = 'button';
+      doneBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+      doneBtn.textContent = 'Done';
+      doneBtn.addEventListener('click', () => act('/api/personal-hq/followups/complete', { id: view.id }, 'complete'));
+      const snoozeBtn = document.createElement('button');
+      snoozeBtn.type = 'button';
+      snoozeBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+      snoozeBtn.textContent = 'Snooze 1 day';
+      snoozeBtn.addEventListener('click', () => {
+        const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        act('/api/personal-hq/followups/snooze', { id: view.id, until }, 'snooze');
+      });
+      actions.append(doneBtn, snoozeBtn);
+    }
+    card.appendChild(actions);
+    return card;
+  }
+
+  // wireFollowUps renders the bounded Home follow-up projection. Additive:
+  // no-op without #hqFollowUpMount or a valid HQ.
+  async function wireFollowUps() {
+    const mount = document.getElementById('hqFollowUpMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    let items;
+    try {
+      items = await fetchHomeFollowUps();
+    } catch (_) {
+      return;
+    }
+    mount.innerHTML = '';
+    if (!items.length) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    const heading = document.createElement('h4');
+    heading.className = 'hq-followup-heading';
+    heading.textContent = 'Follow-ups';
+    mount.appendChild(heading);
+    items.forEach(f => {
+      const view = followUpView(f);
+      if (view) mount.appendChild(renderFollowUpCard(view));
+    });
+  }
+
   function init() {
     wireGuided();
     wireResume();
@@ -876,6 +1012,7 @@ export function replyProposalView(p) {
     wireUpgrade();
     wireEmail();
     wireMailReview();
+    wireFollowUps();
   }
 
   if (document.readyState === 'loading') {

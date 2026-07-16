@@ -23,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
@@ -238,6 +239,9 @@ type ServerBuilder struct {
 	// mailDrafter creates local reply proposals for the mail_draft_reply tool;
 	// nil until the vault system initializes it.
 	mailDrafter chathttp.MailDrafter
+
+	// followUpService is the structured follow-up domain service.
+	followUpService *followup.Service
 
 	// Daily Brief configuration, generation, and scheduling
 	dailyBriefService   *dailybrief.Service

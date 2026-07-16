@@ -23,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
@@ -176,6 +177,10 @@ func (b *ServerBuilder) initializeHandlers() {
 		// one provisioning path (task 2.9).
 		personalHQUpgrade := personalhq.NewUpgradeCoordinator(b.personalHQService, sessionStore, b.sessionHandler)
 		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, personalHQUpgrade, b.userProvider)
+		// Structured follow-ups (Group 6): a dedicated SQLite domain over the
+		// shared database.
+		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))
+		b.personalHQHandler.SetFollowUps(b.followUpService)
 		// Initialize auto-classify handler for session classification
 		b.autoClassifyHandler = sessionhttp.NewAutoClassifyHandler(sessionStore, b.st, b.llmFactory, b.configManager)
 		// Initialize smart input handler for Workspace Hub classification

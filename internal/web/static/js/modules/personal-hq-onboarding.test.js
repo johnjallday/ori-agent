@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, replyProposalView } from './personal-hq-onboarding.js';
+import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, replyProposalView, followUpView, followUpCategoryLabel } from './personal-hq-onboarding.js';
 
 function status(overrides) {
   return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
@@ -151,4 +151,25 @@ test('replyProposalView: a sent proposal is terminal (not sendable)', () => {
   const view = replyProposalView({ id: 'p1', status: 'sent', payload: {} });
   assert.equal(view.canSend, false);
   assert.equal(view.statusNote, 'Sent');
+});
+
+test('followUpCategoryLabel maps v1 categories to friendly labels', () => {
+  assert.equal(followUpCategoryLabel('i_owe'), 'You owe');
+  assert.equal(followUpCategoryLabel('waiting_on'), 'Waiting on');
+  assert.equal(followUpCategoryLabel('needs_decision'), 'Needs decision');
+  assert.equal(followUpCategoryLabel('recurring_check_in'), 'Check-in');
+  assert.equal(followUpCategoryLabel('unknown'), 'Follow-up');
+});
+
+test('followUpView: an active item is actionable (Done/Snooze), not a candidate', () => {
+  const view = followUpView({ id: 'f1', status: 'active', category: 'waiting_on', title: "Dana's quote", counterparty: 'Dana' });
+  assert.equal(view.isCandidate, false);
+  assert.equal(view.category, 'Waiting on');
+  assert.equal(view.counterparty, 'Dana');
+  assert.equal(view.title, "Dana's quote");
+});
+
+test('followUpView: a candidate is flagged for confirm/dismiss', () => {
+  const view = followUpView({ id: 'f2', status: 'candidate', category: 'i_owe', title: 'Maybe send deck' });
+  assert.equal(view.isCandidate, true);
 });
