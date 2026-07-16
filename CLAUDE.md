@@ -268,6 +268,8 @@ SMOKE_DIR=$(mktemp -d)
 HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 ./bin/ori-agent
 ```
 
+**Shorthand: `wt demo [port]`** (from `scripts/wt.sh`, default port 8931) builds the current worktree and launches this exact recipe — sandboxed temp `HOME`/`ORI_DATA_DIR`, started from *inside* the sandbox so the plugin store is isolated too. Use it for the per-group **Demo:** checkpoint (see the manual-test protocol): drive every new user-visible surface in a real browser before its PR opens.
+
 Rules:
 - Start the server as a tracked background process (`run_in_background`) and stop it by PID — never `pkill -f <pattern>`.
 - Keep every smoke artifact under `$SMOKE_DIR`; cleanup is then a single `rm -rf "$SMOKE_DIR"` of a temp path. Nothing under the real `$HOME` should ever need deleting after a smoke test.
