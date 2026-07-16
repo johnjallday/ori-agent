@@ -4540,7 +4540,21 @@ const sessionManager = {
     title.textContent = `Create ${plannedAgent.name}`;
     description.textContent = `${plannedAgent.name} will be saved in Your Agents and can be reused in future workspaces. You can still cancel this workspace afterward.`;
     name.value = String(plannedAgent.name || '');
-    model.value = String(plannedAgent.model || '');
+    const modelSource = String(plannedAgent.model_source || '').trim();
+    const explicitModel = ['template', 'existing'].includes(modelSource)
+      ? String(plannedAgent.model || '').trim()
+      : '';
+    const explicitProvider = explicitModel ? String(plannedAgent.provider || '').trim() : '';
+    const inheritedModel = String(plannedAgent.model || '').trim();
+    const inheritedLabel = inheritedModel
+      ? `${String(plannedAgent.provider || '').trim() ? `${plannedAgent.provider} / ` : ''}${inheritedModel}`
+      : 'App default';
+    model.innerHTML = this.renderTemplateAgentModelOptions(
+      plannedAgent,
+      explicitModel,
+      explicitProvider,
+      inheritedLabel
+    );
     prompt.value = String(plannedAgent.system_prompt || '');
     save.textContent = `Save ${plannedAgent.name}`;
     save.disabled = false;
@@ -4591,12 +4605,21 @@ const sessionManager = {
       return;
     }
 
+    const selectedModel = String(modelInput?.value || '').trim();
+    const selectedProvider = String(
+      modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
+    ).trim();
     const override = {
       index: agentIndex,
       name,
-      model: String(modelInput?.value || '').trim(),
       system_prompt: String(promptInput?.value || '').trim()
     };
+    // An empty picker value intentionally means "inherit the blueprint/system
+    // default". Omit it from the override so that default survives creation.
+    if (selectedModel) {
+      override.model = selectedModel;
+      override.provider = selectedProvider;
+    }
     if (save) save.disabled = true;
     if (status) {
       status.textContent = `Saving ${name} to Your Agents…`;

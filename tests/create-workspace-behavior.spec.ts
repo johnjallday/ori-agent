@@ -553,7 +553,9 @@ test('review visualizes every included template agent and its lifecycle', async 
             action: 'reuse',
             entry_point: true,
             role: 'orchestrator',
-            model_source: 'agent_default'
+            model: 'gpt-5.3-codex',
+            provider: 'codex',
+            model_source: 'template'
           },
           {
             name: 'Source Scout',
@@ -646,6 +648,8 @@ test('primary avatar opens setup before saving a reusable template agent', async
           action: 'reuse',
           entry_point: true,
           role: 'orchestrator',
+          model: 'gpt-5.3-codex',
+          provider: 'codex',
           model_source: 'existing'
         },
         plan: {
@@ -657,6 +661,8 @@ test('primary avatar opens setup before saving a reusable template agent', async
               action: 'reuse',
               entry_point: true,
               role: 'orchestrator',
+              model: 'gpt-5.3-codex',
+              provider: 'codex',
               model_source: 'existing'
             }
           ],
@@ -677,7 +683,7 @@ test('primary avatar opens setup before saving a reusable template agent', async
   await expect(page.locator('#workspaceTemplateAgentSetupName')).toHaveValue('Reaper Producer');
   expect(createPayload).toBeNull();
   await page.locator('#workspaceTemplateAgentSetupName').fill('My Reaper Producer');
-  await page.locator('#workspaceTemplateAgentSetupModel').fill('gpt-5.3-codex');
+  await page.locator('#workspaceTemplateAgentSetupModel').selectOption('gpt-5.3-codex');
   await page.locator('#workspaceTemplateAgentSetupPrompt').fill('Produce with deliberate restraint.');
   await page.locator('#workspaceTemplateAgentSetupSave').click();
 
@@ -689,6 +695,7 @@ test('primary avatar opens setup before saving a reusable template agent', async
       index: 0,
       name: 'My Reaper Producer',
       model: 'gpt-5.3-codex',
+      provider: 'codex',
       system_prompt: 'Produce with deliberate restraint.'
     }
   });
