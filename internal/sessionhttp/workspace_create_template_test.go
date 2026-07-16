@@ -345,6 +345,68 @@ func TestCreateWorkspaceTemplateAgentPlanEndpoint(t *testing.T) {
 	}
 }
 
+func TestCreateTemplateAgentImmediatelySavesReusableDefinition(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	handler.SetSystemModelReader(fakeSystemModelReader{provider: "codex", model: "gpt-5.3-codex"})
+
+	tplDir := filepath.Join(handler.templatesRootResolver(), "reaper-template")
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Reaper Song",
+		"agents":[{"name":"Reaper Producer","role":"orchestrator","system_prompt":"produce the song"}]
+	}`
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	newCreateRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/template-agent-create", bytes.NewBufferString(`{"template_id":"reaper-template","agent_index":0}`))
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+	req := newCreateRequest()
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		Created bool                  `json:"created"`
+		Agent   templateAgentPlanItem `json:"agent"`
+		Plan    templateAgentPlan     `json:"plan"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if !response.Created || response.Agent.Name != "Reaper Producer" || response.Agent.Action != "reuse" {
+		t.Fatalf("unexpected create response: %+v", response)
+	}
+	if len(response.Plan.Agents) != 1 || response.Plan.Agents[0].Action != "reuse" {
+		t.Fatalf("expected refreshed reuse plan, got %+v", response.Plan)
+	}
+	ag, ok := handler.agentStore.GetAgent("Reaper Producer")
+	if !ok || ag == nil || ag.Settings.SystemPrompt != "produce the song" || ag.Settings.Model != "gpt-5.3-codex" {
+		t.Fatalf("template defaults were not saved: %+v", ag)
+	}
+
+	// Calling the action again is idempotent and does not mutate the saved definition.
+	w = httptest.NewRecorder()
+	handler.HandleWorkspaces(w, newCreateRequest())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected idempotent 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode repeat response: %v", err)
+	}
+	if response.Created {
+		t.Fatalf("repeat create unexpectedly reported a new definition: %+v", response)
+	}
+}
+
 func TestCreateWorkspaceAppliesTemplateAgentOverrides(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()

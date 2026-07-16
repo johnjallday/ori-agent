@@ -909,9 +909,11 @@
   display: grid;
   width: 106px;
   height: 106px;
+  padding: 0;
   place-items: center;
   border: 1px solid currentColor;
   border-radius: 50%;
+  appearance: none;
   background:
     radial-gradient(
       circle at 50% 30%,
@@ -922,6 +924,23 @@
   box-shadow:
     0 0 0 6px color-mix(in srgb, currentColor 8%, transparent),
     0 0 30px color-mix(in srgb, currentColor 24%, transparent);
+}
+.workspace-create-modal .workspace-agent-map-avatar:disabled {
+  cursor: default;
+}
+.workspace-create-modal .workspace-agent-map-node.is-actionable .workspace-agent-map-avatar {
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-agent-map-node.is-actionable .workspace-agent-map-avatar:hover {
+  box-shadow:
+    0 0 0 8px color-mix(in srgb, currentColor 11%, transparent),
+    0 0 38px color-mix(in srgb, currentColor 36%, transparent);
+}
+.workspace-create-modal
+  .workspace-agent-map-node.is-actionable
+  .workspace-agent-map-avatar:focus-visible {
+  outline: 2px solid var(--wc-ink-heading);
+  outline-offset: 5px;
 }
 .workspace-create-modal .workspace-agent-map-avatar::before,
 .workspace-create-modal .workspace-agent-map-avatar::after {
@@ -989,6 +1008,14 @@
   display: grid;
   place-items: center;
   opacity: 1;
+}
+.workspace-create-modal .workspace-agent-map-node.is-new .workspace-agent-map-node-kicker::after {
+  display: block;
+  margin-top: 5px;
+  color: var(--wc-ink-dim);
+  content: "CLICK + TO CREATE REUSABLE AGENT";
+  font-size: 8px;
+  letter-spacing: 0.7px;
 }
 .workspace-create-modal .workspace-agent-map-node.is-missing,
 .workspace-create-modal .workspace-agent-map-node.is-loading,

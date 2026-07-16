@@ -610,3 +610,70 @@ test('review visualizes every included template agent and its lifecycle', async 
     'block'
   );
 });
+
+test('primary avatar immediately creates a reusable template agent', async ({ page }) => {
+  let createPayload: Record<string, unknown> | null = null;
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        agents: [
+          {
+            name: 'Reaper Producer',
+            scope: 'reusable',
+            action: 'create',
+            entry_point: true,
+            role: 'orchestrator',
+            model_source: 'agent_default'
+          }
+        ],
+        warnings: []
+      })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-create', async route => {
+    createPayload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        created: true,
+        agent: {
+          name: 'Reaper Producer',
+          scope: 'reusable',
+          action: 'reuse',
+          entry_point: true,
+          role: 'orchestrator',
+          model_source: 'existing'
+        },
+        plan: {
+          has_agents: true,
+          agents: [
+            {
+              name: 'Reaper Producer',
+              scope: 'reusable',
+              action: 'reuse',
+              entry_point: true,
+              role: 'orchestrator',
+              model_source: 'existing'
+            }
+          ],
+          warnings: []
+        }
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  const action = page.locator('#workspaceAgentMapAvatarAction');
+  await expect(action).toBeEnabled();
+  await expect(action).toHaveAccessibleName(/create reaper producer as a reusable agent now/i);
+  await action.click();
+
+  await expect(page.locator('#workspaceAgentMapState')).toHaveText('Ready');
+  await expect(page.locator('#workspaceAgentMapNodeDetail')).toHaveText('Saved reusable agent');
+  expect(createPayload).toMatchObject({ agent_index: 0 });
+});

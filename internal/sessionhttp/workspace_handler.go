@@ -65,6 +65,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 	case "template-agent-plan":
 		h.handleTemplateAgentPlan(w, r)
 		return
+	case "template-agent-create":
+		h.handleTemplateAgentCreate(w, r)
+		return
 	}
 
 	// Handle sub-paths like {id}/agents, {id}/layout

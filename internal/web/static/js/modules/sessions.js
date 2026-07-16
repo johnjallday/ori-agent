@@ -332,6 +332,10 @@ const sessionManager = {
       this.refreshWorkspaceReview();
     });
 
+    document
+      .getElementById('workspaceAgentMapAvatarAction')
+      ?.addEventListener('click', () => this.createTemplateAgentFromPreview());
+
     document.getElementById('addExistingAgentBtn')?.addEventListener('click', () => {
       void this.openExistingAgentRoster();
     });
@@ -4293,6 +4297,7 @@ const sessionManager = {
     const title = document.getElementById('workspaceAgentMapPreviewTitle');
     const canvas = document.querySelector('.workspace-agent-map-canvas');
     const specialists = document.getElementById('workspaceAgentMapSpecialists');
+    const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
     const kicker = document.getElementById('workspaceAgentMapNodeKicker');
     const name = document.getElementById('workspaceAgentMapNodeName');
     const detail = document.getElementById('workspaceAgentMapNodeDetail');
@@ -4303,6 +4308,7 @@ const sessionManager = {
       !title ||
       !canvas ||
       !specialists ||
+      !avatarAction ||
       !kicker ||
       !name ||
       !detail ||
@@ -4319,8 +4325,8 @@ const sessionManager = {
       teamNames.add(key);
       team.push({ ...member, name: memberName });
     };
-    this.includedTemplateAgents().forEach(agent =>
-      addTeamMember({ ...agent, source: 'blueprint' })
+    this.includedTemplateAgents().forEach((agent, templateAgentIndex) =>
+      addTeamMember({ ...agent, source: 'blueprint', templateAgentIndex })
     );
     this.existingAgentSelections.forEach(selectedName => {
       const savedAgent = this.findExistingRosterAgent(selectedName);
@@ -4342,6 +4348,12 @@ const sessionManager = {
       : [];
     const createdAgents = team.filter(
       agent => String(agent.action || '').toLowerCase() === 'create'
+    );
+    const canCreatePrimary = Boolean(
+      primary &&
+      primary.source === 'blueprint' &&
+      String(primary.action || '').toLowerCase() === 'create' &&
+      Number.isInteger(primary.templateAgentIndex)
     );
     const memberLifecycle = agent => {
       if (String(agent.action || '').toLowerCase() === 'create') return 'New reusable agent';
@@ -4421,11 +4433,11 @@ const sessionManager = {
       } else {
         next = {
           state: 'new',
-          label: 'New agent',
+          label: 'Create agent',
           kicker: 'PRIMARY WORKSPACE AGENT',
           name: agentName,
-          detail: memberLifecycle(primary),
-          status: `${agentName} will be added to Your Agents as this workspace's primary agent.${specialistSentence}${creationSentence}`
+          detail: 'Not in Your Agents yet · Create reusable agent',
+          status: `${agentName} is not in Your Agents yet. Select its + avatar to create and save this reusable agent now.${specialistSentence}${creationSentence}`
         };
       }
     } else if (this.templateAgentPlan) {
@@ -4440,18 +4452,86 @@ const sessionManager = {
       };
     }
 
-    node.className = `workspace-agent-map-node is-${next.state}`;
+    node.className = `workspace-agent-map-node is-${next.state}${
+      canCreatePrimary ? ' is-actionable' : ''
+    }`;
     canvas.classList.toggle('is-team', teamSpecialists.length > 0);
     canvas.classList.toggle('has-many-specialists', teamSpecialists.length > 3);
     state.className = `workspace-agent-map-state is-${next.state}`;
     title.textContent =
       team.length > 1 ? `Workspace team · ${team.length} agents` : 'Primary workspace agent';
     specialists.innerHTML = specialistMarkup;
+    avatarAction.disabled = !canCreatePrimary;
+    avatarAction.dataset.templateAgentIndex = canCreatePrimary
+      ? String(primary.templateAgentIndex)
+      : '';
+    avatarAction.setAttribute(
+      'aria-label',
+      canCreatePrimary
+        ? `Create ${primary.name} as a reusable agent now. It will remain in Your Agents if you cancel this workspace.`
+        : `${next.name} is this workspace's primary agent`
+    );
     state.textContent = next.label;
     kicker.textContent = next.kicker;
     name.textContent = next.name;
     detail.textContent = next.detail;
     status.textContent = next.status;
+  },
+
+  async createTemplateAgentFromPreview() {
+    const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
+    const agentIndex = Number.parseInt(avatarAction?.dataset.templateAgentIndex || '', 10);
+    if (!Number.isInteger(agentIndex) || !avatarAction || avatarAction.disabled) return;
+
+    const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
+    const templateId = String(fields.template_id || '').trim();
+    const templatePath = String(fields.template_path || '').trim();
+    const isBlank =
+      Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank) &&
+      !templateId &&
+      !templatePath;
+    const primaryName = String(
+      document.getElementById('workspaceAgentMapNodeName')?.textContent || ''
+    ).trim();
+
+    avatarAction.disabled = true;
+    avatarAction.setAttribute('aria-label', `Creating ${primaryName || 'agent'}…`);
+    try {
+      const response = await fetch('/api/workspaces/template-agent-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_id: templateId || undefined,
+          template_path: templatePath || undefined,
+          blank: isBlank || undefined,
+          agent_index: agentIndex
+        })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        throw new Error(result.error || `Could not create ${primaryName || 'agent'}.`);
+      }
+
+      if (result.plan) {
+        this.templateAgentPlan = result.plan;
+        this.templateAgentPlanError = '';
+        this.renderTemplateAgentPlan(result.plan);
+      } else {
+        await this.refreshTemplateAgentPlan();
+      }
+      const savedName = String(result.agent?.name || primaryName || 'Agent').trim();
+      const message = result.created
+        ? `${savedName} is now saved in Your Agents and ready for this workspace.`
+        : `${savedName} is already saved in Your Agents and ready for this workspace.`;
+      this.announceWorkspaceTeamChange(message);
+      this.showToast(message, 'success');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Could not create the reusable agent.';
+      this.announceWorkspaceTeamChange(message);
+      this.showToast(message, 'error');
+      this.renderWorkspaceAgentMapPreview();
+    }
   },
 
   refreshWorkspaceReview() {
