@@ -512,7 +512,7 @@ test('review attaches a saved agent and submits the complete team atomically', a
   await expect(page.locator('#existingAgentRosterPanel')).toBeVisible();
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
   await expect(page.locator('#existingAgentTeamList')).toContainText('Research Scout');
-  await expect(page.locator('#existingAgentTeamList')).toContainText('Primary assistant');
+  await expect(page.locator('#existingAgentTeamList')).toContainText('Primary workspace agent');
   await page.locator('[data-existing-agent-name="Data Miner"]').evaluate(card => {
     const data = new DataTransfer();
     data.setData('application/x-ori-agent-name', 'Data Miner');
@@ -537,4 +537,39 @@ test('review attaches a saved agent and submits the complete team atomically', a
   await page.waitForURL('**/workspaces/atomic-team');
   expect(payload?.existing_agent_names).toEqual(['Research Scout', 'Data Miner']);
   expect(payload?.entry_agent_name).toBe('Research Scout');
+});
+
+test('review explains a first-use template agent as reusable and workspace-primary', async ({
+  page
+}) => {
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        agents: [
+          {
+            name: 'Reaper Producer',
+            scope: 'reusable',
+            action: 'create',
+            entry_point: true,
+            role: 'orchestrator',
+            model_source: 'agent_default'
+          }
+        ],
+        warnings: []
+      })
+    });
+  });
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await advanceToReview(page);
+
+  const review = page.locator('#templateAgentReview');
+  await expect(review).toContainText('Blueprint agents');
+  await expect(review).toContainText('Reaper Producer');
+  await expect(review).toContainText('New reusable agent · Added to Your Agents and attached');
+  await expect(review).toContainText('Primary workspace agent');
 });

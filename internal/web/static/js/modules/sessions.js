@@ -3562,7 +3562,7 @@ const sessionManager = {
       const data = await response.json().catch(() => ({}));
       if (requestId !== this.templateAgentPlanRequestId) return;
       if (!response.ok || data.error) {
-        this.renderTemplateAgentPlanError(data.error || 'Could not load template agents.');
+        this.renderTemplateAgentPlanError(data.error || 'Could not load blueprint agents.');
         return;
       }
       this.templateAgentPlan = data;
@@ -3572,7 +3572,7 @@ const sessionManager = {
     } catch (error) {
       if (requestId !== this.templateAgentPlanRequestId) return;
       console.error('Failed to load template agent plan:', error);
-      this.renderTemplateAgentPlanError('Could not load template agents.');
+      this.renderTemplateAgentPlanError('Could not load blueprint agents.');
     }
   },
 
@@ -3586,7 +3586,7 @@ const sessionManager = {
       review.hidden = false;
       review.classList.remove('is-disabled');
     }
-    if (summary) summary.textContent = 'Checking template roster...';
+    if (summary) summary.textContent = 'Checking reusable agents...';
     if (status) status.textContent = '';
     if (list) list.innerHTML = '';
     if (warnings) {
@@ -3606,8 +3606,8 @@ const sessionManager = {
       review.hidden = false;
       review.classList.remove('is-disabled');
     }
-    if (summary) summary.textContent = 'Template agents could not be checked.';
-    if (status) status.textContent = message || 'Could not load template agents.';
+    if (summary) summary.textContent = 'Blueprint agents could not be checked.';
+    if (status) status.textContent = message || 'Could not load blueprint agents.';
     if (list) list.innerHTML = '';
     if (toggle) toggle.checked = true;
   },
@@ -3631,10 +3631,16 @@ const sessionManager = {
     const createCount = agents.filter(agent => agent.action === 'create').length;
     const reuseCount = agents.filter(agent => agent.action === 'reuse').length;
     const parts = [];
-    if (reuseCount) parts.push(`${reuseCount} reused`);
-    if (createCount) parts.push(`${createCount} new`);
+    if (reuseCount) {
+      parts.push(`${reuseCount} saved agent${reuseCount === 1 ? '' : 's'} will be attached`);
+    }
+    if (createCount) {
+      parts.push(
+        `${createCount} reusable agent${createCount === 1 ? '' : 's'} will be added to Your Agents and attached`
+      );
+    }
     if (summary) {
-      summary.textContent = `${parts.join(' / ')} agent${agents.length === 1 ? '' : 's'} attached to this workspace.`;
+      summary.textContent = parts.join(' · ');
     }
     if (status) {
       const provider = String(plan.system_provider || '').trim();
@@ -3706,8 +3712,10 @@ const sessionManager = {
       .join('');
     const chips = `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>${roleChips}`;
 
-    const designation = agent?.entry_point ? 'Primary assistant' : 'Specialist';
-    const provision = isReuse ? 'Existing agent · Will be linked' : 'New agent · Will be created';
+    const designation = agent?.entry_point ? 'Primary workspace agent' : 'Workspace specialist';
+    const provision = isReuse
+      ? 'Saved agent · Will be attached'
+      : 'New reusable agent · Added to Your Agents and attached';
     const summaryAction = isReuse
       ? '<button type="button" class="workspace-template-agent-fork-btn">Make a workspace copy</button>'
       : '<button type="button" class="workspace-wizard-inline-action workspace-template-agent-customize-btn" aria-expanded="false">Customize</button>';
@@ -3716,8 +3724,8 @@ const sessionManager = {
           ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
           <div class="workspace-template-agent-summary-copy">
             <strong>${this.escapeHtml(name)}</strong>
-            <span>${designation} · ${provision}</span>
-            <small>${this.escapeHtml(modelText)} · ${this.escapeHtml(source)}</small>
+            <span>${provision}</span>
+            <small>${designation} · ${this.escapeHtml(modelText)} · ${this.escapeHtml(source)}</small>
           </div>
           <div class="workspace-template-agent-summary-action">${summaryAction}</div>
         </div>`;
@@ -4202,7 +4210,7 @@ const sessionManager = {
         : this.existingAgentSelections[0] || '';
       if (this.existingAgentPrimaryName)
         this.announceWorkspaceTeamChange(
-          `${this.existingAgentPrimaryName} is now the primary assistant.`
+          `${this.existingAgentPrimaryName} is now this workspace's primary agent.`
         );
     }
     this.renderExistingAgentRoster();
@@ -4219,12 +4227,12 @@ const sessionManager = {
     )
       return;
     const confirmed = window.confirm(
-      `${agent.name} will receive new starter and setup tasks as the primary assistant. Its saved prompt, model, and tools will be used as-is. Make it primary?`
+      `${agent.name} will become this workspace's primary routing agent and receive new starter and setup tasks. Its saved prompt, model, and tools stay reusable. Make it primary?`
     );
     if (!confirmed) return;
     this.existingAgentPrimaryName = String(agent.name).trim();
     this.refreshWorkspaceReview();
-    this.announceWorkspaceTeamChange(`${agent.name} is now the primary assistant.`);
+    this.announceWorkspaceTeamChange(`${agent.name} is now this workspace's primary agent.`);
   },
 
   includedTemplateAgents() {
@@ -4257,7 +4265,7 @@ const sessionManager = {
           ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
           <div class="workspace-team-agent-copy">
             <strong>${this.escapeHtml(name)}</strong>
-            <span>${isPrimary ? 'Primary assistant' : 'Specialist'} · Existing agent · Will be attached</span>
+            <span>${isPrimary ? 'Primary workspace agent' : 'Workspace specialist'} · Saved agent · Will be attached</span>
             <small>${this.escapeHtml(agent?.model || 'Uses existing agent model')}</small>
           </div>
           <div class="workspace-team-agent-actions">
@@ -4283,16 +4291,22 @@ const sessionManager = {
     if (heading) heading.textContent = total === 1 ? 'Workspace Assistant' : 'Workspace Team';
     if (teamSummary) {
       const parts = [];
-      if (created) parts.push(`${created} new agent${created === 1 ? '' : 's'} will be created`);
+      if (created) {
+        parts.push(
+          `${created} reusable agent${created === 1 ? '' : 's'} will be added to Your Agents and attached`
+        );
+      }
       if (existingCount)
         parts.push(
-          `${existingCount} existing agent${existingCount === 1 ? '' : 's'} will be attached`
+          `${existingCount} saved agent${existingCount === 1 ? '' : 's'} will be attached`
         );
       if (reused)
-        parts.push(`${reused} existing assistant${reused === 1 ? '' : 's'} will be linked`);
+        parts.push(
+          `${reused} blueprint agent${reused === 1 ? '' : 's'} already saved and attached`
+        );
       teamSummary.textContent =
         parts.join(' · ') ||
-        'No assistant will be added. Starter tasks will remain unassigned until you add one.';
+        'No agent will be attached. Starter tasks will remain unassigned until you add one.';
     }
     if (summary) {
       const blueprint =

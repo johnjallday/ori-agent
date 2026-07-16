@@ -137,10 +137,10 @@ type Template struct {
 	// this template binds (apply-if-present). Names only — bound in the
 	// workspace-creation layer, not here.
 	Tools ToolDefaults `json:"tools"`
-	// Agents is the roster of agents seeded onto a workspace created from this
-	// template, in declaration order: the first is the workspace entry agent,
-	// the rest are specialist sub-agents. Carried as data only; agents are
-	// created/attached in the workspace-creation layer (see AgentSpec).
+	// Agents is the ordered set of reusable agents a workspace attaches from
+	// this template. The first becomes that workspace's primary routing agent;
+	// the rest are workspace specialists. Carried as data only; global agent
+	// definitions and workspace attachments are resolved in creation (see AgentSpec).
 	Agents []AgentSpec `json:"agents,omitempty"`
 	// Warnings are non-fatal authoring problems computed at load time (legacy
 	// onboarding block, missing agent roster). They surface through the list

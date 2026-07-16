@@ -337,6 +337,9 @@ func TestCreateWorkspaceTemplateAgentPlanEndpoint(t *testing.T) {
 	if len(plan.Agents) != 2 || plan.Agents[0].Action != "create" || plan.Agents[0].Model != "gpt-5.3-codex" {
 		t.Fatalf("unexpected planned agents: %+v", plan.Agents)
 	}
+	if plan.Agents[0].Scope != "reusable" || plan.Agents[1].Scope != "reusable" {
+		t.Fatalf("template agent scope = %#v, want reusable global definitions", plan.Agents)
+	}
 	if plan.Agents[0].SystemPrompt != "lead it" {
 		t.Fatalf("expected system prompt in plan, got %q", plan.Agents[0].SystemPrompt)
 	}

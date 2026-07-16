@@ -45,7 +45,12 @@ type templateAgentPlan struct {
 }
 
 type templateAgentPlanItem struct {
-	Name            string                        `json:"name"`
+	Name string `json:"name"`
+	// Scope is intentionally explicit in the plan so the UI never describes a
+	// template agent as workspace-only. Template agents are global reusable
+	// definitions; a workspace gets an attachment with its own role, context,
+	// and custom instructions.
+	Scope           string                        `json:"scope"`
 	Action          string                        `json:"action"`
 	EntryPoint      bool                          `json:"entry_point"`
 	Role            string                        `json:"role,omitempty"`
@@ -351,6 +356,7 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 	name := strings.TrimSpace(spec.Name)
 	item := templateAgentPlanItem{
 		Name:       name,
+		Scope:      "reusable",
 		Action:     "create",
 		EntryPoint: entryPoint,
 		Tools:      spec.Tools,

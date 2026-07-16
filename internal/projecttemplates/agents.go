@@ -28,13 +28,13 @@ var ErrRosterRequired = errors.New("template must declare at least one agent; th
 // not a load error.
 const MaxTemplateAgents = 10
 
-// AgentSpec declares one agent a template seeds onto a workspace created from
-// it. Like ToolDefaults, this package carries the spec as data only — it never
-// creates or resolves agents. Role/Type/Model/Provider are trimmed and carried
-// verbatim; canonicalizing them against the real agent enums and resolving empty
-// values to defaults happens in the workspace-creation (seeding) layer, keeping
-// this file-copy engine domain-blind. The first surviving entry in a template's
-// roster is the workspace entry agent; the rest are specialist sub-agents.
+// AgentSpec declares one reusable agent a template recommends and attaches to a
+// workspace created from it. Like ToolDefaults, this package carries the spec as
+// data only — it never creates or resolves agents. Role/Type/Model/Provider are
+// trimmed and carried verbatim; canonicalizing them against the real agent enums
+// and resolving empty values to defaults happens in the workspace-creation layer,
+// keeping this file-copy engine domain-blind. The first surviving entry becomes
+// the workspace's primary routing agent; the rest are workspace specialists.
 type AgentSpec struct {
 	Name         string       `json:"name"`
 	Role         string       `json:"role,omitempty"`
