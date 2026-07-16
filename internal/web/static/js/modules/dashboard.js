@@ -1018,6 +1018,11 @@
         }
       };
     }
+    // Bootstrap appends the backdrop to <body>. Keep the modal in the same
+    // stacking context so page-level layers cannot place the backdrop above it.
+    if (els.thinkingModal.parentElement !== document.body) {
+      document.body.appendChild(els.thinkingModal);
+    }
     if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
     if (homeAssistantThinkingModalInstance) return homeAssistantThinkingModalInstance;
     homeAssistantThinkingModalInstance = bootstrap.Modal.getOrCreateInstance(els.thinkingModal);
@@ -4185,9 +4190,34 @@
     return null;
   }
 
+  function looksLikeAdvisoryRequest(prompt) {
+    var text = normalizeToken(prompt);
+    if (!text) return false;
+
+    var phrases = [
+      'how should',
+      'what should',
+      'what would you recommend',
+      'what do you recommend',
+      'recommend an approach',
+      'give me a game plan',
+      'help me understand',
+      'review this',
+      'compare the',
+      'explain the tradeoffs',
+      'explain the trade-offs'
+    ];
+
+    for (var i = 0; i < phrases.length; i++) {
+      if (text.indexOf(phrases[i]) >= 0) return true;
+    }
+    return false;
+  }
+
   function looksLikeImplementationRequest(prompt) {
     var text = normalizeToken(prompt);
     if (!text) return false;
+    if (looksLikeAdvisoryRequest(text)) return false;
 
     var phrases = [
       'make ori able to',
@@ -4207,7 +4237,10 @@
         return true;
       }
     }
-    if (text.indexOf('ori') >= 0 && (text.indexOf('implement') >= 0 || text.indexOf('support') >= 0)) {
+    if (/^(please\s+)?(implement|build|create|add|fix|update|make)\b/.test(text)) {
+      return true;
+    }
+    if (/^(can|could|would)\s+you\s+(please\s+)?(implement|build|create|add|fix|update|make)\b/.test(text)) {
       return true;
     }
     return false;
@@ -6801,6 +6834,18 @@
     return matchedAgent === 'ori' || matchedAgent === 'system assistant';
   }
 
+  function shouldRunMatchedAdvisoryInline(prompt, routeData, agentName) {
+    if (!looksLikeAdvisoryRequest(prompt)) return false;
+    if (routePolicyRequiresSpecialist(routeData)) return false;
+
+    var matchedAgent = normalizeToken(agentName);
+    if (matchedAgent !== 'ori' && matchedAgent !== 'system assistant') return false;
+    if (getHomeAssistantHandoffPolicy(routeData) !== 'assistant') return false;
+
+    var routingPolicy = normalizeToken(routeData && routeData.routing_policy);
+    return !routingPolicy || routingPolicy === 'assistant_preferred' || routingPolicy === 'assistant_only';
+  }
+
   function routeMatchesWorkspaceEntryAgent(routeData) {
     var matchedAgent = normalizeToken(routeData && routeData.matched_agent);
     var entryAgent = normalizeToken(homeAssistantState.workspaceEntryAgentName);
@@ -8344,11 +8389,20 @@
     var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
     var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
+    var responseMode = normalizeToken(options && options.responseMode);
+    var advisoryMode = responseMode === 'advisory';
 
-    setHomeAssistantBusy(true, 'Running Capability…');
+    setHomeAssistantBusy(true, advisoryMode ? 'Thinking…' : 'Running Capability…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Using the current capability setup to answer this directly.');
-    setHomeAssistantRoutingSummary('Capability Direct', 'Running the request inline with the selected agent.');
+    if (!advisoryMode) {
+      appendHomeAssistantMessage('assistant', 'Using the current capability setup to answer this directly.');
+    }
+    setHomeAssistantRoutingSummary(
+      advisoryMode ? agentName : 'Capability Direct',
+      advisoryMode
+        ? 'Inspecting the request and preparing a grounded recommendation.'
+        : 'Running the request inline with the selected agent.'
+    );
 
     try {
       var data = await API.post('/api/chat', {
@@ -8358,11 +8412,18 @@
       });
       var responseText = String(data && data.response || '').trim();
       if (!responseText) {
-        responseText = 'The capability ran, but no text response was returned.';
+        responseText = advisoryMode
+          ? 'Ori completed the request, but no text response was returned.'
+          : 'The capability ran, but no text response was returned.';
       }
 
       appendHomeAssistantMessage('assistant', responseText);
-      setHomeAssistantRoutingSummary('Capability Direct', 'Completed inline with "' + agentName + '".');
+      setHomeAssistantRoutingSummary(
+        advisoryMode ? agentName : 'Capability Direct',
+        advisoryMode
+          ? 'Answered inline with "' + agentName + '".'
+          : 'Completed inline with "' + agentName + '".'
+      );
       renderHomeAssistantActions([
         {
           label: 'Continue in Chat',
@@ -8377,8 +8438,16 @@
       ]);
     } catch (error) {
       dashLog.debug('Direct capability execution failed', { error: error && error.message || error, agent: agentName });
-      appendHomeAssistantMessage('assistant', 'I could not run that capability directly right now.');
-      setHomeAssistantRoutingSummary('Capability Direct Failed', 'Direct execution failed.');
+      appendHomeAssistantMessage(
+        'assistant',
+        advisoryMode
+          ? 'I could not get Ori\'s recommendation right now.'
+          : 'I could not run that capability directly right now.'
+      );
+      setHomeAssistantRoutingSummary(
+        advisoryMode ? 'Ori Reply Failed' : 'Capability Direct Failed',
+        advisoryMode ? 'The inline assistant request failed.' : 'Direct execution failed.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry',
@@ -8394,6 +8463,11 @@
     } finally {
       setHomeAssistantBusy(false);
     }
+  }
+
+  function runAdvisoryTaskDirect(prompt, agentName, options) {
+    var advisoryOptions = Object.assign({}, options || {}, { responseMode: 'advisory' });
+    return runCapabilityTaskDirect(prompt, agentName, advisoryOptions);
   }
 
   function formatWorkspaceScheduleTask(task) {
@@ -11053,6 +11127,14 @@
 
         if (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key === 'utility_direct') {
           await runUtilityTaskDirect(text, match.agent.name);
+          return;
+        }
+        if (shouldRunMatchedAdvisoryInline(text, routeData, match.agent.name)) {
+          await runAdvisoryTaskDirect(text, match.agent.name, {
+            routeContext: routeContext,
+            intent: homeAssistantState.pendingIntent,
+            appLaunchRequest: appLaunchRequest
+          });
           return;
         }
         var matchedCapabilityHandled = await handleCapabilityResolutionFlow({
