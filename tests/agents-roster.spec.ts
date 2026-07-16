@@ -316,4 +316,56 @@ test.describe('Agents roster', () => {
       await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
     }
   });
+
+  test('filters + URL: tag filter narrows roster, survives reload, excludes checked', async ({ page, request }) => {
+    const prefix = `PWFil${Date.now()}`;
+    const tagged = `${prefix} Tagged`;
+    const plain = `${prefix} Plain`;
+    const r1 = await request.post(`${baseUrl}/api/agents`, {
+      data: { name: tagged, type: 'tool-calling', model: 'gpt-4o-mini', tags: [`${prefix}tag`] },
+    });
+    const r2 = await request.post(`${baseUrl}/api/agents`, {
+      data: { name: plain, type: 'tool-calling', model: 'gpt-4o-mini' },
+    });
+    expect(r1.ok() && r2.ok()).toBeTruthy();
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      // Check both, then apply a tag filter that hides one → 1 hidden checked.
+      await page.locator('#rosterSelectAll').click();
+      await page.locator('#filterTag').selectOption(`${prefix}tag`);
+      await expect(page.locator('.roster-card')).toHaveCount(1);
+      await expect(page.locator(`.roster-card[data-name="${tagged}"]`)).toBeVisible();
+      await expect(page.locator('#bulkCount')).toHaveText(/1 hidden by filters/);
+
+      // The tag filter is reflected in the URL.
+      await expect.poll(() => new URL(page.url()).searchParams.get('tag')).toBe(`${prefix}tag`);
+
+      // Reload restores the filter (still 1 shown) but clears checked selection.
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#filterTag')).toHaveValue(`${prefix}tag`);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(1);
+      await expect(page.locator('#bulkBar')).toBeHidden();
+
+      // Clear filters restores both.
+      await page.locator('#clearFilters').click();
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+    } finally {
+      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(tagged)}`).catch(() => undefined);
+      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(plain)}`).catch(() => undefined);
+    }
+  });
 });

@@ -40,6 +40,10 @@
     allWorkspaces: null,
     creating: false,
     providers: null,
+    // Metadata-driven filters. Categories combine with AND; `health` is a
+    // multi-value set combining with OR (PRD FR73). None are ever persisted to
+    // the checked set — only to the URL (PRD FR77/FR80).
+    filters: { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false },
     // Checked agents: the session-only bulk-selection set, kept entirely separate
     // from `selected` (the focused agent driving the stage). Never persisted to
     // URL or localStorage; a reload starts empty (PRD FR1/FR12/FR13).
@@ -107,6 +111,15 @@
       bulkTagsBody: document.getElementById('bulkTagsBody'),
       bulkTagsCancel: document.getElementById('bulkTagsCancel'),
       bulkTagsConfirm: document.getElementById('bulkTagsConfirm'),
+      filterRole: document.getElementById('filterRole'),
+      filterSource: document.getElementById('filterSource'),
+      filterAssignment: document.getElementById('filterAssignment'),
+      filterTag: document.getElementById('filterTag'),
+      filterFavorite: document.getElementById('filterFavorite'),
+      clearFilters: document.getElementById('clearFilters'),
+      emptyMsg: document.getElementById('rosterEmptyMsg'),
+      emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
+      emptyCreate: document.getElementById('rosterEmptyCreate'),
     };
 
     els.search.addEventListener('input', onSearch);
@@ -125,6 +138,22 @@
 
     els.selectAll.addEventListener('click', selectAllVisible);
     els.clearSelection.addEventListener('click', function () { clearSelection(true); });
+
+    els.filterRole.addEventListener('change', function () { state.filters.role = els.filterRole.value; onFilterChange(); });
+    els.filterSource.addEventListener('change', function () { state.filters.source = els.filterSource.value; onFilterChange(); });
+    els.filterAssignment.addEventListener('change', function () { state.filters.assignment = els.filterAssignment.value; onFilterChange(); });
+    els.filterTag.addEventListener('change', function () { state.filters.tag = els.filterTag.value; onFilterChange(); });
+    els.filterFavorite.addEventListener('click', function () {
+      state.filters.favorite = !state.filters.favorite;
+      els.filterFavorite.setAttribute('aria-pressed', state.filters.favorite ? 'true' : 'false');
+      els.filterFavorite.classList.toggle('is-active', state.filters.favorite);
+      onFilterChange();
+    });
+    els.clearFilters.addEventListener('click', clearFilters);
+    els.emptyClearFilters.addEventListener('click', clearFilters);
+    els.emptyCreate.addEventListener('click', openCreate);
+    // Status summary tiles double as health filter buttons (PRD FR72).
+    els.stats.addEventListener('click', onStatTileClick);
 
     els.bulkDelete.addEventListener('click', openBulkDelete);
     els.bulkDeleteCancel.addEventListener('click', function () { closeBulkDelete(); });
@@ -148,8 +177,14 @@
     });
 
     window.addEventListener('popstate', function () {
+      // Restore search/sort/filters/tab and the focused agent from the URL, but
+      // never the (session-only) checked set (PRD FR14/FR80).
+      applyUrlToState();
+      populateFilterOptions();
+      applyFilterSort();
       var name = new URLSearchParams(window.location.search).get('agent');
       if (name && state.byName[name]) selectAgent(name, { push: false });
+      restoreTabFromUrl();
     });
 
     window.addEventListener('beforeunload', function (e) {
@@ -194,8 +229,11 @@
         state.byName = {};
         agents.forEach(function (a) { state.byName[a.name] = a; });
         pruneChecked();
+        applyUrlToState();
+        populateFilterOptions();
         applyFilterSort();
         restoreSelection();
+        restoreTabFromUrl();
       })
       .catch(function (err) {
         els.count.textContent = 'Could not load agents.';
@@ -230,9 +268,7 @@
   function applyFilterSort() {
     var q = state.query.trim().toLowerCase();
     var list = state.agents.filter(function (a) {
-      if (!q) return true;
-      var hay = (a.name + ' ' + (a.role || '') + ' ' + ((a.metadata && a.metadata.description) || '')).toLowerCase();
-      return hay.indexOf(q) !== -1;
+      return matchesSearch(a, q) && matchesFilters(a);
     });
 
     list.sort(function (a, b) {
@@ -248,6 +284,107 @@
     renderRoster();
   }
 
+  // Search matches name, role, description, and tags (PRD FR74).
+  function matchesSearch(a, q) {
+    if (!q) return true;
+    var tags = (a.metadata && Array.isArray(a.metadata.tags)) ? a.metadata.tags.join(' ') : '';
+    var hay = (a.name + ' ' + (a.role || '') + ' ' + ((a.metadata && a.metadata.description) || '') + ' ' + tags).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }
+
+  // Filter categories combine with AND; multiple health values combine with OR
+  // (PRD FR73).
+  function matchesFilters(a) {
+    var f = state.filters;
+    if (f.health.size > 0 && !f.health.has(agentHealth(a))) return false;
+    if (f.role && String(a.role || '').toLowerCase() !== f.role.toLowerCase()) return false;
+    if (f.source && agentSourceKind(a) !== f.source) return false;
+    if (f.assignment === 'library' && (a.workspace_count || 0) > 0) return false;
+    if (f.assignment === 'assigned' && (a.workspace_count || 0) === 0) return false;
+    if (f.favorite && !(a.metadata && a.metadata.favorite)) return false;
+    if (f.tag) {
+      var tags = (a.metadata && Array.isArray(a.metadata.tags)) ? a.metadata.tags : [];
+      var has = tags.some(function (t) { return String(t).toLowerCase() === f.tag.toLowerCase(); });
+      if (!has) return false;
+    }
+    return true;
+  }
+
+  // Health bucket mirroring the status-summary tiles.
+  function agentHealth(a) {
+    var status = String((a && a.status) || 'idle').toLowerCase();
+    if (status === 'disabled') return 'disabled';
+    if (status === 'error' || !String((a && a.model) || '').trim()) return 'needs';
+    return 'ready';
+  }
+
+  function agentSourceKind(a) {
+    return String((a && a.source) || 'user').toLowerCase() === 'cli' ? 'cli' : 'user';
+  }
+
+  function filtersActive() {
+    var f = state.filters;
+    return f.health.size > 0 || !!f.role || !!f.source || !!f.assignment || !!f.tag || f.favorite;
+  }
+
+  function onFilterChange() {
+    els.clearFilters.hidden = !filtersActive();
+    applyFilterSort();
+    syncUrl(state.selected, false);
+  }
+
+  function clearFilters() {
+    state.filters = { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false };
+    els.filterRole.value = '';
+    els.filterSource.value = '';
+    els.filterAssignment.value = '';
+    els.filterTag.value = '';
+    els.filterFavorite.setAttribute('aria-pressed', 'false');
+    els.filterFavorite.classList.remove('is-active');
+    onFilterChange();
+  }
+
+  function onStatTileClick(e) {
+    var tile = e.target.closest('.roster-stat');
+    if (!tile) return;
+    var health = tile.dataset.health;
+    if (!health || health === 'total') { state.filters.health.clear(); }
+    else if (state.filters.health.has(health)) { state.filters.health.delete(health); }
+    else { state.filters.health.add(health); }
+    onFilterChange();
+  }
+
+  // Populate the Role and Tag filter dropdowns from the values actually present
+  // in the roster, preserving the current selection when still valid.
+  function populateFilterOptions() {
+    var roles = {};
+    var tags = {};
+    state.agents.forEach(function (a) {
+      var role = String(a.role || '').trim();
+      if (role) roles[role.toLowerCase()] = role;
+      var t = (a.metadata && Array.isArray(a.metadata.tags)) ? a.metadata.tags : [];
+      t.forEach(function (tag) { var k = String(tag).toLowerCase(); if (k) tags[k] = tag; });
+    });
+    fillSelect(els.filterRole, 'All roles', roles, state.filters.role, titleCase);
+    fillSelect(els.filterTag, 'All tags', tags, state.filters.tag, null);
+    // A previously-selected value that no longer exists falls back to "all".
+    if (state.filters.role && !roles[state.filters.role.toLowerCase()]) { state.filters.role = ''; els.filterRole.value = ''; }
+    if (state.filters.tag && !tags[state.filters.tag.toLowerCase()]) { state.filters.tag = ''; els.filterTag.value = ''; }
+  }
+
+  function fillSelect(sel, allLabel, valueMap, current, labeler) {
+    if (!sel) return;
+    var keys = Object.keys(valueMap).sort(function (a, b) { return valueMap[a].localeCompare(valueMap[b]); });
+    var html = '<option value="">' + esc(allLabel) + '</option>';
+    keys.forEach(function (k) {
+      var v = valueMap[k];
+      var label = labeler ? labeler(v) : v;
+      html += '<option value="' + esc(v) + '">' + esc(label) + '</option>';
+    });
+    sel.innerHTML = html;
+    if (current) sel.value = current;
+  }
+
   function renderRoster() {
     els.list.innerHTML = '';
     var total = state.agents.length;
@@ -256,7 +393,7 @@
     renderStatusTiles();
 
     if (shown === 0) {
-      els.empty.hidden = false;
+      renderEmptyState(total);
       els.count.textContent = total === 0 ? 'No agents yet.' : '0 of ' + total + ' agents';
       updateBulkBar();
       return;
@@ -296,12 +433,19 @@
       statTile('total', 'Total', total);
   }
 
+  // Each tile is a toggle filter button (PRD FR72). "Total" clears the health
+  // filter; the others toggle their health bucket. Selection is reflected with
+  // aria-pressed + an is-selected class (not color alone).
   function statTile(kind, label, value) {
     var zero = value === 0 ? ' roster-stat--zero' : '';
-    return '<div class="roster-stat roster-stat--' + kind + zero + '">' +
+    var health = kind === 'total' ? 'total' : kind;
+    var selected = kind !== 'total' && state.filters.health.has(kind);
+    var sel = selected ? ' is-selected' : '';
+    return '<button type="button" class="roster-stat roster-stat--' + kind + zero + sel + '"' +
+      ' data-health="' + health + '" aria-pressed="' + (selected ? 'true' : 'false') + '">' +
       '<span class="roster-stat__value">' + value + '</span>' +
       '<span class="roster-stat__label">' + esc(label) + '</span>' +
-      '</div>';
+      '</button>';
   }
 
   function buildCard(agent, idx) {
@@ -376,6 +520,24 @@
     }).join('');
     var more = tags.length > 2 ? '<span class="roster-card__tag roster-card__tag--more">+' + (tags.length - 2) + '</span>' : '';
     return '<span class="roster-card__tags" aria-hidden="true">' + shown + more + '</span>';
+  }
+
+  // Distinct empty states (PRD FR81): no agents at all vs. an active
+  // search/filter that hid everything.
+  function renderEmptyState(total) {
+    els.empty.hidden = false;
+    var hasSearch = state.query.trim() !== '';
+    var hasFilters = filtersActive();
+    els.emptyClearFilters.hidden = !hasFilters;
+    els.clearSearch.hidden = !hasSearch;
+    els.emptyCreate.hidden = total !== 0;
+    if (total === 0) {
+      els.emptyMsg.textContent = 'No agents yet. Create your first agent to get started.';
+    } else if (hasSearch || hasFilters) {
+      els.emptyMsg.textContent = 'No agents match the current search and filters.';
+    } else {
+      els.emptyMsg.textContent = 'No agents to show.';
+    }
   }
 
   function highlightSelected() {
@@ -1105,6 +1267,7 @@
         agents.forEach(function (a) { state.byName[a.name] = a; });
         state.detailCache = {};
         pruneChecked();
+        populateFilterOptions();
         applyFilterSort();
         if (name && state.byName[name]) selectAgent(name, { push: true });
         else if (state.filtered[0]) selectAgent(state.filtered[0].name, { push: false });
@@ -1164,6 +1327,7 @@
     setActiveTab(tabName);
     if (tabName === 'prompt' && state.selected) renderPrompt(state.selected);
     if (focus) document.getElementById('tab-' + tabName).focus();
+    syncUrl(state.selected, false);
   }
 
   function setActiveTab(tabName) {
@@ -1803,8 +1967,8 @@
     announce(msg + '.');
   }
 
-  function onSearch() { state.query = els.search.value || ''; applyFilterSort(); }
-  function onSort() { state.sort = els.sort.value || 'name-asc'; applyFilterSort(); if (state.selected) highlightSelected(); }
+  function onSearch() { state.query = els.search.value || ''; applyFilterSort(); syncUrl(state.selected, false); }
+  function onSort() { state.sort = els.sort.value || 'name-asc'; applyFilterSort(); if (state.selected) highlightSelected(); syncUrl(state.selected, false); }
 
   /* ---- form field builders ------------------------------------------------- */
 
@@ -2023,13 +2187,71 @@
     return s.replace(/\w\S*/g, function (w) { return w.charAt(0).toUpperCase() + w.slice(1); });
   }
 
+  // Serialize search, sort, filters, focused agent, and active tab to the URL.
+  // Checked-agent state is intentionally excluded (PRD FR77/FR80). `push` adds a
+  // history entry (agent focus changes); everything else replaces in place.
   function syncUrl(name, push) {
-    var params = new URLSearchParams(window.location.search);
-    params.delete('view'); // roster is the default Agents page now
-    params.set('agent', name);
-    var url = window.location.pathname + '?' + params.toString();
-    if (push) window.history.pushState({ agent: name }, '', url);
-    else window.history.replaceState({ agent: name }, '', url);
+    var params = new URLSearchParams();
+    if (name) params.set('agent', name);
+    if (state.query.trim()) params.set('q', state.query.trim());
+    if (state.sort && state.sort !== 'name-asc') params.set('sort', state.sort);
+    var tab = currentTab();
+    if (tab && tab !== 'overview') params.set('tab', tab);
+    var f = state.filters;
+    if (f.role) params.set('role', f.role);
+    if (f.source) params.set('source', f.source);
+    if (f.assignment) params.set('assign', f.assignment);
+    if (f.favorite) params.set('fav', '1');
+    if (f.tag) params.append('tag', f.tag);
+    f.health.forEach(function (h) { params.append('health', h); });
+
+    var qs = params.toString();
+    var url = window.location.pathname + (qs ? '?' + qs : '');
+    var stateObj = { agent: name };
+    if (push) window.history.pushState(stateObj, '', url);
+    else window.history.replaceState(stateObj, '', url);
+  }
+
+  // Read filter/search/sort/tab state from the URL into state (not the focused
+  // agent — that is resolved separately against the loaded roster). Invalid or
+  // unknown values are discarded safely (PRD FR79).
+  function applyUrlToState() {
+    var p = new URLSearchParams(window.location.search);
+    state.query = p.get('q') || '';
+    if (els.search) els.search.value = state.query;
+    var sort = p.get('sort') || 'name-asc';
+    var validSorts = { 'name-asc': 1, 'name-desc': 1, 'workspaces-desc': 1, 'active-desc': 1 };
+    state.sort = validSorts[sort] ? sort : 'name-asc';
+    if (els.sort) els.sort.value = state.sort;
+
+    var f = { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false };
+    var role = p.get('role'); if (role) f.role = role;
+    var source = p.get('source'); if (source === 'user' || source === 'cli') f.source = source;
+    var assign = p.get('assign'); if (assign === 'library' || assign === 'assigned') f.assignment = assign;
+    if (p.get('fav') === '1') f.favorite = true;
+    var tag = p.get('tag'); if (tag) f.tag = tag;
+    p.getAll('health').forEach(function (h) { if (h === 'needs' || h === 'ready' || h === 'disabled') f.health.add(h); });
+    state.filters = f;
+    reflectFiltersInControls();
+  }
+
+  // Push current filter state onto the controls (after a URL restore / popstate).
+  function reflectFiltersInControls() {
+    var f = state.filters;
+    if (els.filterRole) els.filterRole.value = f.role;
+    if (els.filterSource) els.filterSource.value = f.source;
+    if (els.filterAssignment) els.filterAssignment.value = f.assignment;
+    if (els.filterTag) els.filterTag.value = f.tag;
+    if (els.filterFavorite) {
+      els.filterFavorite.setAttribute('aria-pressed', f.favorite ? 'true' : 'false');
+      els.filterFavorite.classList.toggle('is-active', f.favorite);
+    }
+    if (els.clearFilters) els.clearFilters.hidden = !filtersActive();
+  }
+
+  function restoreTabFromUrl() {
+    var tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab && TAB_ORDER.indexOf(tab) !== -1 && tab !== 'overview') requestTab(tab, false);
   }
 
   function safeStorageGet() { try { return window.localStorage.getItem(STORAGE_KEY); } catch (e) { return null; } }

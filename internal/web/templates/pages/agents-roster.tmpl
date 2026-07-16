@@ -47,6 +47,35 @@
             </label>
           </div>
 
+          <div class="roster-filters" role="group" aria-label="Filter agents">
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by role</span>
+              <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
+            </label>
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by source</span>
+              <select id="filterSource" aria-label="Filter by source">
+                <option value="">All sources</option>
+                <option value="user">User</option>
+                <option value="cli">Built-in</option>
+              </select>
+            </label>
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by assignment</span>
+              <select id="filterAssignment" aria-label="Filter by assignment">
+                <option value="">Library &amp; assigned</option>
+                <option value="library">Library only</option>
+                <option value="assigned">Assigned only</option>
+              </select>
+            </label>
+            <label class="roster-filter">
+              <span class="visually-hidden">Filter by tag</span>
+              <select id="filterTag" aria-label="Filter by tag"><option value="">All tags</option></select>
+            </label>
+            <button type="button" id="filterFavorite" class="roster-filter-toggle" aria-pressed="false">★ Favorites</button>
+            <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+          </div>
+
           <div class="roster-selectbar" role="group" aria-label="Bulk selection">
             <button type="button" id="rosterSelectAll" class="roster-linkbtn">Select all visible</button>
             <button type="button" id="rosterClearSelection" class="roster-linkbtn" hidden>Clear selection</button>
@@ -103,8 +132,12 @@
           </dialog>
 
           <div class="roster-empty" id="rosterEmpty" hidden>
-            <p>No agents match your search.</p>
-            <button type="button" id="rosterClearSearch" class="roster-linkbtn">Clear search</button>
+            <p id="rosterEmptyMsg">No agents match your search.</p>
+            <div class="roster-empty__actions">
+              <button type="button" id="rosterClearSearch" class="roster-linkbtn" hidden>Clear search</button>
+              <button type="button" id="rosterEmptyClearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+              <button type="button" id="rosterEmptyCreate" class="roster-linkbtn" hidden>Create your first agent</button>
+            </div>
           </div>
         </section>
 
