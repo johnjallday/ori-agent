@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/mailbox"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // MailboxAccess is the narrow, most-restrictive access boundary between the
@@ -34,6 +35,79 @@ type MailboxAccess interface {
 // authorizing the executing agent), the read-only mail tools are exposed.
 func (p *WorkspaceToolProvider) SetMailboxAccess(access MailboxAccess) {
 	p.mailboxAccess = access
+}
+
+// MailDrafter composes a LOCAL reply proposal for later human-confirmed sending.
+// It never sends — the created proposal is surfaced to the user, who reviews and
+// confirms it through the send broker. Implemented by the server reply service.
+type MailDrafter interface {
+	DraftReply(ctx context.Context, userID, threadID, body string) (*mailbox.ReplyProposal, error)
+}
+
+// SetMailDrafter wires the reply-drafting capability for the mail_draft_reply tool.
+func (p *WorkspaceToolProvider) SetMailDrafter(drafter MailDrafter) {
+	p.mailDrafter = drafter
+}
+
+// --- mail_draft_reply (creates a local proposal; never sends) ---
+
+func (p *WorkspaceToolProvider) mailDraftReplyTool() toolapi.Tool {
+	return &nativeUtilityTool{
+		definition: toolapi.ToolDefinition{
+			Name:        "mail_draft_reply",
+			Description: "Draft a reply to an email thread from the Personal HQ's connected account. This creates a LOCAL draft the user must review and explicitly confirm before anything is sent — you cannot send email yourself. Returns the draft's recipients and subject so you can tell the user what you prepared.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"thread_id": map[string]any{
+						"type":        "string",
+						"description": "The thread ID from mail_search_threads to reply to.",
+					},
+					"body": map[string]any{
+						"type":        "string",
+						"description": "The reply body you drafted for the user to review.",
+					},
+				},
+				"required": []string{"thread_id", "body"},
+			},
+		},
+		call: func(ctx context.Context, args string) (string, error) {
+			var in struct {
+				ThreadID string `json:"thread_id"`
+				Body     string `json:"body"`
+			}
+			if err := json.Unmarshal([]byte(args), &in); err != nil {
+				return "", fmt.Errorf("invalid arguments: %w", err)
+			}
+			if strings.TrimSpace(in.ThreadID) == "" {
+				return "", fmt.Errorf("thread_id is required")
+			}
+			// Verify the executing agent is authorized to read this HQ's mail
+			// before drafting a reply to it.
+			if _, err := p.resolveMailAccount(ctx); err != nil {
+				return "", err
+			}
+			proposal, err := p.mailDrafter.DraftReply(ctx, mailDraftUserID(), in.ThreadID, in.Body)
+			if err != nil {
+				return "", fmt.Errorf("could not draft the reply: %w", err)
+			}
+			out, _ := json.Marshal(map[string]any{
+				"drafted":     true,
+				"proposal_id": proposal.ID,
+				"to":          proposal.Payload.To,
+				"subject":     proposal.Payload.Subject,
+				"note":        "Draft created. The user must review and confirm it before it is sent.",
+			})
+			return string(out), nil
+		},
+	}
+}
+
+// mailDraftUserID returns the user the draft belongs to. The app is single-user
+// locally; drafts are keyed to the local user so the Home review UI (same user)
+// can list and confirm them.
+func mailDraftUserID() string {
+	return userprofile.LocalUserID
 }
 
 // mailToolsEnabled reports whether the mail tools should be exposed to the

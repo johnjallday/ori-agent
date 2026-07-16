@@ -235,6 +235,10 @@ type ServerBuilder struct {
 	// until the vault system initializes it (internal/server/dailybrief_mailbox.go).
 	dailyBriefMailbox dailybrief.MailboxSource
 
+	// mailDrafter creates local reply proposals for the mail_draft_reply tool;
+	// nil until the vault system initializes it.
+	mailDrafter chathttp.MailDrafter
+
 	// Daily Brief configuration, generation, and scheduling
 	dailyBriefService   *dailybrief.Service
 	dailyBriefHandler   *dailybriefhttp.Handler

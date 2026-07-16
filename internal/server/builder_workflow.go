@@ -59,6 +59,9 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 		if b.mailboxAccess != nil {
 			provider.SetMailboxAccess(b.mailboxAccess)
 		}
+		if b.mailDrafter != nil {
+			provider.SetMailDrafter(b.mailDrafter)
+		}
 		return provider.Tools()
 	}
 }

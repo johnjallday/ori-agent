@@ -259,6 +259,25 @@ func (b *ServerBuilder) initializeHandlers() {
 			if b.personalHQService != nil {
 				b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider)
 			}
+			// Confirm-gated send broker (task 5.3): the ONLY send path. The raw
+			// (uncached) Gmail provider is the sender; sends re-authorize via the
+			// send policy and emit metadata-only audit events.
+			if b.personalHQService != nil {
+				broker := mailbox.NewBroker(
+					gmailProvider,
+					&sendAuthorizer{hq: b.personalHQService, workspaces: b.workspaceStore},
+					logAuditSink{},
+				)
+				replies := newReplyService(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider, broker)
+				if b.personalHQHandler != nil {
+					b.personalHQHandler.SetReplyService(replies)
+				}
+				// The reply service is also the agent-facing drafter (mail_draft_reply).
+				b.mailDrafter = replies
+				if b.chatHandler != nil {
+					b.chatHandler.SetMailDrafter(replies)
+				}
+			}
 		}
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
