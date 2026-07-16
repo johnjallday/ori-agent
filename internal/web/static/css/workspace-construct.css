@@ -459,6 +459,29 @@
 .workspace-create-modal .workspace-template-agent-warnings {
   color: var(--wc-ink-dim);
 }
+.workspace-create-modal .workspace-template-agent-advanced {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--wc-line);
+}
+.workspace-create-modal .workspace-template-agent-advanced summary {
+  cursor: pointer;
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-template-agent-advanced[open] .workspace-template-agent-toggle {
+  margin-top: 8px;
+}
+.workspace-create-modal .workspace-template-agent-advanced-help {
+  display: block;
+  margin-top: 6px;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
 .workspace-create-modal .workspace-template-agent-toggle,
 .workspace-create-modal .workspace-template-agent-row {
   background: var(--wc-panel-2);
