@@ -572,4 +572,14 @@ test('review explains a first-use template agent as reusable and workspace-prima
   await expect(review).toContainText('Reaper Producer');
   await expect(review).toContainText('New reusable agent · Added to Your Agents and attached');
   await expect(review).toContainText('Primary workspace agent');
+  const preview = page.locator('#workspaceAgentMapPreview');
+  await expect(preview).toContainText('Reaper Producer');
+  await expect(preview).toContainText('New agent');
+  await expect(preview).toContainText('not in Your Agents yet');
+  await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-new/);
+
+  await review.locator('.workspace-template-agent-advanced summary').click();
+  await review.locator('#templateAgentReviewToggle').uncheck();
+  await expect(preview).toContainText('No agent selected');
+  await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-missing/);
 });

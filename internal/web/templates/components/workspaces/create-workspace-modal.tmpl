@@ -76,6 +76,29 @@
                   </div>
                 </div>
               </div>
+
+              <!-- A deliberately small, non-interactive map preview makes the
+                   primary-agent state tangible before the user reaches review.
+                   The separate status line carries the same information for
+                   assistive technology and narrow layouts. -->
+              <section id="workspaceAgentMapPreview" class="workspace-agent-map-preview" aria-labelledby="workspaceAgentMapPreviewTitle">
+                <div class="workspace-agent-map-preview-head">
+                  <div>
+                    <span class="workspace-wizard-eyebrow">Workspace preview</span>
+                    <h3 id="workspaceAgentMapPreviewTitle">Primary workspace agent</h3>
+                  </div>
+                  <span id="workspaceAgentMapState" class="workspace-agent-map-state">Checking</span>
+                </div>
+                <div class="workspace-agent-map-canvas" aria-hidden="true">
+                  <div id="workspaceAgentMapNode" class="workspace-agent-map-node is-loading">
+                    <span class="workspace-agent-map-node-mark"></span>
+                    <span id="workspaceAgentMapNodeKicker" class="workspace-agent-map-node-kicker">AGENT SETUP</span>
+                    <strong id="workspaceAgentMapNodeName">Checking agent setup</strong>
+                    <span id="workspaceAgentMapNodeDetail">This workspace needs a primary agent.</span>
+                  </div>
+                </div>
+                <p id="workspaceAgentMapStatus" class="workspace-agent-map-status" aria-live="polite">Checking the reusable agent for this workspace…</p>
+              </section>
             </section>
 
             <!-- ===== STEP 2 · WORKSPACE DETAILS ===== -->

@@ -150,6 +150,9 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="workspaceTeamLiveRegion"`,
 		`id="addExistingAgentBtn"`,
 		`id="existingAgentRosterPanel"`,
+		`id="workspaceAgentMapPreview"`,
+		`id="workspaceAgentMapNode"`,
+		`id="workspaceAgentMapStatus"`,
 		`aria-label="Close create workspace"`,
 	} {
 		if !strings.Contains(html, want) {

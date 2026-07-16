@@ -38,6 +38,7 @@ const sessionManager = {
   // Populated when the modal opens (defaults to the first/Blank template).
   workspaceTemplate: null,
   templateAgentPlan: null,
+  templateAgentPlanError: '',
   templateAgentPlanRequestId: 0,
   templateAgentPlanTimer: null,
   existingAgentRoster: [],
@@ -3494,6 +3495,7 @@ const sessionManager = {
 
   resetTemplateAgentReview() {
     this.templateAgentPlan = null;
+    this.templateAgentPlanError = '';
     this.templateAgentPlanRequestId += 1;
     if (this.templateAgentPlanTimer) {
       clearTimeout(this.templateAgentPlanTimer);
@@ -3577,6 +3579,8 @@ const sessionManager = {
   },
 
   setTemplateAgentReviewLoading() {
+    this.templateAgentPlan = null;
+    this.templateAgentPlanError = '';
     const review = document.getElementById('templateAgentReview');
     const summary = document.getElementById('templateAgentReviewSummary');
     const status = document.getElementById('templateAgentReviewStatus');
@@ -3593,10 +3597,12 @@ const sessionManager = {
       warnings.hidden = true;
       warnings.innerHTML = '';
     }
+    this.renderWorkspaceAgentMapPreview();
   },
 
   renderTemplateAgentPlanError(message) {
     this.templateAgentPlan = null;
+    this.templateAgentPlanError = message || 'Could not load blueprint agents.';
     const review = document.getElementById('templateAgentReview');
     const summary = document.getElementById('templateAgentReviewSummary');
     const status = document.getElementById('templateAgentReviewStatus');
@@ -3610,6 +3616,7 @@ const sessionManager = {
     if (status) status.textContent = message || 'Could not load blueprint agents.';
     if (list) list.innerHTML = '';
     if (toggle) toggle.checked = true;
+    this.renderWorkspaceAgentMapPreview();
   },
 
   renderTemplateAgentPlan(plan) {
@@ -4277,6 +4284,95 @@ const sessionManager = {
       .join('');
   },
 
+  // The map is a compact, read-only preview rather than a second canvas. It
+  // makes the distinction between a saved reusable agent, a first-use agent
+  // that will be created globally, and an intentionally agent-free setup
+  // visible before the user enters the detailed review step.
+  renderWorkspaceAgentMapPreview() {
+    const node = document.getElementById('workspaceAgentMapNode');
+    const state = document.getElementById('workspaceAgentMapState');
+    const kicker = document.getElementById('workspaceAgentMapNodeKicker');
+    const name = document.getElementById('workspaceAgentMapNodeName');
+    const detail = document.getElementById('workspaceAgentMapNodeDetail');
+    const status = document.getElementById('workspaceAgentMapStatus');
+    if (!node || !state || !kicker || !name || !detail || !status) return;
+
+    const templatePrimary = this.includedTemplateAgents().find(agent =>
+      Boolean(agent?.entry_point)
+    );
+    const explicitPrimary =
+      this.existingAgentPrimaryName || (!templatePrimary ? this.existingAgentSelections[0] : '');
+
+    let next = {
+      state: 'checking',
+      label: 'Checking',
+      kicker: 'AGENT SETUP',
+      name: 'Checking agent setup',
+      detail: 'This workspace needs a primary agent.',
+      status: 'Checking the reusable agent for this workspace…'
+    };
+
+    if (this.templateAgentPlanError) {
+      next = {
+        state: 'missing',
+        label: 'Needs attention',
+        kicker: 'AGENT SETUP',
+        name: 'Agent setup unavailable',
+        detail: 'Could not check blueprint agent',
+        status: this.templateAgentPlanError
+      };
+    } else if (templatePrimary) {
+      const agentName = String(templatePrimary.name || 'Blueprint agent').trim();
+      if (String(templatePrimary.action || '').toLowerCase() === 'reuse') {
+        next = {
+          state: 'ready',
+          label: 'Ready',
+          kicker: 'PRIMARY WORKSPACE AGENT',
+          name: agentName,
+          detail: 'Saved reusable agent',
+          status: `${agentName} is already in Your Agents and will be attached as this workspace's primary agent.`
+        };
+      } else {
+        next = {
+          state: 'new',
+          label: 'New agent',
+          kicker: 'PRIMARY WORKSPACE AGENT',
+          name: agentName,
+          detail: 'New reusable agent',
+          status: `${agentName} is not in Your Agents yet. It will be added to Your Agents and attached as this workspace's primary agent when you create the workspace.`
+        };
+      }
+    } else if (explicitPrimary) {
+      const agentName = String(explicitPrimary).trim();
+      next = {
+        state: 'ready',
+        label: 'Ready',
+        kicker: 'PRIMARY WORKSPACE AGENT',
+        name: agentName,
+        detail: 'Saved reusable agent',
+        status: `${agentName} will be attached as this workspace's primary agent.`
+      };
+    } else if (this.templateAgentPlan) {
+      next = {
+        state: 'missing',
+        label: 'No agent selected',
+        kicker: 'PRIMARY WORKSPACE AGENT',
+        name: 'Choose an agent',
+        detail: 'No primary agent staged',
+        status:
+          'No primary workspace agent is selected. You can add a saved agent in Review & Create; otherwise starter tasks will remain unassigned.'
+      };
+    }
+
+    node.className = `workspace-agent-map-node is-${next.state}`;
+    state.className = `workspace-agent-map-state is-${next.state}`;
+    state.textContent = next.label;
+    kicker.textContent = next.kicker;
+    name.textContent = next.name;
+    detail.textContent = next.detail;
+    status.textContent = next.status;
+  },
+
   refreshWorkspaceReview() {
     const summary = document.getElementById('workspaceReviewSummary');
     const heading = document.getElementById('workspaceTeamHeading');
@@ -4325,6 +4421,7 @@ const sessionManager = {
         </div>`;
     }
     this.renderExistingAgentTeam();
+    this.renderWorkspaceAgentMapPreview();
   },
 
   announceWorkspaceTeamChange(message) {
