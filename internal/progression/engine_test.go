@@ -479,13 +479,16 @@ func TestAllComplete_TreatsSkipAsResolved(t *testing.T) {
 	}
 }
 
-func TestBuiltinQuests_PersonalHQActionStartsGuidedMission(t *testing.T) {
+func TestBuiltinQuests_PersonalHQActionFocusesMapSite(t *testing.T) {
 	for _, q := range BuiltinQuests() {
 		if q.ID != "t2-build-hq" {
 			continue
 		}
-		if q.ActionURL != "/workspaces?hq_onboarding=1" {
-			t.Fatalf("Personal HQ action URL = %q, want guided Mission 01 route", q.ActionURL)
+		if q.ActionURL != "/workspaces?view=map&focus=personal-hq" {
+			t.Fatalf("Personal HQ action URL = %q, want focused workspace Map route", q.ActionURL)
+		}
+		if q.Title != "Build My HQ" || q.ActionLabel != "Build My HQ" {
+			t.Fatalf("Personal HQ quest copy = %q / %q, want Build My HQ", q.Title, q.ActionLabel)
 		}
 		return
 	}

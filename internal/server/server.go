@@ -16,7 +16,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
-	"github.com/johnjallday/ori-agent/internal/userprofile"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -203,50 +202,6 @@ func (s *Server) renderAndWritePage(w http.ResponseWriter, templateName string, 
 	orihttp.WriteHTML(w, html)
 }
 
-// isBrandNewProfile reports whether the current user has never seen the
-// guided Personal HQ first-launch experience (HQOnboardingUnseen). Degrades
-// to false (normal Home launch) when the Personal HQ service is unavailable,
-// so a degraded dependency never blocks the app from starting (PRD FR136).
-//
-// HQOnboardingUnseen alone is not sufficient: migration030PersonalHQ added
-// the hq_onboarding_state column with a blanket 'unseen' SQL DEFAULT applied
-// retroactively to every pre-existing profile row, so an established user
-// upgrading from a version that predates this feature reads exactly the
-// same "unseen" state as a genuinely brand-new profile. Cross-check
-// workspace history — an established user (including one with zero
-// workspaces right now, e.g. after deleting them all, as long as they ever
-// had one) receives only the lightweight resume invitation rather than the
-// full guided construction takeover (PRD FR19/FR116-118, task 8.1).
-//
-// Deliberately NOT cross-checked against the separate app-level onboarding
-// wizard's completion flag, despite that being a tempting second signal: it
-// completes on a genuinely brand-new profile's very first session too, so
-// using it here would wrongly suppress the HQ takeover the moment a new
-// user dismisses that unrelated wizard and reloads, before ever reaching HQ
-// setup — trading a common regression for a narrower edge case (a
-// long-established user who has deleted every workspace and never engaged
-// with HQ) that would need a dedicated "profile first seen" timestamp,
-// independent of any onboarding flow's completion, to close properly.
-func (s *Server) isBrandNewProfile(ctx context.Context) bool {
-	if s.Storage == nil || s.Storage.PersonalHQ == nil {
-		return false
-	}
-	status, err := s.Storage.PersonalHQ.Status(ctx, userprofile.LocalUserID)
-	if err != nil {
-		logger.Warn("isBrandNewProfile: failed to load personal hq status", logger.Fields{"error": err})
-		return false
-	}
-	if status.OnboardingState != userprofile.HQOnboardingUnseen {
-		return false
-	}
-	if s.Storage.WorkspaceStore != nil {
-		if ids, err := s.Storage.WorkspaceStore.List(); err == nil && len(ids) > 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	// Only handle root path, not other paths
 	if r.URL.Path != "/" {
@@ -256,16 +211,13 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 
 	// A brand-new profile lands on Home and is free to explore — first-run
 	// onboarding is a pull invitation (the Mission 01 quest-log card), not a
-	// forced detour. We deliberately do NOT redirect to the guided workspace
-	// launcher here; the guided HQ takeover is reached only when the user
-	// explicitly starts the mission (which navigates to
-	// /workspaces?hq_onboarding=1). isBrandNewProfile still drives adaptive
-	// Home copy below.
+	// forced detour. Starting the mission opens the workspace Map with the
+	// unbuilt Personal HQ landmark selected.
 	data := s.prepareBasePageData("index")
 
 	// Inject home-dashboard context: the workspace count still drives the
 	// adaptive Home copy (first-visit-feeling placeholder text) for a user
-	// who has moved past the guided launcher (skipped, completed, or an
+	// who has moved past the HQ setup invitation (skipped, completed, or an
 	// established user who never saw it). We compute it server-side so the
 	// template can render the correct shell without a flash of empty-state
 	// from a client-side fetch.
@@ -447,12 +399,6 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspaces - Ori Agent"
 	data.BrandText = "Ori Agent"
-	// Authoritative bootstrap hint for the guided Map (PRD FR11/FR20):
-	// avoids a first-paint flash while workspace-hub.js confirms via
-	// GET /api/personal-hq/status. Never a hard requirement — the JS
-	// re-derives this from the API regardless, so a stale/missing hint just
-	// means one extra render pass, not incorrect behavior.
-	data.Extra["HQOnboardingUnseen"] = s.isBrandNewProfile(r.Context())
 	s.renderAndWritePage(w, "workspaces", data)
 }
 

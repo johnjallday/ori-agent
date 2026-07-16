@@ -572,6 +572,17 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     const source = String(state?.source || 'default');
     const effectiveRoot = String(state?.effective_workspace_root || '').trim();
 
+    if (source === 'unconfirmed') {
+      statusIndicator.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#d69e2e">
+          <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+        </svg>
+      `;
+      statusText.textContent = 'Workspace directory not confirmed';
+      statusDetails.textContent = 'Ori is not scanning the suggested directory yet. Choose a folder and save it to continue.';
+      return;
+    }
+
     if (source === 'settings') {
       statusIndicator.innerHTML = `
         <svg width="24" height="24" viewBox="0 0 24 24" fill="#28a745">
@@ -607,7 +618,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     workspaceRootState = state || {};
     const configuredRoot = String(workspaceRootState.workspace_root || '').trim();
     const effectiveRoot = String(workspaceRootState.effective_workspace_root || '').trim();
-    input.value = configuredRoot || effectiveRoot;
+    const defaultRoot = String(workspaceRootState.default_workspace_root || '').trim();
+    input.value = configuredRoot || effectiveRoot || defaultRoot;
     if (resetBtn) {
       resetBtn.disabled = !configuredRoot;
     }

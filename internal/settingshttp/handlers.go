@@ -196,6 +196,7 @@ type WorkspaceRootResponse struct {
 	EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
 	DefaultWorkspaceRoot   string `json:"default_workspace_root"`
 	Source                 string `json:"source"`
+	Confirmed              bool   `json:"confirmed"`
 }
 
 // VaultRootResponse describes the configured and effective vault directory.
@@ -211,11 +212,19 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 	switch r.Method {
 	case http.MethodGet:
 		configured := h.configManager.GetWorkspaceRoot()
+		confirmed := h.configManager.IsWorkspaceRootConfirmed() || strings.TrimSpace(os.Getenv("WORKSPACE_DIR")) != ""
+		effective := ""
+		source := "unconfirmed"
+		if confirmed {
+			effective = config.ResolveWorkspaceRoot(configured)
+			source = config.WorkspaceRootSource(configured)
+		}
 		orihttp.WriteJSON(w, WorkspaceRootResponse{
 			WorkspaceRoot:          configured,
-			EffectiveWorkspaceRoot: config.ResolveWorkspaceRoot(configured),
+			EffectiveWorkspaceRoot: effective,
 			DefaultWorkspaceRoot:   config.DefaultWorkspaceRoot(),
-			Source:                 config.WorkspaceRootSource(configured),
+			Source:                 source,
+			Confirmed:              confirmed,
 		})
 
 	case http.MethodPost:
@@ -254,6 +263,7 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			"effective_workspace_root": effectiveRoot,
 			"default_workspace_root":   config.DefaultWorkspaceRoot(),
 			"source":                   config.WorkspaceRootSource(configured),
+			"confirmed":                true,
 		})
 
 	default:

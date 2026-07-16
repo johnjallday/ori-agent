@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -211,6 +212,76 @@ func TestResolveWorkspaceDir(t *testing.T) {
 	dir = resolveWorkspaceDir()
 	if dir != "/custom/workspaces" {
 		t.Errorf("Expected '/custom/workspaces', got '%s'", dir)
+	}
+}
+
+func TestResolveWorkspaceRoot_UsesStagingUntilDirectoryIsConfirmed(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ORI_DATA_DIR", dataDir)
+	t.Setenv("WORKSPACE_DIR", "")
+
+	manager := config.NewManager(filepath.Join(dataDir, "settings.json"))
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, want := resolveWorkspaceRoot(manager), config.UnconfirmedWorkspaceRoot(); got != want {
+		t.Fatalf("resolveWorkspaceRoot(unconfirmed) = %q, want staging %q", got, want)
+	}
+
+	selected := filepath.Join(t.TempDir(), "selected-workspaces")
+	if err := manager.SetWorkspaceRoot(selected); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+	if got := resolveWorkspaceRoot(manager); got != selected {
+		t.Fatalf("resolveWorkspaceRoot(confirmed) = %q, want %q", got, selected)
+	}
+}
+
+func TestResolveWorkspaceRoot_DoesNotAdoptSuggestedDirectoryBeforeConfirmation(t *testing.T) {
+	homeDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("ORI_DATA_DIR", dataDir)
+	t.Setenv("WORKSPACE_DIR", "")
+
+	suggestedRoot := config.DefaultWorkspaceRoot()
+	existingStore, err := workspace.NewFileStore(suggestedRoot)
+	if err != nil {
+		t.Fatalf("NewFileStore(suggested): %v", err)
+	}
+	if err := existingStore.Save(workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Existing Folder"})); err != nil {
+		t.Fatalf("seed suggested directory: %v", err)
+	}
+
+	manager := config.NewManager(filepath.Join(dataDir, "settings.json"))
+	if err := manager.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	startupStore, err := workspace.NewFileStore(resolveWorkspaceRoot(manager))
+	if err != nil {
+		t.Fatalf("NewFileStore(unconfirmed): %v", err)
+	}
+	ids, err := startupStore.List()
+	if err != nil {
+		t.Fatalf("List(unconfirmed): %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("unconfirmed startup adopted %d workspace(s) from the suggested directory", len(ids))
+	}
+
+	if err := manager.SetWorkspaceRoot(suggestedRoot); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+	confirmedStore, err := workspace.NewFileStore(resolveWorkspaceRoot(manager))
+	if err != nil {
+		t.Fatalf("NewFileStore(confirmed): %v", err)
+	}
+	ids, err = confirmedStore.List()
+	if err != nil {
+		t.Fatalf("List(confirmed): %v", err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("confirmed startup found %d workspaces, want 1", len(ids))
 	}
 }
 

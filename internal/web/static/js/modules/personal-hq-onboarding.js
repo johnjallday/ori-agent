@@ -1,59 +1,10 @@
-// personal-hq-onboarding.js — the guided first-launch Personal HQ experience
-// on the workspace launcher page: the full-screen guided Map state for a
-// brand-new profile (Build My HQ / Start with a Project / Skip for Now), a
-// smaller resume entry for a user who skipped or lost a valid HQ, and the
-// Build My HQ / Choose Existing Workspace modals. Purely additive: no-op on
-// pages without #hqOnboardingGuided (only the workspace launcher has it).
+// personal-hq-onboarding.js — Personal HQ setup and management on the
+// workspace launcher. The workspace Map owns the missing/repair presentation;
+// this module owns the authoritative status request and the Build / Import HQ
+// actions and modals. It is a no-op away from the workspace launcher.
 //
 // Pure decision logic is exported (loaded as type="module") so
 // personal-hq-onboarding.test.js can exercise it without a DOM.
-
-// resolveGuidedMode is the single source of truth for which of the three
-// launcher states to show, given the current Personal HQ status. Kept
-// side-effect-free so it is unit-testable without a DOM/fetch.
-//   - "guided": full-screen first-launch takeover (never seen before).
-//   - "repair": a stored designation exists but does not resolve.
-//   - "resume": no valid HQ and onboarding is not "unseen" (skipped, in
-//     progress, or completed-but-since-cleared) — a small non-blocking entry.
-//   - "none": a valid HQ is designated; nothing to show here.
-export function resolveGuidedMode(status) {
-  if (!status) return 'none';
-  const hasDesignation = !!status.workspace_id;
-  if (hasDesignation && !status.valid) return 'repair';
-  if (status.valid) return 'none';
-  if (status.hq_onboarding_state === 'unseen') return 'guided';
-  return 'resume';
-}
-
-// wantsGuidedTakeover decides whether the full-screen guided takeover should
-// appear on the workspace launcher. It requires BOTH a brand-new ("unseen")
-// profile AND explicit Mission 01 intent — the "Start mission" CTA navigates
-// here with ?hq_onboarding=1. Merely browsing to the launcher (even as an
-// unseen profile) must not force the takeover, so the user can explore. Pure
-// for unit testing.
-export function wantsGuidedTakeover(hint, hasIntent) {
-  return hint === 'unseen' && !!hasIntent;
-}
-
-// resumeCopy derives the resume/repair banner's text and which action
-// buttons it offers, so the DOM-wiring code has no branching logic of its
-// own to get wrong.
-export function resumeCopy(mode) {
-  if (mode === 'repair') {
-    return {
-      text: 'Your Personal HQ needs attention — the workspace it pointed to is no longer available.',
-      showBuild: true,
-      showChoose: true,
-      showClear: true
-    };
-  }
-  return {
-    text: 'Set up your Personal HQ for a daily brief and follow-up tracking.',
-    showBuild: true,
-    showChoose: true,
-    showClear: false
-  };
-}
 
 // upgradeView turns an upgrade plan (from GET /api/personal-hq/upgrade/preview)
 // into the view-model the DOM code renders, so all the branching lives here and
@@ -67,7 +18,13 @@ export function upgradeView(plan) {
   if (!plan) return { show: false };
   const blockers = Array.isArray(plan.blockers) ? plan.blockers : [];
   if (blockers.length) {
-    return { show: true, canApply: false, blocked: true, heading: 'Personal HQ upgrade unavailable', reasons: blockers };
+    return {
+      show: true,
+      canApply: false,
+      blocked: true,
+      heading: 'Personal HQ upgrade unavailable',
+      reasons: blockers
+    };
   }
   const missing = Array.isArray(plan.missing_roles) ? plan.missing_roles : [];
   if (plan.up_to_date && missing.length === 0) {
@@ -99,38 +56,58 @@ export function emailStatusView(status, oauthConfigured) {
   const configured = oauthConfigured !== false;
   if (status && status.connected) {
     return {
-      state: 'connected', chip: 'Email', chipState: 'equipped',
-      heading: 'Email connected', detail: status.email_address || '',
-      action: 'disconnect', actionLabel: 'Disconnect'
+      state: 'connected',
+      chip: 'Email',
+      chipState: 'equipped',
+      heading: 'Email connected',
+      detail: status.email_address || '',
+      action: 'disconnect',
+      actionLabel: 'Disconnect'
     };
   }
   if (!configured) {
     return {
-      state: 'setup', chip: 'Email', chipState: 'empty',
-      heading: 'Set up email', detail: 'Add your Google OAuth credentials in Settings to enable Personal HQ email.',
-      action: 'settings', actionLabel: 'Set up in Settings'
+      state: 'setup',
+      chip: 'Email',
+      chipState: 'empty',
+      heading: 'Set up email',
+      detail: 'Add your Google OAuth credentials in Settings to enable Personal HQ email.',
+      action: 'settings',
+      actionLabel: 'Set up in Settings'
     };
   }
   if (status && status.account_id) {
     return {
-      state: 'repair', chip: 'Email', chipState: 'repair',
-      heading: 'Reconnect your email', detail: 'Your connected email needs to be reconnected before the assistant can read it.',
-      action: 'connect', actionLabel: 'Reconnect'
+      state: 'repair',
+      chip: 'Email',
+      chipState: 'repair',
+      heading: 'Reconnect your email',
+      detail: 'Your connected email needs to be reconnected before the assistant can read it.',
+      action: 'connect',
+      actionLabel: 'Reconnect'
     };
   }
   return {
-    state: 'disconnected', chip: 'Email', chipState: 'empty',
-    heading: 'Connect your email', detail: 'Let your Inbox specialist surface threads that need attention and help draft replies. Read-only — nothing is ever sent without your explicit confirmation.',
-    action: 'connect', actionLabel: 'Connect email'
+    state: 'disconnected',
+    chip: 'Email',
+    chipState: 'empty',
+    heading: 'Connect your email',
+    detail:
+      'Let your Inbox specialist surface threads that need attention and help draft replies. Read-only — nothing is ever sent without your explicit confirmation.',
+    action: 'connect',
+    actionLabel: 'Connect email'
   };
 }
 
 // chipStateLabel renders the short inventory-chip status word.
 export function chipStateLabel(chipState) {
   switch (chipState) {
-    case 'equipped': return 'Connected';
-    case 'repair': return 'Needs repair';
-    default: return 'Not set up';
+    case 'equipped':
+      return 'Connected';
+    case 'repair':
+      return 'Needs repair';
+    default:
+      return 'Not set up';
   }
 }
 
@@ -163,11 +140,16 @@ export function replyProposalView(p) {
 // followUpCategoryLabel maps a follow-up category to a friendly label.
 export function followUpCategoryLabel(category) {
   switch (category) {
-    case 'i_owe': return 'You owe';
-    case 'waiting_on': return 'Waiting on';
-    case 'needs_decision': return 'Needs decision';
-    case 'recurring_check_in': return 'Check-in';
-    default: return 'Follow-up';
+    case 'i_owe':
+      return 'You owe';
+    case 'waiting_on':
+      return 'Waiting on';
+    case 'needs_decision':
+      return 'Needs decision';
+    case 'recurring_check_in':
+      return 'Check-in';
+    default:
+      return 'Follow-up';
   }
 }
 
@@ -181,6 +163,27 @@ export function journalPromptView(proposal) {
     draft: proposal.draft || '',
     degraded: !!proposal.degraded,
     gaps: Array.isArray(proposal.gaps) ? proposal.gaps : []
+  };
+}
+
+export function hqWorkspaceRootView(state) {
+  const source = String(state?.source || 'unconfirmed')
+    .trim()
+    .toLowerCase();
+  const configuredRoot = String(state?.workspace_root || '').trim();
+  const effectiveRoot = String(state?.effective_workspace_root || '').trim();
+  const suggestedRoot = String(state?.default_workspace_root || '').trim();
+  const confirmed =
+    state?.confirmed === true ||
+    source === 'settings' ||
+    source === 'environment' ||
+    source === 'default';
+  return {
+    path: configuredRoot || effectiveRoot || suggestedRoot,
+    confirmed,
+    status: confirmed
+      ? 'Confirmed. Ori will scan only this directory.'
+      : 'Confirm this directory before building your HQ.'
   };
 }
 
@@ -203,28 +206,26 @@ export function followUpView(f) {
 (function () {
   if (typeof document === 'undefined') return;
 
-  const guided = document.getElementById('hqOnboardingGuided');
-  const homeResume = document.getElementById('homeHQResume');
-  if (!guided && !homeResume) return; // Neither the launcher nor Home has an HQ surface.
-
-  const resume = document.getElementById('hqOnboardingResume');
   const hub = document.getElementById('workspaceHub');
+  if (!hub) return;
 
-  // True only when the user arrived via the Mission 01 "Start mission" CTA
-  // (?hq_onboarding=1), which is what gates the full-screen guided takeover.
-  function hasOnboardingIntent() {
-    try {
-      return new URLSearchParams(window.location.search).get('hq_onboarding') === '1';
-    } catch (_) {
-      return false;
-    }
-  }
+  let statusPromise = null;
 
   async function fetchStatus() {
-    const res = await fetch('/api/personal-hq/status', { headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`personal hq status ${res.status}`);
-    const body = await res.json();
-    return body.status;
+    if (!statusPromise) {
+      statusPromise = (async () => {
+        const res = await fetch('/api/personal-hq/status', {
+          headers: { Accept: 'application/json' }
+        });
+        if (!res.ok) throw new Error(`personal hq status ${res.status}`);
+        const body = await res.json();
+        return body.status;
+      })().catch(err => {
+        statusPromise = null;
+        throw err;
+      });
+    }
+    return statusPromise;
   }
 
   async function postJSON(url, body) {
@@ -249,13 +250,6 @@ export function followUpView(f) {
     }
   }
 
-  function setLauncherContentHidden(hidden) {
-    ['launcherGrid', 'launcherEmptyState', 'launcherMap'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.hidden = hidden;
-    });
-  }
-
   function skipHQObjective() {
     return Promise.all([
       postJSON('/api/personal-hq/onboarding-state', { state: 'skipped' }),
@@ -265,136 +259,66 @@ export function followUpView(f) {
     ]);
   }
 
-  function wireGuided() {
-    const buildBtn = document.getElementById('hqGuidedBuildBtn');
-    const projectBtn = document.getElementById('hqGuidedProjectBtn');
-    const skipBtn = document.getElementById('hqGuidedSkipBtn');
+  async function refreshHQStatus() {
+    statusPromise = null;
+    const status = await fetchStatus();
+    if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.setHQStatus === 'function') {
+      window.OriWorkspaceMap.setHQStatus(status);
+    }
+    return status;
+  }
 
-    if (buildBtn) buildBtn.addEventListener('click', () => openBuildModal());
-    if (projectBtn) {
-      projectBtn.addEventListener('click', async () => {
+  function openImportHQModal() {
+    const modalElement = document.getElementById('addFolderModal');
+    if (!modalElement) {
+      toast('Workspace import is unavailable right now.', 'Import unavailable', 'danger');
+      return;
+    }
+    modalElement.dataset.pendingImportMode = 'true';
+    modalElement.dataset.pendingEntryPoint = 'personal_hq_import';
+    modalElement.dataset.pendingPostCreateAction = 'designate_personal_hq';
+    const modal = bootstrapModal('addFolderModal');
+    if (modal) modal.show();
+  }
+
+  function wireMapActions() {
+    window.addEventListener('ori:personal-hq-action', async event => {
+      const action = event?.detail?.action;
+      if (action === 'build') {
+        await openBuildModal();
+        return;
+      }
+      if (action === 'import') {
+        openImportHQModal();
+        return;
+      }
+      if (action === 'skip') {
         try {
           await skipHQObjective();
+          await refreshHQStatus();
+          toast(
+            'Personal HQ is still available from the workspace Map whenever you need it.',
+            'Not now'
+          );
         } catch (_) {
-          /* non-fatal: still let the user start a project */
+          toast(
+            'Could not update Personal HQ setup right now. Try again.',
+            'Update failed',
+            'danger'
+          );
         }
-        hideGuided();
-        if (window.sessionManager && typeof window.sessionManager.showAddWorkspaceModal === 'function') {
-          window.sessionManager.showAddWorkspaceModal({ entryPoint: 'guided_map_project' });
-        }
-      });
-    }
-    if (skipBtn) {
-      skipBtn.addEventListener('click', async () => {
-        skipBtn.disabled = true;
+        return;
+      }
+      if (action === 'clear') {
         try {
-          await skipHQObjective();
-          hideGuided();
-          await refreshResume();
-        } catch (err) {
-          toast('Could not skip right now. Try again.', 'Skip failed', 'error');
-        } finally {
-          skipBtn.disabled = false;
+          await postJSON('/api/personal-hq/clear');
+          await refreshHQStatus();
+          toast('The broken Personal HQ link was cleared.', 'Personal HQ');
+        } catch (_) {
+          toast('Could not clear the Personal HQ link. Try again.', 'Clear failed', 'danger');
         }
-      });
-    }
-  }
-
-  function hideGuided() {
-    if (!guided) return;
-    guided.hidden = true;
-    hub?.classList.remove('is-hq-guided');
-    setLauncherContentHidden(false);
-  }
-
-  function showGuided() {
-    if (!guided) return; // Home has no full-screen takeover, only the resume bar.
-    hub?.classList.add('is-hq-guided');
-    guided.hidden = false;
-    setLauncherContentHidden(true);
-    if (resume) resume.hidden = true;
-  }
-
-  function updateResumeBar(el, textEl, mode) {
-    if (!el) return;
-    if (mode === 'none') {
-      el.hidden = true;
-      return;
-    }
-    const copy = resumeCopy(mode);
-    if (textEl) textEl.textContent = copy.text;
-    el.hidden = false;
-  }
-
-  async function refreshResume() {
-    let status;
-    try {
-      status = await fetchStatus();
-    } catch (_) {
-      return;
-    }
-    const mode = resolveGuidedMode(status);
-    if (mode === 'guided' && hasOnboardingIntent()) {
-      showGuided();
-    } else {
-      hideGuided();
-    }
-
-    if (resume) {
-      if (mode === 'guided' || mode === 'none') {
-        resume.hidden = true;
-      } else {
-        const copy = resumeCopy(mode);
-        const text = document.getElementById('hqResumeText');
-        const chooseBtn = document.getElementById('hqResumeChooseBtn');
-        const clearBtn = document.getElementById('hqResumeClearBtn');
-        if (text) text.textContent = copy.text;
-        if (chooseBtn) chooseBtn.hidden = !copy.showChoose;
-        if (clearBtn) clearBtn.hidden = !copy.showClear;
-        resume.hidden = false;
       }
-    }
-
-    if (homeResume) {
-      // On Home, the Mission 01 quest-log card is the single first-run invite
-      // for a brand-new ("guided"/unseen) profile, so suppress the redundant
-      // resume bar there. It still surfaces for skipped/resume/repair states.
-      updateResumeBar(homeResume, document.getElementById('homeHQResumeText'), mode === 'guided' ? 'none' : mode);
-    }
-  }
-
-  function wireResume() {
-    if (resume) {
-      const buildBtn = document.getElementById('hqResumeBuildBtn');
-      const chooseBtn = document.getElementById('hqResumeChooseBtn');
-      const clearBtn = document.getElementById('hqResumeClearBtn');
-      if (buildBtn) buildBtn.addEventListener('click', () => openBuildModal());
-      if (chooseBtn) chooseBtn.addEventListener('click', () => openChooseExistingModal());
-      if (clearBtn) {
-        clearBtn.addEventListener('click', async () => {
-          clearBtn.disabled = true;
-          try {
-            await postJSON('/api/personal-hq/clear');
-            toast('Personal HQ designation cleared.', 'Cleared');
-            await refreshResume();
-          } catch (err) {
-            toast('Could not clear the designation. Try again.', 'Clear failed', 'error');
-          } finally {
-            clearBtn.disabled = false;
-          }
-        });
-      }
-    }
-    if (homeResume) {
-      // Home's resume bar is intentionally simple (no modals live on this
-      // page): Build My HQ routes to the launcher, which owns the full flow.
-      const buildBtn = document.getElementById('homeHQResumeBuildBtn');
-      if (buildBtn) {
-        buildBtn.addEventListener('click', () => {
-          window.location.href = '/workspaces?hq_onboarding=1';
-        });
-      }
-    }
+    });
   }
 
   // ---- Build My HQ modal ----
@@ -430,11 +354,98 @@ export function followUpView(f) {
     return browserTimezone();
   }
 
+  function showBuildWorkspaceRootError(message) {
+    const errorBox = document.getElementById('hqBuildWorkspaceRootError');
+    if (!errorBox) return;
+    errorBox.textContent = message || '';
+    errorBox.hidden = !message;
+  }
+
+  function renderBuildWorkspaceRoot(state) {
+    const view = hqWorkspaceRootView(state);
+    const input = document.getElementById('hqBuildWorkspaceRoot');
+    const status = document.getElementById('hqBuildWorkspaceRootStatus');
+    if (input) input.value = view.path;
+    if (status) {
+      status.textContent = view.status;
+      status.classList.toggle('is-confirmed', view.confirmed);
+      status.classList.toggle('is-unconfirmed', !view.confirmed);
+    }
+  }
+
+  async function loadBuildWorkspaceRoot() {
+    const response = await fetch('/api/settings/workspace-root', {
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) throw new Error('Could not load the workspace directory.');
+    const state = await response.json();
+    renderBuildWorkspaceRoot(state);
+    return state;
+  }
+
+  async function browseBuildWorkspaceRoot() {
+    const button = document.getElementById('hqBuildWorkspaceRootBrowseBtn');
+    if (button) button.disabled = true;
+    showBuildWorkspaceRootError('');
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose Workspace Directory' })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success)
+        throw new Error(result.error || 'Folder picker unavailable');
+      if (result.selected && result.path) {
+        const input = document.getElementById('hqBuildWorkspaceRoot');
+        const status = document.getElementById('hqBuildWorkspaceRootStatus');
+        if (input) input.value = result.path;
+        if (status) {
+          status.textContent = 'Selected. Build My HQ to confirm this directory.';
+          status.classList.remove('is-confirmed');
+          status.classList.add('is-unconfirmed');
+        }
+      }
+    } catch (error) {
+      showBuildWorkspaceRootError(error.message || 'Could not open the folder picker.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function saveBuildWorkspaceRoot() {
+    const input = document.getElementById('hqBuildWorkspaceRoot');
+    const workspaceRoot = (input?.value || '').trim();
+    if (!workspaceRoot) {
+      showBuildWorkspaceRootError('Choose a workspace directory before building your HQ.');
+      if (input) input.focus();
+      return false;
+    }
+
+    showBuildWorkspaceRootError('');
+    try {
+      const state = await postJSON('/api/settings/workspace-root', {
+        workspace_root: workspaceRoot
+      });
+      renderBuildWorkspaceRoot(state);
+      return true;
+    } catch (error) {
+      showBuildWorkspaceRootError(error.message || 'Could not save the workspace directory.');
+      return false;
+    }
+  }
+
   async function openBuildModal() {
     const tzInput = document.getElementById('hqBuildTimezone');
-    if (tzInput && !tzInput.value) {
-      tzInput.value = await defaultTimezone();
-    }
+    const tasks = [];
+    if (tzInput && !tzInput.value)
+      tasks.push(
+        defaultTimezone().then(timezone => {
+          tzInput.value = timezone;
+        })
+      );
+    tasks.push(loadBuildWorkspaceRoot().catch(error => showBuildWorkspaceRootError(error.message)));
+    await Promise.all(tasks);
     const errorBox = document.getElementById('hqBuildError');
     if (errorBox) errorBox.hidden = true;
     const modal = bootstrapModal('hqBuildModal');
@@ -444,7 +455,9 @@ export function followUpView(f) {
   function collectBuildRequest() {
     const name = (document.getElementById('hqBuildName')?.value || '').trim() || 'My HQ';
     const timezone = (document.getElementById('hqBuildTimezone')?.value || '').trim();
-    const scheduleDays = Array.from(document.querySelectorAll('#hqBuildAdvanced .hq-build-days input:checked')).map(i => i.value);
+    const scheduleDays = Array.from(
+      document.querySelectorAll('#hqBuildAdvanced .hq-build-days input:checked')
+    ).map(i => i.value);
     const scheduleTime = document.getElementById('hqBuildTime')?.value || '';
     const scope = document.getElementById('hqBuildScope')?.value || 'all';
     const includeFuture = !!document.getElementById('hqBuildIncludeFuture')?.checked;
@@ -461,6 +474,19 @@ export function followUpView(f) {
   }
 
   function wireBuildModal() {
+    const browseButton = document.getElementById('hqBuildWorkspaceRootBrowseBtn');
+    if (browseButton) browseButton.addEventListener('click', () => browseBuildWorkspaceRoot());
+    const workspaceRootInput = document.getElementById('hqBuildWorkspaceRoot');
+    if (workspaceRootInput) {
+      workspaceRootInput.addEventListener('input', () => {
+        const status = document.getElementById('hqBuildWorkspaceRootStatus');
+        if (!status) return;
+        status.textContent = 'Changed. Build My HQ to confirm this directory.';
+        status.classList.remove('is-confirmed');
+        status.classList.add('is-unconfirmed');
+      });
+    }
+
     const toggle = document.getElementById('hqBuildAdvancedToggle');
     const advanced = document.getElementById('hqBuildAdvanced');
     if (toggle && advanced) {
@@ -478,10 +504,11 @@ export function followUpView(f) {
       submitBtn.disabled = true;
       if (errorBox) errorBox.hidden = true;
       try {
+        const workspaceRootSaved = await saveBuildWorkspaceRoot();
+        if (!workspaceRootSaved) return;
         const result = await postJSON('/api/personal-hq/setup', collectBuildRequest());
         const modal = bootstrapModal('hqBuildModal');
         if (modal) modal.hide();
-        hideGuided();
         toast('Your Personal HQ is ready.', 'Personal HQ built');
         window.setTimeout(() => {
           window.location.href = '/';
@@ -489,7 +516,8 @@ export function followUpView(f) {
         void result;
       } catch (err) {
         if (errorBox) {
-          errorBox.textContent = err && err.message ? err.message : 'Could not build your Personal HQ. Try again.';
+          errorBox.textContent =
+            err && err.message ? err.message : 'Could not build your Personal HQ. Try again.';
           errorBox.hidden = false;
         }
       } finally {
@@ -498,120 +526,10 @@ export function followUpView(f) {
     });
   }
 
-  // ---- Choose Existing Workspace modal ----
-
-  async function fetchEligibleWorkspaces() {
-    const res = await fetch('/api/workspaces?tree=true', { headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`workspaces ${res.status}`);
-    const data = await res.json();
-    const flat = [];
-    const walk = list => {
-      (list || []).forEach(ws => {
-        if (ws.kind !== 'group' && ws.status !== 'trashed' && ws.status !== 'missing') flat.push(ws);
-        if (ws.children) walk(ws.children);
-      });
-    };
-    walk(data.workspaces || data.folders || []);
-    return flat;
-  }
-
-  async function designateWorkspace(ws, btn, errorBox) {
-    btn.disabled = true;
-    try {
-      await postJSON('/api/personal-hq/replace', { workspace_id: ws.id });
-      await postJSON('/api/personal-hq/onboarding-state', { state: 'completed' });
-      const modalInstance = bootstrapModal('hqChooseExistingModal');
-      if (modalInstance) modalInstance.hide();
-      toast(`${ws.name || 'Workspace'} is now your Personal HQ.`, 'Personal HQ designated');
-      hideGuided();
-      await refreshResume();
-    } catch (err) {
-      if (errorBox) {
-        errorBox.textContent = err && err.message ? err.message : 'Could not designate this workspace. Try again.';
-        errorBox.hidden = false;
-      }
-    } finally {
-      btn.disabled = false;
-    }
-  }
-
-  // Replacing an existing valid HQ requires confirmation naming both
-  // workspaces (PRD FR37) — no content is deleted, only the relationship
-  // changes. A first-time designation (no current valid HQ) skips straight
-  // to the API call since there's nothing to name a replacement against.
-  function confirmReplace(li, ws, currentName, onConfirm) {
-    li.innerHTML = '';
-    const text = document.createElement('span');
-    text.className = 'hq-choose-item-name';
-    text.textContent = `Replace "${currentName}" with "${ws.name || ws.id}"? No content is deleted.`;
-    const confirmBtn = document.createElement('button');
-    confirmBtn.type = 'button';
-    confirmBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
-    confirmBtn.textContent = 'Confirm';
-    confirmBtn.addEventListener('click', onConfirm);
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => openChooseExistingModal());
-    li.append(text, confirmBtn, cancelBtn);
-  }
-
-  async function openChooseExistingModal() {
-    const list = document.getElementById('hqChooseExistingList');
-    const empty = document.getElementById('hqChooseExistingEmpty');
-    const errorBox = document.getElementById('hqChooseExistingError');
-    if (!list) return;
-    list.innerHTML = '';
-    if (errorBox) errorBox.hidden = true;
-    if (empty) empty.hidden = true;
-
-    const modal = bootstrapModal('hqChooseExistingModal');
-    if (modal) modal.show();
-
-    let workspaces;
-    let currentStatus;
-    try {
-      [workspaces, currentStatus] = await Promise.all([fetchEligibleWorkspaces(), fetchStatus()]);
-    } catch (_) {
-      if (errorBox) {
-        errorBox.textContent = 'Could not load workspaces. Try again.';
-        errorBox.hidden = false;
-      }
-      return;
-    }
-    if (workspaces.length === 0) {
-      if (empty) empty.hidden = false;
-      return;
-    }
-    const currentName = currentStatus && currentStatus.valid
-      ? (workspaces.find(w => w.id === currentStatus.workspace_id)?.name || 'your current HQ')
-      : null;
-
-    workspaces.forEach(ws => {
-      const li = document.createElement('li');
-      li.className = 'hq-choose-item';
-      const name = document.createElement('span');
-      name.className = 'hq-choose-item-name';
-      name.textContent = ws.name || ws.id;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
-      btn.textContent = 'Designate';
-      btn.addEventListener('click', () => {
-        if (currentName && ws.id !== currentStatus.workspace_id) {
-          confirmReplace(li, ws, currentName, () => designateWorkspace(ws, btn, errorBox));
-        } else {
-          designateWorkspace(ws, btn, errorBox);
-        }
-      });
-      li.append(name, btn);
-      list.appendChild(li);
-    });
-  }
-
   async function fetchUpgradePreview() {
-    const res = await fetch('/api/personal-hq/upgrade/preview', { headers: { Accept: 'application/json' } });
+    const res = await fetch('/api/personal-hq/upgrade/preview', {
+      headers: { Accept: 'application/json' }
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data && data.plan ? data.plan : null;
@@ -674,7 +592,11 @@ export function followUpView(f) {
         toast('Your Personal HQ is up to date.', 'Upgrade applied', 'success');
         await wireUpgrade();
       } catch (_) {
-        toast('The upgrade did not fully complete — you can retry.', 'Upgrade incomplete', 'danger');
+        toast(
+          'The upgrade did not fully complete — you can retry.',
+          'Upgrade incomplete',
+          'danger'
+        );
         btn.disabled = false;
       }
     });
@@ -709,7 +631,9 @@ export function followUpView(f) {
   }
 
   async function fetchEmailStatus() {
-    const res = await fetch('/api/personal-hq/email/status', { headers: { Accept: 'application/json' } });
+    const res = await fetch('/api/personal-hq/email/status', {
+      headers: { Accept: 'application/json' }
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data && data.status ? data.status : null;
@@ -720,17 +644,25 @@ export function followUpView(f) {
   // depends on the Vault email OAuth being configured; failures surface as a
   // toast rather than a broken flow.
   function connectEmail() {
-    const popup = window.open('/api/vault/email/oauth/start?provider=gmail', 'ori-hq-email', 'width=520,height=680');
+    const popup = window.open(
+      '/api/vault/email/oauth/start?provider=gmail',
+      'ori-hq-email',
+      'width=520,height=680'
+    );
     if (!popup) {
       toast('Allow pop-ups to connect your email.', 'Popup blocked', 'danger');
       return;
     }
-    const onMessage = async (event) => {
+    const onMessage = async event => {
       const data = event && event.data;
       if (!data || data.type !== 'ori:vault-email-oauth') return;
       window.removeEventListener('message', onMessage);
       if (!data.success || !data.account || !data.account.id) {
-        toast(data && data.error ? data.error : 'Could not connect your email.', 'Connect failed', 'danger');
+        toast(
+          data && data.error ? data.error : 'Could not connect your email.',
+          'Connect failed',
+          'danger'
+        );
         return;
       }
       try {
@@ -746,7 +678,9 @@ export function followUpView(f) {
 
   async function fetchOAuthConfigured() {
     try {
-      const res = await fetch('/api/settings/email-oauth', { headers: { Accept: 'application/json' } });
+      const res = await fetch('/api/settings/email-oauth', {
+        headers: { Accept: 'application/json' }
+      });
       if (!res.ok) return true; // assume configured; the connect flow will surface a real error
       const data = await res.json();
       return !!data.configured;
@@ -786,7 +720,9 @@ export function followUpView(f) {
 
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
+    btn.className =
+      'modern-btn modern-btn-sm ' +
+      (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
     btn.textContent = view.actionLabel;
     btn.addEventListener('click', async () => {
       if (view.action === 'settings') {
@@ -834,7 +770,9 @@ export function followUpView(f) {
   }
 
   async function fetchProposals() {
-    const res = await fetch('/api/personal-hq/mail/proposals', { headers: { Accept: 'application/json' } });
+    const res = await fetch('/api/personal-hq/mail/proposals', {
+      headers: { Accept: 'application/json' }
+    });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data.proposals) ? data.proposals : [];
@@ -854,7 +792,10 @@ export function followUpView(f) {
 
     const meta = document.createElement('dl');
     meta.className = 'hq-reply-meta';
-    [['To', view.to], ['Subject', view.subject]].forEach(([label, value]) => {
+    [
+      ['To', view.to],
+      ['Subject', view.subject]
+    ].forEach(([label, value]) => {
       const dt = document.createElement('dt');
       dt.textContent = label;
       const dd = document.createElement('dd');
@@ -885,7 +826,10 @@ export function followUpView(f) {
     sendBtn.addEventListener('click', async () => {
       sendBtn.disabled = true;
       try {
-        await postJSON('/api/personal-hq/mail/confirm', { id: view.id, expected_hash: view.payloadHash });
+        await postJSON('/api/personal-hq/mail/confirm', {
+          id: view.id,
+          expected_hash: view.payloadHash
+        });
         toast('Your reply was sent.', 'Sent', 'success');
         await wireMailReview();
       } catch (e) {
@@ -944,7 +888,9 @@ export function followUpView(f) {
   }
 
   async function fetchHomeFollowUps() {
-    const res = await fetch('/api/personal-hq/followups/home', { headers: { Accept: 'application/json' } });
+    const res = await fetch('/api/personal-hq/followups/home', {
+      headers: { Accept: 'application/json' }
+    });
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data.followups) ? data.followups : [];
@@ -988,19 +934,25 @@ export function followUpView(f) {
       confirmBtn.type = 'button';
       confirmBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
       confirmBtn.textContent = 'Track this';
-      confirmBtn.addEventListener('click', () => act('/api/personal-hq/followups/confirm', { id: view.id }, 'confirm'));
+      confirmBtn.addEventListener('click', () =>
+        act('/api/personal-hq/followups/confirm', { id: view.id }, 'confirm')
+      );
       const dismissBtn = document.createElement('button');
       dismissBtn.type = 'button';
       dismissBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
       dismissBtn.textContent = 'Not a follow-up';
-      dismissBtn.addEventListener('click', () => act('/api/personal-hq/followups/dismiss', { id: view.id }, 'dismiss'));
+      dismissBtn.addEventListener('click', () =>
+        act('/api/personal-hq/followups/dismiss', { id: view.id }, 'dismiss')
+      );
       actions.append(confirmBtn, dismissBtn);
     } else {
       const doneBtn = document.createElement('button');
       doneBtn.type = 'button';
       doneBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
       doneBtn.textContent = 'Done';
-      doneBtn.addEventListener('click', () => act('/api/personal-hq/followups/complete', { id: view.id }, 'complete'));
+      doneBtn.addEventListener('click', () =>
+        act('/api/personal-hq/followups/complete', { id: view.id }, 'complete')
+      );
       const snoozeBtn = document.createElement('button');
       snoozeBtn.type = 'button';
       snoozeBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
@@ -1086,7 +1038,10 @@ export function followUpView(f) {
     saveBtn.addEventListener('click', async () => {
       saveBtn.disabled = true;
       try {
-        await postJSON('/api/personal-hq/journal/save', { local_date: view.localDate, content: editor.value });
+        await postJSON('/api/personal-hq/journal/save', {
+          local_date: view.localDate,
+          content: editor.value
+        });
         toast('Your journal was saved.', 'Saved', 'success');
         mount.innerHTML = '';
         mount.appendChild(journalLauncher(mount));
@@ -1102,7 +1057,11 @@ export function followUpView(f) {
     dismissBtn.textContent = 'Not now';
     dismissBtn.addEventListener('click', async () => {
       // Dismiss is a pure no-op server-side; just collapse the editor.
-      try { await postJSON('/api/personal-hq/journal/dismiss'); } catch (_) { /* no-op */ }
+      try {
+        await postJSON('/api/personal-hq/journal/dismiss');
+      } catch (_) {
+        /* no-op */
+      }
       mount.innerHTML = '';
       mount.appendChild(journalLauncher(mount));
     });
@@ -1121,7 +1080,9 @@ export function followUpView(f) {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       try {
-        const res = await fetch('/api/personal-hq/journal/propose', { headers: { Accept: 'application/json' } });
+        const res = await fetch('/api/personal-hq/journal/propose', {
+          headers: { Accept: 'application/json' }
+        });
         const data = res.ok ? await res.json() : null;
         renderJournalEditor(mount, journalPromptView(data && data.proposal));
       } catch (_) {
@@ -1153,13 +1114,12 @@ export function followUpView(f) {
   }
 
   function init() {
-    wireGuided();
-    wireResume();
+    wireMapActions();
     wireBuildModal();
 
-    const hint = hub ? hub.dataset.hqOnboardingHint : null;
-    if (wantsGuidedTakeover(hint, hasOnboardingIntent())) showGuided();
-    refreshResume();
+    void refreshHQStatus().catch(() => {
+      /* Status is additive; a degraded HQ service must not block the launcher. */
+    });
     wireUpgrade();
     wireEmail();
     wireMailReview();

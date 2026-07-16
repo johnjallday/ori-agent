@@ -678,6 +678,43 @@ func TestWorkspaceRootSettingsHandler_Get_EnvironmentFallback(t *testing.T) {
 	if resp.EffectiveWorkspaceRoot != envRoot {
 		t.Fatalf("Expected effective root %q, got %q", envRoot, resp.EffectiveWorkspaceRoot)
 	}
+	if !resp.Confirmed {
+		t.Fatal("WORKSPACE_DIR is an explicit operator choice and must be treated as confirmed")
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Get_NewInstallRequiresConfirmation(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("WORKSPACE_DIR", "")
+	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	if err := configManager.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/workspace-root", nil)
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", rec.Code)
+	}
+	var resp WorkspaceRootResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Confirmed {
+		t.Fatal("new install must require workspace-root confirmation")
+	}
+	if resp.Source != "unconfirmed" {
+		t.Fatalf("source = %q, want unconfirmed", resp.Source)
+	}
+	if resp.EffectiveWorkspaceRoot != "" {
+		t.Fatalf("effective root = %q, want empty before consent", resp.EffectiveWorkspaceRoot)
+	}
+	if resp.DefaultWorkspaceRoot == "" {
+		t.Fatal("response should still offer the built-in path as a suggestion")
+	}
 }
 
 func TestWorkspaceRootSettingsHandler_Post(t *testing.T) {
@@ -706,6 +743,7 @@ func TestWorkspaceRootSettingsHandler_Post(t *testing.T) {
 		WorkspaceRoot          string `json:"workspace_root"`
 		EffectiveWorkspaceRoot string `json:"effective_workspace_root"`
 		Source                 string `json:"source"`
+		Confirmed              bool   `json:"confirmed"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
@@ -722,6 +760,9 @@ func TestWorkspaceRootSettingsHandler_Post(t *testing.T) {
 	}
 	if resp.Source != "settings" {
 		t.Fatalf("Expected source settings, got %q", resp.Source)
+	}
+	if !resp.Confirmed {
+		t.Fatal("saving a workspace directory must confirm it")
 	}
 	if _, err := os.Stat(customRoot); err != nil {
 		t.Fatalf("Expected workspace root directory to exist: %v", err)

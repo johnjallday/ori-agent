@@ -31,41 +31,37 @@
     </div>
   </section>
 
-  <!-- Small non-blocking Personal HQ resume/repair entry; populated/toggled
-       by personal-hq-onboarding.js. Never a full takeover on Home. -->
-  <div id="homeHQResume" class="hq-resume" hidden>
-    <span id="homeHQResumeText" class="hq-resume-text">Set up your Personal HQ</span>
-    <button type="button" id="homeHQResumeBuildBtn" class="hq-resume-action">Build My HQ</button>
-    <a href="/workspaces?hq_onboarding=1" id="homeHQResumeLink" class="hq-resume-action">Open workspace launcher</a>
-  </div>
-
-  <!-- Daily Brief: the primary Home orientation region once a valid Personal
-       HQ is designated (PRD FR97). Hidden entirely with no HQ — no hidden
-       brief store is created and no workspace is silently selected (FR69).
-       Populated/wired by home-daily-brief.js. -->
-  <section id="homeDailyBrief" class="home-daily-brief" data-state="loading" aria-labelledby="homeDailyBriefTitle" hidden>
-    <header class="home-daily-brief-header">
-      <div class="home-daily-brief-heading">
-        <span class="home-daily-brief-eyebrow">Daily Brief</span>
-        <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
-        <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
+  <!-- The orientation slot is always the bridge's second grid row. Keeping a
+       stable wrapper here prevents the optional Daily Brief from creating an
+       implicit grid row that can collide with the Operations board. -->
+  <div class="home-orientation-slot">
+    <!-- Daily Brief: the primary Home orientation region once a valid Personal
+         HQ is designated (PRD FR97). Hidden entirely with no HQ — no hidden
+         brief store is created and no workspace is silently selected (FR69).
+         Populated/wired by home-daily-brief.js. -->
+    <section id="homeDailyBrief" class="home-daily-brief" data-state="loading" aria-labelledby="homeDailyBriefTitle" hidden>
+      <header class="home-daily-brief-header">
+        <div class="home-daily-brief-heading">
+          <span class="home-daily-brief-eyebrow">Daily Brief</span>
+          <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
+          <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
+        </div>
+        <div class="home-daily-brief-actions">
+          <a id="homeDailyBriefOpenHQ" href="/workspaces" class="modern-btn modern-btn-secondary modern-btn-sm">Open My HQ</a>
+          <button type="button" id="homeDailyBriefSettingsBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Brief settings</button>
+          <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
+        </div>
+      </header>
+      <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
+      <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
+        <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
       </div>
-      <div class="home-daily-brief-actions">
-        <a id="homeDailyBriefOpenHQ" href="/workspaces" class="modern-btn modern-btn-secondary modern-btn-sm">Open My HQ</a>
-        <button type="button" id="homeDailyBriefSettingsBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Brief settings</button>
-        <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
-      </div>
-    </header>
-    <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
-    <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
-      <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Brief settings dialog: HQ-owned config + recent history, opened from
-       Home's "Brief settings" action but scoped to the designated HQ
-       workspace's own data (PRD FR99/task 7.7). -->
-  <div class="modal fade" id="homeDailyBriefSettingsModal" tabindex="-1" aria-labelledby="homeDailyBriefSettingsModalLabel" aria-hidden="true">
+    <!-- Brief settings dialog: HQ-owned config + recent history, opened from
+         Home's "Brief settings" action but scoped to the designated HQ
+         workspace's own data (PRD FR99/task 7.7). -->
+    <div class="modal fade" id="homeDailyBriefSettingsModal" tabindex="-1" aria-labelledby="homeDailyBriefSettingsModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
@@ -109,6 +105,7 @@
           <ul id="homeDailyBriefHistoryList" class="home-daily-brief-history-list"></ul>
         </div>
       </div>
+    </div>
     </div>
   </div>
 
@@ -182,11 +179,11 @@
             </div>
             <div class="quest-log-first-mission-body">
               <div class="quest-log-first-mission-copy">
-                <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build your Personal HQ</h3>
+                <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build My HQ</h3>
                 <p class="quest-log-first-mission-why" data-role="first-mission-why"></p>
               </div>
-              <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/workspaces?hq_onboarding=1">
-                <span data-role="first-mission-action-label">Start mission</span>
+              <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/workspaces?view=map&amp;focus=personal-hq">
+                <span data-role="first-mission-action-label">Build My HQ</span>
                 <span aria-hidden="true">&#8594;</span>
               </a>
             </div>

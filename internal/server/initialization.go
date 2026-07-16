@@ -462,16 +462,25 @@ func resolveWorkspaceDir() string {
 }
 
 // resolveWorkspaceRoot determines the root directory for workspace folders.
-// Priority: 1) settings workspace_root, 2) WORKSPACE_DIR env, 3) ~/Ori Workspaces
+// Priority: 1) confirmed settings workspace_root, 2) WORKSPACE_DIR env,
+// 3) confirmed built-in default, 4) app-owned staging while first-run consent
+// is still pending. The staging fallback is deliberately outside the user's
+// conventional ~/Ori Workspaces tree so startup cannot silently adopt it.
 func resolveWorkspaceRoot(configManager *config.Manager) string {
-	// Check settings first
 	if configManager != nil {
 		if root := configManager.GetWorkspaceRoot(); root != "" {
 			return root
 		}
+		if configManager.IsWorkspaceRootConfirmed() {
+			return config.ResolveWorkspaceRoot("")
+		}
 	}
 
-	return config.ResolveWorkspaceRoot("")
+	if strings.TrimSpace(os.Getenv("WORKSPACE_DIR")) != "" || configManager == nil {
+		return config.ResolveWorkspaceRoot("")
+	}
+
+	return config.UnconfirmedWorkspaceRoot()
 }
 
 // resolveVaultRoot determines the root directory for new managed vault files.

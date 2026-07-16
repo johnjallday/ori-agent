@@ -479,8 +479,7 @@
    above neighbouring buildings. A warm gold glow (vs. the neutral drop-shadow
    on ordinary structs) marks it as the map's capital. */
 .ws-map-struct.is-hq-struct {
-  filter:
-    drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55))
+  filter: drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55))
     drop-shadow(0 0 14px rgba(232, 181, 75, 0.45));
   margin-top: -12px;
 }
@@ -491,9 +490,74 @@
 }
 @keyframes ws-map-hq-beacon {
   50% {
-    filter:
-      drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55))
+    filter: drop-shadow(0 12px 12px rgba(0, 0, 0, 0.55))
       drop-shadow(0 0 20px rgba(232, 181, 75, 0.7));
+  }
+}
+
+/* Unbuilt Personal HQ landmark. This is a map annotation, not a workspace:
+   dashed survey lines and an open footprint communicate "planned site" while
+   preserving the gold capital-building vocabulary of the completed HQ. */
+.ws-map-hq-site .ws-map-led {
+  border: 1px solid var(--ws-keeper);
+  background: transparent;
+  box-shadow: none;
+}
+.ws-map-hq-site.is-repair .ws-map-led {
+  background: var(--ws-danger, #e2654d);
+  border-color: var(--ws-danger, #e2654d);
+  box-shadow: 0 0 7px rgba(226, 101, 77, 0.55);
+}
+.ws-map-hq-site.is-selected::before {
+  border-color: var(--ws-keeper);
+  border-style: dashed;
+  box-shadow: 0 0 22px rgba(232, 181, 75, 0.28);
+}
+.ws-map-hq-site .ws-map-tile-name {
+  color: var(--ws-keeper);
+}
+.ws-map-hq-site .ws-map-tile-hq-badge {
+  border-style: dashed;
+}
+.ws-map-struct.is-hq-site-struct {
+  margin-top: -12px;
+  overflow: visible;
+  filter: drop-shadow(0 0 12px rgba(232, 181, 75, 0.22));
+}
+.ws-map-hq-site-pad {
+  fill: rgba(232, 181, 75, 0.05);
+  stroke: rgba(232, 181, 75, 0.72);
+  stroke-dasharray: 5 4;
+}
+.ws-map-hq-site-outline {
+  fill: none;
+  stroke: rgba(232, 181, 75, 0.82);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  stroke-linejoin: round;
+}
+.ws-map-hq-site-survey {
+  fill: none;
+  stroke: rgba(232, 181, 75, 0.28);
+  stroke-width: 1;
+  stroke-dasharray: 2 5;
+}
+.ws-map-hq-site-beacon {
+  fill: var(--ws-keeper);
+  stroke: #ffe08a;
+  stroke-width: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-hq-site-beacon {
+    animation: ws-map-hq-site-ping 2.8s ease-in-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+}
+@keyframes ws-map-hq-site-ping {
+  50% {
+    opacity: 0.35;
+    transform: scale(1.7);
   }
 }
 
@@ -1071,6 +1135,112 @@
   outline-offset: 2px;
 }
 
+/* Map-native Personal HQ setup panel. The restrained gold blueprint treatment
+   makes this feel like part of the map's world rather than an onboarding
+   banner pasted over it. */
+.ws-map-hq-site-hero {
+  border-bottom-color: rgba(232, 181, 75, 0.28);
+}
+.ws-map-hq-site-icon {
+  border: 1px dashed var(--ws-keeper);
+  background: rgba(232, 181, 75, 0.09);
+  color: var(--ws-keeper);
+}
+.ws-map-hq-site-title {
+  margin: 16px 0 0;
+  color: #f3f5f8;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+.ws-map-hq-site-desc {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+.ws-map-hq-benefits {
+  display: grid;
+  gap: 7px;
+}
+.ws-map-hq-benefit {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid rgba(232, 181, 75, 0.15);
+  background: rgba(232, 181, 75, 0.035);
+}
+.ws-map-hq-benefit > span {
+  color: var(--ws-keeper);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+.ws-map-hq-benefit b,
+.ws-map-hq-benefit small {
+  display: block;
+}
+.ws-map-hq-benefit b {
+  color: #e9ecef;
+  font-size: 12px;
+  letter-spacing: 0.25px;
+}
+.ws-map-hq-benefit small {
+  margin-top: 2px;
+  color: var(--ws-ink-faint);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.ws-map-hq-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.ws-map-hq-action {
+  min-height: 38px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-family: var(--ws-font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  transition: 0.15s;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.ws-map-hq-action-primary {
+  border: 1px solid var(--ws-keeper);
+  background: rgba(232, 181, 75, 0.14);
+  color: var(--ws-keeper);
+}
+.ws-map-hq-action-primary:hover {
+  background: var(--ws-keeper);
+  color: #171204;
+}
+.ws-map-hq-action-secondary {
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink-dim);
+}
+.ws-map-hq-action-secondary:hover {
+  border-color: var(--ws-keeper);
+  color: var(--ws-keeper);
+}
+.ws-map-hq-action-quiet {
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink-faint);
+}
+.ws-map-hq-action-quiet:hover {
+  color: var(--ws-ink-dim);
+}
+.ws-map-hq-action:focus-visible {
+  outline: 2px solid var(--ws-keeper);
+  outline-offset: 2px;
+}
+
 /* Destructive action sits at the bottom of the panel, visually separated from
    the read-only stats above it and de-emphasized versus the primary Open. */
 .ws-map-ov-actions {
@@ -1150,6 +1320,8 @@
 [data-bs-theme="light"] .ws-map-ov-name,
 [data-bs-theme="light"] .ws-map-ov-keeper-name,
 [data-bs-theme="light"] .ws-map-ov-v,
+[data-bs-theme="light"] .ws-map-hq-site-title,
+[data-bs-theme="light"] .ws-map-hq-benefit b,
 [data-bs-theme="light"] .ws-map-selbar-count {
   color: var(--ws-ink-heading);
 }
@@ -1175,6 +1347,10 @@
 [data-bs-theme="light"] .ws-map-tile-name {
   color: var(--ws-ink-heading);
   text-shadow: var(--ws-title-shadow);
+}
+
+[data-bs-theme="light"] .ws-map-hq-site .ws-map-tile-name {
+  color: var(--ws-keeper);
 }
 
 [data-bs-theme="light"] .ws-map-tile-meta,
