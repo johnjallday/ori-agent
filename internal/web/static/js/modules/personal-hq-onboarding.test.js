@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, replyProposalView, followUpView, followUpCategoryLabel } from './personal-hq-onboarding.js';
+import { resolveGuidedMode, resumeCopy, wantsGuidedTakeover, upgradeView, emailStatusView, chipStateLabel, replyProposalView, followUpView, followUpCategoryLabel } from './personal-hq-onboarding.js';
 
 function status(overrides) {
   return { workspace_id: '', valid: false, hq_onboarding_state: 'unseen', ...overrides };
@@ -125,6 +125,28 @@ test('emailStatusView: never-connected offers Connect and promises read-only + c
   assert.equal(view.action, 'connect');
   assert.match(view.detail, /read-only/i);
   assert.match(view.detail, /confirmation/i);
+});
+
+test('emailStatusView: no OAuth client on the server routes to Settings (setup state)', () => {
+  const view = emailStatusView(null, false);
+  assert.equal(view.state, 'setup');
+  assert.equal(view.action, 'settings');
+  assert.equal(view.chipState, 'empty');
+  assert.match(view.detail, /Settings/i);
+});
+
+test('emailStatusView: connected is an equipped loadout chip', () => {
+  const view = emailStatusView({ connected: true, email_address: 'me@x.com' }, true);
+  assert.equal(view.chipState, 'equipped');
+  assert.equal(view.chip, 'Email');
+  assert.equal(view.action, 'disconnect');
+});
+
+test('chipStateLabel maps loadout states to short words', () => {
+  assert.equal(chipStateLabel('equipped'), 'Connected');
+  assert.equal(chipStateLabel('repair'), 'Needs repair');
+  assert.equal(chipStateLabel('empty'), 'Not set up');
+  assert.equal(chipStateLabel(undefined), 'Not set up');
 });
 
 test('replyProposalView: a draft is sendable and carries the exact reviewed payload hash', () => {
