@@ -86,38 +86,52 @@ export function upgradeView(plan) {
   };
 }
 
-// emailStatusView turns the Personal HQ email status (from GET
-// /api/personal-hq/email/status) into the view-model the connect/grant/repair UI
-// renders, so all branching is unit-testable. Three states:
-//   - connected: show the address + a Disconnect action.
-//   - repair: a binding exists but the account is gone/expired — offer Reconnect.
-//   - disconnected: never connected — offer Connect.
-export function emailStatusView(status) {
+// emailStatusView turns the Personal HQ email status (GET /email/status) plus
+// whether the server has Google OAuth credentials (oauthConfigured) into the
+// loadout-chip view-model. Email is a first-class HQ inventory item — equipped,
+// not required — so the chip owns its own setup routing. States:
+//   - connected: equipped; show the address + Disconnect.
+//   - setup:     the server has no OAuth client yet — route to Settings.
+//   - repair:    a binding exists but the account is gone/expired — Reconnect.
+//   - disconnected: OAuth is configured but no account connected — Connect.
+// oauthConfigured defaults to true (backward compatible) unless explicitly false.
+export function emailStatusView(status, oauthConfigured) {
+  const configured = oauthConfigured !== false;
   if (status && status.connected) {
     return {
-      state: 'connected',
-      heading: 'Email connected',
-      detail: status.email_address || '',
-      action: 'disconnect',
-      actionLabel: 'Disconnect'
+      state: 'connected', chip: 'Email', chipState: 'equipped',
+      heading: 'Email connected', detail: status.email_address || '',
+      action: 'disconnect', actionLabel: 'Disconnect'
+    };
+  }
+  if (!configured) {
+    return {
+      state: 'setup', chip: 'Email', chipState: 'empty',
+      heading: 'Set up email', detail: 'Add your Google OAuth credentials in Settings to enable Personal HQ email.',
+      action: 'settings', actionLabel: 'Set up in Settings'
     };
   }
   if (status && status.account_id) {
     return {
-      state: 'repair',
-      heading: 'Reconnect your email',
-      detail: 'Your connected email needs to be reconnected before the assistant can read it.',
-      action: 'connect',
-      actionLabel: 'Reconnect'
+      state: 'repair', chip: 'Email', chipState: 'repair',
+      heading: 'Reconnect your email', detail: 'Your connected email needs to be reconnected before the assistant can read it.',
+      action: 'connect', actionLabel: 'Reconnect'
     };
   }
   return {
-    state: 'disconnected',
-    heading: 'Connect your email',
-    detail: 'Let your Inbox specialist surface threads that need attention and help draft replies. Read-only — nothing is ever sent without your explicit confirmation.',
-    action: 'connect',
-    actionLabel: 'Connect email'
+    state: 'disconnected', chip: 'Email', chipState: 'empty',
+    heading: 'Connect your email', detail: 'Let your Inbox specialist surface threads that need attention and help draft replies. Read-only — nothing is ever sent without your explicit confirmation.',
+    action: 'connect', actionLabel: 'Connect email'
   };
+}
+
+// chipStateLabel renders the short inventory-chip status word.
+export function chipStateLabel(chipState) {
+  switch (chipState) {
+    case 'equipped': return 'Connected';
+    case 'repair': return 'Needs repair';
+    default: return 'Not set up';
+  }
 }
 
 // replyProposalView turns a reply proposal (from the mail broker) into the
@@ -730,20 +744,42 @@ export function followUpView(f) {
     window.addEventListener('message', onMessage);
   }
 
+  async function fetchOAuthConfigured() {
+    try {
+      const res = await fetch('/api/settings/email-oauth', { headers: { Accept: 'application/json' } });
+      if (!res.ok) return true; // assume configured; the connect flow will surface a real error
+      const data = await res.json();
+      return !!data.configured;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // renderEmail renders the Email inventory chip — a first-class HQ loadout item
+  // with its own state and setup routing. The chip's action routes correctly:
+  // 'settings' (server has no OAuth client) opens Settings, 'connect' opens the
+  // OAuth popup, 'disconnect' unlinks.
   function renderEmail(mount, view) {
     mount.innerHTML = '';
     mount.hidden = false;
-    const card = document.createElement('div');
-    card.className = 'hq-email-card hq-email-' + view.state;
 
-    const heading = document.createElement('h4');
-    heading.className = 'hq-email-heading';
-    heading.textContent = view.heading;
-    card.appendChild(heading);
+    const card = document.createElement('div');
+    card.className = 'hq-loadout-chip hq-email-' + view.state;
+
+    const head = document.createElement('div');
+    head.className = 'hq-loadout-chip-head';
+    const name = document.createElement('span');
+    name.className = 'hq-loadout-chip-name';
+    name.textContent = view.chip || 'Email';
+    const state = document.createElement('span');
+    state.className = 'hq-loadout-chip-state hq-loadout-chip-state-' + (view.chipState || 'empty');
+    state.textContent = chipStateLabel(view.chipState);
+    head.append(name, state);
+    card.appendChild(head);
 
     if (view.detail) {
       const detail = document.createElement('p');
-      detail.className = 'hq-email-detail';
+      detail.className = 'hq-loadout-chip-detail';
       detail.textContent = view.detail;
       card.appendChild(detail);
     }
@@ -753,6 +789,10 @@ export function followUpView(f) {
     btn.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
     btn.textContent = view.actionLabel;
     btn.addEventListener('click', async () => {
+      if (view.action === 'settings') {
+        window.location.href = '/settings#personal-hq-email';
+        return;
+      }
       if (view.action === 'disconnect') {
         btn.disabled = true;
         try {
@@ -763,16 +803,16 @@ export function followUpView(f) {
           toast('Could not disconnect the email account.', 'Error', 'danger');
           btn.disabled = false;
         }
-      } else {
-        connectEmail();
+        return;
       }
+      connectEmail();
     });
     card.appendChild(btn);
     mount.appendChild(card);
   }
 
-  // wireEmail shows the email connect/grant/repair card for a valid designated
-  // HQ. Additive: a no-op when the page has no #hqEmailMount or no valid HQ.
+  // wireEmail renders the Email loadout chip for a valid designated HQ. Additive:
+  // a no-op when the page has no #hqEmailMount or no valid HQ.
   async function wireEmail() {
     const mount = document.getElementById('hqEmailMount');
     if (!mount) return;
@@ -786,13 +826,11 @@ export function followUpView(f) {
       mount.hidden = true;
       return;
     }
-    let emailStatus;
-    try {
-      emailStatus = await fetchEmailStatus();
-    } catch (_) {
-      return;
-    }
-    renderEmail(mount, emailStatusView(emailStatus));
+    const [emailStatus, oauthConfigured] = await Promise.all([
+      fetchEmailStatus().catch(() => null),
+      fetchOAuthConfigured()
+    ]);
+    renderEmail(mount, emailStatusView(emailStatus, oauthConfigured));
   }
 
   async function fetchProposals() {

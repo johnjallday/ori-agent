@@ -6229,6 +6229,55 @@ body:has(#workspaceHub.is-hq-guided) #hubSupportChat {
   color: var(--text-secondary);
 }
 
+/* Personal HQ loadout chip — a first-class equipped-capability item (email in
+   v1). Rendered into #hqEmailMount. */
+.hq-loadout-chip {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-loadout-chip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.hq-loadout-chip-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.hq-loadout-chip-state {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, var(--bg-primary));
+  color: var(--text-secondary);
+}
+
+.hq-loadout-chip-state-equipped {
+  color: var(--success-color, #2e7d32);
+}
+
+.hq-loadout-chip-state-repair {
+  color: var(--warning-color, #b26a00);
+}
+
+.hq-loadout-chip-detail {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 /* Personal HQ confirm-gated reply review cards (#hqMailReviewMount). */
 .hq-reply-card {
   margin: 0.75rem 0;

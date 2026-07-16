@@ -243,6 +243,17 @@ func (b *ServerBuilder) initializeHandlers() {
 			ManagedVaultRoot: resolveVaultRoot(b.configManager),
 		})
 		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		// Let in-app Settings supply the Google email OAuth client credentials,
+		// taking precedence over ORI_EMAIL_GOOGLE_* env vars, so a self-hosted
+		// user can enable Personal HQ email without editing the environment.
+		if b.configManager != nil {
+			vaulthttp.EmailOAuthCredentialOverride = func(provider vault.EmailProvider) (string, string) {
+				if provider == vault.EmailProviderGmail {
+					return b.configManager.GetEmailGoogleOAuth()
+				}
+				return "", ""
+			}
+		}
 		b.settingsHandler.SetVaultRootUpdater(vaultStore.SetManagedVaultRoot)
 		if b.workspaceHandler != nil {
 			b.workspaceHandler.SetEmailAccountStore(vaultStore)

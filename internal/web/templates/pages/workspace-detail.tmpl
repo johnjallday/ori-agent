@@ -26,10 +26,44 @@
                 <h2 class="workspace-detail-tools-title" id="workspace-detail-tools-title">Add-ons</h2>
                 <p class="workspace-detail-tools-sub">Optional. Searches the marketplaces for MCPs, skills, and plugins matching your description — add any you want.</p>
               </div>
-              <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" id="workspace-tools-find-btn">Find tools</button>
+              <div class="workspace-detail-tools-actions">
+                <!-- Shown by personal-hq-email-setup.js only when this workspace
+                     is the designated Personal HQ. -->
+                <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" id="hqEmailSetupBtn" hidden>Set up email</button>
+                <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" id="workspace-tools-find-btn">Find tools</button>
+              </div>
             </div>
             <div id="workspace-tools-panel-host" hidden></div>
           </section>
+
+          <style>
+            .workspace-detail-tools-actions { display: flex; gap: 0.5rem; align-items: center; }
+            .hq-email-setup-modal[hidden] { display: none; }
+            .hq-email-setup-modal { position: fixed; inset: 0; z-index: 1080; display: flex; align-items: center; justify-content: center; }
+            .hq-email-setup-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); }
+            .hq-email-setup-dialog { position: relative; width: min(440px, 92vw); background: var(--bg-secondary, #fff); color: var(--text-primary, #111); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 0.5rem); padding: 1rem 1.1rem; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+            .hq-email-setup-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+            .hq-email-setup-title { margin: 0; font-size: 1.05rem; }
+            .hq-email-setup-close { background: none; border: none; font-size: 1.4rem; line-height: 1; cursor: pointer; color: var(--text-secondary, #666); }
+            .hq-email-setup-body .hq-loadout-chip-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; }
+            .hq-email-setup-body .hq-loadout-chip-name { font-weight: 600; }
+            .hq-email-setup-body .hq-loadout-chip-state { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.1rem 0.45rem; border-radius: 999px; background: var(--bg-tertiary, #eee); color: var(--text-secondary, #666); }
+            .hq-email-setup-body .hq-loadout-chip-state-equipped { color: var(--success-color, #2e7d32); }
+            .hq-email-setup-body .hq-loadout-chip-state-repair { color: var(--warning-color, #b26a00); }
+            .hq-email-setup-body .hq-loadout-chip-detail { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--text-secondary, #666); }
+          </style>
+          <!-- Personal HQ email setup modal (opened by #hqEmailSetupBtn). A
+               lightweight overlay — no Bootstrap dependency. -->
+          <div id="hqEmailSetupModal" class="hq-email-setup-modal" hidden role="dialog" aria-modal="true" aria-labelledby="hqEmailSetupTitle">
+            <div class="hq-email-setup-backdrop" data-hq-email-close></div>
+            <div class="hq-email-setup-dialog" role="document">
+              <div class="hq-email-setup-header">
+                <h2 id="hqEmailSetupTitle" class="hq-email-setup-title">Personal HQ Email</h2>
+                <button type="button" class="hq-email-setup-close" data-hq-email-close aria-label="Close">×</button>
+              </div>
+              <div class="hq-email-setup-body">Loading…</div>
+            </div>
+          </div>
 
 
           <div class="modern-card workspace-detail-config-card is-collapsed mb-4" id="workspace-detail-settings-panel">
@@ -8633,6 +8667,7 @@
   <script defer src="/js/modules/workspace-triggers.js"></script>
   <script defer src="/js/modules/project-templates-manage.js"></script>
   <script defer src="/js/modules/workspace-hub-support-chat.js"></script>
+  <script type="module" src="/js/modules/personal-hq-email-setup.js"></script>
 
   <!-- Workspace Detail Page -->
   <script type="module">
