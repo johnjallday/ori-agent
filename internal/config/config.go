@@ -50,10 +50,16 @@ type MacWakeSettings struct {
 
 // Settings holds application-wide configuration
 type Settings struct {
-	OpenAIAPIKey    string   `json:"openai_api_key"`
-	AnthropicAPIKey string   `json:"anthropic_api_key"`
-	GeminiAPIKey    string   `json:"gemini_api_key"`
-	AllowedOrigins  []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
+	OpenAIAPIKey    string `json:"openai_api_key"`
+	AnthropicAPIKey string `json:"anthropic_api_key"`
+	GeminiAPIKey    string `json:"gemini_api_key"`
+
+	// Personal HQ email OAuth client credentials (Google), settable in-app so a
+	// self-hosted user does not need env vars. Empty falls back to the
+	// ORI_EMAIL_GOOGLE_CLIENT_ID / _SECRET environment variables.
+	EmailGoogleClientID     string   `json:"email_google_client_id,omitempty"`
+	EmailGoogleClientSecret string   `json:"email_google_client_secret,omitempty"`
+	AllowedOrigins          []string `json:"allowed_origins,omitempty"` // CORS allowed origins (defaults to localhost)
 
 	// System model settings - used for internal AI tasks (auto-config, suggestions, etc.)
 	SystemProvider        string `json:"system_provider,omitempty"`         // Provider for system tasks (e.g., "openai", "codex", "claude_code", "claude", "gemini", "ollama", "lmstudio", "mlx_lm")
@@ -711,6 +717,40 @@ func (m *Manager) GetAnthropicAPIKey() string {
 	}
 
 	return ""
+}
+
+// GetEmailGoogleOAuth returns the Google email OAuth client credentials,
+// preferring in-app settings over the ORI_EMAIL_GOOGLE_CLIENT_ID / _SECRET
+// environment variables, so a self-hosted user can configure OAuth without env
+// vars.
+func (m *Manager) GetEmailGoogleOAuth() (clientID, clientSecret string) {
+	m.mu.RLock()
+	clientID = strings.TrimSpace(m.settings.EmailGoogleClientID)
+	clientSecret = strings.TrimSpace(m.settings.EmailGoogleClientSecret)
+	m.mu.RUnlock()
+	if clientID == "" {
+		clientID = strings.TrimSpace(os.Getenv("ORI_EMAIL_GOOGLE_CLIENT_ID"))
+	}
+	if clientSecret == "" {
+		clientSecret = strings.TrimSpace(os.Getenv("ORI_EMAIL_GOOGLE_CLIENT_SECRET"))
+	}
+	return clientID, clientSecret
+}
+
+// GetEmailGoogleOAuthConfigured reports whether both Google OAuth credentials
+// are present (settings or env).
+func (m *Manager) GetEmailGoogleOAuthConfigured() bool {
+	id, secret := m.GetEmailGoogleOAuth()
+	return id != "" && secret != ""
+}
+
+// SetEmailGoogleOAuth persists the Google email OAuth client credentials.
+func (m *Manager) SetEmailGoogleOAuth(clientID, clientSecret string) error {
+	m.mu.Lock()
+	m.settings.EmailGoogleClientID = strings.TrimSpace(clientID)
+	m.settings.EmailGoogleClientSecret = strings.TrimSpace(clientSecret)
+	m.mu.Unlock()
+	return m.Save()
 }
 
 // GetGeminiAPIKey returns the Gemini API key, checking settings first, then environment variable
