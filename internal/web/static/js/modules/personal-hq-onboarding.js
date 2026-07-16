@@ -157,6 +157,19 @@ export function followUpCategoryLabel(category) {
   }
 }
 
+// journalPromptView turns an end-of-day journal proposal into the editor
+// view-model: the prefilled editable draft plus a degraded flag when grounding
+// was incomplete. Pure and unit-testable.
+export function journalPromptView(proposal) {
+  if (!proposal) return { draft: '', degraded: false, localDate: '' };
+  return {
+    localDate: proposal.local_date || '',
+    draft: proposal.draft || '',
+    degraded: !!proposal.degraded,
+    gaps: Array.isArray(proposal.gaps) ? proposal.gaps : []
+  };
+}
+
 // followUpView turns a follow-up record into a Home projection card view-model.
 // A candidate (inferred, unconfirmed) offers Confirm/Dismiss; an active item
 // offers Done/Snooze.
@@ -1001,6 +1014,106 @@ export function followUpView(f) {
     });
   }
 
+  function renderJournalEditor(mount, view) {
+    mount.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'hq-journal-card';
+
+    const heading = document.createElement('h4');
+    heading.className = 'hq-journal-heading';
+    heading.textContent = 'End-of-day journal';
+    card.appendChild(heading);
+
+    if (view.degraded) {
+      const note = document.createElement('p');
+      note.className = 'hq-journal-note';
+      note.textContent = 'Some activity could not be loaded — the draft may be incomplete.';
+      card.appendChild(note);
+    }
+
+    const editor = document.createElement('textarea');
+    editor.className = 'hq-journal-editor';
+    editor.rows = 10;
+    editor.value = view.draft;
+    editor.setAttribute('aria-label', 'End-of-day journal draft');
+    card.appendChild(editor);
+
+    const actions = document.createElement('div');
+    actions.className = 'hq-journal-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    saveBtn.textContent = 'Save journal';
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      try {
+        await postJSON('/api/personal-hq/journal/save', { local_date: view.localDate, content: editor.value });
+        toast('Your journal was saved.', 'Saved', 'success');
+        mount.innerHTML = '';
+        mount.appendChild(journalLauncher(mount));
+      } catch (e) {
+        toast(e && e.message ? e.message : 'Could not save the journal.', 'Save failed', 'danger');
+        saveBtn.disabled = false;
+      }
+    });
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    dismissBtn.textContent = 'Not now';
+    dismissBtn.addEventListener('click', async () => {
+      // Dismiss is a pure no-op server-side; just collapse the editor.
+      try { await postJSON('/api/personal-hq/journal/dismiss'); } catch (_) { /* no-op */ }
+      mount.innerHTML = '';
+      mount.appendChild(journalLauncher(mount));
+    });
+
+    actions.append(saveBtn, dismissBtn);
+    card.appendChild(actions);
+    mount.appendChild(card);
+    editor.focus();
+  }
+
+  function journalLauncher(mount) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modern-btn modern-btn-secondary modern-btn-sm hq-journal-launch';
+    btn.textContent = 'Write your end-of-day journal';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/personal-hq/journal/propose', { headers: { Accept: 'application/json' } });
+        const data = res.ok ? await res.json() : null;
+        renderJournalEditor(mount, journalPromptView(data && data.proposal));
+      } catch (_) {
+        toast('Could not open the journal.', 'Error', 'danger');
+        btn.disabled = false;
+      }
+    });
+    return btn;
+  }
+
+  // wireJournal shows an on-demand end-of-day journal launcher. Additive: no-op
+  // without #hqJournalMount or a valid HQ. (A scheduled prompt is a future add.)
+  async function wireJournal() {
+    const mount = document.getElementById('hqJournalMount');
+    if (!mount) return;
+    let status;
+    try {
+      status = await fetchStatus();
+    } catch (_) {
+      return;
+    }
+    if (!status || !status.valid) {
+      mount.hidden = true;
+      return;
+    }
+    mount.hidden = false;
+    mount.innerHTML = '';
+    mount.appendChild(journalLauncher(mount));
+  }
+
   function init() {
     wireGuided();
     wireResume();
@@ -1013,6 +1126,7 @@ export function followUpView(f) {
     wireEmail();
     wireMailReview();
     wireFollowUps();
+    wireJournal();
   }
 
   if (document.readyState === 'loading') {
