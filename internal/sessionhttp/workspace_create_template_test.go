@@ -345,7 +345,7 @@ func TestCreateWorkspaceTemplateAgentPlanEndpoint(t *testing.T) {
 	}
 }
 
-func TestCreateTemplateAgentImmediatelySavesReusableDefinition(t *testing.T) {
+func TestCreateTemplateAgentSavesReusableDefinitionWithSetupOverride(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 	handler.SetSystemModelReader(fakeSystemModelReader{provider: "codex", model: "gpt-5.3-codex"})
@@ -363,7 +363,7 @@ func TestCreateTemplateAgentImmediatelySavesReusableDefinition(t *testing.T) {
 	}
 
 	newCreateRequest := func() *http.Request {
-		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/template-agent-create", bytes.NewBufferString(`{"template_id":"reaper-template","agent_index":0}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/template-agent-create", bytes.NewBufferString(`{"template_id":"reaper-template","agent_index":0,"override":{"index":0,"name":"My Reaper Producer","model":"gpt-5.3-codex","system_prompt":"produce with deliberate restraint"}}`))
 		req.Header.Set("Content-Type", "application/json")
 		return req
 	}
@@ -382,15 +382,15 @@ func TestCreateTemplateAgentImmediatelySavesReusableDefinition(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if !response.Created || response.Agent.Name != "Reaper Producer" || response.Agent.Action != "reuse" {
+	if !response.Created || response.Agent.Name != "My Reaper Producer" || response.Agent.Action != "reuse" {
 		t.Fatalf("unexpected create response: %+v", response)
 	}
 	if len(response.Plan.Agents) != 1 || response.Plan.Agents[0].Action != "reuse" {
 		t.Fatalf("expected refreshed reuse plan, got %+v", response.Plan)
 	}
-	ag, ok := handler.agentStore.GetAgent("Reaper Producer")
-	if !ok || ag == nil || ag.Settings.SystemPrompt != "produce the song" || ag.Settings.Model != "gpt-5.3-codex" {
-		t.Fatalf("template defaults were not saved: %+v", ag)
+	ag, ok := handler.agentStore.GetAgent("My Reaper Producer")
+	if !ok || ag == nil || ag.Settings.SystemPrompt != "produce with deliberate restraint" || ag.Settings.Model != "gpt-5.3-codex" {
+		t.Fatalf("setup override was not saved: %+v", ag)
 	}
 
 	// Calling the action again is idempotent and does not mutate the saved definition.

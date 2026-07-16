@@ -98,10 +98,11 @@ func (h *Handler) handleTemplateAgentCreate(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req struct {
-		TemplateID   string `json:"template_id,omitempty"`
-		TemplatePath string `json:"template_path,omitempty"`
-		Blank        bool   `json:"blank,omitempty"`
-		AgentIndex   int    `json:"agent_index"`
+		TemplateID   string                 `json:"template_id,omitempty"`
+		TemplatePath string                 `json:"template_path,omitempty"`
+		Blank        bool                   `json:"blank,omitempty"`
+		AgentIndex   int                    `json:"agent_index"`
+		Override     *templateAgentOverride `json:"override,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -131,6 +132,21 @@ func (h *Handler) handleTemplateAgentCreate(w http.ResponseWriter, r *http.Reque
 	if req.AgentIndex < 0 || req.AgentIndex >= len(tpl.Agents) {
 		_ = orihttp.RespondBadRequest(w, "template agent index is out of range")
 		return
+	}
+	if req.Override != nil {
+		if req.Override.Index == nil {
+			index := req.AgentIndex
+			req.Override.Index = &index
+		}
+		if *req.Override.Index != req.AgentIndex {
+			_ = orihttp.RespondBadRequest(w, "agent override must match the selected template agent")
+			return
+		}
+		tpl, err = applyTemplateAgentOverrides(tpl, []templateAgentOverride{*req.Override})
+		if err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
 	}
 	if h.agentStore == nil {
 		_ = orihttp.RespondInternalError(w, "agent store is unavailable")

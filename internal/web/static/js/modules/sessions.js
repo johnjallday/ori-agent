@@ -41,6 +41,10 @@ const sessionManager = {
   templateAgentPlanError: '',
   templateAgentPlanRequestId: 0,
   templateAgentPlanTimer: null,
+  // Overrides chosen while explicitly saving a blueprint agent from step 1.
+  // They must accompany final workspace creation so it attaches the exact
+  // global definition the user just named and configured.
+  templateAgentPrecreateOverrides: new Map(),
   existingAgentRoster: [],
   existingAgentRosterLoaded: false,
   existingAgentRosterLoading: false,
@@ -307,6 +311,8 @@ const sessionManager = {
       .getElementById('addFolderModal')
       ?.addEventListener('workspace-template-selected', event => {
         const template = event?.detail?.template || null;
+        this.templateAgentPrecreateOverrides = new Map();
+        this.closeTemplateAgentSetup();
         this.workspaceTemplate = template;
         this.prefillTemplateValue(
           document.getElementById('folderNameInput'),
@@ -334,15 +340,27 @@ const sessionManager = {
 
     document
       .getElementById('workspaceAgentMapAvatarAction')
-      ?.addEventListener('click', () => this.createTemplateAgentFromPreview());
+      ?.addEventListener('click', () => this.openTemplateAgentSetup());
     document.getElementById('workspaceAgentMapSpecialists')?.addEventListener('click', event => {
       const action = event.target.closest('[data-template-agent-index]');
       const agentIndex = Number.parseInt(action?.dataset.templateAgentIndex || '', 10);
-      if (Number.isInteger(agentIndex)) void this.createTemplateAgentFromPreview(agentIndex);
+      if (Number.isInteger(agentIndex)) this.openTemplateAgentSetup(agentIndex);
     });
     document
       .getElementById('workspaceAgentMapCreateAll')
       ?.addEventListener('click', () => this.createAllTemplateAgentsFromPreview());
+    document
+      .getElementById('workspaceTemplateAgentSetupForm')
+      ?.addEventListener('submit', event => {
+        event.preventDefault();
+        void this.saveTemplateAgentFromSetup();
+      });
+    document
+      .getElementById('workspaceTemplateAgentSetupCancel')
+      ?.addEventListener('click', () => this.closeTemplateAgentSetup());
+    document
+      .getElementById('workspaceTemplateAgentSetupBack')
+      ?.addEventListener('click', () => this.closeTemplateAgentSetup());
 
     document.getElementById('addExistingAgentBtn')?.addEventListener('click', () => {
       void this.openExistingAgentRoster();
@@ -3508,6 +3526,8 @@ const sessionManager = {
   resetTemplateAgentReview() {
     this.templateAgentPlan = null;
     this.templateAgentPlanError = '';
+    this.templateAgentPrecreateOverrides = new Map();
+    this.closeTemplateAgentSetup();
     this.templateAgentPlanRequestId += 1;
     if (this.templateAgentPlanTimer) {
       clearTimeout(this.templateAgentPlanTimer);
@@ -3945,7 +3965,7 @@ const sessionManager = {
     if (!review || !toggle || !toggle.checked) return [];
 
     const rows = Array.from(review.querySelectorAll('.workspace-template-agent-row'));
-    const overrides = [];
+    const overridesByIndex = new Map(this.templateAgentPrecreateOverrides || []);
     const names = new Map();
     for (const row of rows) {
       const index = Number.parseInt(row.dataset.templateAgentIndex || '', 10);
@@ -4008,10 +4028,10 @@ const sessionManager = {
       }
       if (promptChanged) override.system_prompt = systemPrompt;
       if (Object.keys(override).length > 1) {
-        overrides.push(override);
+        overridesByIndex.set(index, { ...overridesByIndex.get(index), ...override });
       }
     }
-    return overrides;
+    return Array.from(overridesByIndex.values()).sort((left, right) => left.index - right.index);
   },
 
   templateAgentModelSourceLabel(source) {
@@ -4296,9 +4316,8 @@ const sessionManager = {
       .join('');
   },
 
-  // The map is a compact, read-only preview rather than a second canvas. It
-  // makes both the primary-agent hierarchy and the complete included team
-  // visible before the user enters the detailed review step.
+  // The map is a compact visual preview rather than a second canvas. Missing
+  // agents expose a deliberate + action that opens the setup card below it.
   renderWorkspaceAgentMapPreview() {
     const node = document.getElementById('workspaceAgentMapNode');
     const state = document.getElementById('workspaceAgentMapState');
@@ -4383,7 +4402,7 @@ const sessionManager = {
             .slice(0, 2)
             .toUpperCase() || 'A';
         const avatar = isNew
-          ? `<button type="button" class="workspace-agent-map-specialist-avatar" data-template-agent-index="${agent.templateAgentIndex}" aria-label="Create ${this.escapeHtml(agent.name)} as a reusable agent now">${this.escapeHtml(initials)}<span class="workspace-agent-map-specialist-create-badge" aria-hidden="true">+</span></button>`
+          ? `<button type="button" class="workspace-agent-map-specialist-avatar" data-template-agent-index="${agent.templateAgentIndex}" aria-label="Set up ${this.escapeHtml(agent.name)} as a reusable agent">${this.escapeHtml(initials)}<span class="workspace-agent-map-specialist-create-badge" aria-hidden="true">+</span></button>`
           : `<span class="workspace-agent-map-specialist-avatar" aria-hidden="true">${this.escapeHtml(initials)}</span>`;
         return `
           <div class="workspace-agent-map-specialist${isNew ? ' is-new' : ''}">
@@ -4448,7 +4467,7 @@ const sessionManager = {
           kicker: 'PRIMARY WORKSPACE AGENT',
           name: agentName,
           detail: 'Not in Your Agents yet · Create reusable agent',
-          status: `${agentName} is not in Your Agents yet. Select its + avatar to create and save this reusable agent now.${specialistSentence}${creationSentence}`
+          status: `${agentName} is not in Your Agents yet. Select its + avatar to set up and save this reusable agent.${specialistSentence}${creationSentence}`
         };
       }
     } else if (this.templateAgentPlan) {
@@ -4474,7 +4493,7 @@ const sessionManager = {
     specialists.innerHTML = specialistMarkup;
     createAll.hidden = createdAgents.length < 2;
     createAll.disabled = false;
-    createAll.textContent = `Create all ${createdAgents.length}`;
+    createAll.textContent = `Create all defaults (${createdAgents.length})`;
     avatarAction.disabled = !canCreatePrimary;
     avatarAction.dataset.templateAgentIndex = canCreatePrimary
       ? String(primary.templateAgentIndex)
@@ -4482,7 +4501,7 @@ const sessionManager = {
     avatarAction.setAttribute(
       'aria-label',
       canCreatePrimary
-        ? `Create ${primary.name} as a reusable agent now. It will remain in Your Agents if you cancel this workspace.`
+        ? `Set up ${primary.name} as a reusable agent. It will remain in Your Agents if you cancel this workspace.`
         : `${next.name} is this workspace's primary agent`
     );
     state.textContent = next.label;
@@ -4490,6 +4509,105 @@ const sessionManager = {
     name.textContent = next.name;
     detail.textContent = next.detail;
     status.textContent = next.status;
+  },
+
+  openTemplateAgentSetup(requestedAgentIndex) {
+    const avatarAction = document.getElementById('workspaceAgentMapAvatarAction');
+    const agentIndex = Number.isInteger(requestedAgentIndex)
+      ? requestedAgentIndex
+      : Number.parseInt(avatarAction?.dataset.templateAgentIndex || '', 10);
+    const plannedAgent = this.includedTemplateAgents()[agentIndex];
+    if (
+      !Number.isInteger(agentIndex) ||
+      !plannedAgent ||
+      String(plannedAgent.action || '').toLowerCase() !== 'create'
+    )
+      return;
+
+    const card = document.getElementById('workspaceTemplateAgentSetup');
+    const index = document.getElementById('workspaceTemplateAgentSetupIndex');
+    const title = document.getElementById('workspaceTemplateAgentSetupTitle');
+    const description = document.getElementById('workspaceTemplateAgentSetupDescription');
+    const name = document.getElementById('workspaceTemplateAgentSetupName');
+    const model = document.getElementById('workspaceTemplateAgentSetupModel');
+    const prompt = document.getElementById('workspaceTemplateAgentSetupPrompt');
+    const save = document.getElementById('workspaceTemplateAgentSetupSave');
+    const status = document.getElementById('workspaceTemplateAgentSetupStatus');
+    if (!card || !index || !title || !description || !name || !model || !prompt || !save || !status)
+      return;
+
+    index.value = String(agentIndex);
+    title.textContent = `Create ${plannedAgent.name}`;
+    description.textContent = `${plannedAgent.name} will be saved in Your Agents and can be reused in future workspaces. You can still cancel this workspace afterward.`;
+    name.value = String(plannedAgent.name || '');
+    model.value = String(plannedAgent.model || '');
+    prompt.value = String(plannedAgent.system_prompt || '');
+    save.textContent = `Save ${plannedAgent.name}`;
+    save.disabled = false;
+    status.textContent = '';
+    status.classList.remove('is-error');
+    card.hidden = false;
+    requestAnimationFrame(() => {
+      card.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+      name.focus();
+      name.select();
+    });
+  },
+
+  closeTemplateAgentSetup() {
+    const card = document.getElementById('workspaceTemplateAgentSetup');
+    const status = document.getElementById('workspaceTemplateAgentSetupStatus');
+    if (card) card.hidden = true;
+    if (status) {
+      status.textContent = '';
+      status.classList.remove('is-error');
+    }
+  },
+
+  async saveTemplateAgentFromSetup() {
+    const indexInput = document.getElementById('workspaceTemplateAgentSetupIndex');
+    const nameInput = document.getElementById('workspaceTemplateAgentSetupName');
+    const modelInput = document.getElementById('workspaceTemplateAgentSetupModel');
+    const promptInput = document.getElementById('workspaceTemplateAgentSetupPrompt');
+    const status = document.getElementById('workspaceTemplateAgentSetupStatus');
+    const save = document.getElementById('workspaceTemplateAgentSetupSave');
+    const agentIndex = Number.parseInt(indexInput?.value || '', 10);
+    const name = String(nameInput?.value || '').trim();
+    if (!Number.isInteger(agentIndex) || !this.includedTemplateAgents()[agentIndex]) return;
+    if (!name) {
+      if (status) {
+        status.textContent = 'Enter a name for this reusable agent.';
+        status.classList.add('is-error');
+      }
+      nameInput?.focus();
+      return;
+    }
+    if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
+      if (status) {
+        status.textContent = 'Names can use letters, numbers, spaces, underscores, and hyphens.';
+        status.classList.add('is-error');
+      }
+      nameInput?.focus();
+      return;
+    }
+
+    const override = {
+      index: agentIndex,
+      name,
+      model: String(modelInput?.value || '').trim(),
+      system_prompt: String(promptInput?.value || '').trim()
+    };
+    if (save) save.disabled = true;
+    if (status) {
+      status.textContent = `Saving ${name} to Your Agents…`;
+      status.classList.remove('is-error');
+    }
+    const created = await this.createTemplateAgentFromPreview(agentIndex, { override });
+    if (!created) {
+      if (save) save.disabled = false;
+      return;
+    }
+    this.closeTemplateAgentSetup();
   },
 
   async createTemplateAgentFromPreview(requestedAgentIndex, options = {}) {
@@ -4501,13 +4619,7 @@ const sessionManager = {
     const trigger = document.querySelector(
       `[data-template-agent-index="${Number.isInteger(agentIndex) ? agentIndex : ''}"]`
     );
-    if (
-      !Number.isInteger(agentIndex) ||
-      !plannedAgent ||
-      (!trigger && !options.silent) ||
-      (trigger && trigger.disabled)
-    )
-      return false;
+    if (!Number.isInteger(agentIndex) || !plannedAgent || (trigger && trigger.disabled)) return false;
 
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
@@ -4528,7 +4640,8 @@ const sessionManager = {
           template_id: templateId || undefined,
           template_path: templatePath || undefined,
           blank: isBlank || undefined,
-          agent_index: agentIndex
+          agent_index: agentIndex,
+          override: options.override || undefined
         })
       });
       const result = await response.json().catch(() => ({}));
@@ -4539,6 +4652,9 @@ const sessionManager = {
       if (result.plan) {
         this.templateAgentPlan = result.plan;
         this.templateAgentPlanError = '';
+        if (options.override) {
+          this.templateAgentPrecreateOverrides.set(agentIndex, options.override);
+        }
         this.renderTemplateAgentPlan(result.plan);
       } else {
         await this.refreshTemplateAgentPlan();

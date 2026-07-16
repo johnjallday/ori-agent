@@ -116,6 +116,37 @@
                 </div>
                 <p id="workspaceAgentMapStatus" class="workspace-agent-map-status" aria-live="polite">Checking the reusable agent for this workspace…</p>
               </section>
+
+              <!-- The preview's + actions open this focused setup card before
+                   anything is saved globally. Keeping it in the wizard avoids
+                   a second modal stack while making the saved-agent boundary
+                   explicit. -->
+              <section id="workspaceTemplateAgentSetup" class="workspace-template-agent-setup" hidden aria-labelledby="workspaceTemplateAgentSetupTitle">
+                <div class="workspace-template-agent-setup-head">
+                  <div>
+                    <span class="workspace-wizard-eyebrow">Set up reusable agent</span>
+                    <h3 id="workspaceTemplateAgentSetupTitle">Create agent</h3>
+                  </div>
+                  <button id="workspaceTemplateAgentSetupCancel" type="button" class="workspace-template-agent-setup-cancel" aria-label="Close agent setup">×</button>
+                </div>
+                <p id="workspaceTemplateAgentSetupDescription" class="workspace-template-agent-setup-description">
+                  This will be saved in Your Agents and can be reused in future workspaces.
+                </p>
+                <form id="workspaceTemplateAgentSetupForm" class="workspace-template-agent-setup-form">
+                  <input id="workspaceTemplateAgentSetupIndex" type="hidden">
+                  <label for="workspaceTemplateAgentSetupName">Name</label>
+                  <input id="workspaceTemplateAgentSetupName" class="modern-input" type="text" autocomplete="off" maxlength="100" required>
+                  <label for="workspaceTemplateAgentSetupModel">Model <span>optional</span></label>
+                  <input id="workspaceTemplateAgentSetupModel" class="modern-input" type="text" autocomplete="off" placeholder="Use blueprint default">
+                  <label for="workspaceTemplateAgentSetupPrompt">Instructions <span>optional</span></label>
+                  <textarea id="workspaceTemplateAgentSetupPrompt" class="modern-input" rows="4" placeholder="Use the blueprint instructions"></textarea>
+                  <p id="workspaceTemplateAgentSetupStatus" class="workspace-template-agent-setup-status" aria-live="polite"></p>
+                  <div class="workspace-template-agent-setup-actions">
+                    <button id="workspaceTemplateAgentSetupBack" type="button" class="workspace-wizard-inline-action">Cancel</button>
+                    <button id="workspaceTemplateAgentSetupSave" type="submit" class="workspace-template-agent-setup-save">Save reusable agent</button>
+                  </div>
+                </form>
+              </section>
             </section>
 
             <!-- ===== STEP 2 · WORKSPACE DETAILS ===== -->

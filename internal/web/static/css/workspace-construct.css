@@ -830,6 +830,107 @@
   outline: 2px solid var(--wc-ink-heading);
   outline-offset: 2px;
 }
+.workspace-create-modal .workspace-template-agent-setup {
+  margin-top: 12px;
+  border: 1px solid color-mix(in srgb, var(--wc-faction) 52%, var(--wc-line));
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--wc-faction) 11%, transparent), transparent 52%),
+    var(--wc-panel-2);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--wc-faction) 68%, transparent);
+}
+.workspace-create-modal .workspace-template-agent-setup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px 9px;
+  border-bottom: 1px solid var(--wc-line);
+}
+.workspace-create-modal .workspace-template-agent-setup-head .workspace-wizard-eyebrow {
+  margin-bottom: 3px;
+}
+.workspace-create-modal .workspace-template-agent-setup-head h3 {
+  margin: 0;
+  color: var(--wc-ink-heading);
+  font-size: 16px;
+}
+.workspace-create-modal .workspace-template-agent-setup-cancel {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--wc-line-bright);
+  background: transparent;
+  color: var(--wc-ink-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-template-agent-setup-cancel:hover {
+  color: var(--wc-ink-heading);
+  border-color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-template-agent-setup-description {
+  margin: 10px 14px 0;
+  color: var(--wc-ink-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-template-agent-setup-form {
+  display: grid;
+  gap: 6px;
+  padding: 13px 14px 14px;
+}
+.workspace-create-modal .workspace-template-agent-setup-form label {
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-template-agent-setup-form label span {
+  color: var(--wc-ink-muted);
+  font-weight: 500;
+}
+.workspace-create-modal .workspace-template-agent-setup-form textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+.workspace-create-modal .workspace-template-agent-setup-status {
+  min-height: 18px;
+  margin: 2px 0 0;
+  color: var(--wc-ink-muted);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-template-agent-setup-status.is-error {
+  color: #f57b72;
+}
+.workspace-create-modal .workspace-template-agent-setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 3px;
+}
+.workspace-create-modal .workspace-template-agent-setup-save {
+  min-height: 32px;
+  padding: 5px 11px;
+  border: 1px solid var(--wc-faction);
+  background: color-mix(in srgb, var(--wc-faction) 16%, transparent);
+  color: var(--wc-faction);
+  font-family: var(--wc-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.workspace-create-modal .workspace-template-agent-setup-save:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--wc-faction) 28%, transparent);
+}
+.workspace-create-modal .workspace-template-agent-setup-save:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
 .workspace-create-modal .workspace-agent-map-state {
   display: inline-flex;
   align-items: center;

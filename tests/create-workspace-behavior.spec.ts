@@ -611,7 +611,7 @@ test('review visualizes every included template agent and its lifecycle', async 
   );
 });
 
-test('primary avatar immediately creates a reusable template agent', async ({ page }) => {
+test('primary avatar opens setup before saving a reusable template agent', async ({ page }) => {
   let createPayload: Record<string, unknown> | null = null;
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
@@ -641,7 +641,7 @@ test('primary avatar immediately creates a reusable template agent', async ({ pa
       body: JSON.stringify({
         created: true,
         agent: {
-          name: 'Reaper Producer',
+          name: 'My Reaper Producer',
           scope: 'reusable',
           action: 'reuse',
           entry_point: true,
@@ -652,7 +652,7 @@ test('primary avatar immediately creates a reusable template agent', async ({ pa
           has_agents: true,
           agents: [
             {
-              name: 'Reaper Producer',
+              name: 'My Reaper Producer',
               scope: 'reusable',
               action: 'reuse',
               entry_point: true,
@@ -670,15 +670,31 @@ test('primary avatar immediately creates a reusable template agent', async ({ pa
   await cardByLabel(page, 'Reaper Song').click();
   const action = page.locator('#workspaceAgentMapAvatarAction');
   await expect(action).toBeEnabled();
-  await expect(action).toHaveAccessibleName(/create reaper producer as a reusable agent now/i);
+  await expect(action).toHaveAccessibleName(/set up reaper producer as a reusable agent/i);
   await action.click();
+
+  await expect(page.locator('#workspaceTemplateAgentSetup')).toBeVisible();
+  await expect(page.locator('#workspaceTemplateAgentSetupName')).toHaveValue('Reaper Producer');
+  expect(createPayload).toBeNull();
+  await page.locator('#workspaceTemplateAgentSetupName').fill('My Reaper Producer');
+  await page.locator('#workspaceTemplateAgentSetupModel').fill('gpt-5.3-codex');
+  await page.locator('#workspaceTemplateAgentSetupPrompt').fill('Produce with deliberate restraint.');
+  await page.locator('#workspaceTemplateAgentSetupSave').click();
 
   await expect(page.locator('#workspaceAgentMapState')).toHaveText('Ready');
   await expect(page.locator('#workspaceAgentMapNodeDetail')).toHaveText('Saved reusable agent');
-  expect(createPayload).toMatchObject({ agent_index: 0 });
+  expect(createPayload).toMatchObject({
+    agent_index: 0,
+    override: {
+      index: 0,
+      name: 'My Reaper Producer',
+      model: 'gpt-5.3-codex',
+      system_prompt: 'Produce with deliberate restraint.'
+    }
+  });
 });
 
-test('team preview creates every missing reusable agent', async ({ page }) => {
+test('team preview exposes specialist setup and keeps create-all as a defaults shortcut', async ({ page }) => {
   const createdIndexes: number[] = [];
   const agentNames = ['Research Lead', 'Source Scout', 'Synthesis Writer'];
   const plan = () => ({
@@ -719,7 +735,16 @@ test('team preview creates every missing reusable agent', async ({ page }) => {
   await cardByLabel(page, 'Research Project').click();
   const createAll = page.locator('#workspaceAgentMapCreateAll');
   await expect(createAll).toBeVisible();
-  await expect(createAll).toHaveText('Create all 2');
+  await expect(createAll).toHaveText('Create all defaults (2)');
+
+  const specialist = page.locator('button.workspace-agent-map-specialist-avatar[data-template-agent-index="1"]');
+  await expect(specialist).toBeVisible();
+  await specialist.click();
+  await expect(page.locator('#workspaceTemplateAgentSetup')).toBeVisible();
+  await expect(page.locator('#workspaceTemplateAgentSetupName')).toHaveValue('Source Scout');
+  await page.locator('#workspaceTemplateAgentSetupBack').click();
+  expect(createdIndexes).toEqual([]);
+
   await createAll.click();
 
   await expect.poll(() => createdIndexes.length).toBe(2);
