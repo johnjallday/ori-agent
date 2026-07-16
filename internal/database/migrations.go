@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 31
+const schemaVersion = 32
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -127,6 +127,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration030PersonalHQ(ctx)
 	case 31:
 		return db.migration031DailyBrief(ctx)
+	case 32:
+		return db.migration032FollowUps(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1238,6 +1240,56 @@ func (db *DB) migration029WorkspaceNativeMCPOptIn(ctx context.Context) error {
 // notification per revision). Keyed by workspace_id (the designated HQ),
 // not just user_id, so replacing or clearing an HQ never carries
 // configuration or history onto a different workspace.
+// migration032FollowUps creates the dedicated structured follow-up domain
+// (contract §2): personal commitments/dependencies with their own lifecycle and
+// source-based deduplication — deliberately NOT reusing Action Center
+// opportunities (which are title-deduped mission findings).
+func (db *DB) migration032FollowUps(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS personal_hq_followup (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			category TEXT NOT NULL,
+			direction TEXT NOT NULL DEFAULT 'none',
+			title TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT '',
+			counterparty TEXT NOT NULL DEFAULT '',
+			source_type TEXT NOT NULL DEFAULT 'manual',
+			source_id TEXT NOT NULL DEFAULT '',
+			source_account_id TEXT NOT NULL DEFAULT '',
+			dedup_key TEXT NOT NULL DEFAULT '',
+			provenance TEXT NOT NULL DEFAULT 'manual',
+			confidence TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'active',
+			due_at DATETIME,
+			snoozed_until DATETIME,
+			last_nudged_at DATETIME,
+			related_workspace_id TEXT NOT NULL DEFAULT '',
+			related_task_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			dismissed_at DATETIME
+		)`,
+		// Source-based dedup: a sourced follow-up is unique per user+dedup_key,
+		// enforced at the DB boundary so reprocessing the same thread can never
+		// create a duplicate. Manual items (empty dedup_key) are exempt.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_hq_followup_dedup
+			ON personal_hq_followup(user_id, dedup_key)
+			WHERE dedup_key != ''`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_hq_followup_user_status ON personal_hq_followup(user_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_hq_followup_due ON personal_hq_followup(user_id, status, due_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_hq_followup_updated ON personal_hq_followup(user_id, status, updated_at)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create follow-up schema: %w", err)
+		}
+	}
+	return nil
+}
+
 func (db *DB) migration031DailyBrief(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS daily_brief_config (
