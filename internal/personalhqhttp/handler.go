@@ -21,6 +21,7 @@ type Handler struct {
 	mailboxLinker MailboxLinker
 	replies       ReplyService
 	followups     FollowUpAPI
+	journal       JournalAPI
 	provider      userprofile.UserProvider
 }
 

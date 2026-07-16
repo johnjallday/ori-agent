@@ -1,5 +1,19 @@
 # Personal HQ Assistant — Code-Facing Contracts (v1)
 
+> **Implementation status (2026-07-16).** Delivered on the `epic/personal-hq-assistant`
+> integration branch: G1 contracts, G2 provisioning/upgrade, G3 Gmail mailbox runtime +
+> read tools, G4 grounded email in the Daily Brief, G5 confirm-gated reply/send broker,
+> G6 structured follow-ups, G7 end-of-day journal. **Intentionally deferred to a v1.x
+> follow-on** (not silently dropped): the Action-Center reminder-**delivery** scheduler
+> (follow-up staleness evaluation + nudge idempotency are built and unit-tested; only the
+> periodic wiring is pending), convert-follow-up-to-project-task, read-only follow-up agent
+> tools, the full Personal HQ management panel, explicit journal→memory promotion, the
+> timezone-scheduled EOD prompt (the journal is on-demand for now), account-disconnect
+> retention sweeps, durable send-audit persistence (currently structured logs), and the
+> Playwright browser suites. Calendar remains a separate v2 PRD (Non-Goals below).
+
+
+
 **Status:** Frozen for implementation · **Source PRD:** `tasks/prd-personal-hq-assistant.md`
 **Scope:** This document freezes the non-negotiable data, privacy, security, scheduling, and
 interaction contracts that Groups 2–7 implement against. Do **not** begin a dependent
