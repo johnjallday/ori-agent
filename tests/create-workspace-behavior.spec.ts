@@ -539,9 +539,7 @@ test('review attaches a saved agent and submits the complete team atomically', a
   expect(payload?.entry_agent_name).toBe('Research Scout');
 });
 
-test('review explains a first-use template agent as reusable and workspace-primary', async ({
-  page
-}) => {
+test('review visualizes every included template agent and its lifecycle', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
@@ -550,11 +548,27 @@ test('review explains a first-use template agent as reusable and workspace-prima
         has_agents: true,
         agents: [
           {
-            name: 'Reaper Producer',
+            name: 'Research Lead',
             scope: 'reusable',
-            action: 'create',
+            action: 'reuse',
             entry_point: true,
             role: 'orchestrator',
+            model_source: 'agent_default'
+          },
+          {
+            name: 'Source Scout',
+            scope: 'reusable',
+            action: 'reuse',
+            entry_point: false,
+            role: 'specialist',
+            model_source: 'agent_default'
+          },
+          {
+            name: 'Synthesis Writer',
+            scope: 'reusable',
+            action: 'create',
+            entry_point: false,
+            role: 'specialist',
             model_source: 'agent_default'
           }
         ],
@@ -569,15 +583,20 @@ test('review explains a first-use template agent as reusable and workspace-prima
 
   const review = page.locator('#templateAgentReview');
   await expect(review).toContainText('Blueprint agents');
-  await expect(review).toContainText('Reaper Producer');
+  await expect(review).toContainText('Research Lead');
   await expect(review).toContainText('New reusable agent · Added to Your Agents and attached');
   await expect(review).toContainText('Primary workspace agent');
   const preview = page.locator('#workspaceAgentMapPreview');
-  await expect(preview).toContainText('Reaper Producer');
-  await expect(preview).toContainText('New agent');
-  await expect(preview).toContainText('not in Your Agents yet');
-  await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-new/);
-  await expect(page.locator('.workspace-agent-map-avatar-create-badge')).toHaveCSS(
+  await expect(preview).toContainText('Workspace team · 3 agents');
+  await expect(preview).toContainText('Research Lead');
+  await expect(preview).toContainText('Source Scout');
+  await expect(preview).toContainText('Synthesis Writer');
+  await expect(preview).toContainText('Synthesis Writer is not in Your Agents yet');
+  await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-ready/);
+  await expect(page.locator('#workspaceAgentMapSpecialists')).toHaveText(
+    /Source Scout[\s\S]*Synthesis Writer/
+  );
+  await expect(page.locator('.workspace-agent-map-specialist-create-badge')).toHaveCSS(
     'display',
     'grid'
   );

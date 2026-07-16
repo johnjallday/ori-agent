@@ -4285,23 +4285,91 @@ const sessionManager = {
   },
 
   // The map is a compact, read-only preview rather than a second canvas. It
-  // makes the distinction between a saved reusable agent, a first-use agent
-  // that will be created globally, and an intentionally agent-free setup
+  // makes both the primary-agent hierarchy and the complete included team
   // visible before the user enters the detailed review step.
   renderWorkspaceAgentMapPreview() {
     const node = document.getElementById('workspaceAgentMapNode');
     const state = document.getElementById('workspaceAgentMapState');
+    const title = document.getElementById('workspaceAgentMapPreviewTitle');
+    const canvas = document.querySelector('.workspace-agent-map-canvas');
+    const specialists = document.getElementById('workspaceAgentMapSpecialists');
     const kicker = document.getElementById('workspaceAgentMapNodeKicker');
     const name = document.getElementById('workspaceAgentMapNodeName');
     const detail = document.getElementById('workspaceAgentMapNodeDetail');
     const status = document.getElementById('workspaceAgentMapStatus');
-    if (!node || !state || !kicker || !name || !detail || !status) return;
+    if (
+      !node ||
+      !state ||
+      !title ||
+      !canvas ||
+      !specialists ||
+      !kicker ||
+      !name ||
+      !detail ||
+      !status
+    )
+      return;
 
-    const templatePrimary = this.includedTemplateAgents().find(agent =>
-      Boolean(agent?.entry_point)
+    const team = [];
+    const teamNames = new Set();
+    const addTeamMember = member => {
+      const memberName = String(member?.name || '').trim();
+      const key = this.existingAgentKey(memberName);
+      if (!memberName || teamNames.has(key)) return;
+      teamNames.add(key);
+      team.push({ ...member, name: memberName });
+    };
+    this.includedTemplateAgents().forEach(agent =>
+      addTeamMember({ ...agent, source: 'blueprint' })
     );
-    const explicitPrimary =
-      this.existingAgentPrimaryName || (!templatePrimary ? this.existingAgentSelections[0] : '');
+    this.existingAgentSelections.forEach(selectedName => {
+      const savedAgent = this.findExistingRosterAgent(selectedName);
+      addTeamMember({
+        name: savedAgent?.name || selectedName,
+        action: 'reuse',
+        source: 'existing'
+      });
+    });
+
+    const primaryName = this.resolvedWorkspacePrimaryName();
+    const primary = team.find(
+      agent => this.existingAgentKey(agent.name) === this.existingAgentKey(primaryName)
+    );
+    const teamSpecialists = primary
+      ? team.filter(
+          agent => this.existingAgentKey(agent.name) !== this.existingAgentKey(primary.name)
+        )
+      : [];
+    const createdAgents = team.filter(
+      agent => String(agent.action || '').toLowerCase() === 'create'
+    );
+    const memberLifecycle = agent => {
+      if (String(agent.action || '').toLowerCase() === 'create') return 'New reusable agent';
+      return agent.source === 'existing'
+        ? 'Saved agent · Will be attached'
+        : 'Saved reusable agent';
+    };
+    const specialistMarkup = teamSpecialists
+      .map(agent => {
+        const isNew = String(agent.action || '').toLowerCase() === 'create';
+        const initials =
+          String(agent.name || '')
+            .split(/\s+/)
+            .filter(Boolean)
+            .map(part => part[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase() || 'A';
+        return `
+          <div class="workspace-agent-map-specialist${isNew ? ' is-new' : ''}">
+            <span class="workspace-agent-map-specialist-avatar">${this.escapeHtml(initials)}${
+              isNew ? '<span class="workspace-agent-map-specialist-create-badge">+</span>' : ''
+            }</span>
+            <strong>${this.escapeHtml(agent.name)}</strong>
+            <small>Workspace specialist · ${this.escapeHtml(memberLifecycle(agent))}</small>
+          </div>`;
+      })
+      .join('');
 
     let next = {
       state: 'checking',
@@ -4321,16 +4389,34 @@ const sessionManager = {
         detail: 'Could not check blueprint agent',
         status: this.templateAgentPlanError
       };
-    } else if (templatePrimary) {
-      const agentName = String(templatePrimary.name || 'Blueprint agent').trim();
-      if (String(templatePrimary.action || '').toLowerCase() === 'reuse') {
+    } else if (primary) {
+      const agentName = primary.name;
+      const isNew = String(primary.action || '').toLowerCase() === 'create';
+      const specialistNames = teamSpecialists.map(agent => agent.name);
+      const createdNames = createdAgents
+        .filter(
+          agent =>
+            !isNew || this.existingAgentKey(agent.name) !== this.existingAgentKey(primary.name)
+        )
+        .map(agent => agent.name);
+      const specialistSentence = specialistNames.length
+        ? ` ${specialistNames.join(', ')} will join as workspace specialist${
+            specialistNames.length === 1 ? '' : 's'
+          }.`
+        : '';
+      const creationSentence = createdNames.length
+        ? ` ${createdNames.join(', ')} ${
+            createdNames.length === 1 ? 'is' : 'are'
+          } not in Your Agents yet and will be added when you create the workspace.`
+        : '';
+      if (!isNew) {
         next = {
           state: 'ready',
           label: 'Ready',
           kicker: 'PRIMARY WORKSPACE AGENT',
           name: agentName,
-          detail: 'Saved reusable agent',
-          status: `${agentName} is already in Your Agents and will be attached as this workspace's primary agent.`
+          detail: memberLifecycle(primary),
+          status: `${agentName} will be this workspace's primary agent.${specialistSentence}${creationSentence}`
         };
       } else {
         next = {
@@ -4338,20 +4424,10 @@ const sessionManager = {
           label: 'New agent',
           kicker: 'PRIMARY WORKSPACE AGENT',
           name: agentName,
-          detail: 'New reusable agent',
-          status: `${agentName} is not in Your Agents yet. It will be added to Your Agents and attached as this workspace's primary agent when you create the workspace.`
+          detail: memberLifecycle(primary),
+          status: `${agentName} will be added to Your Agents as this workspace's primary agent.${specialistSentence}${creationSentence}`
         };
       }
-    } else if (explicitPrimary) {
-      const agentName = String(explicitPrimary).trim();
-      next = {
-        state: 'ready',
-        label: 'Ready',
-        kicker: 'PRIMARY WORKSPACE AGENT',
-        name: agentName,
-        detail: 'Saved reusable agent',
-        status: `${agentName} will be attached as this workspace's primary agent.`
-      };
     } else if (this.templateAgentPlan) {
       next = {
         state: 'missing',
@@ -4365,7 +4441,12 @@ const sessionManager = {
     }
 
     node.className = `workspace-agent-map-node is-${next.state}`;
+    canvas.classList.toggle('is-team', teamSpecialists.length > 0);
+    canvas.classList.toggle('has-many-specialists', teamSpecialists.length > 3);
     state.className = `workspace-agent-map-state is-${next.state}`;
+    title.textContent =
+      team.length > 1 ? `Workspace team · ${team.length} agents` : 'Primary workspace agent';
+    specialists.innerHTML = specialistMarkup;
     state.textContent = next.label;
     kicker.textContent = next.kicker;
     name.textContent = next.name;

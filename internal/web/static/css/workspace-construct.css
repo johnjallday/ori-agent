@@ -869,6 +869,24 @@
   border-radius: 50%;
   transform: translateX(-50%);
 }
+.workspace-create-modal .workspace-agent-map-canvas.is-team {
+  min-height: 372px;
+  place-items: start center;
+}
+.workspace-create-modal .workspace-agent-map-canvas.is-team::before {
+  top: 205px;
+  right: 18%;
+  bottom: auto;
+  left: 18%;
+  background: color-mix(in srgb, var(--wc-faction) 38%, transparent);
+  box-shadow: 0 0 18px rgba(70, 211, 154, 0.22);
+}
+.workspace-create-modal .workspace-agent-map-canvas.is-team::after {
+  top: 12px;
+}
+.workspace-create-modal .workspace-agent-map-canvas.is-team.has-many-specialists {
+  min-height: 458px;
+}
 .workspace-create-modal .workspace-agent-map-node {
   position: relative;
   z-index: 1;
@@ -880,6 +898,10 @@
   padding: 14px 16px 12px;
   color: var(--wc-faction);
   text-align: center;
+}
+.workspace-create-modal .workspace-agent-map-canvas.is-team .workspace-agent-map-node {
+  align-self: start;
+  margin-top: 16px;
 }
 .workspace-create-modal .workspace-agent-map-avatar {
   position: absolute;
@@ -1027,6 +1049,113 @@
   color: var(--wc-ink-dim);
   font-size: 11px;
 }
+.workspace-create-modal .workspace-agent-map-specialists {
+  position: absolute;
+  z-index: 1;
+  right: 8%;
+  bottom: 18px;
+  left: 8%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 14px 22px;
+  align-items: start;
+  justify-items: center;
+}
+.workspace-create-modal .workspace-agent-map-specialist {
+  position: relative;
+  display: grid;
+  width: min(142px, 100%);
+  justify-items: center;
+  gap: 4px;
+  color: var(--wc-faction);
+  text-align: center;
+}
+.workspace-create-modal .workspace-agent-map-specialist::before {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  width: 1px;
+  height: 22px;
+  background: color-mix(in srgb, var(--wc-faction) 45%, transparent);
+  content: "";
+}
+.workspace-create-modal .workspace-agent-map-specialist-avatar {
+  position: relative;
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      circle at 50% 31%,
+      color-mix(in srgb, currentColor 18%, transparent),
+      transparent 55%
+    ),
+    rgba(7, 16, 20, 0.78);
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 7%, transparent);
+  font-family: var(--wc-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+.workspace-create-modal .workspace-agent-map-specialist-avatar::before,
+.workspace-create-modal .workspace-agent-map-specialist-avatar::after {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  content: "";
+}
+.workspace-create-modal .workspace-agent-map-specialist-avatar::before {
+  top: 6px;
+  left: 6px;
+  border-top: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+}
+.workspace-create-modal .workspace-agent-map-specialist-avatar::after {
+  right: 6px;
+  bottom: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+}
+.workspace-create-modal .workspace-agent-map-specialist strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--wc-ink-heading);
+  font-size: 12px;
+  line-height: 1.15;
+}
+.workspace-create-modal .workspace-agent-map-specialist small {
+  color: var(--wc-ink-dim);
+  font-size: 10px;
+  line-height: 1.25;
+}
+.workspace-create-modal .workspace-agent-map-specialist.is-new {
+  color: #f7d27a;
+}
+.workspace-create-modal
+  .workspace-agent-map-specialist.is-new
+  .workspace-agent-map-specialist-avatar {
+  opacity: 0.68;
+}
+.workspace-create-modal .workspace-agent-map-specialist-create-badge {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 2px solid var(--wc-panel-deep);
+  border-radius: 50%;
+  background: #f7d27a;
+  color: #2a210e;
+  font-family: var(--wc-font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+}
 .workspace-create-modal .workspace-agent-map-status {
   margin: 0;
   padding: 9px 12px 10px;
@@ -1056,6 +1185,17 @@
   }
   .workspace-create-modal .workspace-agent-map-canvas {
     min-height: 224px;
+  }
+  .workspace-create-modal .workspace-agent-map-canvas.is-team {
+    min-height: 422px;
+  }
+  .workspace-create-modal .workspace-agent-map-canvas.is-team.has-many-specialists {
+    min-height: 508px;
+  }
+  .workspace-create-modal .workspace-agent-map-specialists {
+    right: 5%;
+    left: 5%;
+    gap: 16px 10px;
   }
 }
 
