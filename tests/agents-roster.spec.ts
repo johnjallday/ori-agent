@@ -10,7 +10,7 @@ test.describe('Agents roster', () => {
     const name = `PW Roster ${Date.now()}`;
 
     const create = await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' },
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
     });
     expect(create.ok()).toBeTruthy();
 
@@ -21,13 +21,13 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
       // Roster is the default Agents view; deep-link straight to our agent.
       await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'domcontentloaded'
       });
 
       await expect(page.locator('#rosterList')).toBeVisible();
@@ -66,13 +66,15 @@ test.describe('Agents roster', () => {
         .toBe(404);
     } finally {
       // Best-effort cleanup if the test bailed before the delete step.
-      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
     }
   });
 
   test('multi-select: independent focus/check, select all, range, hidden count, clear, reload', async ({
     page,
-    request,
+    request
   }) => {
     // A unique prefix so a search narrows the roster to exactly our test agents.
     const prefix = `PWMulti${Date.now()}`;
@@ -80,7 +82,7 @@ test.describe('Agents roster', () => {
 
     for (const n of names) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' },
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -91,7 +93,7 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
@@ -143,12 +145,17 @@ test.describe('Agents roster', () => {
       await expect(page.locator('#bulkBar')).toBeHidden();
     } finally {
       for (const n of names) {
-        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
       }
     }
   });
 
-  test('bulk delete: mixed selection deletes eligible and reports skipped', async ({ page, request }) => {
+  test('bulk delete: mixed selection deletes eligible and reports skipped', async ({
+    page,
+    request
+  }) => {
     const prefix = `PWDel${Date.now()}`;
     // Two plain (deletable) agents + one attached agent (skipped).
     const loose1 = `${prefix} Loose1`;
@@ -157,7 +164,7 @@ test.describe('Agents roster', () => {
     const names = [loose1, loose2, attached];
     for (const n of names) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' },
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -165,7 +172,7 @@ test.describe('Agents roster', () => {
     // Attach one agent to a fresh workspace so it is protected from deletion.
     let wsId = '';
     const wsResp = await request.post(`${baseUrl}/api/workspaces`, {
-      data: { name: `${prefix} WS`, entry_agent_name: attached },
+      data: { name: `${prefix} WS`, entry_agent_name: attached }
     });
     if (wsResp.ok()) {
       const wsJson = await wsResp.json();
@@ -178,7 +185,7 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
@@ -204,15 +211,26 @@ test.describe('Agents roster', () => {
 
       // Server persistence: loose agents gone (404), attached survives (200).
       await expect
-        .poll(async () => (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(loose1)}/detail`)).status())
+        .poll(async () =>
+          (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(loose1)}/detail`)).status()
+        )
         .toBe(404);
       await expect
-        .poll(async () => (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(attached)}/detail`)).status())
+        .poll(async () =>
+          (
+            await request.get(`${baseUrl}/api/agents/${encodeURIComponent(attached)}/detail`)
+          ).status()
+        )
         .toBe(200);
     } finally {
-      if (wsId) await request.delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`).catch(() => undefined);
+      if (wsId)
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`)
+          .catch(() => undefined);
       for (const n of names) {
-        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
       }
     }
   });
@@ -222,7 +240,7 @@ test.describe('Agents roster', () => {
     const names = [`${prefix} One`, `${prefix} Two`];
     for (const n of names) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini', tags: ['keep'] },
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini', tags: ['keep'] }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -233,7 +251,7 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
@@ -246,7 +264,9 @@ test.describe('Agents roster', () => {
       await page.locator('#bulkFavorite').click();
       await expect
         .poll(async () => {
-          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(names[0])}/detail`);
+          const r = await request.get(
+            `${baseUrl}/api/agents/${encodeURIComponent(names[0])}/detail`
+          );
           return (await r.json()).metadata?.favorite;
         })
         .toBe(true);
@@ -264,14 +284,18 @@ test.describe('Agents roster', () => {
 
       await expect
         .poll(async () => {
-          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(names[1])}/detail`);
+          const r = await request.get(
+            `${baseUrl}/api/agents/${encodeURIComponent(names[1])}/detail`
+          );
           const tags = (await r.json()).metadata?.tags || [];
           return tags.slice().sort().join(',');
         })
         .toBe('content,keep');
     } finally {
       for (const n of names) {
-        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
       }
     }
   });
@@ -279,7 +303,7 @@ test.describe('Agents roster', () => {
   test('single-agent overview: edit tags and favorite persist', async ({ page, request }) => {
     const name = `PWOv ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' },
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
     });
     expect(create.ok()).toBeTruthy();
 
@@ -289,11 +313,13 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
-      await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, {
+        waitUntil: 'domcontentloaded'
+      });
       await expect(page.locator('#stageName')).toHaveText(name);
 
       // Favorite + add a tag via the Overview form.
@@ -313,19 +339,24 @@ test.describe('Agents roster', () => {
         })
         .toBe('true:research');
     } finally {
-      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
     }
   });
 
-  test('filters + URL: tag filter narrows roster, survives reload, excludes checked', async ({ page, request }) => {
+  test('filters + URL: tag filter narrows roster, survives reload, excludes checked', async ({
+    page,
+    request
+  }) => {
     const prefix = `PWFil${Date.now()}`;
     const tagged = `${prefix} Tagged`;
     const plain = `${prefix} Plain`;
     const r1 = await request.post(`${baseUrl}/api/agents`, {
-      data: { name: tagged, type: 'tool-calling', model: 'gpt-4o-mini', tags: [`${prefix}tag`] },
+      data: { name: tagged, type: 'tool-calling', model: 'gpt-4o-mini', tags: [`${prefix}tag`] }
     });
     const r2 = await request.post(`${baseUrl}/api/agents`, {
-      data: { name: plain, type: 'tool-calling', model: 'gpt-4o-mini' },
+      data: { name: plain, type: 'tool-calling', model: 'gpt-4o-mini' }
     });
     expect(r1.ok() && r2.ok()).toBeTruthy();
 
@@ -335,7 +366,7 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
@@ -364,18 +395,25 @@ test.describe('Agents roster', () => {
       await page.locator('#clearFilters').click();
       await expect(page.locator('.roster-card')).toHaveCount(2);
     } finally {
-      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(tagged)}`).catch(() => undefined);
-      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(plain)}`).catch(() => undefined);
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(tagged)}`)
+        .catch(() => undefined);
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(plain)}`)
+        .catch(() => undefined);
     }
   });
 
-  test('edge cases: no-eligible delete disabled, focused-agent deletion falls back', async ({ page, request }) => {
+  test('edge cases: no-eligible delete disabled, focused-agent deletion falls back', async ({
+    page,
+    request
+  }) => {
     const prefix = `PWEdge${Date.now()}`;
     const a = `${prefix} A`;
     const b = `${prefix} B`;
     for (const n of [a, b]) {
       const r = await request.post(`${baseUrl}/api/agents`, {
-        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' },
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
       });
       expect(r.ok()).toBeTruthy();
     }
@@ -386,7 +424,7 @@ test.describe('Agents roster', () => {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
@@ -398,7 +436,9 @@ test.describe('Agents roster', () => {
       await ori.locator('.roster-card__check').check();
       await page.locator('#bulkDelete').click();
       await expect(page.locator('#bulkDeleteConfirm')).toBeDisabled();
-      await expect(page.locator('#bulkDeleteBody')).toContainText('None of the selected agents can be deleted');
+      await expect(page.locator('#bulkDeleteBody')).toContainText(
+        'None of the selected agents can be deleted'
+      );
       await page.locator('#bulkDeleteCancel').click();
 
       // Focused-agent deletion: focus A, select A, delete → stage falls back.
@@ -412,12 +452,16 @@ test.describe('Agents roster', () => {
 
       // A is gone from the server; the stage no longer shows A.
       await expect
-        .poll(async () => (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(a)}/detail`)).status())
+        .poll(async () =>
+          (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(a)}/detail`)).status()
+        )
         .toBe(404);
       await expect(page.locator('#stageName')).not.toHaveText(a);
     } finally {
       for (const n of [a, b]) {
-        await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`).catch(() => undefined);
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
       }
     }
   });

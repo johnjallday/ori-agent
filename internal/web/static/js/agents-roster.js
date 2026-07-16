@@ -21,7 +21,15 @@
 
   var STORAGE_KEY = 'ori.roster.selectedAgent';
   var TAB_ORDER = ['overview', 'prompt', 'workspaces'];
-  var ROLES = ['general', 'orchestrator', 'researcher', 'analyzer', 'synthesizer', 'validator', 'specialist'];
+  var ROLES = [
+    'general',
+    'orchestrator',
+    'researcher',
+    'analyzer',
+    'synthesizer',
+    'validator',
+    'specialist'
+  ];
   var REASONING = ['', 'minimal', 'low', 'medium', 'high'];
   // Agent capability types; these mirror the model catalog's category strings so
   // the Model picker can be filtered to models that fit the selected type.
@@ -50,7 +58,7 @@
     checked: new Set(),
     // Anchor index (into the current sorted+filtered roster) for Shift-click and
     // Shift+Space contiguous range selection (PRD FR10).
-    rangeAnchor: -1,
+    rangeAnchor: -1
   };
 
   var els = {};
@@ -119,7 +127,7 @@
       clearFilters: document.getElementById('clearFilters'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
-      emptyCreate: document.getElementById('rosterEmptyCreate'),
+      emptyCreate: document.getElementById('rosterEmptyCreate')
     };
 
     els.search.addEventListener('input', onSearch);
@@ -137,12 +145,26 @@
     els.stageDelete.addEventListener('click', onDeleteClick);
 
     els.selectAll.addEventListener('click', selectAllVisible);
-    els.clearSelection.addEventListener('click', function () { clearSelection(true); });
+    els.clearSelection.addEventListener('click', function () {
+      clearSelection(true);
+    });
 
-    els.filterRole.addEventListener('change', function () { state.filters.role = els.filterRole.value; onFilterChange(); });
-    els.filterSource.addEventListener('change', function () { state.filters.source = els.filterSource.value; onFilterChange(); });
-    els.filterAssignment.addEventListener('change', function () { state.filters.assignment = els.filterAssignment.value; onFilterChange(); });
-    els.filterTag.addEventListener('change', function () { state.filters.tag = els.filterTag.value; onFilterChange(); });
+    els.filterRole.addEventListener('change', function () {
+      state.filters.role = els.filterRole.value;
+      onFilterChange();
+    });
+    els.filterSource.addEventListener('change', function () {
+      state.filters.source = els.filterSource.value;
+      onFilterChange();
+    });
+    els.filterAssignment.addEventListener('change', function () {
+      state.filters.assignment = els.filterAssignment.value;
+      onFilterChange();
+    });
+    els.filterTag.addEventListener('change', function () {
+      state.filters.tag = els.filterTag.value;
+      onFilterChange();
+    });
     els.filterFavorite.addEventListener('click', function () {
       state.filters.favorite = !state.filters.favorite;
       els.filterFavorite.setAttribute('aria-pressed', state.filters.favorite ? 'true' : 'false');
@@ -156,23 +178,41 @@
     els.stats.addEventListener('click', onStatTileClick);
 
     els.bulkDelete.addEventListener('click', openBulkDelete);
-    els.bulkDeleteCancel.addEventListener('click', function () { closeBulkDelete(); });
+    els.bulkDeleteCancel.addEventListener('click', function () {
+      closeBulkDelete();
+    });
     els.bulkDeleteConfirm.addEventListener('click', runBulkDelete);
     els.bulkResultDismiss.addEventListener('click', dismissBulkResult);
     // Native <dialog> fires 'cancel' on Escape; keep our teardown consistent.
-    els.bulkDeleteDialog.addEventListener('cancel', function (e) { e.preventDefault(); closeBulkDelete(); });
+    els.bulkDeleteDialog.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      closeBulkDelete();
+    });
 
-    els.bulkAddTags.addEventListener('click', function () { openBulkTags('add'); });
-    els.bulkRemoveTags.addEventListener('click', function () { openBulkTags('remove'); });
+    els.bulkAddTags.addEventListener('click', function () {
+      openBulkTags('add');
+    });
+    els.bulkRemoveTags.addEventListener('click', function () {
+      openBulkTags('remove');
+    });
     els.bulkTagsCancel.addEventListener('click', closeBulkTags);
     els.bulkTagsConfirm.addEventListener('click', runBulkTags);
-    els.bulkTagsDialog.addEventListener('cancel', function (e) { e.preventDefault(); closeBulkTags(); });
-    els.bulkFavorite.addEventListener('click', function () { runBulkFavorite(true); });
-    els.bulkUnfavorite.addEventListener('click', function () { runBulkFavorite(false); });
+    els.bulkTagsDialog.addEventListener('cancel', function (e) {
+      e.preventDefault();
+      closeBulkTags();
+    });
+    els.bulkFavorite.addEventListener('click', function () {
+      runBulkFavorite(true);
+    });
+    els.bulkUnfavorite.addEventListener('click', function () {
+      runBulkFavorite(false);
+    });
 
     var tabs = document.querySelectorAll('.stage__tab');
     tabs.forEach(function (tab) {
-      tab.addEventListener('click', function () { requestTab(tab.dataset.tab, true); });
+      tab.addEventListener('click', function () {
+        requestTab(tab.dataset.tab, true);
+      });
       tab.addEventListener('keydown', onTabKeydown);
     });
 
@@ -188,7 +228,10 @@
     });
 
     window.addEventListener('beforeunload', function (e) {
-      if (anyDirty()) { e.preventDefault(); e.returnValue = ''; }
+      if (anyDirty()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
     });
 
     loadProviders();
@@ -202,9 +245,11 @@
   // slow, renderOverview falls back to a text input.
   function loadProviders() {
     fetch('/api/providers')
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
       .then(function (data) {
-        state.providers = (data && Array.isArray(data.providers)) ? data.providers : [];
+        state.providers = data && Array.isArray(data.providers) ? data.providers : [];
         // If an agent was already selected and its stage rendered before the model
         // catalog arrived, refresh the catalog-dependent surfaces: the overview
         // (picker + notes) and the vitals (legacy badge). Guarded by !dirty so we
@@ -214,7 +259,9 @@
           renderOverview(state.selected, state.detailCache[state.selected]);
         }
       })
-      .catch(function () { state.providers = []; });
+      .catch(function () {
+        state.providers = [];
+      });
   }
 
   function loadAgents() {
@@ -227,7 +274,9 @@
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
         state.agents = agents;
         state.byName = {};
-        agents.forEach(function (a) { state.byName[a.name] = a; });
+        agents.forEach(function (a) {
+          state.byName[a.name] = a;
+        });
         pruneChecked();
         applyUrlToState();
         populateFilterOptions();
@@ -246,8 +295,12 @@
   function pruneChecked() {
     if (state.checked.size === 0) return;
     var stale = [];
-    state.checked.forEach(function (name) { if (!state.byName[name]) stale.push(name); });
-    stale.forEach(function (name) { state.checked.delete(name); });
+    state.checked.forEach(function (name) {
+      if (!state.byName[name]) stale.push(name);
+    });
+    stale.forEach(function (name) {
+      state.checked.delete(name);
+    });
   }
 
   function fetchDetail(name, force) {
@@ -273,10 +326,16 @@
 
     list.sort(function (a, b) {
       switch (state.sort) {
-        case 'name-desc': return b.name.localeCompare(a.name);
-        case 'workspaces-desc': return (b.workspace_count || 0) - (a.workspace_count || 0) || a.name.localeCompare(b.name);
-        case 'active-desc': return lastActive(b) - lastActive(a) || a.name.localeCompare(b.name);
-        default: return a.name.localeCompare(b.name);
+        case 'name-desc':
+          return b.name.localeCompare(a.name);
+        case 'workspaces-desc':
+          return (
+            (b.workspace_count || 0) - (a.workspace_count || 0) || a.name.localeCompare(b.name)
+          );
+        case 'active-desc':
+          return lastActive(b) - lastActive(a) || a.name.localeCompare(b.name);
+        default:
+          return a.name.localeCompare(b.name);
       }
     });
 
@@ -287,8 +346,16 @@
   // Search matches name, role, description, and tags (PRD FR74).
   function matchesSearch(a, q) {
     if (!q) return true;
-    var tags = (a.metadata && Array.isArray(a.metadata.tags)) ? a.metadata.tags.join(' ') : '';
-    var hay = (a.name + ' ' + (a.role || '') + ' ' + ((a.metadata && a.metadata.description) || '') + ' ' + tags).toLowerCase();
+    var tags = a.metadata && Array.isArray(a.metadata.tags) ? a.metadata.tags.join(' ') : '';
+    var hay = (
+      a.name +
+      ' ' +
+      (a.role || '') +
+      ' ' +
+      ((a.metadata && a.metadata.description) || '') +
+      ' ' +
+      tags
+    ).toLowerCase();
     return hay.indexOf(q) !== -1;
   }
 
@@ -303,8 +370,10 @@
     if (f.assignment === 'assigned' && (a.workspace_count || 0) === 0) return false;
     if (f.favorite && !(a.metadata && a.metadata.favorite)) return false;
     if (f.tag) {
-      var tags = (a.metadata && Array.isArray(a.metadata.tags)) ? a.metadata.tags : [];
-      var has = tags.some(function (t) { return String(t).toLowerCase() === f.tag.toLowerCase(); });
+      var tags = a.metadata && Array.isArray(a.metadata.tags) ? a.metadata.tags : [];
+      var has = tags.some(function (t) {
+        return String(t).toLowerCase() === f.tag.toLowerCase();
+      });
       if (!has) return false;
     }
     return true;
@@ -334,7 +403,14 @@
   }
 
   function clearFilters() {
-    state.filters = { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false };
+    state.filters = {
+      health: new Set(),
+      role: '',
+      source: '',
+      assignment: '',
+      tag: '',
+      favorite: false
+    };
     els.filterRole.value = '';
     els.filterSource.value = '';
     els.filterAssignment.value = '';
@@ -348,9 +424,13 @@
     var tile = e.target.closest('.roster-stat');
     if (!tile) return;
     var health = tile.dataset.health;
-    if (!health || health === 'total') { state.filters.health.clear(); }
-    else if (state.filters.health.has(health)) { state.filters.health.delete(health); }
-    else { state.filters.health.add(health); }
+    if (!health || health === 'total') {
+      state.filters.health.clear();
+    } else if (state.filters.health.has(health)) {
+      state.filters.health.delete(health);
+    } else {
+      state.filters.health.add(health);
+    }
     onFilterChange();
   }
 
@@ -362,19 +442,30 @@
     state.agents.forEach(function (a) {
       var role = String(a.role || '').trim();
       if (role) roles[role.toLowerCase()] = role;
-      var t = (a.metadata && Array.isArray(a.metadata.tags)) ? a.metadata.tags : [];
-      t.forEach(function (tag) { var k = String(tag).toLowerCase(); if (k) tags[k] = tag; });
+      var t = a.metadata && Array.isArray(a.metadata.tags) ? a.metadata.tags : [];
+      t.forEach(function (tag) {
+        var k = String(tag).toLowerCase();
+        if (k) tags[k] = tag;
+      });
     });
     fillSelect(els.filterRole, 'All roles', roles, state.filters.role, titleCase);
     fillSelect(els.filterTag, 'All tags', tags, state.filters.tag, null);
     // A previously-selected value that no longer exists falls back to "all".
-    if (state.filters.role && !roles[state.filters.role.toLowerCase()]) { state.filters.role = ''; els.filterRole.value = ''; }
-    if (state.filters.tag && !tags[state.filters.tag.toLowerCase()]) { state.filters.tag = ''; els.filterTag.value = ''; }
+    if (state.filters.role && !roles[state.filters.role.toLowerCase()]) {
+      state.filters.role = '';
+      els.filterRole.value = '';
+    }
+    if (state.filters.tag && !tags[state.filters.tag.toLowerCase()]) {
+      state.filters.tag = '';
+      els.filterTag.value = '';
+    }
   }
 
   function fillSelect(sel, allLabel, valueMap, current, labeler) {
     if (!sel) return;
-    var keys = Object.keys(valueMap).sort(function (a, b) { return valueMap[a].localeCompare(valueMap[b]); });
+    var keys = Object.keys(valueMap).sort(function (a, b) {
+      return valueMap[a].localeCompare(valueMap[b]);
+    });
     var html = '<option value="">' + esc(allLabel) + '</option>';
     keys.forEach(function (k) {
       var v = valueMap[k];
@@ -399,7 +490,10 @@
       return;
     }
     els.empty.hidden = true;
-    els.count.textContent = shown === total ? total + ' agent' + (total === 1 ? '' : 's') : shown + ' of ' + total + ' agents';
+    els.count.textContent =
+      shown === total
+        ? total + ' agent' + (total === 1 ? '' : 's')
+        : shown + ' of ' + total + ' agents';
 
     var frag = document.createDocumentFragment();
     state.filtered.forEach(function (agent, idx) {
@@ -417,12 +511,22 @@
   function renderStatusTiles() {
     if (!els.stats) return;
     var total = state.agents.length;
-    if (total === 0) { els.stats.hidden = true; els.stats.innerHTML = ''; return; }
-    var needs = 0, disabled = 0;
+    if (total === 0) {
+      els.stats.hidden = true;
+      els.stats.innerHTML = '';
+      return;
+    }
+    var needs = 0,
+      disabled = 0;
     state.agents.forEach(function (a) {
       var status = String((a && a.status) || 'idle').toLowerCase();
-      if (status === 'disabled') { disabled++; return; }
-      if (status === 'error' || !String((a && a.model) || '').trim()) { needs++; }
+      if (status === 'disabled') {
+        disabled++;
+        return;
+      }
+      if (status === 'error' || !String((a && a.model) || '').trim()) {
+        needs++;
+      }
     });
     var ready = total - needs - disabled;
     els.stats.hidden = false;
@@ -441,11 +545,25 @@
     var health = kind === 'total' ? 'total' : kind;
     var selected = kind !== 'total' && state.filters.health.has(kind);
     var sel = selected ? ' is-selected' : '';
-    return '<button type="button" class="roster-stat roster-stat--' + kind + zero + sel + '"' +
-      ' data-health="' + health + '" aria-pressed="' + (selected ? 'true' : 'false') + '">' +
-      '<span class="roster-stat__value">' + value + '</span>' +
-      '<span class="roster-stat__label">' + esc(label) + '</span>' +
-      '</button>';
+    return (
+      '<button type="button" class="roster-stat roster-stat--' +
+      kind +
+      zero +
+      sel +
+      '"' +
+      ' data-health="' +
+      health +
+      '" aria-pressed="' +
+      (selected ? 'true' : 'false') +
+      '">' +
+      '<span class="roster-stat__value">' +
+      value +
+      '</span>' +
+      '<span class="roster-stat__label">' +
+      esc(label) +
+      '</span>' +
+      '</button>'
+    );
   }
 
   function buildCard(agent, idx) {
@@ -468,14 +586,21 @@
     var permanent = isPermanent(agent);
     var isChecked = state.checked.has(agent.name);
     var favorite = !!(agent.metadata && agent.metadata.favorite);
-    var tags = (agent.metadata && Array.isArray(agent.metadata.tags)) ? agent.metadata.tags : [];
+    var tags = agent.metadata && Array.isArray(agent.metadata.tags) ? agent.metadata.tags : [];
 
     // Concise spoken label so screen readers don't read the raw dot markup, and
     // it carries the FULL tag list even when the visible chips are truncated
     // (PRD FR59).
-    var wcLabel = wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
-    var openLabel = agent.name + (permanent ? ', built-in' : '') +
-      (favorite ? ', favorite' : '') + ', ' + statusText + ', ' + wcLabel +
+    var wcLabel =
+      wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
+    var openLabel =
+      agent.name +
+      (permanent ? ', built-in' : '') +
+      (favorite ? ', favorite' : '') +
+      ', ' +
+      statusText +
+      ', ' +
+      wcLabel +
       (tags.length ? ', tags: ' + tags.join(', ') : '');
 
     var badge = permanent
@@ -491,20 +616,44 @@
     // two actions stay independent (PRD FR2/FR3/FR4).
     li.innerHTML =
       '<label class="roster-card__checkwrap">' +
-      '<span class="visually-hidden">Select ' + esc(agent.name) + '</span>' +
-      '<input type="checkbox" class="roster-card__check" data-check="' + esc(agent.name) + '"' + (isChecked ? ' checked' : '') + '>' +
+      '<span class="visually-hidden">Select ' +
+      esc(agent.name) +
+      '</span>' +
+      '<input type="checkbox" class="roster-card__check" data-check="' +
+      esc(agent.name) +
+      '"' +
+      (isChecked ? ' checked' : '') +
+      '>' +
       '</label>' +
-      '<button type="button" class="roster-card__open" data-open="' + esc(agent.name) + '" aria-label="' + esc(openLabel) + '">' +
+      '<button type="button" class="roster-card__open" data-open="' +
+      esc(agent.name) +
+      '" aria-label="' +
+      esc(openLabel) +
+      '">' +
       avatarMarkup(agent, 'roster-card__avatar') +
       '<span class="roster-card__body">' +
       '<span class="roster-card__namerow">' +
-      '<span class="roster-card__name">' + esc(agent.name) + '</span>' + star + badge +
-      '<span class="roster-card__statuslabel is-' + status + '">' + esc(statusText) + '</span>' +
+      '<span class="roster-card__name">' +
+      esc(agent.name) +
       '</span>' +
-      '<span class="roster-card__meta">' + esc(metaBits.join(' · ')) + '</span>' +
+      star +
+      badge +
+      '<span class="roster-card__statuslabel is-' +
+      status +
+      '">' +
+      esc(statusText) +
+      '</span>' +
+      '</span>' +
+      '<span class="roster-card__meta">' +
+      esc(metaBits.join(' · ')) +
+      '</span>' +
       tagsRow +
       '</span>' +
-      '<span class="roster-card__status is-' + status + '" title="' + esc(statusText) + '" aria-hidden="true"></span>' +
+      '<span class="roster-card__status is-' +
+      status +
+      '" title="' +
+      esc(statusText) +
+      '" aria-hidden="true"></span>' +
       '</button>';
 
     if (isChecked) li.classList.add('is-checked');
@@ -515,10 +664,16 @@
   // still reaches assistive tech via the open button's aria-label (PRD FR58/FR59).
   function tagsRowHTML(tags) {
     if (!tags || tags.length === 0) return '';
-    var shown = tags.slice(0, 2).map(function (t) {
-      return '<span class="roster-card__tag">' + esc(t) + '</span>';
-    }).join('');
-    var more = tags.length > 2 ? '<span class="roster-card__tag roster-card__tag--more">+' + (tags.length - 2) + '</span>' : '';
+    var shown = tags
+      .slice(0, 2)
+      .map(function (t) {
+        return '<span class="roster-card__tag">' + esc(t) + '</span>';
+      })
+      .join('');
+    var more =
+      tags.length > 2
+        ? '<span class="roster-card__tag roster-card__tag--more">+' + (tags.length - 2) + '</span>'
+        : '';
     return '<span class="roster-card__tags" aria-hidden="true">' + shown + more + '</span>';
   }
 
@@ -555,9 +710,11 @@
   function restoreSelection() {
     var fromUrl = new URLSearchParams(window.location.search).get('agent');
     var fromStore = safeStorageGet();
-    var pick = (fromUrl && state.byName[fromUrl] && fromUrl) ||
+    var pick =
+      (fromUrl && state.byName[fromUrl] && fromUrl) ||
       (fromStore && state.byName[fromStore] && fromStore) ||
-      (state.filtered[0] && state.filtered[0].name) || null;
+      (state.filtered[0] && state.filtered[0].name) ||
+      null;
     if (pick) selectAgent(pick, { push: false });
   }
 
@@ -566,7 +723,9 @@
     if (!state.byName[name]) return;
     if (name !== state.selected && !guardUnsaved()) return;
     state.selected = name;
-    state.focusIndex = state.filtered.findIndex(function (a) { return a.name === name; });
+    state.focusIndex = state.filtered.findIndex(function (a) {
+      return a.name === name;
+    });
     resetDirty();
     safeStorageSet(name);
     syncUrl(name, opts.push !== false);
@@ -630,7 +789,9 @@
     if (cost) vitals.push(vital('Cost', '$' + Number(cost).toFixed(2)));
     var meta = detail && detail.model ? modelMeta(detail.model) : null;
     if (meta && meta.is_legacy) {
-      vitals.push('<span class="vital vital--warn" title="This model is past its deprecation date"><span>Model</span><b>⚠ Legacy</b></span>');
+      vitals.push(
+        '<span class="vital vital--warn" title="This model is past its deprecation date"><span>Model</span><b>⚠ Legacy</b></span>'
+      );
     }
     els.vitals.innerHTML = vitals.join('');
   }
@@ -663,7 +824,8 @@
 
     if (!editable) {
       els.overviewFacts.innerHTML = '<dl class="stage-facts">' + readonlyFacts(detail) + '</dl>';
-      els.overviewDesc.innerHTML = '<p class="stage-hint">This is a built-in agent and cannot be edited here.</p>';
+      els.overviewDesc.innerHTML =
+        '<p class="stage-hint">This is a built-in agent and cannot be edited here.</p>';
       return;
     }
 
@@ -685,20 +847,47 @@
       '<form class="stage-form" id="overviewForm" novalidate>' +
       field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
       field('Type', selectInput('ov-type', TYPES, agentType, typeLabel), 'ov-type') +
-      field('Model', modelControl + '<p class="model-note" id="ov-model-note" aria-live="polite"></p>', 'ov-model') +
+      field(
+        'Model',
+        modelControl + '<p class="model-note" id="ov-model-note" aria-live="polite"></p>',
+        'ov-model'
+      ) +
       field('Provider', providerControl, 'ov-provider') +
-      field('Temperature', numInput('ov-temperature', detail.temperature, '0', '2', '0.1'), 'ov-temperature') +
+      field(
+        'Temperature',
+        numInput('ov-temperature', detail.temperature, '0', '2', '0.1'),
+        'ov-temperature'
+      ) +
       '<div class="field" id="ov-reasoning-field">' +
-        '<label class="field__label" for="ov-reasoning">Reasoning effort</label>' +
-        '<div class="field__control">' +
-        selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) { return v ? titleCase(v) : 'Default'; }) +
-        '</div></div>' +
-      field('Max output tokens', numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'), 'ov-maxtokens') +
+      '<label class="field__label" for="ov-reasoning">Reasoning effort</label>' +
+      '<div class="field__control">' +
+      selectInput('ov-reasoning', REASONING, detail.reasoning_effort || '', function (v) {
+        return v ? titleCase(v) : 'Default';
+      }) +
+      '</div></div>' +
+      field(
+        'Max output tokens',
+        numInput('ov-maxtokens', detail.max_output_tokens || '', '0', '', '1'),
+        'ov-maxtokens'
+      ) +
       field('Web search', checkInput('ov-websearch', detail.allow_web_search)) +
-      field('Description', textareaInput('ov-description', md.description || '', 3), 'ov-description') +
-      field('Favorite', '<label class="check"><input id="ov-favorite" type="checkbox"' + (md.favorite ? ' checked' : '') + '> Favorited</label>') +
+      field(
+        'Description',
+        textareaInput('ov-description', md.description || '', 3),
+        'ov-description'
+      ) +
+      field(
+        'Favorite',
+        '<label class="check"><input id="ov-favorite" type="checkbox"' +
+          (md.favorite ? ' checked' : '') +
+          '> Favorited</label>'
+      ) +
       field('Tags', '<div id="ov-tags-host"></div>', 'ov-tags-host') +
-      field('Avatar color', colorInput('ov-avatarcolor', md.avatar_color || colorFor(name)), 'ov-avatarcolor') +
+      field(
+        'Avatar color',
+        colorInput('ov-avatarcolor', md.avatar_color || colorFor(name)),
+        'ov-avatarcolor'
+      ) +
       '<div class="field"><span class="field__label">Avatar image</span><div class="field__control" id="ov-avatar-control"></div></div>' +
       '</form>' +
       readonlyMetaHTML(detail) +
@@ -709,7 +898,9 @@
     wireAvatarControl(name, md);
     wireColorInput('ov-avatarcolor');
     wireDirty('overview', document.getElementById('overviewForm'));
-    wireSaveBar('overview', function () { saveOverview(name); });
+    wireSaveBar('overview', function () {
+      saveOverview(name);
+    });
 
     var modelSel = document.getElementById('ov-model');
     if (modelSel && modelSel.tagName === 'SELECT') {
@@ -748,7 +939,11 @@
   function updateModelNote(opt) {
     var note = document.getElementById('ov-model-note');
     if (!note) return;
-    if (!opt) { note.textContent = ''; note.className = 'model-note'; return; }
+    if (!opt) {
+      note.textContent = '';
+      note.className = 'model-note';
+      return;
+    }
     var bits = [];
     var goodFor = opt.getAttribute('data-goodfor');
     if (goodFor) bits.push(goodFor);
@@ -757,7 +952,7 @@
     var legacy = opt.getAttribute('data-legacy') === '1';
     var dep = opt.getAttribute('data-deprecation');
     note.className = 'model-note' + (legacy ? ' is-legacy' : '');
-    var warn = legacy ? ('⚠ Legacy model' + (dep ? ' — deprecated ' + dep : '') + '. ') : '';
+    var warn = legacy ? '⚠ Legacy model' + (dep ? ' — deprecated ' + dep : '') + '. ' : '';
     note.textContent = warn + bits.join(' · ');
   }
 
@@ -772,18 +967,25 @@
   }
 
   function supportsReasoning(model) {
-    var m = String(model || '').toLowerCase().trim();
+    var m = String(model || '')
+      .toLowerCase()
+      .trim();
     if (!m) return false;
     return /^o[1345](-|$)/.test(m) || m.indexOf('gpt-5') !== -1 || m.indexOf('codex') !== -1;
   }
 
   function typeLabel(v) {
     switch (v) {
-      case 'tool-calling': return 'Tool Calling';
-      case 'general': return 'General Purpose';
-      case 'research': return 'Research';
-      case 'orchestration': return 'Orchestration';
-      default: return titleCase(v || '');
+      case 'tool-calling':
+        return 'Tool Calling';
+      case 'general':
+        return 'General Purpose';
+      case 'research':
+        return 'Research';
+      case 'orchestration':
+        return 'Orchestration';
+      default:
+        return titleCase(v || '');
     }
   }
 
@@ -792,9 +994,13 @@
       ['Role', titleCase((detail && detail.role) || '—')],
       ['Model', (detail && detail.model) || '—'],
       ['Provider', detail && detail.provider ? titleCase(detail.provider) : '—'],
-      ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—'],
+      ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—']
     ];
-    return facts.map(function (f) { return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>'; }).join('');
+    return facts
+      .map(function (f) {
+        return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>';
+      })
+      .join('');
   }
 
   function overviewEdits(detail) {
@@ -815,7 +1021,8 @@
     if (reasoning !== (detail.reasoning_effort || '')) out.reasoning_effort = reasoning;
     var maxRaw = val('ov-maxtokens').trim();
     var maxNum = maxRaw === '' ? 0 : parseInt(maxRaw, 10);
-    if (!isNaN(maxNum) && maxNum !== Number(detail.max_output_tokens || 0)) out.max_output_tokens = maxNum;
+    if (!isNaN(maxNum) && maxNum !== Number(detail.max_output_tokens || 0))
+      out.max_output_tokens = maxNum;
     var web = checked('ov-websearch');
     if (web !== !!detail.allow_web_search) out.allow_web_search = web;
     var md = detail.metadata || {};
@@ -834,10 +1041,22 @@
   }
 
   function tagsDiffer(a, b) {
-    var na = (a || []).map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean).sort();
-    var nb = (b || []).map(function (t) { return String(t).toLowerCase().trim(); }).filter(Boolean).sort();
+    var na = (a || [])
+      .map(function (t) {
+        return String(t).toLowerCase().trim();
+      })
+      .filter(Boolean)
+      .sort();
+    var nb = (b || [])
+      .map(function (t) {
+        return String(t).toLowerCase().trim();
+      })
+      .filter(Boolean)
+      .sort();
     if (na.length !== nb.length) return true;
-    for (var i = 0; i < na.length; i++) { if (na[i] !== nb[i]) return true; }
+    for (var i = 0; i < na.length; i++) {
+      if (na[i] !== nb[i]) return true;
+    }
     return false;
   }
 
@@ -849,10 +1068,15 @@
       overviewTagsInput = window.OriTagInput.createTagInput({
         container: host,
         initialTags: initial,
-        onChange: function () { markDirty('overview', true); },
+        onChange: function () {
+          markDirty('overview', true);
+        }
       });
     } else {
-      host.innerHTML = '<input id="ov-tags-text" type="text" value="' + esc((initial || []).join(', ')) + '" placeholder="tag1, tag2">';
+      host.innerHTML =
+        '<input id="ov-tags-text" type="text" value="' +
+        esc((initial || []).join(', ')) +
+        '" placeholder="tag1, tag2">';
     }
   }
 
@@ -865,13 +1089,21 @@
     host.innerHTML =
       '<div class="avatar-control">' +
       '<input type="file" id="ov-avatar-file" aria-label="Upload avatar image" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
-      (hasImage ? '<button type="button" class="btn-ghost avatar-control__remove" id="ov-avatar-remove">Remove image</button>' : '') +
+      (hasImage
+        ? '<button type="button" class="btn-ghost avatar-control__remove" id="ov-avatar-remove">Remove image</button>'
+        : '') +
       '<span class="avatar-control__status" id="ov-avatar-status" aria-live="polite"></span>' +
       '</div>';
     var file = document.getElementById('ov-avatar-file');
-    if (file) file.addEventListener('change', function () { uploadAvatar(name, file.files && file.files[0]); });
+    if (file)
+      file.addEventListener('change', function () {
+        uploadAvatar(name, file.files && file.files[0]);
+      });
     var remove = document.getElementById('ov-avatar-remove');
-    if (remove) remove.addEventListener('click', function () { removeAvatar(name); });
+    if (remove)
+      remove.addEventListener('click', function () {
+        removeAvatar(name);
+      });
   }
 
   function uploadAvatar(name, fileObj) {
@@ -881,24 +1113,39 @@
     var form = new FormData();
     form.append('avatar', fileObj);
     fetch('/api/agents/' + encodeURIComponent(name) + '/avatar', { method: 'POST', body: form })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (r) {
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (d) {
+            return { status: r.status, data: d };
+          });
+      })
       .then(function (res) {
         if (res.status >= 200 && res.status < 300) afterAvatarChange(name, status, 'Uploaded.');
         else if (status) status.textContent = (res.data && res.data.message) || 'Upload failed.';
       })
-      .catch(function () { if (status) status.textContent = 'Network error.'; });
+      .catch(function () {
+        if (status) status.textContent = 'Network error.';
+      });
   }
 
   function removeAvatar(name) {
     var status = document.getElementById('ov-avatar-status');
     if (status) status.textContent = 'Removing…';
     fetch('/api/agents/' + encodeURIComponent(name) + '/avatar', { method: 'DELETE' })
-      .then(function (r) { return r.status; })
+      .then(function (r) {
+        return r.status;
+      })
       .then(function (code) {
         if (code >= 200 && code < 300) afterAvatarChange(name, status, 'Removed.');
         else if (status) status.textContent = 'Remove failed.';
       })
-      .catch(function () { if (status) status.textContent = 'Network error.'; });
+      .catch(function () {
+        if (status) status.textContent = 'Network error.';
+      });
   }
 
   function afterAvatarChange(name, status, msg) {
@@ -907,7 +1154,8 @@
       if (state.selected !== name) return;
       // Re-render avatar + card from the fresh metadata.
       var item = state.byName[name];
-      if (item && detail.metadata) item.metadata = Object.assign({}, item.metadata, detail.metadata);
+      if (item && detail.metadata)
+        item.metadata = Object.assign({}, item.metadata, detail.metadata);
       els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar');
       els.avatar = document.getElementById('stageAvatar');
       refreshRosterMeta(name, detail);
@@ -921,17 +1169,26 @@
     var rows = [
       ['Created', fmtDate(s.created_at)],
       ['Updated', fmtDate(s.updated_at)],
-      ['Last active', fmtDate(s.last_active)],
-    ].filter(function (r) { return r[1]; });
+      ['Last active', fmtDate(s.last_active)]
+    ].filter(function (r) {
+      return r[1];
+    });
     if (rows.length === 0) return '';
-    return '<dl class="stage-meta">' + rows.map(function (r) {
-      return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>';
-    }).join('') + '</dl>';
+    return (
+      '<dl class="stage-meta">' +
+      rows
+        .map(function (r) {
+          return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>';
+        })
+        .join('') +
+      '</dl>'
+    );
   }
 
-  var dateFmt = (typeof Intl !== 'undefined' && Intl.DateTimeFormat)
-    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-    : null;
+  var dateFmt =
+    typeof Intl !== 'undefined' && Intl.DateTimeFormat
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+      : null;
   function fmtDate(v) {
     if (!v) return '';
     var t = Date.parse(v);
@@ -971,10 +1228,13 @@
           '<form class="stage-form" id="promptForm" novalidate>' +
           '<textarea id="pr-prompt" class="stage-textarea" rows="16" spellcheck="false" ' +
           'placeholder="No system prompt set. Add one to steer this agent."></textarea>' +
-          '</form>' + saveBar('prompt');
-        document.getElementById('pr-prompt').value = (detail.system_prompt) || '';
+          '</form>' +
+          saveBar('prompt');
+        document.getElementById('pr-prompt').value = detail.system_prompt || '';
         wireDirty('prompt', document.getElementById('promptForm'));
-        wireSaveBar('prompt', function () { savePrompt(name); });
+        wireSaveBar('prompt', function () {
+          savePrompt(name);
+        });
       })
       .catch(function () {
         els.promptBody.innerHTML = '<p class="stage-hint">Could not load the system prompt.</p>';
@@ -1004,19 +1264,37 @@
     fetch('/api/agents/' + encodeURIComponent(name), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     })
       .then(function (r) {
-        return r.json().catch(function () { return {}; }).then(function (data) { return { status: r.status, data: data }; });
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            return { status: r.status, data: data };
+          });
       })
       .then(function (res) {
         setSaving(tab, false);
         if (res.status >= 200 && res.status < 300) return onSaved(name, tab);
-        if (res.status === 409 && res.data && res.data.error === 'stale_agent_edit') return onStale(name, tab, res.data);
-        if (res.status === 409 && res.data && res.data.error === 'shared_agent_edit_requires_confirmation') return onSharedConfirm(name, tab, fields, res.data);
-        if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked') return showStatus(tab, res.data.message || 'Blocked.', 'error');
+        if (res.status === 409 && res.data && res.data.error === 'stale_agent_edit')
+          return onStale(name, tab, res.data);
+        if (
+          res.status === 409 &&
+          res.data &&
+          res.data.error === 'shared_agent_edit_requires_confirmation'
+        )
+          return onSharedConfirm(name, tab, fields, res.data);
+        if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked')
+          return showStatus(tab, res.data.message || 'Blocked.', 'error');
         // Validation / other errors surface their message inline.
-        showStatus(tab, (res.data && res.data.message) || ('Save failed (' + res.status + ').'), 'error');
+        showStatus(
+          tab,
+          (res.data && res.data.message) || 'Save failed (' + res.status + ').',
+          'error'
+        );
       })
       .catch(function (err) {
         setSaving(tab, false);
@@ -1044,16 +1322,24 @@
   }
 
   function onStale(name, tab, data) {
-    showBanner(tab,
+    showBanner(
+      tab,
       'This agent was changed elsewhere since you loaded it. Reload the latest version to continue — your unsaved edits in this tab will be replaced.',
-      'Reload latest', function () {
+      'Reload latest',
+      function () {
         fetchDetail(name, true).then(function (detail) {
           if (state.selected !== name) return;
           state.dirty[tab] = false;
-          if (tab === 'overview') { renderVitals(state.byName[name], detail); renderOverview(name, detail); }
-          else if (tab === 'prompt') { els.promptBody.dataset.loadedFor = ''; renderPrompt(name); }
+          if (tab === 'overview') {
+            renderVitals(state.byName[name], detail);
+            renderOverview(name, detail);
+          } else if (tab === 'prompt') {
+            els.promptBody.dataset.loadedFor = '';
+            renderPrompt(name);
+          }
         });
-      });
+      }
+    );
     if (data && data.current_version && state.detailCache[name]) {
       // Keep the cached version in sync so a subsequent explicit reload lines up.
       state.detailCache[name]._staleVersion = data.current_version;
@@ -1062,7 +1348,13 @@
 
   function onSharedConfirm(name, tab, fields, data) {
     var n = (data && data.workspace_count) || 'multiple';
-    var ok = window.confirm('“' + name + '” is attached to ' + n + ' workspaces. This change affects all of them. Apply it?');
+    var ok = window.confirm(
+      '“' +
+        name +
+        '” is attached to ' +
+        n +
+        ' workspaces. This change affects all of them. Apply it?'
+    );
     if (ok) submitPatch(name, tab, fields, true);
     else showStatus(tab, 'Save cancelled.', 'muted');
   }
@@ -1074,9 +1366,10 @@
 
     // CLI / built-in agents cannot be attached — show the membership read-only.
     if (!isEditable(detail)) {
-      els.workspacesBody.innerHTML = members.length === 0
-        ? '<p class="stage-hint">Not attached to any workspace.</p>'
-        : members.map(readonlyWsRow).join('');
+      els.workspacesBody.innerHTML =
+        members.length === 0
+          ? '<p class="stage-hint">Not attached to any workspace.</p>'
+          : members.map(readonlyWsRow).join('');
       return;
     }
 
@@ -1089,16 +1382,19 @@
       .catch(function () {
         if (state.selected !== name) return;
         // Fall back to a read-only view of current memberships.
-        els.workspacesBody.innerHTML = (members.length === 0
-          ? '<p class="stage-hint">Not attached to any workspace.</p>'
-          : members.map(readonlyWsRow).join('')) +
+        els.workspacesBody.innerHTML =
+          (members.length === 0
+            ? '<p class="stage-hint">Not attached to any workspace.</p>'
+            : members.map(readonlyWsRow).join('')) +
           '<p class="stage-hint">Could not load the full workspace list to edit assignments.</p>';
       });
   }
 
   function readonlyWsRow(ws) {
     var nm = esc(ws.name || 'Workspace');
-    var link = ws.id ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>' : nm;
+    var link = ws.id
+      ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>'
+      : nm;
     var pill = ws.entry_point ? '<span class="ws-entry-pill">Entry agent</span>' : '';
     return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
   }
@@ -1106,45 +1402,80 @@
   function renderWorkspacesEditor(name, members, all) {
     var memberIds = {};
     var entryIds = {};
-    members.forEach(function (m) { memberIds[m.id] = true; if (m.entry_point) entryIds[m.id] = true; });
+    members.forEach(function (m) {
+      memberIds[m.id] = true;
+      if (m.entry_point) entryIds[m.id] = true;
+    });
 
-    var rows = all.map(function (ws) {
-      var isMember = !!memberIds[ws.id];
-      var isEntry = !!entryIds[ws.id];
-      // The agent can't be unassigned from a workspace it's the entry agent of;
-      // lock that checkbox and explain, matching the server guard.
-      var disabled = isEntry ? ' disabled' : '';
-      var pill = isEntry ? '<span class="ws-entry-pill">Entry agent</span>' : '';
-      return '<label class="ws-check' + (disabled ? ' is-locked' : '') + '">' +
-        '<input type="checkbox" data-ws-id="' + esc(ws.id) + '"' + (isMember ? ' checked' : '') + disabled + '>' +
-        '<span class="ws-check__name">' + esc(ws.name || ws.id) + '</span>' + pill + '</label>';
-    }).join('');
+    var rows = all
+      .map(function (ws) {
+        var isMember = !!memberIds[ws.id];
+        var isEntry = !!entryIds[ws.id];
+        // The agent can't be unassigned from a workspace it's the entry agent of;
+        // lock that checkbox and explain, matching the server guard.
+        var disabled = isEntry ? ' disabled' : '';
+        var pill = isEntry ? '<span class="ws-entry-pill">Entry agent</span>' : '';
+        return (
+          '<label class="ws-check' +
+          (disabled ? ' is-locked' : '') +
+          '">' +
+          '<input type="checkbox" data-ws-id="' +
+          esc(ws.id) +
+          '"' +
+          (isMember ? ' checked' : '') +
+          disabled +
+          '>' +
+          '<span class="ws-check__name">' +
+          esc(ws.name || ws.id) +
+          '</span>' +
+          pill +
+          '</label>'
+        );
+      })
+      .join('');
 
     els.workspacesBody.innerHTML =
-      (all.length === 0 ? '<p class="stage-hint">No workspaces exist yet. Create one from the Workspaces page.</p>' : '') +
-      '<form class="ws-list" id="workspacesForm">' + rows + '</form>' +
+      (all.length === 0
+        ? '<p class="stage-hint">No workspaces exist yet. Create one from the Workspaces page.</p>'
+        : '') +
+      '<form class="ws-list" id="workspacesForm">' +
+      rows +
+      '</form>' +
       saveBar('workspaces');
 
     wireDirty('workspaces', document.getElementById('workspacesForm'));
-    wireSaveBar('workspaces', function () { saveWorkspaces(name, members); });
+    wireSaveBar('workspaces', function () {
+      saveWorkspaces(name, members);
+    });
   }
 
   function saveWorkspaces(name, members) {
     var checks = els.workspacesBody.querySelectorAll('input[data-ws-id]');
     var desired = [];
-    checks.forEach(function (c) { if (c.checked) desired.push(c.getAttribute('data-ws-id')); });
+    checks.forEach(function (c) {
+      if (c.checked) desired.push(c.getAttribute('data-ws-id'));
+    });
     // Entry-agent memberships have disabled (unchecked-proof) boxes but must stay
     // in the desired set so the server doesn't try to remove them.
-    members.forEach(function (m) { if (m.entry_point && desired.indexOf(m.id) === -1) desired.push(m.id); });
+    members.forEach(function (m) {
+      if (m.entry_point && desired.indexOf(m.id) === -1) desired.push(m.id);
+    });
 
     setSaving('workspaces', true);
     fetch('/api/agents/' + encodeURIComponent(name) + '/workspaces', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace_ids: desired }),
+      body: JSON.stringify({ workspace_ids: desired })
     })
       .then(function (r) {
-        return r.json().catch(function () { return {}; }).then(function (data) { return { status: r.status, data: data }; });
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            return { status: r.status, data: data };
+          });
       })
       .then(function (res) {
         setSaving('workspaces', false);
@@ -1152,28 +1483,50 @@
           state.dirty.workspaces = false;
           // Reflect the reconciled membership everywhere.
           var item = state.byName[name];
-          if (item) { item.workspaces = res.data.workspaces || []; item.workspace_count = res.data.workspace_count || 0; }
+          if (item) {
+            item.workspaces = res.data.workspaces || [];
+            item.workspace_count = res.data.workspace_count || 0;
+          }
           refreshRosterMeta(name, state.detailCache[name] || {});
           renderWorkspaces(name, item, state.detailCache[name]);
           showStatus('workspaces', 'Saved.', 'ok');
-        } else if (res.status === 409 && res.data && res.data.error === 'entry_agent_removal_blocked') {
+        } else if (
+          res.status === 409 &&
+          res.data &&
+          res.data.error === 'entry_agent_removal_blocked'
+        ) {
           showStatus('workspaces', res.data.message || 'Cannot remove the entry agent.', 'error');
         } else {
-          showStatus('workspaces', (res.data && res.data.message) || ('Save failed (' + res.status + ').'), 'error');
+          showStatus(
+            'workspaces',
+            (res.data && res.data.message) || 'Save failed (' + res.status + ').',
+            'error'
+          );
         }
       })
-      .catch(function () { setSaving('workspaces', false); showStatus('workspaces', 'Network error — not saved.', 'error'); });
+      .catch(function () {
+        setSaving('workspaces', false);
+        showStatus('workspaces', 'Network error — not saved.', 'error');
+      });
   }
 
   function fetchWorkspaces() {
     if (state.allWorkspaces) return Promise.resolve(state.allWorkspaces);
     return fetch('/api/workspaces')
-      .then(function (r) { if (!r.ok) throw new Error('workspaces ' + r.status); return r.json(); })
+      .then(function (r) {
+        if (!r.ok) throw new Error('workspaces ' + r.status);
+        return r.json();
+      })
       .then(function (data) {
         var list = (data && data.workspaces) || [];
         // Only assignable (non-trashed / non-missing) workspaces.
-        list = list.filter(function (w) { var s = String(w.status || '').toLowerCase(); return s !== 'trashed' && s !== 'missing'; });
-        list.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+        list = list.filter(function (w) {
+          var s = String(w.status || '').toLowerCase();
+          return s !== 'trashed' && s !== 'missing';
+        });
+        list.sort(function (a, b) {
+          return String(a.name || '').localeCompare(String(b.name || ''));
+        });
         state.allWorkspaces = list;
         return list;
       });
@@ -1193,7 +1546,10 @@
       field('Role', selectInput('cr-role', ROLES, 'general', titleCase), 'cr-role') +
       field('Model', textInput('cr-model', 'gpt-4o-mini'), 'cr-model') +
       field('Description', textareaInput('cr-description', '', 3), 'cr-description') +
-      field('Favorite', '<label class="check"><input id="cr-favorite" type="checkbox"> Favorited</label>') +
+      field(
+        'Favorite',
+        '<label class="check"><input id="cr-favorite" type="checkbox"> Favorited</label>'
+      ) +
       field('Tags', '<div id="cr-tags-host"></div>', 'cr-tags-host') +
       field('Avatar color', colorInput('cr-avatarcolor', '#4f46e5'), 'cr-avatarcolor') +
       '</form>' +
@@ -1205,7 +1561,10 @@
     createTagsInput = null;
     var tagHost = document.getElementById('cr-tags-host');
     if (window.OriTagInput && tagHost) {
-      createTagsInput = window.OriTagInput.createTagInput({ container: tagHost, placeholder: 'Add tag…' });
+      createTagsInput = window.OriTagInput.createTagInput({
+        container: tagHost,
+        placeholder: 'Add tag…'
+      });
     } else if (tagHost) {
       tagHost.innerHTML = '<input id="cr-tags-text" type="text" placeholder="tag1, tag2">';
     }
@@ -1219,16 +1578,31 @@
   function closeCreate() {
     state.creating = false;
     els.createPanel.hidden = true;
-    if (state.selected) { els.stage.hidden = false; }
-    else { els.placeholder.hidden = false; }
+    if (state.selected) {
+      els.stage.hidden = false;
+    } else {
+      els.placeholder.hidden = false;
+    }
   }
 
   function submitCreate() {
     var name = val('cr-name').trim();
     var status = document.querySelector('#savebar-create .save-status');
-    if (!name) { status.textContent = 'Name is required.'; status.className = 'save-status is-error'; return; }
-    var crTags = createTagsInput ? createTagsInput.getTags()
-      : (val('cr-tags-text') ? val('cr-tags-text').split(',').map(function (t) { return t.trim(); }).filter(Boolean) : []);
+    if (!name) {
+      status.textContent = 'Name is required.';
+      status.className = 'save-status is-error';
+      return;
+    }
+    var crTags = createTagsInput
+      ? createTagsInput.getTags()
+      : val('cr-tags-text')
+        ? val('cr-tags-text')
+            .split(',')
+            .map(function (t) {
+              return t.trim();
+            })
+            .filter(Boolean)
+        : [];
     var body = {
       name: name,
       type: 'tool-calling',
@@ -1237,41 +1611,70 @@
       description: val('cr-description'),
       tags: crTags,
       favorite: checked('cr-favorite'),
-      avatar_color: val('cr-avatarcolor'),
+      avatar_color: val('cr-avatarcolor')
     };
     var submit = document.getElementById('createSubmit');
-    submit.disabled = true; submit.textContent = 'Creating…';
-    fetch('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+    submit.disabled = true;
+    submit.textContent = 'Creating…';
+    fetch('/api/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) {
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (d) {
+            return { status: r.status, data: d };
+          });
+      })
       .then(function (res) {
-        submit.disabled = false; submit.textContent = 'Create agent';
+        submit.disabled = false;
+        submit.textContent = 'Create agent';
         if (res.status >= 200 && res.status < 300) {
           reloadThenSelect(name);
           closeCreate();
         } else {
-          status.textContent = (res.data && res.data.message) || ('Create failed (' + res.status + ').');
+          status.textContent =
+            (res.data && res.data.message) || 'Create failed (' + res.status + ').';
           status.className = 'save-status is-error';
         }
       })
-      .catch(function () { submit.disabled = false; submit.textContent = 'Create agent'; status.textContent = 'Network error.'; status.className = 'save-status is-error'; });
+      .catch(function () {
+        submit.disabled = false;
+        submit.textContent = 'Create agent';
+        status.textContent = 'Network error.';
+        status.className = 'save-status is-error';
+      });
   }
 
   // Reload the roster from the server, then select the named agent if present.
   function reloadThenSelect(name) {
     fetch('/api/agents/dashboard/list?sort_by=name&order=asc')
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.json();
+      })
       .then(function (data) {
         var agents = Array.isArray(data) ? data : (data && data.agents) || [];
         state.agents = agents;
         state.byName = {};
-        agents.forEach(function (a) { state.byName[a.name] = a; });
+        agents.forEach(function (a) {
+          state.byName[a.name] = a;
+        });
         state.detailCache = {};
         pruneChecked();
         populateFilterOptions();
         applyFilterSort();
         if (name && state.byName[name]) selectAgent(name, { push: true });
         else if (state.filtered[0]) selectAgent(state.filtered[0].name, { push: false });
-        else { els.stage.hidden = true; els.placeholder.hidden = false; state.selected = null; }
+        else {
+          els.stage.hidden = true;
+          els.placeholder.hidden = false;
+          state.selected = null;
+        }
       });
   }
 
@@ -1280,13 +1683,27 @@
   function onDeleteClick() {
     var name = state.selected;
     if (!name) return;
-    if (!window.confirm('Delete “' + name + '”? This permanently removes the agent and cannot be undone.')) return;
+    if (
+      !window.confirm(
+        'Delete “' + name + '”? This permanently removes the agent and cannot be undone.'
+      )
+    )
+      return;
     deleteAgent(name);
   }
 
   function deleteAgent(name) {
     fetch('/api/agents?name=' + encodeURIComponent(name), { method: 'DELETE' })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (r) {
+        return r
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (d) {
+            return { status: r.status, data: d };
+          });
+      })
       .then(function (res) {
         if (res.status >= 200 && res.status < 300) {
           resetDirty();
@@ -1294,10 +1711,12 @@
           reloadThenSelect(null);
         } else {
           // Attached-to-workspace (409) or built-in (400): surface on the stage.
-          window.alert((res.data && res.data.message) || ('Delete failed (' + res.status + ').'));
+          window.alert((res.data && res.data.message) || 'Delete failed (' + res.status + ').');
         }
       })
-      .catch(function () { window.alert('Network error — agent not deleted.'); });
+      .catch(function () {
+        window.alert('Network error — agent not deleted.');
+      });
   }
 
   function refreshRosterMeta(name, detail) {
@@ -1353,7 +1772,10 @@
     var idx = TAB_ORDER.indexOf(current);
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
       e.preventDefault();
-      var next = e.key === 'ArrowRight' ? (idx + 1) % TAB_ORDER.length : (idx - 1 + TAB_ORDER.length) % TAB_ORDER.length;
+      var next =
+        e.key === 'ArrowRight'
+          ? (idx + 1) % TAB_ORDER.length
+          : (idx - 1 + TAB_ORDER.length) % TAB_ORDER.length;
       requestTab(TAB_ORDER[next], true);
     } else if (e.key === 'Home') {
       e.preventDefault();
@@ -1368,8 +1790,12 @@
 
   function wireDirty(tab, form) {
     if (!form) return;
-    form.addEventListener('input', function () { markDirty(tab, true); });
-    form.addEventListener('change', function () { markDirty(tab, true); });
+    form.addEventListener('input', function () {
+      markDirty(tab, true);
+    });
+    form.addEventListener('change', function () {
+      markDirty(tab, true);
+    });
   }
 
   function markDirty(tab, on) {
@@ -1388,12 +1814,20 @@
     if (!bar) return;
     bar.querySelector('[data-role="save"]').addEventListener('click', onSave);
     var revert = bar.querySelector('[data-role="revert"]');
-    if (revert) revert.addEventListener('click', function () {
-      state.dirty[tab] = false;
-      if (tab === 'overview') renderOverview(state.selected, state.detailCache[state.selected]);
-      else if (tab === 'prompt') { els.promptBody.dataset.loadedFor = ''; renderPrompt(state.selected); }
-      else if (tab === 'workspaces') renderWorkspaces(state.selected, state.byName[state.selected], state.detailCache[state.selected]);
-    });
+    if (revert)
+      revert.addEventListener('click', function () {
+        state.dirty[tab] = false;
+        if (tab === 'overview') renderOverview(state.selected, state.detailCache[state.selected]);
+        else if (tab === 'prompt') {
+          els.promptBody.dataset.loadedFor = '';
+          renderPrompt(state.selected);
+        } else if (tab === 'workspaces')
+          renderWorkspaces(
+            state.selected,
+            state.byName[state.selected],
+            state.detailCache[state.selected]
+          );
+      });
     markDirty(tab, false);
   }
 
@@ -1401,7 +1835,10 @@
     var bar = document.getElementById('savebar-' + tab);
     if (!bar) return;
     var save = bar.querySelector('[data-role="save"]');
-    if (save) { save.disabled = on || !state.dirty[tab]; save.textContent = on ? 'Saving…' : 'Save'; }
+    if (save) {
+      save.disabled = on || !state.dirty[tab];
+      save.textContent = on ? 'Saving…' : 'Save';
+    }
   }
 
   function showStatus(tab, msg, kind) {
@@ -1413,7 +1850,9 @@
     status.className = 'save-status is-' + (kind || 'muted');
     if (kind === 'ok' || kind === 'muted') {
       window.clearTimeout(status._t);
-      status._t = window.setTimeout(function () { status.textContent = ''; }, 2600);
+      status._t = window.setTimeout(function () {
+        status.textContent = '';
+      }, 2600);
     }
   }
 
@@ -1429,7 +1868,10 @@
     btn.type = 'button';
     btn.className = 'conflict-banner__action';
     btn.textContent = actionLabel;
-    btn.addEventListener('click', function () { clearBanner(tab); onAction(); });
+    btn.addEventListener('click', function () {
+      clearBanner(tab);
+      onAction();
+    });
     banner.appendChild(btn);
     panel.insertBefore(banner, panel.firstChild);
   }
@@ -1441,7 +1883,9 @@
 
   /* ---- unsaved guard ------------------------------------------------------- */
 
-  function anyDirty() { return !!(state.dirty.overview || state.dirty.prompt || state.dirty.workspaces); }
+  function anyDirty() {
+    return !!(state.dirty.overview || state.dirty.prompt || state.dirty.workspaces);
+  }
 
   function guardUnsaved() {
     if (!anyDirty()) return true;
@@ -1450,7 +1894,11 @@
     return ok;
   }
 
-  function resetDirty() { state.dirty.overview = false; state.dirty.prompt = false; state.dirty.workspaces = false; }
+  function resetDirty() {
+    state.dirty.overview = false;
+    state.dirty.prompt = false;
+    state.dirty.workspaces = false;
+  }
 
   /* ---- roster interaction -------------------------------------------------- */
 
@@ -1459,7 +1907,10 @@
   // click there only changes bulk-selection state (PRD FR3/FR4).
   function onListClick(e) {
     var open = e.target.closest('.roster-card__open');
-    if (open && open.dataset.open) { selectAgent(open.dataset.open); return; }
+    if (open && open.dataset.open) {
+      selectAgent(open.dataset.open);
+      return;
+    }
 
     // Shift-click on (or near) a checkbox extends a contiguous range from the
     // anchor. The native toggle still fires via onListChange; here we only widen
@@ -1469,7 +1920,9 @@
       e.preventDefault();
       var card = check.closest('.roster-card');
       var idx = card ? Number(card.dataset.index) : -1;
-      if (idx >= 0) { rangeSelectTo(idx); }
+      if (idx >= 0) {
+        rangeSelectTo(idx);
+      }
     }
   }
 
@@ -1513,8 +1966,9 @@
       var c = open.closest('.roster-card');
       var i = c ? Number(c.dataset.index) : -1;
       if (i < 0) return;
-      if (e.shiftKey) { rangeSelectTo(i); }
-      else {
+      if (e.shiftKey) {
+        rangeSelectTo(i);
+      } else {
         var name = c.dataset.name;
         var nowChecked = !state.checked.has(name);
         setChecked(name, nowChecked);
@@ -1549,7 +2003,9 @@
   // Check every agent in the current filtered result set — and only those, never
   // agents hidden by the active filters (PRD FR7).
   function selectAllVisible() {
-    state.filtered.forEach(function (a) { state.checked.add(a.name); });
+    state.filtered.forEach(function (a) {
+      state.checked.add(a.name);
+    });
     reflectCheckedInDom();
     updateBulkBar();
     announce(state.checked.size + ' agent' + (state.checked.size === 1 ? '' : 's') + ' selected.');
@@ -1595,9 +2051,13 @@
   function hiddenCheckedCount() {
     if (state.checked.size === 0) return 0;
     var visible = {};
-    state.filtered.forEach(function (a) { visible[a.name] = true; });
+    state.filtered.forEach(function (a) {
+      visible[a.name] = true;
+    });
     var hidden = 0;
-    state.checked.forEach(function (name) { if (!visible[name]) hidden++; });
+    state.checked.forEach(function (name) {
+      if (!visible[name]) hidden++;
+    });
     return hidden;
   }
 
@@ -1630,11 +2090,20 @@
     if (isPermanent(agent)) {
       var role = String(agent.role || '').toLowerCase();
       var source = String(agent.source || '').toLowerCase();
-      if (source === 'cli' || role === 'cli_agent') return { eligible: false, reason: 'Built-in CLI agent.' };
+      if (source === 'cli' || role === 'cli_agent')
+        return { eligible: false, reason: 'Built-in CLI agent.' };
       return { eligible: false, reason: 'System assistant.' };
     }
     if ((agent.workspace_count || 0) > 0) {
-      return { eligible: false, reason: 'Attached to ' + agent.workspace_count + ' workspace' + (agent.workspace_count === 1 ? '' : 's') + '.' };
+      return {
+        eligible: false,
+        reason:
+          'Attached to ' +
+          agent.workspace_count +
+          ' workspace' +
+          (agent.workspace_count === 1 ? '' : 's') +
+          '.'
+      };
     }
     return { eligible: true, reason: '' };
   }
@@ -1675,23 +2144,51 @@
 
   function deleteGroupHTML(title, rows, danger) {
     if (!rows.length) return '';
-    var items = rows.map(function (r) {
-      var agent = state.byName[r.name];
-      var reason = r.reason ? '<span class="bulk-dialog__reason">' + esc(r.reason) + '</span>' : '';
-      var wsLink = '';
-      if (agent && Array.isArray(agent.workspaces) && agent.workspaces.length) {
-        var ws = agent.workspaces[0];
-        if (ws && ws.id) wsLink = ' <a class="bulk-dialog__wslink" href="/workspaces/' + encodeURIComponent(ws.id) + '">' + esc(ws.name || 'workspace') + '</a>';
-      }
-      return '<li><span class="bulk-dialog__agent">' + esc(r.name) + '</span>' + reason + wsLink + '</li>';
-    }).join('');
-    return '<div class="bulk-dialog__group' + (danger ? ' is-danger' : '') + '">' +
-      '<h3 class="bulk-dialog__grouptitle">' + esc(title) + ' (' + rows.length + ')</h3>' +
-      '<ul class="bulk-dialog__grouplist">' + items + '</ul></div>';
+    var items = rows
+      .map(function (r) {
+        var agent = state.byName[r.name];
+        var reason = r.reason
+          ? '<span class="bulk-dialog__reason">' + esc(r.reason) + '</span>'
+          : '';
+        var wsLink = '';
+        if (agent && Array.isArray(agent.workspaces) && agent.workspaces.length) {
+          var ws = agent.workspaces[0];
+          if (ws && ws.id)
+            wsLink =
+              ' <a class="bulk-dialog__wslink" href="/workspaces/' +
+              encodeURIComponent(ws.id) +
+              '">' +
+              esc(ws.name || 'workspace') +
+              '</a>';
+        }
+        return (
+          '<li><span class="bulk-dialog__agent">' +
+          esc(r.name) +
+          '</span>' +
+          reason +
+          wsLink +
+          '</li>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="bulk-dialog__group' +
+      (danger ? ' is-danger' : '') +
+      '">' +
+      '<h3 class="bulk-dialog__grouptitle">' +
+      esc(title) +
+      ' (' +
+      rows.length +
+      ')</h3>' +
+      '<ul class="bulk-dialog__grouplist">' +
+      items +
+      '</ul></div>'
+    );
   }
 
   function closeBulkDelete() {
-    if (els.bulkDeleteDialog.open && typeof els.bulkDeleteDialog.close === 'function') els.bulkDeleteDialog.close();
+    if (els.bulkDeleteDialog.open && typeof els.bulkDeleteDialog.close === 'function')
+      els.bulkDeleteDialog.close();
     else els.bulkDeleteDialog.removeAttribute('open');
     // Return focus to a stable control rather than a possibly-removed card.
     if (els.selectAll) els.selectAll.focus();
@@ -1701,8 +2198,15 @@
     var btn = els.bulkDeleteConfirm;
     if (btn.disabled || btn.dataset.busy === '1') return; // prevent double submit
     var names;
-    try { names = JSON.parse(btn.dataset.names || '[]'); } catch (e) { names = []; }
-    if (!names.length) { closeBulkDelete(); return; }
+    try {
+      names = JSON.parse(btn.dataset.names || '[]');
+    } catch (e) {
+      names = [];
+    }
+    if (!names.length) {
+      closeBulkDelete();
+      return;
+    }
 
     // If the focused agent is among those being deleted, honor the unsaved guard.
     if (state.selected && names.indexOf(state.selected) !== -1 && !guardUnsaved()) return;
@@ -1716,17 +2220,35 @@
     fetch('/api/agents/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ operation: 'delete', agent_names: names }),
+      body: JSON.stringify({ operation: 'delete', agent_names: names })
     })
-      .then(function (r) { return r.json().catch(function () { return null; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (r) {
+        return r
+          .json()
+          .catch(function () {
+            return null;
+          })
+          .then(function (d) {
+            return { status: r.status, data: d };
+          });
+      })
       .then(function (res) {
         btn.dataset.busy = '';
         btn.textContent = restoreLabel;
-        if (res.status < 200 || res.status >= 300 || !res.data || !Array.isArray(res.data.results)) {
+        if (
+          res.status < 200 ||
+          res.status >= 300 ||
+          !res.data ||
+          !Array.isArray(res.data.results)
+        ) {
           // Do NOT claim any deletion happened on a malformed/error response.
           announce('Bulk delete failed.');
-          els.bulkDeleteBody.insertAdjacentHTML('afterbegin',
-            '<p class="bulk-dialog__error" role="alert">Delete failed (' + res.status + '). No agents were changed.</p>');
+          els.bulkDeleteBody.insertAdjacentHTML(
+            'afterbegin',
+            '<p class="bulk-dialog__error" role="alert">Delete failed (' +
+              res.status +
+              '). No agents were changed.</p>'
+          );
           btn.disabled = false;
           return;
         }
@@ -1737,8 +2259,10 @@
         btn.disabled = false;
         btn.textContent = restoreLabel;
         announce('Network error — no agents deleted.');
-        els.bulkDeleteBody.insertAdjacentHTML('afterbegin',
-          '<p class="bulk-dialog__error" role="alert">Network error — no agents were deleted.</p>');
+        els.bulkDeleteBody.insertAdjacentHTML(
+          'afterbegin',
+          '<p class="bulk-dialog__error" role="alert">Network error — no agents were deleted.</p>'
+        );
         console.error('[roster] bulk delete failed', err);
       });
   }
@@ -1781,12 +2305,25 @@
     els.bulkResultSummary.textContent = parts.join(' · ');
 
     // List only non-success results — those are the ones worth inspecting.
-    var rows = results.filter(function (r) { return r.status !== 'succeeded'; }).map(function (r) {
-      var reason = r.message ? esc(r.message) : esc(r.reason_code || r.status);
-      return '<li class="bulk-result__item is-' + esc(r.status) + '">' +
-        '<span class="bulk-result__name">' + esc(r.name) + '</span>' +
-        '<span class="bulk-result__reason">' + reason + '</span></li>';
-    }).join('');
+    var rows = results
+      .filter(function (r) {
+        return r.status !== 'succeeded';
+      })
+      .map(function (r) {
+        var reason = r.message ? esc(r.message) : esc(r.reason_code || r.status);
+        return (
+          '<li class="bulk-result__item is-' +
+          esc(r.status) +
+          '">' +
+          '<span class="bulk-result__name">' +
+          esc(r.name) +
+          '</span>' +
+          '<span class="bulk-result__reason">' +
+          reason +
+          '</span></li>'
+        );
+      })
+      .join('');
     els.bulkResultList.innerHTML = rows;
     els.bulkResult.hidden = false;
   }
@@ -1819,31 +2356,48 @@
         '<div id="bulkTagsInputHost"></div>';
       var host = document.getElementById('bulkTagsInputHost');
       if (window.OriTagInput && host) {
-        bulkTagsInput = window.OriTagInput.createTagInput({ container: host, placeholder: 'Add tag…' });
+        bulkTagsInput = window.OriTagInput.createTagInput({
+          container: host,
+          placeholder: 'Add tag…'
+        });
       } else if (host) {
-        host.innerHTML = '<input id="bulkTagsText" type="text" class="bulk-dialog__text" placeholder="tag1, tag2">';
+        host.innerHTML =
+          '<input id="bulkTagsText" type="text" class="bulk-dialog__text" placeholder="tag1, tag2">';
       }
     } else {
       // Remove: offer the union of tags across the checked set as a checklist so
       // the user picks from values that actually exist (PRD FR27).
       var union = tagsUnion(Array.from(state.checked));
       if (union.length === 0) {
-        els.bulkTagsBody.innerHTML = '<p class="bulk-dialog__none">The selected agents have no tags to remove.</p>';
+        els.bulkTagsBody.innerHTML =
+          '<p class="bulk-dialog__none">The selected agents have no tags to remove.</p>';
         els.bulkTagsConfirm.disabled = true;
       } else {
         els.bulkTagsBody.innerHTML =
           '<p class="bulk-dialog__lead">Remove these tags from every selected agent that has them.</p>' +
-          '<div class="bulk-tags-checklist">' + union.map(function (t) {
-            return '<label class="bulk-tags-checklist__item"><input type="checkbox" value="' + esc(t) + '"> ' + esc(t) + '</label>';
-          }).join('') + '</div>';
+          '<div class="bulk-tags-checklist">' +
+          union
+            .map(function (t) {
+              return (
+                '<label class="bulk-tags-checklist__item"><input type="checkbox" value="' +
+                esc(t) +
+                '"> ' +
+                esc(t) +
+                '</label>'
+              );
+            })
+            .join('') +
+          '</div>';
       }
     }
-    if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    else dlg.setAttribute('open', '');
   }
 
   function closeBulkTags() {
     var dlg = els.bulkTagsDialog;
-    if (dlg.open && typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+    if (dlg.open && typeof dlg.close === 'function') dlg.close();
+    else dlg.removeAttribute('open');
     bulkTagsInput = null;
     if (els.selectAll) els.selectAll.focus();
   }
@@ -1857,10 +2411,15 @@
       var tags = (a && a.metadata && a.metadata.tags) || [];
       tags.forEach(function (t) {
         var key = String(t).toLowerCase();
-        if (!seen[key]) { seen[key] = true; out.push(t); }
+        if (!seen[key]) {
+          seen[key] = true;
+          out.push(t);
+        }
       });
     });
-    out.sort(function (a, b) { return String(a).localeCompare(String(b)); });
+    out.sort(function (a, b) {
+      return String(a).localeCompare(String(b));
+    });
     return out;
   }
 
@@ -1876,11 +2435,20 @@
         tags = txt ? txt.value.split(',') : [];
       }
     } else {
-      els.bulkTagsBody.querySelectorAll('input[type="checkbox"]:checked').forEach(function (c) { tags.push(c.value); });
+      els.bulkTagsBody.querySelectorAll('input[type="checkbox"]:checked').forEach(function (c) {
+        tags.push(c.value);
+      });
     }
-    tags = tags.map(function (t) { return String(t).trim(); }).filter(Boolean);
+    tags = tags
+      .map(function (t) {
+        return String(t).trim();
+      })
+      .filter(Boolean);
     if (tags.length === 0) {
-      els.bulkTagsBody.insertAdjacentHTML('afterbegin', '<p class="bulk-dialog__error" role="alert">Enter at least one tag.</p>');
+      els.bulkTagsBody.insertAdjacentHTML(
+        'afterbegin',
+        '<p class="bulk-dialog__error" role="alert">Enter at least one tag.</p>'
+      );
       return;
     }
     var op = mode === 'add' ? 'add_tags' : 'remove_tags';
@@ -1888,20 +2456,34 @@
     btn.disabled = true;
     var restore = btn.textContent;
     btn.textContent = 'Working…';
-    submitBulkMetadata({ operation: op, agent_names: Array.from(state.checked), tags: tags }, function () {
-      btn.dataset.busy = ''; btn.disabled = false; btn.textContent = restore;
-    }, closeBulkTags);
+    submitBulkMetadata(
+      { operation: op, agent_names: Array.from(state.checked), tags: tags },
+      function () {
+        btn.dataset.busy = '';
+        btn.disabled = false;
+        btn.textContent = restore;
+      },
+      closeBulkTags
+    );
   }
 
   function runBulkFavorite(favorite) {
     if (state.checked.size === 0) return;
     if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
     var btns = [els.bulkFavorite, els.bulkUnfavorite];
-    btns.forEach(function (b) { b.disabled = true; });
+    btns.forEach(function (b) {
+      b.disabled = true;
+    });
     announce(favorite ? 'Favoriting…' : 'Unfavoriting…');
-    submitBulkMetadata({ operation: 'set_favorite', agent_names: Array.from(state.checked), favorite: favorite }, function () {
-      btns.forEach(function (b) { b.disabled = false; });
-    }, null);
+    submitBulkMetadata(
+      { operation: 'set_favorite', agent_names: Array.from(state.checked), favorite: favorite },
+      function () {
+        btns.forEach(function (b) {
+          b.disabled = false;
+        });
+      },
+      null
+    );
   }
 
   // Shared bulk-metadata POST with shared-definition confirmation retry. `always`
@@ -1911,23 +2493,50 @@
     fetch('/api/agents/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload)
     })
-      .then(function (r) { return r.json().catch(function () { return null; }).then(function (d) { return { status: r.status, data: d }; }); })
+      .then(function (r) {
+        return r
+          .json()
+          .catch(function () {
+            return null;
+          })
+          .then(function (d) {
+            return { status: r.status, data: d };
+          });
+      })
       .then(function (res) {
         if (always) always();
-        if (res.status < 200 || res.status >= 300 || !res.data || !Array.isArray(res.data.results)) {
+        if (
+          res.status < 200 ||
+          res.status >= 300 ||
+          !res.data ||
+          !Array.isArray(res.data.results)
+        ) {
           announce('Bulk update failed.');
           return;
         }
         var results = res.data.results;
         // Any agent needing shared-definition confirmation → ask once, resend
         // with confirm_shared_edit for the whole batch (PRD FR31).
-        var needsConfirm = results.some(function (r) { return r.reason_code === 'shared_edit_requires_confirmation'; });
+        var needsConfirm = results.some(function (r) {
+          return r.reason_code === 'shared_edit_requires_confirmation';
+        });
         if (needsConfirm && !payload.confirm_shared_edit) {
-          var n = results.filter(function (r) { return r.reason_code === 'shared_edit_requires_confirmation'; }).length;
-          if (window.confirm(n + ' selected agent(s) are attached to multiple workspaces. This change affects all of them. Apply it?')) {
-            submitBulkMetadata(Object.assign({}, payload, { confirm_shared_edit: true }), always, onDone);
+          var n = results.filter(function (r) {
+            return r.reason_code === 'shared_edit_requires_confirmation';
+          }).length;
+          if (
+            window.confirm(
+              n +
+                ' selected agent(s) are attached to multiple workspaces. This change affects all of them. Apply it?'
+            )
+          ) {
+            submitBulkMetadata(
+              Object.assign({}, payload, { confirm_shared_edit: true }),
+              always,
+              onDone
+            );
             return;
           }
         }
@@ -1954,12 +2563,25 @@
     if (summary.skipped) parts.push(summary.skipped + ' skipped');
     if (summary.failed) parts.push(summary.failed + ' failed');
     els.bulkResultSummary.textContent = parts.join(' · ');
-    var rows = results.filter(function (r) { return r.status !== 'succeeded'; }).map(function (r) {
-      var reason = r.message ? esc(r.message) : esc(r.reason_code || r.status);
-      return '<li class="bulk-result__item is-' + esc(r.status) + '">' +
-        '<span class="bulk-result__name">' + esc(r.name) + '</span>' +
-        '<span class="bulk-result__reason">' + reason + '</span></li>';
-    }).join('');
+    var rows = results
+      .filter(function (r) {
+        return r.status !== 'succeeded';
+      })
+      .map(function (r) {
+        var reason = r.message ? esc(r.message) : esc(r.reason_code || r.status);
+        return (
+          '<li class="bulk-result__item is-' +
+          esc(r.status) +
+          '">' +
+          '<span class="bulk-result__name">' +
+          esc(r.name) +
+          '</span>' +
+          '<span class="bulk-result__reason">' +
+          reason +
+          '</span></li>'
+        );
+      })
+      .join('');
     els.bulkResultList.innerHTML = rows;
     els.bulkResult.hidden = false;
     var msg = (summary.succeeded || 0) + ' updated';
@@ -1967,8 +2589,17 @@
     announce(msg + '.');
   }
 
-  function onSearch() { state.query = els.search.value || ''; applyFilterSort(); syncUrl(state.selected, false); }
-  function onSort() { state.sort = els.sort.value || 'name-asc'; applyFilterSort(); if (state.selected) highlightSelected(); syncUrl(state.selected, false); }
+  function onSearch() {
+    state.query = els.search.value || '';
+    applyFilterSort();
+    syncUrl(state.selected, false);
+  }
+  function onSort() {
+    state.sort = els.sort.value || 'name-asc';
+    applyFilterSort();
+    if (state.selected) highlightSelected();
+    syncUrl(state.selected, false);
+  }
 
   /* ---- form field builders ------------------------------------------------- */
 
@@ -1981,27 +2612,66 @@
     return '<div class="field">' + lab + '<div class="field__control">' + control + '</div></div>';
   }
   function textInput(id, value, placeholder) {
-    return '<input id="' + id + '" type="text" value="' + esc(value) + '"' +
-      (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') + '>';
+    return (
+      '<input id="' +
+      id +
+      '" type="text" value="' +
+      esc(value) +
+      '"' +
+      (placeholder ? ' placeholder="' + esc(placeholder) + '"' : '') +
+      '>'
+    );
   }
   // A read-only text input for derived values (e.g. Provider, set by the model).
   // Kept as an <input> so the form still submits its value, but not user-editable.
   function readonlyInput(id, value, title) {
-    return '<input id="' + id + '" class="field__readonly" type="text" readonly tabindex="-1" value="' + esc(value) + '"' +
-      (title ? ' title="' + esc(title) + '"' : '') + '>';
+    return (
+      '<input id="' +
+      id +
+      '" class="field__readonly" type="text" readonly tabindex="-1" value="' +
+      esc(value) +
+      '"' +
+      (title ? ' title="' + esc(title) + '"' : '') +
+      '>'
+    );
   }
   function numInput(id, value, min, max, step) {
-    return '<input id="' + id + '" type="number" value="' + esc(value === '' ? '' : value) + '"' +
-      (min !== '' ? ' min="' + min + '"' : '') + (max ? ' max="' + max + '"' : '') + (step ? ' step="' + step + '"' : '') + '>';
+    return (
+      '<input id="' +
+      id +
+      '" type="number" value="' +
+      esc(value === '' ? '' : value) +
+      '"' +
+      (min !== '' ? ' min="' + min + '"' : '') +
+      (max ? ' max="' + max + '"' : '') +
+      (step ? ' step="' + step + '"' : '') +
+      '>'
+    );
   }
   function checkInput(id, on) {
-    return '<label class="check"><input id="' + id + '" type="checkbox"' + (on ? ' checked' : '') + '> Allowed</label>';
+    return (
+      '<label class="check"><input id="' +
+      id +
+      '" type="checkbox"' +
+      (on ? ' checked' : '') +
+      '> Allowed</label>'
+    );
   }
   function selectInput(id, options, value, labeler) {
-    var opts = options.map(function (o) {
-      var label = labeler ? labeler(o) : o;
-      return '<option value="' + esc(o) + '"' + (o === value ? ' selected' : '') + '>' + esc(label) + '</option>';
-    }).join('');
+    var opts = options
+      .map(function (o) {
+        var label = labeler ? labeler(o) : o;
+        return (
+          '<option value="' +
+          esc(o) +
+          '"' +
+          (o === value ? ' selected' : '') +
+          '>' +
+          esc(label) +
+          '</option>'
+        );
+      })
+      .join('');
     return '<select id="' + id + '">' + opts + '</select>';
   }
   function textareaInput(id, value, rows) {
@@ -2010,17 +2680,29 @@
   // Color picker + hex text, kept in sync, for the avatar color field.
   function colorInput(id, value) {
     var v = /^#[0-9a-fA-F]{6}$/.test(String(value)) ? value : '#4f46e5';
-    return '<span class="color-input">' +
-      '<input id="' + id + '" type="color" value="' + esc(v) + '">' +
-      '<input id="' + id + '-hex" type="text" class="color-input__hex" value="' + esc(v) + '" maxlength="7" spellcheck="false" aria-label="Avatar color hex">' +
-      '</span>';
+    return (
+      '<span class="color-input">' +
+      '<input id="' +
+      id +
+      '" type="color" value="' +
+      esc(v) +
+      '">' +
+      '<input id="' +
+      id +
+      '-hex" type="text" class="color-input__hex" value="' +
+      esc(v) +
+      '" maxlength="7" spellcheck="false" aria-label="Avatar color hex">' +
+      '</span>'
+    );
   }
   // Keep the color picker and its hex text field in sync (either drives the other).
   function wireColorInput(id) {
     var picker = document.getElementById(id);
     var hex = document.getElementById(id + '-hex');
     if (!picker || !hex) return;
-    picker.addEventListener('input', function () { hex.value = picker.value; });
+    picker.addEventListener('input', function () {
+      hex.value = picker.value;
+    });
     hex.addEventListener('input', function () {
       if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) picker.value = hex.value;
     });
@@ -2030,7 +2712,13 @@
   // model that isn't in the catalog (custom, or a provider without a key) is
   // preserved under a "Current" group so switching to a picker never drops it.
   function modelSelectInput(id, currentValue, currentProvider, typeFilter) {
-    return '<select id="' + id + '">' + modelOptionsHTML(currentValue, currentProvider, typeFilter) + '</select>';
+    return (
+      '<select id="' +
+      id +
+      '">' +
+      modelOptionsHTML(currentValue, currentProvider, typeFilter) +
+      '</select>'
+    );
   }
   // Build the grouped <option>/<optgroup> markup for the model picker. Each option
   // carries the data the overview surfaces: provider (for provider sync), pricing
@@ -2054,16 +2742,24 @@
         if (sel) matched = true;
         opts += modelOptionHTML(m.value, m.provider || p.name, m, sel);
       });
-      if (opts) groups += '<optgroup label="' + esc(p.display_name || p.name) + '">' + opts + '</optgroup>';
+      if (opts)
+        groups += '<optgroup label="' + esc(p.display_name || p.name) + '">' + opts + '</optgroup>';
     });
     // Preserve the agent's current model when the type filter excluded it (its real
     // category differs) or it isn't in the catalog at all. Enrich it from the full
     // catalog so its note/warning still show even outside the filtered groups.
     if (currentValue && !matched) {
       var meta = modelMeta(currentValue);
-      groups = '<optgroup label="Current">' +
-        modelOptionHTML(currentValue, (meta && meta.provider) || currentProvider || '', meta, true) +
-        '</optgroup>' + groups;
+      groups =
+        '<optgroup label="Current">' +
+        modelOptionHTML(
+          currentValue,
+          (meta && meta.provider) || currentProvider || '',
+          meta,
+          true
+        ) +
+        '</optgroup>' +
+        groups;
     }
     return groups;
   }
@@ -2071,33 +2767,53 @@
   // for a truly unknown model). Encodes the data the overview reads back.
   function modelOptionHTML(value, provider, meta, selected) {
     var pricing = meta && meta.pricing ? meta.pricing : '';
-    var goodFor = meta && Array.isArray(meta.good_for) && meta.good_for.length ? meta.good_for[0] : '';
+    var goodFor =
+      meta && Array.isArray(meta.good_for) && meta.good_for.length ? meta.good_for[0] : '';
     var legacy = !!(meta && meta.is_legacy);
     var dep = meta && meta.deprecation_date ? meta.deprecation_date : '';
     var label = (meta && meta.label) || value;
-    return '<option value="' + esc(value) + '"' +
-      ' data-provider="' + esc(provider) + '"' +
+    return (
+      '<option value="' +
+      esc(value) +
+      '"' +
+      ' data-provider="' +
+      esc(provider) +
+      '"' +
       (pricing ? ' data-pricing="' + esc(pricing) + '"' : '') +
       (goodFor ? ' data-goodfor="' + esc(goodFor) + '"' : '') +
       (legacy ? ' data-legacy="1"' : '') +
       (dep ? ' data-deprecation="' + esc(dep) + '"' : '') +
-      (selected ? ' selected' : '') + '>' +
-      esc(label) + (legacy ? ' ⚠' : '') + (pricing ? ' · ' + esc(pricing) : '') +
-      '</option>';
+      (selected ? ' selected' : '') +
+      '>' +
+      esc(label) +
+      (legacy ? ' ⚠' : '') +
+      (pricing ? ' · ' + esc(pricing) : '') +
+      '</option>'
+    );
   }
   function saveBar(tab) {
-    return '<div class="save-bar" id="savebar-' + tab + '">' +
+    return (
+      '<div class="save-bar" id="savebar-' +
+      tab +
+      '">' +
       '<span class="dirty-note"></span>' +
       '<span class="save-status is-muted"></span>' +
       '<button type="button" class="btn-ghost" data-role="revert">Revert</button>' +
       '<button type="button" class="btn-primary" data-role="save" disabled>Save</button>' +
-      '</div>';
+      '</div>'
+    );
   }
 
   /* ---- misc helpers -------------------------------------------------------- */
 
-  function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
-  function checked(id) { var el = document.getElementById(id); return !!(el && el.checked); }
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? el.value : '';
+  }
+  function checked(id) {
+    var el = document.getElementById(id);
+    return !!(el && el.checked);
+  }
 
   function vital(label, value) {
     return '<span class="vital"><span>' + esc(label) + '</span><b>' + esc(value) + '</b></span>';
@@ -2107,24 +2823,58 @@
     var idAttr = id ? ' id="' + id + '"' : '';
     var image = agent && agent.metadata && agent.metadata.avatar_image;
     if (image) {
-      return '<div class="' + className + '"' + idAttr + ' style="padding:0;overflow:hidden;">' +
-        '<img src="/avatars/' + esc(String(image)) + '" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;"></div>';
+      return (
+        '<div class="' +
+        className +
+        '"' +
+        idAttr +
+        ' style="padding:0;overflow:hidden;">' +
+        '<img src="/avatars/' +
+        esc(String(image)) +
+        '" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;"></div>'
+      );
     }
-    var color = (agent && agent.metadata && agent.metadata.avatar_color) || colorFor(agent ? agent.name : '');
-    return '<div class="' + className + '"' + idAttr + ' style="background:' + esc(color) + ';">' + esc(initials(agent ? agent.name : '')) + '</div>';
+    var color =
+      (agent && agent.metadata && agent.metadata.avatar_color) || colorFor(agent ? agent.name : '');
+    return (
+      '<div class="' +
+      className +
+      '"' +
+      idAttr +
+      ' style="background:' +
+      esc(color) +
+      ';">' +
+      esc(initials(agent ? agent.name : '')) +
+      '</div>'
+    );
   }
 
   function initials(name) {
-    var parts = String(name || '?').trim().split(/\s+/);
+    var parts = String(name || '?')
+      .trim()
+      .split(/\s+/);
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   }
 
   function colorFor(name) {
     // 700-level shades so white initials clear WCAG AA contrast (>= 4.5:1).
-    var palette = ['#4338ca', '#0e7490', '#6d28d9', '#047857', '#b45309', '#be185d', '#1d4ed8', '#b91c1c'];
+    var palette = [
+      '#4338ca',
+      '#0e7490',
+      '#6d28d9',
+      '#047857',
+      '#b45309',
+      '#be185d',
+      '#1d4ed8',
+      '#b91c1c'
+    ];
     var sum = 0;
-    String(name || '').split('').forEach(function (c) { sum += c.charCodeAt(0); });
+    String(name || '')
+      .split('')
+      .forEach(function (c) {
+        sum += c.charCodeAt(0);
+      });
     return palette[sum % palette.length];
   }
 
@@ -2136,7 +2886,9 @@
     var source = String(agent.source || '').toLowerCase();
     var role = String(agent.role || '').toLowerCase();
     if (source === 'cli' || role === 'cli_agent') return true;
-    var name = String(agent.name || '').trim().toLowerCase();
+    var name = String(agent.name || '')
+      .trim()
+      .toLowerCase();
     return name === 'ori' || name === '__assistant__';
   }
 
@@ -2157,9 +2909,10 @@
   // Locale-aware relative "last active" so the Recently Active sort is legible
   // (PRD FR60). Returns '' when there's no usable timestamp. A zero/epoch value
   // (never active) is treated as missing rather than "55 years ago".
-  var relTimeFmt = (typeof Intl !== 'undefined' && Intl.RelativeTimeFormat)
-    ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
-    : null;
+  var relTimeFmt =
+    typeof Intl !== 'undefined' && Intl.RelativeTimeFormat
+      ? new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+      : null;
   function lastActiveLabel(agent) {
     var t = lastActive(agent);
     if (!t) return '';
@@ -2168,8 +2921,12 @@
     if (absMin < 1) return 'Active now';
     if (!relTimeFmt) return '';
     var units = [
-      ['year', 525600], ['month', 43200], ['week', 10080],
-      ['day', 1440], ['hour', 60], ['minute', 1],
+      ['year', 525600],
+      ['month', 43200],
+      ['week', 10080],
+      ['day', 1440],
+      ['hour', 60],
+      ['minute', 1]
     ];
     for (var i = 0; i < units.length; i++) {
       var perUnit = units[i][1];
@@ -2182,9 +2939,13 @@
   }
 
   function titleCase(s) {
-    s = String(s || '').replace(/[_-]+/g, ' ').trim();
+    s = String(s || '')
+      .replace(/[_-]+/g, ' ')
+      .trim();
     if (!s) return '';
-    return s.replace(/\w\S*/g, function (w) { return w.charAt(0).toUpperCase() + w.slice(1); });
+    return s.replace(/\w\S*/g, function (w) {
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    });
   }
 
   // Serialize search, sort, filters, focused agent, and active tab to the URL.
@@ -2203,7 +2964,9 @@
     if (f.assignment) params.set('assign', f.assignment);
     if (f.favorite) params.set('fav', '1');
     if (f.tag) params.append('tag', f.tag);
-    f.health.forEach(function (h) { params.append('health', h); });
+    f.health.forEach(function (h) {
+      params.append('health', h);
+    });
 
     var qs = params.toString();
     var url = window.location.pathname + (qs ? '?' + qs : '');
@@ -2225,12 +2988,18 @@
     if (els.sort) els.sort.value = state.sort;
 
     var f = { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false };
-    var role = p.get('role'); if (role) f.role = role;
-    var source = p.get('source'); if (source === 'user' || source === 'cli') f.source = source;
-    var assign = p.get('assign'); if (assign === 'library' || assign === 'assigned') f.assignment = assign;
+    var role = p.get('role');
+    if (role) f.role = role;
+    var source = p.get('source');
+    if (source === 'user' || source === 'cli') f.source = source;
+    var assign = p.get('assign');
+    if (assign === 'library' || assign === 'assigned') f.assignment = assign;
     if (p.get('fav') === '1') f.favorite = true;
-    var tag = p.get('tag'); if (tag) f.tag = tag;
-    p.getAll('health').forEach(function (h) { if (h === 'needs' || h === 'ready' || h === 'disabled') f.health.add(h); });
+    var tag = p.get('tag');
+    if (tag) f.tag = tag;
+    p.getAll('health').forEach(function (h) {
+      if (h === 'needs' || h === 'ready' || h === 'disabled') f.health.add(h);
+    });
     state.filters = f;
     reflectFiltersInControls();
   }
@@ -2254,8 +3023,20 @@
     if (tab && TAB_ORDER.indexOf(tab) !== -1 && tab !== 'overview') requestTab(tab, false);
   }
 
-  function safeStorageGet() { try { return window.localStorage.getItem(STORAGE_KEY); } catch (e) { return null; } }
-  function safeStorageSet(v) { try { window.localStorage.setItem(STORAGE_KEY, v); } catch (e) { /* ignore */ } }
+  function safeStorageGet() {
+    try {
+      return window.localStorage.getItem(STORAGE_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
+  function safeStorageSet(v) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, v);
+    } catch (e) {
+      /* ignore */
+    }
+  }
 
   function cssEscape(s) {
     if (window.CSS && window.CSS.escape) return window.CSS.escape(s);
@@ -2264,7 +3045,10 @@
 
   function esc(s) {
     return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 })();

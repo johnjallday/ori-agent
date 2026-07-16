@@ -10,7 +10,7 @@ for (const theme of ['light', 'dark']) {
   test(`agents roster accessibility (${theme})`, async ({ page, request }) => {
     const name = `PW A11y ${theme} ${Date.now()}`;
     const create = await request.post(`${baseUrl}/api/agents`, {
-      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' },
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
     });
     expect(create.ok()).toBeTruthy();
 
@@ -23,12 +23,12 @@ for (const theme of ['light', 'dark']) {
         route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ needs_onboarding: false, completed: true }),
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
         })
       );
 
       await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'domcontentloaded'
       });
       await expect(page.locator('#stageName')).toHaveText(name);
       await expect(page.locator('#overviewFacts .stage-form')).toBeVisible();
@@ -42,7 +42,7 @@ for (const theme of ['light', 'dark']) {
       const results = await page.evaluate(async () => {
         const root = document.querySelector('.roster-layout');
         return await window.axe.run(root, {
-          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] },
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
         });
       });
       expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
@@ -52,12 +52,16 @@ for (const theme of ['light', 'dark']) {
       await expect(page.locator('#bulkDeleteDialog')).toBeVisible();
       const dialogResults = await page.evaluate(async () => {
         return await window.axe.run(document.querySelector('#bulkDeleteDialog'), {
-          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] },
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
         });
       });
-      expect(dialogResults.violations, JSON.stringify(dialogResults.violations, null, 2)).toEqual([]);
+      expect(dialogResults.violations, JSON.stringify(dialogResults.violations, null, 2)).toEqual(
+        []
+      );
     } finally {
-      await request.delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
     }
   });
 }
