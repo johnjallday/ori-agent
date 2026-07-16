@@ -20,6 +20,7 @@ type Handler struct {
 	upgrade       *personalhq.UpgradeCoordinator
 	mailboxLinker MailboxLinker
 	replies       ReplyService
+	followups     FollowUpAPI
 	provider      userprofile.UserProvider
 }
 

@@ -6288,6 +6288,48 @@ body:has(#workspaceHub.is-hq-guided) #hubSupportChat {
   gap: 0.5rem;
 }
 
+/* Personal HQ Home follow-up projection (#hqFollowUpMount). */
+.hq-followup-heading {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.hq-followup-card {
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.hq-followup-category {
+  display: inline-block;
+  margin-bottom: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.hq-followup-title {
+  margin: 0 0 0.2rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.hq-followup-detail {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.hq-followup-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .hq-resume-text {
   flex: 1 1 auto;
   min-width: 12rem;
