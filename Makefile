@@ -43,9 +43,8 @@ help: ## Show this help message
 readme-audit: ## Report README contract state without writing files
 	@node scripts/readme/audit.mjs
 
-readme-capture: ## Capture staged README screenshots (available after capture runtime setup)
-	@echo "README capture runtime is not installed yet. Complete task 2.0 first."
-	@exit 2
+readme-capture: ## Capture staged README screenshots into ignored run artifacts
+	@bash scripts/readme-refresh.sh capture
 
 readme-check: ## Validate README screenshot manifest, references, and accepted assets
 	@node scripts/readme/manifest.mjs

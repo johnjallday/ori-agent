@@ -162,6 +162,10 @@ Do not remove a staging directory until the run has been reviewed, is confirmed
 to be a no-op, or is superseded. Cleanup validates the exact temporary path and
 runs separately from build, capture, and validation commands.
 
+```sh
+bash scripts/readme-refresh.sh cleanup --run-id <run-id>
+```
+
 ## Release backstop
 
 The release check retains `scripts/update-readme.sh` for version-badge updates.
