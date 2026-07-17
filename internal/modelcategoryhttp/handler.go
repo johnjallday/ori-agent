@@ -25,6 +25,13 @@ func NewHandler(categoryStore store.ModelCategoryStore) *Handler {
 	}
 }
 
+// Store returns the underlying model-category store, so other handlers
+// (e.g. the catalog-create path in agenthttp) can reuse the same
+// category-to-model resolution without duplicating storage wiring.
+func (h *Handler) Store() store.ModelCategoryStore {
+	return h.store
+}
+
 // GetAllHandler returns all categories, assignments, and view preference
 // GET /api/model-categories
 func (h *Handler) GetAllHandler(w http.ResponseWriter, r *http.Request) {

@@ -59,6 +59,13 @@ func New(manager *skills.Manager, st store.Store, llmFactory *llm.Factory, cfg *
 	}
 }
 
+// Manager returns the underlying skills manager, so other handlers (e.g. the
+// catalog-create path in agenthttp) can enable skills without duplicating
+// manager wiring.
+func (h *Handler) Manager() *skills.Manager {
+	return h.manager
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

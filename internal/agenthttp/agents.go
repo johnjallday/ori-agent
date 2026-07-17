@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -90,6 +91,13 @@ type Handler struct {
 	// nil when disabled). Injected so agenthttp stays decoupled from the
 	// externalagents package.
 	codexSync func() any
+	// modelCategoryStore resolves a catalog entry's model tier to a concrete
+	// configured model for catalog-create. Nil is a safe no-op (falls back to
+	// the store's default model).
+	modelCategoryStore ModelCategoryReader
+	// skillsManager enables a catalog entry's starter skills at catalog-create
+	// time. Nil is a safe no-op (no starter skills applied).
+	skillsManager *skills.Manager
 }
 
 func New(state store.Store) *Handler {
@@ -287,15 +295,21 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		MaxOutputTokens int                        `json:"max_output_tokens,omitempty"`
 		AllowWebSearch  *bool                      `json:"allow_web_search,omitempty"`
 		RoutingProfile  *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
+		// CatalogRole selects a Role Catalog entry (see internal/agentcatalog)
+		// instead of the free-form fields above: role, model, and starter
+		// prompt/skills come from the entry. Domain is Specialist-only.
+		CatalogRole string `json:"catalog_role,omitempty"`
+		Domain      string `json:"domain,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
 	logger.Debug("CreateAgent request", logger.Fields{
 		"name": req.Name, "type": req.Type, "model": req.Model, "temperature": req.Temperature,
+		"catalog_role": req.CatalogRole,
 	})
 
-	if isSystemAssistantAgent(req.Name) {
+	if isSystemAssistantAgent(req.Name) || strings.EqualFold(strings.TrimSpace(req.Name), "catalog") {
 		orihttp.BadRequest(w, "reserved agent name")
 		return
 	}
@@ -304,6 +318,11 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if err := validateAgentName(req.Name); err != nil {
 		logger.Error("CreateAgent error: invalid agent name", logger.Fields{"error": err})
 		orihttp.BadRequest(w, err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.CatalogRole) != "" {
+		h.handleCatalogCreate(w, req.Name, req.CatalogRole, req.Domain)
 		return
 	}
 
