@@ -449,6 +449,54 @@ func TestDashboardStats_Struct(t *testing.T) {
 	}
 }
 
+func TestSkillSlotsForStage(t *testing.T) {
+	cases := []struct {
+		stage AgentStage
+		want  int
+	}{
+		{AgentStageSpark, 2},
+		{AgentStageInfant, 3},
+		{AgentStageLearner, 4},
+		{AgentStageExpert, 5},
+		{AgentStageSentient, 6},
+		{"", 2},            // unknown/empty defaults to the lowest cap
+		{"bogus-stage", 2}, // unrecognized value defaults to the lowest cap
+	}
+	for _, tc := range cases {
+		if got := SkillSlotsForStage(tc.stage); got != tc.want {
+			t.Errorf("SkillSlotsForStage(%q) = %d, want %d", tc.stage, got, tc.want)
+		}
+	}
+}
+
+func TestAgentMetadata_IsExpertMode(t *testing.T) {
+	trueVal := true
+	falseVal := false
+
+	cases := []struct {
+		name string
+		m    *AgentMetadata
+		role AgentRole
+		want bool
+	}{
+		{"nil metadata, general role -> ON (unspecialized default)", nil, RoleGeneral, true},
+		{"nil metadata, empty role -> ON (unspecialized default)", nil, "", true},
+		{"nil metadata, catalog role -> OFF", nil, RoleResearcher, false},
+		{"unset flag, general role -> ON", &AgentMetadata{}, RoleGeneral, true},
+		{"unset flag, catalog role -> OFF", &AgentMetadata{}, RoleOrchestrator, false},
+		{"explicit true wins regardless of role", &AgentMetadata{ExpertMode: &trueVal}, RoleResearcher, true},
+		{"explicit false wins regardless of role", &AgentMetadata{ExpertMode: &falseVal}, RoleGeneral, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.m.IsExpertMode(tc.role); got != tc.want {
+				t.Errorf("IsExpertMode() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // Helper function for float comparison
 func abs(x float64) float64 {
 	if x < 0 {

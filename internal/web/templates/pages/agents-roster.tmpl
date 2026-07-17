@@ -41,6 +41,7 @@
               <select id="rosterSort" aria-label="Sort agents">
                 <option value="name-asc">Name A–Z</option>
                 <option value="name-desc">Name Z–A</option>
+                <option value="level-desc">Level (highest first)</option>
                 <option value="workspaces-desc">Most workspaces</option>
                 <option value="active-desc">Recently active</option>
               </select>
@@ -91,6 +92,7 @@
             <div class="bulk-bar__actions">
               <button type="button" class="bulk-bar__btn" id="bulkAddTags">Add tags</button>
               <button type="button" class="bulk-bar__btn" id="bulkRemoveTags">Remove tags</button>
+              <button type="button" class="bulk-bar__btn" id="bulkSetRole">Set role</button>
               <button type="button" class="bulk-bar__btn" id="bulkFavorite">Favorite</button>
               <button type="button" class="bulk-bar__btn" id="bulkUnfavorite">Unfavorite</button>
               <button type="button" class="bulk-bar__btn bulk-bar__btn--danger" id="bulkDelete">Delete</button>
@@ -164,6 +166,10 @@
               </div>
             </header>
 
+            <div class="stage__progression" id="stageProgression" aria-live="polite">
+              <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
+            </div>
+
             <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
               <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
               <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
@@ -207,6 +213,9 @@
   <!-- Shared tag-entry widget (exposes window.OriTagInput). Loaded as a module so
        the roster's Overview + bulk tag flows reuse it instead of duplicating. -->
   <script type="module" src="/js/modules/tag-input.js"></script>
+  <script defer src="/js/modules/toast.js"></script>
+  <script defer src="/js/modules/role-catalog.js"></script>
+  <script defer src="/js/modules/stage-up-toast.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 

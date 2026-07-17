@@ -26,6 +26,27 @@ const (
 	AgentStageSentient AgentStage = "sentient"
 )
 
+// stageSkillSlots maps an evolution stage to the number of active skill
+// slots it grants (PRD FR10). Slot growth ties loadout usefulness to
+// progression; an agent's stage-appropriate cap is looked up here.
+var stageSkillSlots = map[AgentStage]int{
+	AgentStageSpark:    2,
+	AgentStageInfant:   3,
+	AgentStageLearner:  4,
+	AgentStageExpert:   5,
+	AgentStageSentient: 6,
+}
+
+// SkillSlotsForStage returns the number of active-skill slots granted at the
+// given evolution stage. An unrecognized or empty stage defaults to the
+// spark-stage cap (the lowest), never an unbounded/unlimited result.
+func SkillSlotsForStage(stage AgentStage) int {
+	if slots, ok := stageSkillSlots[stage]; ok {
+		return slots
+	}
+	return stageSkillSlots[AgentStageSpark]
+}
+
 // AgentPath represents the specialization path for an agent.
 type AgentPath string
 
@@ -69,6 +90,22 @@ type AgentMetadata struct {
 	ReviewEnabled     *bool                `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
 	ReviewSensitivity string               `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")
 	RoutingProfile    *AgentRoutingProfile `json:"routing_profile,omitempty"`    // User-defined routing hints for specialist selection
+	// ExpertMode lifts stage-based active-skill slot caps (see SkillSlotsForStage)
+	// for this agent when true. Nil means unset; IsExpertMode resolves the
+	// default from the agent's role.
+	ExpertMode *bool `json:"expert_mode,omitempty"`
+}
+
+// IsExpertMode reports whether the agent bypasses stage-based skill slot
+// caps (PRD FR13). When explicitly set, that value wins. When unset,
+// pre-existing/Unspecialized agents (empty or "general" role) default to
+// expert mode ON — they predate the loadout-cap system; catalog-created
+// agents (any other role) default OFF.
+func (m *AgentMetadata) IsExpertMode(role AgentRole) bool {
+	if m != nil && m.ExpertMode != nil {
+		return *m.ExpertMode
+	}
+	return role == "" || role == RoleGeneral
 }
 
 // AgentEvolution tracks progression state for an agent.
@@ -240,6 +277,7 @@ const (
 	ActivityEventEvolutionFeed  ActivityEventType = "evolution_feed"  // Feed action granted evolution XP
 	ActivityEventEvolutionStage ActivityEventType = "evolution_stage" // Evolution stage changed
 	ActivityEventEvolutionPath  ActivityEventType = "evolution_path"  // Evolution path selected/changed
+	ActivityEventEvolutionTask  ActivityEventType = "evolution_task"  // Completed task run granted evolution XP
 )
 
 // ActivityLog represents a single activity log entry for an agent

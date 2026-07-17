@@ -24,6 +24,10 @@ const (
 	defaultDuplicateWindow time.Duration = 30 * time.Second
 	defaultMaxXPPerHour    int64         = 200
 	defaultXPPerLevel      int64         = 100
+	// taskXPMultiplier scales AwardTaskXP relative to BaseMessageXP: a
+	// completed task represents more work than a single chat message.
+	// Tunable — see PRD open question on validating this against real accrual.
+	taskXPMultiplier int64 = 5
 )
 
 type AgentStore interface {
@@ -153,17 +157,42 @@ func (s *Service) AwardMessageXP(agentName string, tokenCount int, userMessage s
 		tokenCount = 0
 	}
 	xp := s.cfg.BaseMessageXP + int64(tokenCount/s.cfg.TokensPerXP)
-	return s.awardXP(agentName, xp, userMessage, true, false)
+	return s.awardXP(agentName, xp, userMessage, true, false, false)
 }
 
 // AwardFeedXP grants XP for a validated feed action.
 func (s *Service) AwardFeedXP(agentName string, source string) error {
-	return s.awardXP(agentName, s.cfg.FeedXP, source, false, true)
+	return s.awardXP(agentName, s.cfg.FeedXP, source, false, true, false)
+}
+
+// AwardTaskXP grants XP for a completed workspace task run — worth more than
+// a single chat message (taskXPMultiplier x the base message award), since a
+// completed task represents more work. Unlike AwardMessageXP there is no
+// duplicate-message check: distinct task completions are never "the same
+// message" repeated. The hourly cap still applies. A nil receiver (evolution
+// disabled) is a safe no-op, matching how workspace.TaskExecutor calls this
+// through an optional interface.
+func (s *Service) AwardTaskXP(agentName string) error {
+	if s == nil {
+		return nil
+	}
+	xp := s.cfg.BaseMessageXP * taskXPMultiplier
+	return s.awardXP(agentName, xp, "", false, false, true)
 }
 
 // EvaluateStageTransitions returns the expected stage for a given level.
 func (s *Service) EvaluateStageTransitions(level int) types.AgentStage {
 	return stageForLevel(level)
+}
+
+// XPPerLevel returns the flat XP-per-level threshold, so callers (e.g. the
+// evolution HTTP handler) can compute an agent's progress toward its next
+// level without duplicating the leveling formula.
+func (s *Service) XPPerLevel() int64 {
+	if s == nil {
+		return defaultXPPerLevel
+	}
+	return s.cfg.XPPerLevel
 }
 
 // SelectPath sets a specialization path for an agent once it reaches Learner stage.
@@ -278,7 +307,7 @@ func (s *Service) GetSuggestions(agentName string) ([]Suggestion, error) {
 	return suggestions, nil
 }
 
-func (s *Service) awardXP(agentName string, requestedXP int64, userMessage string, enableDuplicateCheck bool, incrementFeedCount bool) error {
+func (s *Service) awardXP(agentName string, requestedXP int64, userMessage string, enableDuplicateCheck bool, incrementFeedCount bool, logTaskEvent bool) error {
 	if s == nil {
 		return fmt.Errorf("evolution service is nil")
 	}
@@ -366,6 +395,11 @@ func (s *Service) awardXP(agentName string, requestedXP int64, userMessage strin
 			"source":     source,
 			"awarded_xp": awardXP,
 			"feed_count": feedCount,
+		})
+	}
+	if logTaskEvent {
+		s.logActivity(agentName, types.ActivityEventEvolutionTask, map[string]any{
+			"awarded_xp": awardXP,
 		})
 	}
 	if previousStage != newStage {

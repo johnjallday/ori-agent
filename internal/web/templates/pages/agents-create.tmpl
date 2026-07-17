@@ -384,6 +384,124 @@
       align-items: center;
     }
 
+    /* ---------- Catalog / Custom tabs ---------- */
+    .agent-create-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .agent-create-tab {
+      appearance: none;
+      border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 9px 18px;
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .agent-create-tab:hover {
+      color: var(--text-primary);
+    }
+
+    .agent-create-tab.is-active {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border-bottom-color: var(--bg-primary);
+      box-shadow: 0 -2px 0 var(--primary-color) inset;
+    }
+
+    .agent-create-tab:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 24%, transparent);
+    }
+
+    /* ---------- Catalog card grid ---------- */
+    .catalog-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 14px;
+    }
+
+    .catalog-card {
+      --catalog-accent: var(--primary-color);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      text-align: left;
+      padding: 16px 16px 14px;
+      border: 1px solid color-mix(in srgb, var(--border-color) 82%, var(--primary-color) 18%);
+      border-radius: 14px;
+      background: var(--bg-secondary);
+      cursor: pointer;
+      clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .catalog-card:hover {
+      transform: translateY(-2px);
+      border-color: color-mix(in srgb, var(--catalog-accent) 55%, var(--border-color) 45%);
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
+    }
+
+    .catalog-card:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--catalog-accent) 32%, transparent);
+    }
+
+    .catalog-card.is-selected {
+      border-color: var(--catalog-accent);
+      background: color-mix(in srgb, var(--catalog-accent) 10%, var(--bg-secondary));
+      box-shadow: 0 0 0 1px var(--catalog-accent);
+    }
+
+    .catalog-card-emblem {
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-size: 18px;
+      color: var(--catalog-accent);
+      background: color-mix(in srgb, var(--catalog-accent) 16%, transparent);
+    }
+
+    .catalog-card-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .catalog-card-tagline {
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--text-secondary);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .catalog-preset-summary {
+      font-size: 13px;
+      color: var(--text-secondary);
+      background: var(--bg-secondary);
+      border: 1px solid color-mix(in srgb, var(--border-color) 84%, var(--primary-color) 16%);
+      border-radius: 10px;
+      padding: 10px 12px;
+      line-height: 1.5;
+    }
+
+    .catalog-preset-summary strong {
+      color: var(--text-primary);
+    }
+
     .modern-btn:disabled,
     .btn:disabled {
       opacity: 0.5;
@@ -530,6 +648,54 @@
           <p>Configure and customize your AI agent</p>
         </div>
 
+        <div class="agent-create-tabs" role="tablist" aria-label="Agent creation mode">
+          <button type="button" class="agent-create-tab is-active" id="catalogTabBtn" role="tab"
+            aria-selected="true" aria-controls="catalogTabPanel" tabindex="0">Catalog</button>
+          <button type="button" class="agent-create-tab" id="customTabBtn" role="tab"
+            aria-selected="false" aria-controls="customTabPanel" tabindex="-1">Custom</button>
+        </div>
+
+        <section id="catalogTabPanel" class="agent-create-tabpanel" role="tabpanel" aria-labelledby="catalogTabBtn" tabindex="0">
+          <div id="catalogError" class="error-message" role="alert" aria-live="polite" hidden tabindex="-1"></div>
+
+          <div class="form-card modern-card">
+            <h2 class="form-section-title">Choose a Role</h2>
+            <div id="catalogGrid" class="catalog-grid" role="radiogroup" aria-label="Catalog role">
+              <!-- Populated by agents-catalog.js -->
+            </div>
+          </div>
+
+          <div id="catalogSelectionCard" class="form-card modern-card" hidden>
+            <h2 class="form-section-title">Configure &amp; Create</h2>
+
+            <div class="form-group">
+              <label class="form-label required" for="catalogAgentName">Agent Name</label>
+              <input type="text" id="catalogAgentName" class="form-input" autocomplete="off"
+                aria-describedby="catalogAgentNameError" required>
+              <div id="catalogAgentNameError" class="field-error" aria-live="polite"></div>
+            </div>
+
+            <div id="catalogDomainGroup" class="form-group" hidden>
+              <label class="form-label" for="catalogDomain">Domain</label>
+              <input type="text" id="catalogDomain" class="form-input" autocomplete="off" placeholder="e.g., reaper, tax, legal">
+              <div class="form-help">The single domain this Specialist focuses on.</div>
+            </div>
+
+            <div class="form-group">
+              <div class="form-label mb-1">Preset Summary</div>
+              <div id="catalogPresetSummary" class="catalog-preset-summary"></div>
+            </div>
+
+            <div id="catalogModelNotice" class="alert alert-warning" style="font-size: 0.85rem;" role="status" aria-live="polite" hidden></div>
+
+            <div class="form-actions">
+              <a href="/agents" class="modern-btn modern-btn-secondary">Cancel</a>
+              <button type="button" id="catalogCreateBtn" class="modern-btn modern-btn-primary">Create Agent</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="customTabPanel" class="agent-create-tabpanel" role="tabpanel" aria-labelledby="customTabBtn" tabindex="0" hidden>
         <form id="createAgentForm" novalidate>
         <div id="errorMessage" class="error-message" role="alert" aria-live="polite" hidden tabindex="-1"></div>
 
@@ -719,6 +885,7 @@
           </div>
         </div>
         </form>
+        </section>
       </div>
     </main>
   </div>
@@ -738,6 +905,7 @@
   <script defer src="/js/modules/resizer.js"></script>
   <script defer src="/js/modules/sidebar.js"></script>
   <script defer src="/js/agents-create.js"></script>
+  <script defer src="/js/modules/agents-catalog.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>
 </html>

@@ -200,6 +200,12 @@ class WorkspaceRealtime {
   handleTaskEvent(workspaceId, eventType, e) {
     try {
       const data = JSON.parse(e.data);
+      // A completed task may have bumped the executing agent's evolution
+      // stage (PRD FR15/FR19) — check here so the toast fires from the Map
+      // view's normal task flow, not only while the roster page is open.
+      if (eventType === 'task.completed' && data && data.agent && window.StageUpToast) {
+        window.StageUpToast.checkByFetch(data.agent);
+      }
       this.notifyListeners(workspaceId, {
         type: eventType,
         workspaceId: workspaceId,

@@ -2353,14 +2353,40 @@ export class WorkspaceDetailPage {
       issues.push({
         category: 'agent',
         severity: 'error',
-        title: 'Entry agent is missing',
+        title: 'Commander is missing',
         description:
-          'This workspace has no entry agent assigned. Create one so chats, routing, and task orchestration have a default manager.',
+          'This workspace has no Commander assigned. Create one so chats, routing, and task orchestration have a default manager.',
         action: 'entry_agent',
-        actionLabel: 'Create Entry Agent',
+        actionLabel: 'Create Commander',
         agentName: defaults.seedName || 'Workspace Manager',
-        meta: [workspaceName, 'No entry agent']
+        meta: [workspaceName, 'No Commander']
       });
+    }
+
+    // No-Commander nudge (PRD FR23): a workspace with 3+ agents and no
+    // orchestrator-role member reads as a flat team with no dedicated lead —
+    // the slot still works (an Acting Commander holds it), so this is a
+    // non-blocking suggestion, never an error, and never gates creation or
+    // operation. Skipped when the Commander is missing entirely (the error
+    // above already covers that case).
+    if (this.hasWorkspaceEntryAgentReference() && references.length >= 3) {
+      const hasOrchestrator = references.some(reference => {
+        const profile = this.getAgentProfile(reference.name);
+        return String(profile?.role || '').trim().toLowerCase() === 'orchestrator';
+      });
+      if (!hasOrchestrator) {
+        const workspaceName = String(this.workspace?.name || '').trim() || 'This workspace';
+        issues.push({
+          category: 'agent',
+          severity: 'warning',
+          title: 'This team has no dedicated Commander',
+          description:
+            "None of this workspace's agents has the Commander role — the slot is held by an Acting Commander. Assign the Commander role to one of them so dispatch work routes to the right specialist.",
+          action: 'assign_commander',
+          actionLabel: 'Assign a Commander',
+          meta: [workspaceName, `${references.length} agents`, 'No Commander role assigned']
+        });
+      }
     }
 
     if (this.agentCatalogLoadFailed) {
@@ -2387,14 +2413,14 @@ export class WorkspaceDetailPage {
         issues.push({
           category: 'agent',
           severity: 'error',
-          title: reference.isEntryAgent ? 'Entry agent is missing' : 'Workspace agent is missing',
+          title: reference.isEntryAgent ? 'Commander is missing' : 'Workspace agent is missing',
           description: reference.isEntryAgent
-            ? `"${reference.name}" is still assigned as the workspace entry agent, but the runnable agent definition no longer exists.`
+            ? `"${reference.name}" is still assigned as the workspace Commander, but the runnable agent definition no longer exists.`
             : `"${reference.name}" is still linked to this workspace, but the runnable agent definition no longer exists.`,
           action: reference.isEntryAgent ? 'entry_agent' : 'agent',
-          actionLabel: reference.isEntryAgent ? 'Create Entry Agent' : 'Recreate Agent',
+          actionLabel: reference.isEntryAgent ? 'Create Commander' : 'Recreate Agent',
           agentName: reference.name,
-          meta: [reference.name, reference.isEntryAgent ? 'Entry agent' : 'Workspace member']
+          meta: [reference.name, reference.isEntryAgent ? 'Commander' : 'Workspace member']
         });
       });
     }
@@ -2489,7 +2515,7 @@ export class WorkspaceDetailPage {
 
     const parts = [];
     if (agentIssueCount > 0) {
-      parts.push(`${agentIssueCount} missing agent${agentIssueCount === 1 ? '' : 's'}`);
+      parts.push(`${agentIssueCount} agent issue${agentIssueCount === 1 ? '' : 's'}`);
     }
     if (fileIssueCount > 0) {
       parts.push(`${fileIssueCount} linked file issue${fileIssueCount === 1 ? '' : 's'}`);
@@ -2550,7 +2576,7 @@ export class WorkspaceDetailPage {
         <button type="button"
                 class="workspace-detail-panel-btn workspace-detail-health-action"
                 onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'entry')">
-          ${this.escapeHtml(issue.actionLabel || 'Create Entry Agent')}
+          ${this.escapeHtml(issue.actionLabel || 'Create Commander')}
         </button>
       `;
     } else if (issue?.action === 'agent' && issue?.agentName) {
@@ -2560,6 +2586,15 @@ export class WorkspaceDetailPage {
                 onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'agent')">
           ${this.escapeHtml(issue.actionLabel || 'Recreate Agent')}
         </button>
+      `;
+    } else if (issue?.action === 'assign_commander') {
+      // Links to the roster's role picker/bulk "Set role" tool (Group 5)
+      // rather than a recovery onclick — there's nothing broken to repair,
+      // just a role to assign.
+      actionMarkup = `
+        <a class="workspace-detail-panel-btn workspace-detail-health-action" href="/agents">
+          ${this.escapeHtml(issue.actionLabel || 'Assign a Commander')}
+        </a>
       `;
     } else if (issue?.action === 'file' && issue?.fileId) {
       actionMarkup = `
@@ -3241,7 +3276,7 @@ export class WorkspaceDetailPage {
     if (this.isWorkspaceEntryAgent(normalizedName)) {
       const href = this.buildWorkspaceAgentRecoveryURL(normalizedName);
       if (href) {
-        const title = `Create entry agent ${normalizedName}`;
+        const title = `Create Commander ${normalizedName}`;
         return {
           kind: 'missing-entry',
           href,
@@ -3507,7 +3542,12 @@ export class WorkspaceDetailPage {
 
   renderWorkspaceAgentRoleBadge(agentName) {
     if (!this.isWorkspaceEntryAgent(agentName)) return '';
-    return '<span class="workspace-detail-agent-role-badge">Entry Agent</span>';
+    // Commander-slot label (PRD FR21/FR22): "Commander" when the holder's role
+    // is orchestrator, "Acting Commander" otherwise. Display only.
+    const profile = this.getAgentProfile(agentName);
+    const role = profile && profile.role ? String(profile.role).trim().toLowerCase() : '';
+    const label = role === 'orchestrator' ? 'Commander' : 'Acting Commander';
+    return '<span class="workspace-detail-agent-role-badge">' + label + '</span>';
   }
 
   getAgentGroupRolePresentation(group) {
@@ -5195,20 +5235,20 @@ export class WorkspaceDetailPage {
 
     const workspaceName = String(this.workspace?.name || '').trim() || 'this workspace';
     const entryAgentDefaults = this.buildWorkspaceEntryAgentDefaults();
-    // An entry agent is required for the workspace to operate, so this prompt is
+    // A Commander is required for the workspace to operate, so this prompt is
     // mandatory: there is no "create later" escape and it resolves only when the
     // user proceeds to create one.
     await this.showTaskConfirmDialog({
       eyebrow: 'Workspace Setup',
-      title: 'Create an entry agent for this workspace?',
-      message: `"${workspaceName}" cannot function until it has an entry agent.`,
-      confirmLabel: 'Create Entry Agent',
+      title: 'Create a Commander for this workspace?',
+      message: `"${workspaceName}" cannot function until it has a Commander.`,
+      confirmLabel: 'Create Commander',
       mandatory: true,
-      metaItems: [workspaceName, entryAgentDefaults.seedName, 'No entry agent'],
+      metaItems: [workspaceName, entryAgentDefaults.seedName, 'No Commander'],
       details: [
-        'The entry agent is required for this workspace to operate normally.',
-        'Chats, routing, and task orchestration depend on having an entry agent.',
-        'The first agent you add here will become the workspace entry agent automatically.',
+        'The Commander is required for this workspace to operate normally.',
+        'Chats, routing, and task orchestration depend on having a Commander.',
+        'The first agent you add here will become the workspace Commander automatically.',
         'You can rename or replace it later.'
       ]
     });
@@ -6484,7 +6524,7 @@ export class WorkspaceDetailPage {
     if (!normalizedAgentName || !normalizedKey) return;
 
     if (this.isWorkspaceEntryAgent(normalizedAgentName)) {
-      window.alert(`"${normalizedAgentName}" is the workspace entry agent and can't be removed.`);
+      window.alert(`"${normalizedAgentName}" is the workspace Commander and can't be removed.`);
       return;
     }
 
@@ -11609,6 +11649,7 @@ export class WorkspaceDetailPage {
         this.workspaceAgentProfiles.set(key, {
           name,
           type: String(agent?.type || '').trim(),
+          role: String(agent?.role || '').trim(),
           model: String(agent?.model || '').trim(),
           provider: String(agent?.provider || '').trim(),
           source:
@@ -11660,6 +11701,7 @@ export class WorkspaceDetailPage {
         const profile = {
           name,
           type: String(agent?.type || '').trim(),
+          role: String(agent?.role || '').trim(),
           source: String(agent?.source || 'user')
             .trim()
             .toLowerCase(),

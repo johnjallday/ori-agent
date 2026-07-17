@@ -423,6 +423,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		ExternalAgents:    b.externalAgentsCache,
 		ConfigManager:     b.configManager,
 	})
+	// Enforce stage-based active-skill slot caps (PRD section C). Reads the
+	// agent's stage + expert flag through the store on each check, no caching.
+	b.skillsManager.SetLoadoutResolver(newLoadoutResolverAdapter(b.st))
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
 

@@ -423,7 +423,7 @@
       '"></span>' +
       escapeHtml(statusText) +
       '</span>' +
-      (hasKeeper ? '<span class="ws-map-tile-crest" title="Entry agent (locked)">★</span>' : '') +
+      (hasKeeper ? '<span class="ws-map-tile-crest" title="Commander (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
       (isHQ ? structSVGHQ() : structSVG(pal)) +
       '<span class="ws-map-tile-name">' +
@@ -816,7 +816,7 @@
         escapeHtml(entry) +
         '</div>' +
         '<div class="ws-map-ov-keeper-badge">★ Locked · can&#39;t remove</div></div></div>'
-      : '<span class="ws-map-ov-none">No entry agent</span>';
+      : '<span class="ws-map-ov-none">No Commander</span>';
 
     var roster = agents.length
       ? agents
@@ -854,7 +854,7 @@
       folderOverviewHTML(ws, options) +
       tagsOverviewHTML(ws, options) +
       groupPreviewHTML(ws, options) +
-      '<div class="ws-map-ov-label">Entry agent</div>' +
+      '<div class="ws-map-ov-label">Commander</div>' +
       '<div class="ws-map-ov-keeperwrap">' +
       keeper +
       '</div>' +

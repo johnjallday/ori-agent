@@ -451,11 +451,11 @@
             </p>
             <div id="missingAgentMeta" class="agent-missing-meta"></div>
             <div id="missingAgentDetail" class="agent-missing-detail">
-              If this agent belonged to a workspace, recreate its entry agent there so routing and task execution can resume cleanly.
+              If this agent belonged to a workspace, recreate its Commander there so routing and task execution can resume cleanly.
             </div>
             <div class="agent-missing-actions">
               <a id="missingAgentCreateEntryBtn" href="/workspaces" class="modern-btn modern-btn-primary" style="display: none;">
-                Create Entry Agent
+                Create Commander
               </a>
               <a id="missingAgentOpenWorkspaceBtn" href="/workspaces" class="modern-btn modern-btn-secondary" style="display: none;">
                 Open Workspace
@@ -762,9 +762,21 @@
                     </svg>
                     Skills
                   </h3>
-                  <a id="openSkillsPageLink" href="/skills" class="modern-btn modern-btn-secondary btn-sm">
-                    Open Skills Page
-                  </a>
+                  <div class="d-flex align-items-center gap-2">
+                    <span id="skillSlotUsage" class="badge" style="display:none; font-size: 12px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color);"></span>
+                    <a id="openSkillsPageLink" href="/skills" class="modern-btn modern-btn-secondary btn-sm">
+                      Open Skills Page
+                    </a>
+                  </div>
+                </div>
+                <div id="expertModeRow" class="d-flex align-items-center justify-content-between mb-3 p-2" style="display:none !important; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary);">
+                  <div>
+                    <div style="font-weight: 600; color: var(--text-primary); font-size: 13px;">Expert mode</div>
+                    <div style="font-size: 12px; color: var(--text-secondary);">Lifts the stage-based skill slot cap for this agent — enable any number of skills.</div>
+                  </div>
+                  <div class="form-check form-switch m-0">
+                    <input class="form-check-input" type="checkbox" id="expertModeToggle" role="switch" aria-label="Expert mode">
+                  </div>
                 </div>
                 <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
                   <div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>

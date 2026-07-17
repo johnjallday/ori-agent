@@ -125,6 +125,17 @@ func (m *Manager) SetSkillTrusted(agentName, skillName string, trusted bool) err
 }
 
 func (m *Manager) SetSkillEnabled(agentName, skillName string, enabled bool) error {
+	key := normalizeSkillKey(skillName)
+	if enabled {
+		// Bulk "*" enable fills up to the cap deterministically for non-expert
+		// agents rather than blanket-enabling everything (PRD FR14).
+		if key == "*" {
+			return m.enableAllWithinCap(agentName)
+		}
+		if err := m.enforceSlotCapForEnable(agentName, key); err != nil {
+			return err
+		}
+	}
 	return m.updateSkillState(agentName, skillName, func(state *SkillState) {
 		state.Enabled = enabled
 	})

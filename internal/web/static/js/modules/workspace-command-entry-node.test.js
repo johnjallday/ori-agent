@@ -82,7 +82,7 @@ test('accessible name on the command node includes role + orchestration copy (FR
   const view = makeView();
   const entry = agent({ name: 'Manager', key: 'manager', entry: true });
   const html = view.renderMapAgentUnits([entry, agent({ name: 'Writer', key: 'writer' })]);
-  assert.match(html, /aria-label="Select Manager, Entry Agent\. Routes work to 1 specialist agent\. Idle"/);
+  assert.match(html, /aria-label="Select Manager, Acting Commander\. Routes work to 1 specialist agent\. Idle"/);
 });
 
 test('missing entry agent shows a repair state, not a promoted specialist (FR77)', () => {
@@ -90,7 +90,7 @@ test('missing entry agent shows a repair state, not a promoted specialist (FR77)
   const spec = agent({ name: 'Writer', key: 'writer' });
   const html = view.renderMapAgentUnits([spec]);
   assert.match(html, /ws-cmd-map-command-repair/);
-  assert.match(html, /No entry agent/);
+  assert.match(html, /No Commander/);
   assert.match(html, /data-cmd-add-agent/);
   assert.ok(!html.includes('is-command-node'), 'no specialist is visually promoted to the command position');
   assert.match(html, /Writer/, 'the specialist still renders in the normal grid');

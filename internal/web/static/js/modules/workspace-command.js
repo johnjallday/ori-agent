@@ -1780,18 +1780,20 @@ export class WorkspaceCommandView {
           ? page.getAgentRosterStatus(name)
           : { key: 'idle', label: 'Idle' };
         const tone = this.statusTone(status.key, status.label);
+        const profile = page.getAgentProfile ? page.getAgentProfile(name) : null;
         let modelLabel = '';
-        if (page.getAgentProfile && page.getAgentModelPresentation) {
-          const m = page.getAgentModelPresentation(page.getAgentProfile(name));
+        if (profile && page.getAgentModelPresentation) {
+          const m = page.getAgentModelPresentation(profile);
           modelLabel = m && !m.empty ? m.model : '';
         }
+        const commanderLbl = keeper ? this.commanderLabel(profile && profile.role) : '';
         let skillCount = 0;
         if (page.getAgentSkillSummary) {
           const sk = page.getAgentSkillSummary(name);
           skillCount = (sk && sk.count) || 0;
         }
         const chips =
-          (keeper ? '<span class="ws-cmd-mchip is-keeper">★ Entry Agent</span>' : '') +
+          (keeper ? '<span class="ws-cmd-mchip is-keeper">★ ' + escapeHtml(commanderLbl) + '</span>' : '') +
           '<span class="ws-cmd-mchip">' +
           escapeHtml(modelLabel || '—') +
           '</span>' +
@@ -1799,7 +1801,9 @@ export class WorkspaceCommandView {
           skillCount +
           '</span>';
         const removeCtl = keeper
-          ? '<span class="ws-cmd-lock" title="Entry agent — can\'t be removed">🔒</span>'
+          ? '<span class="ws-cmd-lock" title="' +
+            escapeHtml(commanderLbl) +
+            ' — can\'t be removed">🔒</span>'
           : '<button type="button" class="ws-cmd-mrow-btn is-danger" data-cmd-modal-action="delete" data-cmd-id="' +
             escapeHtml(encoded) +
             '" title="Remove agent" aria-label="Remove ' +
@@ -2206,6 +2210,17 @@ export class WorkspaceCommandView {
     );
   }
 
+  // Commander-slot display label (PRD FR21/FR22): the agent holding the
+  // entry-agent slot shows as "Commander" when its role is orchestrator, or
+  // "Acting Commander" otherwise (e.g. a solo Specialist holding the slot).
+  // Display only — entry-agent mechanics, storage keys (entry_agent_name),
+  // and coordinator resolution are unchanged.
+  commanderLabel(role) {
+    return String(role || '').trim().toLowerCase() === 'orchestrator'
+      ? 'Commander'
+      : 'Acting Commander';
+  }
+
   reconcileAgentSelection(groups) {
     const agents = Array.isArray(groups) ? groups : [];
     const keys = new Set(agents.map(group => this.normalizeAgentKey(group.key || group.name)));
@@ -2370,7 +2385,13 @@ export class WorkspaceCommandView {
           agent.instanceCount +
           '×</span>'
         : '';
-    const entry = agent.entry ? '<span class="ws-cmd-roster-entry">Entry</span>' : '';
+    // Compact corner badge: fixed-width "CMD", full label in the title so
+    // Acting-Commander distinction is still available on hover/AT.
+    const entry = agent.entry
+      ? '<span class="ws-cmd-roster-entry" title="' +
+        escapeHtml(this.commanderLabel(agent.profile && agent.profile.role)) +
+        '">CMD</span>'
+      : '';
     return (
       '<button type="button" class="ws-cmd-roster-item' +
       (selected ? ' is-selected' : '') +
@@ -2423,9 +2444,16 @@ export class WorkspaceCommandView {
     const detailAction = target
       ? '<a class="ws-cmd-agent-action" href="' + escapeHtml(target.href) + '">Open Agent</a>'
       : '';
-    const entry = agent.entry ? '<span class="ws-cmd-badge is-keeper">★ Entry Agent</span>' : '';
+    const commanderLbl = agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '';
+    const entry = agent.entry
+      ? '<span class="ws-cmd-badge is-keeper">★ ' + escapeHtml(commanderLbl) + '</span>'
+      : '';
     const remove = agent.entry
-      ? '<span class="ws-cmd-agent-lock" title="The entry agent cannot be removed">Entry agent locked</span>'
+      ? '<span class="ws-cmd-agent-lock" title="The ' +
+        escapeHtml(commanderLbl.toLowerCase()) +
+        ' cannot be removed">' +
+        escapeHtml(commanderLbl) +
+        ' locked</span>'
       : '<button type="button" class="ws-cmd-agent-action is-danger" data-cmd-remove-agent="' +
         escapeHtml(agent.encodedName) +
         '">Remove</button>';
@@ -3907,12 +3935,26 @@ export class WorkspaceCommandView {
     const selected = agent.key === this.selectedAgentKey;
     const destination = agent.destination || 'hub';
     const statusLabel = agent.status?.label || 'Idle';
+    const commanderLbl = agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '';
+    // Station title (design consideration): pair role with the workspace it's
+    // stationed in, e.g. "Commander · Reaper Studio" — this is how
+    // domain-specialized identity is displayed without existing in the catalog.
+    const wsName = String((this.page && this.page.workspace && this.page.workspace.name) || '').trim();
+    const stationTitle = commanderLbl && wsName ? commanderLbl + ' · ' + wsName : commanderLbl;
     const entryBadge =
       agent.entry && !commandNode
-        ? '<span class="ws-cmd-map-entry-badge" title="Entry Agent"><i class="bi bi-star-fill" aria-hidden="true"></i><span>Entry</span></span>'
+        ? '<span class="ws-cmd-map-entry-badge" title="' +
+          escapeHtml(stationTitle) +
+          '"><i class="bi bi-star-fill" aria-hidden="true"></i><span>' +
+          escapeHtml(commanderLbl) +
+          '</span></span>'
         : '';
     const roleLine = commandNode
-      ? '<span class="ws-cmd-map-command-role">Entry Agent</span>'
+      ? '<span class="ws-cmd-map-command-role" title="' +
+        escapeHtml(stationTitle) +
+        '">' +
+        escapeHtml(commanderLbl) +
+        '</span>'
       : '';
     const orchestrationCopy =
       commandNode && this._commandNodeOrchestrationCopy
@@ -3924,7 +3966,7 @@ export class WorkspaceCommandView {
       'Select ' +
       escapeHtml(agent.name) +
       ', ' +
-      (agent.entry ? 'Entry Agent. ' : '') +
+      (agent.entry ? escapeHtml(stationTitle) + '. ' : '') +
       (commandNode && this._commandNodeOrchestrationCopy
         ? escapeHtml(this._commandNodeOrchestrationCopy) + '. '
         : '') +
@@ -3996,9 +4038,9 @@ export class WorkspaceCommandView {
     if (!entry) {
       return (
         '<div class="ws-cmd-map-command-repair">' +
-        '<strong>No entry agent</strong>' +
-        '<span>Chats, routing, and task orchestration need an entry agent.</span>' +
-        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Create Entry Agent</button>' +
+        '<strong>No Commander</strong>' +
+        '<span>Chats, routing, and task orchestration need a Commander.</span>' +
+        '<button type="button" class="ws-cmd-agent-action is-primary" data-cmd-add-agent>Create Commander</button>' +
         '</div>' +
         '<div class="ws-cmd-map-agent-field">' +
         specialists.map((agent, index) => this.renderMapAgentUnit(agent, index, false)).join('') +
@@ -4462,7 +4504,7 @@ export class WorkspaceCommandView {
       { label: 'Units', value: agent.instanceCount }
     ];
     const statusEffects = [
-      agent.entry ? 'Entry Agent' : '',
+      agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '',
       agent.status?.label || 'Idle',
       agent.model?.empty ? '' : agent.model?.label || ''
     ].filter(Boolean);
@@ -4817,7 +4859,7 @@ export class WorkspaceCommandView {
       '<header class="ws-cmd-map-quest-head"><span>New Quest</span>' +
       '<button type="button" class="ws-cmd-map-quest-close" data-cmd-map-quest-cancel aria-label="Close new quest">×</button></header>' +
       '<textarea class="ws-cmd-map-quest-input" data-cmd-map-quest-input rows="2" ' +
-      'placeholder="Describe the quest… (assigned to the entry agent)"' +
+      'placeholder="Describe the quest… (assigned to the Commander)"' +
       disabledAttr +
       '>' +
       draft +
@@ -4892,7 +4934,7 @@ export class WorkspaceCommandView {
       }
     }
     if (window.Toast) {
-      const target = assignee || 'the entry agent';
+      const target = assignee || 'the Commander';
       window.Toast.success(
         (start ? 'Quest started · assigned to ' : 'Quest assigned to ') + target
       );

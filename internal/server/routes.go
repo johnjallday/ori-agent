@@ -142,8 +142,15 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		agentHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		agentHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
 	}
+	if s.Handlers.ModelCategory != nil {
+		agentHandler.SetModelCategoryStore(s.Handlers.ModelCategory.Store())
+	}
+	if s.Handlers.Skills != nil {
+		agentHandler.SetSkillsManager(s.Handlers.Skills.Manager())
+	}
 	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
 	mux.Handle("/api/agents", agentHandler)
+	mux.HandleFunc("/api/agents/catalog", agenthttp.CatalogHandler)
 	if s.Handlers.Evolution != nil {
 		mux.HandleFunc("/api/evolution/assistant", s.Handlers.Evolution.GetAssistantProgress)
 		mux.HandleFunc("/api/evolution/suggestions", s.Handlers.Evolution.GetSuggestions)

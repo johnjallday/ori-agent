@@ -27,11 +27,30 @@ type ManagerConfig struct {
 	ConfigManager     *config.Manager
 }
 
+// AgentLoadout describes an agent's active-skill slot budget for cap
+// enforcement (PRD section C). Stage is carried only for error messages.
+type AgentLoadout struct {
+	SlotCap    int
+	ExpertMode bool
+	Stage      string
+}
+
+// LoadoutResolver resolves an agent's slot cap and expert-mode flag at check
+// time (read through the agent store, never cached — PRD technical notes).
+// Implemented by an adapter over the agent store in the server package.
+type LoadoutResolver interface {
+	// ResolveAgentLoadout returns the agent's loadout budget. ok=false means
+	// the agent is not resolvable, in which case the caller applies no cap
+	// (fail open — a missing agent should never block a skill toggle).
+	ResolveAgentLoadout(agentName string) (loadout AgentLoadout, ok bool)
+}
+
 type Manager struct {
 	agentStorePath    string
 	personalSkillsDir string
 	externalAgents    *externalagents.Cache
 	configManager     *config.Manager
+	loadoutResolver   LoadoutResolver
 }
 
 func NewManager(cfg ManagerConfig) *Manager {
@@ -41,6 +60,13 @@ func NewManager(cfg ManagerConfig) *Manager {
 		externalAgents:    cfg.ExternalAgents,
 		configManager:     cfg.ConfigManager,
 	}
+}
+
+// SetLoadoutResolver wires stage-based slot-cap enforcement for the per-agent
+// skill-enable path. When nil (unset), SetSkillEnabled behaves as it did
+// before caps existed — no enforcement — preserving legacy callers.
+func (m *Manager) SetLoadoutResolver(resolver LoadoutResolver) {
+	m.loadoutResolver = resolver
 }
 
 func (m *Manager) GetSkill(agentName, skillName string) (*Skill, bool, error) {

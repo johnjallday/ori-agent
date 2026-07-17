@@ -290,7 +290,7 @@ test('overviewBodyHTML falls back to empty-state copy when a workspace has no en
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({ id: 'a', name: 'Bare Workspace' });
 
-  assert.match(html, /No entry agent/);
+  assert.match(html, /No Commander/);
   assert.match(html, /No agents yet/);
 });
 
