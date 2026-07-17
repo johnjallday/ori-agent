@@ -216,6 +216,89 @@ func TestService_AwardFeedXP_IncrementsFeedCount(t *testing.T) {
 	}
 }
 
+func TestService_AwardTaskXP_WorthMoreThanMessage(t *testing.T) {
+	svc, agentStore, assistantProgressStore := newTestService(&Config{BaseMessageXP: 10})
+	logSink := &fakeActivityLogger{}
+	svc.SetActivityLogger(logSink)
+
+	if err := svc.AwardTaskXP("alpha"); err != nil {
+		t.Fatalf("AwardTaskXP() failed: %v", err)
+	}
+
+	evolution := agentStore.agents["alpha"].Evolution
+	if evolution == nil {
+		t.Fatal("expected evolution to be initialized")
+	}
+	if evolution.Experience != 50 {
+		t.Errorf("expected task XP 50 (5x base message XP of 10), got %d", evolution.Experience)
+	}
+	if assistantProgressStore.progress.Experience != 50 {
+		t.Errorf("expected assistant XP 50, got %d", assistantProgressStore.progress.Experience)
+	}
+	if len(logSink.events) != 1 || logSink.events[0] != types.ActivityEventEvolutionTask {
+		t.Fatalf("expected one evolution_task activity log, got %v", logSink.events)
+	}
+}
+
+func TestService_AwardTaskXP_NoMessageDuplicateSuppression(t *testing.T) {
+	svc, agentStore, _ := newTestService(&Config{BaseMessageXP: 10})
+
+	now := time.Date(2026, 2, 7, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+
+	if err := svc.AwardTaskXP("alpha"); err != nil {
+		t.Fatalf("first task award failed: %v", err)
+	}
+	// Back-to-back task completions (empty "message") must not be suppressed
+	// the way identical chat messages are.
+	if err := svc.AwardTaskXP("alpha"); err != nil {
+		t.Fatalf("second task award failed: %v", err)
+	}
+
+	if agentStore.agents["alpha"].Evolution.Experience != 100 {
+		t.Errorf("expected both task completions to award XP (100 total), got %d",
+			agentStore.agents["alpha"].Evolution.Experience)
+	}
+}
+
+func TestService_AwardTaskXP_RespectsHourlyCapAcrossChatAndTask(t *testing.T) {
+	svc, agentStore, _ := newTestService(&Config{
+		BaseMessageXP: 10,
+		MaxXPPerHour:  60,
+	})
+
+	now := time.Date(2026, 2, 7, 13, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+
+	if err := svc.AwardMessageXP("alpha", 0, "hello"); err != nil {
+		t.Fatalf("message award failed: %v", err)
+	}
+	if err := svc.AwardTaskXP("alpha"); err != nil {
+		t.Fatalf("task award failed: %v", err)
+	}
+
+	// 10 (message) + 50 (task) = 60, exactly the cap.
+	if agentStore.agents["alpha"].Evolution.Experience != 60 {
+		t.Errorf("expected combined chat+task XP to hit the cap at 60, got %d",
+			agentStore.agents["alpha"].Evolution.Experience)
+	}
+
+	if err := svc.AwardTaskXP("alpha"); err != nil {
+		t.Fatalf("third award failed: %v", err)
+	}
+	if agentStore.agents["alpha"].Evolution.Experience != 60 {
+		t.Errorf("expected hourly cap to block further task XP, got %d",
+			agentStore.agents["alpha"].Evolution.Experience)
+	}
+}
+
+func TestService_AwardTaskXP_NilServiceIsSafeNoOp(t *testing.T) {
+	var svc *Service
+	if err := svc.AwardTaskXP("alpha"); err != nil {
+		t.Fatalf("expected nil service AwardTaskXP to be a safe no-op, got error: %v", err)
+	}
+}
+
 func TestService_SelectPath_GatesBeforeLearner(t *testing.T) {
 	svc, _, _ := newTestService(nil)
 

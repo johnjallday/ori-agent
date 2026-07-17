@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -17,7 +18,8 @@ type fakeTaskHandler struct {
 	mu      sync.Mutex
 	seenIDs map[string]int
 
-	block <-chan struct{} // optional: hold ExecuteTask until closed
+	block     <-chan struct{} // optional: hold ExecuteTask until closed
+	returnErr error           // optional: return this error instead of a successful result
 }
 
 func (h *fakeTaskHandler) ExecuteTask(ctx context.Context, agentName string, task Task) (string, error) {
@@ -35,6 +37,9 @@ func (h *fakeTaskHandler) ExecuteTask(ctx context.Context, agentName string, tas
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}
+	}
+	if h.returnErr != nil {
+		return "", h.returnErr
 	}
 	return "ok", nil
 }
@@ -280,6 +285,133 @@ func TestCheckAndExecuteTasks_SingleClaimPerTask(t *testing.T) {
 		if n != 1 {
 			t.Errorf("task %s executed %d times, want 1", id, n)
 		}
+	}
+}
+
+// fakeXPAwarder records AwardTaskXP calls so tests can assert whether task
+// completion (vs failure) actually triggered an award.
+type fakeXPAwarder struct {
+	mu     sync.Mutex
+	awards []string // agent names, in call order
+	err    error
+}
+
+func (a *fakeXPAwarder) AwardTaskXP(agentName string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.awards = append(a.awards, agentName)
+	return a.err
+}
+
+func (a *fakeXPAwarder) callCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.awards)
+}
+
+// waitForTaskStatus polls the store until the task reaches one of the target
+// statuses or the deadline passes, returning the final status seen.
+func waitForTaskStatus(t *testing.T, store Store, wsID, taskID string, deadline time.Time) TaskStatus {
+	t.Helper()
+	for time.Now().Before(deadline) {
+		fresh, err := store.Get(wsID)
+		if err == nil {
+			if task, taskErr := fresh.GetTask(taskID); taskErr == nil && task != nil {
+				if task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
+					return task.Status
+				}
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("task %s did not reach a terminal status before deadline", taskID)
+	return ""
+}
+
+// TestExecuteTask_AwardsXPOnCompletion verifies a successfully completed task
+// awards XP to the executing agent exactly once (PRD FR15).
+func TestExecuteTask_AwardsXPOnCompletion(t *testing.T) {
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "t1", To: "agent-a", Status: TaskStatusAssigned},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	handler := &fakeTaskHandler{}
+	te := NewTaskExecutor(store, handler, ExecutorConfig{PollInterval: time.Hour, MaxConcurrent: 1})
+	t.Cleanup(te.Stop)
+
+	awarder := &fakeXPAwarder{}
+	te.SetEvolutionAwarder(awarder)
+
+	te.checkAndExecuteTasks()
+
+	status := waitForTaskStatus(t, store, ws.ID, "t1", time.Now().Add(2*time.Second))
+	if status != TaskStatusCompleted {
+		t.Fatalf("task status = %q, want completed", status)
+	}
+
+	if got := awarder.callCount(); got != 1 {
+		t.Fatalf("AwardTaskXP call count = %d, want 1", got)
+	}
+	if awarder.awards[0] != "agent-a" {
+		t.Errorf("AwardTaskXP called for agent %q, want agent-a", awarder.awards[0])
+	}
+}
+
+// TestExecuteTask_NoXPOnFailure verifies a failed task run awards no XP.
+func TestExecuteTask_NoXPOnFailure(t *testing.T) {
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "t1", To: "agent-a", Status: TaskStatusAssigned},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	handler := &fakeTaskHandler{returnErr: errors.New("boom")}
+	te := NewTaskExecutor(store, handler, ExecutorConfig{PollInterval: time.Hour, MaxConcurrent: 1})
+	t.Cleanup(te.Stop)
+
+	awarder := &fakeXPAwarder{}
+	te.SetEvolutionAwarder(awarder)
+
+	te.checkAndExecuteTasks()
+
+	status := waitForTaskStatus(t, store, ws.ID, "t1", time.Now().Add(2*time.Second))
+	if status != TaskStatusFailed {
+		t.Fatalf("task status = %q, want failed", status)
+	}
+
+	if got := awarder.callCount(); got != 0 {
+		t.Fatalf("AwardTaskXP call count = %d, want 0 for a failed task", got)
+	}
+}
+
+// TestExecuteTask_NilAwarderIsSafeNoOp verifies that never calling
+// SetEvolutionAwarder (feature disabled/unwired) does not panic and task
+// completion proceeds normally.
+func TestExecuteTask_NilAwarderIsSafeNoOp(t *testing.T) {
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "t1", To: "agent-a", Status: TaskStatusAssigned},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	handler := &fakeTaskHandler{}
+	te := NewTaskExecutor(store, handler, ExecutorConfig{PollInterval: time.Hour, MaxConcurrent: 1})
+	t.Cleanup(te.Stop)
+	// Deliberately not calling te.SetEvolutionAwarder.
+
+	te.checkAndExecuteTasks()
+
+	status := waitForTaskStatus(t, store, ws.ID, "t1", time.Now().Add(2*time.Second))
+	if status != TaskStatusCompleted {
+		t.Fatalf("task status = %q, want completed", status)
 	}
 }
 

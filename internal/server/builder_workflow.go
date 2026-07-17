@@ -332,6 +332,12 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	// provider profiles, so wire the LLM task handler directly for scheduling
 	// decisions (per-provider concurrency, local timeouts) — WS6.
 	b.taskExecutor.SetProviderResolver(b.taskHandler)
+	// Only wire when non-nil: b.evolutionService is a concrete *evolution.Service
+	// and passing a nil pointer through the TaskXPAwarder interface would leave
+	// a non-nil interface with a nil value, defeating the executor's nil check.
+	if b.evolutionService != nil {
+		b.taskExecutor.SetEvolutionAwarder(b.evolutionService)
+	}
 
 	b.stepExecutor = workspace.NewStepExecutor(b.workspaceStore, taskExecutionHandler, workspace.StepExecutorConfig{
 		PollInterval: 5 * time.Second,

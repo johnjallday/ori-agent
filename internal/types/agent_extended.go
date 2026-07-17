@@ -240,6 +240,7 @@ const (
 	ActivityEventEvolutionFeed  ActivityEventType = "evolution_feed"  // Feed action granted evolution XP
 	ActivityEventEvolutionStage ActivityEventType = "evolution_stage" // Evolution stage changed
 	ActivityEventEvolutionPath  ActivityEventType = "evolution_path"  // Evolution path selected/changed
+	ActivityEventEvolutionTask  ActivityEventType = "evolution_task"  // Completed task run granted evolution XP
 )
 
 // ActivityLog represents a single activity log entry for an agent

@@ -26,6 +26,7 @@ type TaskExecutor struct {
 	eventBus               *EventBus // Optional event bus for publishing events
 
 	providerResolver TaskProviderResolver // optional; overrides taskHandler assertion
+	evolutionAwarder TaskXPAwarder        // optional; awards XP for completed tasks
 
 	mu           sync.RWMutex
 	runningTasks map[string]*taskExecution
@@ -34,12 +35,29 @@ type TaskExecutor struct {
 	wg           sync.WaitGroup
 }
 
+// TaskXPAwarder grants evolution XP for a completed task run. Implemented by
+// evolution.Service; kept as a narrow interface so workspace doesn't depend
+// on the evolution package. A nil TaskXPAwarder (feature disabled/unwired)
+// is handled by simply never calling SetEvolutionAwarder.
+type TaskXPAwarder interface {
+	AwardTaskXP(agentName string) error
+}
+
 // SetProviderResolver wires provider-profile resolution for scheduling (WS6).
 // This is needed when the execution handler is a wrapper (e.g. a run bridge) that
 // does not itself implement TaskProviderResolver; without it the executor falls
 // back to type-asserting the task handler.
 func (te *TaskExecutor) SetProviderResolver(resolver TaskProviderResolver) {
 	te.providerResolver = resolver
+}
+
+// SetEvolutionAwarder wires the evolution service so completed task runs
+// award XP to the executing agent (PRD FR15-16). Never call this with a
+// possibly-nil concrete pointer wrapped in the interface — leave it unset
+// instead, so te.evolutionAwarder stays a true nil interface and the
+// executeTask nil-check below is reliable.
+func (te *TaskExecutor) SetEvolutionAwarder(awarder TaskXPAwarder) {
+	te.evolutionAwarder = awarder
 }
 
 // resolveProviderProfile resolves a task's provider profile, preferring an
@@ -546,6 +564,15 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 				}
 			}
 		} else {
+			// Award evolution XP to the executing agent for the completed task
+			// (PRD FR15-16). Best-effort: a nil awarder (feature disabled) or an
+			// award error never blocks task completion.
+			if te.evolutionAwarder != nil && task.To != "" {
+				if awardErr := te.evolutionAwarder.AwardTaskXP(task.To); awardErr != nil {
+					logger.Error("Failed to award task XP", logger.Fields{"agent": task.To, "task_id": task.ID, "error": awardErr})
+				}
+			}
+
 			// Refresh ws so autoStoreResult sees the post-mutation workspace.
 			// autoStoreResult is best-effort and does its own Save outside the
 			// per-workspace lock, so a concurrent Update can interleave; that's
