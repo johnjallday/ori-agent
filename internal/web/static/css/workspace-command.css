@@ -221,6 +221,24 @@
   text-transform: uppercase;
   clip-path: polygon(0 0, 100% 0, 100% 70%, calc(100% - 6px) 100%, 0 100%);
 }
+/* Personal HQ map-header badge (FR15): reuses the citadel gold "keeper"
+   tokens already mirrored into this file's tactical scale (no new colors),
+   echoing ws-map-tile-hq-badge's treatment on the base /workspaces map for
+   visual continuity. Map mode only — rendered conditionally in JS. */
+.ws-cmd-hq-badge {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.12);
+  color: var(--ws-keeper);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, calc(100% - 6px) 100%, 0 100%);
+}
 .ws-cmd-topbar.is-group .ws-dot {
   background: var(--ws-group-accent, var(--ws-faction));
   box-shadow: 0 0 8px var(--ws-group-accent, var(--ws-faction));
@@ -1079,6 +1097,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+/* Personal HQ Stations panel accent (FR15): tint/border only, reusing the
+   citadel gold "keeper" tokens — no new colors, no layout/density change.
+   Scoped to the Stations panel section, not the whole map frame. */
+.ws-cmd-map-shell.is-hq .ws-cmd-map-window-section.is-stations {
+  padding: 10px;
+  margin: -10px;
+  border: 1px solid var(--ws-keeper-deep);
+  background: linear-gradient(180deg, rgba(232, 181, 75, 0.08), transparent 70%);
 }
 .ws-cmd-map-agent-field {
   width: min(100%, 980px);

@@ -686,6 +686,13 @@ export class WorkspaceCommandView {
     const groupBadge = isGroup
       ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
       : '';
+    // Map-mode only (FR15): commandBarHTML is shared chrome for both Details
+    // and Map, but non-map views must stay byte-for-byte unchanged (Non-
+    // Goals). Echoes the ws-map-tile-hq-badge treatment from the base map.
+    const hqBadge =
+      this.isPersonalHQ() && this.viewMode === 'map'
+        ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
+        : '';
     const tags = this.workspaceTags();
     const isLongDescription = Array.from(description).length > 150;
     const descriptionClass =
@@ -730,6 +737,7 @@ export class WorkspaceCommandView {
       escapeHtml(name) +
       '</h2>' +
       groupBadge +
+      hqBadge +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
@@ -4765,8 +4773,12 @@ export class WorkspaceCommandView {
 
   renderOperationsMap() {
     const { agents, selected } = this.mapAgentViewModels();
+    // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
+    // no whole-frame tint, layout/density unchanged.
     return (
-      '<div class="ws-cmd-map-shell">' +
+      '<div class="ws-cmd-map-shell' +
+      (this.isPersonalHQ() ? ' is-hq' : '') +
+      '">' +
       '<div class="ws-cmd-opmap" role="region" aria-label="Workspace operations map">' +
       this.renderMapAgentsZone(agents) +
       this.renderMapToolTray() +

@@ -2877,3 +2877,93 @@ test('openRailItem no longer special-cases an "email" section', () => {
     globalThis.window = originalWindow;
   }
 });
+
+// ---------- HQ accent styling (FR15/FR16) ----------
+
+test('renderOperationsMap adds is-hq to the map shell only for the designated HQ', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    mapInventorySection: '',
+    activeSystemTab: 'memory',
+    page: {
+      workspace: { id: 'ws-1', designation: 'personal_hq', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+  const hqHTML = commandView.renderOperationsMap();
+  assert.match(hqHTML, /ws-cmd-map-shell is-hq/);
+
+  commandView.page = {
+    workspace: { id: 'ws-2', mcp_bindings: [], skill_bindings: [] },
+    tasks: [],
+    buildAgentGroups: () => []
+  };
+  const plainHTML = commandView.renderOperationsMap();
+  assert.doesNotMatch(plainHTML, /is-hq/);
+});
+
+test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    viewMode: 'map',
+    page: {
+      workspaceId: 'hq-1',
+      workspace: {
+        name: 'My Personal HQ',
+        designation: 'personal_hq',
+        description: '',
+        mcp_bindings: [],
+        skill_bindings: []
+      },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const mapHTML = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+  assert.match(mapHTML, /ws-cmd-hq-badge/);
+  assert.match(mapHTML, />Personal HQ</);
+
+  // Non-Goals: Command view's non-map mode must not change (FR15 is map-only).
+  commandView.viewMode = 'details';
+  const detailsHTML = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+  assert.doesNotMatch(detailsHTML, /ws-cmd-hq-badge/);
+});
+
+test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in map mode', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    identityExpanded: false,
+    identityEditMode: '',
+    viewMode: 'map',
+    page: {
+      workspaceId: 'plain-1',
+      workspace: { name: 'Regular Project', description: '', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+
+  const html = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+  assert.doesNotMatch(html, /ws-cmd-hq-badge/);
+});
