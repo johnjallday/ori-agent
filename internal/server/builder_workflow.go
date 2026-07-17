@@ -160,6 +160,21 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			if err := b.sessionHandler.BackfillGroupScaffolding(context.Background()); err != nil {
 				logger.Warn("Startup group scaffolding backfill failed", logger.Fields{"error": err.Error()})
 			}
+			// Personal HQ designation projection: the folder store only exists
+			// now (Phase 18), after personalHQService was constructed (Phase
+			// 17), so wire the syncer here and reconcile the workspace-side
+			// Designation field against the authoritative designation records.
+			// Idempotent; non-fatal. (Builder wiring-order gotcha — the syncer
+			// reads b.sessionHandler's folder store lazily at call time, set
+			// just above via SetWorkspaceStore.)
+			if b.personalHQService != nil {
+				b.personalHQService.SetDesignationSyncer(b.sessionHandler)
+				if designated, err := b.personalHQService.DesignatedWorkspaceIDs(context.Background()); err != nil {
+					logger.Warn("Startup designation backfill: failed to resolve designated workspaces", logger.Fields{"error": err.Error()})
+				} else if err := b.sessionHandler.BackfillWorkspaceDesignations(context.Background(), designated); err != nil {
+					logger.Warn("Startup workspace designation backfill failed", logger.Fields{"error": err.Error()})
+				}
+			}
 		}
 		if b.chatHandler != nil {
 			b.chatHandler.SetFileStore(fileStore)

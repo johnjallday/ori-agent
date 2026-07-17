@@ -69,6 +69,21 @@ type ProfileStore interface {
 	SetHQOnboardingState(ctx context.Context, userID string, state userprofile.HQOnboardingState) error
 }
 
+// DesignationSyncer projects a designation transition onto the target
+// workspace's folder-store record (workspace.json), the canonical store for
+// the workspace-side Designation field (no SQLite column). designation is ""
+// (clear) or "personal_hq". It is optional and wired post-construction via
+// SetDesignationSyncer, because the folder store is created after this service
+// during server startup (Phase 18 vs 17) — the same wiring-order constraint
+// SetOnDesignated works around. Implemented by sessionhttp.Handler.
+//
+// The personalhq designation record remains the source of truth; a sync
+// failure is best-effort and self-heals on the next startup backfill, so
+// callers must not fail a designation transition when the projection fails.
+type DesignationSyncer interface {
+	SetWorkspaceDesignation(ctx context.Context, workspaceID, designation string) error
+}
+
 // Status is the resolved, read-time view of a user's Personal HQ.
 type Status struct {
 	UserID string `json:"user_id"`
@@ -121,6 +136,11 @@ type Service struct {
 	// smartOnboardingHandler.SetOnPersonalized in internal/server), since
 	// the engine is built after this service during server startup.
 	onDesignated func(ctx context.Context, userID, workspaceID string)
+
+	// designationSync projects designate/replace/clear transitions onto the
+	// workspace-side Designation field (workspace.json). Optional; wired
+	// post-construction via SetDesignationSyncer (see DesignationSyncer).
+	designationSync DesignationSyncer
 }
 
 // NewService constructs a Personal HQ service. Both dependencies are
@@ -136,6 +156,58 @@ func NewService(profiles ProfileStore, workspaces WorkspaceReader) *Service {
 // internal/progression.
 func (s *Service) SetOnDesignated(fn func(ctx context.Context, userID, workspaceID string)) {
 	s.onDesignated = fn
+}
+
+// SetDesignationSyncer registers the sink that mirrors designation transitions
+// onto the workspace-side Designation field. Wired post-construction because
+// the folder store is built after this service during server startup.
+func (s *Service) SetDesignationSyncer(syncer DesignationSyncer) {
+	s.designationSync = syncer
+}
+
+// syncDesignation projects a designation value onto a workspace's folder-store
+// record, best-effort. The personalhq record is the source of truth; a failed
+// projection is logged and left for the startup backfill to heal, never
+// surfaced as an error to the designation transition.
+func (s *Service) syncDesignation(ctx context.Context, workspaceID, designation string) {
+	if s == nil || s.designationSync == nil {
+		return
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return
+	}
+	if err := s.designationSync.SetWorkspaceDesignation(ctx, workspaceID, designation); err != nil {
+		logger.Warn("personal hq: failed to project designation onto workspace", logger.Fields{
+			"workspace_id": workspaceID, "designation": designation, "error": err,
+		})
+	}
+}
+
+// DesignatedWorkspaceIDs returns the set of workspace IDs currently pointed at
+// by a personal-hq designation record, keyed for O(1) membership. The startup
+// backfill reconciles the workspace-side Designation projection against these
+// authoritative records.
+//
+// Local-first: userprofile exposes no multi-user enumeration, so only the
+// local user's record is consulted. The Designation field is global (a
+// workspace either is or isn't an HQ), so on a single-user install this is the
+// complete designated set.
+func (s *Service) DesignatedWorkspaceIDs(ctx context.Context) (map[string]bool, error) {
+	if s == nil || s.profiles == nil {
+		return nil, errors.New("personal hq service is not configured")
+	}
+	state, err := s.profiles.GetPersonalHQState(ctx, normalizeUserID(""))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, 1)
+	if state != nil {
+		if id := strings.TrimSpace(state.PersonalWorkspaceID); id != "" {
+			out[id] = true
+		}
+	}
+	return out, nil
 }
 
 // Status resolves the current Personal HQ designation and onboarding state
@@ -232,6 +304,7 @@ func (s *Service) Clear(ctx context.Context, userID string) (*Status, error) {
 		return nil, err
 	}
 	if previous != nil && previous.HasDesignation() {
+		s.syncDesignation(ctx, previous.WorkspaceID, "")
 		logger.Info("personal hq: designation cleared", logger.Fields{"user_id": userID, "workspace_id": previous.WorkspaceID})
 	}
 	return s.Status(ctx, userID)
@@ -286,8 +359,22 @@ func (s *Service) setDesignation(ctx context.Context, userID, workspaceID string
 	case InvalidReasonWrongOwner:
 		return nil, ErrUnauthorized
 	}
+	// Capture the workspace previously pointed at (stale or valid) before the
+	// record moves, so its workspace-side projection can be cleared when the
+	// HQ changes workspaces.
+	var previousWorkspaceID string
+	if prev, prevErr := s.profiles.GetPersonalHQState(ctx, userID); prevErr == nil && prev != nil {
+		previousWorkspaceID = strings.TrimSpace(prev.PersonalWorkspaceID)
+	}
 	if err := s.profiles.SetPersonalWorkspaceID(ctx, userID, workspaceID); err != nil {
 		return nil, err
+	}
+	// Project the transition onto the workspace records. The record just
+	// written is the source of truth; these mirrors are best-effort. The
+	// target is guaranteed non-group here (ineligibleReason gate above).
+	s.syncDesignation(ctx, workspaceID, string(session.WorkspaceDesignationPersonalHQ))
+	if previousWorkspaceID != "" && previousWorkspaceID != workspaceID {
+		s.syncDesignation(ctx, previousWorkspaceID, "")
 	}
 	if s.onDesignated != nil {
 		s.onDesignated(ctx, userID, workspaceID)
