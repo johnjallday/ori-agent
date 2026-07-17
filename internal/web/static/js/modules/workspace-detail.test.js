@@ -288,7 +288,74 @@ test('referenced agent with no global definition and no snapshot is a missing er
   const issues = page.collectWorkspaceHealthIssues();
   assert.equal(issues.length, 1);
   assert.equal(issues[0].severity, 'error');
-  assert.equal(issues[0].title, 'Entry agent is missing');
+  assert.equal(issues[0].title, 'Commander is missing');
+});
+
+test('3+ agents with no orchestrator role surfaces a non-blocking Commander nudge (FR23)', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    name: 'Trio',
+    entry_agent_name: 'Alpha',
+    agents: ['Alpha', 'Beta', 'Gamma'],
+    agent_instances: [{ name: 'Alpha', entry_point: true }, { name: 'Beta' }, { name: 'Gamma' }],
+    shared_data: {}
+  };
+  page.agentIndex = new Map([
+    ['alpha', { role: 'researcher' }],
+    ['beta', { role: 'analyzer' }],
+    ['gamma', { role: 'specialist' }]
+  ]);
+  page.workspaceAgentSnapshots = new Set(['alpha', 'beta', 'gamma']);
+  page.files = [];
+
+  const issues = page.collectWorkspaceHealthIssues();
+  const nudge = issues.find(issue => issue.title === 'This team has no dedicated Commander');
+  assert.ok(nudge, 'expected the no-Commander nudge to be present');
+  assert.equal(nudge.severity, 'warning', 'the nudge must never be an error (non-blocking)');
+  assert.equal(nudge.action, 'assign_commander');
+});
+
+test('3+ agents with an orchestrator role has no Commander nudge', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    name: 'Trio',
+    entry_agent_name: 'Alpha',
+    agents: ['Alpha', 'Beta', 'Gamma'],
+    agent_instances: [{ name: 'Alpha', entry_point: true }, { name: 'Beta' }, { name: 'Gamma' }],
+    shared_data: {}
+  };
+  page.agentIndex = new Map([
+    ['alpha', { role: 'orchestrator' }],
+    ['beta', { role: 'analyzer' }],
+    ['gamma', { role: 'specialist' }]
+  ]);
+  page.workspaceAgentSnapshots = new Set(['alpha', 'beta', 'gamma']);
+  page.files = [];
+
+  const issues = page.collectWorkspaceHealthIssues();
+  const nudge = issues.find(issue => issue.title === 'This team has no dedicated Commander');
+  assert.equal(nudge, undefined, 'a workspace with a Commander role should not get the nudge');
+});
+
+test('fewer than 3 agents never gets the no-Commander nudge', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    name: 'Duo',
+    entry_agent_name: 'Alpha',
+    agents: ['Alpha', 'Beta'],
+    agent_instances: [{ name: 'Alpha', entry_point: true }, { name: 'Beta' }],
+    shared_data: {}
+  };
+  page.agentIndex = new Map([
+    ['alpha', { role: 'researcher' }],
+    ['beta', { role: 'analyzer' }]
+  ]);
+  page.workspaceAgentSnapshots = new Set(['alpha', 'beta']);
+  page.files = [];
+
+  const issues = page.collectWorkspaceHealthIssues();
+  const nudge = issues.find(issue => issue.title === 'This team has no dedicated Commander');
+  assert.equal(nudge, undefined, 'below the 3-agent threshold, no nudge should appear');
 });
 
 test('workspace detail summary chip counts tasks with reference URLs', () => {

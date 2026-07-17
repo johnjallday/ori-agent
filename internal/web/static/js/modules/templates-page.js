@@ -1149,7 +1149,7 @@ function tplAgentsLoad() {
 function tplAgentsDisplayName(agent, index) {
   const name = String(agent?.name || '').trim();
   if (name) return name;
-  return index === 0 ? 'Entry agent' : `Agent ${index + 1}`;
+  return index === 0 ? 'Commander' : `Agent ${index + 1}`;
 }
 
 function tplAgentsInitials(name, index) {
@@ -1163,7 +1163,7 @@ function tplAgentsInitials(name, index) {
 }
 
 function tplAgentsRoleLabel(agent, index) {
-  if (index === 0) return 'Entry agent';
+  if (index === 0) return 'Commander';
   const role = String(agent?.role || '').trim();
   if (!role) return 'Specialist';
   return role.replace(/[_-]+/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
@@ -1628,7 +1628,7 @@ async function tplAgentsSave() {
   const agents = tplAgentsCollect().filter(a => a.name);
   if (agents.length === 0) {
     tplToast(
-      'A template needs at least one agent — the first is the workspace entry agent.',
+      'A template needs at least one agent — the first is the workspace Commander.',
       'error'
     );
     return;

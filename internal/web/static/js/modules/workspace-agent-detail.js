@@ -198,7 +198,12 @@ export class WorkspaceAgentDetailPage {
     if (badges) {
       const chips = [];
       if (this.isEntryAgent) {
-        chips.push('<span class="wad-badge is-leader">Entry agent</span>');
+        // Commander-slot label (PRD FR21/FR22): "Commander" when this agent's
+        // own role is orchestrator, "Acting Commander" otherwise.
+        const commanderLabel = String(profile?.role || '').trim().toLowerCase() === 'orchestrator'
+          ? 'Commander'
+          : 'Acting Commander';
+        chips.push(`<span class="wad-badge is-leader">${this.escape(commanderLabel)}</span>`);
       }
       chips.push('<span class="wad-badge is-muted">Workspace-local</span>');
       const provider = String(profile?.provider || '').trim();

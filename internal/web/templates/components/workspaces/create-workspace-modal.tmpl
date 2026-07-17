@@ -66,6 +66,11 @@
                     <span class="workspace-template-briefing-row-label">Agents</span>
                     <div id="templateBriefingAgentsValue" class="workspace-template-briefing-chips workspace-template-briefing-agents"></div>
                   </div>
+                  <!-- Non-blocking nudge (PRD FR23): shown when the blueprint seeds 3+
+                       agents and none has the Commander role. Never blocks selection. -->
+                  <div id="templateBriefingNoCommanderNudge" class="workspace-template-briefing-nudge" hidden>
+                    This team has no dedicated Commander — one agent will hold the slot as Acting Commander. You can assign the Commander role after creating the workspace.
+                  </div>
                   <div id="templateBriefingScaffoldRow" class="workspace-template-briefing-row" hidden>
                     <span class="workspace-template-briefing-row-label">Project folder</span>
                     <span id="templateBriefingScaffoldValue" class="workspace-template-briefing-row-value"></span>

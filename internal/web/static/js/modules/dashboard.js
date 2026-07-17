@@ -7344,13 +7344,13 @@
 
   function renderWorkspaceRepairState(prompt, routeContext, intent, routeData, resolution) {
     var workspaceName = resolution.selectedWorkspaceName || 'This workspace';
-    var reason = resolution.repairReason || 'its entry agent is unavailable';
+    var reason = resolution.repairReason || 'its Commander is unavailable';
     appendHomeAssistantMessage(
       'assistant',
-      '"' + workspaceName + '" looks like the right workspace, but its entry agent needs attention before Ori can continue.'
+      '"' + workspaceName + '" looks like the right workspace, but its Commander needs attention before Ori can continue.'
     );
     setHomeAssistantRoutingSummary(
-      'Entry Agent Required',
+      'Commander Required',
       '"' + workspaceName + '" matched this task but needs workspace setup before Ori can continue.',
       {
         detail: reason

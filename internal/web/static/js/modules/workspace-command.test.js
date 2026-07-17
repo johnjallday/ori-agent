@@ -247,7 +247,7 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.doesNotMatch(container.innerHTML, /No schedules yet\./);
   assert.doesNotMatch(container.innerHTML, /No sessions yet\./);
   assert.doesNotMatch(container.innerHTML, /No linked folders yet\./);
-  assert.match(container.innerHTML, /★ Entry Agent/);
+  assert.match(container.innerHTML, /★ Acting Commander/);
   assert.match(container.innerHTML, />Model<\/span>/);
   assert.match(container.innerHTML, /Tasks · 1/);
   assert.match(container.innerHTML, /title="Run"/);
@@ -1505,7 +1505,7 @@ test('agents manager modal locks the entry agent from removal', () => {
   const html = commandView.statModalHTML('agents');
   assert.match(html, /Atlas/);
   assert.match(html, /Builder/);
-  assert.match(html, /★ Entry Agent/);
+  assert.match(html, /★ Acting Commander/);
   // Builder is removable; Atlas (entry agent) shows a lock, not a delete button.
   assert.match(html, /data-cmd-modal-action="delete" data-cmd-id="Builder"/);
   assert.doesNotMatch(html, /data-cmd-modal-action="delete" data-cmd-id="Atlas"/);
@@ -1740,7 +1740,7 @@ test('entry-agent stage exposes manager settings while other agents expose remov
   const other = commandView.agentStageHTML(otherAgent);
 
   assert.match(keeper, /data-cmd-manager-settings/);
-  assert.match(keeper, /Entry Agent/);
+  assert.match(keeper, /Acting Commander/);
   assert.doesNotMatch(keeper, /data-cmd-remove-agent/);
   assert.doesNotMatch(other, /data-cmd-manager-settings/);
   assert.match(other, /data-cmd-remove-agent/);
@@ -2293,7 +2293,7 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     // here since there is no specialist in this fixture).
     assert.match(html, /is-command-node/);
     assert.match(html, /ws-cmd-map-command-role/);
-    assert.match(html, /Entry Agent/);
+    assert.match(html, /Acting Commander/);
     assert.doesNotMatch(html, /data-map-zone="mission"/);
     assert.doesNotMatch(html, /data-map-zone="tasks"/);
     assert.doesNotMatch(html, /data-map-zone="tools"/);

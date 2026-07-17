@@ -1399,7 +1399,7 @@ const sessionManager = {
 
     if (workspaceId) {
       autoModeText.textContent =
-        "You'll chat with this workspace's entry agent, which has the workspace context by default. Switch to Direct agent chat to talk to a different workspace agent.";
+        "You'll chat with this workspace's Commander, which has the workspace context by default. Switch to Direct agent chat to talk to a different workspace agent.";
       return;
     }
 
@@ -1642,7 +1642,7 @@ const sessionManager = {
         if (window.Toast) {
           Toast.warning(
             workspaceId
-              ? "No direct-chat agent is available in this workspace. Add an agent, or switch to auto mode to use the workspace's entry agent."
+              ? "No direct-chat agent is available in this workspace. Add an agent, or switch to auto mode to use the workspace's Commander."
               : 'No direct-chat agent is available. Add an agent or use Assistant.'
           );
         }

@@ -1540,7 +1540,7 @@
       els.workspacesBody.innerHTML =
         members.length === 0
           ? '<p class="stage-hint">Not attached to any workspace.</p>'
-          : members.map(readonlyWsRow).join('');
+          : members.map(function (ws) { return readonlyWsRow(ws, listItem.role); }).join('');
       return;
     }
 
@@ -1548,7 +1548,7 @@
     fetchWorkspaces()
       .then(function (all) {
         if (state.selected !== name) return;
-        renderWorkspacesEditor(name, members, all);
+        renderWorkspacesEditor(name, members, all, listItem.role);
       })
       .catch(function () {
         if (state.selected !== name) return;
@@ -1561,31 +1561,34 @@
       });
   }
 
-  function readonlyWsRow(ws) {
+  function readonlyWsRow(ws, role) {
     var nm = esc(ws.name || 'Workspace');
     var link = ws.id
       ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>'
       : nm;
-    var pill = ws.entry_point ? '<span class="ws-entry-pill">Entry agent</span>' : '';
+    var pill = ws.entry_point
+      ? '<span class="ws-entry-pill">' + esc(commanderSlotLabel(role)) + '</span>'
+      : '';
     return '<div class="ws-row"><span>' + link + '</span>' + pill + '</div>';
   }
 
-  function renderWorkspacesEditor(name, members, all) {
+  function renderWorkspacesEditor(name, members, all, role) {
     var memberIds = {};
     var entryIds = {};
     members.forEach(function (m) {
       memberIds[m.id] = true;
       if (m.entry_point) entryIds[m.id] = true;
     });
+    var commanderLbl = commanderSlotLabel(role);
 
     var rows = all
       .map(function (ws) {
         var isMember = !!memberIds[ws.id];
         var isEntry = !!entryIds[ws.id];
-        // The agent can't be unassigned from a workspace it's the entry agent of;
+        // The agent can't be unassigned from a workspace it's the Commander of;
         // lock that checkbox and explain, matching the server guard.
         var disabled = isEntry ? ' disabled' : '';
-        var pill = isEntry ? '<span class="ws-entry-pill">Entry agent</span>' : '';
+        var pill = isEntry ? '<span class="ws-entry-pill">' + esc(commanderLbl) + '</span>' : '';
         return (
           '<label class="ws-check' +
           (disabled ? ' is-locked' : '') +
@@ -1666,7 +1669,7 @@
           res.data &&
           res.data.error === 'entry_agent_removal_blocked'
         ) {
-          showStatus('workspaces', res.data.message || 'Cannot remove the entry agent.', 'error');
+          showStatus('workspaces', res.data.message || 'Cannot remove the Commander.', 'error');
         } else {
           showStatus(
             'workspaces',
@@ -3157,6 +3160,14 @@
   // before role-catalog.js's fetch resolves, or if it failed to load.
   function roleLabel(role) {
     return window.RoleCatalog ? window.RoleCatalog.label(role) : titleCase(role || 'Unspecialized');
+  }
+
+  // Commander-slot label (PRD FR21/FR22): "Commander" when the entry-slot
+  // holder's role is orchestrator, "Acting Commander" otherwise (e.g. a solo
+  // Specialist holding the slot). Distinct from roleLabel, which names the
+  // agent's own role rather than its Commander-slot status.
+  function commanderSlotLabel(role) {
+    return String(role || '').trim().toLowerCase() === 'orchestrator' ? 'Commander' : 'Acting Commander';
   }
 
   function titleCase(s) {

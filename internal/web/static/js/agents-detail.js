@@ -305,11 +305,11 @@ async function showMissingAgentState(message) {
   let detail = 'Return to the agents directory or open the relevant workspace to repair the missing reference.';
 
   if (recovery?.workspaceId && recovery.isEntryAgent) {
-    title = 'Workspace entry agent is missing';
+    title = 'Workspace Commander is missing';
     body = requestedName
-      ? `"${requestedName}" is still referenced as the entry agent for "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
-      : `The entry agent for "${recovery.workspaceName}" no longer exists.`;
-    detail = 'Create a replacement entry agent to restore workspace routing, chats, and task execution. You can also open the workspace first to inspect the current configuration.';
+      ? `"${requestedName}" is still referenced as the Commander for "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
+      : `The Commander for "${recovery.workspaceName}" no longer exists.`;
+    detail = 'Create a replacement Commander to restore workspace routing, chats, and task execution. You can also open the workspace first to inspect the current configuration.';
   } else if (recovery?.workspaceId) {
     body = requestedName
       ? `"${requestedName}" is still referenced inside "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
@@ -337,7 +337,7 @@ async function showMissingAgentState(message) {
     if (recovery?.workspaceId) {
       metaItems.push({
         label: 'Recovery',
-        value: recovery.isEntryAgent ? 'Create entry agent' : 'Repair workspace link'
+        value: recovery.isEntryAgent ? 'Create Commander' : 'Repair workspace link'
       });
     }
 

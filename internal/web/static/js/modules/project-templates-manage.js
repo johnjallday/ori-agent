@@ -347,6 +347,7 @@ function ptcElements() {
     briefingDeploys: document.getElementById('templateBriefingDeploys'),
     briefingAgentsRow: document.getElementById('templateBriefingAgentsRow'),
     briefingAgentsValue: document.getElementById('templateBriefingAgentsValue'),
+    briefingNoCommanderNudge: document.getElementById('templateBriefingNoCommanderNudge'),
     briefingScaffoldRow: document.getElementById('templateBriefingScaffoldRow'),
     briefingScaffoldValue: document.getElementById('templateBriefingScaffoldValue'),
     briefingAddonsRow: document.getElementById('templateBriefingAddonsRow'),
@@ -539,15 +540,20 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   if (els.briefingAgentsValue) {
     els.briefingAgentsValue.innerHTML = '';
     // One chip per agent: a role-hued dot + name. The first roster entry is the
-    // workspace entry agent (solid dot, brighter chip); the rest are specialists.
+    // workspace Commander (solid dot, brighter chip); the rest are specialists.
     briefingAgents.forEach((agent, index) => {
       const isEntry = index === 0;
       const chip = document.createElement('span');
       chip.className = 'workspace-template-briefing-agent-chip';
       if (isEntry) chip.classList.add('is-entry');
       if (agent.role) chip.dataset.role = agent.role;
+      // Commander-slot label (PRD FR21/FR22): "Commander" when this agent's
+      // own role is orchestrator, "Acting Commander" otherwise.
+      const commanderLabel = String(agent.role || '').trim().toLowerCase() === 'orchestrator'
+        ? 'Commander'
+        : 'Acting Commander';
       const roleLabel = isEntry
-        ? `entry agent${agent.role ? ` · ${agent.role}` : ''}`
+        ? `${commanderLabel}${agent.role ? ` · ${agent.role}` : ''}`
         : agent.role;
       if (roleLabel) chip.title = `${agent.name} — ${roleLabel}`;
       const dot = document.createElement('span');
@@ -557,6 +563,14 @@ function ptcRenderBriefing(els, importMode, templatePath) {
       chip.appendChild(document.createTextNode(agent.name));
       els.briefingAgentsValue.appendChild(chip);
     });
+  }
+
+  // No-Commander nudge (PRD FR23): non-blocking — the blueprint remains
+  // selectable and creatable either way; this only informs the choice.
+  if (els.briefingNoCommanderNudge) {
+    const needsNudge =
+      briefingAgents.length >= 3 && !briefingAgents.some((a) => a.role === 'orchestrator');
+    els.briefingNoCommanderNudge.hidden = !needsNudge;
   }
 
   const showScaffold = Boolean(showBriefing && template.has_skeleton);
