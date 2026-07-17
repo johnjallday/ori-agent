@@ -514,6 +514,13 @@ func convertToSessionLayout(layout *workspace.CanvasLayout) *CanvasLayout {
 		}
 	}
 
+	if layout.StationPositions != nil {
+		sessionLayout.StationPositions = make(map[string]Position)
+		for k, v := range layout.StationPositions {
+			sessionLayout.StationPositions[k] = Position{X: v.X, Y: v.Y}
+		}
+	}
+
 	if len(layout.WorkflowConnections) > 0 {
 		sessionLayout.WorkflowConnections = make([]WorkflowConnectionLayout, len(layout.WorkflowConnections))
 		for i, conn := range layout.WorkflowConnections {
@@ -590,6 +597,13 @@ func convertToAgentWorkspaceLayout(layout *CanvasLayout) *workspace.CanvasLayout
 		agentLayout.FolderPositions = make(map[string]workspace.Position)
 		for k, v := range layout.FolderPositions {
 			agentLayout.FolderPositions[k] = workspace.Position{X: v.X, Y: v.Y}
+		}
+	}
+
+	if layout.StationPositions != nil {
+		agentLayout.StationPositions = make(map[string]workspace.Position)
+		for k, v := range layout.StationPositions {
+			agentLayout.StationPositions[k] = workspace.Position{X: v.X, Y: v.Y}
 		}
 	}
 

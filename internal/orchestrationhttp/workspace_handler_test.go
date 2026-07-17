@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -278,5 +279,152 @@ func TestHandleGetWorkspaceListHydratesDesignation(t *testing.T) {
 	}
 	if plainEntry == nil || plainEntry["designation"] != "" {
 		t.Fatalf("expected plain-workspace summary designation = empty, got %#v", plainEntry)
+	}
+}
+
+// TestSaveStationLayoutHandlerRoundTrip covers FR5: station positions saved
+// through the scoped endpoint must arrive in the orchestration workspace GET
+// payload with no extra fetch.
+func TestSaveStationLayoutHandlerRoundTrip(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
+	ws.ID = "hq-workspace"
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+
+	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
+
+	body := `{"workspace_id":"hq-workspace","station_positions":{"email":{"x":0.92,"y":0.15}}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/station-layout", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.SaveStationLayoutHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/orchestration/workspace?id=hq-workspace", nil)
+	getW := httptest.NewRecorder()
+	handler.WorkspaceHandler(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(getW.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	layout, ok := response["layout"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected layout object in response, got %#v", response["layout"])
+	}
+	stationPositions, ok := layout["station_positions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected station_positions in layout, got %#v", layout["station_positions"])
+	}
+	email, ok := stationPositions["email"].(map[string]any)
+	if !ok || email["x"] != 0.92 || email["y"] != 0.15 {
+		t.Fatalf("expected email station position {0.92, 0.15}, got %#v", stationPositions["email"])
+	}
+}
+
+// TestSaveStationLayoutHandlerMissingWorkspace covers the 404 path.
+func TestSaveStationLayoutHandlerMissingWorkspace(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
+
+	body := `{"workspace_id":"does-not-exist","station_positions":{"email":{"x":0.5,"y":0.5}}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/station-layout", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.SaveStationLayoutHandler(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestSaveStationLayoutHandlerPreservesCanvasFields covers FR3/FR4 (one
+// direction of the clobber regression): saving station positions must leave
+// every canvas layout field untouched.
+func TestSaveStationLayoutHandlerPreservesCanvasFields(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
+	ws.ID = "hq-workspace"
+	ws.Layout = &workspace.CanvasLayout{
+		TaskPositions: map[string]workspace.Position{
+			"task-1": {X: 400, Y: 300},
+		},
+		Scale: 1.5,
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+
+	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
+
+	body := `{"workspace_id":"hq-workspace","station_positions":{"email":{"x":0.92,"y":0.15}}}`
+	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/station-layout", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.SaveStationLayoutHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	saved, err := store.Get("hq-workspace")
+	if err != nil {
+		t.Fatalf("Get workspace: %v", err)
+	}
+	if saved.Layout == nil {
+		t.Fatalf("expected layout to survive station save")
+	}
+	if got := saved.Layout.TaskPositions["task-1"]; got.X != 400 || got.Y != 300 {
+		t.Fatalf("expected canvas task position preserved, got %#v", got)
+	}
+	if saved.Layout.Scale != 1.5 {
+		t.Fatalf("expected canvas scale preserved, got %v", saved.Layout.Scale)
+	}
+	if got := saved.Layout.StationPositions["email"]; got.X != 0.92 || got.Y != 0.15 {
+		t.Fatalf("expected station position saved, got %#v", got)
+	}
+}
+
+// TestSaveLayoutHandlerPreservesStationPositions covers the other direction
+// of the clobber regression (FR4): saving canvas layout must leave station
+// positions untouched, because SaveLayoutHandler's request struct never
+// carries station_positions and it assigns fields in-place onto ws.Layout.
+func TestSaveLayoutHandlerPreservesStationPositions(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
+	ws.ID = "hq-workspace"
+	ws.Layout = &workspace.CanvasLayout{
+		StationPositions: map[string]workspace.Position{
+			"email": {X: 0.92, Y: 0.15},
+		},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save workspace: %v", err)
+	}
+
+	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
+
+	body := `{"workspace_id":"hq-workspace","task_positions":{"task-1":{"x":400,"y":300}},"scale":1.5}`
+	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/layout", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.SaveLayoutHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	saved, err := store.Get("hq-workspace")
+	if err != nil {
+		t.Fatalf("Get workspace: %v", err)
+	}
+	if saved.Layout == nil {
+		t.Fatalf("expected layout to survive canvas save")
+	}
+	if got := saved.Layout.TaskPositions["task-1"]; got.X != 400 || got.Y != 300 {
+		t.Fatalf("expected canvas task position saved, got %#v", got)
+	}
+	if got := saved.Layout.StationPositions["email"]; got.X != 0.92 || got.Y != 0.15 {
+		t.Fatalf("expected station position preserved across canvas save, got %#v", got)
 	}
 }

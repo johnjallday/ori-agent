@@ -263,13 +263,20 @@ type WorkflowConnectionLayout struct {
 
 // CanvasLayout stores the visual arrangement of workspace elements.
 type CanvasLayout struct {
-	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`
-	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`
-	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"`
-	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`
-	StorePositions      map[string]Position        `json:"store_positions,omitempty"`
-	DirectoryPositions  map[string]Position        `json:"directory_positions,omitempty"`
-	FolderPositions     map[string]Position        `json:"folder_positions,omitempty"`
+	TaskPositions       map[string]Position `json:"task_positions,omitempty"`
+	AgentPositions      map[string]Position `json:"agent_positions,omitempty"`
+	AttachmentPositions map[string]Position `json:"attachment_positions,omitempty"`
+	SchedulerPositions  map[string]Position `json:"scheduler_positions,omitempty"`
+	StorePositions      map[string]Position `json:"store_positions,omitempty"`
+	DirectoryPositions  map[string]Position `json:"directory_positions,omitempty"`
+	FolderPositions     map[string]Position `json:"folder_positions,omitempty"`
+	// StationPositions holds HQ command-map station positions, keyed by HQ
+	// station registry key (e.g. "email"). Values are FRACTIONAL coordinates
+	// in [0,1] relative to the command map's field, not canvas pixels —
+	// unlike every other position map here. Written only by the scoped
+	// station-layout save path; the canvas layout save path must never touch
+	// this field.
+	StationPositions    map[string]Position        `json:"station_positions,omitempty"`
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"`
 	Scale               float64                    `json:"scale,omitempty"`
 	OffsetX             float64                    `json:"offset_x,omitempty"`

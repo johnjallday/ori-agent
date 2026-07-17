@@ -446,6 +446,13 @@ func (h *Handler) SaveLayoutHandler(w http.ResponseWriter, r *http.Request) {
 	h.workspaceHandler.SaveLayoutHandler(w, r)
 }
 
+// SaveStationLayoutHandler handles saving HQ command-map station positions,
+// scoped separately from canvas layout so the two writers never clobber each
+// other. Delegates to WorkspaceHandler for modular organization.
+func (h *Handler) SaveStationLayoutHandler(w http.ResponseWriter, r *http.Request) {
+	h.workspaceHandler.SaveStationLayoutHandler(w, r)
+}
+
 // SchedulerNodesHandler handles listing and creating scheduler nodes (canvas-based scheduled tasks)
 // Delegates to TaskHandler for modular organization
 func (h *Handler) SchedulerNodesHandler(w http.ResponseWriter, r *http.Request) {

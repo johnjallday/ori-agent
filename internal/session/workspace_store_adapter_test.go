@@ -311,3 +311,42 @@ func TestWorkspaceStoreAdapter_WorkspaceFoldersRoundTrip(t *testing.T) {
 		t.Fatalf("expected directory position to round-trip, got %#v", got)
 	}
 }
+
+// TestWorkspaceStoreAdapter_StationPositionsRoundTrip guards the HQ
+// station-layout conversion path: StationPositions uses fractional [0,1]
+// coordinates (unlike every other position map on CanvasLayout, which are
+// pixel-based), so a naive copy-paste of the pixel conversion would still
+// compile but silently drop or mis-scale the values. This proves the field
+// survives workspace->session->workspace unchanged.
+func TestWorkspaceStoreAdapter_StationPositionsRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-stations",
+		Name:      "Workspace Stations",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Layout: &workspace.CanvasLayout{
+			StationPositions: map[string]workspace.Position{
+				"email": {X: 0.92, Y: 0.15},
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if sessionWS.Layout == nil {
+		t.Fatalf("expected layout to be converted")
+	}
+	if got := sessionWS.Layout.StationPositions["email"]; got.X != 0.92 || got.Y != 0.15 {
+		t.Fatalf("expected station position to convert to session layout, got %#v", got)
+	}
+
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if roundTripped.Layout == nil {
+		t.Fatalf("expected round-tripped layout")
+	}
+	if got := roundTripped.Layout.StationPositions["email"]; got.X != 0.92 || got.Y != 0.15 {
+		t.Fatalf("expected station position to round-trip, got %#v", got)
+	}
+}

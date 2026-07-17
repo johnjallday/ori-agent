@@ -504,6 +504,7 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/workspace/activate", s.Handlers.Orchestration.WorkspaceActivateHandler)
 	mux.HandleFunc("/api/orchestration/workspace/agents", s.Handlers.Orchestration.WorkspaceAgentsHandler)
 	mux.HandleFunc("/api/orchestration/workspace/layout", s.Handlers.Orchestration.SaveLayoutHandler)
+	mux.HandleFunc("/api/orchestration/workspace/station-layout", s.Handlers.Orchestration.SaveStationLayoutHandler)
 	mux.HandleFunc("/api/orchestration/messages", s.Handlers.Orchestration.MessagesHandler)
 	mux.HandleFunc("/api/orchestration/delegate", s.Handlers.Orchestration.DelegateHandler)
 	mux.HandleFunc("/api/orchestration/dynamic-agents/approve", s.Handlers.Orchestration.DynamicAgentApprovalHandler)
