@@ -180,6 +180,37 @@ func (w Workspace) IsGroup() bool {
 	return NormalizeWorkspaceKind(string(w.Kind)) == WorkspaceKindGroup
 }
 
+// WorkspaceDesignation is a synced projection of the personalhq designation
+// records (internal/personalhq), not the source of truth itself. The
+// per-user designation record — "who has designated which workspace" — lives
+// in the personalhq store; this field mirrors that onto the workspace API
+// payload so UI code can branch on the workspace directly instead of
+// correlating a separate designation endpoint.
+type WorkspaceDesignation string
+
+const (
+	// WorkspaceDesignationPersonalHQ marks the workspace currently designated
+	// as the user's Personal HQ. The only supported non-empty value in v1.
+	WorkspaceDesignationPersonalHQ WorkspaceDesignation = "personal_hq"
+)
+
+// NormalizeWorkspaceDesignation returns a supported workspace designation,
+// defaulting to empty (no designation) when the input is empty or unknown.
+func NormalizeWorkspaceDesignation(value string) WorkspaceDesignation {
+	switch WorkspaceDesignation(strings.TrimSpace(value)) {
+	case WorkspaceDesignationPersonalHQ:
+		return WorkspaceDesignationPersonalHQ
+	default:
+		return ""
+	}
+}
+
+// IsPersonalHQ reports whether the workspace is currently designated as the
+// user's Personal HQ.
+func (w Workspace) IsPersonalHQ() bool {
+	return NormalizeWorkspaceDesignation(string(w.Designation)) == WorkspaceDesignationPersonalHQ
+}
+
 // AgentInstance represents a specific instance of an agent in a workspace.
 // This allows multiple instances of the same agent type with stable IDs.
 type AgentInstance struct {
@@ -258,6 +289,12 @@ type Workspace struct {
 	// Kind indicates whether this record is a concrete workspace or a group
 	// (a full workspace that can also contain member workspaces).
 	Kind WorkspaceKind `json:"kind,omitempty"`
+
+	// Designation is a synced projection of the personalhq designation records
+	// (internal/personalhq), not the source of truth itself — see
+	// WorkspaceDesignation doc comment. Hydrated at read time from the
+	// folder-store workspace (no SQLite column); see hydrateWorkspaceMetadataInto.
+	Designation WorkspaceDesignation `json:"designation,omitempty"`
 
 	// Description is an optional short description of the workspace's purpose.
 	Description string `json:"description,omitempty"`

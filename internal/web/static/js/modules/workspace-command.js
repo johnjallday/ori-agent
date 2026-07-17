@@ -636,6 +636,18 @@ export class WorkspaceCommandView {
     );
   }
 
+  // Single source of HQ-ness for the view (FR8): reads the workspace payload's
+  // designation field rather than correlating window.OriHQEmailSetup.isHQ,
+  // which only reflects one HQ feature (email) and only after it loads.
+  isPersonalHQ() {
+    const ws = (this.page && this.page.workspace) || {};
+    return (
+      String(ws.designation || '')
+        .trim()
+        .toLowerCase() === 'personal_hq'
+    );
+  }
+
   hexToRgba(hex, alpha) {
     if (!hex || typeof hex !== 'string') return '';
     const cleaned = hex.replace('#', '').trim();
@@ -674,6 +686,13 @@ export class WorkspaceCommandView {
     const groupBadge = isGroup
       ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
       : '';
+    // Map-mode only (FR15): commandBarHTML is shared chrome for both Details
+    // and Map, but non-map views must stay byte-for-byte unchanged (Non-
+    // Goals). Echoes the ws-map-tile-hq-badge treatment from the base map.
+    const hqBadge =
+      this.isPersonalHQ() && this.viewMode === 'map'
+        ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
+        : '';
     const tags = this.workspaceTags();
     const isLongDescription = Array.from(description).length > 150;
     const descriptionClass =
@@ -718,6 +737,7 @@ export class WorkspaceCommandView {
       escapeHtml(name) +
       '</h2>' +
       groupBadge +
+      hqBadge +
       '<button type="button" class="ws-cmd-mini-btn" data-cmd-edit-identity="name" aria-label="Edit workspace name">Edit</button>' +
       '</div>' +
       '<div class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
@@ -2046,11 +2066,6 @@ export class WorkspaceCommandView {
   }
 
   openRailItem(sectionKey, id, source) {
-    // Personal HQ email slots open the setup modal; no page object required.
-    if (String(sectionKey || '') === 'email') {
-      this.openHQEmailSetup();
-      return;
-    }
     const page = this.page || window.workspaceDetail;
     if (!page || !id) return;
 
@@ -3818,9 +3833,70 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-map-station" data-cmd-map-inventory-action="systems"><span>Systems</span><strong>' +
       escapeHtml(systemsCount) +
       '</strong></button>' +
+      this.renderHQStations() +
       '</div>' +
       '</div>'
     );
+  }
+
+  // Data-driven HQ station registry (FR9): an ordered list of descriptors.
+  // Adding a future station (Daily Brief, Follow-ups, Journal) means adding
+  // one entry here — no new rendering plumbing. v1 ships Email only.
+  hqStationRegistry() {
+    return [
+      {
+        key: 'email',
+        label: 'Email',
+        icon: 'bi-envelope',
+        state: () => this.hqEmailStationState(),
+        action: () => this.openHQEmailSetup()
+      }
+    ];
+  }
+
+  // Email station state (FR10): neutral while personal-hq-email-setup.js
+  // has not published window.OriHQEmailSetup yet, "Set up Email" when
+  // unconnected, the connected address (or "Connected") when connected.
+  hqEmailStationState() {
+    const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
+    if (!hqEmail) {
+      return { value: '—', description: 'loading' };
+    }
+    if (hqEmail.connected) {
+      return { value: hqEmail.address || 'Connected', description: hqEmail.address || 'connected' };
+    }
+    return { value: 'Set up Email', description: 'not set up' };
+  }
+
+  // Renders the HQ stations after the base MCP+Skills/Systems stations, when
+  // the workspace is the designated Personal HQ (FR9). Real <button>
+  // elements, keyboard-focusable, state-bearing aria-labels (FR13).
+  renderHQStations() {
+    if (!this.isPersonalHQ()) return '';
+    return this.hqStationRegistry()
+      .map(station => {
+        const state = station.state() || {};
+        return (
+          '<button type="button" class="ws-cmd-map-station is-hq-station" data-cmd-hq-station="' +
+          escapeHtml(station.key) +
+          '" aria-label="' +
+          escapeHtml(station.label) +
+          ' station, ' +
+          escapeHtml(state.description || '') +
+          '"><span>' +
+          escapeHtml(station.label) +
+          '</span><strong>' +
+          escapeHtml(state.value || '') +
+          '</strong></button>'
+        );
+      })
+      .join('');
+  }
+
+  // Dispatches a click on an HQ station button to its registry action.
+  runHQStationAction(stationKey) {
+    const station = this.hqStationRegistry().find(entry => entry.key === stationKey);
+    if (station && typeof station.action === 'function') station.action();
   }
 
   // A single agent "unit" card. `commandNode` renders the entry agent as the
@@ -4542,30 +4618,6 @@ export class WorkspaceCommandView {
         }))
       }
     ];
-    // Personal HQ only: email is a first-class inventory item (equipped, not
-    // required). State is published by personal-hq-email-setup.js, whose modal
-    // owns the actual connect/repair/disconnect flow.
-    const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
-    if (hqEmail && hqEmail.isHQ) {
-      groups.push({
-        key: 'email',
-        label: 'Email',
-        icon: 'bi-envelope',
-        count: hqEmail.connected ? 1 : 0,
-        action: hqEmail.connected ? 'Manage Email' : 'Set up Email',
-        slotLabel: 'Email',
-        items: hqEmail.connected
-          ? [
-              {
-                label: hqEmail.address || 'Connected account',
-                meta: 'Connected',
-                section: 'email',
-                id: 'hq-email'
-              }
-            ]
-          : []
-      });
-    }
     return groups;
   }
 
@@ -4721,8 +4773,12 @@ export class WorkspaceCommandView {
 
   renderOperationsMap() {
     const { agents, selected } = this.mapAgentViewModels();
+    // is-hq scopes the citadel gold accent to the Stations panel (FR15) —
+    // no whole-frame tint, layout/density unchanged.
     return (
-      '<div class="ws-cmd-map-shell">' +
+      '<div class="ws-cmd-map-shell' +
+      (this.isPersonalHQ() ? ' is-hq' : '') +
+      '">' +
       '<div class="ws-cmd-opmap" role="region" aria-label="Workspace operations map">' +
       this.renderMapAgentsZone(agents) +
       this.renderMapToolTray() +
@@ -4856,16 +4912,13 @@ export class WorkspaceCommandView {
       this.openSystemTab(this.activeSystemTab || 'memory');
       return;
     }
-    if (section === 'email') {
-      this.openHQEmailSetup();
-      return;
-    }
     this.runRailPrimaryAction(section, triggerButton);
   }
 
   // openHQEmailSetup opens the Personal HQ email modal owned by
   // personal-hq-email-setup.js (present on the detail page for the designated
-  // HQ). No-op when the module has not published its opener.
+  // HQ). No-op when the module has not published its opener. Reachable only
+  // via the Email station (FR12) — the old inventory item is gone.
   openHQEmailSetup() {
     const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
     if (hqEmail && typeof hqEmail.open === 'function') hqEmail.open();
@@ -5002,6 +5055,11 @@ export class WorkspaceCommandView {
           inventoryAction.getAttribute('data-cmd-map-inventory-action'),
           inventoryAction
         );
+        return;
+      }
+      const hqStation = event.target.closest('[data-cmd-hq-station]');
+      if (hqStation) {
+        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
         return;
       }
       const systemTab = event.target.closest('[data-cmd-map-system-tab]');

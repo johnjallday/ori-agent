@@ -42,6 +42,10 @@ type HandlerConfig struct {
 	SessionStore        SessionStore                    // For fetching sessions and session tasks
 	FileWatcher         *filewatcher.Watcher            // Deprecated fallback for workspace directory watching
 	DirectorySync       *workspace.DirectorySyncManager // Lazy workspace directory watching
+	// FolderStore is the canonical folder-based workspace.json store, used to
+	// hydrate fields with no SQLite column (currently: Designation) that a
+	// plain WorkspaceStore.Get (SQLite-primary) never carries.
+	FolderStore *workspace.FileStore
 }
 
 // SessionStore interface for fetching session data
@@ -96,6 +100,7 @@ type Handler struct {
 	taskHandler         workspace.TaskHandler
 	fileWatcher         *filewatcher.Watcher
 	directorySync       *workspace.DirectorySyncManager
+	folderStore         *workspace.FileStore
 
 	// Sub-handlers for modular organization
 	workspaceHandler    *WorkspaceHandler
@@ -137,6 +142,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		taskHandler:         cfg.TaskHandler,
 		fileWatcher:         cfg.FileWatcher,
 		directorySync:       cfg.DirectorySync,
+		folderStore:         cfg.FolderStore,
 	}
 
 	// Initialize all sub-handlers
@@ -154,6 +160,9 @@ func (h *Handler) initializeSubHandlers() {
 	}
 	if h.directorySync != nil {
 		h.workspaceHandler.SetDirectorySync(h.directorySync)
+	}
+	if h.folderStore != nil {
+		h.workspaceHandler.SetFolderStore(h.folderStore)
 	}
 	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)

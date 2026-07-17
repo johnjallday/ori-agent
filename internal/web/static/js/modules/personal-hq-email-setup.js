@@ -17,6 +17,16 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
   const modal = document.getElementById('hqEmailSetupModal');
   if (!btn || !modal) return;
 
+  // The modal starts inside #workspace-detail-shared-hosts, which is always
+  // [hidden] at rest (workspace-command.js only relocates the Systems/
+  // Members panels it explicitly mounts — see mountSharedSurface). Unlike
+  // those, this modal is a self-contained overlay with no "restore" need, so
+  // move it to <body> once so un-hiding it isn't blocked by a hidden
+  // ancestor regardless of which view/mode is active when it's opened.
+  if (document.body && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
+
   const body = modal.querySelector('.hq-email-setup-body');
 
   function currentWorkspaceId() {
@@ -48,6 +58,20 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
   function toast(message, variant) {
     if (window.Toast && typeof window.Toast[variant || 'success'] === 'function') {
       window.Toast[variant || 'success'](message);
+    }
+  }
+
+  // Re-renders the command map's Email station after window.OriHQEmailSetup
+  // changes, so the station reflects connect/disconnect without a page
+  // reload. refresh() is a no-op when the command view isn't the active
+  // surface (e.g. Details mode).
+  function notifyCommandView() {
+    if (
+      typeof window !== 'undefined' &&
+      window.workspaceCommand &&
+      typeof window.workspaceCommand.refresh === 'function'
+    ) {
+      window.workspaceCommand.refresh();
     }
   }
 
@@ -97,6 +121,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     if (window.OriHQEmailSetup) {
       window.OriHQEmailSetup.connected = !!(status && status.connected);
       window.OriHQEmailSetup.address = (status && status.email_address) || '';
+      notifyCommandView();
     }
     const view = emailStatusView(status, oauth ? !!oauth.configured : true);
 
@@ -154,9 +179,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     const status = data && data.status;
     if (status && status.valid && String(status.workspace_id) === wsId) {
       btn.hidden = false;
-      // Publish a tiny global so the command view's Map inventory can show an
-      // Email slot and open this modal (workspace-command.js is a non-module
-      // script and cannot import from here).
+      // Publish a tiny global so the command map's Email station (an HQ
+      // station registry entry in workspace-command.js) can read connection
+      // state and open this modal without a direct import between the two
+      // independently-loaded module scripts.
       const shared = (window.OriHQEmailSetup = window.OriHQEmailSetup || {});
       shared.isHQ = true;
       shared.open = openModal;
@@ -164,6 +190,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
       const emailStatus = emailResp && emailResp.status;
       shared.connected = !!(emailStatus && emailStatus.connected);
       shared.address = (emailStatus && emailStatus.email_address) || '';
+      notifyCommandView();
     }
   }
 

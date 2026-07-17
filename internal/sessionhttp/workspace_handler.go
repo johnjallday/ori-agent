@@ -1322,6 +1322,11 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	if strings.TrimSpace(workspace.ProjectPath) == "" {
 		workspace.ProjectPath = fallback.ProjectPath
 	}
+	// designation has no SQLite column either: workspace.json (via the
+	// personalhq sync) is canonical, so reads always hydrate it from disk.
+	if strings.TrimSpace(string(workspace.Designation)) == "" {
+		workspace.Designation = fallback.Designation
+	}
 	// len()==0 rather than nil: SQLite deserializes the '[]' column default to
 	// an empty non-nil slice, which must not shadow tags that live only in
 	// workspace.json (e.g. a workspace imported from another machine).
