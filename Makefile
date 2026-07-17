@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-check readme-accept
 
 # Default target
 .DEFAULT_GOAL := help
@@ -35,8 +35,24 @@ NC=\033[0m # No Color
 help: ## Show this help message
 	@echo "$(BLUE)Ori Agent - Development Commands$(NC)"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
+
+## README maintenance targets
+
+readme-audit: ## Report README contract state without writing files
+	@node scripts/readme/audit.mjs
+
+readme-capture: ## Capture staged README screenshots (available after capture runtime setup)
+	@echo "README capture runtime is not installed yet. Complete task 2.0 first."
+	@exit 2
+
+readme-check: ## Validate README screenshot manifest, references, and accepted assets
+	@node scripts/readme/manifest.mjs
+
+readme-accept: ## Apply an approved staged README refresh (available after acceptance setup)
+	@echo "README acceptance runtime is not installed yet. Complete task 4.0 first."
+	@exit 2
 
 ## Build targets
 

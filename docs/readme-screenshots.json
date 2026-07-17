@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "acceptance_state": "bootstrap",
+  "last_accepted_capture_commit": null,
+  "accepted_readme_sha256": null,
+  "accepted_environment": null,
+  "sensitive_patterns": [
+    "/Users/",
+    "/home/",
+    "sk-",
+    "AKIA",
+    "BEGIN PRIVATE KEY"
+  ],
+  "screenshots": [
+    {
+      "id": "hero",
+      "output_path": "docs/images/hero.webp",
+      "route": "/",
+      "scenario_id": "readme-product-launch",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "device_scale_factor": 2,
+      "theme": "dark",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "required_visible_selectors": [
+        ".home-command-bridge",
+        "#homeDailyBrief",
+        "#homeDailyBriefBody"
+      ],
+      "caption": "Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.",
+      "alt_text": "Ori Agent Home in dark mode showing the command bridge above a populated Personal HQ Daily Brief.",
+      "display_width": 820,
+      "owner_paths": [
+        "internal/web/templates/components/dashboard.tmpl",
+        "internal/web/static/js/modules/home-daily-brief.js",
+        "internal/web/static/js/modules/dashboard.js",
+        "internal/web/static/css/home-command.css"
+      ],
+      "accepted_sha256": null,
+      "accepted_bytes": null
+    },
+    {
+      "id": "action-center",
+      "output_path": "docs/images/action-center.webp",
+      "route": "/action-center",
+      "scenario_id": "readme-product-launch",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "device_scale_factor": 2,
+      "theme": "dark",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "required_visible_selectors": [
+        "#action-center-list",
+        ".action-center-row"
+      ],
+      "caption": "Action Center gathers mission findings from every workspace for quick triage.",
+      "alt_text": "Ori Agent Action Center in dark mode with three fictional workspace findings and their priorities.",
+      "display_width": 820,
+      "owner_paths": [
+        "internal/web/templates/pages/action-center.tmpl",
+        "internal/web/static/js/modules/action-center.js",
+        "internal/workspace/opportunities.go"
+      ],
+      "accepted_sha256": null,
+      "accepted_bytes": null
+    },
+    {
+      "id": "workspace-map",
+      "output_path": "docs/images/workspace-map.webp",
+      "route": "/workspaces?view=map",
+      "scenario_id": "readme-product-launch",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "device_scale_factor": 2,
+      "theme": "dark",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "required_visible_selectors": [
+        "[data-hq-site]",
+        ".ws-map-tile"
+      ],
+      "caption": "Workspace Map shows Personal HQ and the wider operating landscape at a glance.",
+      "alt_text": "Ori Agent Workspace Map in dark mode showing a Personal HQ landmark and multiple fictional workspaces.",
+      "display_width": 420,
+      "owner_paths": [
+        "internal/web/templates/pages/workspaces.tmpl",
+        "internal/web/static/js/modules/workspace-map.js",
+        "internal/web/static/js/modules/workspace-hub.js",
+        "internal/web/static/js/modules/personal-hq-onboarding.js"
+      ],
+      "accepted_sha256": null,
+      "accepted_bytes": null
+    },
+    {
+      "id": "workspace",
+      "output_path": "docs/images/workspace.webp",
+      "route": "/workspaces/{workspace_id}",
+      "scenario_id": "readme-product-launch",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "device_scale_factor": 2,
+      "theme": "dark",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "required_visible_selectors": [
+        "#workspaceCommandView",
+        ".ws-cmd-deck",
+        "#workspace-command-mission-card"
+      ],
+      "caption": "Workspace Command keeps agents, tasks, notes, files, and mission operations in one active workspace.",
+      "alt_text": "Ori Agent Workspace Command in dark mode with a fictional agent roster, task state, workspace context, and mission controls.",
+      "display_width": 420,
+      "owner_paths": [
+        "internal/web/templates/pages/workspace-detail.tmpl",
+        "internal/web/static/js/modules/workspace-command.js",
+        "internal/web/static/js/modules/workspace-detail.js",
+        "internal/web/static/js/modules/workspace-mission.js"
+      ],
+      "accepted_sha256": null,
+      "accepted_bytes": null
+    }
+  ]
+}
