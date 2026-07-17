@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 type Handler struct {
@@ -198,9 +199,43 @@ func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
 		"agent":  agentName,
 		"skills": skillsList,
 	}
+	if loadout := h.agentLoadout(agentName, skillsList); loadout != nil {
+		response["loadout"] = loadout
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+// agentLoadout returns the agent's active-skill slot budget (stage, cap, used,
+// expert flag) so the UI can render slot usage and disable the enable control
+// at cap (PRD FR11). Returns nil for agents not in the store (e.g. CLI agents
+// or the global/no-agent listing), which the UI treats as "no cap".
+func (h *Handler) agentLoadout(agentName string, skillsList []skills.Skill) map[string]any {
+	if h.store == nil || strings.TrimSpace(agentName) == "" {
+		return nil
+	}
+	ag, ok := h.store.GetAgent(agentName)
+	if !ok || ag == nil {
+		return nil
+	}
+
+	stage := types.AgentStageSpark
+	if ag.Evolution != nil && ag.Evolution.Stage != "" {
+		stage = ag.Evolution.Stage
+	}
+	used := 0
+	for _, s := range skillsList {
+		if s.Enabled {
+			used++
+		}
+	}
+	return map[string]any{
+		"stage":       string(stage),
+		"slot_cap":    types.SkillSlotsForStage(stage),
+		"slots_used":  used,
+		"expert_mode": ag.Metadata.IsExpertMode(ag.Role),
+	}
 }
 
 func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
@@ -714,6 +749,12 @@ func (h *Handler) setSkillEnabled(w http.ResponseWriter, r *http.Request, name s
 		return
 	}
 	if err := h.manager.SetSkillEnabled(agentName, name, *req.Enabled); err != nil {
+		if errors.Is(err, skills.ErrSkillSlotCapReached) {
+			// The cap message already names the stage and slot count; surface it
+			// verbatim as a 409 so the UI can show it to the user.
+			orihttp.Conflict(w, err.Error())
+			return
+		}
 		orihttp.InternalError(w, err.Error())
 		return
 	}

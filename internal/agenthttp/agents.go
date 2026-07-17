@@ -432,6 +432,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		AvatarColor    *string                    `json:"avatar_color,omitempty"`
 		Favorite       *bool                      `json:"favorite,omitempty"`
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
+		// ExpertMode lifts stage-based skill slot caps for this agent (PRD FR13).
+		// Metadata-only; does not touch model/prompt/skills.
+		ExpertMode *bool `json:"expert_mode,omitempty"`
 		// ExpectedVersion is the optimistic-concurrency token the client received
 		// from GET /api/agents/{name}. When present and no longer matching the
 		// stored agent, the update is rejected as stale (PRD FR13). Omitted =
@@ -546,6 +549,10 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RoutingProfile != nil {
 		agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
+	}
+	if req.ExpertMode != nil {
+		expert := *req.ExpertMode
+		agent.Metadata.ExpertMode = &expert
 	}
 
 	newName := agentName

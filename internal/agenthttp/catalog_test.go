@@ -143,6 +143,43 @@ func TestCatalogNameReservedForEndpoint(t *testing.T) {
 	}
 }
 
+func TestUpdateAgentExpertModeMetadataOnly(t *testing.T) {
+	h := catalogTestHandler(t)
+	if err := h.State.CreateAgent("Worker", &store.CreateAgentConfig{
+		Model:        "gpt-4o-mini",
+		SystemPrompt: "original prompt",
+		Role:         types.RoleResearcher,
+	}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+
+	body := `{"expert_mode":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/agents/Worker", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	ag, ok := h.State.GetAgent("Worker")
+	if !ok || ag == nil {
+		t.Fatal("agent missing after update")
+	}
+	if ag.Metadata == nil || ag.Metadata.ExpertMode == nil || !*ag.Metadata.ExpertMode {
+		t.Fatalf("expected expert_mode=true, got %+v", ag.Metadata)
+	}
+	// Metadata-only: model and prompt untouched.
+	if ag.Settings.Model != "gpt-4o-mini" {
+		t.Errorf("expert-mode update changed model to %q", ag.Settings.Model)
+	}
+	if ag.Settings.SystemPrompt != "original prompt" {
+		t.Errorf("expert-mode update changed system prompt to %q", ag.Settings.SystemPrompt)
+	}
+	if ag.Role != types.RoleResearcher {
+		t.Errorf("expert-mode update changed role to %q", ag.Role)
+	}
+}
+
 func TestPlainCreateUnaffectedByCatalogChanges(t *testing.T) {
 	h := catalogTestHandler(t)
 	body := `{"name":"Plain Agent","model":"gpt-4o-mini","system_prompt":"hello"}`

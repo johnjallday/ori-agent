@@ -6,6 +6,7 @@ let isEditingConfig = false;
 let isEditingPrompt = false;
 let availableProviders = []; // Cache for available providers and models from API
 let currentAgentSkills = [];
+let currentAgentLoadout = null; // {stage, slot_cap, slots_used, expert_mode} or null
 let globalMCPServers = [];
 let globalMCPStats = {};
 let profileSelectedTags = [];
@@ -549,6 +550,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('editModel')?.addEventListener('change', updateEditReasoningVisibility);
   setupProfileEditor();
+
+  const expertToggle = document.getElementById('expertModeToggle');
+  if (expertToggle) {
+    expertToggle.addEventListener('change', async () => {
+      const desired = expertToggle.checked;
+      expertToggle.disabled = true;
+      const ok = await setAgentExpertMode(desired);
+      if (!ok) {
+        expertToggle.checked = !desired;
+      }
+      expertToggle.disabled = false;
+    });
+  }
 
   const pluginPanel = document.getElementById('pluginManagerPanel');
   if (pluginPanel) {
@@ -1881,6 +1895,8 @@ async function renderSkills() {
     const data = await response.json();
     const skills = Array.isArray(data.skills) ? data.skills : [];
     currentAgentSkills = skills;
+    currentAgentLoadout = data.loadout || null;
+    renderSkillSlotUsage();
 
     if (skills.length === 0) {
       container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No skills available for this agent.</div>';
@@ -1891,6 +1907,11 @@ async function renderSkills() {
     }
 
     skills.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+
+    // At cap (non-expert) means no *new* skills can be enabled; already-enabled
+    // ones can still be toggled off.
+    const atCap = Boolean(currentAgentLoadout) && !currentAgentLoadout.expert_mode &&
+      currentAgentLoadout.slots_used >= currentAgentLoadout.slot_cap;
 
     container.innerHTML = '';
     skills.forEach(skill => {
@@ -1903,6 +1924,13 @@ async function renderSkills() {
       const isTrusted = Boolean(skill?.trusted);
       const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
       const hasErrors = validationErrors.length > 0;
+
+      // Only disabled skills are blocked at cap; enabled skills can always be
+      // toggled off (and grandfathered over-cap skills stay usable).
+      const capBlocked = atCap && !isEnabled;
+      const capTooltip = currentAgentLoadout
+        ? `At the ${currentAgentLoadout.stage} stage cap of ${currentAgentLoadout.slot_cap} active skills. Disable another skill or turn on Expert mode to add more.`
+        : '';
 
       const item = document.createElement('div');
       item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px;';
@@ -1918,8 +1946,8 @@ async function renderSkills() {
         ${hasErrors ? `<div style="font-size: 11px; color: var(--danger-color);">${escapeHtml(validationErrors.join('; '))}</div>` : ''}
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 4px;">
           <span style="font-size: 12px; color: var(--text-secondary);">Enabled</span>
-          <div class="form-check form-switch m-0">
-            <input class="form-check-input" type="checkbox" data-action="toggle-skill-enabled" ${isEnabled ? 'checked' : ''}>
+          <div class="form-check form-switch m-0"${capBlocked ? ` title="${escapeAttr(capTooltip)}"` : ''}>
+            <input class="form-check-input" type="checkbox" data-action="toggle-skill-enabled" ${isEnabled ? 'checked' : ''} ${capBlocked ? 'disabled' : ''}>
           </div>
         </div>
       `;
@@ -1964,6 +1992,10 @@ async function setSkillEnabled(agent, skillName, enabled) {
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       const message = data?.error || 'Failed to update skill state';
+      // A 409 is the slot-cap rejection; its message names the stage and cap.
+      if (response.status === 409 && typeof showToast === 'function') {
+        showToast(message, 'error');
+      }
       console.error('Failed to update skill state:', message);
       return false;
     }
@@ -1972,6 +2004,64 @@ async function setSkillEnabled(agent, skillName, enabled) {
     return true;
   } catch (error) {
     console.error('Failed to update skill state:', error);
+    return false;
+  }
+}
+
+// renderSkillSlotUsage updates the "N/M slots" badge and the expert-mode row
+// from the current agent's loadout (populated by the skills list response).
+function renderSkillSlotUsage() {
+  const badge = document.getElementById('skillSlotUsage');
+  const expertRow = document.getElementById('expertModeRow');
+  const expertToggle = document.getElementById('expertModeToggle');
+  const loadout = currentAgentLoadout;
+
+  if (badge) {
+    if (loadout && !loadout.expert_mode) {
+      badge.textContent = `${loadout.slots_used}/${loadout.slot_cap} slots`;
+      badge.title = `${loadout.stage} stage grants ${loadout.slot_cap} active skill slots`;
+      badge.style.display = '';
+    } else if (loadout && loadout.expert_mode) {
+      badge.textContent = `${loadout.slots_used} active · expert`;
+      badge.title = 'Expert mode: slot cap lifted';
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  if (expertRow && expertToggle) {
+    if (loadout) {
+      expertRow.style.setProperty('display', 'flex', 'important');
+      expertToggle.checked = Boolean(loadout.expert_mode);
+    } else {
+      expertRow.style.setProperty('display', 'none', 'important');
+    }
+  }
+}
+
+// setAgentExpertMode PATCHes the agent's expert_mode flag, then reloads skills
+// so the slot badge and at-cap toggles reflect the new state.
+async function setAgentExpertMode(enabled) {
+  const name = currentAgent?.name || agentName;
+  if (!name) return false;
+  try {
+    const response = await fetch(`/api/agents/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expert_mode: enabled })
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      if (typeof showToast === 'function') {
+        showToast(data?.error || 'Failed to update expert mode', 'error');
+      }
+      return false;
+    }
+    await renderSkills();
+    return true;
+  } catch (error) {
+    console.error('Failed to update expert mode:', error);
     return false;
   }
 }

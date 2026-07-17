@@ -140,6 +140,66 @@ func TestCreateSkill_FallsBackToLocalCreationWhenSkillsCLIUnavailable(t *testing
 	}
 }
 
+func TestListSkills_IncludesAgentLoadout(t *testing.T) {
+	tmpDir := t.TempDir()
+	agentStorePath := filepath.Join(tmpDir, "agents", "index.json")
+	manager := skills.NewManager(skills.ManagerConfig{AgentStorePath: agentStorePath})
+
+	// A repo skill so the loadout has something to reference.
+	skillDir := filepath.Join(tmpDir, "agents", "skills", "repo-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	skillMd := "---\nname: repo-skill\ndescription: Repo skill\n---\nprompt\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0o644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+
+	agentStore := &testAgentStore{agents: map[string]*agent.Agent{
+		"Worker": {
+			Role:      types.RoleResearcher, // catalog role -> expert defaults OFF
+			Evolution: &types.AgentEvolution{Stage: types.AgentStageInfant},
+			Metadata:  &types.AgentMetadata{},
+		},
+	}}
+	handler := New(manager, agentStore, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?agent=Worker", nil)
+	rec := httptest.NewRecorder()
+	handler.listSkills(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Loadout *struct {
+			Stage      string `json:"stage"`
+			SlotCap    int    `json:"slot_cap"`
+			SlotsUsed  int    `json:"slots_used"`
+			ExpertMode bool   `json:"expert_mode"`
+		} `json:"loadout"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Loadout == nil {
+		t.Fatal("expected loadout in response")
+	}
+	if resp.Loadout.Stage != string(types.AgentStageInfant) {
+		t.Errorf("stage = %q, want infant", resp.Loadout.Stage)
+	}
+	if resp.Loadout.SlotCap != 3 {
+		t.Errorf("slot_cap = %d, want 3 (infant)", resp.Loadout.SlotCap)
+	}
+	if resp.Loadout.SlotsUsed != 0 {
+		t.Errorf("slots_used = %d, want 0 (repo skill disabled by default)", resp.Loadout.SlotsUsed)
+	}
+	if resp.Loadout.ExpertMode {
+		t.Errorf("expert_mode = true, want false for a catalog-role agent with unset flag")
+	}
+}
+
 func TestResolvePromptProvider_UsesModelOnlyAgentConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := config.NewManager(filepath.Join(tmpDir, "settings.json"))
