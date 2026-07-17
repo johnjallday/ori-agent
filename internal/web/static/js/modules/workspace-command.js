@@ -51,6 +51,10 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, n));
 }
 
+// Pointer travel (px) from the press origin past which a press on a station
+// becomes a drag rather than a click (FR9).
+const STATION_DRAG_THRESHOLD_PX = 5;
+
 export class WorkspaceCommandView {
   /**
    * @param {object} page - the live WorkspaceDetailPage instance (window.workspaceDetail).
@@ -942,6 +946,11 @@ export class WorkspaceCommandView {
 
   render() {
     if (!this.container) return;
+    // An active station drag owns the DOM: render() rebuilds it wholesale,
+    // which would tear the dragged element out mid-gesture. Skip background
+    // re-renders while dragging; the drop path re-renders once the gesture
+    // ends, picking up any data that changed in the meantime (FR11).
+    if (this._stationDragActive) return;
     this.captureAgentDeckViewState();
     if (this.commandTagInput) {
       try {
@@ -3951,6 +3960,158 @@ export class WorkspaceCommandView {
     if (station && typeof station.action === 'function') station.action();
   }
 
+  // --- Station drag-to-place (group 3) --------------------------------------
+  // Pure drag math, kept as methods so they are directly unit-testable.
+
+  // Whether pointer travel (dx,dy) from the press origin is far enough to
+  // count as a drag rather than a click (FR9).
+  stationDragExceedsThreshold(dx, dy) {
+    return Math.hypot(Number(dx) || 0, Number(dy) || 0) > STATION_DRAG_THRESHOLD_PX;
+  }
+
+  // Convert a client point to a fractional (0–1) coordinate inside a field
+  // rect, clamped so a drop can never land a station off-field (FR10/FR11).
+  stationPointToFraction(clientX, clientY, rect) {
+    if (!rect || !rect.width || !rect.height) return { x: 0, y: 0 };
+    return {
+      x: clampFraction((clientX - rect.left) / rect.width),
+      y: clampFraction((clientY - rect.top) / rect.height)
+    };
+  }
+
+  // Pointer-event drag on the HQ station structures (FR9–FR11). Bound once per
+  // map render on the map shell root; the per-gesture move/up listeners live
+  // on window so a fast drag that outruns the element still tracks. No
+  // render() runs during an active drag — the drop path persists then
+  // re-renders (see persistStationPosition + the render() guard).
+  bindStationDrag(root) {
+    root.addEventListener('pointerdown', event => {
+      if (event.button != null && event.button !== 0) return;
+      const el = event.target.closest('[data-cmd-hq-station]');
+      if (!el || !root.contains(el)) return;
+      // Fresh interaction: clear any stale click-suppression from a prior drag.
+      this._suppressStationClick = false;
+      const drag = {
+        key: el.getAttribute('data-cmd-hq-station'),
+        el,
+        startX: event.clientX,
+        startY: event.clientY,
+        pointerId: event.pointerId,
+        moved: false,
+        lastFraction: null
+      };
+      this._stationDrag = drag;
+
+      const onMove = moveEvent => this.handleStationPointerMove(moveEvent);
+      const onUp = upEvent => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        this.handleStationPointerUp(upEvent);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  }
+
+  handleStationPointerMove(event) {
+    const drag = this._stationDrag;
+    if (!drag) return;
+    if (!drag.moved) {
+      if (!this.stationDragExceedsThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+        return;
+      }
+      // Cross the threshold once: enter drag mode. The .is-dragging class is a
+      // static style swap (raised z-index, grabbing cursor, lift shadow) so it
+      // is already prefers-reduced-motion safe.
+      drag.moved = true;
+      this._stationDragActive = true;
+      drag.el.classList.add('is-dragging');
+      try {
+        drag.el.setPointerCapture(drag.pointerId);
+      } catch (_err) {
+        /* capture is best-effort */
+      }
+    }
+    const world = this.container && this.container.querySelector('.ws-cmd-map-world');
+    if (!world || typeof world.getBoundingClientRect !== 'function') return;
+    const frac = this.stationPointToFraction(event.clientX, event.clientY, world.getBoundingClientRect());
+    drag.lastFraction = frac;
+    // Move the structure directly via its custom props — no re-render.
+    drag.el.style.setProperty('--station-x', (frac.x * 100).toFixed(2) + '%');
+    drag.el.style.setProperty('--station-y', (frac.y * 100).toFixed(2) + '%');
+  }
+
+  handleStationPointerUp(event) {
+    const drag = this._stationDrag;
+    this._stationDrag = null;
+    if (!drag) return;
+    if (!drag.moved) {
+      // Under-threshold press: not a drag — let the click handler open the
+      // station's action (FR9).
+      return;
+    }
+    this._stationDragActive = false;
+    // Suppress the click the browser dispatches after this pointerup so the
+    // gesture never fires the station action (FR9).
+    this._suppressStationClick = true;
+    drag.el.classList.remove('is-dragging');
+    try {
+      drag.el.releasePointerCapture(drag.pointerId);
+    } catch (_err) {
+      /* capture may already be gone */
+    }
+    if (event && event.type === 'pointercancel') {
+      // Interrupted mid-drag: discard the in-progress move and restore the
+      // committed position by re-rendering.
+      this.render();
+      return;
+    }
+    if (!drag.lastFraction) {
+      this.render();
+      return;
+    }
+    this.persistStationPosition(drag.key, drag.lastFraction);
+  }
+
+  // Optimistically commit a station's new position to the local model and
+  // re-render, then persist it through the scoped station-layout endpoint. A
+  // failed save keeps the session-local position and warns (FR10).
+  async persistStationPosition(key, fraction) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const ws = (page && page.workspace) || null;
+    if (!ws) {
+      this.render();
+      return;
+    }
+    const workspaceId = ws.id || (page && page.workspaceId) || '';
+    if (!ws.layout) ws.layout = {};
+    if (!ws.layout.station_positions) ws.layout.station_positions = {};
+    ws.layout.station_positions[key] = { x: fraction.x, y: fraction.y };
+    // Re-render now that the model carries the new position (this also clears
+    // the drag-active guard's effect for subsequent renders).
+    this.render();
+
+    try {
+      const resp = await fetch('/api/orchestration/workspace/station-layout', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: workspaceId,
+          station_positions: ws.layout.station_positions
+        })
+      });
+      if (!resp || !resp.ok) {
+        throw new Error('station-layout save failed: ' + (resp ? resp.status : 'no response'));
+      }
+    } catch (_err) {
+      if (typeof window !== 'undefined' && window.Toast) {
+        window.Toast.error('Could not save station position; it will reset on reload.');
+      }
+    }
+  }
+
   // A single agent "unit" card. `commandNode` renders the entry agent as the
   // larger, role-framed command node (FR66-67, FR70); otherwise a standard
   // specialist card. Runtime tone classes (working/waiting/needs-input/done)
@@ -4980,6 +5141,7 @@ export class WorkspaceCommandView {
   bindOperationsMap() {
     const root = this.container && this.container.querySelector('.ws-cmd-map-shell');
     if (!root) return;
+    this.bindStationDrag(root);
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (this.handleLoadoutClick(event)) return;
@@ -5112,6 +5274,13 @@ export class WorkspaceCommandView {
       }
       const hqStation = event.target.closest('[data-cmd-hq-station]');
       if (hqStation) {
+        // A completed drag synthesizes a trailing click on the (now detached)
+        // station element; swallow it so dragging never fires the action
+        // (FR9). An under-threshold press leaves the flag clear and opens it.
+        if (this._suppressStationClick) {
+          this._suppressStationClick = false;
+          return;
+        }
         this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
         return;
       }

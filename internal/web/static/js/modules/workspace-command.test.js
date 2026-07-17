@@ -2924,6 +2924,160 @@ test('HQ station click delegation dispatches through the registry', () => {
   }
 });
 
+// ---------- HQ station drag-to-place (FR9-FR11) ----------
+
+test('stationDragExceedsThreshold treats travel past ~5px as a drag', () => {
+  const hq = makeHQCommandView();
+  assert.equal(hq.stationDragExceedsThreshold(0, 0), false);
+  assert.equal(hq.stationDragExceedsThreshold(3, 3), false); // ~4.24px
+  assert.equal(hq.stationDragExceedsThreshold(5, 5), true); // ~7.07px
+  assert.equal(hq.stationDragExceedsThreshold(6, 0), true);
+  assert.equal(hq.stationDragExceedsThreshold(-6, 0), true);
+});
+
+test('stationPointToFraction maps a client point to a clamped [0,1] fraction', () => {
+  const hq = makeHQCommandView();
+  const rect = { left: 100, top: 50, width: 200, height: 400 };
+  // Center of the field → (0.5, 0.5).
+  assert.deepEqual(hq.stationPointToFraction(200, 250, rect), { x: 0.5, y: 0.5 });
+  // Beyond the top-left and bottom-right corners clamps to the edges (FR11).
+  assert.deepEqual(hq.stationPointToFraction(-500, -500, rect), { x: 0, y: 0 });
+  assert.deepEqual(hq.stationPointToFraction(9999, 9999, rect), { x: 1, y: 1 });
+  // Degenerate (zero-size) rect never divides by zero.
+  assert.deepEqual(
+    hq.stationPointToFraction(10, 10, { left: 0, top: 0, width: 0, height: 0 }),
+    { x: 0, y: 0 }
+  );
+});
+
+test('a completed drag suppresses the trailing click; a plain click still opens the action', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const mapRoot = makeListenerRoot();
+    const hq = makeHQCommandView();
+    Object.assign(hq, {
+      container: {
+        querySelector: selector => (selector === '.ws-cmd-map-shell' ? mapRoot : null)
+      }
+    });
+    hq.bindOperationsMap();
+
+    const clickEvent = {
+      target: {
+        closest: selector =>
+          selector === '[data-cmd-hq-station]'
+            ? { getAttribute: name => (name === 'data-cmd-hq-station' ? 'email' : '') }
+            : null
+      }
+    };
+
+    // Emulate the flag a completed drag sets: the trailing click is swallowed
+    // and the flag is consumed (FR9).
+    hq._suppressStationClick = true;
+    mapRoot.listener(clickEvent);
+    assert.deepEqual(opened, []);
+    assert.equal(hq._suppressStationClick, false);
+
+    // The next plain click opens the station action.
+    mapRoot.listener(clickEvent);
+    assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('handleStationPointerUp after a real drag flags click-suppression and persists', async () => {
+  const originalWindow = globalThis.window;
+  const puts = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
+  // Capture the persistence PUT rather than hitting the network.
+  globalThis.fetch = async (url, opts) => {
+    puts.push({ url, body: JSON.parse(opts.body) });
+    return { ok: true, status: 200 };
+  };
+  try {
+    const world = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 500 })
+    };
+    const stationEl = {
+      classList: { add() {}, remove() {} },
+      style: { setProperty() {} },
+      setPointerCapture() {},
+      releasePointerCapture() {}
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    let renders = 0;
+    Object.assign(hq, {
+      container: { querySelector: selector => (selector === '.ws-cmd-map-world' ? world : null) },
+      render() {
+        renders++;
+      }
+    });
+
+    // Simulate a press that crosses the threshold and drops at (250, 125) →
+    // fractional (0.25, 0.25).
+    hq._stationDrag = {
+      key: 'email',
+      el: stationEl,
+      startX: 500,
+      startY: 250,
+      pointerId: 1,
+      moved: false,
+      lastFraction: null
+    };
+    hq.handleStationPointerMove({ clientX: 250, clientY: 125 });
+    assert.equal(hq._stationDrag.moved, true, 'crossing the threshold enters drag mode');
+    assert.equal(hq._stationDragActive, true);
+
+    hq.handleStationPointerUp({ type: 'pointerup' });
+    assert.equal(hq._suppressStationClick, true, 'a completed drag suppresses the click');
+    assert.equal(hq._stationDragActive, false);
+    assert.ok(renders >= 1, 'the drop re-renders after committing the position');
+
+    // Let the async persist settle.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(puts.length, 1);
+    assert.equal(puts[0].url, '/api/orchestration/workspace/station-layout');
+    assert.equal(puts[0].body.workspace_id, 'hq-1');
+    assert.deepEqual(puts[0].body.station_positions.email, { x: 0.25, y: 0.25 });
+  } finally {
+    globalThis.window = originalWindow;
+    delete globalThis.fetch;
+  }
+});
+
+test('an under-threshold press is not a drag and leaves the click to open the action', () => {
+  const hq = makeHQCommandView();
+  const stationEl = {
+    classList: { add() {}, remove() {} },
+    style: { setProperty() {} }
+  };
+  let rendered = false;
+  Object.assign(hq, {
+    container: { querySelector: () => null },
+    render() {
+      rendered = true;
+    }
+  });
+  hq._stationDrag = {
+    key: 'email',
+    el: stationEl,
+    startX: 100,
+    startY: 100,
+    pointerId: 1,
+    moved: false,
+    lastFraction: null
+  };
+  // Tiny travel — below threshold — never enters drag mode.
+  hq.handleStationPointerMove({ clientX: 102, clientY: 101 });
+  assert.equal(hq._stationDrag.moved, false);
+  hq.handleStationPointerUp({ type: 'pointerup' });
+  assert.equal(hq._suppressStationClick, undefined, 'no drag → no click suppression');
+  assert.equal(rendered, false, 'a non-drag never triggers a persist/render');
+});
+
 test('mapInventoryGroups never includes an email entry (station is its only home)', () => {
   const originalWindow = globalThis.window;
   globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' } };

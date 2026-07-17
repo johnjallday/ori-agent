@@ -608,6 +608,13 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// workspaceStore.Get is SQLite-primary and never carries Designation (no
+	// SQLite column, FR3). Saving the workspace back writes its folder-store
+	// projection too, so without re-reading the canonical value here the Save
+	// below would clobber workspace.json's designation to "" — silently
+	// un-designating a Personal HQ on every layout save. Re-hydrate before Save.
+	wh.hydrateDesignation(ws)
+
 	// Update layout
 
 	if ws.Layout == nil {
@@ -681,6 +688,13 @@ func (wh *WorkspaceHandler) SaveStationLayoutHandler(w http.ResponseWriter, r *h
 		orihttp.NotFound(w, fmt.Sprintf("Failed to get workspace: %v", err))
 		return
 	}
+
+	// Re-hydrate the folder-store-only Designation before Save so persisting a
+	// station drag never un-designates the Personal HQ (see the same guard in
+	// SaveLayoutHandler). This matters most here: stations only render on the
+	// designated HQ, so a clobber would make them vanish on the next reload —
+	// exactly the surface this handler exists to persist.
+	wh.hydrateDesignation(ws)
 
 	if ws.Layout == nil {
 		ws.Layout = &workspace.CanvasLayout{}
