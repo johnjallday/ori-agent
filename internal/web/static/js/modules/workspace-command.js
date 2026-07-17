@@ -42,6 +42,15 @@ function escapeHtml(value) {
   });
 }
 
+// Clamp an HQ station's fractional map coordinate into [0,1]. Non-finite input
+// (a corrupt saved value) collapses to 0 so a station can never render or
+// persist off-field (FR11/FR13).
+function clampFraction(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(1, Math.max(0, n));
+}
+
 export class WorkspaceCommandView {
   /**
    * @param {object} page - the live WorkspaceDetailPage instance (window.workspaceDetail).
@@ -3823,6 +3832,9 @@ export class WorkspaceCommandView {
   renderMapStationsPanel() {
     const stats = this.computeStats();
     const systemsCount = this.systemTabs().length;
+    // HQ stations no longer live here: they render as structures on the map
+    // world surface (renderMapHQStations). The panel is back to exactly its
+    // base MCP + Skills / Systems entries — one home per surface (FR6).
     return (
       '<div class="ws-cmd-map-window-section is-stations">' +
       this.mapZoneHeaderHTML('Stations', 'Tools & Systems', stats.tools + systemsCount) +
@@ -3833,7 +3845,6 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-map-station" data-cmd-map-inventory-action="systems"><span>Systems</span><strong>' +
       escapeHtml(systemsCount) +
       '</strong></button>' +
-      this.renderHQStations() +
       '</div>' +
       '</div>'
     );
@@ -3868,26 +3879,67 @@ export class WorkspaceCommandView {
     return { value: 'Set up Email', description: 'not set up' };
   }
 
-  // Renders the HQ stations after the base MCP+Skills/Systems stations, when
-  // the workspace is the designated Personal HQ (FR9). Real <button>
-  // elements, keyboard-focusable, state-bearing aria-labels (FR13).
-  renderHQStations() {
+  // Default map slot for a station with no saved position (FR7): a
+  // deterministic stack down the field's right edge, in registry order. Values
+  // are fractional (0–1) so first render needs no persistence and survives any
+  // viewport size; the structure is centered on the point in CSS
+  // (translate(-50%,-50%)), so x≈0.9 keeps it clear of the right padding.
+  hqStationDefaultPosition(index) {
+    const slot = index < 0 ? 0 : index;
+    return { x: 0.9, y: clampFraction(0.22 + slot * 0.17) };
+  }
+
+  // Resolved fractional position for a station (FR11): the saved position from
+  // the workspace layout, clamped to [0,1] so a stale/corrupt value can never
+  // render a station off-field, else the registry-order default slot. Unknown
+  // or non-finite saved values fall back to the default (FR13).
+  hqStationPosition(key) {
+    const registry = this.hqStationRegistry();
+    const index = registry.findIndex(entry => entry.key === key);
+    const fallback = this.hqStationDefaultPosition(index);
+    const layout = (this.page && this.page.workspace && this.page.workspace.layout) || null;
+    const saved =
+      layout && layout.station_positions ? layout.station_positions[key] : null;
+    if (!saved) return fallback;
+    if (!Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) {
+      return fallback;
+    }
+    return { x: clampFraction(saved.x), y: clampFraction(saved.y) };
+  }
+
+  // Renders HQ stations as freestanding structures on the command map's world
+  // surface (FR6, FR8), replacing their old home inside the Stations panel.
+  // Each is a real <button> (keyboard-focusable, state-bearing aria-label,
+  // FR8) absolutely positioned from its fractional coordinate via the
+  // --station-x/--station-y custom props. Only the designated HQ renders
+  // these; non-HQ workspaces get an empty string (FR16).
+  renderMapHQStations() {
     if (!this.isPersonalHQ()) return '';
     return this.hqStationRegistry()
       .map(station => {
         const state = station.state() || {};
+        const pos = this.hqStationPosition(station.key);
+        const icon = station.icon
+          ? '<i class="bi ' + escapeHtml(station.icon) + '" aria-hidden="true"></i>'
+          : '';
         return (
-          '<button type="button" class="ws-cmd-map-station is-hq-station" data-cmd-hq-station="' +
+          '<button type="button" class="ws-cmd-map-hq-station" data-cmd-hq-station="' +
           escapeHtml(station.key) +
-          '" aria-label="' +
+          '" style="--station-x:' +
+          (pos.x * 100).toFixed(2) +
+          '%;--station-y:' +
+          (pos.y * 100).toFixed(2) +
+          '%" aria-label="' +
           escapeHtml(station.label) +
           ' station, ' +
           escapeHtml(state.description || '') +
-          '"><span>' +
+          '"><span class="ws-cmd-map-hq-station-icon">' +
+          icon +
+          '</span><span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
-          '</span><strong>' +
+          '</span><span class="ws-cmd-map-hq-station-state">' +
           escapeHtml(state.value || '') +
-          '</strong></button>'
+          '</span></button>'
         );
       })
       .join('');
@@ -4022,6 +4074,7 @@ export class WorkspaceCommandView {
       '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
       this.renderMapAgentUnits(agents) +
+      this.renderMapHQStations() +
       '</section>'
     );
   }
