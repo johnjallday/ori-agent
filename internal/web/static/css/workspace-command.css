@@ -1067,6 +1067,19 @@
   font-family: var(--ws-font-mono);
   font-size: 24px;
 }
+/* HQ stations (e.g. Email) show a short text value — "Set up Email", a
+   connected address — rather than a count, so the value slot needs a
+   readable size/family instead of the 24px mono digit treatment. */
+.ws-cmd-map-station.is-hq-station strong {
+  font-family: var(--ws-font-display);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 .ws-cmd-map-agent-field {
   width: min(100%, 980px);
   min-height: 410px;

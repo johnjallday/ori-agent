@@ -400,6 +400,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		SessionStore:        sessionStoreAdapter,
 		FileWatcher:         b.sessionFilesWatcher,
 		DirectorySync:       b.directorySyncManager,
+		FolderStore:         b.workspaceFileStore,
 		// TemplateManager: nil - loaded later in initializeTemplateManager
 	})
 	if err != nil {

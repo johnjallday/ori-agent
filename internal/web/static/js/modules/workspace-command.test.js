@@ -2712,3 +2712,168 @@ test('startMapQuest reports and refreshes when the quest is no longer pending', 
     globalThis.window = originalWindow;
   }
 });
+
+// ---------- HQ station registry (FR8-FR14) ----------
+
+function makeHQCommandView(workspaceOverrides) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      workspace: { designation: 'personal_hq', ...workspaceOverrides },
+      tasks: [],
+      notes: [],
+      schedules: [],
+      sessions: [],
+      directories: [],
+      files: []
+    },
+    activeSystemTab: 'memory'
+  });
+  return commandView;
+}
+
+test('isPersonalHQ reads the workspace designation field', () => {
+  const hq = makeHQCommandView();
+  assert.equal(hq.isPersonalHQ(), true);
+
+  const plain = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(plain, { page: { workspace: {} } });
+  assert.equal(plain.isPersonalHQ(), false);
+
+  const unknown = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(unknown, { page: { workspace: { designation: 'something_else' } } });
+  assert.equal(unknown.isPersonalHQ(), false);
+});
+
+test('renderMapStationsPanel appends the HQ station registry only for HQ payloads', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    const hq = makeHQCommandView();
+    const hqPanel = hq.renderMapStationsPanel();
+    assert.match(hqPanel, /data-cmd-hq-station="email"/);
+    assert.match(hqPanel, /is-hq-station/);
+
+    const plain = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(plain, {
+      page: { workspace: {}, tasks: [] },
+      activeSystemTab: 'memory'
+    });
+    const plainPanel = plain.renderMapStationsPanel();
+    assert.doesNotMatch(plainPanel, /data-cmd-hq-station/);
+    assert.doesNotMatch(plainPanel, /is-hq-station/);
+    // Non-HQ stations panel is unchanged from today (FR14): just the two
+    // base stations.
+    assert.match(plainPanel, /data-cmd-map-open-modal="tools"/);
+    assert.match(plainPanel, /data-cmd-map-inventory-action="systems"/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('Email station reflects neutral, unconnected, and connected states', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const hq = makeHQCommandView();
+
+    // Neutral: personal-hq-email-setup.js has not published its state yet.
+    globalThis.window = {};
+    let panel = hq.renderMapStationsPanel();
+    assert.match(panel, /Email station, loading/);
+    assert.match(panel, /<strong>—<\/strong>/);
+
+    // Unconnected: module loaded, no account linked.
+    globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
+    panel = hq.renderMapStationsPanel();
+    assert.match(panel, /Email station, not set up/);
+    assert.match(panel, /<strong>Set up Email<\/strong>/);
+
+    // Connected: shows the linked address.
+    globalThis.window = {
+      OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' }
+    };
+    panel = hq.renderMapStationsPanel();
+    assert.match(panel, /Email station, me@example\.com/);
+    assert.match(panel, /<strong>me@example\.com<\/strong>/);
+
+    // Connected but no address on record: falls back to "Connected".
+    globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: '' } };
+    panel = hq.renderMapStationsPanel();
+    assert.match(panel, /Email station, connected/);
+    assert.match(panel, /<strong>Connected<\/strong>/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('clicking the Email station opens the HQ email setup modal', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const hq = makeHQCommandView();
+    hq.runHQStationAction('email');
+    assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('HQ station click delegation dispatches through the registry', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const mapRoot = makeListenerRoot();
+    const hq = makeHQCommandView();
+    Object.assign(hq, {
+      container: {
+        querySelector(selector) {
+          return selector === '.ws-cmd-map-shell' ? mapRoot : null;
+        }
+      }
+    });
+    hq.bindOperationsMap();
+
+    mapRoot.listener({
+      target: {
+        closest(selector) {
+          return selector === '[data-cmd-hq-station]'
+            ? { getAttribute: name => (name === 'data-cmd-hq-station' ? 'email' : '') }
+            : null;
+        }
+      }
+    });
+
+    assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('mapInventoryGroups never includes an email entry (station is its only home)', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' } };
+  try {
+    const hq = makeHQCommandView();
+    const keys = hq.mapInventoryGroups().map(group => group.key);
+    assert.equal(keys.includes('email'), false);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('openRailItem no longer special-cases an "email" section', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const hq = makeHQCommandView();
+    // No page.workspaceDetail-style handlers wired for 'email' — if this were
+    // still special-cased to open the modal, `opened` would be non-empty.
+    hq.openRailItem('email', 'hq-email', '');
+    assert.deepEqual(opened, []);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});

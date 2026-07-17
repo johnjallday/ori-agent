@@ -39,7 +39,11 @@
           <style>
             .workspace-detail-tools-actions { display: flex; gap: 0.5rem; align-items: center; }
             .hq-email-setup-modal[hidden] { display: none; }
-            .hq-email-setup-modal { position: fixed; inset: 0; z-index: 1080; display: flex; align-items: center; justify-content: center; }
+            /* Must outrank the Command-view map's legacy overlay z-index
+               (--wsx-layer-legacy-map-window: 10010 in workspace-command.css)
+               since the Email station opens this modal from inside that
+               overlay (map mode Stations panel). */
+            .hq-email-setup-modal { position: fixed; inset: 0; z-index: 10020; display: flex; align-items: center; justify-content: center; }
             .hq-email-setup-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.45); }
             .hq-email-setup-dialog { position: relative; width: min(440px, 92vw); background: var(--bg-secondary, #fff); color: var(--text-primary, #111); border: 1px solid var(--border-color, #ddd); border-radius: var(--radius-md, 0.5rem); padding: 1rem 1.1rem; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
             .hq-email-setup-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }

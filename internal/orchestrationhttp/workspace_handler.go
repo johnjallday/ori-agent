@@ -23,6 +23,12 @@ type WorkspaceHandler struct {
 	sessionStore   SessionStore
 	fileWatcher    *filewatcher.Watcher // optional, for workspace directory watching
 	directorySync  *workspace.DirectorySyncManager
+	// folderStore is the canonical folder-based workspace.json store. Production
+	// wraps workspaceStore with a SQLite-primary SyncStore, so workspaceStore.Get
+	// never carries fields with no SQLite column (e.g. Designation) — only the
+	// disk record does. Optional; wired via SetFolderStore once the folder store
+	// exists (mirrors workspace.HTTPHandler.SetFolderStore).
+	folderStore *workspace.FileStore
 }
 
 // NewWorkspaceHandler creates a new workspace handler
@@ -44,6 +50,34 @@ func (wh *WorkspaceHandler) SetDirectorySync(sync *workspace.DirectorySyncManage
 	wh.directorySync = sync
 }
 
+// SetFolderStore wires the canonical folder-based workspace.json store, used
+// to hydrate fields that have no SQLite column (currently: Designation).
+// Production wraps workspaceStore in decorators (SyncStore, AgentSnapshotStore)
+// that do not promote the folder store's extra read methods, so it must be
+// injected explicitly rather than type-asserted off workspaceStore (mirrors
+// workspace.HTTPHandler.SetFolderStore).
+func (wh *WorkspaceHandler) SetFolderStore(store *workspace.FileStore) {
+	if wh == nil {
+		return
+	}
+	wh.folderStore = store
+}
+
+// hydrateDesignation overlays the workspace-side Designation field from the
+// canonical folder-store record. workspaceStore.Get (SQLite-primary) never
+// carries it: there is no SQLite column (FR3), so a plain Get always returns
+// the zero value. No-op when the folder store isn't wired.
+func (wh *WorkspaceHandler) hydrateDesignation(ws *workspace.Workspace) {
+	if wh == nil || wh.folderStore == nil || ws == nil {
+		return
+	}
+	diskWorkspace, err := wh.folderStore.Get(ws.ID)
+	if err != nil || diskWorkspace == nil {
+		return
+	}
+	ws.Designation = diskWorkspace.Designation
+}
+
 // addWorkspaceMapFields augments a workspace list summary with the fields the
 // Workspace Map view needs but GetSummary() omits (entry agent, group kind /
 // parent, tool/skill counts, ops mode, open-task count, and a working flag).
@@ -55,6 +89,7 @@ func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
 	fields := workspace.ComputeMapSummaryFields(ws)
 	summary["entry_agent_name"] = fields.EntryAgentName
 	summary["kind"] = ws.Kind
+	summary["designation"] = ws.Designation
 	summary["parent_id"] = ws.ParentID
 	summary["mcp_count"] = fields.MCPCount
 	summary["skill_count"] = fields.SkillCount
@@ -99,6 +134,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			orihttp.NotFound(w, err.Error())
 			return
 		}
+		wh.hydrateDesignation(ws)
 
 		settings := workspacesettings.Extract(ws.SharedData)
 		// Build response with workspace data
@@ -106,6 +142,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"id":                                    ws.ID,
 			"name":                                  ws.Name,
 			"kind":                                  ws.Kind,
+			"designation":                           ws.Designation,
 			"description":                           ws.Description,
 			"tags":                                  append([]string(nil), ws.Tags...),
 			"entry_agent_name":                      ws.EntryAgentName(),
@@ -192,6 +229,7 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 		if err != nil {
 			continue // Skip workspaces that fail to load
 		}
+		wh.hydrateDesignation(ws)
 		summary := ws.GetSummary()
 		addWorkspaceMapFields(ws, summary)
 
