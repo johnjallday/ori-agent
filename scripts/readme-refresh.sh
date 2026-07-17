@@ -9,12 +9,14 @@ readonly REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly STAGING_PARENT="${REPO_ROOT}/test-results/readme-refresh"
 readonly METADATA_HELPER="${REPO_ROOT}/scripts/readme/run-metadata.mjs"
 readonly PORT_HELPER="${REPO_ROOT}/scripts/readme/free-port.mjs"
+readonly REPORT_HELPER="${REPO_ROOT}/scripts/readme/report.mjs"
 
 RUN_ID=""
 RUN_DIR=""
 SANDBOX=""
 SERVER_PID=""
 FINAL_STATUS="failed"
+METADATA_FINALIZED=0
 GO_ROOT=""
 GO_MODULE_CACHE=""
 
@@ -37,7 +39,7 @@ EOF
 
 assert_repo_root() {
   [[ -f "${REPO_ROOT}/README.md" && -e "${REPO_ROOT}/.git" ]] || fail "repository root was not resolved safely"
-  [[ -f "${METADATA_HELPER}" && -f "${PORT_HELPER}" ]] || fail "required README helpers are missing"
+  [[ -f "${METADATA_HELPER}" && -f "${PORT_HELPER}" && -f "${REPORT_HELPER}" ]] || fail "required README helpers are missing"
 }
 
 assert_run_id() {
@@ -75,7 +77,7 @@ finish_capture() {
   local exit_status=$?
   trap - EXIT INT TERM
   stop_exact_server
-  if [[ -n "${RUN_DIR}" && -f "${RUN_DIR}/run.json" ]]; then
+  if [[ "${METADATA_FINALIZED}" != "1" && -n "${RUN_DIR}" && -f "${RUN_DIR}/run.json" ]]; then
     node "${METADATA_HELPER}" finalize \
       --repo-root "${REPO_ROOT}" \
       --run-id "${RUN_ID}" \
@@ -89,6 +91,7 @@ capture() {
   local requested_port=""
   local driver="scripts/readme/capture-driver.mjs"
   local server_binary=""
+  local playwright_browsers_path="${PLAYWRIGHT_BROWSERS_PATH:-${HOME}/Library/Caches/ms-playwright}"
   while (( $# > 0 )); do
     case "$1" in
       --run-id) RUN_ID="${2:-}"; shift 2 ;;
@@ -191,6 +194,7 @@ capture() {
     PATH="${PATH}" \
     HOME="${SANDBOX}" \
     ORI_DATA_DIR="${SANDBOX}/ori-data" \
+    PLAYWRIGHT_BROWSERS_PATH="${playwright_browsers_path}" \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TZ=UTC \
@@ -200,7 +204,23 @@ capture() {
       --manifest "${REPO_ROOT}/docs/readme-screenshots.json"
 
   FINAL_STATUS="succeeded"
+  if [[ "${driver}" == "scripts/readme/capture-driver.mjs" ]]; then
+    node "${METADATA_HELPER}" finalize \
+      --repo-root "${REPO_ROOT}" \
+      --run-id "${RUN_ID}" \
+      --run-dir "${RUN_DIR}" \
+      --status "${FINAL_STATUS}"
+    METADATA_FINALIZED=1
+    if ! node "${REPORT_HELPER}" --run-dir "${RUN_DIR}" --manifest "${REPO_ROOT}/docs/readme-screenshots.json" >"${RUN_DIR}/comparison/report-path.txt"; then
+      FINAL_STATUS="failed"
+      METADATA_FINALIZED=0
+      fail "comparison report failed; see ${RUN_DIR}/comparison/"
+    fi
+  fi
   printf '\nStaged README capture: %s\n' "${RUN_DIR}"
+  if [[ "${driver}" == "scripts/readme/capture-driver.mjs" ]]; then
+    printf 'Comparison report: %s\n' "$(cat "${RUN_DIR}/comparison/report-path.txt")"
+  fi
   printf 'Tracked README files were checked before and after capture.\n'
   printf 'Next action: inspect the staged report; no tracked files were changed.\n'
 }

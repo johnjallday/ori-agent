@@ -196,6 +196,16 @@ function updatePid(values) {
   writeJson(metadataPath, metadata);
 }
 
+function updateCaptureDetails(values) {
+  const runPath = path.resolve(values['run-dir'] ?? '');
+  const metadataPath = path.join(runPath, 'run.json');
+  const metadata = readJson(metadataPath);
+  for (const key of ['playwright-version', 'chromium-version', 'encoder-version']) {
+    if (values[key] !== undefined) metadata[key.replace(/-([a-z])/g, (_, letter) => `_${letter}`)] = values[key];
+  }
+  writeJson(metadataPath, metadata);
+}
+
 function finalize(values) {
   const repoRoot = resolveRepoRoot(values['repo-root']);
   const runID = assertRunID(values['run-id']);
@@ -262,6 +272,7 @@ try {
   const { command, values } = parseArgs(process.argv.slice(2));
   if (command === 'init') init(values);
   else if (command === 'record-pid') updatePid(values);
+  else if (command === 'record-capture-details') updateCaptureDetails(values);
   else if (command === 'finalize') finalize(values);
   else if (command === 'cleanup') cleanup(values);
   else fail(`Unknown command: ${command ?? '(missing)'}`);

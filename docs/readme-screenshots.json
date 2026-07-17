@@ -84,7 +84,7 @@
       "locale": "en-US",
       "timezone": "UTC",
       "required_visible_selectors": [
-        "[data-hq-site]",
+        ".ws-map-tile.is-hq",
         ".ws-map-tile"
       ],
       "caption": "Workspace Map shows Personal HQ and the wider operating landscape at a glance.",

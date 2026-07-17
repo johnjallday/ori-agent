@@ -21,6 +21,7 @@ export const README_SCENES = {
       updated_at: '2026-07-17T14:20:00.000Z',
       agent_count: 2,
       open_task_count: 3,
+      entry_agent_name: 'Avery',
     },
     {
       id: 'ws-product-launch',
@@ -30,6 +31,7 @@ export const README_SCENES = {
       updated_at: '2026-07-17T13:45:00.000Z',
       agent_count: 3,
       open_task_count: 5,
+      entry_agent_name: 'Mira',
     },
     {
       id: 'ws-research-lab',
@@ -39,6 +41,7 @@ export const README_SCENES = {
       updated_at: '2026-07-16T18:00:00.000Z',
       agent_count: 1,
       open_task_count: 2,
+      entry_agent_name: 'Theo',
     },
   ],
   action_center: {
@@ -94,14 +97,14 @@ export const README_SCENES = {
         local_date: '2026-07-17',
         status: 'ready',
         generated_at: '2026-07-17T14:20:00.000Z',
-        content: JSON.stringify({
+        content_json: JSON.stringify({
           opening_summary: 'You have a focused day with one launch decision to unblock.',
           needs_attention: [
             {
               title: 'Resolve launch readiness risks',
               workspace_name: 'Product Launch',
               reason: 'two tasks need ownership',
-              ref: { kind: 'workspace', id: 'ws-product-launch' },
+              ref: { entity_type: 'workspace', entity_id: 'ws-product-launch', workspace_id: 'ws-product-launch' },
             },
           ],
           todays_plan: [
@@ -109,7 +112,7 @@ export const README_SCENES = {
               title: 'Review the launch checklist',
               workspace_name: 'Product Launch',
               reason: 'planned for today',
-              ref: { kind: 'workspace', id: 'ws-product-launch' },
+              ref: { entity_type: 'workspace', entity_id: 'ws-product-launch', workspace_id: 'ws-product-launch' },
             },
           ],
           resume: [
@@ -118,14 +121,14 @@ export const README_SCENES = {
               workspace_name: 'Research Lab',
               last_known_state: 'Comparison note is ready.',
               next_step: 'Select the preferred approach.',
-              ref: { kind: 'workspace', id: 'ws-research-lab' },
+              ref: { entity_type: 'workspace', entity_id: 'ws-research-lab', workspace_id: 'ws-research-lab' },
             },
           ],
           suggested_next_actions: [
             {
               label: 'Open Product Launch',
               action_type: 'navigate',
-              ref: { kind: 'workspace', id: 'ws-product-launch' },
+              ref: { entity_type: 'workspace', entity_id: 'ws-product-launch', workspace_id: 'ws-product-launch' },
             },
           ],
         }),
@@ -164,7 +167,7 @@ export function assertReadmeSceneContract() {
       throw new Error(`Action Center fixture references an unknown workspace: ${item.workspace_id}.`);
     }
   }
-  if (!README_SCENES.daily_brief.current.revision.content || README_SCENES.daily_brief.status.status !== 'ready') {
+  if (!README_SCENES.daily_brief.current.revision.content_json || README_SCENES.daily_brief.status.status !== 'ready') {
     throw new Error('Daily Brief fixture must contain a ready, populated revision.');
   }
   if (!README_SCENES.workspace_command.agents.length || !README_SCENES.workspace_command.tasks.length) {

@@ -119,6 +119,12 @@ operating system, and architecture. The accepted manifest records the rendered
 product-source commit plus README/image checksums; it does not attempt the
 impossible self-reference of storing the later documentation commit hash.
 
+The repository pins `sharp` for WebP encoding. Its capture encoder uses fixed
+options: quality `82`, effort `6`, `smartSubsample: false`, alpha quality `100`,
+and the `text` preset. The run report records the exact `sharp` and Chromium
+versions. Do not add metadata-preservation options or compare the resulting
+bytes across different operating systems or architectures.
+
 CI is a validator, not the canonical image publisher. It may run capture tests
 into disposable CI paths and compare two runs on the same runner. It must never
 copy images to `docs/images/`, update the manifest, create a branch, commit,
