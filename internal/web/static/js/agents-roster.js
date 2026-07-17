@@ -86,6 +86,7 @@
       name: document.getElementById('stageName'),
       klass: document.getElementById('stageClass'),
       vitals: document.getElementById('stageVitals'),
+      progression: document.getElementById('stageProgression'),
       overviewFacts: document.getElementById('overviewFacts'),
       overviewDesc: document.getElementById('overviewDesc'),
       promptBody: document.getElementById('promptBody'),
@@ -103,6 +104,7 @@
       bulkLive: document.getElementById('bulkLive'),
       bulkAddTags: document.getElementById('bulkAddTags'),
       bulkRemoveTags: document.getElementById('bulkRemoveTags'),
+      bulkSetRole: document.getElementById('bulkSetRole'),
       bulkFavorite: document.getElementById('bulkFavorite'),
       bulkUnfavorite: document.getElementById('bulkUnfavorite'),
       bulkDelete: document.getElementById('bulkDelete'),
@@ -195,6 +197,9 @@
     els.bulkRemoveTags.addEventListener('click', function () {
       openBulkTags('remove');
     });
+    els.bulkSetRole.addEventListener('click', function () {
+      openBulkTags('role');
+    });
     els.bulkTagsCancel.addEventListener('click', closeBulkTags);
     els.bulkTagsConfirm.addEventListener('click', runBulkTags);
     els.bulkTagsDialog.addEventListener('cancel', function (e) {
@@ -235,7 +240,14 @@
     });
 
     loadProviders();
-    loadAgents();
+    // Wait for the role catalog (emblem/accent-color lookup) so the first
+    // paint of roster cards renders correct role chips instead of a
+    // flash-of-Unspecialized while the catalog fetch is still in flight.
+    if (window.RoleCatalog) {
+      window.RoleCatalog.ready().then(loadAgents);
+    } else {
+      loadAgents();
+    }
   }
 
   /* ---- data ---------------------------------------------------------------- */
@@ -276,6 +288,11 @@
         state.byName = {};
         agents.forEach(function (a) {
           state.byName[a.name] = a;
+          // Compare-on-refresh stage-up detection (PRD FR19): no-ops on first
+          // sight of an agent, fires a toast on genuine forward progress.
+          if (window.StageUpToast && a.evolution && a.evolution.stage) {
+            window.StageUpToast.check(a.name, a.evolution.stage);
+          }
         });
         pruneChecked();
         applyUrlToState();
@@ -328,6 +345,11 @@
       switch (state.sort) {
         case 'name-desc':
           return b.name.localeCompare(a.name);
+        case 'level-desc':
+          return (
+            ((b.evolution && b.evolution.level) || 0) - ((a.evolution && a.evolution.level) || 0) ||
+            a.name.localeCompare(b.name)
+          );
         case 'workspaces-desc':
           return (
             (b.workspace_count || 0) - (a.workspace_count || 0) || a.name.localeCompare(b.name)
@@ -364,7 +386,12 @@
   function matchesFilters(a) {
     var f = state.filters;
     if (f.health.size > 0 && !f.health.has(agentHealth(a))) return false;
-    if (f.role && String(a.role || '').toLowerCase() !== f.role.toLowerCase()) return false;
+    if (f.role === UNSPECIALIZED_FILTER_VALUE) {
+      var isUnspec = window.RoleCatalog ? window.RoleCatalog.isUnspecialized(a.role) : !a.role;
+      if (!isUnspec) return false;
+    } else if (f.role && String(a.role || '').toLowerCase() !== f.role.toLowerCase()) {
+      return false;
+    }
     if (f.source && agentSourceKind(a) !== f.source) return false;
     if (f.assignment === 'library' && (a.workspace_count || 0) > 0) return false;
     if (f.assignment === 'assigned' && (a.workspace_count || 0) === 0) return false;
@@ -434,27 +461,37 @@
     onFilterChange();
   }
 
-  // Populate the Role and Tag filter dropdowns from the values actually present
-  // in the roster, preserving the current selection when still valid.
+  // Role filter sentinel for "no role / general" (PRD FR20: "6 roles +
+  // Unspecialized"). Distinct from "" (which means "All roles").
+  var UNSPECIALIZED_FILTER_VALUE = 'unspecialized';
+
+  // Populate the Role and Tag filter dropdowns. Role is a fixed list — the 6
+  // catalog roles (in catalog order) plus Unspecialized — regardless of which
+  // roles are actually present in the current roster, so the option never
+  // shifts under the user (PRD FR20). Tags stay dynamically derived.
   function populateFilterOptions() {
-    var roles = {};
     var tags = {};
     state.agents.forEach(function (a) {
-      var role = String(a.role || '').trim();
-      if (role) roles[role.toLowerCase()] = role;
       var t = a.metadata && Array.isArray(a.metadata.tags) ? a.metadata.tags : [];
       t.forEach(function (tag) {
         var k = String(tag).toLowerCase();
         if (k) tags[k] = tag;
       });
     });
-    fillSelect(els.filterRole, 'All roles', roles, state.filters.role, titleCase);
-    fillSelect(els.filterTag, 'All tags', tags, state.filters.tag, null);
-    // A previously-selected value that no longer exists falls back to "all".
-    if (state.filters.role && !roles[state.filters.role.toLowerCase()]) {
-      state.filters.role = '';
-      els.filterRole.value = '';
+
+    if (els.filterRole) {
+      var roleOrder = (window.RoleCatalog && window.RoleCatalog.orderedRoles) || [];
+      var html = '<option value="">All roles</option>';
+      roleOrder.forEach(function (slug) {
+        html += '<option value="' + esc(slug) + '">' + esc(roleLabel(slug)) + '</option>';
+      });
+      html +=
+        '<option value="' + UNSPECIALIZED_FILTER_VALUE + '">' + esc(roleLabel('general')) + '</option>';
+      els.filterRole.innerHTML = html;
+      if (state.filters.role) els.filterRole.value = state.filters.role;
     }
+
+    fillSelect(els.filterTag, 'All tags', tags, state.filters.tag, null);
     if (state.filters.tag && !tags[state.filters.tag.toLowerCase()]) {
       state.filters.tag = '';
       els.filterTag.value = '';
@@ -575,8 +612,6 @@
     var status = healthKind(agent);
     var statusText = titleCase(String(agent.status || 'idle'));
     var metaBits = [];
-    var role = titleCase(agent.role || '');
-    if (role) metaBits.push(role);
     if (agent.model) metaBits.push(agent.model);
     var wc = agent.workspace_count || 0;
     metaBits.push(wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's'));
@@ -591,12 +626,22 @@
     // Concise spoken label so screen readers don't read the raw dot markup, and
     // it carries the FULL tag list even when the visible chips are truncated
     // (PRD FR59).
+    var roleLbl = roleLabel(agent.role);
+    var evolution = agent.evolution || {};
+    var stage = evolution.stage || 'spark';
+    var level = evolution.level || 0;
+    var progressLabel = 'Lv ' + level + ' · ' + titleCase(stage);
+
     var wcLabel =
       wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
     var openLabel =
       agent.name +
       (permanent ? ', built-in' : '') +
       (favorite ? ', favorite' : '') +
+      ', ' +
+      roleLbl +
+      ', ' +
+      progressLabel +
       ', ' +
       statusText +
       ', ' +
@@ -610,6 +655,7 @@
       ? '<span class="roster-card__fav" title="Favorite" aria-hidden="true">★</span>'
       : '';
     var tagsRow = tagsRowHTML(tags);
+    var progressRow = permanent ? '' : roleProgressRowHTML(agent.role, roleLbl, progressLabel);
 
     // A labeled checkbox and a separate open/focus button are siblings — never
     // nested — so the checkbox is not a child of an interactive element and the
@@ -647,6 +693,7 @@
       '<span class="roster-card__meta">' +
       esc(metaBits.join(' · ')) +
       '</span>' +
+      progressRow +
       tagsRow +
       '</span>' +
       '<span class="roster-card__status is-' +
@@ -658,6 +705,30 @@
 
     if (isChecked) li.classList.add('is-checked');
     return li;
+  }
+
+  // Role chip (emblem + name for a catalog role; a neutral italic badge with
+  // no emblem for Unspecialized — PRD FR7/FR17) plus a level/stage chip.
+  // Purely decorative (aria-hidden); the spoken label carries the same info
+  // via openLabel.
+  function roleProgressRowHTML(role, roleLbl, progressLabel) {
+    var entry = window.RoleCatalog ? window.RoleCatalog.entry(role) : null;
+    var roleChip;
+    if (entry) {
+      roleChip =
+        '<span class="roster-card__role-chip" style="--role-accent: ' +
+        esc(entry.accent_color) +
+        ';">' +
+        '<i class="bi bi-' +
+        esc(entry.emblem) +
+        ' roster-card__role-emblem"></i>' +
+        esc(roleLbl) +
+        '</span>';
+    } else {
+      roleChip = '<span class="roster-card__role-chip is-unspecialized">' + esc(roleLbl) + '</span>';
+    }
+    var levelChip = '<span class="roster-card__level-chip">' + esc(progressLabel) + '</span>';
+    return '<span class="roster-card__progress" aria-hidden="true">' + roleChip + levelChip + '</span>';
   }
 
   // Up to two visible tag chips + a "+N" indicator when more exist. The full list
@@ -750,11 +821,15 @@
     els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar');
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
-    els.klass.textContent = titleCase(listItem.role || listItem.type || 'agent');
+    els.klass.textContent = listItem.role
+      ? roleLabel(listItem.role)
+      : titleCase(listItem.type || 'agent');
     // Deep-link to the full agent detail page (/agents/{name}). The server routes
     // this to the rich editor for catalog agents and to the dedicated read-only
     // pages for the built-in Claude Code / Codex CLI agents.
     els.stageFullPage.href = '/agents/' + encodeURIComponent(name);
+
+    renderProgression(name, listItem);
 
     els.workspacesBody.innerHTML = '<p class="stage-hint">Loading…</p>';
     els.overviewFacts.innerHTML = '<p class="stage-hint">Loading…</p>';
@@ -775,6 +850,102 @@
         els.overviewFacts.innerHTML = '<p class="stage-hint">Could not load agent details.</p>';
         renderWorkspaces(name, listItem, null);
         console.error('[roster] detail failed', err);
+      });
+  }
+
+  // Stage-panel progression block (PRD FR18): role emblem + name, level,
+  // stage, an XP bar toward the next level, and slot usage. Built-in/CLI
+  // agents don't have a catalog role or evolution, so the block is hidden
+  // for them. Renders synchronously from the already-loaded list item, then
+  // fills in the XP bar and slot usage once their (fast, independent)
+  // fetches resolve.
+  function renderProgression(name, listItem) {
+    if (!els.progression) return;
+    if (isPermanent(listItem)) {
+      els.progression.innerHTML = '';
+      return;
+    }
+
+    var role = listItem.role || '';
+    var entry = window.RoleCatalog ? window.RoleCatalog.entry(role) : null;
+    var lbl = roleLabel(role);
+    var evo = listItem.evolution || {};
+    var stage = evo.stage || 'spark';
+    var level = evo.level || 0;
+
+    var emblemHtml = entry
+      ? '<span class="stage__progression-emblem" style="--role-accent: ' +
+        esc(entry.accent_color) +
+        ';"><i class="bi bi-' +
+        esc(entry.emblem) +
+        '"></i></span>'
+      : '';
+    var roleStyle = entry ? ' style="--role-accent: ' + esc(entry.accent_color) + ';"' : '';
+
+    els.progression.innerHTML =
+      '<span class="stage__progression-role"' +
+      roleStyle +
+      '>' +
+      emblemHtml +
+      esc(lbl) +
+      '</span>' +
+      '<span class="stage__progression-level">Lv ' +
+      level +
+      ' · ' +
+      esc(titleCase(stage)) +
+      '</span>' +
+      '<span class="stage__progression-xp" id="stageProgressionXp"></span>' +
+      '<span class="stage__progression-slots" id="stageProgressionSlots">…</span>';
+
+    fetch('/api/agents/' + encodeURIComponent(name) + '/evolution')
+      .then(function (r) {
+        if (!r.ok) throw new Error('evolution ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (state.selected !== name) return;
+        var e = (data && data.evolution) || {};
+        var xpPerLevel = data && data.xp_per_level;
+        if (e.stage) window.StageUpToast && window.StageUpToast.check(name, e.stage);
+        var xpHost = document.getElementById('stageProgressionXp');
+        if (!xpHost || !xpPerLevel) return;
+        var xp = Number(e.experience || 0);
+        var intoLevel = xp % xpPerLevel;
+        var pct = Math.max(0, Math.min(100, Math.round((intoLevel / xpPerLevel) * 100)));
+        xpHost.innerHTML =
+          '<span class="stage__progression-xpbar"><span class="stage__progression-xpfill" style="width: ' +
+          pct +
+          '%;"></span></span>' +
+          '<span class="stage__progression-xplabel">' +
+          intoLevel +
+          ' / ' +
+          xpPerLevel +
+          ' XP</span>';
+      })
+      .catch(function (err) {
+        console.error('[roster] evolution fetch failed', err);
+      });
+
+    fetch('/api/skills?agent=' + encodeURIComponent(name))
+      .then(function (r) {
+        if (!r.ok) throw new Error('skills ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (state.selected !== name) return;
+        var slotsHost = document.getElementById('stageProgressionSlots');
+        if (!slotsHost) return;
+        var loadout = data && data.loadout;
+        if (!loadout) {
+          slotsHost.textContent = '';
+          return;
+        }
+        slotsHost.textContent = loadout.expert_mode
+          ? loadout.slots_used + ' active · expert'
+          : loadout.slots_used + '/' + loadout.slot_cap + ' slots';
+      })
+      .catch(function (err) {
+        console.error('[roster] loadout fetch failed', err);
       });
   }
 
@@ -845,7 +1016,7 @@
     var md = detail.metadata || {};
     els.overviewFacts.innerHTML =
       '<form class="stage-form" id="overviewForm" novalidate>' +
-      field('Role', selectInput('ov-role', ROLES, detail.role, titleCase), 'ov-role') +
+      field('Role', selectInput('ov-role', ROLES, detail.role, roleLabel), 'ov-role') +
       field('Type', selectInput('ov-type', TYPES, agentType, typeLabel), 'ov-type') +
       field(
         'Model',
@@ -991,7 +1162,7 @@
 
   function readonlyFacts(detail) {
     var facts = [
-      ['Role', titleCase((detail && detail.role) || '—')],
+      ['Role', (detail && detail.role) ? roleLabel(detail.role) : '—'],
       ['Model', (detail && detail.model) || '—'],
       ['Provider', detail && detail.provider ? titleCase(detail.provider) : '—'],
       ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—']
@@ -1543,7 +1714,7 @@
     els.createBody.innerHTML =
       '<form class="stage-form" id="createForm" novalidate>' +
       field('Name', textInput('cr-name', '', 'Unique agent name'), 'cr-name') +
-      field('Role', selectInput('cr-role', ROLES, 'general', titleCase), 'cr-role') +
+      field('Role', selectInput('cr-role', ROLES, 'general', roleLabel), 'cr-role') +
       field('Model', textInput('cr-model', 'gpt-4o-mini'), 'cr-model') +
       field('Description', textareaInput('cr-description', '', 3), 'cr-description') +
       field(
@@ -2340,15 +2511,38 @@
 
   var bulkTagsInput = null; // active OriTagInput instance for the add flow
 
+  // Reused for tags AND bulk role assignment (PRD FR9, Group 5.4): the dialog
+  // is a generic "bulk edit" shell keyed by dlg.dataset.mode.
   function openBulkTags(mode) {
     if (state.checked.size === 0) return;
     if (state.selected && state.checked.has(state.selected) && !guardUnsaved()) return;
     var dlg = els.bulkTagsDialog;
     dlg.dataset.mode = mode;
-    els.bulkTagsTitle.textContent = mode === 'add' ? 'Add tags' : 'Remove tags';
+    var titles = { add: 'Add tags', remove: 'Remove tags', role: 'Set role' };
+    els.bulkTagsTitle.textContent = titles[mode] || '';
     els.bulkTagsConfirm.disabled = false;
-    els.bulkTagsConfirm.textContent = mode === 'add' ? 'Add tags' : 'Remove tags';
+    els.bulkTagsConfirm.textContent = mode === 'role' ? 'Set role' : titles[mode];
     bulkTagsInput = null;
+
+    if (mode === 'role') {
+      var roleOrder = (window.RoleCatalog && window.RoleCatalog.orderedRoles) || [];
+      var options = roleOrder
+        .map(function (slug) {
+          return '<option value="' + esc(slug) + '">' + esc(roleLabel(slug)) + '</option>';
+        })
+        .join('');
+      options +=
+        '<option value="general">' + esc(roleLabel('general')) + '</option>';
+      els.bulkTagsBody.innerHTML =
+        '<p class="bulk-dialog__lead">Assign one role to every selected agent. Metadata only — model, prompt, and skills are unchanged.</p>' +
+        '<label class="bulk-dialog__field"><span class="visually-hidden">Role</span>' +
+        '<select id="bulkRoleSelect" class="bulk-dialog__text">' +
+        options +
+        '</select></label>';
+      if (typeof dlg.showModal === 'function') dlg.showModal();
+      else dlg.setAttribute('open', '');
+      return;
+    }
 
     if (mode === 'add') {
       els.bulkTagsBody.innerHTML =
@@ -2427,6 +2621,27 @@
     var btn = els.bulkTagsConfirm;
     if (btn.disabled || btn.dataset.busy === '1') return;
     var mode = els.bulkTagsDialog.dataset.mode;
+
+    if (mode === 'role') {
+      var roleSel = document.getElementById('bulkRoleSelect');
+      var role = roleSel ? roleSel.value : '';
+      if (!role) return;
+      btn.dataset.busy = '1';
+      btn.disabled = true;
+      var restoreRole = btn.textContent;
+      btn.textContent = 'Working…';
+      submitBulkMetadata(
+        { operation: 'set_role', agent_names: Array.from(state.checked), role: role },
+        function () {
+          btn.dataset.busy = '';
+          btn.disabled = false;
+          btn.textContent = restoreRole;
+        },
+        closeBulkTags
+      );
+      return;
+    }
+
     var tags = [];
     if (mode === 'add') {
       if (bulkTagsInput) tags = bulkTagsInput.getTags();
@@ -2938,6 +3153,12 @@
     return '';
   }
 
+  // roleLabel wraps RoleCatalog.label with a fallback for the (brief) window
+  // before role-catalog.js's fetch resolves, or if it failed to load.
+  function roleLabel(role) {
+    return window.RoleCatalog ? window.RoleCatalog.label(role) : titleCase(role || 'Unspecialized');
+  }
+
   function titleCase(s) {
     s = String(s || '')
       .replace(/[_-]+/g, ' ')
@@ -2983,7 +3204,13 @@
     state.query = p.get('q') || '';
     if (els.search) els.search.value = state.query;
     var sort = p.get('sort') || 'name-asc';
-    var validSorts = { 'name-asc': 1, 'name-desc': 1, 'workspaces-desc': 1, 'active-desc': 1 };
+    var validSorts = {
+      'name-asc': 1,
+      'name-desc': 1,
+      'level-desc': 1,
+      'workspaces-desc': 1,
+      'active-desc': 1
+    };
     state.sort = validSorts[sort] ? sort : 'name-asc';
     if (els.sort) els.sort.value = state.sort;
 

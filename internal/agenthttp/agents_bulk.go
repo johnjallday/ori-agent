@@ -25,7 +25,25 @@ const (
 	bulkOpAddTags     bulkOperation = "add_tags"
 	bulkOpRemoveTags  bulkOperation = "remove_tags"
 	bulkOpSetFavorite bulkOperation = "set_favorite"
+	// bulkOpSetRole assigns the catalog role (or clears it to Unspecialized/
+	// "general") across a batch of agents. Metadata-only — never touches
+	// model/prompt/skills (PRD FR9, Group 5.4).
+	bulkOpSetRole bulkOperation = "set_role"
 )
+
+// bulkAssignableRoles are the values bulkOpSetRole accepts: the 6 catalog
+// roles plus "general" (Unspecialized) to clear a role. cli_agent is
+// deliberately excluded — CLI agents are read-only and already rejected by
+// metadataMutationTarget.
+var bulkAssignableRoles = map[types.AgentRole]bool{
+	types.RoleGeneral:      true,
+	types.RoleOrchestrator: true,
+	types.RoleResearcher:   true,
+	types.RoleAnalyzer:     true,
+	types.RoleSynthesizer:  true,
+	types.RoleValidator:    true,
+	types.RoleSpecialist:   true,
+}
 
 // bulkStatus is the per-agent outcome (PRD FR49).
 type bulkStatus string
@@ -49,11 +67,12 @@ const (
 
 // bulkRequest is the POST /api/agents/bulk body (PRD FR46).
 type bulkRequest struct {
-	AgentNames        []string      `json:"agent_names"`
-	Operation         bulkOperation `json:"operation"`
-	Tags              []string      `json:"tags,omitempty"`
-	Favorite          *bool         `json:"favorite,omitempty"`
-	ConfirmSharedEdit bool          `json:"confirm_shared_edit,omitempty"`
+	AgentNames        []string         `json:"agent_names"`
+	Operation         bulkOperation    `json:"operation"`
+	Tags              []string         `json:"tags,omitempty"`
+	Favorite          *bool            `json:"favorite,omitempty"`
+	Role              *types.AgentRole `json:"role,omitempty"`
+	ConfirmSharedEdit bool             `json:"confirm_shared_edit,omitempty"`
 }
 
 // bulkResult is one per-agent outcome in the response (PRD FR49).
@@ -108,7 +127,7 @@ func (h *Handler) HandleBulk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.Operation {
-	case bulkOpDelete, bulkOpAddTags, bulkOpRemoveTags, bulkOpSetFavorite:
+	case bulkOpDelete, bulkOpAddTags, bulkOpRemoveTags, bulkOpSetFavorite, bulkOpSetRole:
 	default:
 		orihttp.BadRequest(w, fmt.Sprintf("unsupported operation %q", req.Operation))
 		return
@@ -118,6 +137,18 @@ func (h *Handler) HandleBulk(w http.ResponseWriter, r *http.Request) {
 	if req.Operation == bulkOpSetFavorite && req.Favorite == nil {
 		orihttp.BadRequest(w, "set_favorite requires a boolean \"favorite\" field")
 		return
+	}
+
+	// set_role requires one of the 6 catalog roles or "general" (Unspecialized).
+	if req.Operation == bulkOpSetRole {
+		if req.Role == nil {
+			orihttp.BadRequest(w, "set_role requires a \"role\" field")
+			return
+		}
+		if !bulkAssignableRoles[*req.Role] {
+			orihttp.BadRequest(w, fmt.Sprintf("unsupported role %q", *req.Role))
+			return
+		}
 	}
 
 	// Normalize tags once for tag operations; an empty resulting set is rejected
@@ -140,6 +171,8 @@ func (h *Handler) HandleBulk(w http.ResponseWriter, r *http.Request) {
 			results = append(results, h.bulkTagOne(name, req.Operation, tags, req.ConfirmSharedEdit))
 		case bulkOpSetFavorite:
 			results = append(results, h.bulkFavoriteOne(name, *req.Favorite))
+		case bulkOpSetRole:
+			results = append(results, h.bulkRoleOne(name, *req.Role, req.ConfirmSharedEdit))
 		}
 	}
 
@@ -204,6 +237,25 @@ func (h *Handler) bulkFavoriteOne(name string, favorite bool) bulkResult {
 	}
 	ag.Metadata.Favorite = favorite
 	if res, ok := h.persistMetadataMutation(name, ag, []string{"favorite"}); !ok {
+		return res
+	}
+	return bulkResult{Name: name, Status: bulkStatusSucceeded}
+}
+
+// bulkRoleOne assigns a catalog role (or "general" to clear it back to
+// Unspecialized) on one agent. Metadata-only: role is a shared-definition
+// field like model/prompt, so a definition attached to >1 workspace requires
+// confirm_shared_edit, matching the single-agent PATCH rules (PRD FR9).
+func (h *Handler) bulkRoleOne(name string, role types.AgentRole, confirmed bool) bulkResult {
+	ag, code, msg := h.metadataMutationTarget(name, true, confirmed)
+	if code != "" {
+		return bulkResult{Name: name, Status: bulkStatusSkipped, ReasonCode: code, Message: msg}
+	}
+	if ag.Role == role {
+		return bulkResult{Name: name, Status: bulkStatusSucceeded}
+	}
+	ag.Role = role
+	if res, ok := h.persistMetadataMutation(name, ag, []string{"role"}); !ok {
 		return res
 	}
 	return bulkResult{Name: name, Status: bulkStatusSucceeded}

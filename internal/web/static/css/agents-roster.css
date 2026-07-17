@@ -443,6 +443,57 @@
   border-color: var(--border-color, #e5e7eb);
 }
 
+/* Progression row: role chip (emblem + name, or a neutral Unspecialized
+   badge) plus a level/stage chip. Additive to the existing card layout. */
+.roster-card__progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.roster-card__role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  color: var(--role-accent, var(--text-secondary, #6b7280));
+  background: color-mix(in srgb, var(--role-accent, #9ca3af) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--role-accent, #9ca3af) 30%, transparent);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-card__role-chip.is-unspecialized {
+  color: var(--text-secondary, #6b7280);
+  background: color-mix(in srgb, var(--border-color, #9ca3af) 20%, transparent);
+  border-color: var(--border-color, #d1d5db);
+  font-weight: 500;
+  font-style: italic;
+}
+
+.roster-card__role-emblem {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.roster-card__level-chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--text-secondary, #6b7280);
+  background: var(--bg-tertiary, #f3f4f6);
+  border: 1px solid var(--border-color, #e5e7eb);
+  white-space: nowrap;
+}
+
 .roster-empty {
   text-align: center;
   color: var(--text-secondary, #6b7280);
@@ -921,6 +972,90 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Progression block: role emblem + name, level/stage, XP bar, slot usage.
+   Sits below the hero, above the Overview/Prompt/Workspaces tabs. */
+.stage__progression {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-secondary, #f9fafb);
+}
+
+.stage__progression:empty {
+  display: none;
+}
+
+.stage__progression-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--role-accent, var(--text-primary, #111827));
+}
+
+.stage__progression-emblem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--role-accent, var(--text-secondary, #6b7280));
+  background: color-mix(in srgb, var(--role-accent, #9ca3af) 16%, transparent);
+}
+
+.stage__progression-level {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+  white-space: nowrap;
+}
+
+.stage__progression-xp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.stage__progression-xpbar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #e5e7eb);
+  overflow: hidden;
+}
+
+.stage__progression-xpfill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary-color, #4f46e5);
+  transition: width 0.3s ease;
+}
+
+.stage__progression-xplabel {
+  font-size: 11px;
+  color: var(--text-secondary, #6b7280);
+  white-space: nowrap;
+}
+
+.stage__progression-slots {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #f3f4f6);
+  border: 1px solid var(--border-color, #e5e7eb);
 }
 
 .vital {

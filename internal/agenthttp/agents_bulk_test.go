@@ -290,6 +290,49 @@ func TestBulkSetFavorite(t *testing.T) {
 	}
 }
 
+func TestBulkSetRoleRequiresRoleField(t *testing.T) {
+	h := guardTestHandler(t, []string{"A"}, nil)
+	rr := rawBulk(t, h, `{"agent_names":["A"],"operation":"set_role"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestBulkSetRoleRejectsUnknownRole(t *testing.T) {
+	h := guardTestHandler(t, []string{"A"}, nil)
+	rr := rawBulk(t, h, `{"agent_names":["A"],"operation":"set_role","role":"wizard"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown role, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestBulkSetRoleAssignsCatalogRole(t *testing.T) {
+	h := guardTestHandler(t, []string{"A", "B"}, nil)
+	resp := postBulk(t, h, `{"agent_names":["A","B"],"operation":"set_role","role":"researcher"}`)
+	if resp.Summary.Succeeded != 2 {
+		t.Fatalf("expected 2 successes, got %+v", resp.Summary)
+	}
+	for _, name := range []string{"A", "B"} {
+		ag, _ := h.State.GetAgent(name)
+		if ag.Role != types.RoleResearcher {
+			t.Errorf("%s role = %q, want researcher", name, ag.Role)
+		}
+	}
+}
+
+func TestBulkSetRoleClearsToUnspecialized(t *testing.T) {
+	h := guardTestHandler(t, []string{"A"}, nil)
+	postBulk(t, h, `{"agent_names":["A"],"operation":"set_role","role":"specialist"}`)
+	resp := postBulk(t, h, `{"agent_names":["A"],"operation":"set_role","role":"general"}`)
+	if resp.Summary.Succeeded != 1 {
+		t.Fatalf("expected 1 success, got %+v", resp.Summary)
+	}
+	ag, _ := h.State.GetAgent("A")
+	if ag.Role != types.RoleGeneral {
+		t.Errorf("role = %q, want general (Unspecialized)", ag.Role)
+	}
+}
+
 // --- helpers ----------------------------------------------------------------
 
 type fakeSessionPurger struct {

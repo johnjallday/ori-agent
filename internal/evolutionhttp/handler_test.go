@@ -49,6 +49,10 @@ type fakeEvolutionService struct {
 	calls int
 }
 
+func (f *fakeEvolutionService) XPPerLevel() int64 {
+	return 100
+}
+
 func (f *fakeEvolutionService) AwardFeedXP(agentName string, _ string) error {
 	if f.err != nil {
 		return f.err
@@ -165,6 +169,13 @@ func TestHandler_GetAgentEvolution(t *testing.T) {
 	}
 	if evolution.Stage != types.AgentStageSpark {
 		t.Errorf("expected default stage spark, got %q", evolution.Stage)
+	}
+	var xpPerLevel int64
+	if err := json.Unmarshal(body["xp_per_level"], &xpPerLevel); err != nil {
+		t.Fatalf("failed to decode xp_per_level: %v", err)
+	}
+	if xpPerLevel != 100 {
+		t.Errorf("expected xp_per_level 100, got %d", xpPerLevel)
 	}
 }
 

@@ -26,6 +26,10 @@ type EvolutionService interface {
 	AwardFeedXP(agentName string, source string) error
 	SelectPath(agentName string, requestedPath types.AgentPath) error
 	GetSuggestions(agentName string) ([]evolution.Suggestion, error)
+	// XPPerLevel returns the flat XP-per-level threshold, so GetAgentEvolution
+	// can report progress toward the next level (PRD FR18) without callers
+	// having to duplicate the leveling formula.
+	XPPerLevel() int64
 }
 
 type Handler struct {
@@ -90,10 +94,16 @@ func (h *Handler) GetAgentEvolution(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	orihttp.WriteJSON(w, map[string]any{
+	resp := map[string]any{
 		"agent":     agentName,
 		"evolution": ag.Evolution,
-	})
+	}
+	// xp_per_level lets the UI render an XP bar toward the next level (PRD
+	// FR18) without duplicating the leveling formula client-side.
+	if h.evolutionService != nil {
+		resp["xp_per_level"] = h.evolutionService.XPPerLevel()
+	}
+	orihttp.WriteJSON(w, resp)
 }
 
 func (h *Handler) FeedAgent(w http.ResponseWriter, r *http.Request) {

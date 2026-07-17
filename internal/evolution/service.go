@@ -185,6 +185,16 @@ func (s *Service) EvaluateStageTransitions(level int) types.AgentStage {
 	return stageForLevel(level)
 }
 
+// XPPerLevel returns the flat XP-per-level threshold, so callers (e.g. the
+// evolution HTTP handler) can compute an agent's progress toward its next
+// level without duplicating the leveling formula.
+func (s *Service) XPPerLevel() int64 {
+	if s == nil {
+		return defaultXPPerLevel
+	}
+	return s.cfg.XPPerLevel
+}
+
 // SelectPath sets a specialization path for an agent once it reaches Learner stage.
 func (s *Service) SelectPath(agentName string, requestedPath types.AgentPath) error {
 	if s == nil {
