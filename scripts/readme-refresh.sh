@@ -100,7 +100,10 @@ capture() {
   local requested_port=""
   local driver="scripts/readme/capture-driver.mjs"
   local server_binary=""
-  local playwright_browsers_path="${PLAYWRIGHT_BROWSERS_PATH:-${HOME}/Library/Caches/ms-playwright}"
+  local playwright_browsers_path=""
+  if printenv PLAYWRIGHT_BROWSERS_PATH >/dev/null 2>&1; then
+    playwright_browsers_path="$(printenv PLAYWRIGHT_BROWSERS_PATH)"
+  fi
   while (( $# > 0 )); do
     case "$1" in
       --run-id) RUN_ID="${2:-}"; shift 2 ;;
@@ -112,6 +115,24 @@ capture() {
   done
 
   assert_repo_root
+  if [[ -z "$playwright_browsers_path" ]]; then
+    playwright_browsers_path="$(
+      cd "$REPO_ROOT"
+      node --input-type=module -e '
+        import { chromium } from "playwright";
+        import path from "node:path";
+        let current = chromium.executablePath();
+        while (path.basename(current) !== path.parse(current).root && !path.basename(current).startsWith("chromium-")) {
+          current = path.dirname(current);
+        }
+        if (!path.basename(current).startsWith("chromium-")) {
+          throw new Error("Could not locate the Chromium cache.");
+        }
+        process.stdout.write(path.dirname(current));
+      '
+    )" || fail "could not resolve the installed Playwright Chromium cache"
+  fi
+  [[ -d "$playwright_browsers_path" ]] || fail "the Playwright Chromium cache is unavailable: $playwright_browsers_path"
   GO_ROOT="${README_CAPTURE_GOROOT:-$(go env GOROOT)}" || fail "could not resolve the active Go toolchain"
   GO_MODULE_CACHE="${README_CAPTURE_GOMODCACHE:-$(go env GOMODCACHE)}" || fail "could not resolve the Go module cache"
   [[ -x "${GO_ROOT}/bin/go" && -d "${GO_MODULE_CACHE}" ]] || fail "the active Go toolchain or module cache is unavailable"

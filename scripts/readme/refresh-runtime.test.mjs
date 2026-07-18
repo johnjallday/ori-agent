@@ -24,6 +24,19 @@ const loopbackSkip = loopbackAvailable
   : 'Local loopback binding is unavailable in this execution sandbox.';
 const goRoot = spawnSync('go', ['env', 'GOROOT'], { encoding: 'utf8' }).stdout.trim();
 const goModuleCache = spawnSync('go', ['env', 'GOMODCACHE'], { encoding: 'utf8' }).stdout.trim();
+const playwrightExecutable = spawnSync(
+  process.execPath,
+  ['--input-type=module', '-e', 'import { chromium } from "playwright"; process.stdout.write(chromium.executablePath());'],
+  { cwd: repoRoot, encoding: 'utf8' },
+).stdout.trim();
+let playwrightCachePath = playwrightExecutable;
+while (path.basename(playwrightCachePath) !== path.parse(playwrightCachePath).root && !path.basename(playwrightCachePath).startsWith('chromium-')) {
+  playwrightCachePath = path.dirname(playwrightCachePath);
+}
+if (!path.basename(playwrightCachePath).startsWith('chromium-') || !existsSync(path.dirname(playwrightCachePath))) {
+  throw new Error('Could not resolve the installed Playwright Chromium cache for README runtime tests.');
+}
+const playwrightBrowsersPath = path.dirname(playwrightCachePath);
 const fixtureRoot = sandboxRoot('server');
 const fixtureServer = path.join(fixtureRoot, 'readme-fixture-server');
 const fixtureBuild = spawnSync(
@@ -112,6 +125,7 @@ test(
       AWS_ACCESS_KEY_ID: 'sentinel-aws-key',
       README_CAPTURE_GOROOT: goRoot,
       README_CAPTURE_GOMODCACHE: goModuleCache,
+      PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersPath,
       README_CAPTURE_TEST_MODE: '1',
       README_CAPTURE_TEST_SERVER_BINARY: fixtureServer,
     });
@@ -164,6 +178,7 @@ test('failure preserves diagnostics and does not stop an unrelated process', { t
     OPENAI_API_KEY: 'sentinel-openai-key',
     README_CAPTURE_GOROOT: goRoot,
     README_CAPTURE_GOMODCACHE: goModuleCache,
+    PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersPath,
     README_CAPTURE_TEST_MODE: '1',
     README_CAPTURE_TEST_SERVER_BINARY: fixtureServer,
   });
