@@ -699,13 +699,13 @@ export class WorkspaceCommandView {
     const groupBadge = isGroup
       ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
       : '';
-    // Map-mode only (FR15): commandBarHTML is shared chrome for both Details
-    // and Map, but non-map views must stay byte-for-byte unchanged (Non-
-    // Goals). Echoes the ws-map-tile-hq-badge treatment from the base map.
-    const hqBadge =
-      this.isPersonalHQ() && this.viewMode === 'map'
-        ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
-        : '';
+    // Both Command modes now carry HQ surface (Details gains a Stations rail
+    // panel), so the Personal HQ badge shows in Map and Details alike (FR15) —
+    // never for non-HQ workspaces. Echoes the ws-map-tile-hq-badge treatment
+    // from the base map.
+    const hqBadge = this.isPersonalHQ()
+      ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
+      : '';
     const tags = this.workspaceTags();
     const isLongDescription = Array.from(description).length > 150;
     const descriptionClass =
@@ -3960,6 +3960,57 @@ export class WorkspaceCommandView {
     if (station && typeof station.action === 'function') station.action();
   }
 
+  // HQ-gated "Stations" rail panel for Details mode (FR14): one row per
+  // registry entry (label + live state meta from the same state fn as the map
+  // structure), plus a primary action that runs the first station's action.
+  // Rows and the primary button carry data-cmd-hq-station so the rail click
+  // delegation dispatches through runHQStationAction — the same registry
+  // action() as the map surface. Non-HQ workspaces render nothing (FR16).
+  renderStationsRailPanel() {
+    if (!this.isPersonalHQ()) return '';
+    const registry = this.hqStationRegistry();
+    if (!registry.length) return '';
+    const first = registry[0];
+    const firstState = (first.state && first.state()) || {};
+    const rows = registry
+      .map(station => {
+        const state = (station.state && station.state()) || {};
+        return (
+          '<button type="button" class="ws-cmd-rail-item" data-cmd-hq-station="' +
+          escapeHtml(station.key) +
+          '" aria-label="' +
+          escapeHtml(station.label) +
+          ' station, ' +
+          escapeHtml(state.description || '') +
+          '"><span class="ws-cmd-rail-t">' +
+          escapeHtml(station.label) +
+          '</span><span class="ws-cmd-rail-m">' +
+          escapeHtml(state.value || '') +
+          '</span></button>'
+        );
+      })
+      .join('');
+    return (
+      '<section class="ws-cmd-panel is-hq-stations">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Stations</h4><span class="ws-cmd-panel-count">' +
+      registry.length +
+      '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-hq-station="' +
+      escapeHtml(first.key) +
+      '">' +
+      escapeHtml(firstState.value || 'Open') +
+      '</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="ws-cmd-panel-body">' +
+      rows +
+      '</div>' +
+      '</section>'
+    );
+  }
+
   // --- Station drag-to-place (group 3) --------------------------------------
   // Pure drag math, kept as methods so they are directly unit-testable.
 
@@ -6218,7 +6269,8 @@ export class WorkspaceCommandView {
       ) +
       this.renderDetachmentPanel(detachmentExpanded) +
       this.renderFilesPanel(files, filesExpanded) +
-      this.renderSystemsPanel(systemsExpanded)
+      this.renderSystemsPanel(systemsExpanded) +
+      this.renderStationsRailPanel()
     );
   }
 
@@ -6464,6 +6516,14 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', event => {
+      // HQ station rows + the panel's primary action dispatch through the same
+      // registry action as the map structures (FR14). Checked before the
+      // generic section buttons since these carry no data-cmd-*-section attr.
+      const hqStation = event.target.closest('[data-cmd-hq-station]');
+      if (hqStation) {
+        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
+        return;
+      }
       const systemTab = event.target.closest('[data-cmd-system-tab]');
       if (systemTab) {
         this.openSystemTab(systemTab.getAttribute('data-cmd-system-tab'));

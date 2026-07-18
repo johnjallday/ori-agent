@@ -1168,6 +1168,19 @@
   border-color: var(--ws-keeper);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
 }
+/* Details-mode "Stations" rail panel (FR14): the same citadel-gold keeper
+   accent as the map surface, so the HQ reads consistently across both modes.
+   Reuses the shared .ws-cmd-panel structure; accent only, no layout change. */
+.ws-cmd-panel.is-hq-stations {
+  border-color: var(--ws-keeper-deep);
+  background: linear-gradient(180deg, rgba(232, 181, 75, 0.07), transparent 68%);
+}
+.ws-cmd-panel.is-hq-stations .ws-cmd-panel-title h4 {
+  color: var(--ws-keeper);
+}
+.ws-cmd-panel.is-hq-stations .ws-cmd-rail-item .ws-cmd-rail-m {
+  color: var(--ws-keeper);
+}
 .ws-cmd-map-agent-field {
   width: min(100%, 980px);
   min-height: 410px;

@@ -3137,7 +3137,7 @@ test('renderOperationsMap adds is-hq to the map shell only for the designated HQ
   assert.doesNotMatch(plainHTML, /ws-cmd-map-hq-station/);
 });
 
-test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
+test('commandBarHTML shows the Personal HQ badge in both Command modes', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     identityExpanded: false,
@@ -3166,7 +3166,8 @@ test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
   assert.match(mapHTML, /ws-cmd-hq-badge/);
   assert.match(mapHTML, />Personal HQ</);
 
-  // Non-Goals: Command view's non-map mode must not change (FR15 is map-only).
+  // Details mode now carries HQ surface (the Stations rail panel), so the
+  // badge shows there too (FR15).
   commandView.viewMode = 'details';
   const detailsHTML = commandView.commandBarHTML(
     commandView.page.workspace,
@@ -3174,10 +3175,11 @@ test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
     'Guided',
     commandView.computeStats()
   );
-  assert.doesNotMatch(detailsHTML, /ws-cmd-hq-badge/);
+  assert.match(detailsHTML, /ws-cmd-hq-badge/);
+  assert.match(detailsHTML, />Personal HQ</);
 });
 
-test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in map mode', () => {
+test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in both modes', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     identityExpanded: false,
@@ -3191,11 +3193,73 @@ test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in map mo
     }
   });
 
-  const html = commandView.commandBarHTML(
+  const mapHTML = commandView.commandBarHTML(
     commandView.page.workspace,
     commandView.page.workspace.name,
     'Guided',
     commandView.computeStats()
   );
-  assert.doesNotMatch(html, /ws-cmd-hq-badge/);
+  assert.doesNotMatch(mapHTML, /ws-cmd-hq-badge/);
+
+  commandView.viewMode = 'details';
+  const detailsHTML = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+  assert.doesNotMatch(detailsHTML, /ws-cmd-hq-badge/);
+});
+
+// ---------- HQ Details-mode Stations rail panel (FR14) ----------
+
+test('renderStationsRailPanel renders one row per station only for HQ payloads', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
+  try {
+    const hq = makeHQCommandView();
+    const panel = hq.renderStationsRailPanel();
+    assert.match(panel, /<h4>Stations<\/h4>/);
+    assert.match(panel, /data-cmd-hq-station="email"/);
+    // State meta reuses the same state fn as the map structure.
+    assert.match(panel, /ws-cmd-rail-m">Set up Email</);
+    // The primary action runs the first station's action and reflects its state.
+    assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="email">Set up Email</);
+
+    // Non-HQ workspaces render nothing (FR16).
+    const plain = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(plain, { page: { workspace: {} } });
+    assert.equal(plain.renderStationsRailPanel(), '');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the rail click delegation dispatches HQ station rows through the registry action', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const railRoot = makeListenerRoot();
+    const hq = makeHQCommandView();
+    Object.assign(hq, {
+      container: {
+        querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null)
+      }
+    });
+    hq.bindRail();
+
+    railRoot.listener({
+      target: {
+        closest: selector =>
+          selector === '[data-cmd-hq-station]'
+            ? { getAttribute: name => (name === 'data-cmd-hq-station' ? 'email' : '') }
+            : null
+      }
+    });
+
+    assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
