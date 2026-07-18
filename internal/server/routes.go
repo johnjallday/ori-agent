@@ -662,6 +662,13 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
+		// Workspace runtime routes migrated to explicit Go 1.22 method+patterns.
+		// They are strictly more specific than the /api/workspaces/ subtree above,
+		// so ServeMux dispatches them directly; the rest still flow through
+		// handleWorkspaceAPI -> routeWorkspaceRuntimeRequest until migrated.
+		if s.Handlers.Workspace != nil {
+			workspace.RegisterRoutes(mux, s.Handlers.Workspace)
+		}
 
 		// Closed prompt-variable vocabulary + preview (template authoring UI)
 		mux.HandleFunc("GET /api/prompt-variables", s.handlePromptVariablesList)
@@ -1064,45 +1071,6 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 			s.Handlers.Workspace.UpdateTask(w, r)
 		} else if r.Method == http.MethodDelete {
 			s.Handlers.Workspace.DeleteTask(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
-	if strings.Contains(path, "/attachments") {
-		if strings.HasSuffix(path, "/trash") && r.Method == http.MethodPatch {
-			s.Handlers.Workspace.MoveToTrash(w, r)
-		} else if strings.HasSuffix(path, "/restore") && r.Method == http.MethodPatch {
-			s.Handlers.Workspace.RestoreFromTrash(w, r)
-		} else if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
-			s.Handlers.Workspace.RelinkAttachmentFile(w, r)
-		} else if strings.HasSuffix(path, "/locate") && r.Method == http.MethodPatch {
-			s.Handlers.Workspace.LocateAttachmentFile(w, r)
-		} else if strings.HasSuffix(path, "/move") && r.Method == http.MethodPatch {
-			s.Handlers.Workspace.MoveAttachmentFile(w, r)
-		} else if strings.HasSuffix(path, "/bulk-trash") && r.Method == http.MethodPost {
-			s.Handlers.Workspace.BulkMoveToTrash(w, r)
-		} else {
-			switch r.Method {
-			case http.MethodPost:
-				s.Handlers.Workspace.CreateAttachment(w, r)
-			case http.MethodPatch:
-				s.Handlers.Workspace.UpdateAttachment(w, r)
-			case http.MethodDelete:
-				s.Handlers.Workspace.DeleteAttachment(w, r)
-			default:
-				orihttp.MethodNotAllowed(w)
-			}
-		}
-		return true
-	}
-
-	if strings.Contains(path, "/trash") {
-		if strings.HasSuffix(path, "/trash") && r.Method == http.MethodGet {
-			s.Handlers.Workspace.ListTrash(w, r)
-		} else if r.Method == http.MethodDelete {
-			s.Handlers.Workspace.EmptyTrash(w, r)
 		} else {
 			orihttp.MethodNotAllowed(w)
 		}

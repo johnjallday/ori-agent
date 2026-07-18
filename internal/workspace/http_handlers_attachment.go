@@ -66,18 +66,7 @@ func inferAttachmentType(req *CreateAttachmentRequest) AttachmentType {
 
 // CreateAttachment handles POST /api/workspaces/:id/attachments
 func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	var req CreateAttachmentRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -169,19 +158,8 @@ func (h *HTTPHandler) CreateAttachment(w http.ResponseWriter, r *http.Request) {
 
 // UpdateAttachment handles PATCH /api/workspaces/:id/attachments/:attachment_id
 func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	attachmentID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
 
 	var req struct {
 		Title    *string             `json:"title,omitempty"`
@@ -303,19 +281,8 @@ func (h *HTTPHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
 // RelinkAttachmentFile handles POST /api/workspaces/:id/attachments/:attachment_id/relink
 // by copying a replacement file into the workspace-owned files directory.
 func (h *HTTPHandler) RelinkAttachmentFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	attachmentID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
 
 	r.Body = http.MaxBytesReader(w, r.Body, MaxWorkspaceFileSize)
 	if err := r.ParseMultipartForm(MaxWorkspaceFileSize); err != nil {
@@ -410,19 +377,8 @@ func (h *HTTPHandler) RelinkAttachmentFile(w http.ResponseWriter, r *http.Reques
 
 // DeleteAttachment handles DELETE /api/workspaces/:id/attachments/:attachment_id
 func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	attachmentID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -464,19 +420,8 @@ func (h *HTTPHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 // MoveToTrash handles PATCH /api/workspaces/:id/attachments/:attachment_id/trash
 // Soft-deletes an attachment by setting its DeletedAt timestamp
 func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	attachmentID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -533,19 +478,8 @@ func (h *HTTPHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 // RestoreFromTrash handles PATCH /api/workspaces/:id/attachments/:attachment_id/restore
 // Restores a soft-deleted attachment by clearing its DeletedAt timestamp
 func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	attachmentID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -607,18 +541,7 @@ func (h *HTTPHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 // ListTrash handles GET /api/workspaces/:id/trash
 // Returns all soft-deleted attachments for a workspace
 func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -647,19 +570,8 @@ func (h *HTTPHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
 // EmptyTrash handles DELETE /api/workspaces/:id/trash/:attachment_id
 // Permanently deletes a single attachment from trash
 func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	attachmentID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -717,18 +629,7 @@ func (h *HTTPHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 // BulkMoveToTrash handles POST /api/workspaces/:id/attachments/bulk-trash
 // Moves multiple attachments to trash at once
 func (h *HTTPHandler) BulkMoveToTrash(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	var req struct {
 		AttachmentIDs []string `json:"attachment_ids"`

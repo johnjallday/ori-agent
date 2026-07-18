@@ -502,6 +502,8 @@ func TestLocateAttachmentFileAdoptsOrphan(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID+"/attachments/att-1/locate", bytes.NewBufferString(`{"relative_path":"found.txt"}`))
+	req.SetPathValue("workspaceID", ws.ID)
+	req.SetPathValue("attachmentId", "att-1")
 	rr := httptest.NewRecorder()
 	handler.LocateAttachmentFile(rr, req)
 	if rr.Code != http.StatusOK {
@@ -544,6 +546,8 @@ func TestLocateAttachmentFileRejectsDoubleClaim(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID+"/attachments/att-missing/locate", bytes.NewBufferString(`{"relative_path":"owned.txt"}`))
+	req.SetPathValue("workspaceID", ws.ID)
+	req.SetPathValue("attachmentId", "att-missing")
 	rr := httptest.NewRecorder()
 	handler.LocateAttachmentFile(rr, req)
 	if rr.Code != http.StatusConflict {

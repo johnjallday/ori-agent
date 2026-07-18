@@ -325,6 +325,7 @@ func TestHTTPHandlerCreateAttachmentPreservesFolderPrefixedRelativePath(t *testi
 		"/api/workspaces/"+ws.ID+"/attachments",
 		bytes.NewBufferString(`{"title":"Report","type":"doc","file_meta":{"name":"report.txt","relative_path":"research/report.txt"}}`),
 	)
+	req.SetPathValue("workspaceID", ws.ID)
 	rr := httptest.NewRecorder()
 
 	handler.CreateAttachment(rr, req)
@@ -394,6 +395,8 @@ func TestHTTPHandlerRelinkAttachmentFileCopiesReplacementIntoWorkspace(t *testin
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/attachments/att-1/relink", &body)
+	req.SetPathValue("workspaceID", ws.ID)
+	req.SetPathValue("attachmentId", "att-1")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rr := httptest.NewRecorder()
 
@@ -494,6 +497,8 @@ func TestHTTPHandlerRelinkAttachmentFilePreservesExistingFolder(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/attachments/att-1/relink", &body)
+	req.SetPathValue("workspaceID", ws.ID)
+	req.SetPathValue("attachmentId", "att-1")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rr := httptest.NewRecorder()
 
