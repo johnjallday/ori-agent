@@ -30,18 +30,7 @@ type CreateStoreNodeRequest struct {
 
 // CreateStoreNode handles POST /api/workspaces/:id/store-nodes
 func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	var req CreateStoreNodeRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -181,18 +170,7 @@ func (h *HTTPHandler) CreateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 // GetStoreNodes handles GET /api/workspaces/:id/store-nodes
 func (h *HTTPHandler) GetStoreNodes(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 1 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -223,27 +201,8 @@ type UpdateStoreNodeRequest struct {
 
 // UpdateStoreNode handles PUT /api/workspaces/:id/store-nodes/:node_id
 func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-
-	// Handle both /store-nodes/{id} and /canvas/store-nodes/{id} patterns
-
-	var nodeID string
-	if parts[1] == "canvas" && len(parts) >= 4 {
-		nodeID = parts[3] // /canvas/store-nodes/{id}
-	} else {
-		nodeID = parts[2] // /store-nodes/{id}
-	}
+	workspaceID := r.PathValue("workspaceID")
+	nodeID := r.PathValue("nodeId")
 
 	var req UpdateStoreNodeRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -391,19 +350,8 @@ func (h *HTTPHandler) UpdateStoreNode(w http.ResponseWriter, r *http.Request) {
 
 // DeleteStoreNode handles DELETE /api/workspaces/:id/store-nodes/:node_id
 func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	nodeID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	nodeID := r.PathValue("nodeId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -465,19 +413,8 @@ func (h *HTTPHandler) DeleteStoreNode(w http.ResponseWriter, r *http.Request) {
 
 // GetStoreNodeStatus handles GET /api/workspaces/:id/store-nodes/:node_id/status
 func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	nodeID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	nodeID := r.PathValue("nodeId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {

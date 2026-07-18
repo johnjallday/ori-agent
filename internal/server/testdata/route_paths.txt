@@ -274,3 +274,9 @@
 /api/sessions/x/files/x/download
 /api/sessions/x/files/x/relink
 /api/sessions/x/files/x
+# --- store-nodes {nodeId} variants (G2c) ---
+/api/workspaces/x/store-nodes/x
+/api/workspaces/x/store-nodes/x/status
+/api/workspaces/x/canvas/store-nodes
+/api/workspaces/x/canvas/store-nodes/x
+/api/workspaces/x/canvas/store-nodes/x/status

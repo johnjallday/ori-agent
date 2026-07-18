@@ -1052,28 +1052,6 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if strings.Contains(path, "/store-nodes") {
-		// Matches both /store-nodes and its /canvas/store-nodes alias (two
-		// near-identical blocks before this merge). The only historical
-		// difference is preserved: PUT updates are accepted on the plain
-		// surface but were always 405 on the canvas alias.
-		allowPut := !strings.Contains(path, "/canvas/store-nodes")
-		if strings.HasSuffix(path, "/status") && r.Method == http.MethodGet {
-			s.Handlers.Workspace.GetStoreNodeStatus(w, r)
-		} else if r.Method == http.MethodPost {
-			s.Handlers.Workspace.CreateStoreNode(w, r)
-		} else if r.Method == http.MethodGet {
-			s.Handlers.Workspace.GetStoreNodes(w, r)
-		} else if r.Method == http.MethodPatch || (allowPut && r.Method == http.MethodPut) {
-			s.Handlers.Workspace.UpdateStoreNode(w, r)
-		} else if r.Method == http.MethodDelete {
-			s.Handlers.Workspace.DeleteStoreNode(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
 	if len(parts) == 3 && parts[1] == "files" && parts[2] == "tree" {
 		if r.Method == http.MethodGet {
 			s.Handlers.Workspace.GetWorkspaceFilesTree(w, r)

@@ -44,4 +44,21 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/approve", h.ApproveTaskOutputSpecDraft)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/discard", h.DiscardTaskOutputSpecDraft)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/discard", h.DiscardTaskOutputSpecDraft)
+
+	// Store nodes (G2c). Available under both /store-nodes and the historical
+	// /canvas/store-nodes alias. PUT updates are accepted on the plain surface
+	// only (the alias was always 405 for PUT), preserved by omitting the canvas
+	// PUT pattern. Reading {nodeId} via PathValue is identical for both aliases,
+	// which also fixes the old canvas node-id off-by-one (parts[2] vs parts[3]).
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/store-nodes", h.CreateStoreNode)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/store-nodes", h.GetStoreNodes)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/store-nodes/{nodeId}/status", h.GetStoreNodeStatus)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/store-nodes/{nodeId}", h.UpdateStoreNode)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/store-nodes/{nodeId}", h.UpdateStoreNode)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/store-nodes/{nodeId}", h.DeleteStoreNode)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/canvas/store-nodes", h.CreateStoreNode)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/canvas/store-nodes", h.GetStoreNodes)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/canvas/store-nodes/{nodeId}/status", h.GetStoreNodeStatus)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/canvas/store-nodes/{nodeId}", h.UpdateStoreNode)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/canvas/store-nodes/{nodeId}", h.DeleteStoreNode)
 }
