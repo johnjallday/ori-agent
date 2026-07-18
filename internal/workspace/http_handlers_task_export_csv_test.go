@@ -46,7 +46,7 @@ func TestHTTPHandler_ExportResultCSV(t *testing.T) {
 		"/api/workspaces/ws-1/tasks/task-1/results/export-csv", nil)
 	rec := httptest.NewRecorder()
 
-	handler.ExportResultCSV(rec, req)
+	handler.ExportResultCSV(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -93,7 +93,7 @@ func TestHTTPHandler_ExportResultCSV_NoDatasetYet(t *testing.T) {
 		"/api/workspaces/ws-1/tasks/task-1/results/export-csv", nil)
 	rec := httptest.NewRecorder()
 
-	handler.ExportResultCSV(rec, req)
+	handler.ExportResultCSV(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404 for missing dataset", rec.Code)
@@ -118,7 +118,7 @@ func TestHTTPHandler_ExportResultCSV_RejectsNonAppendTask(t *testing.T) {
 		"/api/workspaces/ws-1/tasks/task-1/results/export-csv", nil)
 	rec := httptest.NewRecorder()
 
-	handler.ExportResultCSV(rec, req)
+	handler.ExportResultCSV(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400 when there is no append dataset", rec.Code)

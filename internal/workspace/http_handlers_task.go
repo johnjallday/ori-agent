@@ -39,19 +39,7 @@ type CreateTaskRequest struct {
 
 // CreateTask handles POST /api/workspaces/:id/tasks
 func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract workspace ID from URL path
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	// Parse request body
 
@@ -177,21 +165,8 @@ func (h *HTTPHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 // UpdateTask handles PATCH /api/workspaces/:id/tasks/:task_id
 func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract workspace ID and task ID from URL path
-	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	taskID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	taskID := r.PathValue("taskId")
 
 	// Parse request body
 
@@ -369,21 +344,8 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 // DeleteTask handles DELETE /api/workspaces/:id/tasks/:task_id
 func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract workspace ID and task ID from URL path
-	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	taskID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	taskID := r.PathValue("taskId")
 
 	// Get workspace
 	workspace, err := h.store.Get(workspaceID)
@@ -417,21 +379,8 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 // ExecuteTaskManually handles POST /api/workspaces/:id/tasks/:task_id/execute
 func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract workspace ID and task ID from URL path
-	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}/execute
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	taskID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	taskID := r.PathValue("taskId")
 
 	// Get workspace
 	workspace, err := h.store.Get(workspaceID)
@@ -488,20 +437,8 @@ type AppendResultToCSVRequest struct {
 // already-configured result storage destination (use_storage=true) or to a
 // one-shot destination supplied in the request.
 func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// URL format: /api/workspaces/{workspace_id}/tasks/{task_id}/results/append-csv
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 5 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	taskID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	taskID := r.PathValue("taskId")
 
 	var req AppendResultToCSVRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -664,20 +601,8 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 // from it on demand (data columns first, run metadata after) and returns it as a
 // download. The .jsonl file on disk is never modified.
 func (h *HTTPHandler) ExportResultCSV(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// URL: /api/workspaces/{workspace_id}/tasks/{task_id}/results/export-csv
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 5 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	taskID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	taskID := r.PathValue("taskId")
 
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {

@@ -16,18 +16,6 @@ type taskOutputSpecDraftRequest struct {
 	Overwrite  bool            `json:"overwrite,omitempty"`
 }
 
-func parseTaskOutputSpecPath(path string) (workspaceID, taskID string, ok bool) {
-	trimmed := strings.TrimPrefix(path, "/api/workspaces/")
-	if trimmed == path {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
-	if len(parts) < 4 || parts[1] != "tasks" || parts[3] != "output-spec" {
-		return "", "", false
-	}
-	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[2]), true
-}
-
 func normalizeDraftOutputSpecForRequest(spec *TaskOutputSpec) (*TaskOutputSpec, []string) {
 	if spec != nil && strings.TrimSpace(spec.Source) == "" {
 		clone := SnapshotTaskOutputSpec(spec)
@@ -47,15 +35,7 @@ func normalizeDraftOutputSpecForRequest(spec *TaskOutputSpec) (*TaskOutputSpec, 
 
 // SaveTaskOutputSpecDraft handles POST/PATCH /api/workspaces/{id}/tasks/{task_id}/output-spec/draft.
 func (h *HTTPHandler) SaveTaskOutputSpecDraft(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-	workspaceID, taskID, ok := parseTaskOutputSpecPath(r.URL.Path)
-	if !ok {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
+	workspaceID, taskID := r.PathValue("workspaceID"), r.PathValue("taskId")
 	var req taskOutputSpecDraftRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -102,15 +82,7 @@ var errTaskOutputSpecDraftConflict = fmt.Errorf("draft output spec already exist
 
 // ApproveTaskOutputSpecDraft handles POST /api/workspaces/{id}/tasks/{task_id}/output-spec/approve.
 func (h *HTTPHandler) ApproveTaskOutputSpecDraft(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-	workspaceID, taskID, ok := parseTaskOutputSpecPath(r.URL.Path)
-	if !ok {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
+	workspaceID, taskID := r.PathValue("workspaceID"), r.PathValue("taskId")
 	var updated Task
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -146,15 +118,7 @@ func (h *HTTPHandler) ApproveTaskOutputSpecDraft(w http.ResponseWriter, r *http.
 
 // DiscardTaskOutputSpecDraft handles POST/DELETE /api/workspaces/{id}/tasks/{task_id}/output-spec/discard.
 func (h *HTTPHandler) DiscardTaskOutputSpecDraft(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-	workspaceID, taskID, ok := parseTaskOutputSpecPath(r.URL.Path)
-	if !ok {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
+	workspaceID, taskID := r.PathValue("workspaceID"), r.PathValue("taskId")
 	var updated Task
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {

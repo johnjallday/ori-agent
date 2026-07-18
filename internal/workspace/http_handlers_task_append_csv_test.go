@@ -43,7 +43,7 @@ func TestHTTPHandler_AppendResultToCSV_UsesTaskStorage(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.AppendResultToCSV(rec, req)
+	handler.AppendResultToCSV(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -80,7 +80,7 @@ func TestHTTPHandler_AppendResultToCSV_UsesTaskStorage(t *testing.T) {
 		strings.NewReader(`{"csv":"timestamp,value\n2026-05-21,low","use_storage":true}`))
 	req2.Header.Set("Content-Type", "application/json")
 	rec2 := httptest.NewRecorder()
-	handler.AppendResultToCSV(rec2, req2)
+	handler.AppendResultToCSV(rec2, withTaskPath(req2))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("status2=%d body=%s", rec2.Code, rec2.Body.String())
 	}
@@ -153,7 +153,7 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStorage(t *testing.T) 
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.AppendResultToCSV(rec, req)
+	handler.AppendResultToCSV(rec, withTaskPath(req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -235,7 +235,7 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.AppendResultToCSV(rec, req)
+	handler.AppendResultToCSV(rec, withTaskPath(req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -290,7 +290,7 @@ func TestHTTPHandler_AppendResultToCSV_OneShotCustomPath(t *testing.T) {
 		strings.NewReader(string(raw)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.AppendResultToCSV(rec, req)
+	handler.AppendResultToCSV(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -320,7 +320,7 @@ func TestHTTPHandler_AppendResultToCSV_UseStorageNotConfigured(t *testing.T) {
 		strings.NewReader(`{"csv":"a,b\n1,2","use_storage":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.AppendResultToCSV(rec, req)
+	handler.AppendResultToCSV(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body.String())
@@ -349,7 +349,7 @@ func TestHTTPHandler_UpdateTask_PersistsResultStorage(t *testing.T) {
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.UpdateTask(rec, req)
+	handler.UpdateTask(rec, withTaskPath(req))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -397,7 +397,7 @@ func TestHTTPHandler_AppendResultToCSV_MissingCSV(t *testing.T) {
 		strings.NewReader(`{"csv":"   "}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.AppendResultToCSV(rec, req)
+	handler.AppendResultToCSV(rec, withTaskPath(req))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body.String())
 	}
