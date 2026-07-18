@@ -5,7 +5,8 @@ Output feeds the existing PRD → task generation → build workflow. This doc i
 source of truth for the routine — tune the routine by editing this file, not the schedule.
 
 **Rules for the executing agent:**
-- Read-only pass over the codebase. The only writes allowed are the report file.
+- Read-only pass over the codebase. The only writes allowed are the report file and
+  backlog bookkeeping (source E).
 - Read the most recent report in `docs/feature-discovery/reports/` first. Carry forward
   still-valid candidates, note status changes, don't re-pitch things already rejected or shipped.
 - Timebox web research to ~10 searches. Evidence over speculation.
@@ -46,6 +47,14 @@ Read `docs/features/*.md` (13+ plan docs incl. `AI_FEATURES_ROADMAP.md`, `create
 classify as shipped / partially shipped / not started by spot-checking the code it describes.
 Partially-shipped plans with recent momentum are prime candidates.
 
+### E. User backlog (`BACKLOG.md` at repo root)
+John's own captured ideas — the highest-signal source. Treat every entry under `## Ideas`
+as a candidate and score it with the same rubric: `!` means he explicitly wants it (weight
+Impact up), `#small`/`#large` are effort hints. Bookkeeping duties (the only writes allowed
+outside the report): move entries that shipped or became pointless to `## Shipped / dropped`
+with a one-word reason; promote a candidate to `## Doing` only when John picked it in a
+prior session. Never delete or reword entries under `## Ideas` — his phrasing is the record.
+
 ## Scoring rubric
 
 Score each candidate H/M/L on:
@@ -70,7 +79,7 @@ Write to `docs/feature-discovery/reports/YYYY-MM-DD.md`:
 ## Shortlist
 ### 1. <Candidate name>  [Impact: H | Effort: M | Fit: H]
 - What: one paragraph
-- Why now: evidence from sources A–D with file paths / URLs
+- Why now: evidence from sources A–E with file paths / URLs (tag backlog-originated candidates)
 - First PRD questions: 2–3 questions the PRD must answer
 
 (3–5 candidates total)
