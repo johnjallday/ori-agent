@@ -172,6 +172,53 @@ func TestSyncStore_SavePreservesCanonicalProjectPathFromStalePrimaryWorkspace(t 
 	}
 }
 
+func TestSyncStore_SavePreservesCanonicalDesignationFromStalePrimaryWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-designation-sync", "Designation Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Personal HQ designation is projected directly to workspace.json. The
+	// primary store intentionally has no column for it, so a later task save
+	// must retain the canonical designation rather than erase it.
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace.Designation = "personal_hq"
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	staleWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-designation", Status: TaskStatusPending})
+	if err := store.Save(staleWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diskWorkspace.Designation != "personal_hq" {
+		t.Fatalf("canonical designation = %q, want personal_hq", diskWorkspace.Designation)
+	}
+	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "after-designation" {
+		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)
+	}
+}
+
 func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

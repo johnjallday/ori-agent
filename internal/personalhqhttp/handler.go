@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -23,6 +24,9 @@ type Handler struct {
 	followups     FollowUpAPI
 	journal       JournalAPI
 	provider      userprofile.UserProvider
+	// watchtowerSources is intentionally a factory: workspace storage is wired
+	// after this handler during server startup, so source access must be lazy.
+	watchtowerSources func() dailybrief.SnapshotSources
 }
 
 // NewHandler constructs a Personal HQ HTTP handler. provider may be nil, in

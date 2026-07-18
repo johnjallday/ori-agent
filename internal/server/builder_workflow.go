@@ -74,17 +74,7 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 // avoids a partially initialized HQ overview.
 func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
 	return chathttp.HQVisibilityDeps{
-		SnapshotSources: func() dailybrief.SnapshotSources {
-			workspaceStore := b.workspaceStore
-			sources := dailybrief.SnapshotSources{Workspaces: workspaceStore}
-			if workspaceStore != nil {
-				sources.Opportunities = workspace.NewOpportunityStore(workspaceStore)
-			}
-			if b.sessionStore != nil {
-				sources.Sessions = &sessionSourceAdapter{store: b.sessionStore}
-			}
-			return sources
-		},
+		SnapshotSources: b.watchtowerSnapshotSources,
 		IsDesignatedHQ: func(ctx context.Context, workspaceID string) (bool, error) {
 			if b.personalHQService == nil {
 				return false, nil
@@ -103,6 +93,22 @@ func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
 		},
 		UserID: userprofile.LocalUserID,
 	}
+}
+
+// watchtowerSnapshotSources builds the live cross-workspace read projection
+// shared by the HQ tool and Watchtower endpoint. It is a method rather than a
+// captured value because the Personal HQ handler is constructed before the
+// workspace and folder stores exist.
+func (b *ServerBuilder) watchtowerSnapshotSources() dailybrief.SnapshotSources {
+	workspaceStore := b.workspaceStore
+	sources := dailybrief.SnapshotSources{Workspaces: workspaceStore}
+	if workspaceStore != nil {
+		sources.Opportunities = workspace.NewOpportunityStore(workspaceStore)
+	}
+	if b.sessionStore != nil {
+		sources.Sessions = &sessionSourceAdapter{store: b.sessionStore}
+	}
+	return sources
 }
 
 // delegationCapsFromEnv returns the delegation loop caps, allowing operators to

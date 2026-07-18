@@ -177,6 +177,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		// one provisioning path (task 2.9).
 		personalHQUpgrade := personalhq.NewUpgradeCoordinator(b.personalHQService, sessionStore, b.sessionHandler)
 		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, personalHQUpgrade, b.userProvider)
+		// The workspace stores are constructed in a later phase. Passing the
+		// method value keeps Watchtower reads live once those stores are ready.
+		b.personalHQHandler.SetWatchtowerSources(b.watchtowerSnapshotSources)
 		// Structured follow-ups (Group 6): a dedicated SQLite domain over the
 		// shared database.
 		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))

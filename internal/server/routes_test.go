@@ -121,6 +121,15 @@ func TestPersonalHQRoutesRegistered(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected designate of unknown workspace to return 404, got %d body %s", rec.Code, rec.Body.String())
 	}
+
+	// The Watchtower route is registered even with no HQ yet; its own gate
+	// returns 403 rather than leaving the endpoint unmounted.
+	req = httptest.NewRequest(http.MethodGet, "/api/personal-hq/watchtower?workspace_id=missing", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected Watchtower HQ gate to return 403, got %d body %s", rec.Code, rec.Body.String())
+	}
 }
 
 // TestBrandNewProfileLandsOnHome covers the home-first onboarding direction:

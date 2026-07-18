@@ -56,16 +56,20 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 // the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
-		// ProjectPath is canonical in workspace.json and is not represented by
-		// the SQLite workspace table. A workspace fetched before project
-		// instantiation (or fetched from SQLite afterward) can therefore carry an
-		// empty value and must not erase a project path that was written directly
-		// to the folder store. There is no generic "empty means clear" operation
-		// through SyncStore; an intentional project removal must update the
-		// canonical FileStore explicitly.
-		if ws.ProjectPath == "" {
+		// ProjectPath and Designation are canonical workspace.json fields that
+		// are not represented by the SQLite workspace table. A workspace fetched
+		// from SQLite can therefore carry empty values and must not erase values
+		// written directly to the folder store. There is no generic "empty means
+		// clear" operation through SyncStore; intentional removals must update
+		// the canonical FileStore explicitly.
+		if ws.ProjectPath == "" || ws.Designation == "" {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
-				ws.ProjectPath = diskWorkspace.ProjectPath
+				if ws.ProjectPath == "" {
+					ws.ProjectPath = diskWorkspace.ProjectPath
+				}
+				if ws.Designation == "" {
+					ws.Designation = diskWorkspace.Designation
+				}
 			}
 		}
 		if err := s.fileSync.Save(ws); err != nil {
