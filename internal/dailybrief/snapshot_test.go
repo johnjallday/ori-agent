@@ -62,10 +62,14 @@ func (s slimListingWorkspaceSource) ListActive() ([]*workspace.Workspace, error)
 		if full == nil || full.Status != workspace.StatusActive {
 			continue
 		}
-		lean := *full
-		lean.Tasks = nil
-		lean.ScheduledTasks = nil
-		items = append(items, &lean)
+		items = append(items, &workspace.Workspace{
+			ID:          full.ID,
+			Name:        full.Name,
+			Kind:        full.Kind,
+			Status:      full.Status,
+			OwnerUserID: full.OwnerUserID,
+			CreatedAt:   full.CreatedAt,
+		})
 	}
 	return items, nil
 }
