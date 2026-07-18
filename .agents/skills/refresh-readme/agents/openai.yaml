@@ -1,0 +1,4 @@
+interface:
+  display_name: "README Steward"
+  short_description: "Audit and refresh README screenshots"
+  default_prompt: "Use $refresh-readme as README Steward to audit the root README and plan a safe staged screenshot refresh."

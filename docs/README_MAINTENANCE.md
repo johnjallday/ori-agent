@@ -36,6 +36,24 @@ sessions, external MCP servers, network access, or real Ori workspace data.
 It starts the server with a temporary `HOME` and `ORI_DATA_DIR`, from inside
 that sandbox, and uses only version-controlled fictional fixtures.
 
+## README Steward setup
+
+Create one workspace-scoped agent named **README Steward** in the Ori
+development workspace and attach the repository folder as its workspace-local
+filesystem scope. In the agent's Skills controls, enable and trust the
+repo-discovered `refresh-readme` skill; then add the same enabled/trusted skill
+binding to the development workspace for that agent. Skills are opt-in, so a
+discovered skill is not active until these settings are saved.
+
+Grant only local filesystem, shell, and browser access needed to run the
+versioned README commands. Do not provide provider credentials, external MCP
+servers, OAuth sessions, or access outside the development workspace for
+capture. Keep native CLI autonomy disabled for this workflow. If a CLI-provider
+agent genuinely needs native workspace tools for a later task, explicitly
+enable both `Workspace.AllowNativeMCPCLI` and the agent's
+`Settings.AllowNativeMCPTools` only after reviewing that broader authority;
+the README skill itself does not require either setting.
+
 ## Commands
 
 | Command | Effect |
