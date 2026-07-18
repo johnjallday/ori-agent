@@ -230,9 +230,24 @@ function restoreSnapshot(filePath, contents) {
   writeFileSync(filePath, contents);
 }
 
-function findReferences(root, relativePath) {
+function findContentReferences(root, relativePath) {
   try {
-    const output = execFileSync('git', ['grep', '-n', '-I', '-F', '--', relativePath], { cwd: root, encoding: 'utf8' }).trim();
+    const output = execFileSync(
+      'git',
+      [
+        'grep',
+        '-n',
+        '-I',
+        '-F',
+        '--',
+        relativePath,
+        '--',
+        '.',
+        ':(exclude)scripts/readme/**',
+        ':(exclude)tests/**',
+      ],
+      { cwd: root, encoding: 'utf8' },
+    ).trim();
     return output ? output.split('\n') : [];
   } catch (error) {
     if (error.status === 1) return [];
@@ -310,7 +325,7 @@ export async function applyAcceptance({ root, runID, approved = false, repositor
     writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`);
     for (const asset of OBSOLETE_ASSETS) {
       const absolute = path.join(root, asset);
-      if (existsSync(absolute) && findReferences(root, asset).length === 0) {
+      if (existsSync(absolute) && findContentReferences(root, asset).length === 0) {
         unlinkSync(absolute);
         removedAssets.push(asset);
       }

@@ -259,6 +259,27 @@ test('rolls back a failed post-copy validation and permits a safe retry from the
   assert.equal(git(fixture.root, ['rev-parse', 'HEAD']).length, 40, 'Checkpoint 1 does not create a commit or contact GitHub');
 });
 
+test('removes obsolete assets when only README-tooling literals refer to them', async t => {
+  const fixture = createFixture();
+  t.after(() => cleanupFixture(fixture.root));
+  mkdirSync(path.join(fixture.root, 'scripts', 'readme'), { recursive: true });
+  mkdirSync(path.join(fixture.root, 'tests'), { recursive: true });
+  writeFileSync(path.join(fixture.root, 'scripts', 'readme', 'legacy-assets.mjs'), "const legacy = 'docs/images/hero.png';\n");
+  writeFileSync(path.join(fixture.root, 'tests', 'legacy-assets.test.mjs'), "const legacy = 'docs/images/onboarding.png';\n");
+  git(fixture.root, ['add', '.']);
+  git(fixture.root, ['commit', '-m', 'test: retain legacy asset names in tooling']);
+  const staged = stageRun(fixture.root, fixture.images);
+  t.after(() => rmSync(staged.sandbox, { recursive: true, force: true }));
+
+  const result = await applyAcceptance({ root: fixture.root, runID: 'acceptance-fixture', approved: true });
+  assert.deepEqual(result.removed_assets.sort(), [
+    'docs/images/action-center.png',
+    'docs/images/hero.png',
+    'docs/images/onboarding.png',
+    'docs/images/workspace.png',
+  ]);
+});
+
 test('identical accepted outputs are a no-op and safely clean their staging run', async t => {
   const fixture = createFixture({ branch: 'docs/readme-refresh-2026-07', accepted: true });
   t.after(() => cleanupFixture(fixture.root));
