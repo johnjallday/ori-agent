@@ -20,8 +20,17 @@ METADATA_FINALIZED=0
 GO_ROOT=""
 GO_MODULE_CACHE=""
 
+print_safe_retry() {
+  if [[ -n "${RUN_ID}" ]]; then
+    printf 'Safe retry: bash scripts/readme-refresh.sh cleanup --run-id %q && bash scripts/readme-refresh.sh capture --run-id %q\n' "${RUN_ID}" "${RUN_ID}" >&2
+  else
+    printf 'Safe retry: make readme-capture\n' >&2
+  fi
+}
+
 fail() {
   printf 'README capture error: %s\n' "$*" >&2
+  print_safe_retry
   exit 2
 }
 
@@ -190,7 +199,7 @@ capture() {
     fail "server did not become healthy within 10 seconds; see ${RUN_DIR}/logs/server.log"
   fi
 
-  env -i \
+  if ! env -i \
     PATH="${PATH}" \
     HOME="${SANDBOX}" \
     ORI_DATA_DIR="${SANDBOX}/ori-data" \
@@ -201,7 +210,9 @@ capture() {
     node "${driver_path}" \
       --base-url "http://127.0.0.1:${requested_port}" \
       --run-dir "${RUN_DIR}" \
-      --manifest "${REPO_ROOT}/docs/readme-screenshots.json"
+      --manifest "${REPO_ROOT}/docs/readme-screenshots.json"; then
+    fail "capture driver failed; inspect the named scene or rule above and the preserved logs in ${RUN_DIR}/logs/"
+  fi
 
   FINAL_STATUS="succeeded"
   if [[ "${driver}" == "scripts/readme/capture-driver.mjs" ]]; then

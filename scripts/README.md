@@ -60,7 +60,14 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
   (`FIX_ORIHTTP_ERRCHECK=1`) that adds error handling for `internal/http`
   (`orihttp`) response calls flagged by errcheck.
 - `merge-dependabot.sh` — Batch-merge open dependabot PRs.
-- `update-readme.sh` — Regenerate README sections during the release flow.
+- `update-readme.sh` — Update only the README version and Go badges during the
+  release flow. It does not capture or publish product screenshots.
+- `readme-refresh.sh` — Isolated staged README screenshot capture and cleanup.
+  Use `make readme-audit`, `make readme-capture`, `make readme-propose`, and
+  `make readme-check` for the versioned workflow described in
+  `docs/README_MAINTENANCE.md`.
+- `pre-release-check.sh` — Runs `make readme-check` before the separate badge
+  updater, so releases get a read-only README screenshot-contract backstop.
 
 ## Assets
 

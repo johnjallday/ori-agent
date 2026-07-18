@@ -321,6 +321,7 @@ echo "0.0.12" > VERSION
 ### Verify Documentation
 ```bash
 # Check that key docs are up to date:
+make readme-check
 cat README.md | grep -i "version"
 cat docs/INSTALLATION_MACOS.md | head -20
 cat docs/INSTALLATION_WINDOWS.md | head -20
@@ -329,9 +330,15 @@ cat docs/INSTALLATION_LINUX.md | head -20
 
 **Must verify**:
 - README reflects current features
+- `make readme-check` passes the README screenshot, link, image, and checksum contract
 - Installation guides are current
 - No broken links
 - Version numbers correct
+
+`make readme-check` is read-only. It does not capture screenshots or accept
+staged README assets; see `docs/README_MAINTENANCE.md` for the separately
+approved refresh workflow. The existing `scripts/update-readme.sh` remains
+limited to release badge updates.
 
 ### Generate Release Notes
 ```bash

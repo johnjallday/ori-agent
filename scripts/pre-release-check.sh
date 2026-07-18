@@ -508,6 +508,14 @@ fi
 
 print_header "6. README UPDATE"
 
+# This validates the existing product screenshot contract before the separate
+# release badge updater intentionally edits README.md.
+if [ -f "./scripts/readme/manifest.mjs" ]; then
+  run_check "README screenshot contract" "make readme-check" || true
+else
+  skip_check "README screenshot contract" "README contract helper not found"
+fi
+
 if [ -f "./scripts/update-readme.sh" ]; then
   run_check "Update README badges" "./scripts/update-readme.sh" true
 else
