@@ -69,6 +69,7 @@ type HQVisibilityDeps struct {
 	SnapshotSources func() dailybrief.SnapshotSources
 	IsDesignatedHQ  func(ctx context.Context, workspaceID string) (bool, error)
 	FolderPath      func(workspaceID string) string
+	UserID          string
 }
 
 // mcpServerLister allows listing available MCP servers.
@@ -203,6 +204,13 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		if p.mailDrafter != nil {
 			tools = append(tools, p.mailDraftReplyTool())
 		}
+	}
+
+	// Personal HQ-only: the coordinator gets a bounded, read-only overview of
+	// every eligible workspace. Specialists and non-HQ workspaces never receive
+	// the tool, so their cross-workspace visibility remains unchanged.
+	if p.hqOverviewEnabled() {
+		tools = append(tools, p.hqOverviewTool())
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.

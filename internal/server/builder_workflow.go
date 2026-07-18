@@ -101,6 +101,7 @@ func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
 			}
 			return path
 		},
+		UserID: userprofile.LocalUserID,
 	}
 }
 
