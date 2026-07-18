@@ -1,95 +1,39 @@
 package fileshttp
 
-import (
-	"net/http"
-	"strings"
-)
+import "net/http"
 
-// RegisterRoutes registers all file management HTTP routes on the given mux.
-// This should be called from internal/server/routes.go
+// RegisterRoutes registers all session-file HTTP routes on the given mux using
+// Go 1.22 method+pattern routing. The {id} (session) and {fileId} path
+// parameters are read by the handlers via r.PathValue.
+//
+// These patterns are strictly more specific than the "/api/sessions/" subtree
+// that the session handler owns, so ServeMux dispatches file requests here and
+// leaves everything else (session CRUD, tags, tasks) to the session handler.
 //
 // Routes registered:
-//   - POST   /api/sessions/{id}/files/upload   - Upload a file
-//   - POST   /api/sessions/{id}/files/link     - Link to an external file
-//   - GET    /api/sessions/{id}/files          - List all files
-//   - GET    /api/sessions/{id}/files/{fileId} - Get file metadata
-//   - GET    /api/sessions/{id}/files/{fileId}/download - Download file
-//   - DELETE /api/sessions/{id}/files/{fileId} - Delete a file
-//   - POST   /api/sessions/{id}/files/{fileId}/relink - Re-link a broken symlink
-//   - POST   /api/sessions/{id}/files/validate - Validate all links
-//   - POST   /api/sessions/{id}/folder/open    - Open folder in file manager
-//   - GET    /api/sessions/{id}/files/events   - SSE stream for file changes
-//   - POST   /api/sessions/{id}/files/watch    - Start watching folder
-//   - DELETE /api/sessions/{id}/files/watch    - Stop watching folder
+//   - POST   /api/sessions/{id}/files/upload             - Upload a file
+//   - POST   /api/sessions/{id}/files/link               - Link to an external file
+//   - POST   /api/sessions/{id}/files/validate           - Validate all links
+//   - GET    /api/sessions/{id}/files/events             - SSE stream for file changes
+//   - POST   /api/sessions/{id}/files/watch              - Start watching folder
+//   - DELETE /api/sessions/{id}/files/watch              - Stop watching folder
+//   - POST   /api/sessions/{id}/folder/open              - Open folder in file manager
+//   - GET    /api/sessions/{id}/files                    - List all files
+//   - GET    /api/sessions/{id}/files/{fileId}           - Get file metadata
+//   - DELETE /api/sessions/{id}/files/{fileId}           - Delete a file
+//   - GET    /api/sessions/{id}/files/{fileId}/download  - Download file
+//   - POST   /api/sessions/{id}/files/{fileId}/relink    - Re-link a broken symlink
 func RegisterRoutes(mux *http.ServeMux, h *Handler) {
-	// Session files pattern - handles all /api/sessions/{id}/files/* routes
-	mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		// Only handle file-related routes
-		if !strings.Contains(path, "/files") && !strings.Contains(path, "/folder") {
-			http.NotFound(w, r)
-			return
-		}
-
-		// Route based on path pattern
-		switch {
-		// Upload file
-		case strings.HasSuffix(path, "/files/upload"):
-			h.UploadFile(w, r)
-
-		// Link file
-		case strings.HasSuffix(path, "/files/link"):
-			h.LinkFile(w, r)
-
-		// Validate links
-		case strings.HasSuffix(path, "/files/validate"):
-			h.ValidateLinks(w, r)
-
-		// SSE events
-		case strings.HasSuffix(path, "/files/events"):
-			h.FileEvents(w, r)
-
-		// Watch control
-		case strings.HasSuffix(path, "/files/watch"):
-			switch r.Method {
-			case http.MethodPost:
-				h.StartWatching(w, r)
-			case http.MethodDelete:
-				h.StopWatching(w, r)
-			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			}
-
-		// Open folder
-		case strings.HasSuffix(path, "/folder/open"):
-			h.OpenFolder(w, r)
-
-		// Download file
-		case strings.Contains(path, "/files/") && strings.HasSuffix(path, "/download"):
-			h.DownloadFile(w, r)
-
-		// Relink file
-		case strings.Contains(path, "/files/") && strings.HasSuffix(path, "/relink"):
-			h.RelinkFile(w, r)
-
-		// List files (exact match for /files or /files/)
-		case strings.HasSuffix(path, "/files") || strings.HasSuffix(path, "/files/"):
-			h.ListFiles(w, r)
-
-		// Get or delete specific file
-		case strings.Contains(path, "/files/"):
-			switch r.Method {
-			case http.MethodGet:
-				h.GetFile(w, r)
-			case http.MethodDelete:
-				h.DeleteFile(w, r)
-			default:
-				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			}
-
-		default:
-			http.NotFound(w, r)
-		}
-	})
+	mux.HandleFunc("POST /api/sessions/{id}/files/upload", h.UploadFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/link", h.LinkFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/validate", h.ValidateLinks)
+	mux.HandleFunc("GET /api/sessions/{id}/files/events", h.FileEvents)
+	mux.HandleFunc("POST /api/sessions/{id}/files/watch", h.StartWatching)
+	mux.HandleFunc("DELETE /api/sessions/{id}/files/watch", h.StopWatching)
+	mux.HandleFunc("POST /api/sessions/{id}/folder/open", h.OpenFolder)
+	mux.HandleFunc("GET /api/sessions/{id}/files", h.ListFiles)
+	mux.HandleFunc("GET /api/sessions/{id}/files/{fileId}", h.GetFile)
+	mux.HandleFunc("DELETE /api/sessions/{id}/files/{fileId}", h.DeleteFile)
+	mux.HandleFunc("GET /api/sessions/{id}/files/{fileId}/download", h.DownloadFile)
+	mux.HandleFunc("POST /api/sessions/{id}/files/{fileId}/relink", h.RelinkFile)
 }

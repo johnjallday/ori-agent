@@ -40,6 +40,12 @@ func createTestFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
+// The handlers read their {id} / {fileId} path parameters via r.PathValue,
+// which ServeMux populates from the matched pattern. These unit tests call the
+// handlers directly, so they set the path values explicitly with SetPathValue;
+// the mux-level routing (which method reaches which handler) is asserted in
+// routes_test.go and the server golden route-table test.
+
 func TestHandler_UploadFile(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
 	defer func() { _ = os.RemoveAll(tmpDir) }()
@@ -52,6 +58,7 @@ func TestHandler_UploadFile(t *testing.T) {
 	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/upload", &buf)
+	req.SetPathValue("id", "session-1")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	rr := httptest.NewRecorder()
@@ -74,6 +81,7 @@ func TestHandler_UploadFile_NoFile(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/upload", nil)
+	req.SetPathValue("id", "session-1")
 
 	rr := httptest.NewRecorder()
 	handler.UploadFile(rr, req)
@@ -94,6 +102,7 @@ func TestHandler_LinkFile(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/link", bytes.NewReader(jsonBody))
+	req.SetPathValue("id", "session-1")
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -112,6 +121,7 @@ func TestHandler_LinkFile_InvalidPath(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/link", bytes.NewReader(jsonBody))
+	req.SetPathValue("id", "session-1")
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -131,6 +141,7 @@ func TestHandler_ListFiles(t *testing.T) {
 	_, _ = handler.store.AddFile("session-1", srcPath, "test.txt")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files", nil)
+	req.SetPathValue("id", "session-1")
 
 	rr := httptest.NewRecorder()
 	handler.ListFiles(rr, req)
@@ -153,6 +164,7 @@ func TestHandler_ListFiles_Empty(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files", nil)
+	req.SetPathValue("id", "session-1")
 
 	rr := httptest.NewRecorder()
 	handler.ListFiles(rr, req)
@@ -179,6 +191,8 @@ func TestHandler_GetFile(t *testing.T) {
 	entry, _ := handler.store.AddFile("session-1", srcPath, "test.txt")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files/"+entry.ID, nil)
+	req.SetPathValue("id", "session-1")
+	req.SetPathValue("fileId", entry.ID)
 
 	rr := httptest.NewRecorder()
 	handler.GetFile(rr, req)
@@ -193,6 +207,8 @@ func TestHandler_GetFile_NotFound(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files/nonexistent", nil)
+	req.SetPathValue("id", "session-1")
+	req.SetPathValue("fileId", "nonexistent")
 
 	rr := httptest.NewRecorder()
 	handler.GetFile(rr, req)
@@ -211,6 +227,8 @@ func TestHandler_DeleteFile(t *testing.T) {
 	entry, _ := handler.store.AddFile("session-1", srcPath, "test.txt")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/session-1/files/"+entry.ID, nil)
+	req.SetPathValue("id", "session-1")
+	req.SetPathValue("fileId", entry.ID)
 
 	rr := httptest.NewRecorder()
 	handler.DeleteFile(rr, req)
@@ -231,6 +249,8 @@ func TestHandler_DeleteFile_NotFound(t *testing.T) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/session-1/files/nonexistent", nil)
+	req.SetPathValue("id", "session-1")
+	req.SetPathValue("fileId", "nonexistent")
 
 	rr := httptest.NewRecorder()
 	handler.DeleteFile(rr, req)
@@ -249,6 +269,8 @@ func TestHandler_DownloadFile(t *testing.T) {
 	entry, _ := handler.store.AddFile("session-1", srcPath, "test.txt")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-1/files/"+entry.ID+"/download", nil)
+	req.SetPathValue("id", "session-1")
+	req.SetPathValue("fileId", entry.ID)
 
 	rr := httptest.NewRecorder()
 	handler.DownloadFile(rr, req)
@@ -273,6 +295,7 @@ func TestHandler_ValidateLinks(t *testing.T) {
 	_, _ = handler.store.LinkFile("session-1", srcPath, "linked.txt")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/files/validate", nil)
+	req.SetPathValue("id", "session-1")
 
 	rr := httptest.NewRecorder()
 	handler.ValidateLinks(rr, req)
@@ -297,6 +320,7 @@ func TestHandler_OpenFolder(t *testing.T) {
 	// Note: We can't fully test this without actually opening a folder
 	// but we can test the handler accepts the request
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/folder/open", nil)
+	req.SetPathValue("id", "session-1")
 
 	rr := httptest.NewRecorder()
 	handler.OpenFolder(rr, req)
@@ -305,81 +329,6 @@ func TestHandler_OpenFolder(t *testing.T) {
 	// We mainly want to ensure it doesn't panic
 	if rr.Code != http.StatusOK && rr.Code != http.StatusInternalServerError {
 		t.Errorf("unexpected status %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestHandler_MethodNotAllowed(t *testing.T) {
-	handler, tmpDir := setupTestHandler(t)
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	tests := []struct {
-		name    string
-		method  string
-		path    string
-		handler func(http.ResponseWriter, *http.Request)
-	}{
-		{"UploadFile GET", http.MethodGet, "/api/sessions/session-1/files/upload", handler.UploadFile},
-		{"LinkFile GET", http.MethodGet, "/api/sessions/session-1/files/link", handler.LinkFile},
-		{"ListFiles POST", http.MethodPost, "/api/sessions/session-1/files", handler.ListFiles},
-		{"GetFile POST", http.MethodPost, "/api/sessions/session-1/files/123", handler.GetFile},
-		{"DeleteFile GET", http.MethodGet, "/api/sessions/session-1/files/123", handler.DeleteFile},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
-			rr := httptest.NewRecorder()
-			tt.handler(rr, req)
-
-			if rr.Code != http.StatusMethodNotAllowed {
-				t.Errorf("expected status 405, got %d", rr.Code)
-			}
-		})
-	}
-}
-
-func TestExtractSessionID(t *testing.T) {
-	tests := []struct {
-		path     string
-		prefix   string
-		suffix   string
-		expected string
-	}{
-		{"/api/sessions/abc123/files/upload", "/api/sessions/", "/files/upload", "abc123"},
-		{"/api/sessions/session-1/files", "/api/sessions/", "/files", "session-1"},
-		{"/api/sessions/test/folder/open", "/api/sessions/", "/folder/open", "test"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			result := extractSessionID(tt.path, tt.prefix, tt.suffix)
-			if result != tt.expected {
-				t.Errorf("extractSessionID(%s) = %s, want %s", tt.path, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestExtractSessionAndFileID(t *testing.T) {
-	tests := []struct {
-		path            string
-		expectedSession string
-		expectedFile    string
-	}{
-		{"/api/sessions/session-1/files/file-123", "session-1", "file-123"},
-		{"/api/sessions/abc/files/xyz", "abc", "xyz"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			sessionID, fileID := extractSessionAndFileID(tt.path)
-			if sessionID != tt.expectedSession {
-				t.Errorf("expected session '%s', got '%s'", tt.expectedSession, sessionID)
-			}
-			if fileID != tt.expectedFile {
-				t.Errorf("expected file '%s', got '%s'", tt.expectedFile, fileID)
-			}
-		})
 	}
 }
 
