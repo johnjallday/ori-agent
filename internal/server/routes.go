@@ -1052,31 +1052,6 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if strings.Contains(path, "/tasks") {
-		if strings.HasSuffix(path, "/execute") && r.Method == http.MethodPost {
-			s.Handlers.Workspace.ExecuteTaskManually(w, r)
-		} else if strings.HasSuffix(path, "/results/append-csv") && r.Method == http.MethodPost {
-			s.Handlers.Workspace.AppendResultToCSV(w, r)
-		} else if strings.HasSuffix(path, "/results/export-csv") && r.Method == http.MethodGet {
-			s.Handlers.Workspace.ExportResultCSV(w, r)
-		} else if strings.HasSuffix(path, "/output-spec/draft") && (r.Method == http.MethodPost || r.Method == http.MethodPatch) {
-			s.Handlers.Workspace.SaveTaskOutputSpecDraft(w, r)
-		} else if strings.HasSuffix(path, "/output-spec/approve") && r.Method == http.MethodPost {
-			s.Handlers.Workspace.ApproveTaskOutputSpecDraft(w, r)
-		} else if strings.HasSuffix(path, "/output-spec/discard") && (r.Method == http.MethodPost || r.Method == http.MethodDelete) {
-			s.Handlers.Workspace.DiscardTaskOutputSpecDraft(w, r)
-		} else if r.Method == http.MethodPost {
-			s.Handlers.Workspace.CreateTask(w, r)
-		} else if r.Method == http.MethodPatch {
-			s.Handlers.Workspace.UpdateTask(w, r)
-		} else if r.Method == http.MethodDelete {
-			s.Handlers.Workspace.DeleteTask(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
 	if strings.Contains(path, "/store-nodes") {
 		// Matches both /store-nodes and its /canvas/store-nodes alias (two
 		// near-identical blocks before this merge). The only historical

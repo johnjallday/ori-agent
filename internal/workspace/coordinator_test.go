@@ -165,7 +165,7 @@ func TestCreateTaskStampsManualProvenance(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.CreateTask(rec, req)
+	handler.CreateTask(rec, withTaskPath(req))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -201,7 +201,7 @@ func TestCreateTaskRejectsNonMemberAssignee(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.CreateTask(rec, req)
+	handler.CreateTask(rec, withTaskPath(req))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
@@ -238,7 +238,7 @@ func TestUpdateTaskReassignmentStampsManualProvenance(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.UpdateTask(rec, req)
+	handler.UpdateTask(rec, withTaskPath(req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -380,7 +380,7 @@ func TestCreateTaskDefaultsToEntryAgentCoordinator(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	handler.CreateTask(rec, req)
+	handler.CreateTask(rec, withTaskPath(req))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}

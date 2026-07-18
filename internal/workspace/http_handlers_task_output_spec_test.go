@@ -39,7 +39,7 @@ func TestHTTPHandler_TaskOutputSpecDraftApproveDiscard(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-output-spec/tasks/task-1/output-spec/draft", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.SaveTaskOutputSpecDraft(rec, req)
+	handler.SaveTaskOutputSpecDraft(rec, withTaskPath(req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("save draft status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -56,14 +56,14 @@ func TestHTTPHandler_TaskOutputSpecDraftApproveDiscard(t *testing.T) {
 	conflictReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-output-spec/tasks/task-1/output-spec/draft", strings.NewReader(body))
 	conflictReq.Header.Set("Content-Type", "application/json")
 	conflictRec := httptest.NewRecorder()
-	handler.SaveTaskOutputSpecDraft(conflictRec, conflictReq)
+	handler.SaveTaskOutputSpecDraft(conflictRec, withTaskPath(conflictReq))
 	if conflictRec.Code != http.StatusConflict {
 		t.Fatalf("draft conflict status=%d body=%s", conflictRec.Code, conflictRec.Body.String())
 	}
 
 	approveReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-output-spec/tasks/task-1/output-spec/approve", nil)
 	approveRec := httptest.NewRecorder()
-	handler.ApproveTaskOutputSpecDraft(approveRec, approveReq)
+	handler.ApproveTaskOutputSpecDraft(approveRec, withTaskPath(approveReq))
 	if approveRec.Code != http.StatusOK {
 		t.Fatalf("approve status=%d body=%s", approveRec.Code, approveRec.Body.String())
 	}
@@ -84,7 +84,7 @@ func TestHTTPHandler_TaskOutputSpecDraftApproveDiscard(t *testing.T) {
 
 	discardReq := httptest.NewRequest(http.MethodDelete, "/api/workspaces/ws-output-spec/tasks/task-1/output-spec/discard", nil)
 	discardRec := httptest.NewRecorder()
-	handler.DiscardTaskOutputSpecDraft(discardRec, discardReq)
+	handler.DiscardTaskOutputSpecDraft(discardRec, withTaskPath(discardReq))
 	if discardRec.Code != http.StatusOK {
 		t.Fatalf("discard status=%d body=%s", discardRec.Code, discardRec.Body.String())
 	}
@@ -110,7 +110,7 @@ func TestHTTPHandler_SaveTaskOutputSpecDraftRejectsInvalidSpec(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/ws-output-spec-invalid/tasks/task-1/output-spec/draft", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler.SaveTaskOutputSpecDraft(rec, req)
+	handler.SaveTaskOutputSpecDraft(rec, withTaskPath(req))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body.String())
 	}

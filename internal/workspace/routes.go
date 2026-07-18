@@ -30,4 +30,18 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/attachments/{attachmentId}/move", h.MoveAttachmentFile)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/trash", h.ListTrash)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/trash/{attachmentId}", h.EmptyTrash)
+
+	// Tasks (G2b). output-spec/draft accepts POST+PATCH and output-spec/discard
+	// accepts POST+DELETE, each registered as separate patterns to one handler.
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks", h.CreateTask)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/tasks/{taskId}", h.UpdateTask)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/tasks/{taskId}", h.DeleteTask)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/execute", h.ExecuteTaskManually)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/results/append-csv", h.AppendResultToCSV)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/tasks/{taskId}/results/export-csv", h.ExportResultCSV)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/draft", h.SaveTaskOutputSpecDraft)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/draft", h.SaveTaskOutputSpecDraft)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/approve", h.ApproveTaskOutputSpecDraft)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/discard", h.DiscardTaskOutputSpecDraft)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/tasks/{taskId}/output-spec/discard", h.DiscardTaskOutputSpecDraft)
 }
