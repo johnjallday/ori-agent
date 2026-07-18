@@ -1,0 +1,228 @@
+# README Maintenance
+
+This guide is the source of truth for maintaining Ori's root `README.md` and its
+product screenshots. It is designed for the workspace-scoped **README Steward**
+agent, but every command is versioned in the repository so a maintainer can run
+and inspect it directly.
+
+## What is maintained
+
+The README shows four dark, desktop product scenes from one fictional product
+launch scenario:
+
+| ID | Product surface | README asset | Display width |
+| --- | --- | --- | --- |
+| `hero` | Home command bridge and Personal HQ Daily Brief | `docs/images/hero.webp` | 820 px |
+| `action-center` | Action Center with three findings | `docs/images/action-center.webp` | 820 px |
+| `workspace-map` | Workspace Map with Personal HQ | `docs/images/workspace-map.webp` | 420 px |
+| `workspace` | Workspace Command with active work | `docs/images/workspace.webp` | 420 px |
+
+`docs/readme-screenshots.json` is the machine-readable contract for these
+scenes. It defines their routes, fixture state, required visible elements,
+rendering environment, captions, alt text, and accepted-output metadata.
+
+The old Onboarding screenshot is not part of this portfolio. It remains covered
+by product tests, but it is intentionally not recurring README imagery.
+
+## Prerequisites
+
+- A clean checkout of the intended source commit.
+- Go and the repository's Node version.
+- Dependencies installed with `npm ci` and Chromium available to Playwright.
+- Permission to run a local Ori server in an isolated temporary directory.
+
+The capture workflow does **not** require API keys, provider accounts, OAuth
+sessions, external MCP servers, network access, or real Ori workspace data.
+It starts the server with a temporary `HOME` and `ORI_DATA_DIR`, from inside
+that sandbox, and uses only version-controlled fictional fixtures.
+
+## README Steward setup
+
+Create one workspace-scoped agent named **README Steward** in the Ori
+development workspace and attach the repository folder as its workspace-local
+filesystem scope. In the agent's Skills controls, enable and trust the
+repo-discovered `refresh-readme` skill; then add the same enabled/trusted skill
+binding to the development workspace for that agent. Skills are opt-in, so a
+discovered skill is not active until these settings are saved.
+
+Grant only local filesystem, shell, and browser access needed to run the
+versioned README commands. Do not provide provider credentials, external MCP
+servers, OAuth sessions, or access outside the development workspace for
+capture. Keep native CLI autonomy disabled for this workflow. If a CLI-provider
+agent genuinely needs native workspace tools for a later task, explicitly
+enable both `Workspace.AllowNativeMCPCLI` and the agent's
+`Settings.AllowNativeMCPTools` only after reviewing that broader authority;
+the README skill itself does not require either setting.
+
+## Commands
+
+| Command | Effect |
+| --- | --- |
+| `make readme-audit` | Read-only drift and contract report. It creates no worktree, screenshots, tracked changes, commits, or remote calls. |
+| `make readme-capture` | Builds the current worktree, captures all four scenes into a new ignored staging run, optimizes proposed images, and writes a comparison report. It never writes `README.md` or `docs/images/`. |
+| `make readme-propose RUN_ID=<run-id>` | Audits the root README against repository evidence and writes `README.proposed.md`, a staged diff, and separately labeled optional suggestions inside that ignored run. |
+| `make readme-check` | Validates the manifest, README image coverage, local links, image metadata, size limits, checksums, and forbidden staging references. |
+| `make readme-accept RUN_ID=<run-id> APPROVE=1` | Applies one previously reviewed staged run only after Checkpoint 1 approval. It is branch-guarded and validates the run again before changing tracked README files. |
+
+The commands are introduced in stages with this feature. Until the first
+accepted portfolio exists, the manifest is in `bootstrap` state and the full
+repository-conformance form of `make readme-check` is expected to report that
+the final WebP files have not yet been accepted. In the same state,
+`make readme-audit` returns the explicit `audit.bootstrap` setup error rather
+than pretending that the unaccepted portfolio is clean.
+
+## Modes
+
+### Audit
+
+Use Audit for a report only. README Steward must read this guide and the
+manifest, then run `make readme-audit` and `make readme-check` as applicable.
+It reports the audited commit range, relevant product changes, broken links or
+contract errors, and whether a refresh is recommended.
+
+Audit must not:
+
+- create a worktree or staging directory;
+- launch a server or browser capture;
+- modify tracked or generated files;
+- commit, push, call GitHub, or make external network requests.
+
+### Refresh
+
+Use Refresh when a maintainer asks for updated README screenshots or copy.
+Routine Refresh runs start from `dev` in their own worktree:
+
+```bash
+bash scripts/readme-new-refresh-worktree.sh YYYY-MM
+```
+
+The wrapper verifies the clean `dev` branch and refuses an existing branch or
+worktree; it never deletes or overwrites a prior refresh. It prints the new
+`docs/readme-refresh-YYYY-MM` worktree path before capture begins.
+
+README Steward then captures into `test-results/readme-refresh/<run-id>/` and
+audits the proposed README copy. The directory is ignored by Git and contains:
+
+- raw PNGs and optimized proposed WebPs;
+- `run.json` with source commit, environment, scene statuses, and fingerprints;
+- visible-text/privacy sidecars and logs;
+- a current-versus-proposed comparison report;
+- the proposed README content and text diff.
+
+The one-time initial portfolio is a bootstrap exception: it is accepted on the
+`feature/readme-steward` branch so the tooling and its first verified output
+ship in one feature PR. Every later refresh uses a `docs/readme-refresh-YYYY-MM`
+worktree and never edits `ori-agent-dev` directly.
+
+## Approval checkpoints
+
+### Checkpoint 1 — Apply staged refresh?
+
+README Steward presents the staged report, proposed README diff, file sizes,
+checksums, privacy scan, visual review results, and the exact files that would
+change. Before explicit approval, it must not replace images, edit `README.md`,
+update accepted metadata, or remove old image assets.
+
+After approval, `make readme-accept RUN_ID=<run-id> APPROVE=1` may copy the reviewed
+WebPs, apply the reviewed README candidate, record acceptance metadata, and
+remove an old asset only after a repository-wide reference check confirms it is
+unused. It then reruns `make readme-check` and shows the tracked diff.
+
+### Checkpoint 2 — Commit and open PR?
+
+After acceptance and validation, README Steward presents the final diff. Before
+separate explicit approval, it must not commit, push, call GitHub, or open a PR.
+After approval, it creates one focused documentation commit and runs `wt pr`
+against `dev`. It never merges the PR automatically.
+
+## Determinism and CI
+
+Two consecutive captures must produce identical optimized checksums when they
+use the same source commit, fictional fixtures, lockfile, Chromium version,
+operating system, and architecture. The accepted manifest records the rendered
+product-source commit plus README/image checksums; it does not attempt the
+impossible self-reference of storing the later documentation commit hash.
+
+The repository pins `sharp` for WebP encoding. Its capture encoder uses fixed
+options: quality `82`, effort `6`, `smartSubsample: false`, alpha quality `100`,
+and the `text` preset. The run report records the exact `sharp` and Chromium
+versions. Do not add metadata-preservation options or compare the resulting
+bytes across different operating systems or architectures.
+
+CI is a validator, not the canonical image publisher. It may run capture tests
+into disposable CI paths and compare two runs on the same runner. It must never
+copy images to `docs/images/`, update the manifest, create a branch, commit,
+push, open a PR, or compare Linux-generated bytes with an accepted output from
+another platform.
+
+## Visual and privacy review
+
+Every staged image needs human visual inspection at full resolution and at its
+README display width. Reject any loading/error state, clipped UI, unreadable
+text or borders, inconsistent theme, provider warning, first-run/onboarding
+state, local path, real name, account data, secret, or misleading composition.
+
+Screenshots must be captured from the running Ori UI. Do not use AI-generated,
+retouched, composited, or presentation-only imagery or DOM/CSS.
+
+## Monthly reminder
+
+The Ori development workspace's **Workspace Manager** runs the monthly
+read-only Audit under Watch policy. Configure its Mission controls with this
+default, changing only the day or time when needed:
+
+```json
+{
+  "cadence": { "type": "monthly", "day_of_month": 1, "time_of_day": "09:00" },
+  "autonomy_policy": "watch",
+  "notification_policy": { "min_priority": "medium", "on_findings": "if_any" },
+  "mission_enabled": true
+}
+```
+
+The time is interpreted in the workspace timezone; maintainers may edit the
+day or time through the existing Mission controls.
+
+Use this Mission text for the Workspace Manager:
+
+> In the repository workspace folder, run only `make readme-audit`. Do not run
+> a server, browser, capture, cleanup, worktree, acceptance, Git remote, or
+> GitHub command. If `status` is `clean`, return `{"findings": []}`. If it is
+> `drift`, return exactly one finding titled `README product documentation needs
+> review`, with medium priority, high confidence, the audit's affected paths and
+> commits as evidence, and the recommended action `Ask README Steward to refresh
+> the README.` If it is `error`, return no finding and report the setup error for
+> maintainer repair; do not attempt a fallback command.
+
+The existing title-based opportunity store deduplicates repeat drift reports in
+the same workspace. Resolving the finding removes it from the active backlog;
+the same title re-opens if a later audit finds genuinely recurring drift. Clean
+audits create no Action Center noise.
+
+The mission has external effects denied and may only run the deterministic audit
+command. It must not launch a server, create staging artifacts or worktrees,
+edit files, commit, push, or open a PR.
+
+README Steward owns interactive Refresh; the Workspace Manager owns the
+scheduled Audit. Their shared boundary is `make readme-audit`.
+
+## Failure handling and cleanup
+
+Capture failures keep their ignored run directory and identify the failed scene
+or rule, whether tracked files changed, and an exact safe retry command. The
+capture lifecycle owns one recorded server PID and stops only that PID; it never
+uses broad process matching such as `pkill`.
+
+Do not remove a staging directory until the run has been reviewed, is confirmed
+to be a no-op, or is superseded. Cleanup validates the exact temporary path and
+runs separately from build, capture, and validation commands.
+
+```sh
+bash scripts/readme-refresh.sh cleanup --run-id <run-id>
+```
+
+## Release backstop
+
+The release check retains `scripts/update-readme.sh` for version-badge updates.
+It also runs the lightweight read-only `make readme-check` backstop once that
+command is available. The release flow does not capture or accept screenshots.

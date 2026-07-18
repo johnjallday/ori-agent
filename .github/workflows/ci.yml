@@ -60,6 +60,77 @@ jobs:
       - name: Run frontend module tests
         run: npm run test:modules
 
+  readme-contract:
+    name: README Contract
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.11'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: 'npm'
+
+      - name: Install pinned frontend dependencies
+        run: npm ci
+
+      - name: Install Chromium for disposable README capture
+        run: npx playwright install --with-deps chromium
+
+      - name: Run README Node tests
+        run: npm run readme:test
+
+      - name: Validate README manifest and accepted assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(node -p 'require("./docs/readme-screenshots.json").acceptance_state')" == "bootstrap" ]]; then
+            # The initial feature PR is allowed to contain only the known migration gaps.
+            # Any other contract error remains a CI failure.
+            set +e
+            node scripts/readme/manifest.mjs --json > "$RUNNER_TEMP/readme-contract-bootstrap.json"
+            manifest_status=$?
+            set -e
+            [[ "$manifest_status" -eq 1 ]]
+            jq -e '
+              .manifest.acceptance_state == "bootstrap"
+              and (.errors | length == 12)
+              and all(.errors[]; .code == "readme.unmanifested_product_image" or .code == "readme.missing_manifest_image" or .code == "image.missing_output")
+            ' "$RUNNER_TEMP/readme-contract-bootstrap.json" >/dev/null
+            echo "README contract is in the expected initial bootstrap state; accepted assets are not published by CI."
+          else
+            make readme-check
+          fi
+
+      - name: Capture and compare disposable README screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id="ci-readme-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_dir="test-results/readme-refresh/${run_id}"
+          cleanup() {
+            bash scripts/readme-refresh.sh cleanup --run-id "$run_id" || true
+          }
+          trap cleanup EXIT
+          if ! bash scripts/readme-refresh.sh capture --run-id "$run_id"; then
+            echo "::error::Disposable README capture failed; the command output above includes the failed scene or rule and safe retry command."
+            find "$run_dir/logs" -maxdepth 1 -type f -print -exec tail -n 40 {} \; 2>/dev/null || true
+            exit 1
+          fi
+          test -f "$run_dir/comparison/README_CAPTURE_REPORT.md"
+          git diff --exit-code -- README.md docs/images docs/readme-screenshots.json
+
   test-unit:
     name: Unit Tests
     runs-on: ${{ matrix.os }}

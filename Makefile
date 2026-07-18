@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept
 
 # Default target
 .DEFAULT_GOAL := help
@@ -35,8 +35,28 @@ NC=\033[0m # No Color
 help: ## Show this help message
 	@echo "$(BLUE)Ori Agent - Development Commands$(NC)"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2}'
 	@echo ""
+
+## README maintenance targets
+
+readme-audit: ## Report README contract state without writing files
+	@node scripts/readme/audit.mjs
+
+readme-capture: ## Capture staged README screenshots into ignored run artifacts
+	@bash scripts/readme-refresh.sh capture
+
+readme-propose: ## Audit and stage a README candidate for a successful capture run
+	@test -n "$(RUN_ID)" || (echo "RUN_ID is required" >&2; exit 2)
+	@node scripts/readme/propose.mjs --run-id "$(RUN_ID)"
+
+readme-check: ## Validate README screenshot manifest, references, and accepted assets
+	@node scripts/readme/manifest.mjs
+
+readme-accept: ## Apply an approved staged README refresh (available after acceptance setup)
+	@test -n "$(RUN_ID)" || (echo "RUN_ID is required" >&2; exit 2)
+	@test "$(APPROVE)" = "1" || (echo "Checkpoint 1 approval is required: rerun with APPROVE=1" >&2; exit 2)
+	@node scripts/readme/accept.mjs --run-id "$(RUN_ID)" --approve
 
 ## Build targets
 
