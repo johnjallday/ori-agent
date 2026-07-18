@@ -42,6 +42,19 @@ function escapeHtml(value) {
   });
 }
 
+// Clamp an HQ station's fractional map coordinate into [0,1]. Non-finite input
+// (a corrupt saved value) collapses to 0 so a station can never render or
+// persist off-field (FR11/FR13).
+function clampFraction(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(1, Math.max(0, n));
+}
+
+// Pointer travel (px) from the press origin past which a press on a station
+// becomes a drag rather than a click (FR9).
+const STATION_DRAG_THRESHOLD_PX = 5;
+
 export class WorkspaceCommandView {
   /**
    * @param {object} page - the live WorkspaceDetailPage instance (window.workspaceDetail).
@@ -686,13 +699,13 @@ export class WorkspaceCommandView {
     const groupBadge = isGroup
       ? '<span class="ws-cmd-group-badge" title="Group workspace">Group</span>'
       : '';
-    // Map-mode only (FR15): commandBarHTML is shared chrome for both Details
-    // and Map, but non-map views must stay byte-for-byte unchanged (Non-
-    // Goals). Echoes the ws-map-tile-hq-badge treatment from the base map.
-    const hqBadge =
-      this.isPersonalHQ() && this.viewMode === 'map'
-        ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
-        : '';
+    // Both Command modes now carry HQ surface (Details gains a Stations rail
+    // panel), so the Personal HQ badge shows in Map and Details alike (FR15) —
+    // never for non-HQ workspaces. Echoes the ws-map-tile-hq-badge treatment
+    // from the base map.
+    const hqBadge = this.isPersonalHQ()
+      ? '<span class="ws-cmd-hq-badge" title="Personal HQ">Personal HQ</span>'
+      : '';
     const tags = this.workspaceTags();
     const isLongDescription = Array.from(description).length > 150;
     const descriptionClass =
@@ -933,6 +946,11 @@ export class WorkspaceCommandView {
 
   render() {
     if (!this.container) return;
+    // An active station drag owns the DOM: render() rebuilds it wholesale,
+    // which would tear the dragged element out mid-gesture. Skip background
+    // re-renders while dragging; the drop path re-renders once the gesture
+    // ends, picking up any data that changed in the meantime (FR11).
+    if (this._stationDragActive) return;
     this.captureAgentDeckViewState();
     if (this.commandTagInput) {
       try {
@@ -3851,6 +3869,9 @@ export class WorkspaceCommandView {
   renderMapStationsPanel() {
     const stats = this.computeStats();
     const systemsCount = this.systemTabs().length;
+    // HQ stations no longer live here: they render as structures on the map
+    // world surface (renderMapHQStations). The panel is back to exactly its
+    // base MCP + Skills / Systems entries — one home per surface (FR6).
     return (
       '<div class="ws-cmd-map-window-section is-stations">' +
       this.mapZoneHeaderHTML('Stations', 'Tools & Systems', stats.tools + systemsCount) +
@@ -3861,7 +3882,6 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-map-station" data-cmd-map-inventory-action="systems"><span>Systems</span><strong>' +
       escapeHtml(systemsCount) +
       '</strong></button>' +
-      this.renderHQStations() +
       '</div>' +
       '</div>'
     );
@@ -3896,26 +3916,67 @@ export class WorkspaceCommandView {
     return { value: 'Set up Email', description: 'not set up' };
   }
 
-  // Renders the HQ stations after the base MCP+Skills/Systems stations, when
-  // the workspace is the designated Personal HQ (FR9). Real <button>
-  // elements, keyboard-focusable, state-bearing aria-labels (FR13).
-  renderHQStations() {
+  // Default map slot for a station with no saved position (FR7): a
+  // deterministic stack down the field's right edge, in registry order. Values
+  // are fractional (0–1) so first render needs no persistence and survives any
+  // viewport size; the structure is centered on the point in CSS
+  // (translate(-50%,-50%)), so x≈0.9 keeps it clear of the right padding.
+  hqStationDefaultPosition(index) {
+    const slot = index < 0 ? 0 : index;
+    return { x: 0.9, y: clampFraction(0.22 + slot * 0.17) };
+  }
+
+  // Resolved fractional position for a station (FR11): the saved position from
+  // the workspace layout, clamped to [0,1] so a stale/corrupt value can never
+  // render a station off-field, else the registry-order default slot. Unknown
+  // or non-finite saved values fall back to the default (FR13).
+  hqStationPosition(key) {
+    const registry = this.hqStationRegistry();
+    const index = registry.findIndex(entry => entry.key === key);
+    const fallback = this.hqStationDefaultPosition(index);
+    const layout = (this.page && this.page.workspace && this.page.workspace.layout) || null;
+    const saved =
+      layout && layout.station_positions ? layout.station_positions[key] : null;
+    if (!saved) return fallback;
+    if (!Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) {
+      return fallback;
+    }
+    return { x: clampFraction(saved.x), y: clampFraction(saved.y) };
+  }
+
+  // Renders HQ stations as freestanding structures on the command map's world
+  // surface (FR6, FR8), replacing their old home inside the Stations panel.
+  // Each is a real <button> (keyboard-focusable, state-bearing aria-label,
+  // FR8) absolutely positioned from its fractional coordinate via the
+  // --station-x/--station-y custom props. Only the designated HQ renders
+  // these; non-HQ workspaces get an empty string (FR16).
+  renderMapHQStations() {
     if (!this.isPersonalHQ()) return '';
     return this.hqStationRegistry()
       .map(station => {
         const state = station.state() || {};
+        const pos = this.hqStationPosition(station.key);
+        const icon = station.icon
+          ? '<i class="bi ' + escapeHtml(station.icon) + '" aria-hidden="true"></i>'
+          : '';
         return (
-          '<button type="button" class="ws-cmd-map-station is-hq-station" data-cmd-hq-station="' +
+          '<button type="button" class="ws-cmd-map-hq-station" data-cmd-hq-station="' +
           escapeHtml(station.key) +
-          '" aria-label="' +
+          '" style="--station-x:' +
+          (pos.x * 100).toFixed(2) +
+          '%;--station-y:' +
+          (pos.y * 100).toFixed(2) +
+          '%" aria-label="' +
           escapeHtml(station.label) +
           ' station, ' +
           escapeHtml(state.description || '') +
-          '"><span>' +
+          '"><span class="ws-cmd-map-hq-station-icon">' +
+          icon +
+          '</span><span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
-          '</span><strong>' +
+          '</span><span class="ws-cmd-map-hq-station-state">' +
           escapeHtml(state.value || '') +
-          '</strong></button>'
+          '</span></button>'
         );
       })
       .join('');
@@ -3925,6 +3986,209 @@ export class WorkspaceCommandView {
   runHQStationAction(stationKey) {
     const station = this.hqStationRegistry().find(entry => entry.key === stationKey);
     if (station && typeof station.action === 'function') station.action();
+  }
+
+  // HQ-gated "Stations" rail panel for Details mode (FR14): one row per
+  // registry entry (label + live state meta from the same state fn as the map
+  // structure), plus a primary action that runs the first station's action.
+  // Rows and the primary button carry data-cmd-hq-station so the rail click
+  // delegation dispatches through runHQStationAction — the same registry
+  // action() as the map surface. Non-HQ workspaces render nothing (FR16).
+  renderStationsRailPanel() {
+    if (!this.isPersonalHQ()) return '';
+    const registry = this.hqStationRegistry();
+    if (!registry.length) return '';
+    const first = registry[0];
+    const firstState = (first.state && first.state()) || {};
+    const rows = registry
+      .map(station => {
+        const state = (station.state && station.state()) || {};
+        return (
+          '<button type="button" class="ws-cmd-rail-item" data-cmd-hq-station="' +
+          escapeHtml(station.key) +
+          '" aria-label="' +
+          escapeHtml(station.label) +
+          ' station, ' +
+          escapeHtml(state.description || '') +
+          '"><span class="ws-cmd-rail-t">' +
+          escapeHtml(station.label) +
+          '</span><span class="ws-cmd-rail-m">' +
+          escapeHtml(state.value || '') +
+          '</span></button>'
+        );
+      })
+      .join('');
+    return (
+      '<section class="ws-cmd-panel is-hq-stations">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Stations</h4><span class="ws-cmd-panel-count">' +
+      registry.length +
+      '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-hq-station="' +
+      escapeHtml(first.key) +
+      '">' +
+      escapeHtml(firstState.value || 'Open') +
+      '</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="ws-cmd-panel-body">' +
+      rows +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  // --- Station drag-to-place (group 3) --------------------------------------
+  // Pure drag math, kept as methods so they are directly unit-testable.
+
+  // Whether pointer travel (dx,dy) from the press origin is far enough to
+  // count as a drag rather than a click (FR9).
+  stationDragExceedsThreshold(dx, dy) {
+    return Math.hypot(Number(dx) || 0, Number(dy) || 0) > STATION_DRAG_THRESHOLD_PX;
+  }
+
+  // Convert a client point to a fractional (0–1) coordinate inside a field
+  // rect, clamped so a drop can never land a station off-field (FR10/FR11).
+  stationPointToFraction(clientX, clientY, rect) {
+    if (!rect || !rect.width || !rect.height) return { x: 0, y: 0 };
+    return {
+      x: clampFraction((clientX - rect.left) / rect.width),
+      y: clampFraction((clientY - rect.top) / rect.height)
+    };
+  }
+
+  // Pointer-event drag on the HQ station structures (FR9–FR11). Bound once per
+  // map render on the map shell root; the per-gesture move/up listeners live
+  // on window so a fast drag that outruns the element still tracks. No
+  // render() runs during an active drag — the drop path persists then
+  // re-renders (see persistStationPosition + the render() guard).
+  bindStationDrag(root) {
+    root.addEventListener('pointerdown', event => {
+      if (event.button != null && event.button !== 0) return;
+      const el = event.target.closest('[data-cmd-hq-station]');
+      if (!el || !root.contains(el)) return;
+      // Fresh interaction: clear any stale click-suppression from a prior drag.
+      this._suppressStationClick = false;
+      const drag = {
+        key: el.getAttribute('data-cmd-hq-station'),
+        el,
+        startX: event.clientX,
+        startY: event.clientY,
+        pointerId: event.pointerId,
+        moved: false,
+        lastFraction: null
+      };
+      this._stationDrag = drag;
+
+      const onMove = moveEvent => this.handleStationPointerMove(moveEvent);
+      const onUp = upEvent => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        this.handleStationPointerUp(upEvent);
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  }
+
+  handleStationPointerMove(event) {
+    const drag = this._stationDrag;
+    if (!drag) return;
+    if (!drag.moved) {
+      if (!this.stationDragExceedsThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+        return;
+      }
+      // Cross the threshold once: enter drag mode. The .is-dragging class is a
+      // static style swap (raised z-index, grabbing cursor, lift shadow) so it
+      // is already prefers-reduced-motion safe.
+      drag.moved = true;
+      this._stationDragActive = true;
+      drag.el.classList.add('is-dragging');
+      try {
+        drag.el.setPointerCapture(drag.pointerId);
+      } catch (_err) {
+        /* capture is best-effort */
+      }
+    }
+    const world = this.container && this.container.querySelector('.ws-cmd-map-world');
+    if (!world || typeof world.getBoundingClientRect !== 'function') return;
+    const frac = this.stationPointToFraction(event.clientX, event.clientY, world.getBoundingClientRect());
+    drag.lastFraction = frac;
+    // Move the structure directly via its custom props — no re-render.
+    drag.el.style.setProperty('--station-x', (frac.x * 100).toFixed(2) + '%');
+    drag.el.style.setProperty('--station-y', (frac.y * 100).toFixed(2) + '%');
+  }
+
+  handleStationPointerUp(event) {
+    const drag = this._stationDrag;
+    this._stationDrag = null;
+    if (!drag) return;
+    if (!drag.moved) {
+      // Under-threshold press: not a drag — let the click handler open the
+      // station's action (FR9).
+      return;
+    }
+    this._stationDragActive = false;
+    // Suppress the click the browser dispatches after this pointerup so the
+    // gesture never fires the station action (FR9).
+    this._suppressStationClick = true;
+    drag.el.classList.remove('is-dragging');
+    try {
+      drag.el.releasePointerCapture(drag.pointerId);
+    } catch (_err) {
+      /* capture may already be gone */
+    }
+    if (event && event.type === 'pointercancel') {
+      // Interrupted mid-drag: discard the in-progress move and restore the
+      // committed position by re-rendering.
+      this.render();
+      return;
+    }
+    if (!drag.lastFraction) {
+      this.render();
+      return;
+    }
+    this.persistStationPosition(drag.key, drag.lastFraction);
+  }
+
+  // Optimistically commit a station's new position to the local model and
+  // re-render, then persist it through the scoped station-layout endpoint. A
+  // failed save keeps the session-local position and warns (FR10).
+  async persistStationPosition(key, fraction) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const ws = (page && page.workspace) || null;
+    if (!ws) {
+      this.render();
+      return;
+    }
+    const workspaceId = ws.id || (page && page.workspaceId) || '';
+    if (!ws.layout) ws.layout = {};
+    if (!ws.layout.station_positions) ws.layout.station_positions = {};
+    ws.layout.station_positions[key] = { x: fraction.x, y: fraction.y };
+    // Re-render now that the model carries the new position (this also clears
+    // the drag-active guard's effect for subsequent renders).
+    this.render();
+
+    try {
+      const resp = await fetch('/api/orchestration/workspace/station-layout', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: workspaceId,
+          station_positions: ws.layout.station_positions
+        })
+      });
+      if (!resp || !resp.ok) {
+        throw new Error('station-layout save failed: ' + (resp ? resp.status : 'no response'));
+      }
+    } catch (_err) {
+      if (typeof window !== 'undefined' && window.Toast) {
+        window.Toast.error('Could not save station position; it will reset on reload.');
+      }
+    }
   }
 
   // A single agent "unit" card. `commandNode` renders the entry agent as the
@@ -4064,6 +4328,7 @@ export class WorkspaceCommandView {
       '<section class="ws-cmd-map-world" data-map-zone="agents" aria-label="Agent units">' +
       '<div class="ws-cmd-map-floor" aria-hidden="true"></div>' +
       this.renderMapAgentUnits(agents) +
+      this.renderMapHQStations() +
       '</section>'
     );
   }
@@ -4969,6 +5234,7 @@ export class WorkspaceCommandView {
   bindOperationsMap() {
     const root = this.container && this.container.querySelector('.ws-cmd-map-shell');
     if (!root) return;
+    this.bindStationDrag(root);
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (this.handleLoadoutClick(event)) return;
@@ -5101,6 +5367,13 @@ export class WorkspaceCommandView {
       }
       const hqStation = event.target.closest('[data-cmd-hq-station]');
       if (hqStation) {
+        // A completed drag synthesizes a trailing click on the (now detached)
+        // station element; swallow it so dragging never fires the action
+        // (FR9). An under-threshold press leaves the flag clear and opens it.
+        if (this._suppressStationClick) {
+          this._suppressStationClick = false;
+          return;
+        }
         this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
         return;
       }
@@ -6038,7 +6311,8 @@ export class WorkspaceCommandView {
       ) +
       this.renderDetachmentPanel(detachmentExpanded) +
       this.renderFilesPanel(files, filesExpanded) +
-      this.renderSystemsPanel(systemsExpanded)
+      this.renderSystemsPanel(systemsExpanded) +
+      this.renderStationsRailPanel()
     );
   }
 
@@ -6284,6 +6558,14 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', event => {
+      // HQ station rows + the panel's primary action dispatch through the same
+      // registry action as the map structures (FR14). Checked before the
+      // generic section buttons since these carry no data-cmd-*-section attr.
+      const hqStation = event.target.closest('[data-cmd-hq-station]');
+      if (hqStation) {
+        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
+        return;
+      }
       const systemTab = event.target.closest('[data-cmd-system-tab]');
       if (systemTab) {
         this.openSystemTab(systemTab.getAttribute('data-cmd-system-tab'));

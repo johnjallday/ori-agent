@@ -2745,27 +2745,31 @@ test('isPersonalHQ reads the workspace designation field', () => {
   assert.equal(unknown.isPersonalHQ(), false);
 });
 
-test('renderMapStationsPanel appends the HQ station registry only for HQ payloads', () => {
+test('HQ stations are absent from the Stations panel and render on the map surface', () => {
   const originalWindow = globalThis.window;
   globalThis.window = {};
   try {
     const hq = makeHQCommandView();
+    // Stations moved onto the map world (FR6): the panel is back to exactly
+    // its two base entries and no longer carries the HQ station buttons.
     const hqPanel = hq.renderMapStationsPanel();
-    assert.match(hqPanel, /data-cmd-hq-station="email"/);
-    assert.match(hqPanel, /is-hq-station/);
+    assert.doesNotMatch(hqPanel, /data-cmd-hq-station/);
+    assert.match(hqPanel, /data-cmd-map-open-modal="tools"/);
+    assert.match(hqPanel, /data-cmd-map-inventory-action="systems"/);
 
+    // The station structure now renders on the map world surface (FR6/FR8).
+    const hqMap = hq.renderMapHQStations();
+    assert.match(hqMap, /data-cmd-hq-station="email"/);
+    assert.match(hqMap, /ws-cmd-map-hq-station/);
+
+    // Non-HQ: no station buttons anywhere.
     const plain = Object.create(WorkspaceCommandView.prototype);
     Object.assign(plain, {
       page: { workspace: {}, tasks: [] },
       activeSystemTab: 'memory'
     });
-    const plainPanel = plain.renderMapStationsPanel();
-    assert.doesNotMatch(plainPanel, /data-cmd-hq-station/);
-    assert.doesNotMatch(plainPanel, /is-hq-station/);
-    // Non-HQ stations panel is unchanged from today (FR14): just the two
-    // base stations.
-    assert.match(plainPanel, /data-cmd-map-open-modal="tools"/);
-    assert.match(plainPanel, /data-cmd-map-inventory-action="systems"/);
+    assert.doesNotMatch(plain.renderMapStationsPanel(), /data-cmd-hq-station/);
+    assert.equal(plain.renderMapHQStations(), '');
   } finally {
     globalThis.window = originalWindow;
   }
@@ -2778,29 +2782,98 @@ test('Email station reflects neutral, unconnected, and connected states', () => 
 
     // Neutral: personal-hq-email-setup.js has not published its state yet.
     globalThis.window = {};
-    let panel = hq.renderMapStationsPanel();
-    assert.match(panel, /Email station, loading/);
-    assert.match(panel, /<strong>—<\/strong>/);
+    let map = hq.renderMapHQStations();
+    assert.match(map, /Email station, loading/);
+    assert.match(map, /ws-cmd-map-hq-station-state">—</);
 
     // Unconnected: module loaded, no account linked.
     globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
-    panel = hq.renderMapStationsPanel();
-    assert.match(panel, /Email station, not set up/);
-    assert.match(panel, /<strong>Set up Email<\/strong>/);
+    map = hq.renderMapHQStations();
+    assert.match(map, /Email station, not set up/);
+    assert.match(map, /ws-cmd-map-hq-station-state">Set up Email</);
 
     // Connected: shows the linked address.
     globalThis.window = {
       OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' }
     };
-    panel = hq.renderMapStationsPanel();
-    assert.match(panel, /Email station, me@example\.com/);
-    assert.match(panel, /<strong>me@example\.com<\/strong>/);
+    map = hq.renderMapHQStations();
+    assert.match(map, /Email station, me@example\.com/);
+    assert.match(map, /ws-cmd-map-hq-station-state">me@example\.com</);
 
     // Connected but no address on record: falls back to "Connected".
     globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: '' } };
-    panel = hq.renderMapStationsPanel();
-    assert.match(panel, /Email station, connected/);
-    assert.match(panel, /<strong>Connected<\/strong>/);
+    map = hq.renderMapHQStations();
+    assert.match(map, /Email station, connected/);
+    assert.match(map, /ws-cmd-map-hq-station-state">Connected</);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('hqStationDefaultPosition stacks deterministically down the right edge', () => {
+  const hq = makeHQCommandView();
+  const first = hq.hqStationDefaultPosition(0);
+  const second = hq.hqStationDefaultPosition(1);
+  // Same right-edge column, stacked downward in registry order (FR7).
+  assert.equal(first.x, 0.9);
+  assert.equal(second.x, 0.9);
+  assert.ok(second.y > first.y, 'later slots stack below earlier ones');
+  // Always in-field.
+  for (const pos of [first, second]) {
+    assert.ok(pos.x >= 0 && pos.x <= 1);
+    assert.ok(pos.y >= 0 && pos.y <= 1);
+  }
+});
+
+test('hqStationPosition uses the saved position, clamps it, and falls back safely', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    // No layout → default slot (FR7).
+    const noLayout = makeHQCommandView();
+    assert.deepEqual(noLayout.hqStationPosition('email'), noLayout.hqStationDefaultPosition(0));
+
+    // Saved in-bounds position is used verbatim.
+    const saved = makeHQCommandView({
+      layout: { station_positions: { email: { x: 0.42, y: 0.66 } } }
+    });
+    assert.deepEqual(saved.hqStationPosition('email'), { x: 0.42, y: 0.66 });
+
+    // Out-of-bounds saved position is clamped to [0,1] (FR11).
+    const oob = makeHQCommandView({
+      layout: { station_positions: { email: { x: 1.8, y: -0.5 } } }
+    });
+    assert.deepEqual(oob.hqStationPosition('email'), { x: 1, y: 0 });
+
+    // Corrupt (non-finite) saved position falls back to the default (FR13).
+    const corrupt = makeHQCommandView({
+      layout: { station_positions: { email: { x: 'nope', y: null } } }
+    });
+    assert.deepEqual(corrupt.hqStationPosition('email'), corrupt.hqStationDefaultPosition(0));
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('renderMapHQStations emits fractional coordinates as CSS custom props and ignores unknown keys', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  try {
+    // Saved email position, plus a stale/unknown key that must be ignored (FR13).
+    const hq = makeHQCommandView({
+      layout: {
+        station_positions: {
+          email: { x: 0.5, y: 0.25 },
+          journal: { x: 0.1, y: 0.1 }
+        }
+      }
+    });
+    const html = hq.renderMapHQStations();
+    assert.match(html, /--station-x:50\.00%/);
+    assert.match(html, /--station-y:25\.00%/);
+    // Only the registered station renders; the unknown key contributes nothing.
+    assert.doesNotMatch(html, /data-cmd-hq-station="journal"/);
+    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 1);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -2851,6 +2924,160 @@ test('HQ station click delegation dispatches through the registry', () => {
   }
 });
 
+// ---------- HQ station drag-to-place (FR9-FR11) ----------
+
+test('stationDragExceedsThreshold treats travel past ~5px as a drag', () => {
+  const hq = makeHQCommandView();
+  assert.equal(hq.stationDragExceedsThreshold(0, 0), false);
+  assert.equal(hq.stationDragExceedsThreshold(3, 3), false); // ~4.24px
+  assert.equal(hq.stationDragExceedsThreshold(5, 5), true); // ~7.07px
+  assert.equal(hq.stationDragExceedsThreshold(6, 0), true);
+  assert.equal(hq.stationDragExceedsThreshold(-6, 0), true);
+});
+
+test('stationPointToFraction maps a client point to a clamped [0,1] fraction', () => {
+  const hq = makeHQCommandView();
+  const rect = { left: 100, top: 50, width: 200, height: 400 };
+  // Center of the field → (0.5, 0.5).
+  assert.deepEqual(hq.stationPointToFraction(200, 250, rect), { x: 0.5, y: 0.5 });
+  // Beyond the top-left and bottom-right corners clamps to the edges (FR11).
+  assert.deepEqual(hq.stationPointToFraction(-500, -500, rect), { x: 0, y: 0 });
+  assert.deepEqual(hq.stationPointToFraction(9999, 9999, rect), { x: 1, y: 1 });
+  // Degenerate (zero-size) rect never divides by zero.
+  assert.deepEqual(
+    hq.stationPointToFraction(10, 10, { left: 0, top: 0, width: 0, height: 0 }),
+    { x: 0, y: 0 }
+  );
+});
+
+test('a completed drag suppresses the trailing click; a plain click still opens the action', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const mapRoot = makeListenerRoot();
+    const hq = makeHQCommandView();
+    Object.assign(hq, {
+      container: {
+        querySelector: selector => (selector === '.ws-cmd-map-shell' ? mapRoot : null)
+      }
+    });
+    hq.bindOperationsMap();
+
+    const clickEvent = {
+      target: {
+        closest: selector =>
+          selector === '[data-cmd-hq-station]'
+            ? { getAttribute: name => (name === 'data-cmd-hq-station' ? 'email' : '') }
+            : null
+      }
+    };
+
+    // Emulate the flag a completed drag sets: the trailing click is swallowed
+    // and the flag is consumed (FR9).
+    hq._suppressStationClick = true;
+    mapRoot.listener(clickEvent);
+    assert.deepEqual(opened, []);
+    assert.equal(hq._suppressStationClick, false);
+
+    // The next plain click opens the station action.
+    mapRoot.listener(clickEvent);
+    assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('handleStationPointerUp after a real drag flags click-suppression and persists', async () => {
+  const originalWindow = globalThis.window;
+  const puts = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
+  // Capture the persistence PUT rather than hitting the network.
+  globalThis.fetch = async (url, opts) => {
+    puts.push({ url, body: JSON.parse(opts.body) });
+    return { ok: true, status: 200 };
+  };
+  try {
+    const world = {
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 500 })
+    };
+    const stationEl = {
+      classList: { add() {}, remove() {} },
+      style: { setProperty() {} },
+      setPointerCapture() {},
+      releasePointerCapture() {}
+    };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    let renders = 0;
+    Object.assign(hq, {
+      container: { querySelector: selector => (selector === '.ws-cmd-map-world' ? world : null) },
+      render() {
+        renders++;
+      }
+    });
+
+    // Simulate a press that crosses the threshold and drops at (250, 125) →
+    // fractional (0.25, 0.25).
+    hq._stationDrag = {
+      key: 'email',
+      el: stationEl,
+      startX: 500,
+      startY: 250,
+      pointerId: 1,
+      moved: false,
+      lastFraction: null
+    };
+    hq.handleStationPointerMove({ clientX: 250, clientY: 125 });
+    assert.equal(hq._stationDrag.moved, true, 'crossing the threshold enters drag mode');
+    assert.equal(hq._stationDragActive, true);
+
+    hq.handleStationPointerUp({ type: 'pointerup' });
+    assert.equal(hq._suppressStationClick, true, 'a completed drag suppresses the click');
+    assert.equal(hq._stationDragActive, false);
+    assert.ok(renders >= 1, 'the drop re-renders after committing the position');
+
+    // Let the async persist settle.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(puts.length, 1);
+    assert.equal(puts[0].url, '/api/orchestration/workspace/station-layout');
+    assert.equal(puts[0].body.workspace_id, 'hq-1');
+    assert.deepEqual(puts[0].body.station_positions.email, { x: 0.25, y: 0.25 });
+  } finally {
+    globalThis.window = originalWindow;
+    delete globalThis.fetch;
+  }
+});
+
+test('an under-threshold press is not a drag and leaves the click to open the action', () => {
+  const hq = makeHQCommandView();
+  const stationEl = {
+    classList: { add() {}, remove() {} },
+    style: { setProperty() {} }
+  };
+  let rendered = false;
+  Object.assign(hq, {
+    container: { querySelector: () => null },
+    render() {
+      rendered = true;
+    }
+  });
+  hq._stationDrag = {
+    key: 'email',
+    el: stationEl,
+    startX: 100,
+    startY: 100,
+    pointerId: 1,
+    moved: false,
+    lastFraction: null
+  };
+  // Tiny travel — below threshold — never enters drag mode.
+  hq.handleStationPointerMove({ clientX: 102, clientY: 101 });
+  assert.equal(hq._stationDrag.moved, false);
+  hq.handleStationPointerUp({ type: 'pointerup' });
+  assert.equal(hq._suppressStationClick, undefined, 'no drag → no click suppression');
+  assert.equal(rendered, false, 'a non-drag never triggers a persist/render');
+});
+
 test('mapInventoryGroups never includes an email entry (station is its only home)', () => {
   const originalWindow = globalThis.window;
   globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' } };
@@ -2895,6 +3122,9 @@ test('renderOperationsMap adds is-hq to the map shell only for the designated HQ
   });
   const hqHTML = commandView.renderOperationsMap();
   assert.match(hqHTML, /ws-cmd-map-shell is-hq/);
+  // The station structure renders on the map world surface for the HQ (FR6).
+  assert.match(hqHTML, /ws-cmd-map-hq-station/);
+  assert.match(hqHTML, /data-cmd-hq-station="email"/);
 
   commandView.page = {
     workspace: { id: 'ws-2', mcp_bindings: [], skill_bindings: [] },
@@ -2903,9 +3133,11 @@ test('renderOperationsMap adds is-hq to the map shell only for the designated HQ
   };
   const plainHTML = commandView.renderOperationsMap();
   assert.doesNotMatch(plainHTML, /is-hq/);
+  // Non-HQ map surface is unchanged: no station structures (FR16).
+  assert.doesNotMatch(plainHTML, /ws-cmd-map-hq-station/);
 });
 
-test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
+test('commandBarHTML shows the Personal HQ badge in both Command modes', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     identityExpanded: false,
@@ -2934,7 +3166,8 @@ test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
   assert.match(mapHTML, /ws-cmd-hq-badge/);
   assert.match(mapHTML, />Personal HQ</);
 
-  // Non-Goals: Command view's non-map mode must not change (FR15 is map-only).
+  // Details mode now carries HQ surface (the Stations rail panel), so the
+  // badge shows there too (FR15).
   commandView.viewMode = 'details';
   const detailsHTML = commandView.commandBarHTML(
     commandView.page.workspace,
@@ -2942,10 +3175,11 @@ test('commandBarHTML shows the Personal HQ badge in map mode only', () => {
     'Guided',
     commandView.computeStats()
   );
-  assert.doesNotMatch(detailsHTML, /ws-cmd-hq-badge/);
+  assert.match(detailsHTML, /ws-cmd-hq-badge/);
+  assert.match(detailsHTML, />Personal HQ</);
 });
 
-test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in map mode', () => {
+test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in both modes', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     identityExpanded: false,
@@ -2959,11 +3193,73 @@ test('commandBarHTML omits the Personal HQ badge for non-HQ workspaces in map mo
     }
   });
 
-  const html = commandView.commandBarHTML(
+  const mapHTML = commandView.commandBarHTML(
     commandView.page.workspace,
     commandView.page.workspace.name,
     'Guided',
     commandView.computeStats()
   );
-  assert.doesNotMatch(html, /ws-cmd-hq-badge/);
+  assert.doesNotMatch(mapHTML, /ws-cmd-hq-badge/);
+
+  commandView.viewMode = 'details';
+  const detailsHTML = commandView.commandBarHTML(
+    commandView.page.workspace,
+    commandView.page.workspace.name,
+    'Guided',
+    commandView.computeStats()
+  );
+  assert.doesNotMatch(detailsHTML, /ws-cmd-hq-badge/);
+});
+
+// ---------- HQ Details-mode Stations rail panel (FR14) ----------
+
+test('renderStationsRailPanel renders one row per station only for HQ payloads', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
+  try {
+    const hq = makeHQCommandView();
+    const panel = hq.renderStationsRailPanel();
+    assert.match(panel, /<h4>Stations<\/h4>/);
+    assert.match(panel, /data-cmd-hq-station="email"/);
+    // State meta reuses the same state fn as the map structure.
+    assert.match(panel, /ws-cmd-rail-m">Set up Email</);
+    // The primary action runs the first station's action and reflects its state.
+    assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="email">Set up Email</);
+
+    // Non-HQ workspaces render nothing (FR16).
+    const plain = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(plain, { page: { workspace: {} } });
+    assert.equal(plain.renderStationsRailPanel(), '');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the rail click delegation dispatches HQ station rows through the registry action', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  try {
+    const railRoot = makeListenerRoot();
+    const hq = makeHQCommandView();
+    Object.assign(hq, {
+      container: {
+        querySelector: selector => (selector === '.ws-cmd-rail' ? railRoot : null)
+      }
+    });
+    hq.bindRail();
+
+    railRoot.listener({
+      target: {
+        closest: selector =>
+          selector === '[data-cmd-hq-station]'
+            ? { getAttribute: name => (name === 'data-cmd-hq-station' ? 'email' : '') }
+            : null
+      }
+    });
+
+    assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });

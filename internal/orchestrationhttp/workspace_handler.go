@@ -608,6 +608,13 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// workspaceStore.Get is SQLite-primary and never carries Designation (no
+	// SQLite column, FR3). Saving the workspace back writes its folder-store
+	// projection too, so without re-reading the canonical value here the Save
+	// below would clobber workspace.json's designation to "" — silently
+	// un-designating a Personal HQ on every layout save. Re-hydrate before Save.
+	wh.hydrateDesignation(ws)
+
 	// Update layout
 
 	if ws.Layout == nil {
@@ -642,6 +649,73 @@ func (wh *WorkspaceHandler) SaveLayoutHandler(w http.ResponseWriter, r *http.Req
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
 		"success": true,
 		"message": "Layout saved successfully",
+	}); encErr != nil {
+		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
+	}
+}
+
+// SaveStationLayoutHandler saves HQ command-map station positions for a
+// workspace, scoped to ONLY Layout.StationPositions. It is a deliberately
+// separate write path from SaveLayoutHandler (canvas layout): that handler
+// full-replaces the fields it knows about on the in-place *ws.Layout, so as
+// long as it never learns about StationPositions, a canvas save can never
+// clobber a station drag and vice versa (same precedent as DirectoryPositions,
+// which neither handler touches).
+// PUT: Save HQ station positions (fractional [0,1] coordinates, keyed by
+// station registry key).
+func (wh *WorkspaceHandler) SaveStationLayoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+
+	var req struct {
+		WorkspaceID      string                        `json:"workspace_id"`
+		StationPositions map[string]workspace.Position `json:"station_positions"`
+	}
+
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+
+	ws, err := wh.workspaceStore.Get(req.WorkspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Failed to get workspace: %v", err))
+		return
+	}
+
+	// Re-hydrate the folder-store-only Designation before Save so persisting a
+	// station drag never un-designates the Personal HQ (see the same guard in
+	// SaveLayoutHandler). This matters most here: stations only render on the
+	// designated HQ, so a clobber would make them vanish on the next reload —
+	// exactly the surface this handler exists to persist.
+	wh.hydrateDesignation(ws)
+
+	if ws.Layout == nil {
+		ws.Layout = &workspace.CanvasLayout{}
+	}
+	ws.Layout.StationPositions = req.StationPositions
+
+	if err := wh.workspaceStore.Save(ws); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
+		return
+	}
+
+	wh.eventBus.Publish(workspace.Event{
+		WorkspaceID: req.WorkspaceID,
+		Type:        workspace.EventWorkspaceUpdated,
+		Timestamp:   time.Now(),
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	if encErr := json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"message": "Station layout saved successfully",
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

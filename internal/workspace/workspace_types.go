@@ -171,13 +171,21 @@ type Workspace struct {
 
 // CanvasLayout stores positions of tasks and agents on the canvas
 type CanvasLayout struct {
-	TaskPositions       map[string]Position        `json:"task_positions,omitempty"`       // task ID -> position
-	AgentPositions      map[string]Position        `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
-	AttachmentPositions map[string]Position        `json:"attachment_positions,omitempty"` // attachment ID -> position
-	SchedulerPositions  map[string]Position        `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
-	StorePositions      map[string]Position        `json:"store_positions,omitempty"`      // store node ID -> position
-	DirectoryPositions  map[string]Position        `json:"directory_positions,omitempty"`  // directory reference ID -> position
-	FolderPositions     map[string]Position        `json:"folder_positions,omitempty"`     // managed workspace folder ID -> position
+	TaskPositions       map[string]Position `json:"task_positions,omitempty"`       // task ID -> position
+	AgentPositions      map[string]Position `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
+	AttachmentPositions map[string]Position `json:"attachment_positions,omitempty"` // attachment ID -> position
+	SchedulerPositions  map[string]Position `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
+	StorePositions      map[string]Position `json:"store_positions,omitempty"`      // store node ID -> position
+	DirectoryPositions  map[string]Position `json:"directory_positions,omitempty"`  // directory reference ID -> position
+	FolderPositions     map[string]Position `json:"folder_positions,omitempty"`     // managed workspace folder ID -> position
+	// StationPositions holds HQ command-map station positions, keyed by HQ
+	// station registry key (e.g. "email"). Unlike every other position map on
+	// this struct, values are FRACTIONAL coordinates in [0,1] relative to the
+	// command map's field, not canvas pixels — this keeps a saved position
+	// meaningful across viewport sizes. Written only by the scoped
+	// station-layout save path; the canvas layout save path must never touch
+	// this field (see SaveLayoutHandler / SaveStationLayoutHandler).
+	StationPositions    map[string]Position        `json:"station_positions,omitempty"`
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level
 	OffsetX             float64                    `json:"offset_x,omitempty"`             // pan offset X
