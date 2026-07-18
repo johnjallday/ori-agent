@@ -2351,7 +2351,10 @@ test('operations map shows a New Quest button and reveals the composer when open
   assert.match(closedHTML, /aria-expanded="false"/);
   assert.doesNotMatch(closedHTML, /data-cmd-map-quest-input/);
 
-  const open = makeQuestComposerView({ taskComposerOpen: true, taskComposerDraft: 'Draft copy edits' });
+  const open = makeQuestComposerView({
+    taskComposerOpen: true,
+    taskComposerDraft: 'Draft copy edits'
+  });
   const openHTML = open.renderMapQuickTask();
   assert.match(openHTML, /aria-expanded="true"/);
   assert.match(openHTML, /data-cmd-map-quest-input/);
@@ -2503,7 +2506,10 @@ test('loadout editor renders interactive toggles, locked chips, and add buttons'
 
   const html = view.renderLoadoutEditor({ name: 'Atlas', encodedName: 'Atlas' });
   assert.match(html, /data-cmd-loadout-toggle="skill" data-cmd-loadout-binding="sk-1"/);
-  assert.match(html, /aria-checked="true"[^>]*data-cmd-loadout-binding="sk-1"|data-cmd-loadout-binding="sk-1"[^>]*aria-checked="true"/);
+  assert.match(
+    html,
+    /aria-checked="true"[^>]*data-cmd-loadout-binding="sk-1"|data-cmd-loadout-binding="sk-1"[^>]*aria-checked="true"/
+  );
   assert.match(html, /data-cmd-loadout-binding="sk-2"/);
   assert.match(html, /ws-cmd-loadout-chip is-locked/);
   assert.doesNotMatch(html, /data-cmd-loadout-toggle="mcp" data-cmd-loadout-binding="fs"/);
@@ -2662,7 +2668,12 @@ test('agent command menu keeps Track Quest (open) for an in-progress task', () =
   const view = Object.create(WorkspaceCommandView.prototype);
   view.priorityTaskForAgent = () => ({ id: 'q2', status: 'in_progress', description: 'Run' });
   view.latestAgentSession = () => null;
-  const agent = { skills: { count: 0 }, mcpNames: [], encodedName: 'Atlas', status: { label: 'Working' } };
+  const agent = {
+    skills: { count: 0 },
+    mcpNames: [],
+    encodedName: 'Atlas',
+    status: { label: 'Working' }
+  };
 
   const html = view.renderMapAgentCommandMenu(agent, null);
 
@@ -2759,6 +2770,7 @@ test('HQ stations are absent from the Stations panel and render on the map surfa
 
     // The station structure now renders on the map world surface (FR6/FR8).
     const hqMap = hq.renderMapHQStations();
+    assert.match(hqMap, /data-cmd-hq-station="watchtower"/);
     assert.match(hqMap, /data-cmd-hq-station="email"/);
     assert.match(hqMap, /ws-cmd-map-hq-station/);
 
@@ -2810,6 +2822,155 @@ test('Email station reflects neutral, unconnected, and connected states', () => 
   }
 });
 
+test('Watchtower station exposes loading, attention, clear, and degraded badge states', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+
+  let state = hq.hqWatchtowerStationState();
+  assert.deepEqual(state, {
+    value: 'Scanning…',
+    description: 'loading attention queue',
+    tone: 'loading'
+  });
+
+  hq._watchtower = {
+    workspaceID: 'hq-1',
+    status: 'ready',
+    items: [{ entity_id: 't1' }, { entity_id: 'o1' }],
+    gaps: [],
+    error: ''
+  };
+  state = hq.hqWatchtowerStationState();
+  assert.equal(state.value, '2 signals');
+  assert.equal(state.tone, 'attention');
+
+  hq._watchtower.items = [];
+  state = hq.hqWatchtowerStationState();
+  assert.equal(state.value, 'All clear');
+  assert.equal(state.tone, 'clear');
+
+  hq._watchtower.status = 'error';
+  state = hq.hqWatchtowerStationState();
+  assert.equal(state.value, 'Unavailable');
+  assert.equal(state.tone, 'degraded');
+});
+
+test('Watchtower fetches the HQ-scoped queue and redraws its attention badge', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async url => {
+    calls.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            workspace_id: 'alpha',
+            workspace_name: 'Alpha',
+            entity_id: 'task-1',
+            title: 'Need a decision'
+          }
+        ],
+        gaps: []
+      })
+    };
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = true;
+    hq.hqWatchtowerStationState();
+    assert.equal(hq.watchtowerState().status, 'loading');
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls, ['/api/personal-hq/watchtower?workspace_id=hq-1']);
+    assert.equal(hq.watchtowerState().status, 'ready');
+    assert.equal(hq.hqWatchtowerStationState().value, '1 signal');
+    assert.match(hq.renderMapHQStations(), /ws-cmd-map-hq-station is-attention/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Watchtower panel groups items by workspace and renders empty, gap, and degraded states', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+  const recent = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  hq._watchtower = {
+    workspaceID: 'hq-1',
+    status: 'ready',
+    items: [
+      {
+        workspace_id: 'alpha',
+        workspace_name: 'Alpha',
+        item_type: 'task',
+        entity_id: 'task-1',
+        title: 'Need a decision',
+        description: 'Choose the release channel',
+        severity: 'waiting_for_choice',
+        timestamp: recent
+      },
+      {
+        workspace_id: 'beta',
+        workspace_name: 'Beta',
+        item_type: 'opportunity',
+        entity_id: 'opp-1',
+        title: 'Critical finding',
+        description: '',
+        severity: 'critical',
+        timestamp: recent
+      },
+      {
+        workspace_id: 'alpha',
+        workspace_name: 'Alpha',
+        item_type: 'scheduled_task',
+        entity_id: 'schedule-1',
+        title: 'Nightly sync',
+        description: 'sync failed',
+        severity: 'scheduled_failure',
+        timestamp: recent
+      }
+    ],
+    gaps: ["couldn't read workspace Gamma"],
+    error: ''
+  };
+  let html = hq.watchtowerPanelHTML();
+  assert.match(html, /Cross-workspace attention queue/);
+  assert.match(html, /Alpha/);
+  assert.match(html, /Beta/);
+  assert.equal((html.match(/ws-cmd-watchtower-group/g) || []).length, 2);
+  assert.match(html, /data-cmd-modal-action="open-watchtower-workspace" data-cmd-id="alpha"/);
+  assert.match(html, /bi-question-diamond-fill/);
+  assert.match(html, /2m ago/);
+  assert.match(html, /couldn&#39;t read workspace Gamma/);
+
+  hq._watchtower.items = [];
+  hq._watchtower.gaps = [];
+  html = hq.watchtowerPanelHTML();
+  assert.match(html, /All clear/);
+
+  hq._watchtower.status = 'error';
+  html = hq.watchtowerPanelHTML();
+  assert.match(html, /Watchtower could not refresh/);
+  assert.match(html, /data-cmd-modal-action="refresh-watchtower"/);
+});
+
+test('Watchtower row navigation closes the panel and opens the owning workspace', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { location: { assign: target => opened.push(target) } };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.statModalSection = 'watchtower';
+    let closed = 0;
+    hq.closeStatModal = () => {
+      closed += 1;
+    };
+    hq.handleStatModalAction('open-watchtower-workspace', 'beta-1');
+    assert.equal(closed, 1);
+    assert.deepEqual(opened, ['/workspaces/beta-1']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('hqStationDefaultPosition stacks deterministically down the right edge', () => {
   const hq = makeHQCommandView();
   const first = hq.hqStationDefaultPosition(0);
@@ -2831,7 +2992,11 @@ test('hqStationPosition uses the saved position, clamps it, and falls back safel
   try {
     // No layout → default slot (FR7).
     const noLayout = makeHQCommandView();
-    assert.deepEqual(noLayout.hqStationPosition('email'), noLayout.hqStationDefaultPosition(0));
+    assert.deepEqual(
+      noLayout.hqStationPosition('watchtower'),
+      noLayout.hqStationDefaultPosition(0)
+    );
+    assert.deepEqual(noLayout.hqStationPosition('email'), noLayout.hqStationDefaultPosition(1));
 
     // Saved in-bounds position is used verbatim.
     const saved = makeHQCommandView({
@@ -2841,15 +3006,15 @@ test('hqStationPosition uses the saved position, clamps it, and falls back safel
 
     // Out-of-bounds saved position is clamped to [0,1] (FR11).
     const oob = makeHQCommandView({
-      layout: { station_positions: { email: { x: 1.8, y: -0.5 } } }
+      layout: { station_positions: { watchtower: { x: 1.8, y: -0.5 } } }
     });
-    assert.deepEqual(oob.hqStationPosition('email'), { x: 1, y: 0 });
+    assert.deepEqual(oob.hqStationPosition('watchtower'), { x: 1, y: 0 });
 
     // Corrupt (non-finite) saved position falls back to the default (FR13).
     const corrupt = makeHQCommandView({
-      layout: { station_positions: { email: { x: 'nope', y: null } } }
+      layout: { station_positions: { watchtower: { x: 'nope', y: null } } }
     });
-    assert.deepEqual(corrupt.hqStationPosition('email'), corrupt.hqStationDefaultPosition(0));
+    assert.deepEqual(corrupt.hqStationPosition('watchtower'), corrupt.hqStationDefaultPosition(0));
   } finally {
     globalThis.window = originalWindow;
   }
@@ -2871,9 +3036,9 @@ test('renderMapHQStations emits fractional coordinates as CSS custom props and i
     const html = hq.renderMapHQStations();
     assert.match(html, /--station-x:50\.00%/);
     assert.match(html, /--station-y:25\.00%/);
-    // Only the registered station renders; the unknown key contributes nothing.
+    // Both registered stations render; the unknown key contributes nothing.
     assert.doesNotMatch(html, /data-cmd-hq-station="journal"/);
-    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 1);
+    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 2);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -2944,10 +3109,10 @@ test('stationPointToFraction maps a client point to a clamped [0,1] fraction', (
   assert.deepEqual(hq.stationPointToFraction(-500, -500, rect), { x: 0, y: 0 });
   assert.deepEqual(hq.stationPointToFraction(9999, 9999, rect), { x: 1, y: 1 });
   // Degenerate (zero-size) rect never divides by zero.
-  assert.deepEqual(
-    hq.stationPointToFraction(10, 10, { left: 0, top: 0, width: 0, height: 0 }),
-    { x: 0, y: 0 }
-  );
+  assert.deepEqual(hq.stationPointToFraction(10, 10, { left: 0, top: 0, width: 0, height: 0 }), {
+    x: 0,
+    y: 0
+  });
 });
 
 test('a completed drag suppresses the trailing click; a plain click still opens the action', () => {
@@ -3080,7 +3245,9 @@ test('an under-threshold press is not a drag and leaves the click to open the ac
 
 test('mapInventoryGroups never includes an email entry (station is its only home)', () => {
   const originalWindow = globalThis.window;
-  globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' } };
+  globalThis.window = {
+    OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' }
+  };
   try {
     const hq = makeHQCommandView();
     const keys = hq.mapInventoryGroups().map(group => group.key);
@@ -3220,11 +3387,12 @@ test('renderStationsRailPanel renders one row per station only for HQ payloads',
     const hq = makeHQCommandView();
     const panel = hq.renderStationsRailPanel();
     assert.match(panel, /<h4>Stations<\/h4>/);
+    assert.match(panel, /data-cmd-hq-station="watchtower"/);
     assert.match(panel, /data-cmd-hq-station="email"/);
     // State meta reuses the same state fn as the map structure.
     assert.match(panel, /ws-cmd-rail-m">Set up Email</);
     // The primary action runs the first station's action and reflects its state.
-    assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="email">Set up Email</);
+    assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="watchtower">Scanning…</);
 
     // Non-HQ workspaces render nothing (FR16).
     const plain = Object.create(WorkspaceCommandView.prototype);
