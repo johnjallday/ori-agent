@@ -23,7 +23,7 @@ func TestHTTPHandlerCreateStoreNodeSupportsWorkspaceFolderTarget(t *testing.T) {
 	}`))
 	rr := httptest.NewRecorder()
 
-	handler.CreateStoreNode(rr, req)
+	handler.CreateStoreNode(rr, withStorePath(req))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -69,7 +69,7 @@ func TestHTTPHandlerCreateStoreNodeRejectsWorkspaceFolderTraversal(t *testing.T)
 	}`))
 	rr := httptest.NewRecorder()
 
-	handler.CreateStoreNode(rr, req)
+	handler.CreateStoreNode(rr, withStorePath(req))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -99,7 +99,7 @@ func TestHTTPHandlerUpdateStoreNodeSwitchesToWorkspaceFolderTarget(t *testing.T)
 	}`))
 	rr := httptest.NewRecorder()
 
-	handler.UpdateStoreNode(rr, req)
+	handler.UpdateStoreNode(rr, withStorePath(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}

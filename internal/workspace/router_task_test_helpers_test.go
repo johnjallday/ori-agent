@@ -20,3 +20,20 @@ func withTaskPath(req *http.Request) *http.Request {
 	}
 	return req
 }
+
+// withStorePath populates {workspaceID}/{nodeId} for store-node handlers,
+// deriving them from the request URL, which may be
+// /api/workspaces/{ws}/store-nodes/{nodeId} or the /canvas/store-nodes/{nodeId}
+// alias.
+func withStorePath(req *http.Request) *http.Request {
+	segs := strings.Split(strings.Trim(strings.TrimPrefix(req.URL.Path, "/api/workspaces/"), "/"), "/")
+	if len(segs) > 0 && segs[0] != "" {
+		req.SetPathValue("workspaceID", segs[0])
+	}
+	for i, s := range segs {
+		if s == "store-nodes" && i+1 < len(segs) {
+			req.SetPathValue("nodeId", segs[i+1])
+		}
+	}
+	return req
+}
