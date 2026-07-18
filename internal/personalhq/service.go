@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 var (
@@ -84,6 +85,14 @@ type DesignationSyncer interface {
 	SetWorkspaceDesignation(ctx context.Context, workspaceID, designation string) error
 }
 
+// DesignationReader reads the canonical folder-backed workspace record. The
+// workspace-side Designation field has no SQLite column, so callers that gate
+// behavior on that field must use this reader instead of a SQLite-primary
+// workspace Get.
+type DesignationReader interface {
+	GetFolderWorkspace(id string) (*workspace.Workspace, error)
+}
+
 // Status is the resolved, read-time view of a user's Personal HQ.
 type Status struct {
 	UserID string `json:"user_id"`
@@ -141,6 +150,11 @@ type Service struct {
 	// workspace-side Designation field (workspace.json). Optional; wired
 	// post-construction via SetDesignationSyncer (see DesignationSyncer).
 	designationSync DesignationSyncer
+
+	// designationReader reads that canonical folder projection for callers that
+	// need to decide whether a workspace is the Personal HQ at request time.
+	// It is wired after the folder store exists during server startup.
+	designationReader DesignationReader
 }
 
 // NewService constructs a Personal HQ service. Both dependencies are
@@ -163,6 +177,45 @@ func (s *Service) SetOnDesignated(fn func(ctx context.Context, userID, workspace
 // the folder store is built after this service during server startup.
 func (s *Service) SetDesignationSyncer(syncer DesignationSyncer) {
 	s.designationSync = syncer
+}
+
+// SetDesignationReader wires the canonical folder-store reader used for
+// workspace-side Personal HQ checks. It is separate from DesignationSyncer so
+// read-only callers never need write access to the projection.
+func (s *Service) SetDesignationReader(reader DesignationReader) {
+	if s == nil {
+		return
+	}
+	s.designationReader = reader
+}
+
+// IsWorkspaceDesignatedPersonalHQ resolves a workspace-side Personal HQ
+// designation through the canonical folder record. The SQLite-primary
+// workspace store intentionally has no Designation column, so it must not be
+// used for this decision. When no folder reader has been wired (for example,
+// in a minimal test harness), the authoritative profile status is a safe
+// fallback.
+func (s *Service) IsWorkspaceDesignatedPersonalHQ(ctx context.Context, userID, workspaceID string) (bool, error) {
+	if s == nil {
+		return false, errors.New("personal hq service is not configured")
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return false, nil
+	}
+	if s.designationReader != nil {
+		ws, err := s.designationReader.GetFolderWorkspace(workspaceID)
+		if err != nil {
+			return false, err
+		}
+		return ws != nil && session.NormalizeWorkspaceDesignation(ws.Designation) == session.WorkspaceDesignationPersonalHQ, nil
+	}
+
+	status, err := s.Status(ctx, userID)
+	if err != nil || status == nil {
+		return false, err
+	}
+	return status.Valid && status.WorkspaceID == workspaceID, nil
 }
 
 // syncDesignation projects a designation value onto a workspace's folder-store

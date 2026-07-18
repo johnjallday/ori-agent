@@ -113,6 +113,7 @@ func (h *Handler) attachWorkspaceTools(ag *resolvedChatAgent, agentName string, 
 		return
 	}
 	wtp := NewWorkspaceToolProvider(h.sessionStore, h.workspaceStore, workspaceID)
+	wtp.SetHQVisibilityDeps(h.hqVisibility)
 	if name := strings.TrimSpace(agentName); name != "" {
 		wtp.SetExecutingAgent(name)
 	}

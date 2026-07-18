@@ -134,6 +134,45 @@ func TestBuildSnapshot_FutureWorkspaceInclusion(t *testing.T) {
 	}
 }
 
+func TestBuildAllScopeSnapshot_IncludesCurrentEligibleWorkspacesRegardlessOfSavedConfigTime(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	now := time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)
+
+	hq := newTestWorkspace("ws-hq", "Personal HQ", "workspace", workspace.StatusActive, "local")
+	hq.CreatedAt = now.Add(-48 * time.Hour)
+	if err := store.Save(hq); err != nil {
+		t.Fatalf("save HQ workspace: %v", err)
+	}
+
+	newWorkspace := newTestWorkspace("ws-new", "Created Later", "workspace", workspace.StatusActive, "local")
+	newWorkspace.CreatedAt = now.Add(-time.Hour)
+	if err := store.Save(newWorkspace); err != nil {
+		t.Fatalf("save later workspace: %v", err)
+	}
+
+	group := newTestWorkspace("ws-group", "Group", "group", workspace.StatusActive, "local")
+	if err := store.Save(group); err != nil {
+		t.Fatalf("save group: %v", err)
+	}
+	inactive := newTestWorkspace("ws-inactive", "Inactive", "workspace", workspace.StatusTrashed, "local")
+	if err := store.Save(inactive); err != nil {
+		t.Fatalf("save inactive: %v", err)
+	}
+	otherOwner := newTestWorkspace("ws-other", "Someone Else", "workspace", workspace.StatusActive, "other-user")
+	if err := store.Save(otherOwner); err != nil {
+		t.Fatalf("save other-owner workspace: %v", err)
+	}
+
+	snap := BuildAllScopeSnapshot(context.Background(), SnapshotSources{Workspaces: store}, "local", now)
+	ids := map[string]bool{}
+	for _, ws := range snap.Workspaces {
+		ids[ws.WorkspaceID] = true
+	}
+	if !ids["ws-hq"] || !ids["ws-new"] || len(ids) != 2 {
+		t.Fatalf("all-scope snapshot should include only the HQ and later eligible workspace, got %#v", ids)
+	}
+}
+
 func TestBuildSnapshot_DegradesWithGapWhenWorkspaceSourceMissing(t *testing.T) {
 	snap := BuildSnapshot(context.Background(), SnapshotSources{}, Config{Scope: ScopeAll}, "local", time.Now())
 	if len(snap.Gaps) != 1 {

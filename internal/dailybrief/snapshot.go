@@ -286,6 +286,17 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 	return snap
 }
 
+// BuildAllScopeSnapshot assembles the live, bounded cross-workspace projection
+// used by Personal HQ surfaces that must never inherit a user's saved Daily
+// Brief scope. It deliberately includes every currently eligible workspace,
+// including workspaces created after any Daily Brief configuration was saved.
+func BuildAllScopeSnapshot(ctx context.Context, sources SnapshotSources, userID string, now time.Time) Snapshot {
+	return BuildSnapshot(ctx, sources, Config{
+		Scope:                   ScopeAll,
+		IncludeFutureWorkspaces: true,
+	}, userID, now)
+}
+
 func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *workspace.Workspace) (WorkspaceSnapshot, []string) {
 	out := WorkspaceSnapshot{WorkspaceID: ws.ID, Name: ws.Name, AgentCount: len(ws.AgentInstances)}
 	var gaps []string
