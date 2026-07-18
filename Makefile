@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-check readme-accept
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept
 
 # Default target
 .DEFAULT_GOAL := help
@@ -46,12 +46,17 @@ readme-audit: ## Report README contract state without writing files
 readme-capture: ## Capture staged README screenshots into ignored run artifacts
 	@bash scripts/readme-refresh.sh capture
 
+readme-propose: ## Audit and stage a README candidate for a successful capture run
+	@test -n "$(RUN_ID)" || (echo "RUN_ID is required" >&2; exit 2)
+	@node scripts/readme/propose.mjs --run-id "$(RUN_ID)"
+
 readme-check: ## Validate README screenshot manifest, references, and accepted assets
 	@node scripts/readme/manifest.mjs
 
 readme-accept: ## Apply an approved staged README refresh (available after acceptance setup)
-	@echo "README acceptance runtime is not installed yet. Complete task 4.0 first."
-	@exit 2
+	@test -n "$(RUN_ID)" || (echo "RUN_ID is required" >&2; exit 2)
+	@test "$(APPROVE)" = "1" || (echo "Checkpoint 1 approval is required: rerun with APPROVE=1" >&2; exit 2)
+	@node scripts/readme/accept.mjs --run-id "$(RUN_ID)" --approve
 
 ## Build targets
 

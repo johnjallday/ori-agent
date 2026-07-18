@@ -203,19 +203,14 @@ async function pathExists(filePath) {
   }
 }
 
-export async function validateReadmeReferences(root, manifest, readmePath = 'README.md') {
+export async function validateReadmeContent(root, manifest, markdown, { virtualExistingPaths = [] } = {}) {
   const errors = [];
-  const resolvedReadme = resolveRepositoryPath(root, readmePath);
-  if (!resolvedReadme) return [issue('readme.invalid_path', 'README path must be safe and repository-relative.', readmePath)];
-  let markdown;
-  try {
-    markdown = await readFile(resolvedReadme, 'utf8');
-  } catch (error) {
-    return [issue('readme.unreadable', `Could not read ${readmePath}: ${error.message}`, readmePath)];
+  if (typeof markdown !== 'string') {
+    return [issue('readme.invalid_content', 'README content must be a string.', 'README.md')];
   }
-
   const references = extractReadmeLocalReferences(markdown);
   const manifestOutputs = new Set((manifest.screenshots || []).map(screenshot => screenshot.output_path));
+  const virtualPaths = new Set(virtualExistingPaths);
   const productImageReferences = new Set();
   for (const reference of references) {
     if (reference.target.includes('test-results/readme-refresh/')) {
@@ -226,7 +221,7 @@ export async function validateReadmeReferences(root, manifest, readmePath = 'REA
       errors.push(issue('readme.unsafe_reference', `README reference "${reference.target}" escapes the repository.`, reference.target));
       continue;
     }
-    if (!await pathExists(resolved)) {
+    if (!virtualPaths.has(reference.target) && !await pathExists(resolved)) {
       errors.push(issue('readme.missing_reference', `README reference "${reference.target}" does not exist.`, reference.target));
     }
     if (reference.kind === 'image' && reference.target.startsWith('docs/images/')) {
@@ -242,6 +237,18 @@ export async function validateReadmeReferences(root, manifest, readmePath = 'REA
     }
   }
   return errors;
+}
+
+export async function validateReadmeReferences(root, manifest, readmePath = 'README.md') {
+  const resolvedReadme = resolveRepositoryPath(root, readmePath);
+  if (!resolvedReadme) return [issue('readme.invalid_path', 'README path must be safe and repository-relative.', readmePath)];
+  let markdown;
+  try {
+    markdown = await readFile(resolvedReadme, 'utf8');
+  } catch (error) {
+    return [issue('readme.unreadable', `Could not read ${readmePath}: ${error.message}`, readmePath)];
+  }
+  return validateReadmeContent(root, manifest, markdown);
 }
 
 export async function sha256(filePath) {

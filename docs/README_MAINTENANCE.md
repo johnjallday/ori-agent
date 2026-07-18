@@ -42,8 +42,9 @@ that sandbox, and uses only version-controlled fictional fixtures.
 | --- | --- |
 | `make readme-audit` | Read-only drift and contract report. It creates no worktree, screenshots, tracked changes, commits, or remote calls. |
 | `make readme-capture` | Builds the current worktree, captures all four scenes into a new ignored staging run, optimizes proposed images, and writes a comparison report. It never writes `README.md` or `docs/images/`. |
+| `make readme-propose RUN_ID=<run-id>` | Audits the root README against repository evidence and writes `README.proposed.md`, a staged diff, and separately labeled optional suggestions inside that ignored run. |
 | `make readme-check` | Validates the manifest, README image coverage, local links, image metadata, size limits, checksums, and forbidden staging references. |
-| `make readme-accept RUN_ID=<run-id>` | Applies one previously reviewed staged run only after Checkpoint 1 approval. It is branch-guarded and validates the run again before changing tracked README files. |
+| `make readme-accept RUN_ID=<run-id> APPROVE=1` | Applies one previously reviewed staged run only after Checkpoint 1 approval. It is branch-guarded and validates the run again before changing tracked README files. |
 
 The commands are introduced in stages with this feature. Until the first
 accepted portfolio exists, the manifest is in `bootstrap` state and the full
@@ -72,9 +73,12 @@ Use Refresh when a maintainer asks for updated README screenshots or copy.
 Routine Refresh runs start from `dev` in their own worktree:
 
 ```bash
-source scripts/wt.sh
-wt new docs/readme-refresh-YYYY-MM
+bash scripts/readme-new-refresh-worktree.sh YYYY-MM
 ```
+
+The wrapper verifies the clean `dev` branch and refuses an existing branch or
+worktree; it never deletes or overwrites a prior refresh. It prints the new
+`docs/readme-refresh-YYYY-MM` worktree path before capture begins.
 
 README Steward then captures into `test-results/readme-refresh/<run-id>/` and
 audits the proposed README copy. The directory is ignored by Git and contains:
@@ -99,7 +103,7 @@ checksums, privacy scan, visual review results, and the exact files that would
 change. Before explicit approval, it must not replace images, edit `README.md`,
 update accepted metadata, or remove old image assets.
 
-After approval, `make readme-accept RUN_ID=<run-id>` may copy the reviewed
+After approval, `make readme-accept RUN_ID=<run-id> APPROVE=1` may copy the reviewed
 WebPs, apply the reviewed README candidate, record acceptance metadata, and
 remove an old asset only after a repository-wide reference check confirms it is
 unused. It then reruns `make readme-check` and shows the tracked diff.
