@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
@@ -22,7 +23,12 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%s", port), mux); err != nil {
+	server := &http.Server{
+		Addr:              fmt.Sprintf("127.0.0.1:%s", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		panic(err)
 	}
 }

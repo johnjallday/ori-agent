@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$(node -p \"require('./docs/readme-screenshots.json').acceptance_state\")" == "bootstrap" ]]; then
+          if [[ "$(node -p 'require("./docs/readme-screenshots.json").acceptance_state')" == "bootstrap" ]]; then
             # The initial feature PR is allowed to contain only the known migration gaps.
             # Any other contract error remains a CI failure.
             set +e
