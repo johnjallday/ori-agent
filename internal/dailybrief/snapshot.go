@@ -252,7 +252,25 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 		candidates = all
 	}
 
-	for _, ws := range candidates {
+	for _, candidate := range candidates {
+		ws := candidate
+		// SQLite's ListActive path deliberately returns a lean workspace record
+		// without orchestration payloads such as tasks and schedules. Hydrate
+		// all-scope candidates before building the projection so callers such as
+		// Watchtower cannot mistake an omitted payload for a quiet workspace.
+		// Selected scope already loaded each full record above.
+		if cfg.Scope == ScopeAll {
+			fullWorkspace, err := sources.Workspaces.Get(candidate.ID)
+			if err != nil || fullWorkspace == nil {
+				name := strings.TrimSpace(candidate.Name)
+				if name == "" {
+					name = candidate.ID
+				}
+				snap.Gaps = append(snap.Gaps, fmt.Sprintf("workspace %s is unavailable", name))
+				continue
+			}
+			ws = fullWorkspace
+		}
 		if ws == nil || isGroupWorkspace(ws) || ws.Status != workspace.StatusActive {
 			continue
 		}
