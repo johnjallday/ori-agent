@@ -1,9 +1,16 @@
 {
   "schema_version": 1,
-  "acceptance_state": "bootstrap",
-  "last_accepted_capture_commit": null,
-  "accepted_readme_sha256": null,
-  "accepted_environment": null,
+  "acceptance_state": "accepted",
+  "last_accepted_capture_commit": "c386860147e33a67e1f31f7fc5b77d4fa5e32904",
+  "accepted_readme_sha256": "f7b337608daa1d9496776c8615e5e76da02912555a7c90553218c0e7f2e75511",
+  "accepted_environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "node_version": "v25.9.0",
+    "playwright_version": "1.57.0",
+    "chromium_version": "Google Chrome for Testing 143.0.7499.4",
+    "encoder_version": "sharp@0.34.5"
+  },
   "sensitive_patterns": [
     "/Users/",
     "/home/",
@@ -39,8 +46,8 @@
         "internal/web/static/js/modules/dashboard.js",
         "internal/web/static/css/home-command.css"
       ],
-      "accepted_sha256": null,
-      "accepted_bytes": null
+      "accepted_sha256": "c6e5d474ee2799ac8b9055e0d0b024df84b5e2e93e9f3061f487b19420ca4379",
+      "accepted_bytes": 76874
     },
     {
       "id": "action-center",
@@ -67,8 +74,8 @@
         "internal/web/static/js/modules/action-center.js",
         "internal/workspace/opportunities.go"
       ],
-      "accepted_sha256": null,
-      "accepted_bytes": null
+      "accepted_sha256": "d90bd7fbc3f44019b23317c873f819f085b424bbc33bce067d6f10d3e8e1b0e2",
+      "accepted_bytes": 81278
     },
     {
       "id": "workspace-map",
@@ -96,8 +103,8 @@
         "internal/web/static/js/modules/workspace-hub.js",
         "internal/web/static/js/modules/personal-hq-onboarding.js"
       ],
-      "accepted_sha256": null,
-      "accepted_bytes": null
+      "accepted_sha256": "53e3d73721044723308c28de70d76cf4c4dfb5120a0b213df8da7f810f239667",
+      "accepted_bytes": 96330
     },
     {
       "id": "workspace",
@@ -126,8 +133,8 @@
         "internal/web/static/js/modules/workspace-detail.js",
         "internal/web/static/js/modules/workspace-mission.js"
       ],
-      "accepted_sha256": null,
-      "accepted_bytes": null
+      "accepted_sha256": "e154432d0509b6be3b6968c3140da18b820d73ed071a73f00bc505fb0f061449",
+      "accepted_bytes": 113760
     }
   ]
 }

@@ -13,7 +13,28 @@ function runID() {
   return `proposal-test-${process.pid}-${Date.now()}`;
 }
 
-test('renders the four-scene WebP portfolio without rewriting unrelated README copy', async () => {
+function legacyPortfolioFixture() {
+  return [
+    '# Fixture README',
+    '',
+    '<p align="center">',
+    '  <img src="docs/images/hero.png" alt="Legacy hero" width="820" />',
+    '</p>',
+    '',
+    'Unaffected introduction copy.',
+    '',
+    '<p align="center">',
+    '  <img src="docs/images/action-center.png" alt="Legacy Action Center" width="820" />',
+    '</p>',
+    '',
+    '| Onboarding | Workspace |',
+    '| :---: | :---: |',
+    '| <img src="docs/images/onboarding.png" alt="Legacy onboarding" width="420" /> | <img src="docs/images/workspace.png" alt="Legacy workspace" width="420" /> |',
+    '',
+  ].join('\n');
+}
+
+test('keeps an accepted four-scene portfolio unchanged while validating it', async () => {
   const { manifest } = await loadManifest(root);
   const current = readFileSync(path.join(root, 'README.md'), 'utf8');
   const proposed = renderProposedREADME(current, manifest);
@@ -28,6 +49,7 @@ test('renders the four-scene WebP portfolio without rewriting unrelated README c
     assert.match(proposed, new RegExp(scene.caption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(proposed, new RegExp(scene.alt_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+  assert.equal(proposed, current);
   assert.match(proposed, /## 🚀 Quick start/);
   assert.match(proposed, /## 🤖 Providers/);
   assert.match(proposed, /## 📚 Documentation/);
@@ -35,6 +57,18 @@ test('renders the four-scene WebP portfolio without rewriting unrelated README c
     virtualExistingPaths: manifest.screenshots.map((scene) => scene.output_path),
   });
   assert.deepEqual(errors, []);
+});
+
+test('migrates the legacy PNG portfolio without rewriting unrelated copy', async () => {
+  const { manifest } = await loadManifest(root);
+  const proposed = renderProposedREADME(legacyPortfolioFixture(), manifest);
+  assert.match(proposed, /docs\/images\/hero\.webp/);
+  assert.match(proposed, /docs\/images\/action-center\.webp/);
+  assert.match(proposed, /docs\/images\/workspace-map\.webp/);
+  assert.match(proposed, /docs\/images\/workspace\.webp/);
+  assert.doesNotMatch(proposed, /docs\/images\/(?:hero|action-center|onboarding|workspace)\.png/);
+  assert.match(proposed, /Unaffected introduction copy\./);
+  assert.equal(auditCandidate({ root, manifest, current: legacyPortfolioFixture(), proposed }).required_changes.length, 1);
 });
 
 test('writes a ready, ignored proposal, diff, and factual audit into one staging run', async t => {
@@ -90,6 +124,6 @@ test('writes a ready, ignored proposal, diff, and factual audit into one staging
   const audit = JSON.parse(readFileSync(path.join(runDir, 'README.refresh-audit.json'), 'utf8'));
   assert.equal(audit.status, 'ready');
   assert.deepEqual(audit.optional_suggestions, []);
-  assert.equal(audit.required_changes.length, 1);
-  assert.equal(readFileSync(path.join(runDir, 'README.proposed.diff'), 'utf8').includes('workspace-map.webp'), true);
+  assert.equal(audit.required_changes.length, 0);
+  assert.equal(readFileSync(path.join(runDir, 'README.proposed.diff'), 'utf8'), '');
 });

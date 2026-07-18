@@ -79,11 +79,16 @@ function runGit(root, args) {
 
 function branchGuard(root, manifest) {
   const branch = runGit(root, ['branch', '--show-current']);
+  if (branch === BOOTSTRAP_BRANCH) {
+    if (manifest.acceptance_state === 'bootstrap') {
+      return { branch, mode: 'bootstrap' };
+    }
+    return { branch, mode: 'bootstrap-noop-only' };
+  }
   if (manifest.acceptance_state === 'bootstrap') {
     if (branch !== BOOTSTRAP_BRANCH) {
       fail(`Bootstrap acceptance is allowed only on ${BOOTSTRAP_BRANCH}, not ${branch || 'detached HEAD'}.`);
     }
-    return { branch, mode: 'bootstrap' };
   }
   if (!REFRESH_BRANCH_RE.test(branch)) {
     fail(`Routine acceptance requires a docs/readme-refresh-YYYY-MM branch, not ${branch || 'detached HEAD'}.`);
@@ -91,9 +96,19 @@ function branchGuard(root, manifest) {
   return { branch, mode: 'routine' };
 }
 
-function assertCleanTrackedWorktree(root) {
-  const status = runGit(root, ['status', '--porcelain', '--untracked-files=no']);
-  if (status) fail('Acceptance requires a clean tracked worktree; commit or revert unrelated changes first.');
+function changedTrackedPaths(root) {
+  return new Set([
+    ...runGit(root, ['diff', '--name-only']).split('\n'),
+    ...runGit(root, ['diff', '--cached', '--name-only']).split('\n'),
+  ].filter(Boolean));
+}
+
+function assertCleanTrackedWorktree(root, { allowedPaths = [] } = {}) {
+  const allowed = new Set(allowedPaths);
+  const unexpected = [...changedTrackedPaths(root)].filter((relativePath) => !allowed.has(relativePath));
+  if (unexpected.length > 0) {
+    fail('Acceptance requires a clean tracked worktree; commit or revert unrelated changes first.');
+  }
 }
 
 function stagedRunDirectory(root, runID) {
@@ -285,7 +300,6 @@ function cleanupNoopRun(root, runID, runDir, run) {
 export async function inspectAcceptance({ root, runID }) {
   const { manifest } = await loadManifest(root);
   const branch = branchGuard(root, manifest);
-  assertCleanTrackedWorktree(root);
   const runDir = stagedRunDirectory(root, runID);
   const run = readJson(path.join(runDir, 'run.json'), 'Run metadata');
   validateRun(root, run, runDir, manifest);
@@ -307,10 +321,23 @@ export async function applyAcceptance({ root, runID, approved = false, repositor
   if (approved !== true) fail('Acceptance requires explicit approval after Checkpoint 1.');
   const inspection = await inspectAcceptance({ root, runID });
   const { manifest, run, runDir, metadata, proposedReadme } = inspection;
-  if (currentOutputMatches(manifest, metadata, root, proposedReadme)) {
+  const isNoop = currentOutputMatches(manifest, metadata, root, proposedReadme);
+  if (inspection.branch.mode === 'bootstrap-noop-only' && !isNoop) {
+    fail(`The initial ${BOOTSTRAP_BRANCH} branch may clean only an identical accepted run; use a docs/readme-refresh-YYYY-MM branch for another refresh.`);
+  }
+  if (isNoop) {
+    assertCleanTrackedWorktree(root, {
+      allowedPaths: [
+        'README.md',
+        'docs/readme-screenshots.json',
+        ...metadata.results.map((item) => item.scene.output_path),
+        ...OBSOLETE_ASSETS,
+      ],
+    });
     cleanupNoopRun(root, runID, runDir, run);
     return { status: 'noop', run_id: runID, changed_paths: [], removed_assets: [], staging_cleaned: true };
   }
+  assertCleanTrackedWorktree(root);
   const nextManifest = acceptedManifest(manifest, run, metadata, proposedReadme);
   const manifestPath = path.join(root, 'docs', 'readme-screenshots.json');
   const readmePath = path.join(root, 'README.md');

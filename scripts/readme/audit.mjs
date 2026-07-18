@@ -13,12 +13,9 @@ const STATIC_RELEVANT_PATHS = [
   'tests/readme-capture.spec.ts',
   'tests/fixtures/readme-scenes.ts',
   'scripts/readme-refresh.sh',
-  'scripts/readme/audit.mjs',
   'scripts/readme/capture-driver.mjs',
   'scripts/readme/encode.mjs',
   'scripts/readme/manifest.mjs',
-  'scripts/readme/propose.mjs',
-  'scripts/readme/report.mjs',
   'internal/web/templates/',
   'internal/web/static/',
 ];

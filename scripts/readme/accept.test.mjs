@@ -281,7 +281,7 @@ test('removes obsolete assets when only README-tooling literals refer to them', 
 });
 
 test('identical accepted outputs are a no-op and safely clean their staging run', async t => {
-  const fixture = createFixture({ branch: 'docs/readme-refresh-2026-07', accepted: true });
+  const fixture = createFixture({ accepted: true });
   t.after(() => cleanupFixture(fixture.root));
   const staged = stageRun(fixture.root, fixture.images, { readme: fixture.acceptedReadme });
   const beforeHead = git(fixture.root, ['rev-parse', 'HEAD']);
@@ -299,4 +299,36 @@ test('identical accepted outputs are a no-op and safely clean their staging run'
   assert.equal(existsSync(staged.sandbox), false);
   assert.equal(git(fixture.root, ['rev-parse', 'HEAD']), beforeHead);
   assert.deepEqual(readFileSync(path.join(fixture.root, 'docs', 'readme-screenshots.json')), beforeManifest);
+});
+
+test('an immediate second refresh cleans an identical run while only its accepted file set is pending commit', async t => {
+  const fixture = createFixture();
+  t.after(() => cleanupFixture(fixture.root));
+  const initial = stageRun(fixture.root, fixture.images, { runID: 'initial-refresh' });
+  t.after(() => rmSync(initial.sandbox, { recursive: true, force: true }));
+
+  const applied = await applyAcceptance({ root: fixture.root, runID: 'initial-refresh', approved: true });
+  assert.equal(applied.status, 'applied');
+  assert.notEqual(git(fixture.root, ['status', '--porcelain', '--untracked-files=no']), '', 'initial acceptance deliberately waits for Checkpoint 2 before commit');
+
+  const retry = stageRun(fixture.root, fixture.images, { runID: 'immediate-retry' });
+  t.after(() => rmSync(retry.sandbox, { recursive: true, force: true }));
+  const result = await applyAcceptance({ root: fixture.root, runID: 'immediate-retry', approved: true });
+
+  assert.equal(result.status, 'noop');
+  assert.equal(existsSync(retry.runDir), false);
+  assert.equal(existsSync(retry.sandbox), false);
+});
+
+test('rejects a non-identical accepted run on the initial feature branch', async t => {
+  const fixture = createFixture({ accepted: true });
+  t.after(() => cleanupFixture(fixture.root));
+  const revisedImages = new Map([...fixture.images].map(([id, bytes], index) => [id, Buffer.concat([bytes, Buffer.from([index + 1])])]));
+  const staged = stageRun(fixture.root, revisedImages);
+  t.after(() => rmSync(staged.sandbox, { recursive: true, force: true }));
+
+  await assert.rejects(
+    () => applyAcceptance({ root: fixture.root, runID: 'acceptance-fixture', approved: true }),
+    /may clean only an identical accepted run/,
+  );
 });

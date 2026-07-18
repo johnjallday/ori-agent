@@ -70,19 +70,19 @@ export function renderProposedREADME(current, manifest) {
   let proposed = current;
   proposed = replaceExactlyOnce(
     proposed,
-    /<p align="center">\s*<img src="docs\/images\/hero\.png"[^>]*\/>\s*<\/p>/,
+    /<p align="center">\s*<img src="docs\/images\/hero\.(?:png|webp)"[^>]*\/>\s*<\/p>(?:\s*<p align="center"><em>[\s\S]*?<\/em><\/p>)?/,
     centeredImage(hero),
     'hero screenshot',
   );
   proposed = replaceExactlyOnce(
     proposed,
-    /<p align="center">\s*<img src="docs\/images\/action-center\.png"[^>]*\/>\s*<\/p>/,
+    /<p align="center">\s*<img src="docs\/images\/action-center\.(?:png|webp)"[^>]*\/>\s*<\/p>(?:\s*<p align="center"><em>[\s\S]*?<\/em><\/p>)?/,
     centeredImage(actionCenter),
     'Action Center screenshot',
   );
   proposed = replaceExactlyOnce(
     proposed,
-    /\| Onboarding \| Workspace \|\n\| :---: \| :---: \|\n\| <img src="docs\/images\/onboarding\.png"[^>]*\/> \| <img src="docs\/images\/workspace\.png"[^>]*\/> \|/,
+    /\| (?:Onboarding|Workspace Map) \| (?:Workspace|Workspace Command) \|\n\| :---: \| :---: \|\n\| <img src="docs\/images\/(?:onboarding|workspace-map)\.(?:png|webp)"[^>]*\/> \| <img src="docs\/images\/workspace\.(?:png|webp)"[^>]*\/> \|(?:\n\| <sub>[^<]*<\/sub> \| <sub>[^<]*<\/sub> \|)?/,
     `| Workspace Map | Workspace Command |\n| :---: | :---: |\n| ${imageTag(workspaceMap)} | ${imageTag(workspace)} |\n| <sub>${workspaceMap.caption}</sub> | <sub>${workspace.caption}</sub> |`,
     'paired screenshot table',
   );

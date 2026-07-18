@@ -10,8 +10,9 @@ Autonomous AI workspaces — guardrailed by policy, running **local-first** on y
 ![Go](https://img.shields.io/github/go-mod/go-version/johnjallday/ori-agent?label=Go&color=00add8)
 
 <p align="center">
-  <img src="docs/images/hero.png" alt="Ori Agent — autonomous AI workspaces dashboard" width="820" />
+  <img src="docs/images/hero.webp" alt="Ori Agent Home in dark mode showing the command bridge above a populated Personal HQ Daily Brief." width="820" />
 </p>
+<p align="center"><em>Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.</em></p>
 
 **Ori Agent** is a local-first platform for **autonomous AI agents**. Give a **workspace** a mission and it works on a recurring schedule under an **autonomy policy** you set — surfacing what it finds as **opportunities** you triage from a single cross-workspace **Action Center**. Compose each workspace from multiple named agents, each with its own model, prompt, skills, and MCP tools. Everything stays on your machine unless you opt into cloud LLMs.
 
@@ -50,12 +51,14 @@ Each MCP/skill binding is classified by side effect (read / write / external), a
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="docs/images/action-center.png" alt="The Action Center — triage mission findings from every workspace in one inbox" width="820" />
+  <img src="docs/images/action-center.webp" alt="Ori Agent Action Center in dark mode with three fictional workspace findings and their priorities." width="820" />
 </p>
+<p align="center"><em>Action Center gathers mission findings from every workspace for quick triage.</em></p>
 
-| Onboarding | Workspace |
+| Workspace Map | Workspace Command |
 | :---: | :---: |
-| <img src="docs/images/onboarding.png" alt="Ori onboarding — meet your assistant" width="420" /> | <img src="docs/images/workspace.png" alt="A workspace in Ori Agent" width="420" /> |
+| <img src="docs/images/workspace-map.webp" alt="Ori Agent Workspace Map in dark mode showing a Personal HQ landmark and multiple fictional workspaces." width="420" /> | <img src="docs/images/workspace.webp" alt="Ori Agent Workspace Command in dark mode with a fictional agent roster, task state, workspace context, and mission controls." width="420" /> |
+| <sub>Workspace Map shows Personal HQ and the wider operating landscape at a glance.</sub> | <sub>Workspace Command keeps agents, tasks, notes, files, and mission operations in one active workspace.</sub> |
 
 ## 🚀 Quick start
 
