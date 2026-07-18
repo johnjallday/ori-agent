@@ -67,7 +67,9 @@ the README skill itself does not require either setting.
 The commands are introduced in stages with this feature. Until the first
 accepted portfolio exists, the manifest is in `bootstrap` state and the full
 repository-conformance form of `make readme-check` is expected to report that
-the final WebP files have not yet been accepted.
+the final WebP files have not yet been accepted. In the same state,
+`make readme-audit` returns the explicit `audit.bootstrap` setup error rather
+than pretending that the unaccepted portfolio is clean.
 
 ## Modes
 
@@ -166,15 +168,40 @@ retouched, composited, or presentation-only imagery or DOM/CSS.
 ## Monthly reminder
 
 The Ori development workspace's **Workspace Manager** runs the monthly
-read-only Audit under Watch policy. The default cadence is day 1 at 09:00 in the
-workspace timezone, and the maintainer may change the day or time in existing
-mission controls. The mission has external effects denied and may only run the
-deterministic audit command.
+read-only Audit under Watch policy. Configure its Mission controls with this
+default, changing only the day or time when needed:
 
-On meaningful drift, it creates one Action Center finding titled **README
-product documentation needs review** with the recommended action **Ask README
-Steward to refresh the README.** Existing title-based deduplication keeps
-repeat monthly findings together. Clean audits produce no Action Center noise.
+```json
+{
+  "cadence": { "type": "monthly", "day_of_month": 1, "time_of_day": "09:00" },
+  "autonomy_policy": "watch",
+  "notification_policy": { "min_priority": "medium", "on_findings": "if_any" },
+  "mission_enabled": true
+}
+```
+
+The time is interpreted in the workspace timezone; maintainers may edit the
+day or time through the existing Mission controls.
+
+Use this Mission text for the Workspace Manager:
+
+> In the repository workspace folder, run only `make readme-audit`. Do not run
+> a server, browser, capture, cleanup, worktree, acceptance, Git remote, or
+> GitHub command. If `status` is `clean`, return `{"findings": []}`. If it is
+> `drift`, return exactly one finding titled `README product documentation needs
+> review`, with medium priority, high confidence, the audit's affected paths and
+> commits as evidence, and the recommended action `Ask README Steward to refresh
+> the README.` If it is `error`, return no finding and report the setup error for
+> maintainer repair; do not attempt a fallback command.
+
+The existing title-based opportunity store deduplicates repeat drift reports in
+the same workspace. Resolving the finding removes it from the active backlog;
+the same title re-opens if a later audit finds genuinely recurring drift. Clean
+audits create no Action Center noise.
+
+The mission has external effects denied and may only run the deterministic audit
+command. It must not launch a server, create staging artifacts or worktrees,
+edit files, commit, push, or open a PR.
 
 README Steward owns interactive Refresh; the Workspace Manager owns the
 scheduled Audit. Their shared boundary is `make readme-audit`.
