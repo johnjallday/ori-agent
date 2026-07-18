@@ -396,11 +396,6 @@ func (h *HTTPHandler) publishFileSyncEvents(workspaceID string, events []fileSyn
 }
 
 func (h *HTTPHandler) MoveAttachmentFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	workspaceID, attachmentID, ok := attachmentRouteParts(w, r)
 	if !ok {
 		return
@@ -530,11 +525,6 @@ func (h *HTTPHandler) MoveAttachmentFile(w http.ResponseWriter, r *http.Request)
 // file, and unlike RelinkAttachmentFile it does not upload a replacement — it
 // adopts the file the user points to. JSON body: { "relative_path": "..." }.
 func (h *HTTPHandler) LocateAttachmentFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	workspaceID, attachmentID, ok := attachmentRouteParts(w, r)
 	if !ok {
 		return
@@ -883,13 +873,13 @@ func workspaceFolderRouteParts(w http.ResponseWriter, r *http.Request) (string, 
 }
 
 func attachmentRouteParts(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) < 3 || parts[1] != "attachments" || strings.TrimSpace(parts[2]) == "" {
+	workspaceID := r.PathValue("workspaceID")
+	attachmentID := r.PathValue("attachmentId")
+	if workspaceID == "" || strings.TrimSpace(attachmentID) == "" {
 		orihttp.BadRequest(w, "Invalid URL format")
 		return "", "", false
 	}
-	return parts[0], parts[2], true
+	return workspaceID, attachmentID, true
 }
 
 func (h *HTTPHandler) publishWorkspaceFolderEvent(workspaceID, action string, data map[string]any) {

@@ -336,6 +336,8 @@ func TestHTTPHandlerMoveAttachmentFileMovesFileAndUpdatesMetadata(t *testing.T) 
 	}
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID+"/attachments/att-1/move", bytes.NewBufferString(`{"target_folder":"research"}`))
+	req.SetPathValue("workspaceID", ws.ID)
+	req.SetPathValue("attachmentId", "att-1")
 	rr := httptest.NewRecorder()
 	handler.MoveAttachmentFile(rr, req)
 	if rr.Code != http.StatusOK {
