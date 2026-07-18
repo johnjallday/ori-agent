@@ -42,16 +42,7 @@ func NewHandler(store *sessionfiles.Store, watcher *filewatcher.Watcher) *Handle
 
 // UploadFile handles POST /api/sessions/{id}/files/upload
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files/upload")
-	if sessionID == "" {
-		logger.Warn("Upload failed: no session ID", logger.Fields{"path": r.URL.Path})
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	logger.Debug("Processing file upload", logger.Fields{"session_id": sessionID})
 
@@ -115,15 +106,7 @@ type LinkFileRequest struct {
 
 // LinkFile handles POST /api/sessions/{id}/files/link
 func (h *Handler) LinkFile(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files/link")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	var req LinkFileRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -187,15 +170,7 @@ func (h *Handler) LinkFile(w http.ResponseWriter, r *http.Request) {
 
 // ListFiles handles GET /api/sessions/{id}/files
 func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	files, err := h.store.ListFiles(sessionID)
 	if err != nil {
@@ -211,15 +186,7 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 
 // GetFile handles GET /api/sessions/{id}/files/{fileId}
 func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	sessionID, fileID := extractSessionAndFileID(r.URL.Path)
-	if sessionID == "" || fileID == "" {
-		orihttp.BadRequest(w, "Session ID and File ID are required")
-		return
-	}
+	sessionID, fileID := r.PathValue("id"), r.PathValue("fileId")
 
 	entry, err := h.store.GetFile(sessionID, fileID)
 	if err != nil {
@@ -232,19 +199,7 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 
 // DownloadFile handles GET /api/sessions/{id}/files/{fileId}/download
 func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	// Extract IDs from path like /api/sessions/{id}/files/{fileId}/download
-	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	sessionID := parts[0]
-	fileID := parts[2]
+	sessionID, fileID := r.PathValue("id"), r.PathValue("fileId")
 
 	// Get file entry
 	entry, err := h.store.GetFile(sessionID, fileID)
@@ -274,15 +229,7 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 
 // DeleteFile handles DELETE /api/sessions/{id}/files/{fileId}
 func (h *Handler) DeleteFile(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodDelete) {
-		return
-	}
-
-	sessionID, fileID := extractSessionAndFileID(r.URL.Path)
-	if sessionID == "" || fileID == "" {
-		orihttp.BadRequest(w, "Session ID and File ID are required")
-		return
-	}
+	sessionID, fileID := r.PathValue("id"), r.PathValue("fileId")
 
 	if err := h.store.RemoveFile(sessionID, fileID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -310,19 +257,7 @@ type RelinkFileRequest struct {
 
 // RelinkFile handles POST /api/sessions/{id}/files/{fileId}/relink
 func (h *Handler) RelinkFile(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	// Extract IDs from path like /api/sessions/{id}/files/{fileId}/relink
-	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	sessionID := parts[0]
-	fileID := parts[2]
+	sessionID, fileID := r.PathValue("id"), r.PathValue("fileId")
 
 	var req RelinkFileRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -371,15 +306,7 @@ func (h *Handler) RelinkFile(w http.ResponseWriter, r *http.Request) {
 
 // OpenFolder handles POST /api/sessions/{id}/folder/open
 func (h *Handler) OpenFolder(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/folder/open")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	// Get session files path
 	folderPath := h.store.GetSessionFilesPath(sessionID)
@@ -416,15 +343,7 @@ func (h *Handler) OpenFolder(w http.ResponseWriter, r *http.Request) {
 
 // ValidateLinks handles POST /api/sessions/{id}/files/validate
 func (h *Handler) ValidateLinks(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files/validate")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	brokenLinks, err := h.store.ValidateLinks(sessionID)
 	if err != nil {
@@ -440,15 +359,7 @@ func (h *Handler) ValidateLinks(w http.ResponseWriter, r *http.Request) {
 
 // FileEvents handles GET /api/sessions/{id}/files/events (SSE endpoint)
 func (h *Handler) FileEvents(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodGet) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files/events")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -497,15 +408,7 @@ func (h *Handler) FileEvents(w http.ResponseWriter, r *http.Request) {
 
 // StartWatching handles POST /api/sessions/{id}/files/watch
 func (h *Handler) StartWatching(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodPost) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files/watch")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	if h.watcher == nil {
 		orihttp.InternalError(w, "File watcher not available")
@@ -526,15 +429,7 @@ func (h *Handler) StartWatching(w http.ResponseWriter, r *http.Request) {
 
 // StopWatching handles DELETE /api/sessions/{id}/files/watch
 func (h *Handler) StopWatching(w http.ResponseWriter, r *http.Request) {
-	if !orihttp.RequireMethod(w, r, http.MethodDelete) {
-		return
-	}
-
-	sessionID := extractSessionID(r.URL.Path, "/api/sessions/", "/files/watch")
-	if sessionID == "" {
-		orihttp.BadRequest(w, "Session ID is required")
-		return
-	}
+	sessionID := r.PathValue("id")
 
 	if h.watcher == nil {
 		orihttp.InternalError(w, "File watcher not available")
@@ -549,29 +444,6 @@ func (h *Handler) StopWatching(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"message": "Stopped watching session folder",
 	})
-}
-
-// Helper functions
-
-// extractSessionID extracts the session ID from a URL path
-func extractSessionID(path, prefix, suffix string) string {
-	path = strings.TrimPrefix(path, prefix)
-	path = strings.TrimSuffix(path, suffix)
-	// Handle cases like /files or /files/
-	path = strings.TrimSuffix(path, "/files")
-	path = strings.TrimSuffix(path, "/folder")
-	return strings.TrimSuffix(path, "/")
-}
-
-// extractSessionAndFileID extracts session and file IDs from a path like
-// /api/sessions/{sessionID}/files/{fileID}
-func extractSessionAndFileID(path string) (string, string) {
-	path = strings.TrimPrefix(path, "/api/sessions/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		return "", ""
-	}
-	return parts[0], parts[2]
 }
 
 // ReadFile reads file content - for use by agent plugins

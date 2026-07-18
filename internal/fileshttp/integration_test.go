@@ -17,6 +17,11 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 )
 
+// These tests call the handlers directly, so they populate the {id} / {fileId}
+// path parameters with SetPathValue exactly as ServeMux would from the matched
+// pattern (see RegisterRoutes). Mux-level routing is covered by routes_test.go
+// and the server golden route-table test.
+
 // Integration test: Upload file via browser → verify in session
 func TestIntegration_UploadAndVerify(t *testing.T) {
 	// Setup
@@ -43,6 +48,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
+	req.SetPathValue("id", sessionID)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	rr := httptest.NewRecorder()
@@ -63,6 +69,7 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 
 	// Step 3: List files and verify the file is present
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files", nil)
+	req.SetPathValue("id", sessionID)
 	rr = httptest.NewRecorder()
 	handler.ListFiles(rr, req)
 
@@ -80,6 +87,8 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 
 	// Step 4: Get file metadata and verify
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files/"+fileID, nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", fileID)
 	rr = httptest.NewRecorder()
 	handler.GetFile(rr, req)
 
@@ -96,6 +105,8 @@ func TestIntegration_UploadAndVerify(t *testing.T) {
 
 	// Step 5: Download and verify content
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files/"+fileID+"/download", nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", fileID)
 	rr = httptest.NewRecorder()
 	handler.DownloadFile(rr, req)
 
@@ -244,6 +255,7 @@ func TestIntegration_AgentReadsUploadedFile(t *testing.T) {
 	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
+	req.SetPathValue("id", sessionID)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	rr := httptest.NewRecorder()
@@ -308,6 +320,7 @@ func TestIntegration_AgentWritesNewFile(t *testing.T) {
 
 	// Step 2: Verify file appears in list via HTTP API
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files", nil)
+	req.SetPathValue("id", sessionID)
 	rr := httptest.NewRecorder()
 	handler.ListFiles(rr, req)
 
@@ -325,6 +338,8 @@ func TestIntegration_AgentWritesNewFile(t *testing.T) {
 
 	// Step 3: Verify file content via download
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files/"+entry.ID+"/download", nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", entry.ID)
 	rr = httptest.NewRecorder()
 	handler.DownloadFile(rr, req)
 
@@ -339,7 +354,7 @@ func TestIntegration_AgentWritesNewFile(t *testing.T) {
 	t.Log("Integration test: Agent writes new file - PASSED")
 }
 
-// Integration test: Permission denied scenarios
+// Integration test: Permission denied / not-found scenarios
 func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 	// Setup
 	tmpDir, err := os.MkdirTemp("", "integration-test-perms-*")
@@ -361,6 +376,7 @@ func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/link", bytes.NewReader(jsonBody))
+	req.SetPathValue("id", sessionID)
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -372,6 +388,8 @@ func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 
 	// Test 2: Try to get a non-existent file
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files/nonexistent-id", nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", "nonexistent-id")
 	rr = httptest.NewRecorder()
 	handler.GetFile(rr, req)
 
@@ -381,6 +399,8 @@ func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 
 	// Test 3: Try to delete a non-existent file
 	req = httptest.NewRequest(http.MethodDelete, "/api/sessions/"+sessionID+"/files/nonexistent-id", nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", "nonexistent-id")
 	rr = httptest.NewRecorder()
 	handler.DeleteFile(rr, req)
 
@@ -390,6 +410,8 @@ func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 
 	// Test 4: Try to download a non-existent file
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files/nonexistent-id/download", nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", "nonexistent-id")
 	rr = httptest.NewRecorder()
 	handler.DownloadFile(rr, req)
 
@@ -397,14 +419,10 @@ func TestIntegration_PermissionDeniedScenarios(t *testing.T) {
 		t.Errorf("expected status 404 for downloading non-existent file, got %d", rr.Code)
 	}
 
-	// Test 5: Missing session ID
-	req = httptest.NewRequest(http.MethodGet, "/api/sessions//files", nil)
-	rr = httptest.NewRecorder()
-	handler.ListFiles(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400 for missing session ID, got %d", rr.Code)
-	}
+	// Note: the "missing session ID" case is now enforced by ServeMux (a request
+	// whose {id} segment is empty never matches a file pattern), so it is a
+	// routing concern verified by the server golden route-table test rather than
+	// a handler-level 400. It is intentionally not re-tested here.
 
 	t.Log("Integration test: Permission denied scenarios - PASSED")
 }
@@ -437,6 +455,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/link", bytes.NewReader(jsonBody))
+	req.SetPathValue("id", sessionID)
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()
@@ -453,6 +472,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 
 	// Step 3: Verify link is valid
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/validate", nil)
+	req.SetPathValue("id", sessionID)
 	rr = httptest.NewRecorder()
 	handler.ValidateLinks(rr, req)
 
@@ -475,6 +495,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 
 	// Step 5: Validate again - should detect broken link
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/validate", nil)
+	req.SetPathValue("id", sessionID)
 	rr = httptest.NewRecorder()
 	handler.ValidateLinks(rr, req)
 
@@ -490,6 +511,8 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 
 	// Step 6: Try to download broken link - should fail gracefully
 	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files/"+fileID+"/download", nil)
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", fileID)
 	rr = httptest.NewRecorder()
 	handler.DownloadFile(rr, req)
 
@@ -507,6 +530,8 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 	relinkJSON, _ := json.Marshal(relinkBody)
 
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/"+fileID+"/relink", bytes.NewReader(relinkJSON))
+	req.SetPathValue("id", sessionID)
+	req.SetPathValue("fileId", fileID)
 	req.Header.Set("Content-Type", "application/json")
 
 	rr = httptest.NewRecorder()
@@ -518,6 +543,7 @@ func TestIntegration_BrokenLinkDetection(t *testing.T) {
 
 	// Step 8: Validate again - should be fixed
 	req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/validate", nil)
+	req.SetPathValue("id", sessionID)
 	rr = httptest.NewRecorder()
 	handler.ValidateLinks(rr, req)
 
@@ -552,7 +578,7 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 	sessionID := "test-session-limit"
 
 	// Upload files up to the limit
-	for i := 0; i < sessionfiles.MaxFilesPerSession; i++ {
+	for i := range sessionfiles.MaxFilesPerSession {
 		var buf bytes.Buffer
 		writer := multipart.NewWriter(&buf)
 		part, _ := writer.CreateFormFile("file", "file-"+string(rune('a'+i%26))+".txt")
@@ -560,6 +586,7 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 		_ = writer.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
+		req.SetPathValue("id", sessionID)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 
 		rr := httptest.NewRecorder()
@@ -578,6 +605,7 @@ func TestIntegration_FileCountLimit(t *testing.T) {
 	_ = writer.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
+	req.SetPathValue("id", sessionID)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	rr := httptest.NewRecorder()
@@ -636,6 +664,7 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 		_ = writer.Close()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/files/upload", &buf)
+		req.SetPathValue("id", sessionID)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 
 		rr := httptest.NewRecorder()
@@ -659,6 +688,7 @@ func TestIntegration_MultipleFileTypes(t *testing.T) {
 
 	// Verify all files are stored
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/files", nil)
+	req.SetPathValue("id", sessionID)
 	rr := httptest.NewRecorder()
 	handler.ListFiles(rr, req)
 

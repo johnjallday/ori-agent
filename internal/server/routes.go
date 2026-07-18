@@ -9,6 +9,7 @@ import (
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/filehttp"
+	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
@@ -620,71 +621,15 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("/api/smart-input/override", s.Handlers.SmartInput.HandleOverride)
 		}
 
-		mux.HandleFunc("/api/sessions/", func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
+		// Session files use explicit Go 1.22 method+pattern routes. They are
+		// strictly more specific than the "/api/sessions/" subtree below, so
+		// ServeMux dispatches file requests to them and leaves session CRUD,
+		// tags, and tasks to the session handler.
+		if s.Handlers.SessionFiles != nil {
+			fileshttp.RegisterRoutes(mux, s.Handlers.SessionFiles)
+		}
 
-			// Session files routes (check if files handler is available)
-			if s.Handlers.SessionFiles != nil {
-				if strings.Contains(path, "/files/upload") && r.Method == http.MethodPost {
-					s.Handlers.SessionFiles.UploadFile(w, r)
-					return
-				}
-				if strings.Contains(path, "/files/link") && r.Method == http.MethodPost {
-					s.Handlers.SessionFiles.LinkFile(w, r)
-					return
-				}
-				if strings.Contains(path, "/files/validate") && r.Method == http.MethodPost {
-					s.Handlers.SessionFiles.ValidateLinks(w, r)
-					return
-				}
-				if strings.Contains(path, "/files/events") && r.Method == http.MethodGet {
-					s.Handlers.SessionFiles.FileEvents(w, r)
-					return
-				}
-				if strings.Contains(path, "/files/watch") {
-					switch r.Method {
-					case http.MethodPost:
-						s.Handlers.SessionFiles.StartWatching(w, r)
-					case http.MethodDelete:
-						s.Handlers.SessionFiles.StopWatching(w, r)
-					}
-					return
-				}
-				if strings.Contains(path, "/folder/open") && r.Method == http.MethodPost {
-					s.Handlers.SessionFiles.OpenFolder(w, r)
-					return
-				}
-
-				// File-specific routes (with file ID)
-				if strings.Contains(path, "/files/") {
-					if strings.HasSuffix(path, "/download") {
-						s.Handlers.SessionFiles.DownloadFile(w, r)
-						return
-					}
-					if strings.HasSuffix(path, "/relink") && r.Method == http.MethodPost {
-						s.Handlers.SessionFiles.RelinkFile(w, r)
-						return
-					}
-					if r.Method == http.MethodDelete {
-						s.Handlers.SessionFiles.DeleteFile(w, r)
-						return
-					}
-					if r.Method == http.MethodGet {
-						s.Handlers.SessionFiles.GetFile(w, r)
-						return
-					}
-				}
-
-				// List files route
-				if strings.HasSuffix(path, "/files") && r.Method == http.MethodGet {
-					s.Handlers.SessionFiles.ListFiles(w, r)
-					return
-				}
-			}
-
-			// Fall through to session handler
-			s.Handlers.Session.HandleSessions(w, r)
-		})
+		mux.HandleFunc("/api/sessions/", s.Handlers.Session.HandleSessions)
 		mux.HandleFunc("/api/sessions", s.Handlers.Session.HandleSessions)
 
 		// Notes search and bulk operations must be before the wildcard /api/notes/
