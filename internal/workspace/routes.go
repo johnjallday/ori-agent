@@ -74,4 +74,28 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/files/reveal", h.RevealWorkspaceFile)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/files", h.UploadFile)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/files/{relativePath...}", h.ServeFile)
+
+	// Agents: list profiles + in-place model edit (G2e). The /agents/{name}/*
+	// sub-resources are registered separately in server/routes.go; POST/DELETE
+	// /agents fall through to the session handler (add/remove agent).
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agents", h.ListWorkspaceAgentProfiles)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/agents/{name}", h.UpdateWorkspaceAgentModel)
+
+	// Workspace runtime misc (G2e).
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/project/open", h.OpenWorkspaceProject)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/events", h.GetWorkspaceEvents)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/output-dir", h.GetWorkspaceOutputDir)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/output-dir/open", h.OpenWorkspaceOutputDir)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-snapshots", h.ListAgentSnapshots)
+
+	// Directories (G2e). {dirId} is a single segment; ReadDirectoryFile takes a
+	// {filePath...} wildcard for nested files under a directory.
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/directories", h.CreateDirectory)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories", h.ListDirectories)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories/{dirId}", h.GetDirectory)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/directories/{dirId}", h.UpdateDirectory)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/directories/{dirId}", h.UpdateDirectory)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/directories/{dirId}", h.DeleteDirectory)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories/{dirId}/files", h.ListDirectoryFiles)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories/{dirId}/files/{filePath...}", h.ReadDirectoryFile)
 }

@@ -288,3 +288,9 @@
 /api/workspaces/x/files/reveal
 /api/workspaces/x/files/x
 /api/workspaces/x/files/x/y
+# --- directories + agents (G2e) ---
+/api/workspaces/x/directories
+/api/workspaces/x/directories/x
+/api/workspaces/x/directories/x/files
+/api/workspaces/x/directories/x/files/y
+/api/workspaces/x/agents/x

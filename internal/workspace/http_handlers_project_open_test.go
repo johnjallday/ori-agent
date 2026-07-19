@@ -47,6 +47,7 @@ func localProjectOpenRequest(method, workspaceID string, body *bytes.Reader) *ht
 		req = httptest.NewRequest(method, "/api/workspaces/"+workspaceID+"/project/open", body)
 	}
 	req.RemoteAddr = "127.0.0.1:43210"
+	req.SetPathValue("workspaceID", workspaceID)
 	return req
 }
 
@@ -139,11 +140,9 @@ func TestOpenWorkspaceProjectRejectsMethodAndBody(t *testing.T) {
 	called := false
 	handler.openFile = func(string) error { called = true; return nil }
 
-	rr := httptest.NewRecorder()
-	handler.OpenWorkspaceProject(rr, localProjectOpenRequest(http.MethodGet, ws.ID, nil))
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET expected 405, got %d", rr.Code)
-	}
+	// Method rejection (GET, etc.) is enforced by ServeMux (POST-only pattern),
+	// covered by the server golden route-table test.
+	var rr *httptest.ResponseRecorder
 
 	for name, body := range map[string][]byte{
 		"caller path": []byte(`{"path":"outside.rpp"}`),

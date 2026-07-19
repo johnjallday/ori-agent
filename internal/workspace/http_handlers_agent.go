@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -198,18 +197,7 @@ func (h *HTTPHandler) RemoveAgent(w http.ResponseWriter, r *http.Request) {
 // snapshots for. Used by the workspace health UI to distinguish a
 // recoverable "snapshot present" entry agent from a truly missing one.
 func (h *HTTPHandler) ListAgentSnapshots(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 || parts[0] == "" {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -251,18 +239,7 @@ type WorkspaceAgentProfile struct {
 // the model/provider/type for each workspace-local agent that has an on-disk
 // config.json snapshot.
 func (h *HTTPHandler) ListWorkspaceAgentProfiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 || parts[0] == "" {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -308,23 +285,8 @@ type UpdateWorkspaceAgentModelRequest struct {
 // never touches the global agent store: the workspace config.json is the single
 // source of truth for these agents.
 func (h *HTTPHandler) UpdateWorkspaceAgentModel(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 || parts[0] == "" {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-
-	agentName, decodeErr := url.PathUnescape(parts[2])
-	if decodeErr != nil {
-		agentName = parts[2]
-	}
+	workspaceID := r.PathValue("workspaceID")
+	agentName := r.PathValue("name")
 	// Drop any ":instance" suffix — model config is per agent name (slug),
 	// shared by all instances of that agent in the workspace.
 	if idx := strings.Index(agentName, ":"); idx >= 0 {

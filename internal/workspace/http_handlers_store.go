@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -450,18 +449,7 @@ func (h *HTTPHandler) GetStoreNodeStatus(w http.ResponseWriter, r *http.Request)
 // GetWorkspaceOutputDir handles GET /api/workspaces/:id/output-dir
 // Returns the default output directory for a workspace
 func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 1 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -497,18 +485,7 @@ func (h *HTTPHandler) GetWorkspaceOutputDir(w http.ResponseWriter, r *http.Reque
 // (Finder on macOS, Explorer on Windows). Creates the directory if it
 // doesn't exist yet so the user can drop files in immediately.
 func (h *HTTPHandler) OpenWorkspaceOutputDir(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 1 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {

@@ -30,6 +30,7 @@ func TestHTTPHandler_ListAgentSnapshots(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-snap/agent-snapshots", nil)
+	req.SetPathValue("workspaceID", "ws-snap")
 	rec := httptest.NewRecorder()
 	handler.ListAgentSnapshots(rec, req)
 

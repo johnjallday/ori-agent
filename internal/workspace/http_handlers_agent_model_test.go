@@ -38,6 +38,7 @@ func TestHTTPHandler_ListWorkspaceAgentProfiles(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-prof/agents", nil)
+	req.SetPathValue("workspaceID", "ws-prof")
 	rec := httptest.NewRecorder()
 	handler.ListWorkspaceAgentProfiles(rec, req)
 
@@ -69,6 +70,7 @@ func TestHTTPHandler_ListWorkspaceAgentProfiles_UnknownWorkspace(t *testing.T) {
 	handler := NewHTTPHandler(store, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/nope/agents", nil)
+	req.SetPathValue("workspaceID", "nope")
 	rec := httptest.NewRecorder()
 	handler.ListWorkspaceAgentProfiles(rec, req)
 
@@ -110,6 +112,8 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel(t *testing.T) {
 	})
 	// Path uses %20 for the space; net/http decodes URL.Path before our handler.
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/ws-upd/agents/ReaperDAW%20Manager", bytes.NewReader(body))
+	req.SetPathValue("workspaceID", "ws-upd")
+	req.SetPathValue("name", "ReaperDAW Manager")
 	rec := httptest.NewRecorder()
 	handler.UpdateWorkspaceAgentModel(rec, req)
 
@@ -267,6 +271,8 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel_Validation(t *testing.T) {
 	// Missing model -> 400.
 	body, _ := json.Marshal(map[string]string{"llm_provider": "claude"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/ws-val/agents/Manager", bytes.NewReader(body))
+	req.SetPathValue("workspaceID", "ws-val")
+	req.SetPathValue("name", "Manager")
 	rec := httptest.NewRecorder()
 	handler.UpdateWorkspaceAgentModel(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -276,6 +282,8 @@ func TestHTTPHandler_UpdateWorkspaceAgentModel_Validation(t *testing.T) {
 	// Unknown agent -> 404.
 	body, _ = json.Marshal(map[string]string{"model": "m", "llm_provider": "p"})
 	req = httptest.NewRequest(http.MethodPatch, "/api/workspaces/ws-val/agents/Ghost", bytes.NewReader(body))
+	req.SetPathValue("workspaceID", "ws-val")
+	req.SetPathValue("name", "Ghost")
 	rec = httptest.NewRecorder()
 	handler.UpdateWorkspaceAgentModel(rec, req)
 	if rec.Code != http.StatusNotFound {
