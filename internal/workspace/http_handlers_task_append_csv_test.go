@@ -179,7 +179,7 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStorage(t *testing.T) 
 
 	treeReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
 	treeRR := httptest.NewRecorder()
-	handler.GetWorkspaceFilesTree(treeRR, treeReq)
+	handler.GetWorkspaceFilesTree(treeRR, withFilesPath(treeReq))
 	if treeRR.Code != http.StatusOK {
 		t.Fatalf("tree status=%d body=%s", treeRR.Code, treeRR.Body.String())
 	}

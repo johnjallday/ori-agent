@@ -35,15 +35,7 @@ func (h *HTTPHandler) RevealWorkspaceFile(w http.ResponseWriter, r *http.Request
 }
 
 func (h *HTTPHandler) osOpenWorkspaceFile(w http.ResponseWriter, r *http.Request, reveal bool) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	workspaceID, ok := workspaceIDFromWorkspacePath(w, r)
-	if !ok {
-		return
-	}
+	workspaceID := r.PathValue("workspaceID")
 	var req openWorkspaceFileRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return

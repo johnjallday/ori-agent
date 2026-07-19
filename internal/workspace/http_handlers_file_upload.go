@@ -25,19 +25,7 @@ const (
 // UploadFile handles POST /api/workspaces/:id/files
 // Accepts multipart form data with a file and creates an attachment with file metadata.
 func (h *HTTPHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract workspace ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	logger.Debug("Processing workspace file upload", logger.Fields{"workspace_id": workspaceID})
 
@@ -192,20 +180,8 @@ func workspaceFolderFormValue(r *http.Request) (string, bool) {
 // ServeFile handles GET /api/workspaces/:id/files/:filename
 // Serves uploaded files from the workspace files directory.
 func (h *HTTPHandler) ServeFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	// Extract workspace ID and filename from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	relativePath := strings.Join(parts[2:], "/")
+	workspaceID := r.PathValue("workspaceID")
+	relativePath := r.PathValue("relativePath")
 	if unescaped, err := url.PathUnescape(relativePath); err == nil {
 		relativePath = unescaped
 	}

@@ -1052,54 +1052,6 @@ func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if len(parts) == 3 && parts[1] == "files" && parts[2] == "tree" {
-		if r.Method == http.MethodGet {
-			s.Handlers.Workspace.GetWorkspaceFilesTree(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
-	if len(parts) >= 2 && parts[1] == "folders" {
-		switch r.Method {
-		case http.MethodPost:
-			s.Handlers.Workspace.CreateWorkspaceFolder(w, r)
-		case http.MethodPatch, http.MethodPut:
-			s.Handlers.Workspace.UpdateWorkspaceFolder(w, r)
-		case http.MethodDelete:
-			s.Handlers.Workspace.DeleteWorkspaceFolder(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
-	if len(parts) == 3 && parts[1] == "files" && (parts[2] == "open" || parts[2] == "reveal") {
-		if r.Method != http.MethodPost {
-			orihttp.MethodNotAllowed(w)
-			return true
-		}
-		if parts[2] == "open" {
-			s.Handlers.Workspace.OpenWorkspaceFile(w, r)
-		} else {
-			s.Handlers.Workspace.RevealWorkspaceFile(w, r)
-		}
-		return true
-	}
-
-	if strings.Contains(path, "/files") && !strings.Contains(path, "/directories") {
-		switch r.Method {
-		case http.MethodPost:
-			s.Handlers.Workspace.UploadFile(w, r)
-		case http.MethodGet:
-			s.Handlers.Workspace.ServeFile(w, r)
-		default:
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
 	if strings.Contains(path, "/directories") {
 		if strings.Contains(path, "/files/") {
 			s.Handlers.Workspace.ReadDirectoryFile(w, r)

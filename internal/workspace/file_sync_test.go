@@ -447,7 +447,7 @@ func TestGetWorkspaceFilesTreeReconcilesRename(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
 	rr := httptest.NewRecorder()
-	handler.GetWorkspaceFilesTree(rr, req)
+	handler.GetWorkspaceFilesTree(rr, withFilesPath(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}

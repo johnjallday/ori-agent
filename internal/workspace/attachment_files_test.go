@@ -180,7 +180,7 @@ func TestHTTPHandlerServeFileSupportsNestedPaths(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, workspaceFileURL(ws.ID, relativePath), nil)
 	rr := httptest.NewRecorder()
 
-	handler.ServeFile(rr, req)
+	handler.ServeFile(rr, withFilesPath(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -206,7 +206,7 @@ func TestHTTPHandlerServeFileRejectsTraversal(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/../workspace.json", nil)
 	rr := httptest.NewRecorder()
 
-	handler.ServeFile(rr, req)
+	handler.ServeFile(rr, withFilesPath(req))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -237,7 +237,7 @@ func TestHTTPHandlerServeFileRejectsSymlinkEscape(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/escape/secret.txt", nil)
 	rr := httptest.NewRecorder()
 
-	handler.ServeFile(rr, req)
+	handler.ServeFile(rr, withFilesPath(req))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -280,7 +280,7 @@ func TestHTTPHandlerUploadFileStoresBytesInSelectedFolder(t *testing.T) {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rr := httptest.NewRecorder()
 
-	handler.UploadFile(rr, req)
+	handler.UploadFile(rr, withFilesPath(req))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d: %s", rr.Code, rr.Body.String())
 	}

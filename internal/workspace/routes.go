@@ -61,4 +61,17 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/canvas/store-nodes/{nodeId}/status", h.GetStoreNodeStatus)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/canvas/store-nodes/{nodeId}", h.UpdateStoreNode)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/canvas/store-nodes/{nodeId}", h.DeleteStoreNode)
+
+	// Files + folders (G2d). ServeFile takes a {relativePath...} wildcard for
+	// nested file paths; the more-specific literals (/files/tree, /files/open,
+	// /files/reveal) win over it by ServeMux precedence.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/files/tree", h.GetWorkspaceFilesTree)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/folders", h.CreateWorkspaceFolder)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/folders/{folderId}", h.UpdateWorkspaceFolder)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/folders/{folderId}", h.UpdateWorkspaceFolder)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/folders/{folderId}", h.DeleteWorkspaceFolder)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/files/open", h.OpenWorkspaceFile)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/files/reveal", h.RevealWorkspaceFile)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/files", h.UploadFile)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/files/{relativePath...}", h.ServeFile)
 }
