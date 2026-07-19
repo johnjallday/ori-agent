@@ -22,18 +22,7 @@ type CreateDirectoryRequest struct {
 
 // CreateDirectory handles POST /api/workspaces/:id/directories
 func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	var req CreateDirectoryRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -107,18 +96,7 @@ func (h *HTTPHandler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 
 // ListDirectories handles GET /api/workspaces/:id/directories
 func (h *HTTPHandler) ListDirectories(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -138,19 +116,8 @@ func (h *HTTPHandler) ListDirectories(w http.ResponseWriter, r *http.Request) {
 
 // GetDirectory handles GET /api/workspaces/:id/directories/:dir_id
 func (h *HTTPHandler) GetDirectory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	dirID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	dirID := r.PathValue("dirId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -175,19 +142,8 @@ func (h *HTTPHandler) GetDirectory(w http.ResponseWriter, r *http.Request) {
 
 // UpdateDirectory handles PUT /api/workspaces/:id/directories/:dir_id
 func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	dirID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	dirID := r.PathValue("dirId")
 
 	var req struct {
 		Name *string  `json:"name,omitempty"`
@@ -266,19 +222,8 @@ func (h *HTTPHandler) UpdateDirectory(w http.ResponseWriter, r *http.Request) {
 
 // DeleteDirectory handles DELETE /api/workspaces/:id/directories/:dir_id
 func (h *HTTPHandler) DeleteDirectory(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	dirID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	dirID := r.PathValue("dirId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -320,19 +265,8 @@ func (h *HTTPHandler) DeleteDirectory(w http.ResponseWriter, r *http.Request) {
 
 // ListDirectoryFiles handles GET /api/workspaces/:id/directories/:dir_id/files
 func (h *HTTPHandler) ListDirectoryFiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
-	dirID := parts[2]
+	workspaceID := r.PathValue("workspaceID")
+	dirID := r.PathValue("dirId")
 
 	workspace, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -366,21 +300,9 @@ func (h *HTTPHandler) ListDirectoryFiles(w http.ResponseWriter, r *http.Request)
 // ReadDirectoryFile handles GET /api/workspaces/:id/directories/:dir_id/files/*
 // The file path is everything after /files/
 func (h *HTTPHandler) ReadDirectoryFile(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 5 {
-		orihttp.BadRequest(w, "Invalid URL format - file path required")
-		return
-	}
-	workspaceID := parts[0]
-	dirID := parts[2]
-	// Everything after "files/" is the relative file path
-	filePath := strings.Join(parts[4:], "/")
+	workspaceID := r.PathValue("workspaceID")
+	dirID := r.PathValue("dirId")
+	filePath := r.PathValue("filePath")
 
 	if filePath == "" {
 		orihttp.BadRequest(w, "File path is required")

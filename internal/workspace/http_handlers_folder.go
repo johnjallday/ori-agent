@@ -821,16 +821,6 @@ func workspaceFolderHasActiveAttachments(ws *Workspace, folderPath string) bool 
 	return false
 }
 
-func workspaceIDFromWorkspacePath(w http.ResponseWriter, r *http.Request) (string, bool) {
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return "", false
-	}
-	return parts[0], true
-}
-
 func workspaceFolderRouteParts(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	workspaceID := r.PathValue("workspaceID")
 	folderID := strings.TrimSpace(r.PathValue("folderId"))

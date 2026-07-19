@@ -276,14 +276,7 @@ func (h *HTTPHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 // GetWorkspaceEvents handles GET /api/workspaces/:id/events (Server-Sent Events)
 func (h *HTTPHandler) GetWorkspaceEvents(w http.ResponseWriter, r *http.Request) {
-	// Extract workspace ID
-	path := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return
-	}
-	workspaceID := parts[0]
+	workspaceID := r.PathValue("workspaceID")
 
 	// Verify workspace exists
 

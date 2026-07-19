@@ -662,10 +662,10 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)
-		// Workspace runtime routes migrated to explicit Go 1.22 method+patterns.
-		// They are strictly more specific than the /api/workspaces/ subtree above,
-		// so ServeMux dispatches them directly; the rest still flow through
-		// handleWorkspaceAPI -> routeWorkspaceRuntimeRequest until migrated.
+		// All workspace runtime routes are explicit Go 1.22 method+patterns,
+		// strictly more specific than the /api/workspaces/ subtree above, so
+		// ServeMux dispatches them directly. Unmatched requests fall through
+		// handleWorkspaceAPI to the session workspace handler (CRUD, layout).
 		if s.Handlers.Workspace != nil {
 			workspace.RegisterRoutes(mux, s.Handlers.Workspace)
 		}
@@ -984,103 +984,10 @@ func (s *Server) handleWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		s.Handlers.Session.HandleWorkspaceNotes(w, r)
 		return
 	}
-	// Workspace runtime subresources are served only under the canonical
-	// /api/workspaces surface.
-	if s.routeWorkspaceRuntimeRequest(w, r) {
-		return
-	}
-	// Everything else (workspace CRUD, agent add/remove, layout) is served by
-	// the session workspace handler.
+	// Runtime subresources (attachments, tasks, store-nodes, files, folders,
+	// directories, agents, project-open, events, output-dir, ...) are served by
+	// explicit Go 1.22 ServeMux patterns registered via workspace.RegisterRoutes.
+	// Everything else (workspace CRUD, agent add/remove, layout) is served by the
+	// session workspace handler.
 	s.Handlers.Session.HandleWorkspaces(w, r)
-}
-
-func (s *Server) routeWorkspaceRuntimeRequest(w http.ResponseWriter, r *http.Request) bool {
-	path := r.URL.Path
-	if !strings.HasPrefix(path, "/api/workspaces/") {
-		return false
-	}
-	trimmed := strings.TrimPrefix(path, "/api/workspaces/")
-	parts := strings.Split(trimmed, "/")
-
-	// Fixed-target desktop project launch must be claimed before the session
-	// handler's broader /project creation route. The runtime handler enforces
-	// POST, loopback origin, persisted metadata, and filesystem containment.
-	if len(parts) == 3 && parts[1] == "project" && parts[2] == "open" {
-		s.Handlers.Workspace.OpenWorkspaceProject(w, r)
-		return true
-	}
-
-	if strings.HasSuffix(path, "/events") {
-		s.Handlers.Workspace.GetWorkspaceEvents(w, r)
-		return true
-	}
-
-	if strings.HasSuffix(path, "/output-dir") {
-		if r.Method == http.MethodGet {
-			s.Handlers.Workspace.GetWorkspaceOutputDir(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
-	if strings.HasSuffix(path, "/output-dir/open") {
-		if r.Method == http.MethodPost {
-			s.Handlers.Workspace.OpenWorkspaceOutputDir(w, r)
-		} else {
-			orihttp.MethodNotAllowed(w)
-		}
-		return true
-	}
-
-	if strings.HasSuffix(path, "/agent-snapshots") {
-		s.Handlers.Workspace.ListAgentSnapshots(w, r)
-		return true
-	}
-
-	// Workspace-local agent profiles + in-place model editing.
-	//   GET   /api/workspaces/{id}/agents         -> list profiles (model/provider/type)
-	//   PATCH /api/workspaces/{id}/agents/{name}  -> update model + provider
-	// POST/DELETE fall through to the session handler (add/remove agent).
-	if len(parts) >= 2 && parts[1] == "agents" {
-		if len(parts) == 2 && r.Method == http.MethodGet {
-			s.Handlers.Workspace.ListWorkspaceAgentProfiles(w, r)
-			return true
-		}
-		if len(parts) >= 3 && r.Method == http.MethodPatch {
-			s.Handlers.Workspace.UpdateWorkspaceAgentModel(w, r)
-			return true
-		}
-	}
-
-	if strings.Contains(path, "/directories") {
-		if strings.Contains(path, "/files/") {
-			s.Handlers.Workspace.ReadDirectoryFile(w, r)
-		} else if strings.HasSuffix(path, "/files") && r.Method == http.MethodGet {
-			s.Handlers.Workspace.ListDirectoryFiles(w, r)
-		} else if strings.HasSuffix(path, "/directories") {
-			switch r.Method {
-			case http.MethodPost:
-				s.Handlers.Workspace.CreateDirectory(w, r)
-			case http.MethodGet:
-				s.Handlers.Workspace.ListDirectories(w, r)
-			default:
-				orihttp.MethodNotAllowed(w)
-			}
-		} else {
-			switch r.Method {
-			case http.MethodGet:
-				s.Handlers.Workspace.GetDirectory(w, r)
-			case http.MethodPut, http.MethodPatch:
-				s.Handlers.Workspace.UpdateDirectory(w, r)
-			case http.MethodDelete:
-				s.Handlers.Workspace.DeleteDirectory(w, r)
-			default:
-				orihttp.MethodNotAllowed(w)
-			}
-		}
-		return true
-	}
-
-	return false
 }

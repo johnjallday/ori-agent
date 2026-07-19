@@ -22,10 +22,6 @@ var errProjectEntryTargetMissing = errors.New("project entry target is missing")
 // workspace.json and is restricted to local peers because it causes a desktop
 // side effect on the server machine.
 func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
 	if !projectOpenRequestIsLoopback(r) {
 		orihttp.Forbidden(w, "Opening a desktop project requires a local request")
 		return
@@ -35,10 +31,7 @@ func (h *HTTPHandler) OpenWorkspaceProject(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	workspaceID, ok := workspaceIDFromWorkspacePath(w, r)
-	if !ok {
-		return
-	}
+	workspaceID := r.PathValue("workspaceID")
 	if h.folderResolver == nil || h.folderWorkspaceResolver == nil {
 		orihttp.ServiceUnavailable(w, "Workspace folder storage is unavailable")
 		return
