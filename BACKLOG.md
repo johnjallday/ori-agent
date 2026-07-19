@@ -24,7 +24,7 @@ Conventions, all optional: date prefix (`2026-07-18 …`), `!` = I really want t
 - 2026-07-19 Template: Client Ops (CRM-lite) — per-client notes, follow-up cadence, invoice reminders for freelancers
 
 ## Doing
-- Mail workspace spin-off PRD (2A: new builtin starter template; 3A: brief/journal/follow-up surfacing stay in HQ; 4A: email station → portal) — next up
+- Email Ops workspace spin-off → PRD at tasks/prd-email-ops-workspace.md (template Email Ops; personal-ops v5 drops Inbox; station → portal; follow-ups re-keyed) — task list next
 
 ## Shipped / dropped
 - 2026-07-19 HQ cross-workspace visibility (hq_overview + Watchtower) — PR #240 merged to dev; post-merge live demo verified (badge/panel/navigation/all-clear + Chief hq_overview call on local model)
