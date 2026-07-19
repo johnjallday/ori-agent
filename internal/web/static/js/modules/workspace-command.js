@@ -66,7 +66,8 @@ export class WorkspaceCommandView {
     // URL/history restoration (group 6): read the URL once at boot. `mode`
     // wins over the localStorage preference (FR85); panel/task/agent/run are
     // held pending until page data is available to sanitize against (FR91).
-    this._urlBootState = typeof window !== 'undefined' ? parseWorkspaceURLState(window.location.search) : null;
+    this._urlBootState =
+      typeof window !== 'undefined' ? parseWorkspaceURLState(window.location.search) : null;
     this._urlStateApplied = false;
     this._urlSyncEnabled = false;
     this._lastSyncedURLState = null;
@@ -338,7 +339,11 @@ export class WorkspaceCommandView {
     if (typeof document === 'undefined') return null;
     const active = document.activeElement;
     if (!active || typeof active.getAttribute !== 'function') return null;
-    for (const attr of ['data-cmd-map-select-agent', 'data-cmd-drawer-select', 'data-cmd-open-task-drawer']) {
+    for (const attr of [
+      'data-cmd-map-select-agent',
+      'data-cmd-drawer-select',
+      'data-cmd-open-task-drawer'
+    ]) {
       const value = active.getAttribute(attr);
       if (value) return '[' + attr + '="' + value.replace(/"/g, '\\"') + '"]';
     }
@@ -396,7 +401,10 @@ export class WorkspaceCommandView {
   handlePopState(event) {
     if (!this._urlSyncEnabled) return;
     const context = this.urlStateContext();
-    const { state } = sanitizeWorkspaceURLState(parseWorkspaceURLState(window.location.search), context);
+    const { state } = sanitizeWorkspaceURLState(
+      parseWorkspaceURLState(window.location.search),
+      context
+    );
     this._lastSyncedURLState = state;
 
     const effectiveMode = resolveEffectiveMode(state.mode, this.viewMode, this.viewMode);
@@ -417,9 +425,14 @@ export class WorkspaceCommandView {
       el.hidden = false;
       this.renderTaskDrawerBody();
       const list = el.querySelector('.ws-cmd-drawer-list');
-      if (list && typeof historyState.drawerScroll === 'number') list.scrollTop = historyState.drawerScroll;
+      if (list && typeof historyState.drawerScroll === 'number')
+        list.scrollTop = historyState.drawerScroll;
     }
-    if (historyState.focusSelector && this.container && typeof this.container.querySelector === 'function') {
+    if (
+      historyState.focusSelector &&
+      this.container &&
+      typeof this.container.querySelector === 'function'
+    ) {
       const target = this.container.querySelector(historyState.focusSelector);
       if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
     }
@@ -1246,6 +1259,8 @@ export class WorkspaceCommandView {
 
   statSectionMeta(section) {
     switch (String(section || '')) {
+      case 'watchtower':
+        return { title: 'Watchtower', addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -1587,6 +1602,7 @@ export class WorkspaceCommandView {
   statModalHTML(section) {
     const meta = this.statSectionMeta(section);
     if (!meta) return '';
+    if (section === 'watchtower') return this.watchtowerPanelHTML();
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
     // Find Tools discovery flow behind one tabbed surface.
     if (section === 'tools') {
@@ -1811,7 +1827,9 @@ export class WorkspaceCommandView {
           skillCount = (sk && sk.count) || 0;
         }
         const chips =
-          (keeper ? '<span class="ws-cmd-mchip is-keeper">★ ' + escapeHtml(commanderLbl) + '</span>' : '') +
+          (keeper
+            ? '<span class="ws-cmd-mchip is-keeper">★ ' + escapeHtml(commanderLbl) + '</span>'
+            : '') +
           '<span class="ws-cmd-mchip">' +
           escapeHtml(modelLabel || '—') +
           '</span>' +
@@ -1969,6 +1987,22 @@ export class WorkspaceCommandView {
     const a = String(action || '');
     if (a === 'close') {
       this.closeStatModal();
+      return;
+    }
+    if (a === 'refresh-watchtower' && section === 'watchtower') {
+      this.requestWatchtowerData(true);
+      this.renderStatModalBody();
+      return;
+    }
+    if (a === 'open-watchtower-workspace' && section === 'watchtower') {
+      const workspaceID = String(id || '').trim();
+      if (!workspaceID) return;
+      this.closeStatModal();
+      const target = '/workspaces/' + encodeURIComponent(workspaceID);
+      if (typeof window !== 'undefined' && window.location) {
+        if (typeof window.location.assign === 'function') window.location.assign(target);
+        else window.location.href = target;
+      }
       return;
     }
     if (a === 'toggle-task-filter' && section === 'tasks') {
@@ -2234,7 +2268,9 @@ export class WorkspaceCommandView {
   // Display only — entry-agent mechanics, storage keys (entry_agent_name),
   // and coordinator resolution are unchanged.
   commanderLabel(role) {
-    return String(role || '').trim().toLowerCase() === 'orchestrator'
+    return String(role || '')
+      .trim()
+      .toLowerCase() === 'orchestrator'
       ? 'Commander'
       : 'Acting Commander';
   }
@@ -2462,7 +2498,9 @@ export class WorkspaceCommandView {
     const detailAction = target
       ? '<a class="ws-cmd-agent-action" href="' + escapeHtml(target.href) + '">Open Agent</a>'
       : '';
-    const commanderLbl = agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '';
+    const commanderLbl = agent.entry
+      ? this.commanderLabel(agent.profile && agent.profile.role)
+      : '';
     const entry = agent.entry
       ? '<span class="ws-cmd-badge is-keeper">★ ' + escapeHtml(commanderLbl) + '</span>'
       : '';
@@ -3209,9 +3247,7 @@ export class WorkspaceCommandView {
                 escapeHtml(label) +
                 '"><i class="bi bi-play-fill" aria-hidden="true"></i><span>Start</span></button>'
               : '';
-            return (
-              '<div class="ws-cmd-map-task-row-wrap">' + openButton + startButton + '</div>'
-            );
+            return '<div class="ws-cmd-map-task-row-wrap">' + openButton + startButton + '</div>';
           })
           .join('')
       : '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest log clear</strong><span>No active objectives assigned.</span></div>';
@@ -3315,7 +3351,8 @@ export class WorkspaceCommandView {
 
   ensureTaskDrawer() {
     if (this.taskDrawerEl) return this.taskDrawerEl;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
     const el = document.createElement('aside');
     el.className = 'ws-cmd-drawer';
     el.setAttribute('role', 'region');
@@ -3360,7 +3397,9 @@ export class WorkspaceCommandView {
   reconcileDrawerSelection() {
     this._drawerAnnounce = '';
     if (!this.taskDrawerSelectedId) return;
-    const stillHere = this.drawerTasks().some(t => String(t.id || '') === this.taskDrawerSelectedId);
+    const stillHere = this.drawerTasks().some(
+      t => String(t.id || '') === this.taskDrawerSelectedId
+    );
     if (stillHere) return;
     this._drawerAnnounce = 'The selected task is no longer available.';
     const next = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
@@ -3577,7 +3616,8 @@ export class WorkspaceCommandView {
       typeof window !== 'undefined' &&
       window.workspaceRealtime &&
       typeof window.workspaceRealtime.subscribeToWorkspace === 'function'
-        ? (workspaceId, handler) => window.workspaceRealtime.subscribeToWorkspace(workspaceId, handler)
+        ? (workspaceId, handler) =>
+            window.workspaceRealtime.subscribeToWorkspace(workspaceId, handler)
         : null;
     this.execController = new WorkspaceExecutionController({
       workspaceId: wsId,
@@ -3635,7 +3675,8 @@ export class WorkspaceCommandView {
 
   ensureTray() {
     if (this.trayEl) return this.trayEl;
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return null;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
     const el = document.createElement('section');
     el.className = 'ws-cmd-tray';
     el.setAttribute('role', 'region');
@@ -3685,7 +3726,8 @@ export class WorkspaceCommandView {
 
   trayElapsedLabel(run) {
     if (!run || !run.startedAt) return '';
-    const end = run.phase === RUN_PHASE.SETTLED && run.lastActivityAt ? run.lastActivityAt : Date.now();
+    const end =
+      run.phase === RUN_PHASE.SETTLED && run.lastActivityAt ? run.lastActivityAt : Date.now();
     const secs = Math.max(0, Math.round((end - run.startedAt) / 1000));
     if (secs < 60) return secs + 's';
     const mins = Math.floor(secs / 60);
@@ -3718,9 +3760,9 @@ export class WorkspaceCommandView {
       return;
     }
     if (typeof fetch === 'function') {
-      fetch('/api/orchestration/tasks/' + encodeURIComponent(id) + '/cancel', { method: 'POST' }).catch(
-        () => {}
-      );
+      fetch('/api/orchestration/tasks/' + encodeURIComponent(id) + '/cancel', {
+        method: 'POST'
+      }).catch(() => {});
     }
   }
 
@@ -3749,7 +3791,8 @@ export class WorkspaceCommandView {
     const title = String(task.description || task.name || task.title || run.taskId);
     const assignee = pres.assignee || 'Unassigned';
     const elapsed = this.trayElapsedLabel(run);
-    const lastActivity = run.activity && run.activity.length ? run.activity[run.activity.length - 1] : null;
+    const lastActivity =
+      run.activity && run.activity.length ? run.activity[run.activity.length - 1] : null;
     const activityText = lastActivity ? String(lastActivity.label || lastActivity.state || '') : '';
     const others = c.getRuns().filter(r => r.taskId !== run.taskId);
     const attention = c.getAttentionRuns().length;
@@ -3789,7 +3832,9 @@ export class WorkspaceCommandView {
           ? '<div class="ws-cmd-tray-collapsed-activity">' + escapeHtml(activityText) + '</div>'
           : '') +
         (attention
-          ? '<div class="ws-cmd-tray-attention">' + escapeHtml(String(attention)) + ' need attention</div>'
+          ? '<div class="ws-cmd-tray-attention">' +
+            escapeHtml(String(attention)) +
+            ' need attention</div>'
           : '')
       );
     }
@@ -3828,7 +3873,12 @@ export class WorkspaceCommandView {
       (run.activity && run.activity.length
         ? run.activity
             .slice(-8)
-            .map(a => '<div class="ws-cmd-tray-log-line">' + escapeHtml(String(a.label || a.state || '')) + '</div>')
+            .map(
+              a =>
+                '<div class="ws-cmd-tray-log-line">' +
+                escapeHtml(String(a.label || a.state || '')) +
+                '</div>'
+            )
             .join('')
         : '<div class="ws-cmd-tray-log-line is-muted">Starting…</div>') +
       '</div>';
@@ -3851,7 +3901,9 @@ export class WorkspaceCommandView {
         '" data-cmd-tray-cancel="' +
         escapeHtml(run.taskId) +
         '">' +
-        (this._trayCancelArmed === run.taskId ? 'Confirm cancel “' + escapeHtml(title.slice(0, 20)) + '”' : 'Cancel') +
+        (this._trayCancelArmed === run.taskId
+          ? 'Confirm cancel “' + escapeHtml(title.slice(0, 20)) + '”'
+          : 'Cancel') +
         '</button>'
       : '';
 
@@ -3889,9 +3941,17 @@ export class WorkspaceCommandView {
 
   // Data-driven HQ station registry (FR9): an ordered list of descriptors.
   // Adding a future station (Daily Brief, Follow-ups, Journal) means adding
-  // one entry here — no new rendering plumbing. v1 ships Email only.
+  // one entry here — no new rendering plumbing. Watchtower comes first so the
+  // HQ's cross-workspace attention signal is the most visible station.
   hqStationRegistry() {
     return [
+      {
+        key: 'watchtower',
+        label: 'Watchtower',
+        icon: 'bi-binoculars',
+        state: () => this.hqWatchtowerStationState(),
+        action: trigger => this.openWatchtowerPanel(trigger)
+      },
       {
         key: 'email',
         label: 'Email',
@@ -3916,6 +3976,250 @@ export class WorkspaceCommandView {
     return { value: 'Set up Email', description: 'not set up' };
   }
 
+  // Returns the active HQ workspace id without trusting a stale page-level
+  // workspaceId. The Watchtower API uses this id as a server-side HQ gate.
+  watchtowerWorkspaceID() {
+    const ws = (this.page && this.page.workspace) || {};
+    return String(ws.id || (this.page && this.page.workspaceId) || '').trim();
+  }
+
+  // Normalized in-memory state for the Watchtower's one read-only endpoint.
+  // It stays scoped to the current HQ id so a page reuse can never briefly
+  // render another workspace's attention queue.
+  watchtowerState() {
+    const workspaceID = this.watchtowerWorkspaceID();
+    if (!this._watchtower || this._watchtower.workspaceID !== workspaceID) {
+      this._watchtower = {
+        workspaceID,
+        status: 'idle',
+        items: [],
+        gaps: [],
+        error: ''
+      };
+    }
+    return this._watchtower;
+  }
+
+  // The station's compact state is rendered on both the Map structure and the
+  // Details Stations rail. Start the fetch only while the command view is
+  // active; this keeps pure render helpers side-effect free in tests.
+  hqWatchtowerStationState() {
+    const state = this.watchtowerState();
+    if (state.status === 'idle' && this.active) this.requestWatchtowerData();
+    switch (state.status) {
+      case 'loading':
+        return { value: 'Scanning…', description: 'loading attention queue', tone: 'loading' };
+      case 'error':
+        return {
+          value: 'Unavailable',
+          description: 'attention queue unavailable',
+          tone: 'degraded'
+        };
+      case 'ready': {
+        const count = state.items.length;
+        return count
+          ? {
+              value: count + (count === 1 ? ' signal' : ' signals'),
+              description:
+                count + (count === 1 ? ' item needs attention' : ' items need attention'),
+              tone: 'attention'
+            }
+          : {
+              value: 'All clear',
+              description: 'no cross-workspace attention items',
+              tone: 'clear'
+            };
+      }
+      default:
+        return { value: 'Scanning…', description: 'loading attention queue', tone: 'loading' };
+    }
+  }
+
+  // Fetch the bounded Watchtower projection once for the active HQ. A request
+  // token ignores slow stale responses after a workspace switch or retry.
+  requestWatchtowerData(force = false) {
+    if (!this.isPersonalHQ()) return;
+    const state = this.watchtowerState();
+    if (!state.workspaceID) return;
+    if (state.status === 'loading') return;
+    if (!force && state.status === 'ready') return;
+    if (force) {
+      state.items = [];
+      state.gaps = [];
+      state.error = '';
+    }
+    if (typeof fetch !== 'function') {
+      state.status = 'error';
+      state.error = 'Watchtower is unavailable in this browser.';
+      return;
+    }
+
+    state.status = 'loading';
+    const requestID = (this._watchtowerRequestID || 0) + 1;
+    this._watchtowerRequestID = requestID;
+    const endpoint =
+      '/api/personal-hq/watchtower?workspace_id=' + encodeURIComponent(state.workspaceID);
+
+    Promise.resolve(fetch(endpoint))
+      .then(async response => {
+        if (!response || !response.ok) {
+          throw new Error('Watchtower request failed' + (response ? ': ' + response.status : ''));
+        }
+        return response.json();
+      })
+      .then(payload => {
+        if (this._watchtowerRequestID !== requestID) return;
+        const current = this.watchtowerState();
+        if (current.workspaceID !== state.workspaceID) return;
+        current.status = 'ready';
+        current.items = Array.isArray(payload && payload.items) ? payload.items : [];
+        current.gaps = Array.isArray(payload && payload.gaps) ? payload.gaps : [];
+        current.error = '';
+        this.refreshWatchtowerSurface();
+      })
+      .catch(error => {
+        if (this._watchtowerRequestID !== requestID) return;
+        const current = this.watchtowerState();
+        if (current.workspaceID !== state.workspaceID) return;
+        current.status = 'error';
+        current.error = error && error.message ? error.message : 'Watchtower could not be loaded.';
+        this.refreshWatchtowerSurface();
+      });
+  }
+
+  refreshWatchtowerSurface() {
+    if (this.active) {
+      this.render();
+    } else if (this.statModalSection === 'watchtower') {
+      this.renderStatModalBody();
+    }
+  }
+
+  openWatchtowerPanel(trigger) {
+    const state = this.watchtowerState();
+    this.requestWatchtowerData(state.status === 'error');
+    this.openStatModal('watchtower', trigger);
+  }
+
+  watchtowerRelativeTime(timestamp) {
+    const when = Date.parse(String(timestamp || ''));
+    if (!Number.isFinite(when)) return 'time unknown';
+    const seconds = Math.max(0, Math.floor((Date.now() - when) / 1000));
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    if (seconds < 604800) return Math.floor(seconds / 86400) + 'd ago';
+    return new Date(when).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  watchtowerSeverityIcon(severity) {
+    switch (String(severity || '').toLowerCase()) {
+      case 'failed':
+      case 'timeout':
+        return 'bi-x-octagon-fill';
+      case 'critical':
+        return 'bi-exclamation-triangle-fill';
+      case 'waiting_for_choice':
+        return 'bi-question-diamond-fill';
+      case 'scheduled_failure':
+        return 'bi-clock-history';
+      case 'high':
+        return 'bi-arrow-up-circle-fill';
+      default:
+        return 'bi-dot';
+    }
+  }
+
+  watchtowerGroups(items) {
+    const groups = [];
+    const byWorkspace = new Map();
+    (Array.isArray(items) ? items : []).forEach(item => {
+      const workspaceID = String(item && item.workspace_id ? item.workspace_id : '').trim();
+      const workspaceName =
+        String((item && item.workspace_name) || 'Workspace').trim() || 'Workspace';
+      const key = workspaceID || workspaceName;
+      if (!byWorkspace.has(key)) {
+        const group = { workspaceID, workspaceName, items: [] };
+        byWorkspace.set(key, group);
+        groups.push(group);
+      }
+      byWorkspace.get(key).items.push(item || {});
+    });
+    return groups;
+  }
+
+  watchtowerItemHTML(item) {
+    const workspaceID = String(item.workspace_id || '').trim();
+    const severity = String(item.severity || 'attention').trim();
+    const title = String(item.title || 'Attention item').trim() || 'Attention item';
+    const description = String(item.description || '').trim();
+    const descriptionHTML =
+      description && description !== title
+        ? '<span class="ws-cmd-watchtower-item-detail">' + escapeHtml(description) + '</span>'
+        : '';
+    return (
+      '<button type="button" class="ws-cmd-watchtower-item is-' +
+      escapeHtml(severity.toLowerCase()) +
+      '" data-cmd-modal-action="open-watchtower-workspace" data-cmd-id="' +
+      escapeHtml(workspaceID) +
+      '" aria-label="Open ' +
+      escapeHtml(title) +
+      ' in ' +
+      escapeHtml(String(item.workspace_name || 'workspace')) +
+      '"><span class="ws-cmd-watchtower-item-icon"><i class="bi ' +
+      escapeHtml(this.watchtowerSeverityIcon(severity)) +
+      '" aria-hidden="true"></i></span><span class="ws-cmd-watchtower-item-main"><span class="ws-cmd-watchtower-item-title">' +
+      escapeHtml(title) +
+      '</span>' +
+      descriptionHTML +
+      '</span><time class="ws-cmd-watchtower-item-time" datetime="' +
+      escapeHtml(String(item.timestamp || '')) +
+      '">' +
+      escapeHtml(this.watchtowerRelativeTime(item.timestamp)) +
+      '</time></button>'
+    );
+  }
+
+  watchtowerPanelHTML() {
+    const state = this.watchtowerState();
+    let content = '';
+    if (state.status === 'loading' || state.status === 'idle') {
+      content = this.modalEmptyHTML('Scanning workspaces for attention signals…');
+    } else if (state.status === 'error') {
+      content =
+        '<div class="ws-cmd-watchtower-degraded" role="status"><i class="bi bi-exclamation-diamond" aria-hidden="true"></i><p>Watchtower could not refresh. The map remains available.</p><button type="button" data-cmd-modal-action="refresh-watchtower">Retry scan</button></div>';
+    } else if (!state.items.length) {
+      content =
+        '<div class="ws-cmd-watchtower-all-clear"><i class="bi bi-shield-check" aria-hidden="true"></i><strong>All clear</strong><span>No waiting decisions, failed runs, or high-priority findings across your workspaces.</span></div>';
+    } else {
+      content = this.watchtowerGroups(state.items)
+        .map(
+          group =>
+            '<section class="ws-cmd-watchtower-group"><header><span>' +
+            escapeHtml(group.workspaceName) +
+            '</span><strong>' +
+            group.items.length +
+            '</strong></header><div class="ws-cmd-watchtower-items">' +
+            group.items.map(item => this.watchtowerItemHTML(item)).join('') +
+            '</div></section>'
+        )
+        .join('');
+    }
+    const gaps = state.gaps.length
+      ? '<aside class="ws-cmd-watchtower-gaps" role="status"><strong>Partial signal</strong><ul>' +
+        state.gaps.map(gap => '<li>' + escapeHtml(gap) + '</li>').join('') +
+        '</ul></aside>'
+      : '';
+    return (
+      '<header class="ws-cmd-modal-head is-watchtower"><div><h3 class="ws-cmd-modal-title">Watchtower</h3><span class="ws-cmd-watchtower-kicker">Cross-workspace attention queue</span></div><span class="ws-cmd-modal-count">' +
+      (state.status === 'ready' ? state.items.length : '—') +
+      '</span><div class="ws-cmd-modal-head-actions"><button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Watchtower">×</button></div></header><div class="ws-cmd-modal-body ws-cmd-watchtower-body">' +
+      gaps +
+      content +
+      '</div>'
+    );
+  }
+
   // Default map slot for a station with no saved position (FR7): a
   // deterministic stack down the field's right edge, in registry order. Values
   // are fractional (0–1) so first render needs no persistence and survives any
@@ -3935,8 +4239,7 @@ export class WorkspaceCommandView {
     const index = registry.findIndex(entry => entry.key === key);
     const fallback = this.hqStationDefaultPosition(index);
     const layout = (this.page && this.page.workspace && this.page.workspace.layout) || null;
-    const saved =
-      layout && layout.station_positions ? layout.station_positions[key] : null;
+    const saved = layout && layout.station_positions ? layout.station_positions[key] : null;
     if (!saved) return fallback;
     if (!Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) {
       return fallback;
@@ -3960,7 +4263,9 @@ export class WorkspaceCommandView {
           ? '<i class="bi ' + escapeHtml(station.icon) + '" aria-hidden="true"></i>'
           : '';
         return (
-          '<button type="button" class="ws-cmd-map-hq-station" data-cmd-hq-station="' +
+          '<button type="button" class="ws-cmd-map-hq-station' +
+          (state.tone ? ' is-' + escapeHtml(state.tone) : '') +
+          '" data-cmd-hq-station="' +
           escapeHtml(station.key) +
           '" style="--station-x:' +
           (pos.x * 100).toFixed(2) +
@@ -3983,9 +4288,9 @@ export class WorkspaceCommandView {
   }
 
   // Dispatches a click on an HQ station button to its registry action.
-  runHQStationAction(stationKey) {
+  runHQStationAction(stationKey, trigger) {
     const station = this.hqStationRegistry().find(entry => entry.key === stationKey);
-    if (station && typeof station.action === 'function') station.action();
+    if (station && typeof station.action === 'function') station.action(trigger);
   }
 
   // HQ-gated "Stations" rail panel for Details mode (FR14): one row per
@@ -4098,7 +4403,9 @@ export class WorkspaceCommandView {
     const drag = this._stationDrag;
     if (!drag) return;
     if (!drag.moved) {
-      if (!this.stationDragExceedsThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+      if (
+        !this.stationDragExceedsThreshold(event.clientX - drag.startX, event.clientY - drag.startY)
+      ) {
         return;
       }
       // Cross the threshold once: enter drag mode. The .is-dragging class is a
@@ -4115,7 +4422,11 @@ export class WorkspaceCommandView {
     }
     const world = this.container && this.container.querySelector('.ws-cmd-map-world');
     if (!world || typeof world.getBoundingClientRect !== 'function') return;
-    const frac = this.stationPointToFraction(event.clientX, event.clientY, world.getBoundingClientRect());
+    const frac = this.stationPointToFraction(
+      event.clientX,
+      event.clientY,
+      world.getBoundingClientRect()
+    );
     drag.lastFraction = frac;
     // Move the structure directly via its custom props — no re-render.
     drag.el.style.setProperty('--station-x', (frac.x * 100).toFixed(2) + '%');
@@ -4199,11 +4510,15 @@ export class WorkspaceCommandView {
     const selected = agent.key === this.selectedAgentKey;
     const destination = agent.destination || 'hub';
     const statusLabel = agent.status?.label || 'Idle';
-    const commanderLbl = agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '';
+    const commanderLbl = agent.entry
+      ? this.commanderLabel(agent.profile && agent.profile.role)
+      : '';
     // Station title (design consideration): pair role with the workspace it's
     // stationed in, e.g. "Commander · Reaper Studio" — this is how
     // domain-specialized identity is displayed without existing in the catalog.
-    const wsName = String((this.page && this.page.workspace && this.page.workspace.name) || '').trim();
+    const wsName = String(
+      (this.page && this.page.workspace && this.page.workspace.name) || ''
+    ).trim();
     const stationTitle = commanderLbl && wsName ? commanderLbl + ' · ' + wsName : commanderLbl;
     const entryBadge =
       agent.entry && !commandNode
@@ -4279,7 +4594,9 @@ export class WorkspaceCommandView {
   // records — agentGroups() already dedupes and drops unassigned (FR69).
   commandNodeOrchestrationCopy(specialistCount) {
     if (specialistCount <= 0) return 'No specialist agents yet';
-    return 'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's');
+    return (
+      'Routes work to ' + specialistCount + ' specialist agent' + (specialistCount === 1 ? '' : 's')
+    );
   }
 
   renderMapAgentUnits(agents) {
@@ -5374,7 +5691,7 @@ export class WorkspaceCommandView {
           this._suppressStationClick = false;
           return;
         }
-        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
+        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'), hqStation);
         return;
       }
       const systemTab = event.target.closest('[data-cmd-map-system-tab]');
@@ -6563,7 +6880,7 @@ export class WorkspaceCommandView {
       // generic section buttons since these carry no data-cmd-*-section attr.
       const hqStation = event.target.closest('[data-cmd-hq-station]');
       if (hqStation) {
-        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'));
+        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'), hqStation);
         return;
       }
       const systemTab = event.target.closest('[data-cmd-system-tab]');

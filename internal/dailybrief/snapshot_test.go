@@ -41,6 +41,39 @@ func (f *fakeSessionSource) ListSessions(ctx context.Context, filter *session.Se
 	return items, nil
 }
 
+// slimListingWorkspaceSource models the SQLite workspace list path, which
+// returns enough metadata for navigation but omits the heavier orchestration
+// payloads. Get still returns the complete record.
+type slimListingWorkspaceSource struct {
+	full map[string]*workspace.Workspace
+}
+
+func (s slimListingWorkspaceSource) Get(id string) (*workspace.Workspace, error) {
+	ws, ok := s.full[id]
+	if !ok {
+		return nil, errors.New("workspace not found")
+	}
+	return ws, nil
+}
+
+func (s slimListingWorkspaceSource) ListActive() ([]*workspace.Workspace, error) {
+	items := make([]*workspace.Workspace, 0, len(s.full))
+	for _, full := range s.full {
+		if full == nil || full.Status != workspace.StatusActive {
+			continue
+		}
+		items = append(items, &workspace.Workspace{
+			ID:          full.ID,
+			Name:        full.Name,
+			Kind:        full.Kind,
+			Status:      full.Status,
+			OwnerUserID: full.OwnerUserID,
+			CreatedAt:   full.CreatedAt,
+		})
+	}
+	return items, nil
+}
+
 func newTestWorkspace(id, name, kind string, status workspace.WorkspaceStatus, owner string) *workspace.Workspace {
 	return &workspace.Workspace{
 		ID: id, Name: name, Kind: kind, Status: status, OwnerUserID: owner,
@@ -131,6 +164,79 @@ func TestBuildSnapshot_FutureWorkspaceInclusion(t *testing.T) {
 	snap = BuildSnapshot(context.Background(), SnapshotSources{Workspaces: store}, cfgWithFuture, "local", time.Now())
 	if len(snap.Workspaces) != 2 {
 		t.Fatalf("expected both workspaces when future inclusion is on, got %+v", snap.Workspaces)
+	}
+}
+
+func TestBuildAllScopeSnapshot_IncludesCurrentEligibleWorkspacesRegardlessOfSavedConfigTime(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	now := time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)
+
+	hq := newTestWorkspace("ws-hq", "Personal HQ", "workspace", workspace.StatusActive, "local")
+	hq.CreatedAt = now.Add(-48 * time.Hour)
+	if err := store.Save(hq); err != nil {
+		t.Fatalf("save HQ workspace: %v", err)
+	}
+
+	newWorkspace := newTestWorkspace("ws-new", "Created Later", "workspace", workspace.StatusActive, "local")
+	newWorkspace.CreatedAt = now.Add(-time.Hour)
+	if err := store.Save(newWorkspace); err != nil {
+		t.Fatalf("save later workspace: %v", err)
+	}
+
+	group := newTestWorkspace("ws-group", "Group", "group", workspace.StatusActive, "local")
+	if err := store.Save(group); err != nil {
+		t.Fatalf("save group: %v", err)
+	}
+	inactive := newTestWorkspace("ws-inactive", "Inactive", "workspace", workspace.StatusTrashed, "local")
+	if err := store.Save(inactive); err != nil {
+		t.Fatalf("save inactive: %v", err)
+	}
+	otherOwner := newTestWorkspace("ws-other", "Someone Else", "workspace", workspace.StatusActive, "other-user")
+	if err := store.Save(otherOwner); err != nil {
+		t.Fatalf("save other-owner workspace: %v", err)
+	}
+
+	snap := BuildAllScopeSnapshot(context.Background(), SnapshotSources{Workspaces: store}, "local", now)
+	ids := map[string]bool{}
+	for _, ws := range snap.Workspaces {
+		ids[ws.WorkspaceID] = true
+	}
+	if !ids["ws-hq"] || !ids["ws-new"] || len(ids) != 2 {
+		t.Fatalf("all-scope snapshot should include only the HQ and later eligible workspace, got %#v", ids)
+	}
+}
+
+func TestBuildAllScopeSnapshot_HydratesAllScopeWorkspacePayloads(t *testing.T) {
+	now := time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)
+	full := newTestWorkspace("ws-1", "Attention", "workspace", workspace.StatusActive, "local")
+	full.Tasks = []workspace.Task{{
+		ID:          "task-failed",
+		WorkspaceID: "ws-1",
+		Description: "Resolve the release blocker",
+		Status:      workspace.TaskStatusFailed,
+		CreatedAt:   now.Add(-time.Hour),
+	}}
+	full.ScheduledTasks = []workspace.ScheduledTask{{
+		ID:           "nightly-sync",
+		WorkspaceID:  "ws-1",
+		Name:         "Nightly sync",
+		FailureCount: 2,
+		LastError:    "remote unavailable",
+		UpdatedAt:    now.Add(-30 * time.Minute),
+	}}
+
+	snap := BuildAllScopeSnapshot(context.Background(), SnapshotSources{
+		Workspaces: slimListingWorkspaceSource{full: map[string]*workspace.Workspace{"ws-1": full}},
+	}, "local", now)
+	if len(snap.Workspaces) != 1 {
+		t.Fatalf("expected one workspace, got %+v", snap.Workspaces)
+	}
+	got := snap.Workspaces[0]
+	if len(got.OpenTasks) != 1 || got.OpenTasks[0].Ref.EntityID != "task-failed" {
+		t.Fatalf("expected hydrated failed task, got %+v", got.OpenTasks)
+	}
+	if len(got.ScheduledTasks) != 1 || got.ScheduledTasks[0].Ref.EntityID != "nightly-sync" {
+		t.Fatalf("expected hydrated scheduled task, got %+v", got.ScheduledTasks)
 	}
 }
 

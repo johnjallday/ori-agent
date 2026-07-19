@@ -76,7 +76,11 @@ type Handler struct {
 	// authorized agents in chat (see SetMailboxAccess).
 	mailboxAccess MailboxAccess
 	// mailDrafter, when set, enables the mail_draft_reply tool in chat.
-	mailDrafter  MailDrafter
+	mailDrafter MailDrafter
+	// hqVisibility supplies the live read-only dependencies for Personal HQ
+	// cross-workspace tools. It remains unset on minimal/test handlers, which
+	// keeps those optional tools hidden.
+	hqVisibility HQVisibilityDeps
 	evolutionSvc interface {
 		AwardMessageXP(agentName string, tokenCount int, userMessage string) error
 	}
@@ -152,6 +156,16 @@ func (h *Handler) SetWorkspaceStore(ws workspace.Store) {
 // SetFileStore sets the folder-based workspace store for syncing notes to disk.
 func (h *Handler) SetFileStore(fs *workspace.FileStore) {
 	h.fileStore = fs
+}
+
+// SetHQVisibilityDeps wires the live read-only inputs used when workspace chat
+// is on a designated Personal HQ. The closures are resolved only when a tool
+// runs so builder ordering cannot leave a stale store behind.
+func (h *Handler) SetHQVisibilityDeps(deps HQVisibilityDeps) {
+	if h == nil {
+		return
+	}
+	h.hqVisibility = deps
 }
 
 // SetMailboxAccess wires the Personal HQ mailbox access boundary so authorized

@@ -252,7 +252,25 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 		candidates = all
 	}
 
-	for _, ws := range candidates {
+	for _, candidate := range candidates {
+		ws := candidate
+		// SQLite's ListActive path deliberately returns a lean workspace record
+		// without orchestration payloads such as tasks and schedules. Hydrate
+		// all-scope candidates before building the projection so callers such as
+		// Watchtower cannot mistake an omitted payload for a quiet workspace.
+		// Selected scope already loaded each full record above.
+		if cfg.Scope == ScopeAll {
+			fullWorkspace, err := sources.Workspaces.Get(candidate.ID)
+			if err != nil || fullWorkspace == nil {
+				name := strings.TrimSpace(candidate.Name)
+				if name == "" {
+					name = candidate.ID
+				}
+				snap.Gaps = append(snap.Gaps, fmt.Sprintf("workspace %s is unavailable", name))
+				continue
+			}
+			ws = fullWorkspace
+		}
 		if ws == nil || isGroupWorkspace(ws) || ws.Status != workspace.StatusActive {
 			continue
 		}
@@ -284,6 +302,17 @@ func BuildSnapshot(ctx context.Context, sources SnapshotSources, cfg Config, use
 		}
 	}
 	return snap
+}
+
+// BuildAllScopeSnapshot assembles the live, bounded cross-workspace projection
+// used by Personal HQ surfaces that must never inherit a user's saved Daily
+// Brief scope. It deliberately includes every currently eligible workspace,
+// including workspaces created after any Daily Brief configuration was saved.
+func BuildAllScopeSnapshot(ctx context.Context, sources SnapshotSources, userID string, now time.Time) Snapshot {
+	return BuildSnapshot(ctx, sources, Config{
+		Scope:                   ScopeAll,
+		IncludeFutureWorkspaces: true,
+	}, userID, now)
 }
 
 func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *workspace.Workspace) (WorkspaceSnapshot, []string) {

@@ -652,7 +652,14 @@
   letter-spacing: 0.4px;
   text-transform: uppercase;
   cursor: pointer;
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  clip-path: polygon(
+    0 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% 100%,
+    10px 100%,
+    0 calc(100% - 10px)
+  );
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
 }
 .ws-cmd-map-quest-fab i {
@@ -676,8 +683,17 @@
   padding: 14px;
   border: 1px solid var(--ws-line-bright);
   background: linear-gradient(180deg, #15171c, #0b0c10);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), var(--ws-glow);
-  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.5),
+    var(--ws-glow);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 12px) 0,
+    100% 12px,
+    100% 100%,
+    12px 100%,
+    0 calc(100% - 12px)
+  );
 }
 .ws-cmd-map-quest-head {
   display: flex;
@@ -1168,6 +1184,28 @@
   border-color: var(--ws-keeper);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
 }
+/* Watchtower keeps the gold HQ structure silhouette, then shifts its small
+   signal readout by state. The color is information, not decoration: amber
+   means live attention, green means clear, and red means the observation
+   source itself is degraded. */
+.ws-cmd-map-hq-station.is-attention .ws-cmd-map-hq-station-state {
+  color: var(--ws-waiting);
+}
+.ws-cmd-map-hq-station.is-clear .ws-cmd-map-hq-station-state {
+  color: var(--ws-done);
+}
+.ws-cmd-map-hq-station.is-degraded {
+  border-color: rgba(226, 101, 77, 0.6);
+  border-top-color: var(--ws-alert);
+}
+.ws-cmd-map-hq-station.is-degraded .ws-cmd-map-hq-station-icon,
+.ws-cmd-map-hq-station.is-degraded .ws-cmd-map-hq-station-state {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.38);
+}
+.ws-cmd-map-hq-station.is-loading .ws-cmd-map-hq-station-state {
+  color: var(--ws-ink-faint);
+}
 /* Details-mode "Stations" rail panel (FR14): the same citadel-gold keeper
    accent as the map surface, so the HQ reads consistently across both modes.
    Reuses the shared .ws-cmd-panel structure; accent only, no layout change. */
@@ -1180,6 +1218,211 @@
 }
 .ws-cmd-panel.is-hq-stations .ws-cmd-rail-item .ws-cmd-rail-m {
   color: var(--ws-keeper);
+}
+/* Watchtower panel: compact operations-console density, grouped by owning
+   workspace so a cross-workspace scan reads like a queue rather than a flat
+   notification feed. It deliberately reuses the command modal shell. */
+.ws-cmd-modal-head.is-watchtower {
+  align-items: flex-start;
+  border-bottom-color: var(--ws-keeper-deep);
+  background: linear-gradient(100deg, rgba(232, 181, 75, 0.13), transparent 58%);
+}
+.ws-cmd-modal-head.is-watchtower .ws-cmd-modal-title {
+  color: var(--ws-keeper);
+}
+.ws-cmd-watchtower-kicker {
+  display: block;
+  margin-top: 3px;
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+.ws-cmd-watchtower-body {
+  gap: 14px;
+  background:
+    linear-gradient(90deg, rgba(232, 181, 75, 0.045) 1px, transparent 1px) 0 0 / 18px 18px,
+    linear-gradient(rgba(232, 181, 75, 0.045) 1px, transparent 1px) 0 0 / 18px 18px;
+}
+.ws-cmd-watchtower-group {
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.19);
+}
+.ws-cmd-watchtower-group > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ws-line);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+.ws-cmd-watchtower-group > header::before {
+  width: 6px;
+  height: 6px;
+  background: var(--ws-keeper);
+  box-shadow: 0 0 8px rgba(232, 181, 75, 0.65);
+  content: "";
+}
+.ws-cmd-watchtower-group > header strong {
+  min-width: 20px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid var(--ws-keeper-deep);
+  color: var(--ws-keeper);
+  font-weight: 600;
+  text-align: center;
+}
+.ws-cmd-watchtower-items {
+  display: grid;
+}
+.ws-cmd-watchtower-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(54, 58, 69, 0.74);
+  background: transparent;
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.ws-cmd-watchtower-item:last-child {
+  border-bottom: 0;
+}
+.ws-cmd-watchtower-item:hover {
+  background: rgba(232, 181, 75, 0.07);
+}
+.ws-cmd-watchtower-item:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--ws-keeper);
+  outline-offset: -2px;
+}
+.ws-cmd-watchtower-item-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(226, 101, 77, 0.42);
+  color: var(--ws-alert);
+  font-size: 13px;
+}
+.ws-cmd-watchtower-item.is-waiting_for_choice .ws-cmd-watchtower-item-icon,
+.ws-cmd-watchtower-item.is-scheduled_failure .ws-cmd-watchtower-item-icon {
+  border-color: var(--ws-keeper-deep);
+  color: var(--ws-keeper);
+}
+.ws-cmd-watchtower-item.is-high .ws-cmd-watchtower-item-icon {
+  border-color: rgba(240, 138, 75, 0.42);
+  color: var(--ws-input);
+}
+.ws-cmd-watchtower-item-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.ws-cmd-watchtower-item-title {
+  overflow: hidden;
+  color: var(--ws-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-watchtower-item-detail {
+  overflow: hidden;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-watchtower-item-time {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.ws-cmd-watchtower-gaps {
+  padding: 10px 12px;
+  border: 1px solid rgba(240, 138, 75, 0.38);
+  background: rgba(240, 138, 75, 0.08);
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+}
+.ws-cmd-watchtower-gaps strong {
+  color: var(--ws-input);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-watchtower-gaps ul {
+  display: grid;
+  gap: 3px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+.ws-cmd-watchtower-all-clear,
+.ws-cmd-watchtower-degraded {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 30px 18px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-dim);
+  text-align: center;
+}
+.ws-cmd-watchtower-all-clear > i {
+  color: var(--ws-done);
+  font-size: 26px;
+}
+.ws-cmd-watchtower-all-clear strong {
+  color: var(--ws-done);
+  font-size: 15px;
+}
+.ws-cmd-watchtower-all-clear span {
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ws-cmd-watchtower-degraded {
+  border-color: rgba(226, 101, 77, 0.45);
+}
+.ws-cmd-watchtower-degraded > i {
+  color: var(--ws-alert);
+  font-size: 25px;
+}
+.ws-cmd-watchtower-degraded p {
+  max-width: 330px;
+  margin: 0;
+  line-height: 1.5;
+}
+.ws-cmd-watchtower-degraded button {
+  padding: 7px 11px;
+  border: 1px solid rgba(226, 101, 77, 0.52);
+  background: rgba(226, 101, 77, 0.08);
+  color: var(--ws-alert);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-watchtower-degraded button:hover {
+  background: rgba(226, 101, 77, 0.16);
+}
+.ws-cmd-watchtower-degraded button:focus-visible {
+  outline: 2px solid var(--ws-alert);
+  outline-offset: 2px;
 }
 .ws-cmd-map-agent-field {
   width: min(100%, 980px);
@@ -3522,7 +3765,9 @@
   cursor: pointer;
   background: transparent;
   font-size: 10px;
-  transition: border-color 0.12s ease, color 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
 }
 .ws-cmd-loadout-chip-mark {
   font-weight: 700;
@@ -4869,7 +5114,7 @@
 .ws-cmd-tray-head {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  grid-template-areas: 'state title controls' 'meta meta controls';
+  grid-template-areas: "state title controls" "meta meta controls";
   align-items: center;
   gap: 4px 10px;
   padding: 10px 12px;

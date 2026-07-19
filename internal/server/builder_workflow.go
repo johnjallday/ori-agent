@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
@@ -21,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
 	"github.com/johnjallday/ori-agent/internal/triggerhttp"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
@@ -45,7 +47,7 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 	userStore := b.userStore
 	userProvider := b.userProvider
 	return func(workspaceID, agentName string) []toolapi.Tool {
-		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID)
+		provider := chathttp.NewWorkspaceToolProvider(sessionStore, workspaceStore, workspaceID, b.hqVisibilityDeps())
 		provider.SetExecutingAgent(agentName)
 		if fileStore != nil {
 			provider.SetFileStore(fileStore)
@@ -64,6 +66,49 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 		}
 		return provider.Tools()
 	}
+}
+
+// hqVisibilityDeps creates closures rather than retaining a snapshot of the
+// builder's stores. Workspace storage and the folder projection are wired in
+// different builder phases, so resolving dependencies only at tool-call time
+// avoids a partially initialized HQ overview.
+func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
+	return chathttp.HQVisibilityDeps{
+		SnapshotSources: b.watchtowerSnapshotSources,
+		IsDesignatedHQ: func(ctx context.Context, workspaceID string) (bool, error) {
+			if b.personalHQService == nil {
+				return false, nil
+			}
+			return b.personalHQService.IsWorkspaceDesignatedPersonalHQ(ctx, userprofile.LocalUserID, workspaceID)
+		},
+		FolderPath: func(workspaceID string) string {
+			if b.workspaceFileStore == nil {
+				return ""
+			}
+			path, err := b.workspaceFileStore.GetFolderPath(workspaceID)
+			if err != nil {
+				return ""
+			}
+			return path
+		},
+		UserID: userprofile.LocalUserID,
+	}
+}
+
+// watchtowerSnapshotSources builds the live cross-workspace read projection
+// shared by the HQ tool and Watchtower endpoint. It is a method rather than a
+// captured value because the Personal HQ handler is constructed before the
+// workspace and folder stores exist.
+func (b *ServerBuilder) watchtowerSnapshotSources() dailybrief.SnapshotSources {
+	workspaceStore := b.workspaceStore
+	sources := dailybrief.SnapshotSources{Workspaces: workspaceStore}
+	if workspaceStore != nil {
+		sources.Opportunities = workspace.NewOpportunityStore(workspaceStore)
+	}
+	if b.sessionStore != nil {
+		sources.Sessions = &sessionSourceAdapter{store: b.sessionStore}
+	}
+	return sources
 }
 
 // delegationCapsFromEnv returns the delegation loop caps, allowing operators to
@@ -169,6 +214,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			// just above via SetWorkspaceStore.)
 			if b.personalHQService != nil {
 				b.personalHQService.SetDesignationSyncer(b.sessionHandler)
+				b.personalHQService.SetDesignationReader(fileStore)
 				if designated, err := b.personalHQService.DesignatedWorkspaceIDs(context.Background()); err != nil {
 					logger.Warn("Startup designation backfill: failed to resolve designated workspaces", logger.Fields{"error": err.Error()})
 				} else if err := b.sessionHandler.BackfillWorkspaceDesignations(context.Background(), designated); err != nil {
@@ -178,6 +224,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 		if b.chatHandler != nil {
 			b.chatHandler.SetFileStore(fileStore)
+			b.chatHandler.SetHQVisibilityDeps(b.hqVisibilityDeps())
 		}
 		if b.resetHandler != nil {
 			b.resetHandler.SetWorkspaceStore(fileStore)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -54,6 +55,21 @@ type WorkspaceToolProvider struct {
 	// mailDrafter, when set, enables the mail_draft_reply tool (creates a LOCAL
 	// reply proposal; never sends).
 	mailDrafter MailDrafter
+
+	// hqVisibility carries the live, read-only dependencies that only Personal
+	// HQ tools need. The source factory deliberately resolves stores when the
+	// tool runs, after server construction has finished wiring its stores.
+	hqVisibility HQVisibilityDeps
+}
+
+// HQVisibilityDeps supplies the read-only inputs shared by Personal HQ
+// cross-workspace tools. All callbacks are optional so ordinary workspace
+// providers retain their existing tool surface.
+type HQVisibilityDeps struct {
+	SnapshotSources func() dailybrief.SnapshotSources
+	IsDesignatedHQ  func(ctx context.Context, workspaceID string) (bool, error)
+	FolderPath      func(workspaceID string) string
+	UserID          string
 }
 
 // mcpServerLister allows listing available MCP servers.
@@ -67,17 +83,49 @@ type skillLister interface {
 }
 
 // NewWorkspaceToolProvider creates a provider scoped to a specific workspace.
-func NewWorkspaceToolProvider(sessionStore session.HybridStore, workspaceStore workspace.Store, workspaceID string) *WorkspaceToolProvider {
-	return &WorkspaceToolProvider{
+func NewWorkspaceToolProvider(sessionStore session.HybridStore, workspaceStore workspace.Store, workspaceID string, hqDeps ...HQVisibilityDeps) *WorkspaceToolProvider {
+	provider := &WorkspaceToolProvider{
 		sessionStore:   sessionStore,
 		workspaceStore: workspaceStore,
 		workspaceID:    workspaceID,
 	}
+	if len(hqDeps) > 0 {
+		provider.SetHQVisibilityDeps(hqDeps[0])
+	}
+	return provider
 }
 
 // SetFileStore sets the folder-based workspace store for syncing notes to disk.
 func (p *WorkspaceToolProvider) SetFileStore(fs *workspace.FileStore) {
 	p.fileStore = fs
+}
+
+// SetHQVisibilityDeps wires the live, read-only sources required by Personal
+// HQ cross-workspace tools. Production passes closures because the workspace,
+// opportunity, and session stores are finalized in later builder phases.
+func (p *WorkspaceToolProvider) SetHQVisibilityDeps(deps HQVisibilityDeps) {
+	p.hqVisibility = deps
+}
+
+// hqWorkspaceFolderPath returns the canonical on-disk workspace folder for
+// metadata-only HQ tool output. A missing mapping is intentionally an empty
+// string: the overview must degrade its path hint without failing its whole
+// cross-workspace read.
+func (p *WorkspaceToolProvider) hqWorkspaceFolderPath(workspaceID string) string {
+	if p == nil {
+		return ""
+	}
+	if p.hqVisibility.FolderPath != nil {
+		return strings.TrimSpace(p.hqVisibility.FolderPath(workspaceID))
+	}
+	if p.fileStore == nil {
+		return ""
+	}
+	path, err := p.fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(path)
 }
 
 func (p *WorkspaceToolProvider) SetUserProfileDeps(store userprofile.UserStore, provider userprofile.UserProvider) {
@@ -156,6 +204,13 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		if p.mailDrafter != nil {
 			tools = append(tools, p.mailDraftReplyTool())
 		}
+	}
+
+	// Personal HQ-only: the coordinator gets a bounded, read-only overview of
+	// every eligible workspace. Specialists and non-HQ workspaces never receive
+	// the tool, so their cross-workspace visibility remains unchanged.
+	if p.hqOverviewEnabled() {
+		tools = append(tools, p.hqOverviewTool())
 	}
 
 	// Coordinator-only: the entry agent can delegate work to specialists.
