@@ -16,7 +16,7 @@ func TestOpenWorkspaceFileRejectsTraversal(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/files/open",
 		bytes.NewBufferString(`{"relative_path":"../escape.txt"}`))
 	rr := httptest.NewRecorder()
-	handler.OpenWorkspaceFile(rr, req)
+	handler.OpenWorkspaceFile(rr, withFilesPath(req))
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for traversal, got %d: %s", rr.Code, rr.Body.String())
@@ -29,24 +29,16 @@ func TestOpenWorkspaceFileMissingReturns404(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/files/open",
 		bytes.NewBufferString(`{"relative_path":"nope.txt"}`))
 	rr := httptest.NewRecorder()
-	handler.OpenWorkspaceFile(rr, req)
+	handler.OpenWorkspaceFile(rr, withFilesPath(req))
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing file, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
-func TestRevealWorkspaceFileRejectsWrongMethod(t *testing.T) {
-	_, ws, handler := newFolderHandlerTest(t, "ws-reveal-method", "Reveal Method")
-
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/reveal", nil)
-	rr := httptest.NewRecorder()
-	handler.RevealWorkspaceFile(rr, req)
-
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405 for GET, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
+// Method rejection for /files/reveal is now enforced by ServeMux (POST-only
+// pattern), covered by the server golden route-table test, so there is no
+// handler-level wrong-method test here.
 
 func TestNearestExistingDirWalksUpToRoot(t *testing.T) {
 	root := t.TempDir()

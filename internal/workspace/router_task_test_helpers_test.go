@@ -37,3 +37,25 @@ func withStorePath(req *http.Request) *http.Request {
 	}
 	return req
 }
+
+// withFilesPath populates {workspaceID}, {folderId} and {relativePath} for the
+// files/folders handlers, deriving them from the request URL.
+func withFilesPath(req *http.Request) *http.Request {
+	segs := strings.Split(strings.Trim(strings.TrimPrefix(req.URL.Path, "/api/workspaces/"), "/"), "/")
+	if len(segs) > 0 && segs[0] != "" {
+		req.SetPathValue("workspaceID", segs[0])
+	}
+	for i, s := range segs {
+		switch s {
+		case "folders":
+			if i+1 < len(segs) {
+				req.SetPathValue("folderId", segs[i+1])
+			}
+		case "files":
+			if i+1 < len(segs) {
+				req.SetPathValue("relativePath", strings.Join(segs[i+1:], "/"))
+			}
+		}
+	}
+	return req
+}

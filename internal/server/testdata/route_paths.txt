@@ -280,3 +280,11 @@
 /api/workspaces/x/canvas/store-nodes
 /api/workspaces/x/canvas/store-nodes/x
 /api/workspaces/x/canvas/store-nodes/x/status
+# --- files + folders (G2d) ---
+/api/workspaces/x/files/tree
+/api/workspaces/x/folders
+/api/workspaces/x/folders/x
+/api/workspaces/x/files/open
+/api/workspaces/x/files/reveal
+/api/workspaces/x/files/x
+/api/workspaces/x/files/x/y

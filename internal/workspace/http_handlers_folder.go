@@ -28,11 +28,6 @@ type locateAttachmentFileRequest struct {
 }
 
 func (h *HTTPHandler) CreateWorkspaceFolder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	workspaceID, _, ok := workspaceFolderRouteParts(w, r)
 	if !ok {
 		return
@@ -109,11 +104,6 @@ func (h *HTTPHandler) CreateWorkspaceFolder(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *HTTPHandler) UpdateWorkspaceFolder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	workspaceID, folderID, ok := workspaceFolderRouteParts(w, r)
 	if !ok {
 		return
@@ -229,11 +219,6 @@ func (h *HTTPHandler) UpdateWorkspaceFolder(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *HTTPHandler) DeleteWorkspaceFolder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
 	workspaceID, folderID, ok := workspaceFolderRouteParts(w, r)
 	if !ok {
 		return
@@ -310,15 +295,7 @@ func (h *HTTPHandler) DeleteWorkspaceFolder(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *HTTPHandler) GetWorkspaceFilesTree(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		orihttp.MethodNotAllowed(w)
-		return
-	}
-
-	workspaceID, ok := workspaceIDFromWorkspacePath(w, r)
-	if !ok {
-		return
-	}
+	workspaceID := r.PathValue("workspaceID")
 
 	// Get returns a private deep clone, so reconcile and tree-building run on our
 	// own copy with no shared state — no per-workspace lock needed. Deliberately
@@ -855,21 +832,13 @@ func workspaceIDFromWorkspacePath(w http.ResponseWriter, r *http.Request) (strin
 }
 
 func workspaceFolderRouteParts(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	trimmed := strings.TrimPrefix(r.URL.Path, "/api/workspaces/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) < 2 || parts[1] != "folders" {
-		orihttp.BadRequest(w, "Invalid URL format")
-		return "", "", false
-	}
-	folderID := ""
-	if len(parts) >= 3 {
-		folderID = strings.TrimSpace(parts[2])
-	}
+	workspaceID := r.PathValue("workspaceID")
+	folderID := strings.TrimSpace(r.PathValue("folderId"))
 	if r.Method != http.MethodPost && folderID == "" {
 		orihttp.BadRequest(w, "Folder ID is required")
 		return "", "", false
 	}
-	return parts[0], folderID, true
+	return workspaceID, folderID, true
 }
 
 func attachmentRouteParts(w http.ResponseWriter, r *http.Request) (string, string, bool) {

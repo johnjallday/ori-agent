@@ -16,7 +16,7 @@ func TestHTTPHandlerCreateWorkspaceFolderAndFileTree(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/folders", bytes.NewBufferString(`{"path":"research"}`))
 	rr := httptest.NewRecorder()
-	handler.CreateWorkspaceFolder(rr, req)
+	handler.CreateWorkspaceFolder(rr, withFilesPath(req))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -41,7 +41,7 @@ func TestHTTPHandlerCreateWorkspaceFolderAndFileTree(t *testing.T) {
 
 	treeReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
 	treeRR := httptest.NewRecorder()
-	handler.GetWorkspaceFilesTree(treeRR, treeReq)
+	handler.GetWorkspaceFilesTree(treeRR, withFilesPath(treeReq))
 	if treeRR.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", treeRR.Code, treeRR.Body.String())
 	}
@@ -70,7 +70,7 @@ func TestGetWorkspaceFilesTreeIndexesRPPAndOmitsHiddenFiles(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/files/tree", nil)
 	rr := httptest.NewRecorder()
-	handler.GetWorkspaceFilesTree(rr, req)
+	handler.GetWorkspaceFilesTree(rr, withFilesPath(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -107,7 +107,7 @@ func TestHTTPHandlerCreateWorkspaceFolderRejectsTraversalAndFileCollision(t *tes
 
 	traversalReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/folders", bytes.NewBufferString(`{"path":"../outside"}`))
 	traversalRR := httptest.NewRecorder()
-	handler.CreateWorkspaceFolder(traversalRR, traversalReq)
+	handler.CreateWorkspaceFolder(traversalRR, withFilesPath(traversalReq))
 	if traversalRR.Code != http.StatusBadRequest {
 		t.Fatalf("expected traversal status 400, got %d: %s", traversalRR.Code, traversalRR.Body.String())
 	}
@@ -117,7 +117,7 @@ func TestHTTPHandlerCreateWorkspaceFolderRejectsTraversalAndFileCollision(t *tes
 	}
 	collisionReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/folders", bytes.NewBufferString(`{"path":"collision"}`))
 	collisionRR := httptest.NewRecorder()
-	handler.CreateWorkspaceFolder(collisionRR, collisionReq)
+	handler.CreateWorkspaceFolder(collisionRR, withFilesPath(collisionReq))
 	if collisionRR.Code != http.StatusConflict {
 		t.Fatalf("expected collision status 409, got %d: %s", collisionRR.Code, collisionRR.Body.String())
 	}
@@ -188,7 +188,7 @@ func TestHTTPHandlerRenameWorkspaceFolderUpdatesNestedMetadataAndFiles(t *testin
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/"+ws.ID+"/folders/folder-1", bytes.NewBufferString(`{"path":"archive"}`))
 	rr := httptest.NewRecorder()
-	handler.UpdateWorkspaceFolder(rr, req)
+	handler.UpdateWorkspaceFolder(rr, withFilesPath(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -245,7 +245,7 @@ func TestHTTPHandlerDeleteWorkspaceFolderRejectsNonEmptyAndDeletesEmpty(t *testi
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID+"/folders/folder-1", nil)
 	rr := httptest.NewRecorder()
-	handler.DeleteWorkspaceFolder(rr, req)
+	handler.DeleteWorkspaceFolder(rr, withFilesPath(req))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected non-empty delete status 409, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -255,7 +255,7 @@ func TestHTTPHandlerDeleteWorkspaceFolderRejectsNonEmptyAndDeletesEmpty(t *testi
 	}
 	req = httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID+"/folders/folder-1", nil)
 	rr = httptest.NewRecorder()
-	handler.DeleteWorkspaceFolder(rr, req)
+	handler.DeleteWorkspaceFolder(rr, withFilesPath(req))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected empty delete status 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -300,7 +300,7 @@ func TestHTTPHandlerDeleteWorkspaceFolderRejectsStorageReferences(t *testing.T) 
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/workspaces/"+ws.ID+"/folders/folder-1", nil)
 	rr := httptest.NewRecorder()
-	handler.DeleteWorkspaceFolder(rr, req)
+	handler.DeleteWorkspaceFolder(rr, withFilesPath(req))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("expected delete with storage reference status 409, got %d: %s", rr.Code, rr.Body.String())
 	}
