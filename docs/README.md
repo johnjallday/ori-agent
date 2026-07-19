@@ -48,6 +48,7 @@ This directory contains detailed documentation for Ori Agent.
 - [Agent Output Viewing Plan](./features/AGENT_OUTPUT_VIEWING_PLAN.md) - Implementation plan for viewing agent outputs
 - [Progress Tracking Plan](./features/PROGRESS_TRACKING_PLAN.md) - Implementation plan for progress tracking
 - [System Home Context Routing Plan](./features/system-home-context-routing-plan.md) - Home context routing plan
+- [PRD-to-Task Coverage Audit](./PRD_TASK_COVERAGE_AUDIT.md) - Final planning-quality check before creating a feature worktree
 - [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
 
 ### UI Documentation
@@ -70,6 +71,7 @@ docs/
 ├── RELEASE_CHECKLIST.md                # Pre-release validation checklist
 ├── DEPENDENCY_MANAGEMENT.md            # Go dependency management guide
 ├── SCHEDULER_NODES_GUIDE.md            # Scheduler nodes usage guide
+├── PRD_TASK_COVERAGE_AUDIT.md          # PRD-to-task planning audit
 ├── premium_features.md                 # Premium feature overview
 │
 ├── api/
