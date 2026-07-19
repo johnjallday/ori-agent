@@ -647,6 +647,9 @@ function wt_dispatch {
     local demo_port="${2:-8931}"
     echo "Building $demo_root ..."
     (cd "$demo_root" && go build -o bin/ori-agent ./cmd/server) || return 1
+    # Purge sandboxes left behind by prior demo runs before creating a new one,
+    # so these don't accumulate indefinitely in $TMPDIR across sessions.
+    rm -rf "${TMPDIR:-/tmp}"/ori-demo.* 2>/dev/null
     local demo_dir
     demo_dir="$(mktemp -d "${TMPDIR:-/tmp}/ori-demo.XXXXXX")" || return 1
     echo "Demo sandbox: $demo_dir   (safe to rm -rf when done)"
