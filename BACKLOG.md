@@ -7,6 +7,11 @@ signals, and does the bookkeeping here (promotes picks to Doing, files shipped/d
 Conventions, all optional: date prefix (`2026-07-18 …`), `!` = I really want this,
 `#small` / `#large` = effort hint.
 
+Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here and pushes;
+`wt backlog sync` pushes pending edits; `wt start` promotes a picked PRD to `## Doing`; and
+`wt done` retires it to `## Shipped / dropped` with the merged PR number. Each is a scoped
+`docs(backlog):` commit on dev, so this file never drifts from origin.
+
 ## Ideas
 - 2026-07-18 #dogfood `backlog` skill in Ori: add/list/prune/promote on workspace BACKLOG.md (DOGFOODING.md stage 1) #small
 - 2026-07-18 #dogfood Weekly discovery playbook as scheduled Workspace Run; audit web-research MCP availability first (stage 2)
