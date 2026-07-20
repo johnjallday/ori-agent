@@ -493,6 +493,10 @@ func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/mcp/servers/{name}/status", s.Handlers.MCP.GetServerStatusHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/test", s.Handlers.MCP.TestConnectionHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/retry", s.Handlers.MCP.RetryConnectionHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/connect", s.Handlers.MCP.ConnectServerHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/disconnect", s.Handlers.MCP.DisconnectServerHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/oauth-status", s.Handlers.MCP.GetServerOAuthStatusHandler)
+	mux.HandleFunc("GET /api/mcp/oauth/callback", s.Handlers.MCP.OAuthCallbackHandler)
 
 	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)

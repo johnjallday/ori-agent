@@ -246,6 +246,14 @@ func (b *ServerBuilder) initializeHandlers() {
 			ManagedVaultRoot: resolveVaultRoot(b.configManager),
 		})
 		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		// Wire remote MCP OAuth credential persistence now that the vault
+		// store exists; the MCP registry/handler were constructed earlier
+		// (initializeMCP) without it, matching the lazy-store pattern used
+		// for workspaceStore elsewhere in this file.
+		mcp.ConfigureRemoteOAuth(newVaultMCPCredentialStore(vaultStore), mcpOAuthUserID)
+		if b.mcpHandler != nil {
+			b.mcpHandler.SetVaultOAuthStore(vaultStore)
+		}
 		// Let in-app Settings supply the Google email OAuth client credentials,
 		// taking precedence over ORI_EMAIL_GOOGLE_* env vars, so a self-hosted
 		// user can enable Personal HQ email without editing the environment.
