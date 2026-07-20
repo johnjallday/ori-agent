@@ -192,7 +192,7 @@ function wt_branch_status {
 }
 
 function wt_color_init {
-  typeset -g WT_C_RESET WT_C_DIM WT_C_BOLD WT_C_RED WT_C_GREEN WT_C_YELLOW WT_C_CYAN
+  typeset -g WT_C_RESET WT_C_DIM WT_C_BOLD WT_C_RED WT_C_GREEN WT_C_YELLOW WT_C_CYAN WT_C_MAGENTA
   if [[ -t 1 ]]; then
     WT_C_RESET=$'\e[0m'
     WT_C_DIM=$'\e[2m'
@@ -201,8 +201,9 @@ function wt_color_init {
     WT_C_GREEN=$'\e[32m'
     WT_C_YELLOW=$'\e[33m'
     WT_C_CYAN=$'\e[36m'
+    WT_C_MAGENTA=$'\e[35m'
   else
-    WT_C_RESET="" WT_C_DIM="" WT_C_BOLD="" WT_C_RED="" WT_C_GREEN="" WT_C_YELLOW="" WT_C_CYAN=""
+    WT_C_RESET="" WT_C_DIM="" WT_C_BOLD="" WT_C_RED="" WT_C_GREEN="" WT_C_YELLOW="" WT_C_CYAN="" WT_C_MAGENTA=""
   fi
 }
 
@@ -464,6 +465,66 @@ function wt_backlog_retire {
       if (shipped == 0) { print ""; print "## Shipped / dropped"; print shipline }
     }
   ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+function wt_backlog_render {
+  # Pretty, colorized view of BACKLOG.md for reading in a terminal: a one-line
+  # summary, section headers tinted by kind (Ideas cyan / Doing yellow /
+  # Shipped green) with a bullet count, and per-bullet emphasis - dimmed date
+  # prefix, red "!" priority flag, magenta #tags. Intro prose is folded away.
+  # Colours come from wt_color_init and vanish when stdout isn't a tty, but
+  # callers should prefer raw `cat` when piped (see the dispatch).
+  local file="$1"
+  wt_color_init
+  awk -v R="$WT_C_RESET" -v B="$WT_C_BOLD" -v D="$WT_C_DIM" \
+      -v RED="$WT_C_RED" -v GRN="$WT_C_GREEN" -v YEL="$WT_C_YELLOW" \
+      -v CYN="$WT_C_CYAN" -v MAG="$WT_C_MAGENTA" '
+    { L[NR] = $0 }
+    END {
+      ideas = 0; doing = 0; shipped = 0
+      for (i = 1; i <= NR; i++) {
+        if (L[i] ~ /^## /) {
+          c = 0
+          for (j = i + 1; j <= NR && L[j] !~ /^## /; j++) if (L[j] ~ /^- /) c++
+          cnt[i] = c
+          if (L[i] ~ /Ideas/)   ideas = c
+          if (L[i] ~ /Doing/)   doing = c
+          if (L[i] ~ /Shipped/) shipped = c
+        }
+      }
+      cur = CYN
+      for (i = 1; i <= NR; i++) {
+        line = L[i]
+        if (line ~ /^# /) {
+          print B line R
+          print D ideas " ideas  •  " doing " doing  •  " shipped " shipped" R
+          for (j = i + 1; j <= NR && L[j] !~ /^## /; j++) ;   # fold intro prose
+          i = j - 1
+          continue
+        }
+        if (line ~ /^## /) {
+          hc = CYN
+          if (line ~ /Doing/)   hc = YEL
+          if (line ~ /Shipped/) hc = GRN
+          cur = hc
+          print ""
+          print hc B line R "  " D "(" cnt[i] ")" R
+          continue
+        }
+        if (line ~ /^- /) {
+          t = substr(line, 3)
+          sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/, D "&" R, t)
+          sub(/^! /, RED B "!" R " ", t)
+          gsub(/ ! /, " " RED B "!" R " ", t)
+          gsub(/#[a-zA-Z0-9_-]+/, MAG "&" R, t)
+          print "  " cur "•" R " " t
+          continue
+        }
+        if (line == "") continue   # spacing is emitted per-header, not per file blank
+        print D line R
+      }
+    }
+  ' "$file"
 }
 
 function wt_repl {
@@ -1042,7 +1103,13 @@ function wt_dispatch {
     local bl_dev="${bl_file:h}"
     case "$2" in
       ""|list|ls)
-        cat "$bl_file"
+        # Pretty colorized view for a terminal; raw file when piped/redirected
+        # so downstream tools (grep, less -F, editors) still see plain markdown.
+        if [[ -t 1 ]]; then
+          wt_backlog_render "$bl_file"
+        else
+          cat "$bl_file"
+        fi
         ;;
       add)
         shift 2
