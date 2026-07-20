@@ -53,11 +53,16 @@ type SpecialistRole struct {
 	Entry bool
 }
 
-// V1Roster is the operational v1 Personal HQ specialist roster, in template
-// declaration order (first is the entry agent). No Calendar role ships in v1.
+// V1Roster is the operational Personal HQ specialist roster, in template
+// declaration order (first is the entry agent). The Inbox specialist moved out
+// to the dedicated Email Ops workspace (Mail spin-off), so it is no longer part
+// of the HQ roster: the upgrade planner must not offer to add it back, and an
+// existing HQ's own Inbox agent is preserved as a user-owned non-roster agent
+// (upgrades only add, never remove). The mailbox-access gate still recognizes an
+// agent literally named "Inbox" regardless of this roster. No Calendar role
+// ships.
 var V1Roster = []SpecialistRole{
 	{Slug: "chief_of_staff", AgentName: "Personal Chief of Staff", Entry: true},
-	{Slug: "inbox", AgentName: "Inbox"},
 	{Slug: "journal", AgentName: "Journal"},
 }
 
