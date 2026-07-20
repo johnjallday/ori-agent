@@ -17,10 +17,14 @@ import (
 // this workspace so the hub-and-spoke split works: management lives in Email Ops
 // and HQ surfaces them read-only via the same resolution rule.
 func (h *Handler) resolveEmailOpsWorkspaceID(userID string) string {
-	if h == nil || h.watchtowerSources == nil {
+	if h == nil || h.emailOpsSource == nil {
 		return ""
 	}
-	id, err := workspace.ResolveEmailOpsWorkspace(h.watchtowerSources().Workspaces, userID)
+	src := h.emailOpsSource()
+	if src == nil {
+		return ""
+	}
+	id, err := workspace.ResolveEmailOpsWorkspace(src, userID)
 	if err != nil {
 		return ""
 	}

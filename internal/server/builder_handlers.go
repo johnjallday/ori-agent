@@ -180,6 +180,15 @@ func (b *ServerBuilder) initializeHandlers() {
 		// The workspace stores are constructed in a later phase. Passing the
 		// method value keeps Watchtower reads live once those stores are ready.
 		b.personalHQHandler.SetWatchtowerSources(b.watchtowerSnapshotSources)
+		// Email Ops resolution needs template provenance, a folder-store field
+		// the SQLite-primary store drops — so it reads through the FileStore.
+		// Lazy: the FileStore is constructed in a later phase (Phase 18).
+		b.personalHQHandler.SetEmailOpsSource(func() workspace.EmailOpsWorkspaceSource {
+			if b.workspaceFileStore == nil {
+				return nil
+			}
+			return b.workspaceFileStore
+		})
 		// Structured follow-ups (Group 6): a dedicated SQLite domain over the
 		// shared database.
 		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))

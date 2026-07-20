@@ -794,6 +794,9 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/email/status", s.Handlers.PersonalHQ.WorkspaceMailboxStatusHandler)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/link", s.Handlers.PersonalHQ.WorkspaceLinkMailbox)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/unlink", s.Handlers.PersonalHQ.WorkspaceUnlinkMailbox)
+		// Email Ops portal status for the HQ email station (presence + open
+		// follow-up count badge).
+		mux.HandleFunc("GET /api/personal-hq/email-ops", s.Handlers.PersonalHQ.EmailOpsStatusHandler)
 		mux.HandleFunc("POST /api/personal-hq/mail/draft", s.Handlers.PersonalHQ.DraftReply)
 		mux.HandleFunc("GET /api/personal-hq/mail/proposals", s.Handlers.PersonalHQ.ListProposals)
 		mux.HandleFunc("POST /api/personal-hq/mail/edit", s.Handlers.PersonalHQ.EditReply)

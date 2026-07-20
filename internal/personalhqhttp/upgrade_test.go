@@ -103,11 +103,12 @@ func TestUpgradePreviewAndApplyFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &previewResp); err != nil {
 		t.Fatalf("decode preview: %v (%s)", err, rec.Body.String())
 	}
-	if len(previewResp.Plan.MissingRoles) != 3 {
-		t.Fatalf("expected 3 missing roles, got %v", previewResp.Plan.MissingRoles)
+	// Post Email Ops spin-off, the HQ roster is Chief + Journal (Inbox moved out).
+	if len(previewResp.Plan.MissingRoles) != len(personalhq.V1Roster) {
+		t.Fatalf("expected %d missing roles, got %v", len(personalhq.V1Roster), previewResp.Plan.MissingRoles)
 	}
 
-	// Apply: succeeds, adds the 3 specialists.
+	// Apply: succeeds, adds the roster specialists.
 	rec = httptest.NewRecorder()
 	handler.UpgradeApply(rec, httptest.NewRequest(http.MethodPost, "/api/personal-hq/upgrade/apply", nil))
 	if rec.Code != http.StatusOK {
