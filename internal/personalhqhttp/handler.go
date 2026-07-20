@@ -16,14 +16,15 @@ import (
 
 // Handler serves the Personal HQ API.
 type Handler struct {
-	service       *personalhq.Service
-	setup         *personalhq.SetupCoordinator
-	upgrade       *personalhq.UpgradeCoordinator
-	mailboxLinker MailboxLinker
-	replies       ReplyService
-	followups     FollowUpAPI
-	journal       JournalAPI
-	provider      userprofile.UserProvider
+	service                *personalhq.Service
+	setup                  *personalhq.SetupCoordinator
+	upgrade                *personalhq.UpgradeCoordinator
+	mailboxLinker          MailboxLinker
+	workspaceMailboxLinker WorkspaceMailboxLinker
+	replies                ReplyService
+	followups              FollowUpAPI
+	journal                JournalAPI
+	provider               userprofile.UserProvider
 	// watchtowerSources is intentionally a factory: workspace storage is wired
 	// after this handler during server startup, so source access must be lazy.
 	watchtowerSources func() dailybrief.SnapshotSources

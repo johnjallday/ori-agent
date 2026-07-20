@@ -261,50 +261,11 @@ func (b *ServerBuilder) initializeHandlers() {
 		if b.workspaceHandler != nil {
 			b.workspaceHandler.SetEmailAccountStore(vaultStore)
 		}
-		// Wire the Personal HQ mailbox read runtime: a Gmail provider over a
-		// Vault-backed credential resolver, gated by the most-restrictive access
-		// policy. Exposed to authorized HQ agents via the workspace tool factory.
-		if b.workspaceStore != nil {
-			gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(vaultStore))
-			cachedProvider := mailbox.NewCachingProvider(gmailProvider)
-			b.mailboxAccess = newMailboxAccess(b.workspaceStore, vaultStore, cachedProvider)
-			if b.chatHandler != nil {
-				b.chatHandler.SetMailboxAccess(b.mailboxAccess)
-			}
-			// Personal HQ email connect/disconnect (task 3.10): manage an email
-			// MCP binding on the designated HQ workspace, with disconnect cache
-			// invalidation.
-			if b.personalHQHandler != nil && b.personalHQService != nil {
-				b.personalHQHandler.SetMailboxLinker(
-					newPersonalHQMailboxLinker(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider),
-				)
-			}
-			// Grounded email attention for the Daily Brief (task 4.8): reads the
-			// HQ's connected account through the same cached provider. No second
-			// brief service/scheduler is introduced.
-			if b.personalHQService != nil {
-				b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider)
-			}
-			// Confirm-gated send broker (task 5.3): the ONLY send path. The raw
-			// (uncached) Gmail provider is the sender; sends re-authorize via the
-			// send policy and emit metadata-only audit events.
-			if b.personalHQService != nil {
-				broker := mailbox.NewBroker(
-					gmailProvider,
-					&sendAuthorizer{hq: b.personalHQService, workspaces: b.workspaceStore},
-					logAuditSink{},
-				)
-				replies := newReplyService(b.personalHQService, b.workspaceStore, vaultStore, cachedProvider, broker)
-				if b.personalHQHandler != nil {
-					b.personalHQHandler.SetReplyService(replies)
-				}
-				// The reply service is also the agent-facing drafter (mail_draft_reply).
-				b.mailDrafter = replies
-				if b.chatHandler != nil {
-					b.chatHandler.SetMailDrafter(replies)
-				}
-			}
-		}
+		// The mailbox read/link/send runtime depends on b.workspaceStore, which is
+		// still nil at this phase (Phase 17). Stash the vault store and defer that
+		// wiring to wireMailboxRuntime, called after the workspace store exists
+		// (Phase 18) — same reason wireReaperSetup is deferred.
+		b.vaultStore = vaultStore
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
 
@@ -464,6 +425,62 @@ func (b *ServerBuilder) wireReaperSetup() {
 	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
 	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
 	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
+}
+
+// wireMailboxRuntime wires the Personal HQ / workspace mailbox read-link-send
+// runtime: a Gmail provider over the Vault-backed credential resolver, the
+// access gate, the HQ + workspace email linkers, the Daily Brief email source,
+// and the confirm-gated send broker.
+//
+// It must be called AFTER the workspace store exists (Phase 18), not during
+// initializeHandlers (Phase 17) where b.workspaceStore is still nil — otherwise
+// the whole block was silently skipped and every email endpoint reported
+// "unavailable". Downstream consumers capture valid state: the workspace tool
+// factory is built at Phase 20 and the Daily Brief at Phase 22.6, both after
+// this runs.
+func (b *ServerBuilder) wireMailboxRuntime() {
+	if b.workspaceStore == nil || b.vaultStore == nil {
+		return
+	}
+	gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(b.vaultStore))
+	cachedProvider := mailbox.NewCachingProvider(gmailProvider)
+	b.mailboxAccess = newMailboxAccess(b.workspaceStore, b.vaultStore, cachedProvider)
+	if b.chatHandler != nil {
+		b.chatHandler.SetMailboxAccess(b.mailboxAccess)
+	}
+	// Email connect/disconnect: manage an email MCP binding on the target
+	// workspace, with disconnect cache invalidation. The same service backs both
+	// the HQ-scoped endpoints (designated HQ) and the workspace-scoped endpoints
+	// (Email Ops and other owned workspaces).
+	if b.personalHQHandler != nil && b.personalHQService != nil {
+		linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
+		b.personalHQHandler.SetMailboxLinker(linker)
+		b.personalHQHandler.SetWorkspaceMailboxLinker(linker)
+	}
+	// Grounded email attention for the Daily Brief: reads the connected account
+	// through the same cached provider. No second brief service/scheduler.
+	if b.personalHQService != nil {
+		b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
+	}
+	// Confirm-gated send broker: the ONLY send path. The raw (uncached) Gmail
+	// provider is the sender; sends re-authorize via the send policy and emit
+	// metadata-only audit events.
+	if b.personalHQService != nil {
+		broker := mailbox.NewBroker(
+			gmailProvider,
+			&sendAuthorizer{hq: b.personalHQService, workspaces: b.workspaceStore},
+			logAuditSink{},
+		)
+		replies := newReplyService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider, broker)
+		if b.personalHQHandler != nil {
+			b.personalHQHandler.SetReplyService(replies)
+		}
+		// The reply service is also the agent-facing drafter (mail_draft_reply).
+		b.mailDrafter = replies
+		if b.chatHandler != nil {
+			b.chatHandler.SetMailDrafter(replies)
+		}
+	}
 }
 
 func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {
