@@ -25,30 +25,61 @@ const briefEmailMaxThreads = 10
 // still never touches credentials — reads go through the mailbox provider, whose
 // resolver holds the tokens.
 type dailyBriefMailboxSource struct {
-	hq         *personalhq.Service
-	workspaces workspace.Store
-	accounts   emailAccountResolver
-	provider   mailbox.MailboxProvider
+	hq             *personalhq.Service
+	workspaces     workspace.Store
+	accounts       emailAccountResolver
+	provider       mailbox.MailboxProvider
+	emailOpsSource func() workspace.EmailOpsWorkspaceSource
 }
 
-func newDailyBriefMailboxSource(hq *personalhq.Service, workspaces workspace.Store, accounts emailAccountResolver, provider mailbox.MailboxProvider) *dailyBriefMailboxSource {
-	return &dailyBriefMailboxSource{hq: hq, workspaces: workspaces, accounts: accounts, provider: provider}
+func newDailyBriefMailboxSource(hq *personalhq.Service, workspaces workspace.Store, accounts emailAccountResolver, provider mailbox.MailboxProvider, emailOpsSource func() workspace.EmailOpsWorkspaceSource) *dailyBriefMailboxSource {
+	return &dailyBriefMailboxSource{hq: hq, workspaces: workspaces, accounts: accounts, provider: provider, emailOpsSource: emailOpsSource}
+}
+
+// emailWorkspace resolves the workspace whose email binding the brief should
+// read (Mail spin-off FR18): the user's Email Ops workspace when it has a
+// connected binding, falling back to the designated HQ's own binding for the
+// legacy pre-spin-off in-place setup. Returns nil when neither is connected.
+func (s *dailyBriefMailboxSource) emailWorkspace(ctx context.Context, userID string) *workspace.Workspace {
+	// Email Ops first. Provenance is a folder-store field, so resolution goes
+	// through the provenance-hydrating source, not s.workspaces (SQLite-primary).
+	if s.emailOpsSource != nil {
+		if src := s.emailOpsSource(); src != nil {
+			if eoID, err := workspace.ResolveEmailOpsWorkspace(src, userID); err == nil && eoID != "" {
+				if ws, err := s.workspaces.Get(eoID); err == nil && ws != nil {
+					if _, ok := emailBindingFor(ws); ok {
+						return ws
+					}
+				}
+			}
+		}
+	}
+	// Legacy fallback: the designated HQ's own in-place email binding.
+	status, err := s.hq.Status(ctx, userID)
+	if err != nil || status == nil || !status.Valid {
+		return nil
+	}
+	ws, err := s.workspaces.Get(status.WorkspaceID)
+	if err != nil || ws == nil {
+		return nil
+	}
+	if _, ok := emailBindingFor(ws); !ok {
+		return nil
+	}
+	return ws
 }
 
 // BriefEmailThreads returns bounded email attention projections for the user's
-// designated HQ. A missing HQ / binding / account is ErrEmailNotConfigured (not
-// a gap); a provider read failure returns the error (the brief turns it into a
-// named gap).
+// email account, sourced from their Email Ops workspace (or a legacy in-HQ
+// binding). A missing workspace / binding / account is ErrEmailNotConfigured
+// (not a gap); a provider read failure returns the error (the brief turns it
+// into a named gap).
 func (s *dailyBriefMailboxSource) BriefEmailThreads(ctx context.Context, userID string) ([]dailybrief.EmailThreadSnapshot, error) {
 	if s == nil || s.provider == nil || s.hq == nil || s.workspaces == nil || s.accounts == nil {
 		return nil, dailybrief.ErrEmailNotConfigured
 	}
-	status, err := s.hq.Status(ctx, userID)
-	if err != nil || status == nil || !status.Valid {
-		return nil, dailybrief.ErrEmailNotConfigured
-	}
-	ws, err := s.workspaces.Get(status.WorkspaceID)
-	if err != nil || ws == nil {
+	ws := s.emailWorkspace(ctx, userID)
+	if ws == nil {
 		return nil, dailybrief.ErrEmailNotConfigured
 	}
 	binding, ok := emailBindingFor(ws)

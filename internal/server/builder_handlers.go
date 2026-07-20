@@ -467,9 +467,17 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 		b.personalHQHandler.SetWorkspaceMailboxLinker(linker)
 	}
 	// Grounded email attention for the Daily Brief: reads the connected account
-	// through the same cached provider. No second brief service/scheduler.
+	// (Email Ops workspace first, legacy HQ binding as fallback) through the
+	// same cached provider. No second brief service/scheduler. The Email Ops
+	// resolver reads through the FileStore so it sees template provenance.
 	if b.personalHQService != nil {
-		b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
+		emailOpsSource := func() workspace.EmailOpsWorkspaceSource {
+			if b.workspaceFileStore == nil {
+				return nil
+			}
+			return b.workspaceFileStore
+		}
+		b.dailyBriefMailbox = newDailyBriefMailboxSource(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider, emailOpsSource)
 	}
 	// Confirm-gated send broker: the ONLY send path. The raw (uncached) Gmail
 	// provider is the sender; sends re-authorize via the send policy and emit
