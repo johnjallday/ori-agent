@@ -1,8 +1,8 @@
 # <img src="assets/logo-readme.svg" alt="Ori Agent logo" width="28" height="28" style="vertical-align: text-bottom;" /> Ori Agent
 
-> **Give your agents a mission. They work on a schedule. You triage the findings.**
+> **Your AI headquarters — on your machine. Workspaces work the missions. You triage the findings.**
 
-Autonomous AI workspaces — guardrailed by policy, running **local-first** on your machine.
+A **local-first** base of autonomous AI workspaces, guardrailed by the autonomy policy you set.
 
 ![Version](https://img.shields.io/github/v/release/johnjallday/ori-agent?label=Version&color=blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -14,7 +14,7 @@ Autonomous AI workspaces — guardrailed by policy, running **local-first** on y
 </p>
 <p align="center"><em>Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.</em></p>
 
-**Ori Agent** is a local-first platform for **autonomous AI agents**. Give a **workspace** a mission and it works on a recurring schedule under an **autonomy policy** you set — surfacing what it finds as **opportunities** you triage from a single cross-workspace **Action Center**. Compose each workspace from multiple named agents, each with its own model, prompt, skills, and MCP tools. Everything stays on your machine unless you opt into cloud LLMs.
+**Ori Agent** is a local-first **AI headquarters** that runs on your machine. A **Personal HQ** anchors your day — daily brief, email station, follow-ups, and a Watchtower view across everything else — while specialized **workspaces** around it pursue missions on a recurring schedule under an **autonomy policy** you set. Findings flow into one cross-workspace **Action Center** for triage. Compose each workspace from multiple named agents, each with its own model, prompt, skills, and MCP tools. Everything stays local unless you opt into cloud LLMs.
 
 ## ⚙️ How it works
 
@@ -36,6 +36,7 @@ Each MCP/skill binding is classified by side effect (read / write / external), a
 
 ## ✨ What you can do
 
+- **Personal HQ** — a home-base workspace that starts your day: daily brief, Gmail-backed email station with confirm-gated send, follow-up tracking, a journal, and a Watchtower view over every other workspace.
 - **Missions & Action Center** — let a workspace work autonomously on a recurring cadence under an autonomy policy, and triage its findings (“opportunities”) from one cross-workspace inbox.
 - **Workspaces** — group agents to collaborate, with shared notes, files, and tasks scoped to the workspace. The same agent can have different tool access in different workspaces.
 - **Tasks & scheduling** — assign tasks to agents and run them on a cron-like schedule, with structured result storage (CSV/JSON output specs).
