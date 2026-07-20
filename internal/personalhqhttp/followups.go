@@ -9,7 +9,23 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/followup"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// resolveEmailOpsWorkspaceID returns the user's Email Ops workspace ID, or "" if
+// none exists (or the workspace source is not wired). Follow-ups are keyed to
+// this workspace so the hub-and-spoke split works: management lives in Email Ops
+// and HQ surfaces them read-only via the same resolution rule.
+func (h *Handler) resolveEmailOpsWorkspaceID(userID string) string {
+	if h == nil || h.watchtowerSources == nil {
+		return ""
+	}
+	id, err := workspace.ResolveEmailOpsWorkspace(h.watchtowerSources().Workspaces, userID)
+	if err != nil {
+		return ""
+	}
+	return id
+}
 
 // FollowUpAPI is the follow-up surface this handler needs, implemented by
 // *followup.Service. Kept as an interface for testability.
@@ -116,7 +132,8 @@ func (h *Handler) CreateFollowUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, err := h.followups.Capture(r.Context(), followup.CaptureInput{
-		UserID: userID, Category: cat, Direction: followup.Direction(strings.TrimSpace(req.Direction)),
+		UserID: userID, WorkspaceID: h.resolveEmailOpsWorkspaceID(userID),
+		Category: cat, Direction: followup.Direction(strings.TrimSpace(req.Direction)),
 		Title: req.Title, Detail: req.Detail, Counterparty: req.Counterparty,
 		Source: followup.SourceRef{Type: "manual"}, Provenance: followup.ProvenanceManual,
 	})
