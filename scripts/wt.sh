@@ -14,7 +14,12 @@
 #   wt status               # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
 #   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
+#   wt backlog [sub]        # BACKLOG.md: list (default) | add <idea> | sync  (scoped commit+push to dev)
 #   wt merge [name]         # Local merge into dev (legacy; prefer wt pr)
+#
+# Backlog is kept in sync with git automatically: `wt start` promotes the PRD's
+# feature to ## Doing, `wt done` retires it to ## Shipped with the merged PR
+# number, and both push a scoped docs(backlog) commit to dev.
 #
 # Planning docs live in the dev worktree's tasks/ folder (gitignored). Create
 # each PRD + task list there, then `wt start` fans a single PRD out into its
@@ -187,7 +192,7 @@ function wt_branch_status {
 }
 
 function wt_color_init {
-  typeset -g WT_C_RESET WT_C_DIM WT_C_BOLD WT_C_RED WT_C_GREEN WT_C_YELLOW WT_C_CYAN
+  typeset -g WT_C_RESET WT_C_DIM WT_C_BOLD WT_C_RED WT_C_GREEN WT_C_YELLOW WT_C_CYAN WT_C_MAGENTA
   if [[ -t 1 ]]; then
     WT_C_RESET=$'\e[0m'
     WT_C_DIM=$'\e[2m'
@@ -196,8 +201,9 @@ function wt_color_init {
     WT_C_GREEN=$'\e[32m'
     WT_C_YELLOW=$'\e[33m'
     WT_C_CYAN=$'\e[36m'
+    WT_C_MAGENTA=$'\e[35m'
   else
-    WT_C_RESET="" WT_C_DIM="" WT_C_BOLD="" WT_C_RED="" WT_C_GREEN="" WT_C_YELLOW="" WT_C_CYAN=""
+    WT_C_RESET="" WT_C_DIM="" WT_C_BOLD="" WT_C_RED="" WT_C_GREEN="" WT_C_YELLOW="" WT_C_CYAN="" WT_C_MAGENTA=""
   fi
 }
 
@@ -330,12 +336,203 @@ JSON
   return 0
 }
 
+function wt_backlog_file {
+  # Echoes the path to the tracked BACKLOG.md, which lives in the dev worktree
+  # (where its docs(backlog) commits ride, same as they do by hand today).
+  # Returns non-zero if the dev worktree can't be found.
+  local dev_path
+  dev_path="$(wt_get_dev_worktree)" || return 1
+  [[ -z "$dev_path" ]] && return 1
+  print -r -- "$dev_path/BACKLOG.md"
+}
+
+function wt_backlog_commit_push {
+  # Scoped commit of BACKLOG.md ONLY + push to origin/$BASE_BRANCH. The
+  # path-limited commit never sweeps up unrelated WIP in the shared dev
+  # worktree. On a non-fast-forward push (a concurrent backlog edit landed) it
+  # rebases onto origin/$BASE_BRANCH - but only when nothing else is dirty,
+  # since rebase can't run over unstaged edits. Non-fatal by contract: returns
+  # non-zero on failure, but callers proceed with their real work.
+  # Args: $1 = dev worktree path, $2 = commit message.
+  local dev_path="$1" msg="$2"
+  if [[ -z "$(git -C "$dev_path" status --porcelain -- BACKLOG.md 2>/dev/null)" ]]; then
+    echo "Backlog: no BACKLOG.md changes to commit."
+    return 0
+  fi
+  git -C "$dev_path" commit -q -m "$msg" -- BACKLOG.md || return 1
+  echo "Backlog: committed - $msg"
+  git -C "$dev_path" fetch origin "$BASE_BRANCH" --quiet 2>/dev/null
+  if git -C "$dev_path" push -q origin "$BASE_BRANCH" 2>/dev/null; then
+    echo "Backlog: pushed to origin/$BASE_BRANCH"
+    return 0
+  fi
+  echo "Backlog: push rejected (origin/$BASE_BRANCH moved); integrating..."
+  if [[ -n "$(git -C "$dev_path" status --porcelain --untracked-files=no)" ]]; then
+    echo "Backlog: dev worktree has other uncommitted changes; can't auto-rebase."
+    echo "  Sync manually: git -C '$dev_path' pull --rebase origin $BASE_BRANCH && git -C '$dev_path' push origin $BASE_BRANCH"
+    return 1
+  fi
+  if git -C "$dev_path" rebase "origin/$BASE_BRANCH" >/dev/null 2>&1; then
+    git -C "$dev_path" push -q origin "$BASE_BRANCH" \
+      && echo "Backlog: pushed to origin/$BASE_BRANCH" \
+      || { echo "Backlog: push still failing; push manually from $dev_path"; return 1; }
+  else
+    git -C "$dev_path" rebase --abort >/dev/null 2>&1
+    echo "Backlog: rebase onto origin/$BASE_BRANCH hit conflicts; resolve in $dev_path and push."
+    return 1
+  fi
+}
+
+function wt_backlog_add_idea {
+  # Inserts "- YYYY-MM-DD <text>" after the last bullet of the ## Ideas section
+  # (or right after the header if the section is empty). Args: $1 = file,
+  # $2 = idea text (verbatim; user supplies any !, #small/#large, tags).
+  local file="$1" text="$2"
+  local bullet="- $(date +%F) $text"
+  local tmp="${file}.wt.$$"
+  awk -v nl="$bullet" '
+    { L[NR] = $0 }
+    END {
+      ideas = 0
+      for (i = 1; i <= NR; i++) if (L[i] ~ /^## Ideas *$/) { ideas = i; break }
+      if (ideas == 0) { for (i = 1; i <= NR; i++) print L[i]; print nl; exit }
+      nx = NR + 1
+      for (i = ideas + 1; i <= NR; i++) if (L[i] ~ /^## /) { nx = i; break }
+      at = ideas
+      for (i = ideas + 1; i < nx; i++) if (L[i] ~ /^- /) at = i
+      for (i = 1; i <= NR; i++) { print L[i]; if (i == at) print nl }
+    }
+  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+function wt_backlog_ensure_doing {
+  # Appends a Doing entry keyed by the PRD slug, so wt done can retire it on
+  # merge. Idempotent: skips if a Doing line already references prd-<feature>.md.
+  # Deliberately does NOT touch ## Ideas (rule E forbids rewording/deleting
+  # ideas; matching free text to a slug is unsafe). Args: $1 = file, $2 = slug.
+  local file="$1" feature="$2"
+  local entry="- $feature -> PRD at tasks/prd-$feature.md (started $(date +%F))"
+  local tmp="${file}.wt.$$"
+  awk -v feature="$feature" -v entry="$entry" '
+    { L[NR] = $0 }
+    END {
+      doing = 0
+      for (i = 1; i <= NR; i++) if (L[i] ~ /^## Doing *$/) { doing = i; break }
+      if (doing == 0) { for (i = 1; i <= NR; i++) print L[i]; exit }
+      nx = NR + 1
+      for (i = doing + 1; i <= NR; i++) if (L[i] ~ /^## /) { nx = i; break }
+      for (i = doing + 1; i < nx; i++)
+        if (index(L[i], "prd-" feature ".md") > 0) { for (j = 1; j <= NR; j++) print L[j]; exit }
+      at = doing
+      for (i = doing + 1; i < nx; i++) if (L[i] ~ /^- /) at = i
+      for (i = 1; i <= NR; i++) { print L[i]; if (i == at) print entry }
+    }
+  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+function wt_backlog_retire {
+  # Moves the ## Doing line for this feature to the top of ## Shipped / dropped,
+  # annotated with the merged PR number and date. Falls back to appending a
+  # fresh Shipped line if no Doing line matches (shipment still recorded).
+  # Matches on prd-<feature>.md first, then a bare-slug substring for
+  # hand-written Doing lines. Args: $1 = file, $2 = slug, $3 = PR number (opt).
+  local file="$1" feature="$2" prnum="$3"
+  local d="$(date +%F)" suffix
+  if [[ -n "$prnum" ]]; then suffix="PR #$prnum merged to dev ($d)"; else suffix="merged to dev ($d)"; fi
+  local tmp="${file}.wt.$$"
+  awk -v feature="$feature" -v suffix="$suffix" -v d="$d" '
+    { L[NR] = $0 }
+    END {
+      doing = 0; shipped = 0
+      for (i = 1; i <= NR; i++) {
+        if (L[i] ~ /^## Doing *$/) doing = i
+        if (L[i] ~ /^## Shipped/) shipped = i
+      }
+      moved = 0
+      if (doing > 0) {
+        dn = NR + 1
+        for (i = doing + 1; i <= NR; i++) if (L[i] ~ /^## /) { dn = i; break }
+        for (i = doing + 1; i < dn; i++)
+          if (L[i] ~ /^- / && (index(L[i], "prd-" feature ".md") > 0 || index(L[i], feature) > 0)) { moved = i; break }
+      }
+      if (moved > 0) { base = L[moved]; sub(/^- /, "", base) } else { base = feature }
+      shipline = "- " d " " base " - " suffix
+      for (i = 1; i <= NR; i++) {
+        if (i == moved) continue
+        print L[i]
+        if (i == shipped) print shipline
+      }
+      if (shipped == 0) { print ""; print "## Shipped / dropped"; print shipline }
+    }
+  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+function wt_backlog_render {
+  # Pretty, colorized view of BACKLOG.md for reading in a terminal: a one-line
+  # summary, section headers tinted by kind (Ideas cyan / Doing yellow /
+  # Shipped green) with a bullet count, and per-bullet emphasis - dimmed date
+  # prefix, red "!" priority flag, magenta #tags. Intro prose is folded away.
+  # Colours come from wt_color_init and vanish when stdout isn't a tty, but
+  # callers should prefer raw `cat` when piped (see the dispatch).
+  local file="$1"
+  wt_color_init
+  awk -v R="$WT_C_RESET" -v B="$WT_C_BOLD" -v D="$WT_C_DIM" \
+      -v RED="$WT_C_RED" -v GRN="$WT_C_GREEN" -v YEL="$WT_C_YELLOW" \
+      -v CYN="$WT_C_CYAN" -v MAG="$WT_C_MAGENTA" '
+    { L[NR] = $0 }
+    END {
+      ideas = 0; doing = 0; shipped = 0
+      for (i = 1; i <= NR; i++) {
+        if (L[i] ~ /^## /) {
+          c = 0
+          for (j = i + 1; j <= NR && L[j] !~ /^## /; j++) if (L[j] ~ /^- /) c++
+          cnt[i] = c
+          if (L[i] ~ /Ideas/)   ideas = c
+          if (L[i] ~ /Doing/)   doing = c
+          if (L[i] ~ /Shipped/) shipped = c
+        }
+      }
+      cur = CYN
+      for (i = 1; i <= NR; i++) {
+        line = L[i]
+        if (line ~ /^# /) {
+          print B line R
+          print D ideas " ideas  •  " doing " doing  •  " shipped " shipped" R
+          for (j = i + 1; j <= NR && L[j] !~ /^## /; j++) ;   # fold intro prose
+          i = j - 1
+          continue
+        }
+        if (line ~ /^## /) {
+          hc = CYN
+          if (line ~ /Doing/)   hc = YEL
+          if (line ~ /Shipped/) hc = GRN
+          cur = hc
+          print ""
+          print hc B line R "  " D "(" cnt[i] ")" R
+          continue
+        }
+        if (line ~ /^- /) {
+          t = substr(line, 3)
+          sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/, D "&" R, t)
+          sub(/^! /, RED B "!" R " ", t)
+          gsub(/ ! /, " " RED B "!" R " ", t)
+          gsub(/#[a-zA-Z0-9_-]+/, MAG "&" R, t)
+          print "  " cur "•" R " " t
+          continue
+        }
+        if (line == "") continue   # spacing is emitted per-header, not per file blank
+        print D line R
+      }
+    }
+  ' "$file"
+}
+
 function wt_repl {
   # Persistent prompt: read a line and dispatch it as `wt <words>`. Runs in the
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, merge, help  (q to quit)"
+  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, backlog, merge, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -446,6 +643,15 @@ function wt_dispatch {
       echo "Note: no tasks-$feature.md yet - generate the task list in this worktree."
     fi
 
+    # Backlog bookkeeping: record this feature under ## Doing (keyed by the PRD
+    # slug) and push, so wt done can retire it on merge. Non-fatal - never
+    # blocks starting the feature. Commits land on the dev worktree's tracked
+    # BACKLOG.md, not this new feature worktree.
+    if [[ -f "$dev_path/BACKLOG.md" ]]; then
+      wt_backlog_ensure_doing "$dev_path/BACKLOG.md" "$feature" \
+        && wt_backlog_commit_push "$dev_path" "docs(backlog): promote $feature to Doing"
+    fi
+
     cd "$target"
     echo "Changed to: $target"
     ;;
@@ -493,7 +699,7 @@ function wt_dispatch {
     # Post-merge cleanup: archive the (completed) task list back to dev, remove
     # the worktree + local/remote branch, then rebase the dev worktree onto
     # origin/dev. Meant to run after the feature's PR has been squash-merged.
-    local name="$2" target_path branch
+    local name="$2" target_path branch merged_num=""
     if [[ -z "$name" ]]; then
       target_path="$(git rev-parse --show-toplevel 2>/dev/null)"
       name="${target_path:t}"
@@ -518,7 +724,6 @@ function wt_dispatch {
 
     # Best-effort merged check so we don't discard unmerged work by accident.
     if command -v gh >/dev/null 2>&1; then
-      local merged_num
       merged_num="$(gh pr list --head "$branch" --state merged --limit 1 \
                  --json number --jq '.[0].number' 2>/dev/null)"
       if [[ -z "$merged_num" ]]; then
@@ -526,6 +731,15 @@ function wt_dispatch {
         read "cont?Continue cleaning up anyway? [y/N]: "
         [[ "$cont" == y* ]] || { echo "Aborted"; return 0; }
       fi
+    fi
+
+    # Backlog bookkeeping: move this feature from ## Doing to ## Shipped/dropped
+    # with the merged PR number, then commit+push on dev. Non-fatal - a failed
+    # push here never blocks the worktree cleanup below. $name is the worktree
+    # dir = feature slug (matches prd-<slug>.md created by wt start).
+    if [[ -f "$dev_path/BACKLOG.md" ]]; then
+      wt_backlog_retire "$dev_path/BACKLOG.md" "$name" "$merged_num" \
+        && wt_backlog_commit_push "$dev_path" "docs(backlog): ship $name${merged_num:+ (PR #$merged_num)}"
     fi
 
     # Archive tasks/ (with ticked checkboxes) back into the dev worktree.
@@ -876,6 +1090,47 @@ function wt_dispatch {
       echo "Removed worktree and branch: $name"
     fi
     ;;
+  backlog)
+    # BACKLOG.md capture + sync. Operates on the tracked copy in the dev
+    # worktree and commits/pushes scoped changes so the file never drifts.
+    wt_color_init
+    local bl_file
+    bl_file="$(wt_backlog_file)" || { echo "Could not find $BASE_BRANCH worktree"; return 1; }
+    if [[ ! -f "$bl_file" ]]; then
+      echo "No BACKLOG.md at $bl_file"
+      return 1
+    fi
+    local bl_dev="${bl_file:h}"
+    case "$2" in
+      ""|list|ls)
+        # Pretty colorized view for a terminal; raw file when piped/redirected
+        # so downstream tools (grep, less -F, editors) still see plain markdown.
+        if [[ -t 1 ]]; then
+          wt_backlog_render "$bl_file"
+        else
+          cat "$bl_file"
+        fi
+        ;;
+      add)
+        shift 2
+        local idea="$*"
+        idea="${idea## }"; idea="${idea%% }"
+        if [[ -z "$idea" ]]; then
+          echo "Usage: wt backlog add <idea text>"
+          return 1
+        fi
+        wt_backlog_add_idea "$bl_file" "$idea" || { echo "Failed to edit BACKLOG.md"; return 1; }
+        wt_backlog_commit_push "$bl_dev" "docs(backlog): add idea - $idea"
+        ;;
+      sync)
+        wt_backlog_commit_push "$bl_dev" "docs(backlog): update"
+        ;;
+      *)
+        echo "Usage: wt backlog [list | add <idea> | sync]"
+        return 1
+        ;;
+    esac
+    ;;
   *)
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
@@ -889,6 +1144,7 @@ function wt_dispatch {
     echo "  wt status        - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
+    echo "  wt backlog [sub] - BACKLOG.md: list (default) | add <idea> | sync (scoped commit+push to $BASE_BRANCH)"
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;
   esac

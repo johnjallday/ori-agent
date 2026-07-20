@@ -55,6 +55,13 @@ outside the report): move entries that shipped or became pointless to `## Shippe
 with a one-word reason; promote a candidate to `## Doing` only when John picked it in a
 prior session. Never delete or reword entries under `## Ideas` — his phrasing is the record.
 
+Note: `scripts/wt.sh` now owns the two git-adjacent transitions automatically — `wt start`
+adds a `## Doing` entry keyed to `prd-<slug>.md`, and `wt done` retires it to
+`## Shipped / dropped` with the merged PR number. So when scoring, **skip an `## Ideas` entry
+that already has a matching `## Doing` line or a `tasks/prd-<slug>.md`** — it's already in
+flight or shipped, not a fresh candidate. You still do the Ideas→Shipped move for ideas that
+became pointless without ever being built.
+
 ## Scoring rubric
 
 Score each candidate H/M/L on:
