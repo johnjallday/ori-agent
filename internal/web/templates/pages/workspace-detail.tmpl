@@ -11,6 +11,19 @@
 
     <div class="main-content">
       <div class="container-fluid py-4">
+        <!-- Workspace follow-up management panel (Mail spin-off): populated by
+             workspace-followups.js for a workspace that owns follow-ups (the
+             Email Ops workspace). Additive; hidden when there are none. Placed
+             above the command view so it stays visible (the command view locks
+             body scroll for map panning). -->
+        <div id="workspaceFollowupMount" class="workspace-followup-mount" hidden></div>
+        <style>
+          .workspace-followup-mount { margin-bottom: 1rem; padding: 1rem 1.25rem; border-radius: 12px;
+            background: var(--surface-1, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, rgba(255,255,255,0.08)); }
+          .workspace-followup-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }
+          .workspace-followup-sub { font-size: 0.8rem; margin: 0.15rem 0 0.75rem; color: var(--text-secondary, #9aa0a6); }
+          .workspace-followup-list { display: flex; flex-direction: column; gap: 0.6rem; }
+        </style>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
         <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
         <!-- Workspace Detail View -->
@@ -8672,6 +8685,8 @@
   <script defer src="/js/modules/project-templates-manage.js"></script>
   <script defer src="/js/modules/workspace-hub-support-chat.js"></script>
   <script type="module" src="/js/modules/personal-hq-email-setup.js"></script>
+  <!-- Follow-up management panel for a workspace that owns follow-ups (Email Ops). -->
+  <script type="module" src="/js/modules/workspace-followups.js"></script>
 
   <!-- Workspace Detail Page -->
   <script type="module">

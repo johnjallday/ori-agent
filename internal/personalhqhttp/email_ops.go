@@ -2,6 +2,7 @@ package personalhqhttp
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/followup"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -59,4 +60,33 @@ func (h *Handler) EmailOpsStatusHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	orihttp.Success(w, map[string]any{"status": status})
+}
+
+// WorkspaceFollowUps handles GET /api/workspaces/{workspaceID}/followups: the
+// open follow-ups owned by a workspace, for that workspace's follow-up
+// management panel (Email Ops). User-scoped by follow-up ownership, so a user
+// only ever sees their own; the workspace filter narrows to that workspace's
+// items. Follow-up mutations reuse the existing /api/personal-hq/followups/*
+// endpoints (keyed by follow-up id + user).
+func (h *Handler) WorkspaceFollowUps(w http.ResponseWriter, r *http.Request) {
+	if !h.followUpsReady(w, r, http.MethodGet) {
+		return
+	}
+	userID, ok := h.resolveUser(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace id is required")
+		return
+	}
+	items, err := h.followups.List(r.Context(), followup.Filter{
+		UserID: userID, WorkspaceID: workspaceID, OpenOnly: true,
+	})
+	if err != nil {
+		orihttp.InternalError(w, "Failed to list follow-ups: "+err.Error())
+		return
+	}
+	orihttp.Success(w, map[string]any{"followups": items})
 }
