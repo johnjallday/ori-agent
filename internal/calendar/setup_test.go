@@ -174,6 +174,25 @@ func TestIsReadOperation(t *testing.T) {
 	}
 }
 
+func TestToolSideEffectOverrides_ClassifiesReadsAndWrites(t *testing.T) {
+	got := ToolSideEffectOverrides(googleShapedMapping())
+	want := map[string]workspace.SideEffect{
+		"calendars_list": workspace.SideEffectRead,
+		"events_list":    workspace.SideEffectRead,
+		"events_insert":  workspace.SideEffectExternal,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ToolSideEffectOverrides = %v, want %v", got, want)
+	}
+}
+
+func TestToolSideEffectOverrides_UnmappedYieldsNil(t *testing.T) {
+	mapping := workspace.CapabilityMapping{Capability: CapabilityKey}
+	if got := ToolSideEffectOverrides(mapping); got != nil {
+		t.Fatalf("ToolSideEffectOverrides(empty mapping) = %v, want nil", got)
+	}
+}
+
 func TestListCalendars_GoogleShaped(t *testing.T) {
 	call := func(ctx context.Context, tool string, args map[string]any) (any, error) {
 		if tool != "calendars_list" {

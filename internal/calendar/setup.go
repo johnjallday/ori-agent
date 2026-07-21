@@ -131,6 +131,41 @@ func IsReadOperation(operation string) bool {
 	return known && !contract.IsWrite
 }
 
+// ToolSideEffectOverrides classifies every mapped operation's tool name for the
+// workspace autonomy gate (FR28): read operations (list_calendars, list_events,
+// get_event, freebusy, suggest_time, list_accounts) classify as
+// workspace.SideEffectRead; write operations (create_event, update_event,
+// connect_account) classify as workspace.SideEffectExternal -- calendar writes
+// affect a system outside the workspace, never a workspace-internal write. The
+// result is meant for MCPBinding.ToolOverrides, giving the gate exact per-tool
+// attribution instead of falling back to the binding's DefaultSideEffect (see
+// resolveMissionToolSideEffect's override>default>heuristic precedence). Write
+// tools are classified here even though ReadOnlyAllowedTools already keeps them
+// out of the agent-facing allowlist: this is defense in depth, and it documents
+// the correct classification if the allowlist is ever widened.
+func ToolSideEffectOverrides(mapping workspace.CapabilityMapping) map[string]workspace.SideEffect {
+	overrides := make(map[string]workspace.SideEffect)
+	for name, op := range mapping.Operations {
+		contract, known := operationContracts[strings.ToLower(strings.TrimSpace(name))]
+		if !known {
+			continue
+		}
+		tool := strings.TrimSpace(op.Tool)
+		if tool == "" {
+			continue
+		}
+		if contract.IsWrite {
+			overrides[tool] = workspace.SideEffectExternal
+		} else {
+			overrides[tool] = workspace.SideEffectRead
+		}
+	}
+	if len(overrides) == 0 {
+		return nil
+	}
+	return overrides
+}
+
 // SetupState is a stable, UI-facing Calendar Ops connector setup state. The
 // values are contract strings shared with the frontend; do not rename them.
 type SetupState string

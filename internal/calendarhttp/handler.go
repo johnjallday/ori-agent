@@ -85,6 +85,11 @@ type Handler struct {
 	// toolCallerFor builds a calendar.ToolCaller for a server. Injectable so the
 	// validate flow can be tested with a fake connector.
 	toolCallerFor func(serverName string) calendar.ToolCaller
+
+	// cache is the gateway's short-TTL read cache (FR34). Always non-nil.
+	cache *readCache
+	// confirmations is the mutation confirmation store (FR31). Always non-nil.
+	confirmations *confirmationStore
 }
 
 // NewHandler constructs a Calendar Ops setup handler. registry and config may be
@@ -103,6 +108,8 @@ func NewHandler(folders FolderStore, lister WorkspaceLister, registry *mcp.Regis
 	}
 	h.connectorStatusFn = h.registryConnectorStatus
 	h.toolCallerFor = h.registryToolCaller
+	h.cache = newReadCache(readCacheTTL)
+	h.confirmations = newConfirmationStore(confirmationTTL)
 	return h
 }
 

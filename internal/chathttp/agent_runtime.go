@@ -26,6 +26,10 @@ type resolvedChatAgent struct {
 	MCPServers      []string
 	EffectiveSkills []workspace.ResolvedSkill
 	WorkspaceTools  *WorkspaceToolProvider
+	// MCPToolAllowlist maps a runtime server name to the tool names its
+	// binding permits; a missing key means no restriction. See
+	// workspace.ResolvedAgentRuntime.MCPToolAllowlist.
+	MCPToolAllowlist map[string][]string
 }
 
 // SetRuntimeResolver configures workspace-aware agent runtime resolution for chat requests.
@@ -61,8 +65,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 			return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
 		}
 		result := &resolvedChatAgent{
-			Agent:      cloneAgentForChat(resolved.Agent),
-			MCPServers: append([]string{}, resolved.MCPServers...),
+			Agent:            cloneAgentForChat(resolved.Agent),
+			MCPServers:       append([]string{}, resolved.MCPServers...),
+			MCPToolAllowlist: resolved.MCPToolAllowlist,
 		}
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)

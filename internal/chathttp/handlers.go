@@ -591,6 +591,7 @@ func (h *Handler) findMCPToolByName(ag *resolvedChatAgent, toolName string) (too
 		if err != nil {
 			continue
 		}
+		mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
 		for _, mcpTool := range mcpTools {
 			defName := strings.TrimSpace(mcpTool.Definition().Name)
 			for _, candidate := range candidateNames {
@@ -1507,6 +1508,7 @@ func (h *Handler) buildChatToolList(ag *resolvedChatAgent, current string, invok
 				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
 				continue
 			}
+			mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
 			for _, mcpTool := range mcpTools {
 				mcpDef := mcpTool.Definition()
 				appendTool(llm.Tool{

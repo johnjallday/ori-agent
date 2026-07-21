@@ -349,6 +349,14 @@ func (h *Handler) applySave(ctx context.Context, ws *agentworkspace.Workspace, u
 
 	binding.CapabilityMappings = []agentworkspace.CapabilityMapping{mapping}
 	binding.AllowedTools = calendar.ReadOnlyAllowedTools(mapping)
+	// DefaultSideEffect=read matches the allowlist above (only read tools are
+	// ever agent-callable); ToolOverrides gives the autonomy gate exact
+	// per-tool attribution, classifying the mapped write tools as external
+	// even though they're never exposed to agents (FR28, defense in depth).
+	// Setting a valid default also satisfies MissionBindingsReady so Calendar
+	// Ops workspaces don't hit the one-time "classify this binding" prompt.
+	binding.DefaultSideEffect = agentworkspace.SideEffectRead
+	binding.ToolOverrides = calendar.ToolSideEffectOverrides(mapping)
 	binding.Config = calendar.WriteBindingSettings(binding.Config, settings)
 	binding.Enabled = true
 

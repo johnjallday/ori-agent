@@ -507,6 +507,17 @@ func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/calendar-ops/setup/validate", s.Handlers.CalendarOps.Validate)
 	mux.HandleFunc("POST /api/calendar-ops/setup/save", s.Handlers.CalendarOps.Save)
 
+	// Calendar Ops safe gateway: normalized reads (cached, bounded) and the
+	// two-step mutation preview/confirm boundary. Every route resolves
+	// ownership/readiness itself (CalendarMCPGateway, FR24/FR25); the browser
+	// never talks to an MCP server directly.
+	mux.HandleFunc("GET /api/calendar-ops/capabilities", s.Handlers.CalendarOps.Capabilities)
+	mux.HandleFunc("GET /api/calendar-ops/calendars", s.Handlers.CalendarOps.Calendars)
+	mux.HandleFunc("GET /api/calendar-ops/events", s.Handlers.CalendarOps.Events)
+	mux.HandleFunc("GET /api/calendar-ops/events/detail", s.Handlers.CalendarOps.EventDetail)
+	mux.HandleFunc("POST /api/calendar-ops/mutations/preview", s.Handlers.CalendarOps.Preview)
+	mux.HandleFunc("POST /api/calendar-ops/mutations/confirm", s.Handlers.CalendarOps.Confirm)
+
 	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
 	mux.HandleFunc("GET /api/mcp/search", s.Handlers.MCP.SearchServersHandler)

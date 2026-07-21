@@ -977,3 +977,86 @@ func TestAgentRuntimeResolver_UsesUpdatedWorkspaceLocalModel(t *testing.T) {
 			resolved2.Agent.Settings.Model, resolved2.Agent.Settings.Provider)
 	}
 }
+
+func TestAgentRuntimeResolver_MCPToolAllowlistFromBinding(t *testing.T) {
+	agentStore := &resolverAgentStoreStub{
+		agents: map[string]*agent.Agent{
+			"Scheduler": {},
+		},
+	}
+	ws := &Workspace{
+		ID: "ws-calendar",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Scheduler", NodeID: "scheduler-1"},
+		},
+		MCPBindings: []MCPBinding{
+			{
+				ID:           "binding-calendar",
+				ServerName:   "calendar-mcp",
+				Enabled:      true,
+				AllowedTools: []string{"list_events", "list_calendars"},
+			},
+		},
+	}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{
+		servers: map[string]mcp.ServerConfig{
+			"calendar-mcp": {Name: "calendar-mcp", Transport: "streamable-http", URL: "https://calendar.example/mcp"},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolved, err := resolver.ResolveAgentForTask("Scheduler", Task{WorkspaceID: ws.ID, AssignedNodeID: "scheduler-1"})
+	if err != nil {
+		t.Fatalf("ResolveAgentForTask() error = %v", err)
+	}
+	if len(resolved.MCPServers) != 1 {
+		t.Fatalf("expected exactly one runtime MCP server, got %v", resolved.MCPServers)
+	}
+
+	runtimeName := resolved.MCPServers[0]
+	allowed, ok := resolved.MCPToolAllowlist[runtimeName]
+	if !ok {
+		t.Fatalf("expected MCPToolAllowlist entry for %q, got %v", runtimeName, resolved.MCPToolAllowlist)
+	}
+	if len(allowed) != 2 || allowed[0] != "list_events" || allowed[1] != "list_calendars" {
+		t.Fatalf("MCPToolAllowlist[%q] = %v, want [list_events list_calendars]", runtimeName, allowed)
+	}
+}
+
+func TestAgentRuntimeResolver_MCPToolAllowlistOmittedWhenBindingAllowsAllTools(t *testing.T) {
+	agentStore := &resolverAgentStoreStub{
+		agents: map[string]*agent.Agent{
+			"Coder": {},
+		},
+	}
+	ws := &Workspace{
+		ID: "ws-legacy",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Coder", NodeID: "coder-1"},
+		},
+		MCPBindings: []MCPBinding{
+			{ID: "binding-legacy", ServerName: "browser", Enabled: true},
+		},
+	}
+	workspaceStore := newTestWorkspaceStore(t, ws)
+	registry := &runtimeRegistryStub{}
+	templates := &templateLookupStub{
+		servers: map[string]mcp.ServerConfig{
+			"browser": {Name: "browser", Command: "npx", Args: []string{"@playwright/mcp"}},
+		},
+	}
+
+	resolver := NewAgentRuntimeResolver(agentStore, workspaceStore, registry, templates)
+	resolved, err := resolver.ResolveAgentForTask("Coder", Task{WorkspaceID: ws.ID, AssignedNodeID: "coder-1"})
+	if err != nil {
+		t.Fatalf("ResolveAgentForTask() error = %v", err)
+	}
+	if len(resolved.MCPServers) != 1 {
+		t.Fatalf("expected exactly one runtime MCP server, got %v", resolved.MCPServers)
+	}
+	if _, ok := resolved.MCPToolAllowlist[resolved.MCPServers[0]]; ok {
+		t.Fatalf("expected no allowlist entry for a binding with nil AllowedTools (legacy all-tools), got %v", resolved.MCPToolAllowlist)
+	}
+}

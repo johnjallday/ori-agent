@@ -323,6 +323,53 @@ func TestApplySave_PersistsReadOnlyAllowlistAndSettings(t *testing.T) {
 	}
 }
 
+func TestApplySave_ClassifiesToolSideEffects(t *testing.T) {
+	ws := newCalendarOpsWorkspace("ws-cal")
+	if err := ws.UpsertMCPBinding(agentworkspace.MCPBinding{
+		ID:         "cal-binding",
+		ServerName: "google-calendar",
+		Enabled:    true,
+		Config:     calendar.WriteBindingSettings(nil, calendar.BindingSettings{}),
+	}); err != nil {
+		t.Fatalf("UpsertMCPBinding: %v", err)
+	}
+
+	mapping := googleShapedMappingForTest()
+	mapping.Operations[calendar.OpCreateEvent] = agentworkspace.OperationMapping{
+		Tool:      "events_insert",
+		Arguments: map[string]string{"calendar_id": "/calendarId", "title": "/summary", "start_time": "/start/dateTime", "end_time": "/end/dateTime"},
+	}
+
+	h := NewHandler(newFakeFolderStore(), &fakeWorkspaceLister{}, nil, nil, nil)
+	if err := h.applySave(context.Background(), ws, "local", saveRequest{WorkspaceID: "ws-cal", Mapping: mapping}); err != nil {
+		t.Fatalf("applySave: %v", err)
+	}
+
+	binding, ok := findCalendarBinding(ws)
+	if !ok {
+		t.Fatal("expected the calendar binding to still exist")
+	}
+	if binding.DefaultSideEffect != agentworkspace.SideEffectRead {
+		t.Fatalf("DefaultSideEffect = %q, want %q", binding.DefaultSideEffect, agentworkspace.SideEffectRead)
+	}
+	if got := binding.ToolOverrides["calendars_list"]; got != agentworkspace.SideEffectRead {
+		t.Errorf("ToolOverrides[calendars_list] = %q, want read", got)
+	}
+	if got := binding.ToolOverrides["events_list"]; got != agentworkspace.SideEffectRead {
+		t.Errorf("ToolOverrides[events_list] = %q, want read", got)
+	}
+	if got := binding.ToolOverrides["events_insert"]; got != agentworkspace.SideEffectExternal {
+		t.Errorf("ToolOverrides[events_insert] = %q, want external", got)
+	}
+	// The write tool must never appear in AllowedTools, even though it's
+	// classified -- classification and exposure are separate defenses.
+	for _, tool := range binding.AllowedTools {
+		if tool == "events_insert" {
+			t.Fatal("create_event's tool must not be in AllowedTools")
+		}
+	}
+}
+
 func TestApplySave_RejectsInvalidMapping(t *testing.T) {
 	ws := newCalendarOpsWorkspace("ws-cal")
 	if err := ws.UpsertMCPBinding(agentworkspace.MCPBinding{
