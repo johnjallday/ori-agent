@@ -56,19 +56,26 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 // the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
-		// ProjectPath and Designation are canonical workspace.json fields that
-		// are not represented by the SQLite workspace table. A workspace fetched
-		// from SQLite can therefore carry empty values and must not erase values
-		// written directly to the folder store. There is no generic "empty means
-		// clear" operation through SyncStore; intentional removals must update
-		// the canonical FileStore explicitly.
-		if ws.ProjectPath == "" || ws.Designation == "" {
+		// ProjectPath, Designation, and TemplateProvenance are canonical
+		// workspace.json fields not represented by the SQLite workspace table.
+		// A workspace fetched from SQLite (the primary store's Get) therefore
+		// always carries these as zero values, and must not erase values
+		// written directly to the folder store by an unrelated Update/Save
+		// cycle (e.g. the template-setup first-open auto-start saving a task
+		// status change would otherwise silently wipe out the template
+		// provenance persisted moments earlier at workspace-creation time).
+		// There is no generic "empty means clear" operation through SyncStore;
+		// intentional removals must update the canonical FileStore explicitly.
+		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
 				if ws.ProjectPath == "" {
 					ws.ProjectPath = diskWorkspace.ProjectPath
 				}
 				if ws.Designation == "" {
 					ws.Designation = diskWorkspace.Designation
+				}
+				if ws.TemplateProvenance == nil {
+					ws.TemplateProvenance = diskWorkspace.TemplateProvenance
 				}
 			}
 		}

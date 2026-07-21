@@ -130,6 +130,53 @@ func TestAgentSnapshotStore_SyncStoreWritesSnapshotToDisk(t *testing.T) {
 	}
 }
 
+// TestAgentSnapshotStore_GetFolderWorkspaceForwardsThroughWrapping guards a
+// real bug: production wraps the workspace store as
+// AgentSnapshotStore{Store: SyncStore{...}}, and AgentSnapshotStore embeds
+// the Store *interface* (not SyncStore's concrete type), so
+// GetFolderWorkspace was never promoted -- any caller needing a
+// folder-store-only field (TemplateProvenance, ProjectPath, Designation)
+// through the fully-wrapped production store got a method-not-found error
+// (or, before this was caught, a nil handler from a failed interface
+// assertion at wiring time). This must keep working through the same
+// wrapping chain builder.go's initializeWorkspaceStore actually builds.
+func TestAgentSnapshotStore_GetFolderWorkspaceForwardsThroughWrapping(t *testing.T) {
+	dir := t.TempDir()
+	fileStore, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	primary := NewInMemoryStore()
+	sync := NewSyncStore(primary, fileStore)
+	store := NewAgentSnapshotStore(sync, &resolverAgentStoreStub{agents: map[string]*agent.Agent{}})
+
+	ws := &Workspace{ID: "ws-provenance", Name: "Provenance", Status: StatusActive}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		w.SetTemplateProvenance(&TemplateProvenance{TemplateID: "calendar-ops", Builtin: true})
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// The interface this repo's HTTP handlers actually assert against
+	// (calendarhttp.FolderStore mirrors this shape) -- confirms the fully
+	// wrapped production store satisfies it, not just that the method exists.
+	var reader interface {
+		GetFolderWorkspace(id string) (*Workspace, error)
+	} = store
+
+	got, err := reader.GetFolderWorkspace(ws.ID)
+	if err != nil {
+		t.Fatalf("GetFolderWorkspace: %v", err)
+	}
+	if got == nil || got.TemplateProvenance == nil || got.TemplateProvenance.TemplateID != "calendar-ops" {
+		t.Fatalf("expected forwarded read to see template provenance, got: %+v", got)
+	}
+}
+
 func TestRestoreWorkspaceAgents_RegistersMissingAgents(t *testing.T) {
 	primary := NewInMemoryStore()
 	manager := &agent.Agent{Type: agent.TypeToolCalling}

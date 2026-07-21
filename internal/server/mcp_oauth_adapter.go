@@ -17,7 +17,15 @@ type vaultMCPCredentialStore struct {
 }
 
 func newVaultMCPCredentialStore(store *vault.Store) *vaultMCPCredentialStore {
-	return &vaultMCPCredentialStore{store: store, vaultID: vault.DefaultVaultID}
+	// vault.DefaultVaultID ("default") is only a display-name/legacy-id
+	// comparison sentinel (see vault/store.go's IsDefault assignments) --
+	// real vaults created through the API get a generated UUID, so it is
+	// never an actual, resolvable vault id. The correct way to reference
+	// "the user's one vault" is Store.resolveVaultID's own empty-string
+	// convention, which auto-resolves when exactly one vault exists (and
+	// errors ErrVaultRequired otherwise, same as every other vault-backed
+	// feature in this app).
+	return &vaultMCPCredentialStore{store: store, vaultID: ""}
 }
 
 func (a *vaultMCPCredentialStore) LoadCredential(ctx context.Context, authRef string) (mcp.RemoteCredential, bool, error) {

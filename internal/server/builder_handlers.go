@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -472,6 +473,31 @@ func (b *ServerBuilder) wireReaperSetup() {
 	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
 	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
 	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
+}
+
+// wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. Like
+// wireReaperSetup, this must run AFTER the workspace store exists (Phase 18),
+// not during initializeHandlers (Phase 17) where b.workspaceStore is still
+// nil -- the handler needs it as its FolderStore.
+//
+// b.workspaceStore is statically typed as workspace.Store, which does not
+// declare GetFolderWorkspace -- calendarhttp.FolderStore requires it
+// specifically so template-provenance reads bypass the SQLite-primary Get
+// (which always returns TemplateProvenance nil; see sync_store.go's Save
+// rehydration comment for the write-side half of this). A runtime type
+// assertion is required here since Go checks interface-to-interface
+// assignment statically; both concrete stores actually wired in
+// initializeWorkspaceStore (*SyncStore, *FileStore) implement it.
+func (b *ServerBuilder) wireCalendarOpsSetup() {
+	if b.workspaceStore == nil || b.sessionStore == nil {
+		return
+	}
+	folders, ok := b.workspaceStore.(calendarhttp.FolderStore)
+	if !ok {
+		logger.Warn("Calendar Ops setup handler not wired: workspace store lacks GetFolderWorkspace", logger.Fields{})
+		return
+	}
+	b.calendarOpsHandler = calendarhttp.NewHandler(folders, b.sessionStore, b.mcpRegistry, b.mcpConfigManager, b.userProvider)
 }
 
 func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {

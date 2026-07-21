@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -25,6 +26,22 @@ type AgentSnapshotStore struct {
 // If agents is nil the wrapper is a no-op pass-through.
 func NewAgentSnapshotStore(inner Store, agents store.Store) *AgentSnapshotStore {
 	return &AgentSnapshotStore{Store: inner, agents: agents}
+}
+
+// GetFolderWorkspace forwards to the wrapped store when it supports reading
+// the canonical workspace.json directly (folderWorkspaceResolver, declared
+// in http_handlers.go). AgentSnapshotStore embeds the Store *interface*, not
+// the wrapped store's concrete type, so Go's method promotion does not pick
+// up GetFolderWorkspace automatically even though every concrete store
+// actually wired in production (SyncStore, FileStore) implements it --
+// without this forwarding method, any caller needing folder-store-only
+// fields (e.g. TemplateProvenance, which has no SQLite column) silently
+// loses that capability the moment this decorator wraps the chain.
+func (s *AgentSnapshotStore) GetFolderWorkspace(id string) (*Workspace, error) {
+	if fw, ok := s.Store.(folderWorkspaceResolver); ok {
+		return fw.GetFolderWorkspace(id)
+	}
+	return nil, fmt.Errorf("wrapped store does not support GetFolderWorkspace")
 }
 
 // Save persists the workspace, then opportunistically snapshots referenced

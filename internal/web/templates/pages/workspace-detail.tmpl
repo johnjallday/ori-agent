@@ -455,6 +455,20 @@
                   role="tabpanel"
                   aria-labelledby="workspace-detail-config-mcp-tab"
                   tabindex="0">
+                  <!-- Calendar Ops guided connector setup. Hidden unless the
+                       workspace's GET /api/calendar-ops/setup reports
+                       applicable:true. Populated by calendar-ops-setup.js. -->
+                  <div id="calendarOpsSetupCard" class="workspace-detail-reaper-card" role="group" aria-label="Calendar Ops Setup" hidden>
+                    <div class="workspace-detail-reaper-head">
+                      <div>
+                        <div class="workspace-detail-reaper-title">Calendar Ops Setup</div>
+                        <div id="calendarOpsSetupStatus" class="workspace-detail-reaper-status" aria-live="polite"></div>
+                      </div>
+                      <span id="calendarOpsSetupBadge" class="reaper-setup-badge" aria-hidden="true"></span>
+                    </div>
+                    <div id="calendarOpsSetupBody"></div>
+                    <div id="calendarOpsSetupActions" class="workspace-detail-reaper-actions d-flex flex-wrap gap-2"></div>
+                  </div>
                   <div class="workspace-detail-config-pane-header">
                     <div>
                       <div class="workspace-detail-config-pane-title">Workspace MCP</div>
@@ -8649,6 +8663,7 @@
   <script defer src="/js/modules/reaper-plugin-install.js"></script>
   <script defer src="/js/modules/reaper-setup-card.js"></script>
   <script defer src="/js/modules/reaper-readiness-panel.js"></script>
+  <script defer src="/js/modules/calendar-ops-setup.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/dashboard.js"></script>
   <script defer src="/js/modules/toast.js"></script>

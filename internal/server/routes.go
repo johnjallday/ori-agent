@@ -498,6 +498,15 @@ func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/mcp/servers/{name}/oauth-status", s.Handlers.MCP.GetServerOAuthStatusHandler)
 	mux.HandleFunc("GET /api/mcp/oauth/callback", s.Handlers.MCP.OAuthCallbackHandler)
 
+	// =============================================================================
+	// Calendar Ops guided connector setup
+	// =============================================================================
+	mux.HandleFunc("GET /api/calendar-ops/setup", s.Handlers.CalendarOps.Setup)
+	mux.HandleFunc("POST /api/calendar-ops/setup/connector", s.Handlers.CalendarOps.Connector)
+	mux.HandleFunc("POST /api/calendar-ops/setup/suggest-mappings", s.Handlers.CalendarOps.SuggestMappings)
+	mux.HandleFunc("POST /api/calendar-ops/setup/validate", s.Handlers.CalendarOps.Validate)
+	mux.HandleFunc("POST /api/calendar-ops/setup/save", s.Handlers.CalendarOps.Save)
+
 	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)
 	mux.HandleFunc("GET /api/mcp/search", s.Handlers.MCP.SearchServersHandler)

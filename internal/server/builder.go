@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -140,6 +141,7 @@ type ServerBuilder struct {
 	costTracker              *llm.CostTracker
 	mcpRegistry              *mcp.Registry
 	mcpConfigManager         *mcp.ConfigManager
+	calendarOpsHandler       *calendarhttp.Handler
 	locationManager          *location.Manager
 	onboardingMgr            *onboarding.Manager
 	userStore                userprofile.UserStore
@@ -409,6 +411,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Workspace:        b.workspaceHandler,
 		Usage:            b.usageHandler,
 		MCP:              b.mcpHandler,
+		CalendarOps:      b.calendarOpsHandler,
 		Location:         b.locationHandler,
 		Workflow:         b.workflowHandler,
 		ModelCategory:    b.modelCategoryHandler,

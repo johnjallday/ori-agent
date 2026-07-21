@@ -191,7 +191,9 @@ func (h *Handler) GetServerOAuthStatusHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	status, err := h.vaultOAuth.GetMCPOAuthStatus(r.Context(), vault.DefaultVaultID, mcp.NormalizedAuthRef(*cfg))
+	// "" auto-resolves to the user's one vault (vault.DefaultVaultID is a
+	// display-name sentinel, not a resolvable id -- see mcp_oauth_adapter.go).
+	status, err := h.vaultOAuth.GetMCPOAuthStatus(r.Context(), "", mcp.NormalizedAuthRef(*cfg))
 	if err != nil {
 		orihttp.InternalError(w, err.Error())
 		return
