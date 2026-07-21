@@ -1,8 +1,11 @@
 // personal-hq-email-setup.js — the "Set up email" button + modal on the
-// workspace detail page. It appears ONLY when the current workspace is the
-// user's designated Personal HQ, and opens a modal that reuses the loadout-chip
-// view-model to route setup correctly: no OAuth client → Settings, configured →
-// Connect, connected → Disconnect, stale → Reconnect.
+// workspace detail page. It appears when the current workspace can hold an
+// email account: the user's designated Personal HQ (legacy in-place email) OR
+// the user's Email Ops workspace (Mail spin-off). The modal reuses the
+// loadout-chip view-model to route setup correctly: no OAuth client → Settings,
+// configured → Connect, connected → Disconnect, stale → Reconnect. The link /
+// status / unlink calls are scoped to whichever workspace this is (HQ endpoints
+// for the HQ, workspace-scoped endpoints for Email Ops).
 //
 // Self-contained (no Bootstrap): a lightweight overlay toggled by a class. The
 // pure view-model helpers are imported from personal-hq-onboarding.js so the
@@ -33,6 +36,47 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     if (window.currentWorkspaceId) return String(window.currentWorkspaceId);
     const parts = window.location.pathname.split('/');
     return parts[2] || '';
+  }
+
+  // scope is set by resolveScope() to the endpoints for whichever email-capable
+  // workspace this is (HQ vs Email Ops). All link/status/unlink calls read it.
+  let scope = null;
+
+  // resolveScope decides whether this workspace can hold email, and which
+  // endpoints to use: the designated Personal HQ (legacy in-place binding) uses
+  // the HQ endpoints; the Email Ops workspace uses the workspace-scoped ones.
+  // Returns null when this workspace is neither (button stays hidden).
+  async function resolveScope() {
+    const wsId = currentWorkspaceId();
+    if (!wsId) return null;
+
+    const hq = await fetchJSON('/api/personal-hq/status');
+    const hqStatus = hq && hq.status;
+    if (hqStatus && hqStatus.valid && String(hqStatus.workspace_id) === wsId) {
+      return {
+        kind: 'hq',
+        isHQ: true,
+        statusUrl: '/api/personal-hq/email/status',
+        linkUrl: '/api/personal-hq/email/link',
+        unlinkUrl: '/api/personal-hq/email/unlink',
+        connectedTarget: 'your Personal HQ'
+      };
+    }
+
+    const eo = await fetchJSON('/api/personal-hq/email-ops');
+    const eoStatus = eo && eo.status;
+    if (eoStatus && eoStatus.exists && String(eoStatus.workspace_id) === wsId) {
+      const base = '/api/workspaces/' + encodeURIComponent(wsId) + '/email';
+      return {
+        kind: 'workspace',
+        isHQ: false,
+        statusUrl: base + '/status',
+        linkUrl: base + '/link',
+        unlinkUrl: base + '/unlink',
+        connectedTarget: 'Email Ops'
+      };
+    }
+    return null;
   }
 
   async function fetchJSON(url) {
@@ -99,22 +143,23 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
         toast(data && data.error ? data.error : 'Could not connect your email.', 'danger');
         return;
       }
+      if (!scope) return;
       try {
-        await postJSON('/api/personal-hq/email/link', { account_id: data.account.id });
-        toast('Email connected to your Personal HQ.', 'success');
+        await postJSON(scope.linkUrl, { account_id: data.account.id });
+        toast('Email connected to ' + scope.connectedTarget + '.', 'success');
         renderBody();
       } catch (_) {
-        toast('Connected the account but could not link it to your HQ.', 'danger');
+        toast('Connected the account but could not link it to ' + scope.connectedTarget + '.', 'danger');
       }
     };
     window.addEventListener('message', onMessage);
   }
 
   async function renderBody() {
-    if (!body) return;
+    if (!body || !scope) return;
     body.textContent = 'Loading…';
     const [statusResp, oauth] = await Promise.all([
-      fetchJSON('/api/personal-hq/email/status'),
+      fetchJSON(scope.statusUrl),
       fetchJSON('/api/settings/email-oauth')
     ]);
     const status = statusResp && statusResp.status ? statusResp.status : null;
@@ -122,6 +167,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
       window.OriHQEmailSetup.connected = !!(status && status.connected);
       window.OriHQEmailSetup.address = (status && status.email_address) || '';
       notifyCommandView();
+    }
+    // Keep the Email Ops connect CTA in sync after connect/disconnect.
+    if (scope && !scope.isHQ) {
+      renderWorkspaceConnectCTA(!!(status && status.connected));
     }
     const view = emailStatusView(status, oauth ? !!oauth.configured : true);
 
@@ -157,7 +206,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
       if (view.action === 'disconnect') {
         action.disabled = true;
         try {
-          await postJSON('/api/personal-hq/email/unlink');
+          await postJSON(scope.unlinkUrl);
           toast('Email disconnected.', 'success');
           renderBody();
         } catch (_) {
@@ -171,26 +220,61 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     body.appendChild(action);
   }
 
-  // Show the button only when this workspace is the user's valid, designated HQ.
+  // renderWorkspaceConnectCTA shows a prominent "Connect email" banner on the
+  // Email Ops workspace when no account is linked yet, so setup is one click on
+  // the workspace surface rather than only an agent starter task. Hidden once
+  // connected. No-op without the mount (only present on the workspace detail
+  // page).
+  function renderWorkspaceConnectCTA(connected) {
+    const mount = document.getElementById('workspaceEmailConnectMount');
+    if (!mount) return;
+    if (connected) {
+      mount.hidden = true;
+      mount.innerHTML = '';
+      return;
+    }
+    mount.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'workspace-email-connect-card';
+    const text = document.createElement('div');
+    const title = document.createElement('p');
+    title.className = 'workspace-email-connect-title';
+    title.textContent = 'Connect your email';
+    const sub = document.createElement('p');
+    sub.className = 'workspace-email-connect-sub';
+    sub.textContent = 'Link an account so this workspace can triage your inbox and draft replies. Nothing is ever sent without your confirmation.';
+    text.append(title, sub);
+    const connect = document.createElement('button');
+    connect.type = 'button';
+    connect.className = 'modern-btn modern-btn-primary modern-btn-sm';
+    connect.textContent = 'Connect email';
+    connect.addEventListener('click', openModal);
+    card.append(text, connect);
+    mount.appendChild(card);
+    mount.hidden = false;
+  }
+
+  // Show the button when this workspace can hold email (HQ or Email Ops), using
+  // the resolved scope's endpoints.
   async function maybeShowButton() {
-    const wsId = currentWorkspaceId();
-    if (!wsId) return;
-    const data = await fetchJSON('/api/personal-hq/status');
-    const status = data && data.status;
-    if (status && status.valid && String(status.workspace_id) === wsId) {
-      btn.hidden = false;
-      // Publish a tiny global so the command map's Email station (an HQ
-      // station registry entry in workspace-command.js) can read connection
-      // state and open this modal without a direct import between the two
-      // independently-loaded module scripts.
-      const shared = (window.OriHQEmailSetup = window.OriHQEmailSetup || {});
-      shared.isHQ = true;
-      shared.open = openModal;
-      const emailResp = await fetchJSON('/api/personal-hq/email/status');
-      const emailStatus = emailResp && emailResp.status;
-      shared.connected = !!(emailStatus && emailStatus.connected);
-      shared.address = (emailStatus && emailStatus.email_address) || '';
-      notifyCommandView();
+    scope = await resolveScope();
+    if (!scope) return;
+    btn.hidden = false;
+    // Publish a tiny global so the command map's Email station (an HQ station
+    // registry entry in workspace-command.js) and the Email Ops connect CTA can
+    // read connection state and open this modal without a direct import between
+    // independently-loaded module scripts.
+    const shared = (window.OriHQEmailSetup = window.OriHQEmailSetup || {});
+    shared.isHQ = scope.isHQ;
+    shared.open = openModal;
+    const emailResp = await fetchJSON(scope.statusUrl);
+    const emailStatus = emailResp && emailResp.status;
+    shared.connected = !!(emailStatus && emailStatus.connected);
+    shared.address = (emailStatus && emailStatus.email_address) || '';
+    notifyCommandView();
+    // On the Email Ops workspace, surface a prominent connect CTA until linked.
+    if (!scope.isHQ) {
+      renderWorkspaceConnectCTA(shared.connected);
     }
   }
 
