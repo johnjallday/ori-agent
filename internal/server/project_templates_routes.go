@@ -67,13 +67,14 @@ func (s *Server) handleProjectTemplateImport(w http.ResponseWriter, r *http.Requ
 // project_entry null explicitly clears that object.
 func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name            string                          `json:"name"`
-		Description     string                          `json:"description"`
-		Tags            *[]string                       `json:"tags"`
-		Icon            *string                         `json:"icon"`
-		BehaviorProfile *string                         `json:"behavior_profile"`
-		StarterTasks    *[]projecttemplates.StarterTask `json:"starter_tasks"`
-		ProjectEntry    json.RawMessage                 `json:"project_entry"`
+		Name                   string                                    `json:"name"`
+		Description            string                                    `json:"description"`
+		Tags                   *[]string                                 `json:"tags"`
+		Icon                   *string                                   `json:"icon"`
+		BehaviorProfile        *string                                   `json:"behavior_profile"`
+		StarterTasks           *[]projecttemplates.StarterTask           `json:"starter_tasks"`
+		ProjectEntry           json.RawMessage                           `json:"project_entry"`
+		CapabilityRequirements *[]projecttemplates.CapabilityRequirement `json:"capability_requirements"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -96,10 +97,11 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 	}
 
 	edit := &projecttemplates.ManifestEdit{
-		Icon:            req.Icon,
-		BehaviorProfile: req.BehaviorProfile,
-		StarterTasks:    req.StarterTasks,
-		ProjectEntry:    projectEntryEdit,
+		Icon:                   req.Icon,
+		BehaviorProfile:        req.BehaviorProfile,
+		StarterTasks:           req.StarterTasks,
+		ProjectEntry:           projectEntryEdit,
+		CapabilityRequirements: req.CapabilityRequirements,
 	}
 	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags, edit)
 	if err != nil {

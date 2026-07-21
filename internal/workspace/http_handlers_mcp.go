@@ -21,14 +21,16 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ID                string                `json:"id,omitempty"`
-		ServerName        string                `json:"server_name"`
-		Alias             string                `json:"alias,omitempty"`
-		Enabled           *bool                 `json:"enabled,omitempty"`
-		Scope             map[string]any        `json:"scope,omitempty"`
-		Config            map[string]any        `json:"config,omitempty"`
-		DefaultSideEffect SideEffect            `json:"default_side_effect,omitempty"`
-		ToolOverrides     map[string]SideEffect `json:"tool_overrides,omitempty"`
+		ID                 string                `json:"id,omitempty"`
+		ServerName         string                `json:"server_name"`
+		Alias              string                `json:"alias,omitempty"`
+		Enabled            *bool                 `json:"enabled,omitempty"`
+		Scope              map[string]any        `json:"scope,omitempty"`
+		Config             map[string]any        `json:"config,omitempty"`
+		DefaultSideEffect  SideEffect            `json:"default_side_effect,omitempty"`
+		ToolOverrides      map[string]SideEffect `json:"tool_overrides,omitempty"`
+		AllowedTools       []string              `json:"allowed_tools,omitempty"`
+		CapabilityMappings []CapabilityMapping   `json:"capability_mappings,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -69,16 +71,18 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	binding := MCPBinding{
-		ID:                bindingID,
-		ServerName:        req.ServerName,
-		Alias:             req.Alias,
-		Enabled:           enabled,
-		Scope:             req.Scope,
-		Config:            req.Config,
-		DefaultSideEffect: req.DefaultSideEffect,
-		ToolOverrides:     req.ToolOverrides,
-		CreatedAt:         time.Now(),
-		UpdatedAt:         time.Now(),
+		ID:                 bindingID,
+		ServerName:         req.ServerName,
+		Alias:              req.Alias,
+		Enabled:            enabled,
+		Scope:              req.Scope,
+		Config:             req.Config,
+		DefaultSideEffect:  req.DefaultSideEffect,
+		ToolOverrides:      req.ToolOverrides,
+		AllowedTools:       req.AllowedTools,
+		CapabilityMappings: req.CapabilityMappings,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 	binding, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, binding)
 	if err != nil {
@@ -177,13 +181,15 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ServerName        *string                `json:"server_name,omitempty"`
-		Alias             *string                `json:"alias,omitempty"`
-		Enabled           *bool                  `json:"enabled,omitempty"`
-		Scope             map[string]any         `json:"scope,omitempty"`
-		Config            map[string]any         `json:"config,omitempty"`
-		DefaultSideEffect *SideEffect            `json:"default_side_effect,omitempty"`
-		ToolOverrides     *map[string]SideEffect `json:"tool_overrides,omitempty"`
+		ServerName         *string                `json:"server_name,omitempty"`
+		Alias              *string                `json:"alias,omitempty"`
+		Enabled            *bool                  `json:"enabled,omitempty"`
+		Scope              map[string]any         `json:"scope,omitempty"`
+		Config             map[string]any         `json:"config,omitempty"`
+		DefaultSideEffect  *SideEffect            `json:"default_side_effect,omitempty"`
+		ToolOverrides      *map[string]SideEffect `json:"tool_overrides,omitempty"`
+		AllowedTools       *[]string              `json:"allowed_tools,omitempty"`
+		CapabilityMappings *[]CapabilityMapping   `json:"capability_mappings,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -233,6 +239,12 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ToolOverrides != nil {
 		binding.ToolOverrides = *req.ToolOverrides
+	}
+	if req.AllowedTools != nil {
+		binding.AllowedTools = *req.AllowedTools
+	}
+	if req.CapabilityMappings != nil {
+		binding.CapabilityMappings = *req.CapabilityMappings
 	}
 	*binding, err = h.normalizeBindingForPersistence(r.Context(), workspaceID, *binding)
 	if err != nil {
