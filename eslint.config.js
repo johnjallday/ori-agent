@@ -170,6 +170,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-tags-card.js',
       'internal/web/static/js/modules/workspace-command.js',
       'internal/web/static/js/modules/workspace-execution-controller.js',
+      'internal/web/static/js/modules/workspace-followups.js',
       'internal/web/static/js/modules/workspace-overlay-coordinator.js',
       'internal/web/static/js/modules/workspace-url-state.js',
     ],
