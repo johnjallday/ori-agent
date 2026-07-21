@@ -887,6 +887,14 @@ test('workspace-local model picker lists every model; global picker filters by t
       name: 'lmstudio',
       display_name: 'LM Studio',
       models: [{ value: 'google/gemma-4-e4b', type: 'research', label: 'Gemma' }]
+    },
+    {
+      name: 'codex',
+      display_name: 'OpenAI Codex (CLI)',
+      models: [
+        { value: 'gpt-5.3-codex', type: 'research', label: 'gpt-5.3-codex' },
+        { value: 'gpt-5.3-codex', type: 'orchestration', label: 'gpt-5.3-codex' }
+      ]
     }
   ];
 
@@ -940,9 +948,14 @@ test('workspace-local model picker lists every model; global picker filters by t
     };
     page.populateAgentModelSelect();
     const wsValues = values();
-    assert.equal(wsValues.length, 3, 'workspace-local lists every model');
+    assert.equal(wsValues.length, 4, 'workspace-local lists every unique model');
     assert.ok(wsValues.includes('google/gemma-4-e4b'), 'local provider model present');
     assert.ok(wsValues.includes('claude-haiku'), 'non-matching type present');
+    assert.equal(
+      wsValues.filter(value => value === 'gpt-5.3-codex').length,
+      1,
+      'Codex model is available without duplicate capability entries'
+    );
 
     // Global: only models whose type matches the agent type.
     page.activeAgentModelEdit = {
@@ -952,7 +965,11 @@ test('workspace-local model picker lists every model; global picker filters by t
       isWorkspaceAgent: false
     };
     page.populateAgentModelSelect();
-    assert.deepEqual(values(), ['claude-opus-4'], 'global picker keeps only matching type');
+    assert.deepEqual(
+      values(),
+      ['claude-opus-4', 'gpt-5.3-codex'],
+      'global orchestration picker includes Commander-capable Codex models'
+    );
   } finally {
     global.document.createElement = origCreate;
   }

@@ -506,6 +506,19 @@ test('detailed view is deleted; shared hosts and goal modal survive in the templ
   assert.equal(template.includes('WorkspaceFloatingAssistantEnabled'), false);
 });
 
+test('agent model modal layers above the Operations Map Unit Sheet', () => {
+  const template = readFileSync(
+    new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(template, /#workspace-detail-agent-model-modal\s*{\s*z-index:\s*10030;/);
+  assert.match(
+    template,
+    /\.modal-backdrop\.workspace-detail-backdrop-agent-model\s*{\s*z-index:\s*10020;/
+  );
+});
+
 test('command rail renders project_path fallback when no directories are loaded', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -2171,6 +2184,9 @@ test('Operations Map agent command menu delegates to existing workspace flows', 
       },
       openTask(id) {
         calls.push(['open-task', id]);
+      },
+      openAgentModelModal(encodedName) {
+        calls.push(['edit-model', encodedName]);
       }
     },
     selectAgent(encodedName, options) {
@@ -2186,6 +2202,9 @@ test('Operations Map agent command menu delegates to existing workspace flows', 
 
   commandView.bindOperationsMap();
 
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-edit-model': 'Researcher' })
+  });
   mapRoot.listener({
     target: makeAttributeClickTarget({ 'data-cmd-add-task': 'Researcher' })
   });
@@ -2206,6 +2225,7 @@ test('Operations Map agent command menu delegates to existing workspace flows', 
   });
 
   assert.deepEqual(calls, [
+    ['edit-model', 'Researcher'],
     ['add-task', 'Researcher'],
     ['new-session', 'Researcher'],
     ['open-session', 'session-1'],
@@ -2260,8 +2280,20 @@ test('Operations Map renders units first and keeps support panels hidden by defa
         getAgentWorkspaceMCPLoadout() {
           return [{ bindingId: 'mcp-1', name: 'filesystem', enabled: true, locked: false }];
         },
-        getAgentModelPresentation() {
-          return { model: '', label: 'Model not set', empty: true };
+        getAgentProfile() {
+          return {
+            name: 'Researcher',
+            role: 'orchestrator',
+            source: 'workspace',
+            provider: 'codex',
+            model: 'gpt-5.3-codex'
+          };
+        },
+        agentAllowsModelEditing(profile) {
+          return profile?.source === 'workspace';
+        },
+        getAgentModelPresentation(profile) {
+          return { model: profile.model, label: profile.model, empty: false };
         },
         tasks: [{ id: 'task-1', status: 'in_progress', description: 'Collect sources' }],
         sessions: [
@@ -2293,7 +2325,7 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     // here since there is no specialist in this fixture).
     assert.match(html, /is-command-node/);
     assert.match(html, /ws-cmd-map-command-role/);
-    assert.match(html, /Acting Commander/);
+    assert.match(html, /Commander/);
     assert.doesNotMatch(html, /data-map-zone="mission"/);
     assert.doesNotMatch(html, /data-map-zone="tasks"/);
     assert.doesNotMatch(html, /data-map-zone="tools"/);
@@ -2309,7 +2341,15 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     commandView.activeMapWindow = 'inspector';
     const agentSheetHTML = commandView.renderOperationsMap();
     assert.match(agentSheetHTML, /Unit Sheet/);
-    assert.match(agentSheetHTML, /Class/);
+    assert.equal((agentSheetHTML.match(/<span>Unit Sheet<\/span>/g) || []).length, 1);
+    assert.doesNotMatch(agentSheetHTML, /<span>Class<\/span>/);
+    assert.match(agentSheetHTML, /<span>Role<\/span><strong>Commander<\/strong>/);
+    assert.match(agentSheetHTML, /data-cmd-edit-model="Researcher"/);
+    assert.match(
+      agentSheetHTML,
+      /aria-label="Change model for Researcher\. Current model: gpt-5\.3-codex"/
+    );
+    assert.match(agentSheetHTML, /<strong translate="no">gpt-5\.3-codex<\/strong>/);
     assert.match(agentSheetHTML, /Loadout/);
     assert.match(agentSheetHTML, /workspace-planning/);
     assert.match(agentSheetHTML, /filesystem/);
@@ -2319,6 +2359,9 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(agentSheetHTML, /Track Quest/);
     assert.match(agentSheetHTML, /Continue Session/);
     assert.match(agentSheetHTML, /Configure Loadout/);
+    assert.doesNotMatch(agentSheetHTML, /ws-cmd-rpg-loadout-model/);
+    assert.doesNotMatch(agentSheetHTML, /ws-cmd-rpg-effects/);
+    assert.doesNotMatch(agentSheetHTML, /In progress · In progress/);
   } finally {
     globalThis.localStorage = originalLocalStorage;
   }

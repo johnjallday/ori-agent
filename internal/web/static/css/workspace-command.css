@@ -1637,21 +1637,12 @@
 }
 .ws-cmd-map-agent-sheet-head strong {
   display: block;
-  margin-top: 3px;
   color: #eef0f3;
   font-family: var(--ws-font-display);
   font-size: 22px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
   overflow-wrap: anywhere;
-}
-.ws-cmd-map-agent-sheet-head p {
-  margin: 6px 0 0;
-  color: var(--ws-ink-dim);
-  font-family: var(--ws-font-mono);
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
 }
 .ws-cmd-rpg-sheet {
   display: grid;
@@ -1663,6 +1654,7 @@
   gap: 10px;
 }
 .ws-cmd-rpg-class-card {
+  position: relative;
   min-width: 0;
   min-height: 68px;
   display: grid;
@@ -1670,8 +1662,26 @@
   gap: 5px;
   padding: 11px;
   border: 1px solid var(--ws-line);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   background:
     linear-gradient(120deg, rgba(70, 211, 154, 0.08), transparent 58%), rgba(0, 0, 0, 0.18);
+}
+button.ws-cmd-rpg-class-card {
+  width: 100%;
+  padding-right: 76px;
+  cursor: pointer;
+  appearance: none;
+}
+button.ws-cmd-rpg-class-card:hover {
+  border-color: var(--ws-faction);
+  background:
+    linear-gradient(120deg, rgba(70, 211, 154, 0.14), transparent 64%), rgba(0, 0, 0, 0.22);
+}
+button.ws-cmd-rpg-class-card:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
 }
 .ws-cmd-rpg-class-card span,
 .ws-cmd-rpg-loadout > span {
@@ -1686,6 +1696,19 @@
   color: #eef0f3;
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+.ws-cmd-rpg-class-card small {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 .ws-cmd-rpg-status-strip,
 .ws-cmd-rpg-sheet-row {
@@ -1805,24 +1828,6 @@
   color: var(--ws-ink);
   font-size: 12px;
   text-align: right;
-}
-.ws-cmd-rpg-effects {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.ws-cmd-rpg-effects span {
-  min-height: 25px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--ws-line);
-  background: rgba(0, 0, 0, 0.18);
-  color: var(--ws-faction);
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  padding: 4px 8px;
 }
 .ws-cmd-map-inspector-actions {
   display: flex;
@@ -3850,19 +3855,6 @@
 }
 .ws-cmd-rpg-loadout.is-editable {
   display: block;
-}
-.ws-cmd-rpg-loadout-model {
-  margin-bottom: 8px;
-  color: var(--ws-ink);
-  font-family: var(--ws-font-mono);
-  font-size: 11px;
-}
-.ws-cmd-rpg-loadout-model small {
-  display: block;
-  color: var(--ws-ink-faint);
-  font-size: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 .ws-cmd-loadout-card.is-editor {
   display: block;

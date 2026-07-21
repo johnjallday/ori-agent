@@ -1733,6 +1733,9 @@ export class WorkspaceDetailPage {
     this.elements.agentModelSubmitBtn?.addEventListener('click', () =>
       this.submitAgentModelChange()
     );
+    this.elements.agentModelModal?.addEventListener('shown.bs.modal', () => {
+      this.applyTopBackdropLayer('workspace-detail-backdrop-agent-model');
+    });
     this.elements.agentModelModal?.addEventListener('hidden.bs.modal', () =>
       this.resetAgentModelModal()
     );
@@ -10330,6 +10333,7 @@ export class WorkspaceDetailPage {
       const group = document.createElement('optgroup');
       group.label = String(provider?.display_name || provider?.name || '').trim() || 'Provider';
       let groupHasOptions = false;
+      const includedValues = new Set();
 
       const models = Array.isArray(provider?.models) ? provider.models : [];
       models.forEach(model => {
@@ -10340,7 +10344,8 @@ export class WorkspaceDetailPage {
           .trim()
           .toLowerCase();
         const include = skipTypeFilter || modelType === normalizedType || value === currentModel;
-        if (!include) return;
+        if (!include || includedValues.has(value)) return;
+        includedValues.add(value);
 
         const option = document.createElement('option');
         option.value = value;
@@ -12178,7 +12183,8 @@ export class WorkspaceDetailPage {
     topBackdrop.classList.remove(
       'workspace-detail-backdrop-mcp',
       'workspace-detail-backdrop-execution',
-      'workspace-detail-backdrop-result'
+      'workspace-detail-backdrop-result',
+      'workspace-detail-backdrop-agent-model'
     );
     if (layerClass) {
       topBackdrop.classList.add(layerClass);
