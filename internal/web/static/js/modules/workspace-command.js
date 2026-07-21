@@ -6273,7 +6273,13 @@ export class WorkspaceCommandView {
         tabId: 'workspace-detail-config-plugins-tab',
         host: 'config'
       },
-      { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' }
+      { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' },
+      {
+        key: 'calendar',
+        label: 'Calendar',
+        tabId: 'workspace-detail-config-calendar-tab',
+        host: 'config'
+      }
     ];
   }
 
@@ -6299,6 +6305,8 @@ export class WorkspaceCommandView {
         return 'workspace-detail-config-mission-tab';
       case 'intent':
         return 'workspace-detail-config-intent-tab';
+      case 'calendar':
+        return 'workspace-detail-config-calendar-tab';
       default:
         return '';
     }

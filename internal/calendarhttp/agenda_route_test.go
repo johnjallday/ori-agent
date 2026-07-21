@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/calendar"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func TestCapabilities_ReportsMappedOperations(t *testing.T) {
@@ -209,6 +210,85 @@ func TestEventDetail_UnmappedOperationRespondsMappedFalse(t *testing.T) {
 	}
 	if rec.callCount() != 0 {
 		t.Fatal("an unmapped operation must never reach the connector")
+	}
+}
+
+func TestFreeWindows_UnmappedRespondsMappedFalseWithZeroCalls(t *testing.T) {
+	h, _, rec := newMutableGatewayHandler(t, "local")
+	w := doJSONRequest(t, h.FreeWindows, http.MethodGet,
+		"/api/calendar-ops/free-windows?workspace_id=ws-cal&start=2026-07-20T00:00:00Z&end=2026-07-21T00:00:00Z", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unmapped freebusy/suggest_time should be a clean 200 mapped:false, got %d: %s", w.Code, w.Body.String())
+	}
+	resp := decodeSuccess[freeWindowsResponse](t, w)
+	if resp.Mapped {
+		t.Fatal("neither freebusy nor suggest_time is mapped in this fixture; expected mapped:false")
+	}
+	if rec.callCount() != 0 {
+		t.Fatal("an unmapped free-windows request must never reach the connector")
+	}
+}
+
+func TestFreeWindows_PrefersFreeBusyOverSuggestTime(t *testing.T) {
+	h, ws, rec := newMutableGatewayHandler(t, "local")
+	binding, _ := findCalendarBinding(ws)
+	mapping := binding.CapabilityMappings[0]
+	mapping.Operations[calendar.OpFreeBusy] = agentworkspace.OperationMapping{
+		Tool:             "freebusy_query",
+		ResultCollection: "/slots",
+		Arguments:        map[string]string{"start_time": "/timeMin", "end_time": "/timeMax"},
+		Fields:           map[string]string{"start_time": "/start", "end_time": "/end"},
+	}
+	mapping.Operations[calendar.OpSuggestTime] = agentworkspace.OperationMapping{
+		Tool:             "suggest_time_query",
+		ResultCollection: "/slots",
+		Fields:           map[string]string{"start_time": "/start", "end_time": "/end"},
+	}
+	binding.CapabilityMappings = []agentworkspace.CapabilityMapping{mapping}
+	binding.AllowedTools = calendar.ReadOnlyAllowedTools(mapping)
+	_ = ws.UpsertMCPBinding(*binding)
+
+	rec.resultFn = func(tool string, args map[string]any) (any, error) {
+		if tool != "freebusy_query" {
+			t.Errorf("expected freebusy to be preferred over suggest_time, got tool=%q", tool)
+		}
+		return map[string]any{"slots": []any{
+			map[string]any{"start": "2026-07-20T09:00:00Z", "end": "2026-07-20T10:00:00Z"},
+		}}, nil
+	}
+
+	w := doJSONRequest(t, h.FreeWindows, http.MethodGet,
+		"/api/calendar-ops/free-windows?workspace_id=ws-cal&start=2026-07-20T00:00:00Z&end=2026-07-21T00:00:00Z", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	resp := decodeSuccess[freeWindowsResponse](t, w)
+	if !resp.Mapped || resp.Operation != "freebusy" {
+		t.Fatalf("expected mapped:true operation:freebusy, got %+v", resp)
+	}
+	if len(resp.Windows) != 1 {
+		t.Fatalf("expected 1 window, got %+v", resp.Windows)
+	}
+	if rec.callCount() != 1 {
+		t.Fatalf("expected exactly 1 connector call, got %d", rec.callCount())
+	}
+}
+
+func TestFreeWindows_RejectsExcessiveRange(t *testing.T) {
+	h, ws, rec := newMutableGatewayHandler(t, "local")
+	binding, _ := findCalendarBinding(ws)
+	mapping := binding.CapabilityMappings[0]
+	mapping.Operations[calendar.OpFreeBusy] = agentworkspace.OperationMapping{Tool: "freebusy_query", ResultCollection: "/slots"}
+	binding.CapabilityMappings = []agentworkspace.CapabilityMapping{mapping}
+	_ = ws.UpsertMCPBinding(*binding)
+
+	w := doJSONRequest(t, h.FreeWindows, http.MethodGet,
+		"/api/calendar-ops/free-windows?workspace_id=ws-cal&start=2026-01-01T00:00:00Z&end=2026-02-01T00:00:00Z", nil)
+	if w.Code == http.StatusOK {
+		t.Fatalf("expected a bounds error for a range exceeding the free-window maximum, got 200: %s", w.Body.String())
+	}
+	if rec.callCount() != 0 {
+		t.Fatal("an out-of-bounds free-windows request must never reach the connector")
 	}
 }
 

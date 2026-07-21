@@ -271,9 +271,10 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 }
 
 type mutationConfirmResponse struct {
-	Success bool   `json:"success"`
-	EventID string `json:"event_id,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success bool            `json:"success"`
+	EventID string          `json:"event_id,omitempty"`
+	Event   *calendar.Event `json:"event,omitempty"`
+	Error   string          `json:"error,omitempty"`
 }
 
 // Confirm handles POST /api/calendar-ops/mutations/confirm. It re-resolves
@@ -330,14 +331,30 @@ func (h *Handler) Confirm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	call := h.toolCallerFor(gw.Binding.ServerName)
-	_, callErr := call(r.Context(), op.Tool, args)
+	result, callErr := call(r.Context(), op.Tool, args)
 	h.cache.invalidateBinding(gw.Binding.ID)
 	if callErr != nil {
 		_ = orihttp.RespondSuccess(w, mutationConfirmResponse{Success: false, Error: callErr.Error()})
 		return
 	}
 
-	_ = orihttp.RespondSuccess(w, mutationConfirmResponse{Success: true, EventID: payload.EventID})
+	resp := mutationConfirmResponse{Success: true, EventID: payload.EventID}
+	// Best-effort: if the mapping declares Fields for this write operation
+	// (not required -- see calendar.ValidateMapping, which only requires
+	// Arguments for writes), extract the connector's response so the
+	// frontend can open the created/updated event directly (task 5.7,
+	// "open the returned/updated event when possible") instead of forcing a
+	// fresh fetch.
+	if len(op.Fields) > 0 {
+		evt := calendar.SanitizeEvent(calendar.ApplyEvent(result, op))
+		if evt.ID != "" {
+			resp.Event = &evt
+			if resp.EventID == "" {
+				resp.EventID = evt.ID
+			}
+		}
+	}
+	_ = orihttp.RespondSuccess(w, resp)
 }
 
 // buildMutationArguments maps a normalized mutation payload onto the mapped

@@ -335,6 +335,109 @@ func (h *Handler) EventDetail(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondSuccess(w, eventDetailResponse{Event: evt, Mapped: true})
 }
 
+// --- free windows ------------------------------------------------------
+
+// maxFreeWindowRangeDays bounds a free-window request tighter than the
+// general agenda range: freebusy/suggest_time queries are typically scoped to
+// "find a slot this week," and connectors are more likely to reject/degrade
+// on a wide multi-week freebusy scan.
+const maxFreeWindowRangeDays = 14
+
+type freeWindowsResponse struct {
+	Mapped    bool                `json:"mapped"`
+	Operation string              `json:"operation,omitempty"` // "freebusy" | "suggest_time"
+	Windows   []calendar.TimeSlot `json:"windows,omitempty"`
+	StartTime string              `json:"start_time"`
+	EndTime   string              `json:"end_time"`
+}
+
+// FreeWindows handles GET /api/calendar-ops/free-windows. When the connector
+// maps freebusy or suggest_time (freebusy preferred), it invokes that
+// operation and returns provider-confirmed windows. When neither is mapped,
+// it responds mapped:false with zero MCP calls -- FR39 requires the frontend
+// derive gaps client-side from the already-loaded agenda range in that case,
+// and label them "event-derived" rather than implying provider-confirmed
+// availability, which this endpoint deliberately does not fabricate.
+func (h *Handler) FreeWindows(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	q := r.URL.Query()
+	workspaceID := strings.TrimSpace(q.Get("workspace_id"))
+	gw, gerr := h.resolveGateway(r.Context(), workspaceID)
+	if gerr != nil {
+		writeGatewayError(w, gerr)
+		return
+	}
+
+	operation := calendar.OpFreeBusy
+	op, mapped := gw.Mapping.Operation(operation)
+	if !mapped {
+		operation = calendar.OpSuggestTime
+		op, mapped = gw.Mapping.Operation(operation)
+	}
+	if !mapped {
+		_ = orihttp.RespondSuccess(w, freeWindowsResponse{Mapped: false})
+		return
+	}
+
+	startT, endT, boundsErr := parseFreeWindowRange(q.Get("start"), q.Get("end"))
+	if boundsErr != nil {
+		orihttp.BadRequest(w, boundsErr.Error())
+		return
+	}
+	startStr, endStr := startT.Format(time.RFC3339), endT.Format(time.RFC3339)
+
+	args, err := calendar.BuildArguments(map[string]any{"start_time": startStr, "end_time": endStr}, op)
+	if err != nil {
+		orihttp.InternalError(w, "failed to build connector arguments: "+err.Error())
+		return
+	}
+
+	raw, cached := h.cachedCall(r.Context(), gw, operation, args, func(ctx context.Context, call calendar.ToolCaller, op agentworkspace.OperationMapping) (any, error) {
+		result, err := call(ctx, op.Tool, args)
+		if err != nil {
+			return nil, err
+		}
+		items, err := calendar.Collection(result, op)
+		if err != nil {
+			return nil, err
+		}
+		windows := make([]calendar.TimeSlot, 0, len(items))
+		for _, item := range items {
+			slot := calendar.SanitizeTimeSlot(calendar.ApplyTimeSlot(item, op))
+			if slot.StartTime == "" || slot.EndTime == "" {
+				continue
+			}
+			windows = append(windows, slot)
+		}
+		return windows, nil
+	})
+	if cached.err != nil {
+		orihttp.InternalError(w, "failed to load free windows: "+cached.err.Error())
+		return
+	}
+	windows, _ := raw.([]calendar.TimeSlot)
+	_ = orihttp.RespondSuccess(w, freeWindowsResponse{
+		Mapped:    true,
+		Operation: operation,
+		Windows:   windows,
+		StartTime: startStr,
+		EndTime:   endStr,
+	})
+}
+
+func parseFreeWindowRange(startRaw, endRaw string) (time.Time, time.Time, error) {
+	start, end, err := parseAgendaRange(startRaw, endRaw)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if end.Sub(start) > maxFreeWindowRangeDays*24*time.Hour {
+		return time.Time{}, time.Time{}, fmt.Errorf("requested range exceeds the %d-day free-window maximum", maxFreeWindowRangeDays)
+	}
+	return start, end, nil
+}
+
 // --- shared cached-call plumbing -------------------------------------------
 
 type cachedCallResult struct{ err error }

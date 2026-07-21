@@ -84,6 +84,13 @@
                        card in the Plugins tab. Hidden unless a REAPER workspace
                        needs setup (or shows a compact success once ori_ready). -->
                   <button type="button" class="workspace-detail-config-chip reaper-setup-chip" id="reaperReadinessChip" hidden></button>
+                  <!-- Calendar console entry point ("station"). Hidden unless
+                       GET /api/calendar-ops/capabilities reports the workspace
+                       is applicable; opens the Calendar tab. This chip lives in
+                       the shared-hosts strip that workspace-command.js
+                       relocates into Command view, so it also serves as the
+                       Calendar station/entry in Command view (task 5.1). -->
+                  <button type="button" class="workspace-detail-config-chip" id="calendarConsoleChip" hidden></button>
                 </div>
               </div>
               <button
@@ -187,6 +194,17 @@
                   aria-controls="workspace-detail-config-memory-pane"
                   aria-selected="false">
                   Memory
+                </button>
+                <button
+                  class="nav-link workspace-detail-config-tab"
+                  id="workspace-detail-config-calendar-tab"
+                  data-bs-toggle="tab"
+                  data-bs-target="#workspace-detail-config-calendar-pane"
+                  type="button"
+                  role="tab"
+                  aria-controls="workspace-detail-config-calendar-pane"
+                  aria-selected="false">
+                  Calendar
                 </button>
               </div>
               <div class="tab-content workspace-detail-config-body">
@@ -812,8 +830,79 @@
                   </form>
                   <div id="workspace-detail-memory-list" class="workspace-detail-memory-list"></div>
                 </div>
+                <div
+                  class="tab-pane fade workspace-detail-config-pane"
+                  id="workspace-detail-config-calendar-pane"
+                  role="tabpanel"
+                  aria-labelledby="workspace-detail-config-calendar-tab">
+                  <!-- Calendar Ops day/week agenda console (?panel=calendar).
+                       Hidden/dormant until GET /api/calendar-ops/capabilities
+                       reports the workspace is applicable. Populated by
+                       calendar-console.js. -->
+                  <div id="calendarConsoleRoot" tabindex="-1" role="region" aria-label="Calendar">
+                    <div class="workspace-detail-config-pane-header">
+                      <div>
+                        <div class="workspace-detail-config-pane-title">Calendar</div>
+                        <div id="calendarConsoleStatus" class="workspace-detail-config-pane-copy" aria-live="polite"></div>
+                      </div>
+                    </div>
+                    <div id="calendarConsoleLiveRegion" class="visually-hidden" aria-live="polite"></div>
+                    <div id="calendarConsoleToolbar" class="calendar-console-toolbar"></div>
+                    <div id="calendarConsoleFormHost" hidden></div>
+                    <div id="calendarConsoleBody" class="calendar-console-body"></div>
+                    <div id="calendarConsoleDrawer" class="calendar-console-drawer" hidden></div>
+                  </div>
+                </div>
               </div>
             </div>
+            <style>
+              .calendar-console-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin: 0.5rem 0 1rem; }
+              .calendar-console-nav { display: flex; align-items: center; gap: 0.35rem; }
+              .calendar-console-nav-label { font-weight: 600; margin-left: 0.35rem; min-width: 12ch; }
+              .calendar-console-view-switch { display: flex; gap: 0.25rem; }
+              .calendar-console-filters { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
+              .calendar-console-filter { display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+              .calendar-console-body { display: flex; flex-direction: column; gap: 1rem; }
+              .calendar-console-empty { color: var(--text-secondary, #666); font-size: 0.9rem; padding: 0.5rem 0; }
+              .calendar-console-day-heading { font-size: 0.95rem; font-weight: 700; margin: 0 0 0.4rem; }
+              .calendar-console-allday-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.4rem; }
+              .calendar-console-timed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+              .calendar-console-event {
+                display: block; width: 100%; text-align: left; border: 1px solid var(--border-color, #ddd);
+                border-radius: var(--radius-md, 0.5rem); padding: 0.4rem 0.6rem; background: var(--bg-secondary, #fff);
+                cursor: pointer; font: inherit;
+              }
+              .calendar-console-event:hover, .calendar-console-event:focus-visible { border-color: var(--primary-color, #3f6fd8); outline: none; }
+              .calendar-console-event-conflict { border-color: var(--danger-color, #c0392b); }
+              .calendar-console-event-private { font-style: italic; color: var(--text-secondary, #666); }
+              .calendar-console-event-time { font-size: 0.78rem; color: var(--text-secondary, #666); }
+              .calendar-console-event-title-row { display: flex; align-items: center; gap: 0.35rem; }
+              .calendar-console-event-title { font-weight: 600; font-size: 0.9rem; }
+              .calendar-console-color-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+              .calendar-console-event-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.25rem; }
+              .calendar-console-badge {
+                font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+                padding: 0.08rem 0.4rem; border-radius: 999px; background: var(--bg-tertiary, #eee); color: var(--text-secondary, #666);
+              }
+              .calendar-console-badge-conflict { background: rgba(192, 57, 43, 0.15); color: var(--danger-color, #c0392b); }
+              .calendar-console-free-windows { border-top: 1px solid var(--border-color, #ddd); padding-top: 0.6rem; margin-top: 0.4rem; }
+              .calendar-console-free-windows-list { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.3rem; }
+              .calendar-console-free-window { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+              .calendar-console-drawer {
+                position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 92vw); background: var(--bg-secondary, #fff);
+                border-left: 1px solid var(--border-color, #ddd); box-shadow: -6px 0 20px rgba(0,0,0,0.15);
+                padding: 1rem; overflow-y: auto; z-index: 1200;
+              }
+              .calendar-console-drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; gap: 0.5rem; }
+              .calendar-console-drawer-description { white-space: pre-wrap; font-size: 0.85rem; }
+              .calendar-console-attendee-list { font-size: 0.85rem; padding-left: 1.1rem; }
+              .calendar-console-drawer-links { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem; }
+              .calendar-console-form-row { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.6rem; font-size: 0.85rem; }
+              .calendar-console-form-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+              .calendar-console-form-error { color: var(--danger-color, #c0392b); font-size: 0.85rem; min-height: 1.1em; }
+              .calendar-console-checkpoint-row { font-size: 0.85rem; margin-bottom: 0.25rem; }
+              .calendar-console-checkpoint-impact { font-size: 0.82rem; color: var(--text-secondary, #666); margin: 0.4rem 0; }
+            </style>
           </div>
 
                 <div id="workspace-detail-tasks-board" class="workspace-detail-board" style="display: none;">
@@ -8664,6 +8753,7 @@
   <script defer src="/js/modules/reaper-setup-card.js"></script>
   <script defer src="/js/modules/reaper-readiness-panel.js"></script>
   <script defer src="/js/modules/calendar-ops-setup.js"></script>
+  <script defer src="/js/modules/calendar-console.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/dashboard.js"></script>
   <script defer src="/js/modules/toast.js"></script>

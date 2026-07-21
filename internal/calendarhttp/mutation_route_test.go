@@ -320,6 +320,52 @@ func TestConfirm_WrongWorkspaceRejected(t *testing.T) {
 	}
 }
 
+func TestConfirm_ReturnsCreatedEventWhenMappingDeclaresFields(t *testing.T) {
+	h, ws, rec := newMutableGatewayHandler(t, "local")
+	binding, _ := findCalendarBinding(ws)
+	mapping := binding.CapabilityMappings[0]
+	createOp := mapping.Operations[calendar.OpCreateEvent]
+	createOp.Fields = map[string]string{
+		"id": "/id", "title": "/summary",
+		"start_time": "/start/dateTime", "end_time": "/end/dateTime",
+	}
+	mapping.Operations[calendar.OpCreateEvent] = createOp
+	binding.CapabilityMappings = []agentworkspace.CapabilityMapping{mapping}
+	_ = ws.UpsertMCPBinding(*binding)
+
+	rec.resultFn = func(tool string, args map[string]any) (any, error) {
+		return map[string]any{
+			"id": "connector-evt-42", "summary": "Team Sync",
+			"start": map[string]any{"dateTime": "2026-07-20T10:00:00Z"},
+			"end":   map[string]any{"dateTime": "2026-07-20T11:00:00Z"},
+		}, nil
+	}
+
+	req := mutationRequest{
+		WorkspaceID: "ws-cal", Operation: "create_event", CalendarID: "primary",
+		Title: "Team Sync", StartTime: "2026-07-20T10:00:00Z", EndTime: "2026-07-20T11:00:00Z",
+	}
+	previewW := doJSONRequest(t, h.Preview, http.MethodPost, "/api/calendar-ops/mutations/preview", req)
+	preview := decodeSuccess[mutationPreviewResponse](t, previewW)
+	req.ConfirmationID = preview.ConfirmationID
+
+	w := doJSONRequest(t, h.Confirm, http.MethodPost, "/api/calendar-ops/mutations/confirm", req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	result := decodeSuccess[mutationConfirmResponse](t, w)
+	if !result.Success {
+		t.Fatalf("expected success, got %+v", result)
+	}
+	if result.EventID != "connector-evt-42" {
+		t.Fatalf("EventID = %q, want connector-evt-42", result.EventID)
+	}
+	if result.Event == nil || result.Event.Title != "Team Sync" {
+		t.Fatalf("expected the returned event to be populated, got %+v", result.Event)
+	}
+	_ = rec
+}
+
 func TestConfirm_ConnectorFailureReportsFailureNotSuccess(t *testing.T) {
 	h, _, rec := newMutableGatewayHandler(t, "local")
 	rec.resultFn = func(tool string, args map[string]any) (any, error) {
