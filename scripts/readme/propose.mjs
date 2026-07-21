@@ -113,7 +113,7 @@ export function auditCandidate({ root, manifest, current, proposed }) {
     {
       id: 'introduction',
       evidence_paths: ['internal/workspace/mission.go', 'internal/workspace/opportunities.go'],
-      required_text: ['local-first platform', 'autonomous AI agents', 'Action Center'],
+      required_text: ['local-first', 'AI headquarters', 'Personal HQ', 'Action Center'],
     },
     {
       id: 'how_it_works',
