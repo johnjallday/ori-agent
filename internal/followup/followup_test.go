@@ -165,3 +165,49 @@ func TestWakeReactivatesElapsedSnooze(t *testing.T) {
 		t.Fatalf("snooze should have elapsed to active, got %v", got.Status)
 	}
 }
+
+// captureIn builds a manual capture keyed to a specific workspace.
+func captureIn(userID, workspaceID, title string) CaptureInput {
+	return CaptureInput{
+		UserID: userID, WorkspaceID: workspaceID, Category: CategoryWaitingOn,
+		Direction: DirectionInbound, Title: title,
+		Source: SourceRef{Type: "manual"}, Provenance: ProvenanceManual,
+	}
+}
+
+// TestListFiltersByWorkspace covers the Email Ops spin-off read path: a
+// workspace filter returns only that workspace's follow-ups, and legacy rows
+// with an empty or different workspace_id are never matched.
+func TestListFiltersByWorkspace(t *testing.T) {
+	svc, store := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Capture(ctx, captureIn("u1", "eo-1", "Reply to landlord")); err != nil {
+		t.Fatalf("capture eo-1: %v", err)
+	}
+	if _, err := svc.Capture(ctx, captureIn("u1", "other-ws", "Other workspace item")); err != nil {
+		t.Fatalf("capture other: %v", err)
+	}
+	// Legacy row: no workspace_id.
+	if _, err := svc.Capture(ctx, captureIn("u1", "", "Legacy unkeyed item")); err != nil {
+		t.Fatalf("capture legacy: %v", err)
+	}
+
+	// Workspace-scoped read returns only eo-1's item.
+	scoped, err := store.List(ctx, Filter{UserID: "u1", WorkspaceID: "eo-1"})
+	if err != nil {
+		t.Fatalf("scoped list: %v", err)
+	}
+	if len(scoped) != 1 || scoped[0].Title != "Reply to landlord" {
+		t.Fatalf("workspace filter should return only eo-1's follow-up, got %+v", scoped)
+	}
+
+	// No workspace filter returns all three (user-scoped, backward compatible).
+	all, err := store.List(ctx, Filter{UserID: "u1"})
+	if err != nil {
+		t.Fatalf("unscoped list: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("unscoped list should return all 3 follow-ups, got %d", len(all))
+	}
+}

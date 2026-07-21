@@ -47,7 +47,7 @@ func TestPersonalHQMailboxLinkStatusUnlink(t *testing.T) {
 		CredentialsStatus: vault.EmailAccountSecretState{HasRefreshToken: true},
 	}}
 
-	linker := newPersonalHQMailboxLinker(hq, wstore, accounts, nil)
+	linker := newMailboxLinkerService(hq, wstore, accounts, nil)
 
 	// Initially not connected.
 	st, err := linker.MailboxStatus(ctx, userID)
@@ -111,7 +111,7 @@ func TestPersonalHQMailboxLinkRejectsUnknownAccount(t *testing.T) {
 	wstore := workspace.NewInMemoryStore()
 	_ = wstore.Save(&workspace.Workspace{ID: "hq-1"})
 
-	linker := newPersonalHQMailboxLinker(hq, wstore, fakeAccounts{acc: nil}, nil)
+	linker := newMailboxLinkerService(hq, wstore, fakeAccounts{acc: nil}, nil)
 	if _, err := linker.LinkMailbox(ctx, userID, "nope"); err == nil {
 		t.Fatal("expected an error linking an unknown account")
 	}

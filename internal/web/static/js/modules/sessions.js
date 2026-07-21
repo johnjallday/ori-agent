@@ -475,17 +475,22 @@ const sessionManager = {
           ''
       ).trim();
 
+      const pendingBlueprint = String(addFolderModal.dataset.pendingBlueprint || '').trim();
+
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
       if (importMode) {
         this.setImportModeEnabled(true);
+      } else if (pendingBlueprint) {
+        this.preselectBlueprintCard(pendingBlueprint);
       }
 
       delete addFolderModal.dataset.pendingImportMode;
       delete addFolderModal.dataset.pendingEntryPoint;
       delete addFolderModal.dataset.pendingPostCreateAction;
+      delete addFolderModal.dataset.pendingBlueprint;
     });
 
     // Close dropdowns when clicking outside
@@ -6278,9 +6283,38 @@ const sessionManager = {
     modalElement.dataset.pendingEntryPoint = String(
       options.entryPoint || (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create')
     );
+    if (options.blueprint) {
+      modalElement.dataset.pendingBlueprint = String(options.blueprint);
+    } else {
+      delete modalElement.dataset.pendingBlueprint;
+    }
 
     const modal = new bootstrap.Modal(modalElement);
     modal.show();
+  },
+
+  // preselectBlueprintCard selects the blueprint card matching templateId, so a
+  // deep-linked Construct flow (e.g. the HQ email station's "Set up Email Ops"
+  // CTA) lands on the right blueprint. The picker renders asynchronously and can
+  // re-render to its Blank default after the modal opens, wiping an early click;
+  // so this re-clicks until the selection actually sticks (verified against
+  // ProjectTemplateCard.getSelectedTemplate) or a short budget elapses. Quietly
+  // gives up if the card never appears.
+  preselectBlueprintCard(templateId) {
+    const id = String(templateId || '').trim();
+    if (!id) return;
+    let attempts = 0;
+    const step = () => {
+      const picker = typeof window !== 'undefined' ? window.ProjectTemplateCard : null;
+      const selected = picker && picker.getSelectedTemplate ? picker.getSelectedTemplate() : null;
+      if (selected && String(selected.id || '') === id) return; // stuck — done
+      const card = document.querySelector(
+        `.workspace-template-card[data-template-id="${id}"], .workspace-template-row[data-template-id="${id}"]`
+      );
+      if (card) card.click();
+      if (attempts++ < 40) setTimeout(step, 75);
+    };
+    step();
   },
 
   // Show import workspace modal
@@ -10329,13 +10363,20 @@ document.addEventListener('DOMContentLoaded', () => {
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get('create') === '1') {
+      // Optional blueprint preselection: /workspaces?create=1&blueprint=email-ops
+      // (the HQ email station CTA and the Home Email Ops CTA link here).
+      const blueprint = String(params.get('blueprint') || '').trim();
       params.delete('create');
+      params.delete('blueprint');
       const qs = params.toString();
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
       requestAnimationFrame(() =>
-        sessionManager.showAddWorkspaceModal({ entryPoint: 'home_first_run' })
+        sessionManager.showAddWorkspaceModal({
+          entryPoint: blueprint ? 'email_ops_cta' : 'home_first_run',
+          blueprint: blueprint || undefined
+        })
       );
     }
   } catch (_) {

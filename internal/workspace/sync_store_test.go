@@ -219,6 +219,57 @@ func TestSyncStore_SavePreservesCanonicalDesignationFromStalePrimaryWorkspace(t 
 	}
 }
 
+func TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-provenance-sync", "Provenance Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Template provenance is projected directly to workspace.json; the primary
+	// store has no column for it. A later save of a SQLite-fetched (stale)
+	// workspace must retain the canonical provenance rather than erase it —
+	// otherwise the Email Ops resolver loses the workspace over time.
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace.SetTemplateProvenance(&TemplateProvenance{TemplateID: EmailOpsTemplateID, Builtin: true})
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	staleWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleWorkspace.GetTemplateProvenance() != nil {
+		t.Fatal("precondition: the in-memory stale copy should have no provenance")
+	}
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-provenance", Status: TaskStatusPending})
+	if err := store.Save(staleWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diskWorkspace.IsFromTemplate(EmailOpsTemplateID) {
+		t.Fatalf("canonical template provenance was clobbered: %+v", diskWorkspace.GetTemplateProvenance())
+	}
+	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "after-provenance" {
+		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)
+	}
+}
+
 func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

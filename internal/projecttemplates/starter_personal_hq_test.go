@@ -30,9 +30,9 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	if !tpl.Builtin {
 		t.Fatal("personal-ops must remain a built-in template")
 	}
-	// The v1 assistant roster bumped the manifest to version 4.
-	if tpl.BuiltinVersion < 4 {
-		t.Fatalf("personal-ops builtin_version = %d, want at least 4", tpl.BuiltinVersion)
+	// The Email Ops spin-off (v5) dropped the in-HQ Inbox specialist.
+	if tpl.BuiltinVersion < 5 {
+		t.Fatalf("personal-ops builtin_version = %d, want at least 5", tpl.BuiltinVersion)
 	}
 
 	// Display metadata now presents this as Personal HQ.
@@ -43,12 +43,10 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		t.Fatalf("description must describe a personal command center, got %q", tpl.Description)
 	}
 
-	// Roster: the v1 operational assistant roster is Personal Chief of Staff
-	// (entry/orchestrator) + Inbox + Journal specialists. No Calendar role
-	// ships in v1 — calendar behavior is deferred (contract §5.3), and an
-	// inert role would re-introduce the cosmetic-promise problem this feature
-	// removes.
-	wantRoster := []string{"Personal Chief of Staff", "Inbox", "Journal"}
+	// Roster after the Email Ops spin-off (v5): Personal Chief of Staff
+	// (entry/orchestrator) + Journal specialist. The Inbox specialist moved out
+	// to the dedicated Email Ops workspace; no Calendar role ships (deferred).
+	wantRoster := []string{"Personal Chief of Staff", "Journal"}
 	if len(tpl.Agents) != len(wantRoster) {
 		t.Fatalf("expected %d agents %v, got %d: %+v", len(wantRoster), wantRoster, len(tpl.Agents), tpl.Agents)
 	}
@@ -58,8 +56,11 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		}
 	}
 	for _, a := range tpl.Agents {
+		if strings.EqualFold(a.Name, "Inbox") {
+			t.Errorf("Inbox specialist must not ship in personal-ops v5 (moved to Email Ops), found %+v", a)
+		}
 		if strings.EqualFold(a.Name, "Calendar") {
-			t.Errorf("no Calendar role should ship in v1, found %+v", a)
+			t.Errorf("no Calendar role should ship, found %+v", a)
 		}
 	}
 
@@ -69,23 +70,21 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 			t.Errorf("Chief of Staff prompt missing scope keyword %q: %s", want, prompt)
 		}
 	}
+	// The Chief must route email work to the Email Ops workspace, not do it in HQ.
+	if !strings.Contains(strings.ToLower(prompt), "email ops") {
+		t.Errorf("Chief prompt must route email to the Email Ops workspace: %s", prompt)
+	}
 	if !strings.Contains(strings.ToLower(prompt), "not the specialist work itself") &&
 		!strings.Contains(strings.ToLower(prompt), "not take it on yourself") &&
 		!strings.Contains(strings.ToLower(prompt), "route the user to the right project workspace") {
 		t.Errorf("Chief of Staff prompt must not claim ownership of specialist project work: %s", prompt)
 	}
 
-	// The Inbox specialist must state the never-send-without-confirmation and
-	// untrusted-content guarantees (contract §3, §4).
-	inboxPrompt := strings.ToLower(tpl.Agents[1].SystemPrompt)
-	if !strings.Contains(inboxPrompt, "confirm") || !strings.Contains(inboxPrompt, "untrusted") {
-		t.Errorf("Inbox prompt must promise explicit send confirmation and treat mail as untrusted: %s", tpl.Agents[1].SystemPrompt)
-	}
 	// The Journal specialist must state that memory promotion is user-driven,
 	// never automatic (contract §7).
-	journalPrompt := strings.ToLower(tpl.Agents[2].SystemPrompt)
+	journalPrompt := strings.ToLower(tpl.Agents[1].SystemPrompt)
 	if !strings.Contains(journalPrompt, "memory") || !strings.Contains(journalPrompt, "never") {
-		t.Errorf("Journal prompt must state memory promotion is never automatic: %s", tpl.Agents[2].SystemPrompt)
+		t.Errorf("Journal prompt must state memory promotion is never automatic: %s", tpl.Agents[1].SystemPrompt)
 	}
 
 	// Starter tasks: a small set, at most one (here exactly one) marked

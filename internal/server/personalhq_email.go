@@ -19,25 +19,31 @@ type accountInvalidator interface {
 	InvalidateAccount(accountID string)
 }
 
-// personalHQMailboxLinker implements personalhqhttp.MailboxLinker: it attaches or
-// detaches an OAuth-connected email account to the user's designated Personal HQ
-// by managing an email MCP binding on the HQ workspace (task 3.10). Because the
-// mail tools are gated to the Inbox specialist by mailboxAccess, linking does not
-// need to rewrite every agent's access — the binding presence is enough, and the
-// role gate keeps email off non-Inbox agents.
-type personalHQMailboxLinker struct {
+// mailboxLinkerService attaches or detaches an OAuth-connected email account to a
+// workspace by managing an email MCP binding on it. Because the mail tools are
+// gated to the Inbox specialist by mailboxAccess, linking does not need to
+// rewrite every agent's access — the binding presence is enough, and the role
+// gate keeps email off non-Inbox agents (so the Email Ops Postmaster delegates
+// to Inbox rather than reading mail directly).
+//
+// It satisfies two interfaces over a single shared core (the *ForWorkspace
+// methods): personalhqhttp.MailboxLinker, whose user-keyed methods target the
+// user's designated Personal HQ, and personalhqhttp.WorkspaceMailboxLinker,
+// whose workspace-keyed methods target any workspace the user owns (e.g. an
+// Email Ops workspace, which needs no Personal HQ to exist).
+type mailboxLinkerService struct {
 	hq          *personalhq.Service
 	workspaces  workspace.Store
 	accounts    emailAccountResolver
 	invalidator accountInvalidator
 }
 
-func newPersonalHQMailboxLinker(hq *personalhq.Service, workspaces workspace.Store, accounts emailAccountResolver, invalidator accountInvalidator) *personalHQMailboxLinker {
-	return &personalHQMailboxLinker{hq: hq, workspaces: workspaces, accounts: accounts, invalidator: invalidator}
+func newMailboxLinkerService(hq *personalhq.Service, workspaces workspace.Store, accounts emailAccountResolver, invalidator accountInvalidator) *mailboxLinkerService {
+	return &mailboxLinkerService{hq: hq, workspaces: workspaces, accounts: accounts, invalidator: invalidator}
 }
 
 // hqWorkspace resolves the user's designated, valid Personal HQ workspace.
-func (l *personalHQMailboxLinker) hqWorkspace(ctx context.Context, userID string) (*workspace.Workspace, error) {
+func (l *mailboxLinkerService) hqWorkspace(ctx context.Context, userID string) (*workspace.Workspace, error) {
 	if l == nil || l.hq == nil || l.workspaces == nil {
 		return nil, fmt.Errorf("personal hq email is not configured")
 	}
@@ -55,11 +61,32 @@ func (l *personalHQMailboxLinker) hqWorkspace(ctx context.Context, userID string
 	return ws, nil
 }
 
-func (l *personalHQMailboxLinker) MailboxStatus(ctx context.Context, userID string) (personalhqhttp.MailboxStatus, error) {
-	ws, err := l.hqWorkspace(ctx, userID)
-	if err != nil {
-		return personalhqhttp.MailboxStatus{}, err
+// ownedWorkspace resolves a workspace the user owns, by explicit ID. It requires
+// no Personal HQ. A workspace with a set owner that is not this user is denied;
+// an empty owner (legacy/local single-user records) is permitted.
+func (l *mailboxLinkerService) ownedWorkspace(_ context.Context, userID, workspaceID string) (*workspace.Workspace, error) {
+	if l == nil || l.workspaces == nil {
+		return nil, fmt.Errorf("email linking is not configured")
 	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace_id is required")
+	}
+	ws, err := l.workspaces.Get(workspaceID)
+	if err != nil || ws == nil {
+		return nil, fmt.Errorf("the workspace could not be loaded")
+	}
+	owner := strings.TrimSpace(ws.OwnerUserID)
+	if owner != "" && !strings.EqualFold(owner, strings.TrimSpace(userID)) {
+		return nil, fmt.Errorf("that workspace belongs to a different user")
+	}
+	return ws, nil
+}
+
+// ---- Shared core: operate on an explicit workspace ------------------------
+
+// mailboxStatusForWorkspace reports the email connection state of ws.
+func (l *mailboxLinkerService) mailboxStatusForWorkspace(ctx context.Context, ws *workspace.Workspace) (personalhqhttp.MailboxStatus, error) {
 	binding, ok := emailBindingFor(ws)
 	if !ok {
 		return personalhqhttp.MailboxStatus{Connected: false}, nil
@@ -78,21 +105,10 @@ func (l *personalHQMailboxLinker) MailboxStatus(ctx context.Context, userID stri
 	}, nil
 }
 
-// accountHealth maps a Vault email secret state to a mailbox health label for the
-// UI: a connected account with a usable token is healthy; one whose tokens are
-// gone reads as disconnected (needs reconnect).
-func accountHealth(state vault.EmailAccountSecretState) string {
-	if state.HasAccessToken || state.HasRefreshToken {
-		return "healthy"
-	}
-	return "disconnected"
-}
-
-func (l *personalHQMailboxLinker) LinkMailbox(ctx context.Context, userID, accountID string) (personalhqhttp.MailboxStatus, error) {
-	ws, err := l.hqWorkspace(ctx, userID)
-	if err != nil {
-		return personalhqhttp.MailboxStatus{}, err
-	}
+// linkMailboxToWorkspace attaches an already OAuth-connected account to ws by
+// upserting the email MCP binding. OAuth credentials live in the global vault
+// keyed by account, so attaching an existing account never re-authorizes.
+func (l *mailboxLinkerService) linkMailboxToWorkspace(ctx context.Context, ws *workspace.Workspace, accountID string) (personalhqhttp.MailboxStatus, error) {
 	accountID = strings.TrimSpace(accountID)
 	acc, err := l.accounts.GetEmailAccount(ctx, accountID)
 	if err != nil || acc == nil {
@@ -122,14 +138,12 @@ func (l *personalHQMailboxLinker) LinkMailbox(ctx context.Context, userID, accou
 	if err := l.workspaces.Save(ws); err != nil {
 		return personalhqhttp.MailboxStatus{}, err
 	}
-	return l.MailboxStatus(ctx, userID)
+	return l.mailboxStatusForWorkspace(ctx, ws)
 }
 
-func (l *personalHQMailboxLinker) UnlinkMailbox(ctx context.Context, userID string) (personalhqhttp.MailboxStatus, error) {
-	ws, err := l.hqWorkspace(ctx, userID)
-	if err != nil {
-		return personalhqhttp.MailboxStatus{}, err
-	}
+// unlinkMailboxFromWorkspace removes ws's email binding and invalidates the
+// account's cached reads.
+func (l *mailboxLinkerService) unlinkMailboxFromWorkspace(ctx context.Context, ws *workspace.Workspace) (personalhqhttp.MailboxStatus, error) {
 	binding, ok := emailBindingFor(ws)
 	if !ok {
 		return personalhqhttp.MailboxStatus{Connected: false}, nil
@@ -145,4 +159,66 @@ func (l *personalHQMailboxLinker) UnlinkMailbox(ctx context.Context, userID stri
 		l.invalidator.InvalidateAccount(accountID)
 	}
 	return personalhqhttp.MailboxStatus{Connected: false}, nil
+}
+
+// accountHealth maps a Vault email secret state to a mailbox health label for the
+// UI: a connected account with a usable token is healthy; one whose tokens are
+// gone reads as disconnected (needs reconnect).
+func accountHealth(state vault.EmailAccountSecretState) string {
+	if state.HasAccessToken || state.HasRefreshToken {
+		return "healthy"
+	}
+	return "disconnected"
+}
+
+// ---- HQ-scoped front end (personalhqhttp.MailboxLinker) -------------------
+
+func (l *mailboxLinkerService) MailboxStatus(ctx context.Context, userID string) (personalhqhttp.MailboxStatus, error) {
+	ws, err := l.hqWorkspace(ctx, userID)
+	if err != nil {
+		return personalhqhttp.MailboxStatus{}, err
+	}
+	return l.mailboxStatusForWorkspace(ctx, ws)
+}
+
+func (l *mailboxLinkerService) LinkMailbox(ctx context.Context, userID, accountID string) (personalhqhttp.MailboxStatus, error) {
+	ws, err := l.hqWorkspace(ctx, userID)
+	if err != nil {
+		return personalhqhttp.MailboxStatus{}, err
+	}
+	return l.linkMailboxToWorkspace(ctx, ws, accountID)
+}
+
+func (l *mailboxLinkerService) UnlinkMailbox(ctx context.Context, userID string) (personalhqhttp.MailboxStatus, error) {
+	ws, err := l.hqWorkspace(ctx, userID)
+	if err != nil {
+		return personalhqhttp.MailboxStatus{}, err
+	}
+	return l.unlinkMailboxFromWorkspace(ctx, ws)
+}
+
+// ---- Workspace-scoped front end (personalhqhttp.WorkspaceMailboxLinker) ----
+
+func (l *mailboxLinkerService) WorkspaceMailboxStatus(ctx context.Context, userID, workspaceID string) (personalhqhttp.MailboxStatus, error) {
+	ws, err := l.ownedWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return personalhqhttp.MailboxStatus{}, err
+	}
+	return l.mailboxStatusForWorkspace(ctx, ws)
+}
+
+func (l *mailboxLinkerService) LinkWorkspaceMailbox(ctx context.Context, userID, workspaceID, accountID string) (personalhqhttp.MailboxStatus, error) {
+	ws, err := l.ownedWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return personalhqhttp.MailboxStatus{}, err
+	}
+	return l.linkMailboxToWorkspace(ctx, ws, accountID)
+}
+
+func (l *mailboxLinkerService) UnlinkWorkspaceMailbox(ctx context.Context, userID, workspaceID string) (personalhqhttp.MailboxStatus, error) {
+	ws, err := l.ownedWorkspace(ctx, userID, workspaceID)
+	if err != nil {
+		return personalhqhttp.MailboxStatus{}, err
+	}
+	return l.unlinkMailboxFromWorkspace(ctx, ws)
 }

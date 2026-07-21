@@ -916,54 +916,8 @@ export function followUpView(f) {
       detail.textContent = view.detail;
       card.appendChild(detail);
     }
-
-    const actions = document.createElement('div');
-    actions.className = 'hq-followup-actions';
-
-    const act = async (url, body, label) => {
-      try {
-        await postJSON(url, body);
-        await wireFollowUps();
-      } catch (_) {
-        toast(`Could not ${label} the follow-up.`, 'Error', 'danger');
-      }
-    };
-
-    if (view.isCandidate) {
-      const confirmBtn = document.createElement('button');
-      confirmBtn.type = 'button';
-      confirmBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
-      confirmBtn.textContent = 'Track this';
-      confirmBtn.addEventListener('click', () =>
-        act('/api/personal-hq/followups/confirm', { id: view.id }, 'confirm')
-      );
-      const dismissBtn = document.createElement('button');
-      dismissBtn.type = 'button';
-      dismissBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
-      dismissBtn.textContent = 'Not a follow-up';
-      dismissBtn.addEventListener('click', () =>
-        act('/api/personal-hq/followups/dismiss', { id: view.id }, 'dismiss')
-      );
-      actions.append(confirmBtn, dismissBtn);
-    } else {
-      const doneBtn = document.createElement('button');
-      doneBtn.type = 'button';
-      doneBtn.className = 'modern-btn modern-btn-primary modern-btn-sm';
-      doneBtn.textContent = 'Done';
-      doneBtn.addEventListener('click', () =>
-        act('/api/personal-hq/followups/complete', { id: view.id }, 'complete')
-      );
-      const snoozeBtn = document.createElement('button');
-      snoozeBtn.type = 'button';
-      snoozeBtn.className = 'modern-btn modern-btn-secondary modern-btn-sm';
-      snoozeBtn.textContent = 'Snooze 1 day';
-      snoozeBtn.addEventListener('click', () => {
-        const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        act('/api/personal-hq/followups/snooze', { id: view.id, until }, 'snooze');
-      });
-      actions.append(doneBtn, snoozeBtn);
-    }
-    card.appendChild(actions);
+    // Read-only on HQ (Mail spin-off FR20): the brief/Home surfaces follow-ups
+    // but does not mutate them — management lives in the Email Ops workspace.
     return card;
   }
 
@@ -1002,6 +956,24 @@ export function followUpView(f) {
       const view = followUpView(f);
       if (view) mount.appendChild(renderFollowUpCard(view));
     });
+    // Read-only surfacing: send the user to the Email Ops workspace to act on
+    // these (Mail spin-off FR20). Best-effort — omit the link if no Email Ops
+    // workspace exists.
+    try {
+      const res = await fetch('/api/personal-hq/email-ops', { headers: { Accept: 'application/json' } });
+      if (res.ok) {
+        const eo = (await res.json()).status || {};
+        if (eo.exists && eo.workspace_id) {
+          const link = document.createElement('a');
+          link.className = 'hq-followup-manage-link';
+          link.href = `/workspaces/${encodeURIComponent(eo.workspace_id)}`;
+          link.textContent = 'Manage in Email Ops →';
+          mount.appendChild(link);
+        }
+      }
+    } catch (_) {
+      /* non-fatal: the read-only list still renders */
+    }
   }
 
   function renderJournalEditor(mount, view) {

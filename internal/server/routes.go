@@ -787,6 +787,18 @@ func registerPersonalHQRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/personal-hq/email/status", s.Handlers.PersonalHQ.MailboxStatusHandler)
 		mux.HandleFunc("POST /api/personal-hq/email/link", s.Handlers.PersonalHQ.LinkMailbox)
 		mux.HandleFunc("POST /api/personal-hq/email/unlink", s.Handlers.PersonalHQ.UnlinkMailbox)
+		// Workspace-scoped email linking (Email Ops spin-off): the same shared
+		// service, targeting any workspace the user owns rather than the
+		// designated HQ. More specific than the /api/workspaces/ catch-all, so
+		// these ServeMux patterns win.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/email/status", s.Handlers.PersonalHQ.WorkspaceMailboxStatusHandler)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/link", s.Handlers.PersonalHQ.WorkspaceLinkMailbox)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/email/unlink", s.Handlers.PersonalHQ.WorkspaceUnlinkMailbox)
+		// Email Ops portal status for the HQ email station (presence + open
+		// follow-up count badge).
+		mux.HandleFunc("GET /api/personal-hq/email-ops", s.Handlers.PersonalHQ.EmailOpsStatusHandler)
+		// A workspace's own open follow-ups, for its management panel (Email Ops).
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/followups", s.Handlers.PersonalHQ.WorkspaceFollowUps)
 		mux.HandleFunc("POST /api/personal-hq/mail/draft", s.Handlers.PersonalHQ.DraftReply)
 		mux.HandleFunc("GET /api/personal-hq/mail/proposals", s.Handlers.PersonalHQ.ListProposals)
 		mux.HandleFunc("POST /api/personal-hq/mail/edit", s.Handlers.PersonalHQ.EditReply)

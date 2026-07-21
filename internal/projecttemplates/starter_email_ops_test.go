@@ -1,0 +1,97 @@
+package projecttemplates_test
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+)
+
+// TestEmailOpsStarterTemplate pins the Email Ops blueprint (Mail spin-off PRD
+// FR1-6): a built-in template whose ordered roster is Postmaster (entry) +
+// Inbox specialist, with a setup starter task that connects an email account
+// and a first-triage task. The Inbox specialist must be named exactly "Inbox"
+// so the mailbox-access gate (isInboxAgent) recognizes it.
+func TestEmailOpsStarterTemplate(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	tpl, err := projecttemplates.FindLibraryTemplate(libDir, "email-ops")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(email-ops): %v", err)
+	}
+	if tpl.ID != "email-ops" {
+		t.Fatalf("template ID must be email-ops, got %q", tpl.ID)
+	}
+	if !tpl.Builtin {
+		t.Fatal("email-ops must be a built-in template")
+	}
+	if tpl.BuiltinVersion < 1 {
+		t.Fatalf("email-ops builtin_version = %d, want at least 1", tpl.BuiltinVersion)
+	}
+	if tpl.Name != "Email Ops" {
+		t.Fatalf("display name = %q, want %q", tpl.Name, "Email Ops")
+	}
+
+	// Roster: Postmaster (entry/orchestrator) then Inbox (specialist). Order is
+	// preserved and the first agent is the entry agent.
+	wantRoster := []string{"Postmaster", "Inbox"}
+	if len(tpl.Agents) != len(wantRoster) {
+		t.Fatalf("expected %d agents %v, got %d: %+v", len(wantRoster), wantRoster, len(tpl.Agents), tpl.Agents)
+	}
+	for i, want := range wantRoster {
+		if tpl.Agents[i].Name != want {
+			t.Fatalf("agent[%d] = %q, want %q (order preserved; first is the entry agent)", i, tpl.Agents[i].Name, want)
+		}
+	}
+
+	// The specialist must be named exactly "Inbox" so isInboxAgent (in
+	// internal/server/mailbox_access.go) grants it mailbox access without a
+	// gate change.
+	if tpl.Agents[1].Name != "Inbox" {
+		t.Fatalf("specialist must be named exactly \"Inbox\" for the mailbox-access gate, got %q", tpl.Agents[1].Name)
+	}
+
+	// Postmaster prompt scopes it to email ops and disclaims non-email work.
+	postmaster := strings.ToLower(tpl.Agents[0].SystemPrompt)
+	for _, want := range []string{"inbox", "route", "follow-up"} {
+		if !strings.Contains(postmaster, want) {
+			t.Errorf("Postmaster prompt missing scope keyword %q: %s", want, tpl.Agents[0].SystemPrompt)
+		}
+	}
+
+	// The Inbox specialist must promise explicit send confirmation and treat
+	// mail as untrusted (contract carried over from the HQ Inbox).
+	inbox := strings.ToLower(tpl.Agents[1].SystemPrompt)
+	if !strings.Contains(inbox, "confirm") || !strings.Contains(inbox, "untrusted") {
+		t.Errorf("Inbox prompt must promise explicit send confirmation and treat mail as untrusted: %s", tpl.Agents[1].SystemPrompt)
+	}
+
+	// Starter tasks: a setup task (first, setup:true) that connects email, plus
+	// a first-triage task.
+	if len(tpl.StarterTasks) != 2 {
+		t.Fatalf("expected 2 starter tasks (1 setup + 1 triage), got %d: %+v", len(tpl.StarterTasks), tpl.StarterTasks)
+	}
+	if !tpl.StarterTasks[0].Setup {
+		t.Errorf("first starter task must be the setup task (setup:true): %+v", tpl.StarterTasks[0])
+	}
+	setupCount := 0
+	for i, task := range tpl.StarterTasks {
+		if task.Setup {
+			setupCount++
+			if i != 0 {
+				t.Errorf("setup task must be first, found at index %d", i)
+			}
+		}
+	}
+	if setupCount != 1 {
+		t.Fatalf("expected exactly one setup:true starter task, got %d", setupCount)
+	}
+
+	if len(tpl.Warnings) != 0 {
+		t.Fatalf("email-ops should load without warnings, got %v", tpl.Warnings)
+	}
+}

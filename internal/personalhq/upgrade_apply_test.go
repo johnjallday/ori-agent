@@ -91,9 +91,10 @@ func TestApplyUpgradeAddsMissingSpecialistsAndStampsVersion(t *testing.T) {
 	if res.Outcome != UpgradeOutcomeSuccess || res.Version != CurrentProvisioningVersion {
 		t.Fatalf("expected success at current version, got %+v", res)
 	}
-	// All 3 specialist roles should have been requested and added.
-	if len(res.AddedRoles) != 3 {
-		t.Fatalf("expected 3 roles added, got %v", res.AddedRoles)
+	// The full roster (Chief + Journal after the Email Ops spin-off) should
+	// have been requested and added.
+	if len(res.AddedRoles) != len(V1Roster) {
+		t.Fatalf("expected %d roles added, got %v", len(V1Roster), res.AddedRoles)
 	}
 	// The user's own agent must survive.
 	ws, _ := store.GetWorkspace(context.Background(), hqID)
