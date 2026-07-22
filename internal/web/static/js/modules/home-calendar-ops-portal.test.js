@@ -68,7 +68,12 @@ test('renderBodyHTML for needs_setup shows the state label and a finish-setup CT
 });
 
 test('renderBodyHTML for ready with no next meeting says so plainly', () => {
-  const html = renderBodyHTML({ kind: 'ready', eventCount: 0, conflictCount: 0, nextMeeting: null });
+  const html = renderBodyHTML({
+    kind: 'ready',
+    eventCount: 0,
+    conflictCount: 0,
+    nextMeeting: null
+  });
   assert.match(html, /No more meetings today/);
   assert.match(html, /0 events today/);
   assert.doesNotMatch(html, /conflict/);
@@ -89,11 +94,20 @@ test('renderBodyHTML for ready with a next meeting and conflicts renders both, H
 });
 
 test('renderBodyHTML for ready with a data gap includes a partial-data banner', () => {
-  const html = renderBodyHTML({ kind: 'ready', eventCount: 1, conflictCount: 0, nextMeeting: null, dataGap: true });
+  const html = renderBodyHTML({
+    kind: 'ready',
+    eventCount: 1,
+    conflictCount: 0,
+    nextMeeting: null,
+    dataGap: true
+  });
   assert.match(html, /Some calendars could not be read\./);
 });
 
 test('escapeHtml neutralizes every HTML-significant character', () => {
-  assert.equal(escapeHtml(`<a href="x">'&'</a>`), '&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;');
+  assert.equal(
+    escapeHtml(`<a href="x">'&'</a>`),
+    '&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;'
+  );
   assert.equal(escapeHtml(null), '');
 });

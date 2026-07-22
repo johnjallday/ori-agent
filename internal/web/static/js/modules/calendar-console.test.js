@@ -626,3 +626,31 @@ test('renderCheckpoint shows calendar/title/start/end/timezone/location/descript
   assert.match(text, /Weekly sync/);
   assert.match(text, /1 attendee.*invitation/);
 });
+
+// --- openCalendarTab renders whatever state checkApplicability already
+// resolved (task 8.1-adjacent regression: a workspace whose setup isn't
+// finished must never open to a permanently blank Calendar pane) ---------
+
+test('openCalendarTab shows the setup-incomplete error state when capabilities failed, instead of leaving the body blank', async () => {
+  const doc = setup();
+  mockFetchJSON({ error: 'no calendar connector is configured for this workspace', code: 'connector_missing' }, false);
+  await mod.init('ws-unfinished-setup');
+  await new Promise(r => setTimeout(r, 0));
+
+  mod.openCalendarTab();
+
+  const body = doc.getElementById('calendarConsoleBody');
+  assert.match(body.textContent, /calendar connector/i);
+});
+
+test('openCalendarTab re-renders the ready agenda when capabilities already succeeded', async () => {
+  const doc = setup();
+  mockFetchJSON({ display_time_zone: 'UTC' }, true);
+  await mod.init('ws-ready');
+  await new Promise(r => setTimeout(r, 0));
+
+  mod.openCalendarTab();
+
+  const status = doc.getElementById('calendarConsoleStatus');
+  assert.equal(status.textContent, 'UTC');
+});

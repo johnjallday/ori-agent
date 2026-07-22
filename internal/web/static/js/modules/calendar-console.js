@@ -271,6 +271,12 @@
   let view = 'day'; // 'day' | 'week'
   let anchorDate = new Date();
   let capabilities = null;
+  // Set only when checkApplicability's capabilities fetch fails. The chip
+  // stays silent for that failure (see checkApplicability's comment), but an
+  // explicit open of the tab -- the chip itself, ?panel=calendar, or the
+  // Tools modal's Calendar tab -- still needs a reason to show instead of a
+  // permanently blank body; openCalendarTab reads this to decide.
+  let lastCapabilitiesError = null;
   let allCalendars = [];
   let selectedCalendarIds = new Set();
   let currentEvents = [];
@@ -331,15 +337,17 @@
     if (!id) return;
     try {
       capabilities = await apiGet('/api/calendar-ops/capabilities?workspace_id=' + encodeURIComponent(id));
+      lastCapabilitiesError = null;
       showChip(true);
       await loadCalendarsAndRender();
     } catch (err) {
       capabilities = null;
+      lastCapabilitiesError = err;
       // A workspace with no calendar binding at all (connector_missing on a
       // non-Calendar-Ops workspace) is the overwhelmingly common case and
       // must stay silent; only surface a degraded/auth-required state when
-      // the console is actually open (renderState handles that from a
-      // direct fetchEvents error instead).
+      // the console is actually open (openCalendarTab renders it from
+      // lastCapabilitiesError instead).
       showChip(false);
     }
   }
@@ -369,6 +377,7 @@
     if (cmd && typeof cmd.openStatModal === 'function' && typeof cmd.setToolsTab === 'function') {
       cmd.openStatModal('tools');
       cmd.setToolsTab('calendar');
+      renderOpenState();
       return;
     }
     // Fallback for a page layout without Command view (e.g. a future/older
@@ -378,6 +387,22 @@
     const { root } = els();
     root?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     root?.focus?.();
+    renderOpenState();
+  }
+
+  // renderOpenState fills the pane the moment it's actually opened. Neither
+  // branch of checkApplicability's fetch renders into the DOM on its own:
+  // the success path already did (loadCalendarsAndRender), but the failure
+  // path deliberately only silences the chip (see its comment) and would
+  // otherwise leave calendarConsoleBody permanently blank for any workspace
+  // whose setup isn't finished yet -- exactly the state a "finish setup"
+  // link (the Home/HQ portal, Daily Brief) lands a user on.
+  function renderOpenState() {
+    if (capabilities) {
+      renderReady();
+    } else if (lastCapabilitiesError) {
+      renderErrorState(lastCapabilitiesError);
+    }
   }
 
   // --- data loading -------------------------------------------------------

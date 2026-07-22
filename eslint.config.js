@@ -134,6 +134,7 @@ export default defineConfig([
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/personal-hq-onboarding.js',
       'internal/web/static/js/modules/personal-hq-email-setup.js',
+      'internal/web/static/js/modules/home-calendar-ops-portal.js',
       'internal/web/static/js/modules/home-daily-brief.js',
       'internal/web/static/js/modules/plugin-init-banner.js',
       'internal/web/static/js/modules/progression-widget.js',

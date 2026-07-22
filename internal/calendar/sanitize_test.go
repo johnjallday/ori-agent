@@ -29,6 +29,9 @@ func TestSanitizeEvent_DropsUnsafeLinks(t *testing.T) {
 		{"http ok", "http://meet.example.com/abc", true},
 		{"javascript URI rejected", "javascript:alert(1)", false},
 		{"data URI rejected", "data:text/html,<script>alert(1)</script>", false},
+		{"file URI rejected", "file:///etc/passwd", false},
+		{"custom scheme rejected", "vbscript:msgbox(1)", false},
+		{"protocol-relative rejected (no explicit scheme)", "//evil.example.com/abc", false},
 		{"bare path rejected", "/relative/path", false},
 		{"empty stays empty", "", false},
 	}

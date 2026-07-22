@@ -1,6 +1,7 @@
 package calendarhttp
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -226,6 +227,36 @@ func TestEvents_OneCalendarFailureDoesNotBlankTheWholeAgenda(t *testing.T) {
 	resp := decodeSuccess[eventsResponse](t, w)
 	if len(resp.Events) != 1 || resp.Events[0].ID != "evt-good" {
 		t.Fatalf("expected the good calendar's event to survive a sibling failure, got %+v", resp.Events)
+	}
+}
+
+// TestEvents_OversizedConnectorResponseIsBoundedNotUnbounded proves a
+// malicious or malfunctioning connector returning far more events than any
+// real calendar has cannot inflate the response beyond maxAgendaEvents
+// (task 8.2: "oversized responses").
+func TestEvents_OversizedConnectorResponseIsBoundedNotUnbounded(t *testing.T) {
+	h, _, rec := newMutableGatewayHandler(t, "local")
+	const oversizedCount = maxAgendaEvents + 250
+	rec.resultFn = func(tool string, args map[string]any) (any, error) {
+		items := make([]any, 0, oversizedCount)
+		for i := range oversizedCount {
+			items = append(items, map[string]any{
+				"id": fmt.Sprintf("evt-%d", i), "summary": "Flood",
+				"start": map[string]any{"dateTime": "2026-07-20T10:00:00Z"},
+				"end":   map[string]any{"dateTime": "2026-07-20T11:00:00Z"},
+			})
+		}
+		return map[string]any{"items": items}, nil
+	}
+
+	w := doJSONRequest(t, h.Events, http.MethodGet,
+		"/api/calendar-ops/events?workspace_id=ws-cal&start=2026-07-20T00:00:00Z&end=2026-07-21T00:00:00Z", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	resp := decodeSuccess[eventsResponse](t, w)
+	if len(resp.Events) != maxAgendaEvents {
+		t.Fatalf("expected the response bounded to maxAgendaEvents=%d regardless of connector response size, got %d", maxAgendaEvents, len(resp.Events))
 	}
 }
 
