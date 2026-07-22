@@ -253,7 +253,31 @@
       return `<div class="home-workspace-empty">${newTile}</div>`;
     }
 
-    return `<div class="home-workspace-strip">${cards}${newTile}</div>`;
+    // Advertise the Email Ops blueprint (Mail spin-off, open-Q4) once the user
+    // is past first-run and does not already have an Email Ops workspace. The
+    // CTA deep-links the Construct wizard with the blueprint preselected.
+    const emailOpsTile =
+      !isFirstRun && !hasEmailOpsWorkspace(workspaces)
+        ? `
+      <a href="/workspaces?create=1&blueprint=email-ops" class="home-workspace-card home-workspace-card-new home-workspace-card-suggested" data-role="new-email-ops" aria-label="Set up an Email Ops workspace for inbox triage and reply drafting">
+        <div class="home-workspace-card-new-icon" aria-hidden="true">📬</div>
+        <div class="home-workspace-card-new-label">Set up Email Ops</div>
+      </a>
+    `
+        : '';
+
+    return `<div class="home-workspace-strip">${cards}${newTile}${emailOpsTile}</div>`;
+  }
+
+  // hasEmailOpsWorkspace reports whether any of the user's workspaces is an Email
+  // Ops workspace, by template provenance when available or name as a fallback.
+  function hasEmailOpsWorkspace(workspaces) {
+    return (workspaces || []).some(ws => {
+      const prov = ws.template_provenance || {};
+      const templateId = String(ws.template_id || prov.template_id || '').trim();
+      if (templateId === 'email-ops') return true;
+      return String(ws.name || '').trim().toLowerCase() === 'email ops';
+    });
   }
 
   function wireWorkspaceCardClicks(_body) {

@@ -475,17 +475,22 @@ const sessionManager = {
           ''
       ).trim();
 
+      const pendingBlueprint = String(addFolderModal.dataset.pendingBlueprint || '').trim();
+
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
       if (importMode) {
         this.setImportModeEnabled(true);
+      } else if (pendingBlueprint) {
+        this.preselectBlueprintCard(pendingBlueprint);
       }
 
       delete addFolderModal.dataset.pendingImportMode;
       delete addFolderModal.dataset.pendingEntryPoint;
       delete addFolderModal.dataset.pendingPostCreateAction;
+      delete addFolderModal.dataset.pendingBlueprint;
     });
 
     // Close dropdowns when clicking outside
@@ -6278,17 +6283,38 @@ const sessionManager = {
     modalElement.dataset.pendingEntryPoint = String(
       options.entryPoint || (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create')
     );
-    // Consumed one-shot by project-templates-manage.js's own populate flow to
-    // preselect a blueprint card (task 7.5) -- never applies an inline
-    // creation shortcut, just pre-picks the card in the existing wizard.
-    if (options.templateId) {
-      modalElement.dataset.pendingTemplateSelectId = String(options.templateId);
+    if (options.blueprint) {
+      modalElement.dataset.pendingBlueprint = String(options.blueprint);
     } else {
-      delete modalElement.dataset.pendingTemplateSelectId;
+      delete modalElement.dataset.pendingBlueprint;
     }
 
     const modal = new bootstrap.Modal(modalElement);
     modal.show();
+  },
+
+  // preselectBlueprintCard selects the blueprint card matching templateId, so a
+  // deep-linked Construct flow (e.g. the HQ email station's "Set up Email Ops"
+  // CTA) lands on the right blueprint. The picker renders asynchronously and can
+  // re-render to its Blank default after the modal opens, wiping an early click;
+  // so this re-clicks until the selection actually sticks (verified against
+  // ProjectTemplateCard.getSelectedTemplate) or a short budget elapses. Quietly
+  // gives up if the card never appears.
+  preselectBlueprintCard(templateId) {
+    const id = String(templateId || '').trim();
+    if (!id) return;
+    let attempts = 0;
+    const step = () => {
+      const picker = typeof window !== 'undefined' ? window.ProjectTemplateCard : null;
+      const selected = picker && picker.getSelectedTemplate ? picker.getSelectedTemplate() : null;
+      if (selected && String(selected.id || '') === id) return; // stuck — done
+      const card = document.querySelector(
+        `.workspace-template-card[data-template-id="${id}"], .workspace-template-row[data-template-id="${id}"]`
+      );
+      if (card) card.click();
+      if (attempts++ < 40) setTimeout(step, 75);
+    };
+    step();
   },
 
   // Show import workspace modal
@@ -10334,22 +10360,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
   // history so a refresh doesn't re-open. Previously handled by the now-removed
   // workspace-create.js on a different (unrouted) page.
-  // ?template=<id> additionally preselects that blueprint (task 7.5's
-  // absent-workspace Calendar Ops CTA: /workspaces?create=1&template=calendar-ops).
+  // Optional blueprint preselection: /workspaces?create=1&blueprint=email-ops
+  // (the HQ email station CTA, the Home Email Ops CTA, and the Home Calendar
+  // Ops portal's absent-workspace CTA all link here).
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get('create') === '1') {
-      const templateId = params.get('template') || '';
+      const blueprint = String(params.get('blueprint') || '').trim();
       params.delete('create');
-      params.delete('template');
+      params.delete('blueprint');
       const qs = params.toString();
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
       requestAnimationFrame(() =>
         sessionManager.showAddWorkspaceModal({
-          entryPoint: 'home_first_run',
-          templateId: templateId || undefined
+          entryPoint: blueprint ? `${blueprint.replace(/-/g, '_')}_cta` : 'home_first_run',
+          blueprint: blueprint || undefined
         })
       );
     }

@@ -302,6 +302,10 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	b.wireReaperSetup()
 	b.wireCalendarOpsSetup()
 
+	// Same reason: the mailbox read/link/send runtime depends on the workspace
+	// store, so it is wired here rather than in initializeHandlers (Phase 17).
+	b.wireMailboxRuntime()
+
 	return nil
 }
 

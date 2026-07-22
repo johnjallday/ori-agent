@@ -61,6 +61,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/usagehttp"
 	"github.com/johnjallday/ori-agent/internal/userhttp"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
+	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
@@ -231,6 +232,12 @@ type ServerBuilder struct {
 	// Personal HQ designation and onboarding state
 	personalHQService *personalhq.Service
 	personalHQHandler *personalhqhttp.Handler
+
+	// vaultStore is created during initializeHandlers (Phase 17) but the
+	// store-dependent mailbox runtime built on it must be wired after the
+	// workspace store exists (Phase 18), so it is stashed here for
+	// wireMailboxRuntime to consume.
+	vaultStore *vault.Store
 
 	// mailboxAccess gates the read-only Personal HQ mail tools; nil until the
 	// vault system initializes it (internal/server/mailbox_access.go).

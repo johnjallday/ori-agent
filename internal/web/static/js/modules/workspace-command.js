@@ -3155,7 +3155,7 @@ export class WorkspaceCommandView {
     return {
       taskLabel: String(task.description || task.name || task.title || 'Untitled task'),
       statusLabel: this.taskStatusLabel(task.status),
-      activityLabel: activity?.label || this.taskStatusLabel(task.status),
+      activityLabel: activity?.label || '',
       whenLabel: this.formatRelativeTime(timestamp),
       timestamp: task.updated_at || task.created_at || ''
     };
@@ -4006,18 +4006,124 @@ export class WorkspaceCommandView {
     ];
   }
 
-  // Email station state (FR10): neutral while personal-hq-email-setup.js
-  // has not published window.OriHQEmailSetup yet, "Set up Email" when
-  // unconnected, the connected address (or "Connected") when connected.
+  // Email station is a portal (Mail spin-off FR15) with three states, decided at
+  // render time (FR17):
+  //   (c) legacy — this HQ has its own in-place email binding: keep the existing
+  //       in-HQ setup behavior (existing HQs are never disturbed).
+  //   (b) an Email Ops workspace exists: show its open follow-up count and
+  //       navigate there on activation.
+  //   (a) none: a "Set up Email Ops" CTA that deep-links the Construct wizard.
   hqEmailStationState() {
+    if (this.hqHasInPlaceEmail()) {
+      const hqEmail = window.OriHQEmailSetup;
+      return {
+        value: hqEmail.address || 'Connected',
+        description: hqEmail.address || 'connected',
+        tone: 'clear'
+      };
+    }
+    const state = this.emailOpsState();
+    if (state.status === 'idle' && this.active) this.requestEmailOpsData();
+    switch (state.status) {
+      case 'loading':
+        return { value: '—', description: 'checking Email Ops', tone: 'loading' };
+      case 'error':
+        return { value: 'Email Ops', description: 'status unavailable', tone: 'degraded' };
+      case 'ready':
+        if (state.exists) {
+          const count = state.openFollowupCount;
+          return count
+            ? {
+                value: count + (count === 1 ? ' follow-up' : ' follow-ups'),
+                description: state.workspaceName || 'open Email Ops',
+                tone: 'attention'
+              }
+            : {
+                value: state.workspaceName || 'Email Ops',
+                description: 'open Email Ops',
+                tone: 'clear'
+              };
+        }
+        return { value: 'Set up Email Ops', description: 'no Email Ops workspace yet' };
+      default:
+        return { value: '—', description: 'checking Email Ops', tone: 'loading' };
+    }
+  }
+
+  // hqHasInPlaceEmail reports whether this HQ itself has a connected email
+  // binding (the pre-spin-off legacy setup). Only such an HQ keeps the in-HQ
+  // email behavior; new HQs never do.
+  hqHasInPlaceEmail() {
     const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
-    if (!hqEmail) {
-      return { value: '—', description: 'loading' };
+    return !!(hqEmail && hqEmail.connected);
+  }
+
+  // emailOpsState is the lazy per-HQ cache for the portal's Email Ops status.
+  emailOpsState() {
+    const hqWorkspaceID = this.watchtowerWorkspaceID();
+    if (!this._emailOps || this._emailOps.hqWorkspaceID !== hqWorkspaceID) {
+      this._emailOps = {
+        hqWorkspaceID,
+        status: 'idle',
+        exists: false,
+        workspaceID: '',
+        workspaceName: '',
+        openFollowupCount: 0,
+        error: ''
+      };
     }
-    if (hqEmail.connected) {
-      return { value: hqEmail.address || 'Connected', description: hqEmail.address || 'connected' };
+    return this._emailOps;
+  }
+
+  // Fetch the user's Email Ops status once for the active HQ. A request token
+  // ignores slow stale responses after a workspace switch. A failed fetch
+  // degrades the badge but never breaks map rendering.
+  requestEmailOpsData(force = false) {
+    if (!this.isPersonalHQ()) return;
+    const state = this.emailOpsState();
+    if (state.status === 'loading') return;
+    if (!force && state.status === 'ready') return;
+    if (typeof fetch !== 'function') {
+      state.status = 'error';
+      state.error = 'Email Ops status is unavailable in this browser.';
+      return;
     }
-    return { value: 'Set up Email', description: 'not set up' };
+    state.status = 'loading';
+    const requestID = (this._emailOpsRequestID || 0) + 1;
+    this._emailOpsRequestID = requestID;
+
+    Promise.resolve(fetch('/api/personal-hq/email-ops'))
+      .then(async response => {
+        if (!response || !response.ok) {
+          throw new Error('Email Ops request failed' + (response ? ': ' + response.status : ''));
+        }
+        return response.json();
+      })
+      .then(payload => {
+        if (this._emailOpsRequestID !== requestID) return;
+        const st = (payload && payload.status) || {};
+        const current = this.emailOpsState();
+        if (current.hqWorkspaceID !== state.hqWorkspaceID) return;
+        current.status = 'ready';
+        current.exists = !!st.exists;
+        current.workspaceID = String(st.workspace_id || '');
+        current.workspaceName = String(st.workspace_name || '');
+        current.openFollowupCount = Number(st.open_followup_count || 0);
+        current.error = '';
+        this.refreshEmailStationSurface();
+      })
+      .catch(error => {
+        if (this._emailOpsRequestID !== requestID) return;
+        const current = this.emailOpsState();
+        if (current.hqWorkspaceID !== state.hqWorkspaceID) return;
+        current.status = 'error';
+        current.error = (error && error.message) || 'Email Ops status unavailable';
+        this.refreshEmailStationSurface();
+      });
+  }
+
+  refreshEmailStationSurface() {
+    if (this.active) this.render();
   }
 
   // Returns the active HQ workspace id without trusting a stale page-level
@@ -4286,7 +4392,7 @@ export class WorkspaceCommandView {
     }
     window.sessionManager.showAddWorkspaceModal({
       entryPoint: 'calendar_ops_portal',
-      templateId: 'calendar-ops'
+      blueprint: 'calendar-ops'
     });
   }
 
@@ -4885,17 +4991,46 @@ export class WorkspaceCommandView {
   }
 
   renderMapAgentLoadout(agent) {
-    const modelLine =
-      !agent?.model?.empty && agent?.model?.label
-        ? '<div class="ws-cmd-rpg-loadout-model"><small>Model</small>' +
-          escapeHtml(agent.model.label) +
-          '</div>'
-        : '';
     return (
       '<section class="ws-cmd-rpg-loadout is-editable"><span>Loadout</span>' +
-      modelLine +
       this.renderLoadoutEditor(agent) +
       '</section>'
+    );
+  }
+
+  renderMapAgentModelCard(agent) {
+    const page = this.page || {};
+    const modelLabel = agent?.model?.empty
+      ? 'Model not set'
+      : agent?.model?.label || agent?.model?.model || 'Model not set';
+    const editable =
+      typeof page.agentAllowsModelEditing === 'function' &&
+      page.agentAllowsModelEditing(agent?.profile);
+    const contents =
+      '<span>Model</span><strong translate="no">' +
+      escapeHtml(modelLabel) +
+      '</strong>' +
+      (editable
+        ? '<small aria-hidden="true"><i class="bi bi-pencil" aria-hidden="true"></i>' +
+          (agent?.model?.empty ? 'Set model' : 'Change') +
+          '</small>'
+        : '');
+
+    if (!editable) {
+      return '<div class="ws-cmd-rpg-class-card">' + contents + '</div>';
+    }
+
+    const actionLabel = agent?.model?.empty
+      ? 'Set model for ' + agent.name
+      : 'Change model for ' + agent.name + '. Current model: ' + modelLabel;
+    return (
+      '<button type="button" class="ws-cmd-rpg-class-card is-editable" data-cmd-edit-model="' +
+      escapeHtml(agent.encodedName) +
+      '" aria-label="' +
+      escapeHtml(actionLabel) +
+      '">' +
+      contents +
+      '</button>'
     );
   }
 
@@ -5311,19 +5446,30 @@ export class WorkspaceCommandView {
       return !['completed', 'cancelled', 'timeout'].includes(status);
     }).length;
     const detailTarget = this.agentDetailTarget(agent);
-    const classLabel = agent.role?.detail || agent.role?.label || 'Agent';
-    const modelLabel = agent.model?.empty ? 'Model not set' : agent.model?.label || 'Model not set';
+    const profileRole = String(agent.profile?.role || agent.role?.roles?.[0] || '').trim();
+    const roleLabel = agent.entry
+      ? this.commanderLabel(profileRole)
+      : agent.role?.detail || agent.role?.label || 'Agent';
+    const questStatusLabel = summary?.statusLabel || agent.status?.label || 'Idle';
+    const questActivityLabel = String(summary?.activityLabel || '').trim();
+    const questMeta = [
+      questStatusLabel,
+      questActivityLabel.toLowerCase() === String(questStatusLabel).trim().toLowerCase()
+        ? ''
+        : questActivityLabel,
+      summary?.whenLabel || ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    const recentActivityMeta = questActivityLabel
+      ? [questActivityLabel, summary?.whenLabel || ''].filter(Boolean).join(' · ')
+      : 'No recorded activity';
     const statCards = [
       { label: 'Quests', value: openTaskCount },
       { label: 'Skills', value: Number(agent.skills?.count || 0) },
       { label: 'Tools', value: agent.mcpNames.length },
       { label: 'Units', value: agent.instanceCount }
     ];
-    const statusEffects = [
-      agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '',
-      agent.status?.label || 'Idle',
-      agent.model?.empty ? '' : agent.model?.label || ''
-    ].filter(Boolean);
     return (
       '<div class="ws-cmd-map-inspector-card ' +
       escapeHtml(agent.tone) +
@@ -5332,19 +5478,15 @@ export class WorkspaceCommandView {
       ' sheet">' +
       '<div class="ws-cmd-map-agent-sheet-head">' +
       this.agentCharacterHTML(agent, 'roster') +
-      '<div class="ws-cmd-map-agent-sheet-title"><span>Unit Sheet</span><strong>' +
+      '<div class="ws-cmd-map-agent-sheet-title"><strong>' +
       escapeHtml(agent.name) +
-      '</strong><p>' +
-      escapeHtml(agent.role?.label || 'Agent') +
-      '</p></div></div>' +
+      '</strong></div></div>' +
       '<div class="ws-cmd-rpg-sheet">' +
       '<div class="ws-cmd-rpg-class-grid">' +
-      '<div class="ws-cmd-rpg-class-card"><span>Class</span><strong>' +
-      escapeHtml(classLabel) +
+      '<div class="ws-cmd-rpg-class-card"><span>Role</span><strong>' +
+      escapeHtml(roleLabel) +
       '</strong></div>' +
-      '<div class="ws-cmd-rpg-class-card"><span>Model</span><strong>' +
-      escapeHtml(modelLabel) +
-      '</strong></div>' +
+      this.renderMapAgentModelCard(agent) +
       '</div>' +
       '<div class="ws-cmd-rpg-status-strip"><span class="ws-cmd-led ' +
       escapeHtml(agent.tone) +
@@ -5368,18 +5510,12 @@ export class WorkspaceCommandView {
       '<section class="ws-cmd-rpg-quest-card"><span>Current Quest</span><strong>' +
       escapeHtml(summary?.taskLabel || 'No task in progress') +
       '</strong><p>' +
-      escapeHtml(summary?.statusLabel || agent.status?.label || 'Idle') +
-      (summary?.activityLabel ? ' · ' + escapeHtml(summary.activityLabel) : '') +
-      (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
+      escapeHtml(questMeta) +
       '</p></section>' +
       this.renderMapAgentLoadout(agent) +
       '<div class="ws-cmd-rpg-sheet-row"><span>Recent Activity</span><strong>' +
-      escapeHtml(summary?.activityLabel || 'No recent activity') +
-      (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
-      '</strong></div>' +
-      '<div class="ws-cmd-rpg-effects">' +
-      statusEffects.map(effect => '<span>' + escapeHtml(effect) + '</span>').join('') +
-      '</div></div>' +
+      escapeHtml(recentActivityMeta) +
+      '</strong></div></div>' +
       this.renderMapAgentCommandMenu(agent, detailTarget) +
       '</div>'
     );
@@ -5773,13 +5909,31 @@ export class WorkspaceCommandView {
     this.runRailPrimaryAction(section, triggerButton);
   }
 
-  // openHQEmailSetup opens the Personal HQ email modal owned by
-  // personal-hq-email-setup.js (present on the detail page for the designated
-  // HQ). No-op when the module has not published its opener. Reachable only
-  // via the Email station (FR12) — the old inventory item is gone.
+  // Activating the email station routes by portal state (Mail spin-off FR15):
+  //   (c) legacy in-HQ email → open the in-HQ email modal.
+  //   (b) an Email Ops workspace exists → navigate to it.
+  //   (a) none → deep-link the Construct wizard with the email-ops blueprint
+  //       preselected (one creation path; the CTA never creates directly).
   openHQEmailSetup() {
-    const hqEmail = typeof window !== 'undefined' ? window.OriHQEmailSetup : null;
-    if (hqEmail && typeof hqEmail.open === 'function') hqEmail.open();
+    if (this.hqHasInPlaceEmail()) {
+      const hqEmail = window.OriHQEmailSetup;
+      if (hqEmail && typeof hqEmail.open === 'function') hqEmail.open();
+      return;
+    }
+    const state = this.emailOpsState();
+    if (state.status === 'ready' && state.exists && state.workspaceID) {
+      this.navigateTo('/workspaces/' + encodeURIComponent(state.workspaceID));
+      return;
+    }
+    this.navigateTo('/workspaces?create=1&blueprint=email-ops');
+  }
+
+  // navigateTo performs a full navigation, tolerant of environments (tests)
+  // without window.location.assign.
+  navigateTo(target) {
+    if (typeof window === 'undefined' || !window.location) return;
+    if (typeof window.location.assign === 'function') window.location.assign(target);
+    else window.location.href = target;
   }
 
   bindOperationsMap() {
@@ -5789,6 +5943,11 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (this.handleLoadoutClick(event)) return;
+      const modelBtn = event.target.closest('[data-cmd-edit-model]');
+      if (modelBtn && page && typeof page.openAgentModelModal === 'function') {
+        page.openAgentModelModal(modelBtn.getAttribute('data-cmd-edit-model'));
+        return;
+      }
       const questToggle = event.target.closest('[data-cmd-map-quest-toggle]');
       if (questToggle) {
         if (this.taskComposerOpen) this.closeTaskComposer();

@@ -59,18 +59,20 @@ func TestWriteReadProvisionStateRoundTrip(t *testing.T) {
 }
 
 func TestFindRoleInstanceMatchesByName(t *testing.T) {
-	ws := wsWithAgents("", "Personal Chief of Staff", "inbox") // case-insensitive
+	ws := wsWithAgents("", "Personal Chief of Staff", "journal") // case-insensitive
+	// V1Roster is [Chief, Journal] after the Email Ops spin-off dropped Inbox.
 	if _, ok := FindRoleInstance(ws, V1Roster[1]); !ok {
-		t.Fatal("expected to find the Inbox role case-insensitively")
+		t.Fatal("expected to find the Journal role case-insensitively")
 	}
-	if _, ok := FindRoleInstance(ws, V1Roster[2]); ok {
-		t.Fatal("did not expect to find a Journal role")
+	// A role the workspace does not have must not be found.
+	if _, ok := FindRoleInstance(ws, SpecialistRole{Slug: "inbox", AgentName: "Inbox"}); ok {
+		t.Fatal("did not expect to find an Inbox role")
 	}
 }
 
 func TestPlanUpgradeArbitraryWorkspaceNeedsFullRoster(t *testing.T) {
 	// An arbitrary designated workspace (no assistant roster, no record) must
-	// converge onto the full v1 roster via the same plan path (task 2.1/2.9),
+	// converge onto the full roster via the same plan path (task 2.1/2.9),
 	// without assuming the personal-ops template.
 	ws := wsWithAgents("user-1", "My Notes Agent")
 	plan := PlanUpgrade(ws, "user-1")
@@ -81,8 +83,9 @@ func TestPlanUpgradeArbitraryWorkspaceNeedsFullRoster(t *testing.T) {
 	if plan.UpToDate {
 		t.Fatal("a bare workspace must not report up to date")
 	}
-	if len(plan.MissingRoles) != 3 {
-		t.Fatalf("expected all 3 specialist roles missing, got %v", plan.MissingRoles)
+	// Post-spin-off roster is Chief + Journal (Inbox moved to Email Ops).
+	if len(plan.MissingRoles) != len(V1Roster) {
+		t.Fatalf("expected all %d specialist roles missing, got %v", len(V1Roster), plan.MissingRoles)
 	}
 	if !plan.HasChanges() {
 		t.Fatal("plan with missing roles must report changes")

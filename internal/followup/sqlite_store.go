@@ -68,9 +68,14 @@ func (s *SQLiteStore) GetByDedupKey(ctx context.Context, userID, dedupKey string
 
 // Filter narrows a list query.
 type Filter struct {
-	UserID   string
-	Statuses []Status // empty = any
-	OpenOnly bool     // convenience: active/snoozed/candidate/reopened
+	UserID string
+	// WorkspaceID, when set, scopes the list to follow-ups owned by that
+	// workspace (the Email Ops spin-off: follow-ups are keyed to the workspace
+	// whose agents captured them). Blank = any workspace, so legacy rows with an
+	// empty or HQ workspace_id are simply never matched by a workspace filter.
+	WorkspaceID string
+	Statuses    []Status // empty = any
+	OpenOnly    bool     // convenience: active/snoozed/candidate/reopened
 }
 
 // List returns follow-ups matching the filter, most-recently-updated first.
@@ -82,6 +87,10 @@ func (s *SQLiteStore) List(ctx context.Context, f Filter) ([]*FollowUp, error) {
 	if strings.TrimSpace(f.UserID) != "" {
 		where = append(where, "user_id = ?")
 		args = append(args, f.UserID)
+	}
+	if strings.TrimSpace(f.WorkspaceID) != "" {
+		where = append(where, "workspace_id = ?")
+		args = append(args, f.WorkspaceID)
 	}
 
 	statuses := f.Statuses

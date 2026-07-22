@@ -219,17 +219,6 @@ func TestSyncStore_SavePreservesCanonicalDesignationFromStalePrimaryWorkspace(t 
 	}
 }
 
-// TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorkspace
-// guards the exact clobber this test file's Designation/ProjectPath siblings
-// guard, for TemplateProvenance: SetTemplateProvenance persists it to
-// workspace.json at workspace-creation time, but any unrelated later Save
-// built from a primary (SQLite) Get -- which has no TemplateProvenance
-// column and so always returns nil -- must not erase it. This was a real,
-// previously-uncaught bug: the template-setup first-open auto-start's task
-// status Update/Save (an ordinary, unrelated mutation) silently wiped
-// TemplateProvenance moments after workspace creation set it, breaking every
-// template-origin-based feature (REAPER readiness, Calendar Ops setup
-// detection, ...) for a workspace's entire lifetime.
 func TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	fileSync, err := NewFileStore(t.TempDir())
@@ -244,30 +233,29 @@ func TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorks
 		t.Fatal(err)
 	}
 
-	// Set provenance the way persistCreateWorkspaceTemplateProvenance's real
-	// storage layer effectively behaves: written to the canonical
-	// workspace.json (SQLite has no column for it, so the primary store
-	// never learns about it -- this is what makes the read below "stale").
+	// Template provenance is projected directly to workspace.json; the primary
+	// store has no column for it. A later save of a SQLite-fetched (stale)
+	// workspace must retain the canonical provenance rather than erase it —
+	// otherwise a template-origin-based feature (REAPER readiness, Calendar
+	// Ops setup detection, the Email Ops resolver, ...) loses the workspace
+	// over time.
 	canonicalWorkspace, err := fileSync.Get(ws.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonicalWorkspace.TemplateProvenance = &TemplateProvenance{TemplateID: "calendar-ops", TemplateName: "Calendar Ops", Builtin: true, Version: 1}
+	canonicalWorkspace.SetTemplateProvenance(&TemplateProvenance{TemplateID: EmailOpsTemplateID, Builtin: true})
 	if err := fileSync.Save(canonicalWorkspace); err != nil {
 		t.Fatal(err)
 	}
 
-	// An unrelated later mutation built from a stale (SQLite-primary) read --
-	// e.g. the setup-task auto-start flipping a task's status -- must not
-	// erase the provenance written above.
 	staleWorkspace, err := primary.Get(ws.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if staleWorkspace.TemplateProvenance != nil {
-		t.Fatalf("test setup invariant broken: primary store should never carry TemplateProvenance, got %+v", staleWorkspace.TemplateProvenance)
+	if staleWorkspace.GetTemplateProvenance() != nil {
+		t.Fatal("precondition: the in-memory stale copy should have no provenance")
 	}
-	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-provenance", Status: TaskStatusInProgress})
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-provenance", Status: TaskStatusPending})
 	if err := store.Save(staleWorkspace); err != nil {
 		t.Fatal(err)
 	}
@@ -276,11 +264,8 @@ func TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorks
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diskWorkspace.TemplateProvenance == nil || diskWorkspace.TemplateProvenance.TemplateID != "calendar-ops" {
-		t.Fatalf("template provenance was clobbered by an unrelated save: %+v", diskWorkspace.TemplateProvenance)
-	}
-	if !diskWorkspace.IsFromTemplate("calendar-ops") {
-		t.Fatal("IsFromTemplate should report true after the unrelated save")
+	if !diskWorkspace.IsFromTemplate(EmailOpsTemplateID) {
+		t.Fatalf("canonical template provenance was clobbered: %+v", diskWorkspace.GetTemplateProvenance())
 	}
 	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "after-provenance" {
 		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)

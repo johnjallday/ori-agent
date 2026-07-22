@@ -12,21 +12,36 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// SetEmailOpsSource wires the lazy, provenance-hydrating source used to resolve
+// the user's Email Ops workspace.
+func (h *Handler) SetEmailOpsSource(factory func() workspace.EmailOpsWorkspaceSource) {
+	if h == nil {
+		return
+	}
+	h.emailOpsSource = factory
+}
 
 // Handler serves the Personal HQ API.
 type Handler struct {
-	service       *personalhq.Service
-	setup         *personalhq.SetupCoordinator
-	upgrade       *personalhq.UpgradeCoordinator
-	mailboxLinker MailboxLinker
-	replies       ReplyService
-	followups     FollowUpAPI
-	journal       JournalAPI
-	provider      userprofile.UserProvider
+	service                *personalhq.Service
+	setup                  *personalhq.SetupCoordinator
+	upgrade                *personalhq.UpgradeCoordinator
+	mailboxLinker          MailboxLinker
+	workspaceMailboxLinker WorkspaceMailboxLinker
+	replies                ReplyService
+	followups              FollowUpAPI
+	journal                JournalAPI
+	provider               userprofile.UserProvider
 	// watchtowerSources is intentionally a factory: workspace storage is wired
 	// after this handler during server startup, so source access must be lazy.
 	watchtowerSources func() dailybrief.SnapshotSources
+	// emailOpsSource is a lazy source for the Email Ops workspace resolver. It
+	// MUST hydrate template provenance (folder-store field), so it is wired to
+	// the FileStore, not the SQLite-primary store whose Get drops provenance.
+	emailOpsSource func() workspace.EmailOpsWorkspaceSource
 }
 
 // NewHandler constructs a Personal HQ HTTP handler. provider may be nil, in

@@ -146,7 +146,7 @@ export function renderBodyHTML(view) {
       if (!btn) return;
       const role = btn.getAttribute('data-role');
       if (role === 'setup') {
-        window.location.href = '/workspaces?create=1&template=calendar-ops';
+        window.location.href = '/workspaces?create=1&blueprint=calendar-ops';
         return;
       }
       if (role === 'finish-setup') {

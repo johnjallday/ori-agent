@@ -27,10 +27,16 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-19 Template: Downloads Janitor — file-watch ~/Downloads, classify + file documents (local-first showcase) #small
 - 2026-07-19 Template: Calendar Ops — daily agenda + meeting prep; blocked on net-new GCal integration #large
 - 2026-07-19 Template: Client Ops (CRM-lite) — per-client notes, follow-up cadence, invoice reminders for freelancers
+- 2026-07-20 commander allow codex models #small
+- 2026-07-20 "workspace-details-unit-sheetallow edit models" #small
+- 2026-07-21 multiple-hq persisted in directory investigate why they are not imported
+- 2026-07-22 google-account easy connection setup
 
 ## Doing
 - Email Ops workspace spin-off → PRD at tasks/prd-email-ops-workspace.md (template Email Ops; personal-ops v5 drops Inbox; station → portal; follow-ups re-keyed) — task list next
 - calendar-ops-mcp -> PRD at tasks/prd-calendar-ops-mcp.md (started 2026-07-20)
+- workspace-backlog -> PRD at tasks/prd-workspace-backlog.md (started 2026-07-22)
 
 ## Shipped / dropped
+- 2026-07-21 unit-sheet-model-editing - PR #246 merged to dev (2026-07-21)
 - 2026-07-19 HQ cross-workspace visibility (hq_overview + Watchtower) — PR #240 merged to dev; post-merge live demo verified (badge/panel/navigation/all-clear + Chief hq_overview call on local model)

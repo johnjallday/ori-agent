@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "acceptance_state": "accepted",
-  "last_accepted_capture_commit": "c386860147e33a67e1f31f7fc5b77d4fa5e32904",
-  "accepted_readme_sha256": "f7b337608daa1d9496776c8615e5e76da02912555a7c90553218c0e7f2e75511",
+  "last_accepted_capture_commit": "c05fd44bba51d2e4a9340ce4d5e9bbe2cef600e1",
+  "accepted_readme_sha256": "09bcf6dbda181869b377f5ddcf843994e1372a2fecae1c261ca85a32519cc390",
   "accepted_environment": {
     "platform": "darwin",
     "architecture": "arm64",
@@ -103,8 +103,8 @@
         "internal/web/static/js/modules/workspace-hub.js",
         "internal/web/static/js/modules/personal-hq-onboarding.js"
       ],
-      "accepted_sha256": "53e3d73721044723308c28de70d76cf4c4dfb5120a0b213df8da7f810f239667",
-      "accepted_bytes": 96330
+      "accepted_sha256": "3645b9b6f671761cadbaeb18022747a9455d78636a9b8d23c9990a0ca9a85fcb",
+      "accepted_bytes": 96296
     },
     {
       "id": "workspace",
@@ -133,8 +133,8 @@
         "internal/web/static/js/modules/workspace-detail.js",
         "internal/web/static/js/modules/workspace-mission.js"
       ],
-      "accepted_sha256": "e154432d0509b6be3b6968c3140da18b820d73ed071a73f00bc505fb0f061449",
-      "accepted_bytes": 113760
+      "accepted_sha256": "18e55567152fd236b71d49d5a41d3600deef0ff38817681d09f11243d5af8e98",
+      "accepted_bytes": 114188
     }
   ]
 }

@@ -506,6 +506,19 @@ test('detailed view is deleted; shared hosts and goal modal survive in the templ
   assert.equal(template.includes('WorkspaceFloatingAssistantEnabled'), false);
 });
 
+test('agent model modal layers above the Operations Map Unit Sheet', () => {
+  const template = readFileSync(
+    new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(template, /#workspace-detail-agent-model-modal\s*{\s*z-index:\s*10030;/);
+  assert.match(
+    template,
+    /\.modal-backdrop\.workspace-detail-backdrop-agent-model\s*{\s*z-index:\s*10020;/
+  );
+});
+
 test('command rail renders project_path fallback when no directories are loaded', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -2171,6 +2184,9 @@ test('Operations Map agent command menu delegates to existing workspace flows', 
       },
       openTask(id) {
         calls.push(['open-task', id]);
+      },
+      openAgentModelModal(encodedName) {
+        calls.push(['edit-model', encodedName]);
       }
     },
     selectAgent(encodedName, options) {
@@ -2186,6 +2202,9 @@ test('Operations Map agent command menu delegates to existing workspace flows', 
 
   commandView.bindOperationsMap();
 
+  mapRoot.listener({
+    target: makeAttributeClickTarget({ 'data-cmd-edit-model': 'Researcher' })
+  });
   mapRoot.listener({
     target: makeAttributeClickTarget({ 'data-cmd-add-task': 'Researcher' })
   });
@@ -2206,6 +2225,7 @@ test('Operations Map agent command menu delegates to existing workspace flows', 
   });
 
   assert.deepEqual(calls, [
+    ['edit-model', 'Researcher'],
     ['add-task', 'Researcher'],
     ['new-session', 'Researcher'],
     ['open-session', 'session-1'],
@@ -2260,8 +2280,20 @@ test('Operations Map renders units first and keeps support panels hidden by defa
         getAgentWorkspaceMCPLoadout() {
           return [{ bindingId: 'mcp-1', name: 'filesystem', enabled: true, locked: false }];
         },
-        getAgentModelPresentation() {
-          return { model: '', label: 'Model not set', empty: true };
+        getAgentProfile() {
+          return {
+            name: 'Researcher',
+            role: 'orchestrator',
+            source: 'workspace',
+            provider: 'codex',
+            model: 'gpt-5.3-codex'
+          };
+        },
+        agentAllowsModelEditing(profile) {
+          return profile?.source === 'workspace';
+        },
+        getAgentModelPresentation(profile) {
+          return { model: profile.model, label: profile.model, empty: false };
         },
         tasks: [{ id: 'task-1', status: 'in_progress', description: 'Collect sources' }],
         sessions: [
@@ -2293,7 +2325,7 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     // here since there is no specialist in this fixture).
     assert.match(html, /is-command-node/);
     assert.match(html, /ws-cmd-map-command-role/);
-    assert.match(html, /Acting Commander/);
+    assert.match(html, /Commander/);
     assert.doesNotMatch(html, /data-map-zone="mission"/);
     assert.doesNotMatch(html, /data-map-zone="tasks"/);
     assert.doesNotMatch(html, /data-map-zone="tools"/);
@@ -2309,7 +2341,15 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     commandView.activeMapWindow = 'inspector';
     const agentSheetHTML = commandView.renderOperationsMap();
     assert.match(agentSheetHTML, /Unit Sheet/);
-    assert.match(agentSheetHTML, /Class/);
+    assert.equal((agentSheetHTML.match(/<span>Unit Sheet<\/span>/g) || []).length, 1);
+    assert.doesNotMatch(agentSheetHTML, /<span>Class<\/span>/);
+    assert.match(agentSheetHTML, /<span>Role<\/span><strong>Commander<\/strong>/);
+    assert.match(agentSheetHTML, /data-cmd-edit-model="Researcher"/);
+    assert.match(
+      agentSheetHTML,
+      /aria-label="Change model for Researcher\. Current model: gpt-5\.3-codex"/
+    );
+    assert.match(agentSheetHTML, /<strong translate="no">gpt-5\.3-codex<\/strong>/);
     assert.match(agentSheetHTML, /Loadout/);
     assert.match(agentSheetHTML, /workspace-planning/);
     assert.match(agentSheetHTML, /filesystem/);
@@ -2319,6 +2359,9 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(agentSheetHTML, /Track Quest/);
     assert.match(agentSheetHTML, /Continue Session/);
     assert.match(agentSheetHTML, /Configure Loadout/);
+    assert.doesNotMatch(agentSheetHTML, /ws-cmd-rpg-loadout-model/);
+    assert.doesNotMatch(agentSheetHTML, /ws-cmd-rpg-effects/);
+    assert.doesNotMatch(agentSheetHTML, /In progress · In progress/);
   } finally {
     globalThis.localStorage = originalLocalStorage;
   }
@@ -2787,36 +2830,114 @@ test('HQ stations are absent from the Stations panel and render on the map surfa
   }
 });
 
-test('Email station reflects neutral, unconnected, and connected states', () => {
+test('Email station portal reflects legacy, loading, CTA, and Email Ops states', () => {
   const originalWindow = globalThis.window;
   try {
-    const hq = makeHQCommandView();
+    const hq = makeHQCommandView({ id: 'hq-1' });
 
-    // Neutral: personal-hq-email-setup.js has not published its state yet.
-    globalThis.window = {};
-    let map = hq.renderMapHQStations();
-    assert.match(map, /Email station, loading/);
-    assert.match(map, /ws-cmd-map-hq-station-state">—</);
-
-    // Unconnected: module loaded, no account linked.
-    globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
-    map = hq.renderMapHQStations();
-    assert.match(map, /Email station, not set up/);
-    assert.match(map, /ws-cmd-map-hq-station-state">Set up Email</);
-
-    // Connected: shows the linked address.
+    // (c) Legacy: this HQ has its own in-place email binding → in-HQ address.
     globalThis.window = {
       OriHQEmailSetup: { isHQ: true, connected: true, address: 'me@example.com' }
     };
-    map = hq.renderMapHQStations();
-    assert.match(map, /Email station, me@example\.com/);
-    assert.match(map, /ws-cmd-map-hq-station-state">me@example\.com</);
+    let state = hq.hqEmailStationState();
+    assert.equal(state.value, 'me@example.com');
+    assert.equal(state.tone, 'clear');
 
-    // Connected but no address on record: falls back to "Connected".
-    globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: true, address: '' } };
-    map = hq.renderMapHQStations();
-    assert.match(map, /Email station, connected/);
-    assert.match(map, /ws-cmd-map-hq-station-state">Connected</);
+    // No legacy binding → portal states, driven by the Email Ops status cache.
+    globalThis.window = {};
+
+    // Loading: cache idle and view inactive, so no fetch is triggered.
+    hq.active = false;
+    state = hq.hqEmailStationState();
+    assert.equal(state.value, '—');
+    assert.equal(state.tone, 'loading');
+
+    // (a) No Email Ops workspace → "Set up Email Ops" CTA.
+    hq._emailOps = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      exists: false,
+      workspaceID: '',
+      workspaceName: '',
+      openFollowupCount: 0,
+      error: ''
+    };
+    state = hq.hqEmailStationState();
+    assert.equal(state.value, 'Set up Email Ops');
+
+    // (b) Email Ops exists with open follow-ups → count badge, attention tone.
+    hq._emailOps = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      exists: true,
+      workspaceID: 'eo-1',
+      workspaceName: 'Email Ops',
+      openFollowupCount: 3,
+      error: ''
+    };
+    state = hq.hqEmailStationState();
+    assert.equal(state.value, '3 follow-ups');
+    assert.equal(state.tone, 'attention');
+
+    // (b) Email Ops exists, no open follow-ups → workspace name, clear tone.
+    hq._emailOps.openFollowupCount = 0;
+    state = hq.hqEmailStationState();
+    assert.equal(state.value, 'Email Ops');
+    assert.equal(state.tone, 'clear');
+
+    // Degraded fetch → still renders a neutral badge, never breaks the map.
+    hq._emailOps.status = 'error';
+    state = hq.hqEmailStationState();
+    assert.equal(state.value, 'Email Ops');
+    assert.equal(state.tone, 'degraded');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('Email station portal routes by state: legacy modal, workspace nav, CTA deep-link', () => {
+  const originalWindow = globalThis.window;
+  try {
+    // (b) Email Ops exists → navigate to the Email Ops workspace.
+    const navPaths = [];
+    globalThis.window = { location: { assign: p => navPaths.push(p) } };
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq._emailOps = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      exists: true,
+      workspaceID: 'eo-1',
+      workspaceName: 'Email Ops',
+      openFollowupCount: 0,
+      error: ''
+    };
+    hq.runHQStationAction('email');
+    assert.deepEqual(navPaths, ['/workspaces/eo-1']);
+
+    // (a) No Email Ops workspace → deep-link the Construct wizard preselected.
+    navPaths.length = 0;
+    hq._emailOps = {
+      hqWorkspaceID: 'hq-1',
+      status: 'ready',
+      exists: false,
+      workspaceID: '',
+      workspaceName: '',
+      openFollowupCount: 0,
+      error: ''
+    };
+    hq.runHQStationAction('email');
+    assert.deepEqual(navPaths, ['/workspaces?create=1&blueprint=email-ops']);
+
+    // (c) Legacy in-HQ binding → open the in-HQ modal, never navigate.
+    navPaths.length = 0;
+    const opened = [];
+    globalThis.window = {
+      location: { assign: p => navPaths.push(p) },
+      OriHQEmailSetup: { isHQ: true, connected: true, open: () => opened.push('opened') }
+    };
+    hq.runHQStationAction('email');
+    assert.deepEqual(opened, ['opened']);
+    assert.deepEqual(navPaths, []);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -3188,7 +3309,9 @@ test('renderMapHQStations emits fractional coordinates as CSS custom props and i
 test('clicking the Email station opens the HQ email setup modal', () => {
   const originalWindow = globalThis.window;
   const opened = [];
-  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  globalThis.window = {
+    OriHQEmailSetup: { isHQ: true, connected: true, open: () => opened.push('opened') }
+  };
   try {
     const hq = makeHQCommandView();
     hq.runHQStationAction('email');
@@ -3201,7 +3324,9 @@ test('clicking the Email station opens the HQ email setup modal', () => {
 test('HQ station click delegation dispatches through the registry', () => {
   const originalWindow = globalThis.window;
   const opened = [];
-  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  globalThis.window = {
+    OriHQEmailSetup: { isHQ: true, connected: true, open: () => opened.push('opened') }
+  };
   try {
     const mapRoot = makeListenerRoot();
     const hq = makeHQCommandView();
@@ -3259,7 +3384,9 @@ test('stationPointToFraction maps a client point to a clamped [0,1] fraction', (
 test('a completed drag suppresses the trailing click; a plain click still opens the action', () => {
   const originalWindow = globalThis.window;
   const opened = [];
-  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  globalThis.window = {
+    OriHQEmailSetup: { isHQ: true, connected: true, open: () => opened.push('opened') }
+  };
   try {
     const mapRoot = makeListenerRoot();
     const hq = makeHQCommandView();
@@ -3401,7 +3528,9 @@ test('mapInventoryGroups never includes an email entry (station is its only home
 test('openRailItem no longer special-cases an "email" section', () => {
   const originalWindow = globalThis.window;
   const opened = [];
-  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  globalThis.window = {
+    OriHQEmailSetup: { isHQ: true, connected: true, open: () => opened.push('opened') }
+  };
   try {
     const hq = makeHQCommandView();
     // No page.workspaceDetail-style handlers wired for 'email' — if this were
@@ -3526,12 +3655,22 @@ test('renderStationsRailPanel renders one row per station only for HQ payloads',
   globalThis.window = { OriHQEmailSetup: { isHQ: true, connected: false } };
   try {
     const hq = makeHQCommandView();
+    // Portal has resolved: no Email Ops workspace → the CTA state.
+    hq._emailOps = {
+      hqWorkspaceID: hq.watchtowerWorkspaceID(),
+      status: 'ready',
+      exists: false,
+      workspaceID: '',
+      workspaceName: '',
+      openFollowupCount: 0,
+      error: ''
+    };
     const panel = hq.renderStationsRailPanel();
     assert.match(panel, /<h4>Stations<\/h4>/);
     assert.match(panel, /data-cmd-hq-station="watchtower"/);
     assert.match(panel, /data-cmd-hq-station="email"/);
     // State meta reuses the same state fn as the map structure.
-    assert.match(panel, /ws-cmd-rail-m">Set up Email</);
+    assert.match(panel, /ws-cmd-rail-m">Set up Email Ops</);
     // The primary action runs the first station's action and reflects its state.
     assert.match(panel, /ws-cmd-panel-action" data-cmd-hq-station="watchtower">Scanning…</);
 
@@ -3547,7 +3686,9 @@ test('renderStationsRailPanel renders one row per station only for HQ payloads',
 test('the rail click delegation dispatches HQ station rows through the registry action', () => {
   const originalWindow = globalThis.window;
   const opened = [];
-  globalThis.window = { OriHQEmailSetup: { isHQ: true, open: () => opened.push('opened') } };
+  globalThis.window = {
+    OriHQEmailSetup: { isHQ: true, connected: true, open: () => opened.push('opened') }
+  };
   try {
     const railRoot = makeListenerRoot();
     const hq = makeHQCommandView();
