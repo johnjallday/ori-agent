@@ -3092,6 +3092,147 @@ test('Watchtower row navigation closes the panel and opens the owning workspace'
   }
 });
 
+test('Calendar Ops station exposes not-set-up, needs-setup, clear, attention, and degraded badge states', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+
+  let state = hq.hqCalendarOpsStationState();
+  assert.deepEqual(state, {
+    value: 'Loading…',
+    description: 'loading calendar summary',
+    tone: 'loading'
+  });
+
+  hq._calendarOpsPortal = {
+    workspaceID: 'hq-1',
+    status: 'ready',
+    hasWorkspace: false,
+    calendarWorkspaceID: '',
+    state: '',
+    nextMeeting: null,
+    eventCount: 0,
+    conflictCount: 0,
+    dataGap: false,
+    error: ''
+  };
+  state = hq.hqCalendarOpsStationState();
+  assert.equal(state.value, 'Set up');
+  assert.equal(state.tone, 'attention');
+
+  hq._calendarOpsPortal.hasWorkspace = true;
+  hq._calendarOpsPortal.calendarWorkspaceID = 'ws-cal';
+  hq._calendarOpsPortal.state = 'auth_required';
+  state = hq.hqCalendarOpsStationState();
+  assert.equal(state.value, 'Finish setup');
+  assert.equal(state.tone, 'attention');
+
+  hq._calendarOpsPortal.state = 'ready';
+  hq._calendarOpsPortal.eventCount = 0;
+  state = hq.hqCalendarOpsStationState();
+  assert.equal(state.value, 'Clear');
+  assert.equal(state.description, 'no events today');
+  assert.equal(state.tone, 'clear');
+
+  hq._calendarOpsPortal.nextMeeting = { title: 'Design Review', start_time: '2026-07-20T14:30:00Z' };
+  hq._calendarOpsPortal.conflictCount = 1;
+  state = hq.hqCalendarOpsStationState();
+  assert.equal(state.value, 'Design Review');
+  assert.match(state.description, /1 conflict/);
+  assert.equal(state.tone, 'attention');
+
+  hq._calendarOpsPortal.status = 'error';
+  state = hq.hqCalendarOpsStationState();
+  assert.equal(state.value, 'Unavailable');
+  assert.equal(state.tone, 'degraded');
+});
+
+test('Calendar Ops fetches the bounded portal summary and redraws its badge', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async url => {
+    calls.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        has_workspace: true,
+        workspace_id: 'ws-cal',
+        state: 'ready',
+        next_meeting: { title: 'Standup', start_time: '2026-07-20T09:00:00Z' },
+        event_count: 2,
+        conflict_count: 0,
+        data_gap: false
+      })
+    };
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.active = true;
+    hq.hqCalendarOpsStationState();
+    assert.equal(hq.calendarOpsPortalState().status, 'loading');
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(calls, ['/api/calendar-ops/home-portal-summary']);
+    assert.equal(hq.calendarOpsPortalState().status, 'ready');
+    assert.equal(hq.hqCalendarOpsStationState().value, 'Standup');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Calendar Ops panel offers setup/finish-setup/open actions and shows a partial-data gap banner', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+  hq._calendarOpsPortal = {
+    workspaceID: 'hq-1',
+    status: 'ready',
+    hasWorkspace: false,
+    calendarWorkspaceID: '',
+    state: '',
+    nextMeeting: null,
+    eventCount: 0,
+    conflictCount: 0,
+    dataGap: false,
+    error: ''
+  };
+  let html = hq.calendarOpsPanelHTML();
+  assert.match(html, /data-cmd-modal-action="calendar-ops-setup"/);
+
+  hq._calendarOpsPortal.hasWorkspace = true;
+  hq._calendarOpsPortal.state = 'connector_missing';
+  html = hq.calendarOpsPanelHTML();
+  assert.match(html, /data-cmd-modal-action="calendar-ops-open"/);
+  assert.match(html, /Finish setup/);
+
+  hq._calendarOpsPortal.state = 'ready';
+  hq._calendarOpsPortal.dataGap = true;
+  hq._calendarOpsPortal.eventCount = 1;
+  html = hq.calendarOpsPanelHTML();
+  assert.match(html, /Some calendars could not be read\./);
+  assert.match(html, /Open Calendar Ops/);
+
+  hq._calendarOpsPortal.status = 'error';
+  html = hq.calendarOpsPanelHTML();
+  assert.match(html, /data-cmd-modal-action="refresh-calendar-ops"/);
+});
+
+test('Calendar Ops open action navigates to the resolved workspace with panel=calendar', () => {
+  const originalWindow = globalThis.window;
+  const opened = [];
+  globalThis.window = { location: { assign: target => opened.push(target) } };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.statModalSection = 'calendar-ops';
+    hq._calendarOpsPortal = { workspaceID: 'hq-1', calendarWorkspaceID: 'ws-cal' };
+    let closed = 0;
+    hq.closeStatModal = () => {
+      closed += 1;
+    };
+    hq.handleStatModalAction('calendar-ops-open');
+    assert.equal(closed, 1);
+    assert.deepEqual(opened, ['/workspaces/ws-cal?panel=calendar']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('hqStationDefaultPosition stacks deterministically down the right edge', () => {
   const hq = makeHQCommandView();
   const first = hq.hqStationDefaultPosition(0);
@@ -3157,9 +3298,9 @@ test('renderMapHQStations emits fractional coordinates as CSS custom props and i
     const html = hq.renderMapHQStations();
     assert.match(html, /--station-x:50\.00%/);
     assert.match(html, /--station-y:25\.00%/);
-    // Both registered stations render; the unknown key contributes nothing.
+    // Every registered station renders; the unknown key contributes nothing.
     assert.doesNotMatch(html, /data-cmd-hq-station="journal"/);
-    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 2);
+    assert.equal((html.match(/data-cmd-hq-station=/g) || []).length, 3);
   } finally {
     globalThis.window = originalWindow;
   }

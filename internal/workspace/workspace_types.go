@@ -729,8 +729,20 @@ type MCPBinding struct {
 	// overriding DefaultSideEffect for that tool. Used for mixed-capability
 	// servers (e.g. filesystem servers with both read_file and write_file).
 	ToolOverrides map[string]SideEffect `json:"tool_overrides,omitempty"`
-	CreatedAt     time.Time             `json:"created_at,omitempty"`
-	UpdatedAt     time.Time             `json:"updated_at,omitempty"`
+	// AllowedTools, when non-nil, restricts which of the server's tools this
+	// binding may expose to chat/tasks/missions/delegated agents -- an
+	// explicit empty list means no tools are exposed. A nil value (the
+	// default, and every binding authored before this field existed)
+	// preserves legacy all-tools behavior. See AllowsAllTools/ToolAllowed.
+	AllowedTools []string `json:"allowed_tools,omitempty"`
+	// CapabilityMappings binds this server's concrete tools onto Ori's
+	// abstract capability contracts (e.g. "calendar") so consuming code can
+	// invoke semantic operations without knowing which connector is bound.
+	// See internal/calendar for the calendar capability's contract and the
+	// deterministic JSON-Pointer mapping types in this package.
+	CapabilityMappings []CapabilityMapping `json:"capability_mappings,omitempty"`
+	CreatedAt          time.Time           `json:"created_at,omitempty"`
+	UpdatedAt          time.Time           `json:"updated_at,omitempty"`
 }
 
 // AgentMCPAccess narrows which workspace MCP bindings an agent instance

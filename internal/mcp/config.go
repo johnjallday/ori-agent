@@ -76,6 +76,10 @@ func (cm *ConfigManager) SaveGlobalConfig(config *GlobalConfig) error {
 
 // AddServer adds a server to the global registry
 func (cm *ConfigManager) AddServer(server ServerConfig) error {
+	if err := ValidateServerConfig(server); err != nil {
+		return err
+	}
+
 	config, err := cm.LoadGlobalConfig()
 	if err != nil {
 		return err
@@ -119,6 +123,10 @@ func (cm *ConfigManager) RemoveServer(name string) error {
 
 // UpdateServer updates a server in the global registry
 func (cm *ConfigManager) UpdateServer(server ServerConfig) error {
+	if err := ValidateServerConfig(server); err != nil {
+		return err
+	}
+
 	config, err := cm.LoadGlobalConfig()
 	if err != nil {
 		return err

@@ -121,3 +121,66 @@ func TestGetMCPToolsForServer_ReturnsStartError(t *testing.T) {
 		t.Fatalf("expected 1 start call, got %d", reg.startCalls)
 	}
 }
+
+func TestFilterAllowedMCPTools(t *testing.T) {
+	tools := []toolapi.Tool{
+		mockPluginTool{name: "list_events"},
+		mockPluginTool{name: "list_calendars"},
+		mockPluginTool{name: "delete_event"},
+	}
+
+	t.Run("nil allowlist keeps legacy all-tools behavior", func(t *testing.T) {
+		got := filterAllowedMCPTools(tools, nil, "calendar-mcp")
+		if len(got) != 3 {
+			t.Fatalf("got %d tools, want 3", len(got))
+		}
+	})
+
+	t.Run("server absent from allowlist keeps all its tools", func(t *testing.T) {
+		got := filterAllowedMCPTools(tools, map[string][]string{"other-server": {"x"}}, "calendar-mcp")
+		if len(got) != 3 {
+			t.Fatalf("got %d tools, want 3", len(got))
+		}
+	})
+
+	t.Run("restricts to allowed names case-insensitively", func(t *testing.T) {
+		got := filterAllowedMCPTools(tools, map[string][]string{"calendar-mcp": {"List_Events", "list_calendars"}}, "calendar-mcp")
+		if len(got) != 2 {
+			t.Fatalf("got %d tools, want 2: %+v", len(got), got)
+		}
+		for _, tool := range got {
+			name := tool.Definition().Name
+			if name == "delete_event" {
+				t.Fatalf("delete_event must be filtered out, got %+v", got)
+			}
+		}
+	})
+
+	t.Run("empty allowlist entry denies all tools for that server", func(t *testing.T) {
+		got := filterAllowedMCPTools(tools, map[string][]string{"calendar-mcp": {}}, "calendar-mcp")
+		if len(got) != 0 {
+			t.Fatalf("got %d tools, want 0: %+v", len(got), got)
+		}
+	})
+}
+
+func TestFindMCPToolByName_HonorsAllowlist(t *testing.T) {
+	reg := &mockMCPRegistry{getFn: func(string) ([]toolapi.Tool, error) {
+		return []toolapi.Tool{
+			mockPluginTool{name: "list_events"},
+			mockPluginTool{name: "delete_event"},
+		}, nil
+	}}
+	h := &Handler{mcpRegistry: reg}
+	ag := &resolvedChatAgent{
+		MCPServers:       []string{"calendar-mcp"},
+		MCPToolAllowlist: map[string][]string{"calendar-mcp": {"list_events"}},
+	}
+
+	if _, ok := h.findMCPToolByName(ag, "list_events"); !ok {
+		t.Error("expected list_events to resolve (allowlisted)")
+	}
+	if _, ok := h.findMCPToolByName(ag, "delete_event"); ok {
+		t.Error("expected delete_event to be blocked by the binding's AllowedTools")
+	}
+}

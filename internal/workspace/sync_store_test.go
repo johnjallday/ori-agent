@@ -236,7 +236,9 @@ func TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorks
 	// Template provenance is projected directly to workspace.json; the primary
 	// store has no column for it. A later save of a SQLite-fetched (stale)
 	// workspace must retain the canonical provenance rather than erase it —
-	// otherwise the Email Ops resolver loses the workspace over time.
+	// otherwise a template-origin-based feature (REAPER readiness, Calendar
+	// Ops setup detection, the Email Ops resolver, ...) loses the workspace
+	// over time.
 	canonicalWorkspace, err := fileSync.Get(ws.ID)
 	if err != nil {
 		t.Fatal(err)

@@ -1323,6 +1323,34 @@ a.quest-title:focus-visible {
   line-height: 1.5;
 }
 
+.home-calendar-ops-next {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.home-calendar-ops-next strong {
+  color: var(--hc-ink);
+  font-size: 12px;
+}
+
+.home-calendar-ops-next span {
+  color: var(--hc-ink-faint);
+  font-size: 9.5px;
+}
+
+.home-calendar-ops-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 9.5px;
+  color: var(--hc-ink-faint);
+}
+
+.home-calendar-ops-stats .is-attention {
+  color: var(--hc-amber);
+}
+
 .home-daily-brief-gaps {
   margin: 0 0 10px;
   color: var(--hc-amber);

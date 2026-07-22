@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -32,6 +33,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/macwake"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/meetingprep"
 	"github.com/johnjallday/ori-agent/internal/memoryhttp"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
@@ -141,6 +143,8 @@ type ServerBuilder struct {
 	costTracker              *llm.CostTracker
 	mcpRegistry              *mcp.Registry
 	mcpConfigManager         *mcp.ConfigManager
+	calendarOpsHandler       *calendarhttp.Handler
+	meetingPrepStore         *meetingprep.SQLiteStore
 	locationManager          *location.Manager
 	onboardingMgr            *onboarding.Manager
 	userStore                userprofile.UserStore
@@ -330,6 +334,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 		return nil, fmt.Errorf("orchestration phase failed: %w", err)
 	}
 	b.initializeWorkspaceOrchestrator() // Phase 22
+	b.wireCalendarOpsPrepTaskExecutor() // Phase 22.1 — Calendar Ops meeting-prep needs the orchestrator
 	b.initializeMissionBridge()         // Phase 22.5 — wire mission cadence → run lifecycle
 	b.initializeDailyBrief()            // Phase 22.6 — wire personal hq daily brief storage/scheduling/synthesis
 	b.initializeTemplateManager()       // Phase 23
@@ -416,6 +421,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Workspace:        b.workspaceHandler,
 		Usage:            b.usageHandler,
 		MCP:              b.mcpHandler,
+		CalendarOps:      b.calendarOpsHandler,
 		Location:         b.locationHandler,
 		Workflow:         b.workflowHandler,
 		ModelCategory:    b.modelCategoryHandler,

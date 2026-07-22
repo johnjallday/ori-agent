@@ -255,10 +255,11 @@ func EnsureMutable(libDir, id string) error {
 // current value, a set pointer replaces it (empty icon clears the key; empty
 // starter_tasks clears the key; behavior_profile is normalized).
 type ManifestEdit struct {
-	Icon            *string
-	BehaviorProfile *string
-	StarterTasks    *[]StarterTask
-	ProjectEntry    *ProjectEntryEdit
+	Icon                   *string
+	BehaviorProfile        *string
+	StarterTasks           *[]StarterTask
+	ProjectEntry           *ProjectEntryEdit
+	CapabilityRequirements *[]CapabilityRequirement
 }
 
 // UpdateManifest writes display metadata into a library template's
@@ -323,6 +324,19 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 				raw["starter_tasks"] = tasks
 			} else {
 				delete(raw, "starter_tasks")
+			}
+		}
+		if edit.CapabilityRequirements != nil {
+			// Same validate-before-normalize order as StarterTasks: the
+			// tolerant normalize path would silently absorb a blank
+			// key/operation, so validation must see the raw edit first.
+			if err := validateCapabilityRequirements(*edit.CapabilityRequirements); err != nil {
+				return Template{}, err
+			}
+			if reqs := normalizeCapabilityRequirements(*edit.CapabilityRequirements); len(reqs) > 0 {
+				raw["capability_requirements"] = reqs
+			} else {
+				delete(raw, "capability_requirements")
 			}
 		}
 		if edit.ProjectEntry != nil && edit.ProjectEntry.Set {

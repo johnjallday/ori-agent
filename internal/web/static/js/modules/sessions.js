@@ -10360,11 +10360,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
   // history so a refresh doesn't re-open. Previously handled by the now-removed
   // workspace-create.js on a different (unrouted) page.
+  // Optional blueprint preselection: /workspaces?create=1&blueprint=email-ops
+  // (the HQ email station CTA, the Home Email Ops CTA, and the Home Calendar
+  // Ops portal's absent-workspace CTA all link here).
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get('create') === '1') {
-      // Optional blueprint preselection: /workspaces?create=1&blueprint=email-ops
-      // (the HQ email station CTA and the Home Email Ops CTA link here).
       const blueprint = String(params.get('blueprint') || '').trim();
       params.delete('create');
       params.delete('blueprint');
@@ -10374,7 +10375,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Defer a frame so init()'s show.bs.modal handler is bound first.
       requestAnimationFrame(() =>
         sessionManager.showAddWorkspaceModal({
-          entryPoint: blueprint ? 'email_ops_cta' : 'home_first_run',
+          entryPoint: blueprint ? `${blueprint.replace(/-/g, '_')}_cta` : 'home_first_run',
           blueprint: blueprint || undefined
         })
       );

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -31,6 +32,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/mailboxvault"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/meetingprep"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
@@ -192,6 +194,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		// Structured follow-ups (Group 6): a dedicated SQLite domain over the
 		// shared database.
 		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))
+		// Calendar Ops meeting-prep event-to-note links (Group 6): a dedicated
+		// SQLite domain over the shared database, same pattern as follow-ups.
+		b.meetingPrepStore = meetingprep.NewSQLiteStore(sessionStore.DB())
 		b.personalHQHandler.SetFollowUps(b.followUpService)
 		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
 		// saved as a dated Personal HQ note (never MEMORY.md by default).
@@ -255,6 +260,14 @@ func (b *ServerBuilder) initializeHandlers() {
 			ManagedVaultRoot: resolveVaultRoot(b.configManager),
 		})
 		b.vaultHandler = vaulthttp.NewHandler(vaultStore)
+		// Wire remote MCP OAuth credential persistence now that the vault
+		// store exists; the MCP registry/handler were constructed earlier
+		// (initializeMCP) without it, matching the lazy-store pattern used
+		// for workspaceStore elsewhere in this file.
+		mcp.ConfigureRemoteOAuth(newVaultMCPCredentialStore(vaultStore), mcpOAuthUserID)
+		if b.mcpHandler != nil {
+			b.mcpHandler.SetVaultOAuthStore(vaultStore)
+		}
 		// Let in-app Settings supply the Google email OAuth client credentials,
 		// taking precedence over ORI_EMAIL_GOOGLE_* env vars, so a self-hosted
 		// user can enable Personal HQ email without editing the environment.
@@ -434,6 +447,48 @@ func (b *ServerBuilder) wireReaperSetup() {
 	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
 	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
 	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
+}
+
+// wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. Like
+// wireReaperSetup, this must run AFTER the workspace store exists (Phase 18),
+// not during initializeHandlers (Phase 17) where b.workspaceStore is still
+// nil -- the handler needs it as its FolderStore.
+//
+// b.workspaceStore is statically typed as workspace.Store, which does not
+// declare GetFolderWorkspace -- calendarhttp.FolderStore requires it
+// specifically so template-provenance reads bypass the SQLite-primary Get
+// (which always returns TemplateProvenance nil; see sync_store.go's Save
+// rehydration comment for the write-side half of this). A runtime type
+// assertion is required here since Go checks interface-to-interface
+// assignment statically; both concrete stores actually wired in
+// initializeWorkspaceStore (*SyncStore, *FileStore) implement it.
+func (b *ServerBuilder) wireCalendarOpsSetup() {
+	if b.workspaceStore == nil || b.sessionStore == nil {
+		return
+	}
+	folders, ok := b.workspaceStore.(calendarhttp.FolderStore)
+	if !ok {
+		logger.Warn("Calendar Ops setup handler not wired: workspace store lacks GetFolderWorkspace", logger.Fields{})
+		return
+	}
+	b.calendarOpsHandler = calendarhttp.NewHandler(folders, b.sessionStore, b.mcpRegistry, b.mcpConfigManager, b.userProvider)
+	b.calendarOpsHandler.SetNotes(b.sessionStore)
+	if b.meetingPrepStore != nil {
+		b.calendarOpsHandler.SetMeetingPreps(b.meetingPrepStore)
+	}
+}
+
+// wireCalendarOpsPrepTaskExecutor gives the already-constructed Calendar Ops
+// handler its task executor. Split out from wireCalendarOpsSetup because
+// b.workspaceOrchestrator does not exist until initializeWorkspaceOrchestrator
+// (Phase 22), which runs after the workspace-store phase (18) where
+// wireCalendarOpsSetup itself is called -- same later-phase-dependency
+// pattern as wireReaperSetup/wireCalendarOpsSetup's own doc comment describes.
+func (b *ServerBuilder) wireCalendarOpsPrepTaskExecutor() {
+	if b.calendarOpsHandler == nil || b.workspaceOrchestrator == nil {
+		return
+	}
+	b.calendarOpsHandler.SetTaskExecutor(b.workspaceOrchestrator)
 }
 
 // wireMailboxRuntime wires the Personal HQ / workspace mailbox read-link-send

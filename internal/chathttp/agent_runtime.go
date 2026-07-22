@@ -21,11 +21,33 @@ type chatRuntimeResolver interface {
 	ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 }
 
+// chatCalendarOpsPreference mirrors agenthttp.CalendarOpsPreference so the
+// per-request specialist-handoff router (assistant_specialist_handoff.go)
+// can prefer the Calendar Ops Scheduler the same way the Home route handler
+// does (FR53), without chathttp importing agenthttp's full package for one
+// method signature.
+type chatCalendarOpsPreference interface {
+	PreferredCalendarAgent(ctx context.Context) (agentName string, ok bool)
+}
+
+// SetCalendarOpsPreference configures the Calendar Ops routing preference
+// used by the assistant specialist handoff (FR53).
+func (h *Handler) SetCalendarOpsPreference(pref chatCalendarOpsPreference) {
+	if h == nil {
+		return
+	}
+	h.calendarOpsPreference = pref
+}
+
 type resolvedChatAgent struct {
 	*agent.Agent
 	MCPServers      []string
 	EffectiveSkills []workspace.ResolvedSkill
 	WorkspaceTools  *WorkspaceToolProvider
+	// MCPToolAllowlist maps a runtime server name to the tool names its
+	// binding permits; a missing key means no restriction. See
+	// workspace.ResolvedAgentRuntime.MCPToolAllowlist.
+	MCPToolAllowlist map[string][]string
 }
 
 // SetRuntimeResolver configures workspace-aware agent runtime resolution for chat requests.
@@ -61,8 +83,9 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 			return nil, fmt.Errorf("%w: %s", errAgentPaused, agentName)
 		}
 		result := &resolvedChatAgent{
-			Agent:      cloneAgentForChat(resolved.Agent),
-			MCPServers: append([]string{}, resolved.MCPServers...),
+			Agent:            cloneAgentForChat(resolved.Agent),
+			MCPServers:       append([]string{}, resolved.MCPServers...),
+			MCPToolAllowlist: resolved.MCPToolAllowlist,
 		}
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)

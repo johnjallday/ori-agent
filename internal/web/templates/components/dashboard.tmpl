@@ -58,6 +58,27 @@
       </div>
     </section>
 
+    <!-- Calendar Ops portal: a second, independent Home orientation region
+         (task 7.3) -- a bounded read of today's calendar, separate from
+         Daily Brief in both data source and lifecycle (FR54: never adds a
+         live Calendar Ops call to Daily Brief generation). Populated/wired
+         by home-calendar-ops-portal.js; a fetch failure hides the whole
+         section rather than surfacing a broken widget (FR51). -->
+    <section id="homeCalendarOpsPortal" class="home-daily-brief home-calendar-ops-portal" data-state="loading" aria-labelledby="homeCalendarOpsPortalTitle" hidden>
+      <header class="home-daily-brief-header">
+        <div class="home-daily-brief-heading">
+          <span class="home-daily-brief-eyebrow">Calendar</span>
+          <h2 id="homeCalendarOpsPortalTitle" class="home-daily-brief-title">Today</h2>
+        </div>
+        <div class="home-daily-brief-actions">
+          <a id="homeCalendarOpsPortalOpen" href="/workspaces" class="modern-btn modern-btn-primary modern-btn-sm" hidden>Open Calendar Ops</a>
+        </div>
+      </header>
+      <div id="homeCalendarOpsPortalBody" class="home-daily-brief-body" aria-live="polite">
+        <div class="home-daily-brief-placeholder">Loading your calendar…</div>
+      </div>
+    </section>
+
     <!-- Brief settings dialog: HQ-owned config + recent history, opened from
          Home's "Brief settings" action but scoped to the designated HQ
          workspace's own data (PRD FR99/task 7.7). -->

@@ -1,6 +1,9 @@
 package agenthttp
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestClassifyHomeIntentPrecedence covers the FR #4 precedence examples plus the
 // new app_introspection / app_navigation intents, and confirms existing intents
@@ -42,7 +45,7 @@ func TestRoutePromptInlineModeForAppIntents(t *testing.T) {
 	h := NewHomeAssistantRouteHandler(st)
 	h.SetWorkspaceResolver(resolver)
 
-	resp, err := h.RoutePrompt("summarize this week's task activity", nil)
+	resp, err := h.RoutePrompt(context.Background(), "summarize this week's task activity", nil)
 	if err != nil {
 		t.Fatalf("RoutePrompt: %v", err)
 	}

@@ -244,6 +244,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		})
 	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
+	homeAssistantRouteHandler.SetCalendarOpsPreference(s.Handlers.CalendarOps)
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
 			workspace.NewAgentRuntimeResolver(
@@ -493,6 +494,37 @@ func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/mcp/servers/{name}/status", s.Handlers.MCP.GetServerStatusHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/test", s.Handlers.MCP.TestConnectionHandler)
 	mux.HandleFunc("POST /api/mcp/servers/{name}/retry", s.Handlers.MCP.RetryConnectionHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/connect", s.Handlers.MCP.ConnectServerHandler)
+	mux.HandleFunc("POST /api/mcp/servers/{name}/disconnect", s.Handlers.MCP.DisconnectServerHandler)
+	mux.HandleFunc("GET /api/mcp/servers/{name}/oauth-status", s.Handlers.MCP.GetServerOAuthStatusHandler)
+	mux.HandleFunc("GET /api/mcp/oauth/callback", s.Handlers.MCP.OAuthCallbackHandler)
+
+	// =============================================================================
+	// Calendar Ops guided connector setup
+	// =============================================================================
+	mux.HandleFunc("GET /api/calendar-ops/setup", s.Handlers.CalendarOps.Setup)
+	mux.HandleFunc("POST /api/calendar-ops/setup/connector", s.Handlers.CalendarOps.Connector)
+	mux.HandleFunc("POST /api/calendar-ops/setup/suggest-mappings", s.Handlers.CalendarOps.SuggestMappings)
+	mux.HandleFunc("POST /api/calendar-ops/setup/validate", s.Handlers.CalendarOps.Validate)
+	mux.HandleFunc("POST /api/calendar-ops/setup/save", s.Handlers.CalendarOps.Save)
+
+	// Calendar Ops safe gateway: normalized reads (cached, bounded) and the
+	// two-step mutation preview/confirm boundary. Every route resolves
+	// ownership/readiness itself (CalendarMCPGateway, FR24/FR25); the browser
+	// never talks to an MCP server directly.
+	mux.HandleFunc("GET /api/calendar-ops/capabilities", s.Handlers.CalendarOps.Capabilities)
+	mux.HandleFunc("GET /api/calendar-ops/calendars", s.Handlers.CalendarOps.Calendars)
+	mux.HandleFunc("GET /api/calendar-ops/events", s.Handlers.CalendarOps.Events)
+	mux.HandleFunc("GET /api/calendar-ops/events/detail", s.Handlers.CalendarOps.EventDetail)
+	mux.HandleFunc("GET /api/calendar-ops/free-windows", s.Handlers.CalendarOps.FreeWindows)
+	mux.HandleFunc("POST /api/calendar-ops/events/prepare", s.Handlers.CalendarOps.Prepare)
+	mux.HandleFunc("GET /api/calendar-ops/events/prep-status", s.Handlers.CalendarOps.PrepStatus)
+	mux.HandleFunc("POST /api/calendar-ops/mutations/preview", s.Handlers.CalendarOps.Preview)
+	mux.HandleFunc("POST /api/calendar-ops/mutations/confirm", s.Handlers.CalendarOps.Confirm)
+
+	// Home/Personal HQ Calendar Ops portal (FR49-51): a single bounded read,
+	// resolved for the current user rather than a caller-supplied workspace id.
+	mux.HandleFunc("GET /api/calendar-ops/home-portal-summary", s.Handlers.CalendarOps.PortalSummary)
 
 	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)

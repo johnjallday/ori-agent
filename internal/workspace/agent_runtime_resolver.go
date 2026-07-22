@@ -58,6 +58,15 @@ type ResolvedAgentRuntime struct {
 	AgentInstance   *AgentInstance
 	MCPServers      []string
 	EffectiveSkills []ResolvedSkill
+	// MCPToolAllowlist maps a materialized runtime server name (see
+	// RuntimeMCPServerName) to the tool names its binding permits. A missing
+	// key means the server carries no restriction (legacy all-tools
+	// behavior, MCPBinding.AllowsAllTools()); a present key -- even an empty
+	// slice -- means only those tool names may be listed or invoked for that
+	// server. Callers that expose MCP tools to chat, workspace tasks,
+	// missions, or delegated tasks must consult this map (see
+	// chathttp.getMCPToolsForServer / LLMTaskHandler.getAgentMCPTools).
+	MCPToolAllowlist map[string][]string
 }
 
 // AgentRuntimeResolver composes base agent configuration with workspace-owned MCP bindings and skills.
@@ -157,15 +166,23 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	}
 
 	effectiveServers := make([]string, 0, len(allowedBindings))
+	var toolAllowlist map[string][]string
 	for _, binding := range allowedBindings {
 		runtimeName, err := r.materializeRuntimeBinding(ws.ID, binding)
 		if err != nil {
 			return nil, err
 		}
 		effectiveServers = append(effectiveServers, runtimeName)
+		if !binding.AllowsAllTools() {
+			if toolAllowlist == nil {
+				toolAllowlist = make(map[string][]string, len(allowedBindings))
+			}
+			toolAllowlist[runtimeName] = append([]string(nil), binding.AllowedTools...)
+		}
 	}
 
 	resolved.MCPServers = dedupeStringsPreserveOrder(effectiveServers)
+	resolved.MCPToolAllowlist = toolAllowlist
 	return resolved, nil
 }
 

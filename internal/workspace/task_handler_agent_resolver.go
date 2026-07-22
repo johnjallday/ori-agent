@@ -29,9 +29,10 @@ func (h *LLMTaskHandler) resolveExecutionAgent(agentName string, task Task) (*re
 		}
 		if resolved != nil && resolved.Agent != nil {
 			return &resolvedTaskAgent{
-				Agent:           resolved.Agent,
-				MCPServers:      append([]string{}, resolved.MCPServers...),
-				EffectiveSkills: append([]ResolvedSkill{}, resolved.EffectiveSkills...),
+				Agent:            resolved.Agent,
+				MCPServers:       append([]string{}, resolved.MCPServers...),
+				EffectiveSkills:  append([]ResolvedSkill{}, resolved.EffectiveSkills...),
+				MCPToolAllowlist: resolved.MCPToolAllowlist,
 			}, nil
 		}
 	}

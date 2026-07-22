@@ -1,6 +1,7 @@
 package agenthttp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,7 +61,7 @@ func TestHomeAssistantRouteHandler_WorkspaceRouteFixtures(t *testing.T) {
 
 	for _, fixture := range loadHomeAssistantWorkspaceRouteFixtures(t) {
 		t.Run(fixture.Name, func(t *testing.T) {
-			got, err := handler.RoutePrompt(fixture.Prompt, nil)
+			got, err := handler.RoutePrompt(context.Background(), fixture.Prompt, nil)
 			if err != nil {
 				t.Fatalf("route prompt: %v", err)
 			}

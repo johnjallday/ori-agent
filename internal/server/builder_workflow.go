@@ -300,6 +300,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// preview / repair. Done here rather than in initializeHandlers because the
 	// store is created in this phase (Phase 18), after the handlers.
 	b.wireReaperSetup()
+	b.wireCalendarOpsSetup()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace
 	// store, so it is wired here rather than in initializeHandlers (Phase 17).
@@ -367,6 +368,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.runtimeResolver = runtimeResolver
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
+	if b.calendarOpsHandler != nil {
+		b.chatHandler.SetCalendarOpsPreference(b.calendarOpsHandler)
+	}
 	if b.sessionStore != nil {
 		b.taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
