@@ -188,6 +188,15 @@ async function installFixtureRoutes(page: Page) {
       await json(route, README_SCENES.action_center);
       return;
     }
+    if (url.pathname === '/api/personal-hq/email-ops') {
+      await json(route, {
+        status: {
+          exists: false,
+          open_followup_count: 0,
+        },
+      });
+      return;
+    }
     if (
       [
         '/api/updates/check',
@@ -272,6 +281,10 @@ async function installFixtureRoutes(page: Page) {
           ? README_SCENES.workspace_command.notes.map((note) => ({ ...note, content: 'Launch decision context is ready for review.' }))
           : [],
       });
+      return;
+    }
+    if (/^\/api\/workspaces\/[^/]+\/followups$/.test(url.pathname)) {
+      await json(route, { followups: [] });
       return;
     }
     if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/mission`) {
