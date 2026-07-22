@@ -55,12 +55,22 @@ func (w *Workspace) ApplyTaskAssignment(task *Task, a TaskAssignment) error {
 
 // stampAssignment writes the assignee and provenance fields. It is the single
 // low-level writer so Task.To never drifts from its provenance.
+//
+// Naming a real agent records explicit execution intent (FR11-12): it clears
+// AwaitingExecutionIntent so a promoted-Ready or directly-created-Ready task
+// stops being quiescent the moment it is deliberately assigned. Sweep paths
+// (ApplyEntryAgentDefault, ClaimUnassignedTasksForCoordinator) never reach
+// this call for a quiescent task in the first place — see
+// taskEligibleForCoordinatorClaim — so this unconditional clear is safe.
 func stampAssignment(task *Task, agent string, a TaskAssignment) {
 	task.To = agent
 	task.AssignedNodeID = strings.TrimSpace(a.NodeID)
 	task.AssignedBy = strings.TrimSpace(a.AssignedBy)
 	task.AssignmentMode = a.Mode
 	task.AssignmentReason = strings.TrimSpace(a.Reason)
+	if agent != "" {
+		task.AwaitingExecutionIntent = false
+	}
 }
 
 // taskAssigneeIsDefaultable reports whether a task's current assignee is empty
@@ -69,6 +79,25 @@ func stampAssignment(task *Task, agent string, a TaskAssignment) {
 func taskAssigneeIsDefaultable(to string) bool {
 	t := strings.TrimSpace(to)
 	return t == "" || strings.EqualFold(t, "unassigned")
+}
+
+// taskEligibleForCoordinatorClaim reports whether an automatic
+// coordinator/entry-agent sweep may claim task: its assignee must be
+// defaultable, it must not still be in Backlog, and it must not be a
+// quiescent Ready item awaiting an explicit assignment/run/schedule action
+// (FR7, FR11; task-list 1.8). Explicit, user-initiated dispatch is not
+// gated by this check — only the two automatic sweep functions below call it.
+func taskEligibleForCoordinatorClaim(task *Task) bool {
+	if task == nil {
+		return false
+	}
+	if !taskAssigneeIsDefaultable(task.To) {
+		return false
+	}
+	if task.Status == TaskStatusBacklog {
+		return false
+	}
+	return !task.AwaitingExecutionIntent
 }
 
 // ApplyEntryAgentDefault assigns an otherwise-unassigned task to the workspace
@@ -81,11 +110,15 @@ func taskAssigneeIsDefaultable(to string) bool {
 // ClaimUnassignedTasksForCoordinator picks them up. Assignment funnels through
 // ApplyTaskAssignment, so it never auto-adds an agent — the resolver only ever
 // returns a current workspace member.
+//
+// It is also a no-op for a Backlog task or a quiescent Ready task
+// (AwaitingExecutionIntent) — this default-assignment sweep must never record
+// execution intent on its own (FR7, FR11).
 func (w *Workspace) ApplyEntryAgentDefault(task *Task) bool {
 	if w == nil || task == nil {
 		return false
 	}
-	if !taskAssigneeIsDefaultable(task.To) {
+	if !taskEligibleForCoordinatorClaim(task) {
 		return false
 	}
 	coordinator, source := w.ResolveCoordinator()
@@ -116,6 +149,10 @@ func (w *Workspace) ApplyEntryAgentDefault(task *Task) bool {
 //
 // Callers persist the result; the workspace store's Update closure is the
 // expected caller so the sweep observes an exclusively-held workspace.
+//
+// It never claims a Backlog task or a quiescent Ready task
+// (AwaitingExecutionIntent) — those stay unclaimed until an explicit
+// assignment, run, or schedule action records execution intent (FR7, FR11).
 func (w *Workspace) ClaimUnassignedTasksForCoordinator() int {
 	if w == nil {
 		return 0
@@ -126,7 +163,7 @@ func (w *Workspace) ClaimUnassignedTasksForCoordinator() int {
 	}
 	claimed := 0
 	for i := range w.Tasks {
-		if !taskAssigneeIsDefaultable(w.Tasks[i].To) {
+		if !taskEligibleForCoordinatorClaim(&w.Tasks[i]) {
 			continue
 		}
 		if err := w.ApplyTaskAssignment(&w.Tasks[i], TaskAssignment{

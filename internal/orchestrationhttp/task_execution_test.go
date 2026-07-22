@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1082,6 +1084,140 @@ func TestExecuteTaskWithDependencies_RecordsSuccessfulRunHistory(t *testing.T) {
 	}
 	if updatedTask.CurrentRunID != "run-123" || updatedTask.ExecutionHistory[0].RunID != "run-123" {
 		t.Fatalf("task = %+v, want run id propagated to current run and history", updatedTask)
+	}
+}
+
+// TestExecuteTaskWithDependencies_RejectsBacklogTask covers task-list 1.9:
+// a Backlog task must never reach execution, even if a caller bypasses the
+// HTTP handler and calls the shared execution engine directly.
+func TestExecuteTaskWithDependencies_RejectsBacklogTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-backlog",
+		Status:      workspace.TaskStatusBacklog,
+		Description: "someday maybe",
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    &stubRunAwareWorkspaceTaskExecutor{},
+	}
+
+	if _, err := handler.executeTaskWithDependencies(ws, persistedTask); !errors.Is(err, workspace.ErrBacklogTaskNotRunnable) {
+		t.Fatalf("executeTaskWithDependencies() error = %v, want ErrBacklogTaskNotRunnable", err)
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusBacklog {
+		t.Fatalf("Status = %q, want unchanged Backlog", updatedTask.Status)
+	}
+}
+
+// TestExecuteTaskHandler_RejectsBacklogTask covers the manual "Run" HTTP
+// entry point rejecting a Backlog task with an actionable 400 instead of
+// silently starting it (task-list 1.7).
+func TestExecuteTaskHandler_RejectsBacklogTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	task := workspace.Task{
+		ID:          "task-backlog-http",
+		Status:      workspace.TaskStatusBacklog,
+		Description: "someday maybe",
+	}
+	if err := ws.AddTask(task); err != nil {
+		t.Fatalf("failed to add task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    &stubRunAwareWorkspaceTaskExecutor{},
+	}
+
+	body := strings.NewReader(`{"task_id":"task-backlog-http"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/execute", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ExecuteTaskHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	updatedTask, err := ws.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated task: %v", err)
+	}
+	if updatedTask.Status != workspace.TaskStatusBacklog {
+		t.Fatalf("Status = %q, want unchanged Backlog", updatedTask.Status)
+	}
+}
+
+// TestExecuteInputTasksIfNeeded_RejectsBacklogInputTask covers task-list 1.9:
+// a Backlog task named as another task's input_task_ids must not be
+// auto-executed as a dependency.
+func TestExecuteInputTasksIfNeeded_RejectsBacklogInputTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr", Agents: []string{"Ori"}})
+	inputTask := workspace.Task{
+		ID:          "input-backlog",
+		Status:      workspace.TaskStatusBacklog,
+		Description: "someday maybe",
+	}
+	if err := ws.AddTask(inputTask); err != nil {
+		t.Fatalf("failed to add input task: %v", err)
+	}
+	mainTask := workspace.Task{
+		ID:           "main-task",
+		To:           "Ori",
+		Description:  "depends on backlog item",
+		InputTaskIDs: []string{"input-backlog"},
+	}
+	if err := ws.AddTask(mainTask); err != nil {
+		t.Fatalf("failed to add main task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("failed to save workspace: %v", err)
+	}
+
+	persistedMain, err := ws.GetTask(mainTask.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch main task: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		taskHandler:    &stubRunAwareWorkspaceTaskExecutor{},
+	}
+
+	if err := handler.executeInputTasksIfNeeded(ws, persistedMain); !errors.Is(err, workspace.ErrBacklogTaskNotRunnable) {
+		t.Fatalf("executeInputTasksIfNeeded() error = %v, want ErrBacklogTaskNotRunnable", err)
+	}
+
+	updatedInput, err := ws.GetTask(inputTask.ID)
+	if err != nil {
+		t.Fatalf("failed to fetch updated input task: %v", err)
+	}
+	if updatedInput.Status != workspace.TaskStatusBacklog {
+		t.Fatalf("Status = %q, want unchanged Backlog", updatedInput.Status)
 	}
 }
 

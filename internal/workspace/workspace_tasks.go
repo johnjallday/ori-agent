@@ -289,6 +289,7 @@ func (w *Workspace) GetTaskStats() map[string]int {
 
 	stats := map[string]int{
 		"total":              len(w.Tasks),
+		"backlog":            0,
 		"pending":            0,
 		"assigned":           0,
 		"in_progress":        0,
@@ -302,6 +303,8 @@ func (w *Workspace) GetTaskStats() map[string]int {
 
 	for _, task := range w.Tasks {
 		switch task.Status {
+		case TaskStatusBacklog:
+			stats["backlog"]++
 		case TaskStatusPending:
 			stats["pending"]++
 		case TaskStatusAssigned:

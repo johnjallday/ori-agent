@@ -1,9 +1,112 @@
 package workspace
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+// TestExecuteTaskSchedule_RejectsBacklogTask covers task-list 1.9: a Backlog
+// task must never be reset/queued by the schedule-execution path, even if it
+// somehow carries schedule fields (defense in depth alongside
+// ValidateBacklogTaskInvariants, which normally prevents this state).
+func TestExecuteTaskSchedule_RejectsBacklogTask(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ws := memberWorkspace("Writer")
+	ws.ID = "ws-backlog-sched"
+	ws.Status = StatusActive
+	task := Task{
+		ID:              "t1",
+		Status:          TaskStatusBacklog,
+		To:              "Writer",
+		ScheduleEnabled: true,
+		Schedule:        &ScheduleConfig{Type: ScheduleDaily},
+	}
+	ws.Tasks = []Task{task}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	ts := NewTaskScheduler(store, SchedulerConfig{})
+	loaded, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	got, err := loaded.GetTask("t1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+
+	ts.executeTaskSchedule(loaded, got, time.Now())
+
+	after, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get workspace after: %v", err)
+	}
+	afterTask, err := after.GetTask("t1")
+	if err != nil {
+		t.Fatalf("get task after: %v", err)
+	}
+	if afterTask.Status != TaskStatusBacklog {
+		t.Fatalf("Status = %q, want unchanged Backlog", afterTask.Status)
+	}
+	if afterTask.FailureCount == 0 {
+		t.Fatalf("expected the rejection to be recorded as a schedule failure")
+	}
+}
+
+// TestRerunTargetTask_RejectsBacklogTask mirrors the above for the legacy
+// ScheduledTask entity path (rerunTargetTask).
+func TestRerunTargetTask_RejectsBacklogTask(t *testing.T) {
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ws := memberWorkspace("Writer")
+	ws.ID = "ws-backlog-rerun"
+	ws.Status = StatusActive
+	ws.Tasks = []Task{{ID: "t1", Status: TaskStatusBacklog, To: "Writer"}}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	ts := NewTaskScheduler(store, SchedulerConfig{})
+	loaded, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	st := &ScheduledTask{ID: "st1", WorkspaceID: ws.ID, TargetTaskID: "t1"}
+
+	ts.rerunTargetTask(loaded, st, time.Now())
+
+	after, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get workspace after: %v", err)
+	}
+	afterTask, err := after.GetTask("t1")
+	if err != nil {
+		t.Fatalf("get task after: %v", err)
+	}
+	if afterTask.Status != TaskStatusBacklog {
+		t.Fatalf("Status = %q, want unchanged Backlog", afterTask.Status)
+	}
+}
+
+func TestRequireTaskNotBacklog_UsedByScheduler(t *testing.T) {
+	// Sanity check that the shared guard is wired with the sentinel error the
+	// rest of the package expects (coordinator/executor share this check).
+	task := &Task{ID: "t", Status: TaskStatusBacklog}
+	if err := RequireTaskNotBacklog(task, "cannot schedule task"); !errors.Is(err, ErrBacklogTaskNotRunnable) {
+		t.Fatalf("expected ErrBacklogTaskNotRunnable, got %v", err)
+	}
+}
 
 // TestValidateCronExpression tests cron expression validation
 func TestValidateCronExpression(t *testing.T) {

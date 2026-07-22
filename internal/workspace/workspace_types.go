@@ -344,6 +344,29 @@ type Task struct {
 	// into Context prevents the persisted task from accumulating stale
 	// runtime state across re-runs.
 	RuntimeInputs *TaskRuntimeInputs `json:"-"`
+
+	// --- Backlog lifecycle (tasks/prd-workspace-backlog.md) ---
+
+	// BacklogRank orders items within the Backlog stage for display and
+	// promotion ordering (lower sorts first, then CreatedAt, then ID). It is
+	// meaningless once the item leaves Backlog.
+	BacklogRank int64 `json:"backlog_rank,omitempty"`
+	// SourceType/SourceID record backlog capture provenance: which surface
+	// created the item (e.g. "manual", "assistant", "action_center",
+	// "backlog_markdown") and, when applicable, the originating record's ID
+	// (e.g. an Action Center opportunity ID). Display-only metadata.
+	SourceType string `json:"source_type,omitempty"`
+	SourceID   string `json:"source_id,omitempty"`
+	// AwaitingExecutionIntent marks a Ready-or-later task that has not yet
+	// received an explicit assignment, schedule, or run action (PRD FR11).
+	// It is set true only by Backlog promotion and direct unassigned-Ready
+	// creation; every other task-creation path leaves it false (the zero
+	// value), so pre-existing and normally-created tasks are unaffected by
+	// its introduction. Coordinator and scheduler claim sweeps must skip
+	// tasks where this is true — see taskEligibleForCoordinatorClaim in
+	// coordinator.go. It is cleared the moment a real assignee is stamped
+	// (stampAssignment) or a schedule/run action is explicitly taken.
+	AwaitingExecutionIntent bool `json:"awaiting_execution_intent,omitempty"`
 }
 
 // TaskRuntimeInputs carries the inputs computed for a task at execution time.
@@ -373,6 +396,31 @@ type ResultStorageConfig struct {
 type TaskStatus string
 
 const (
+	// TaskStatusBacklog is the uncommitted capture stage added by the
+	// workspace-backlog feature (tasks/prd-workspace-backlog.md). It is a new
+	// value with no legacy meaning, so no persisted task predates it — every
+	// pre-existing task record is already Pending-or-later and needs no
+	// status-level migration (only the kanban board's default column config
+	// does; see session.MigrateLegacyKanbanBoardConfig).
+	//
+	// Compatibility mapping (PRD FR7-8, task-list 1.1/1.10):
+	//   - Backlog is excluded from every "is this task open/pending/runnable"
+	//     check by construction: those checks positive-match specific legacy
+	//     statuses (Pending/Assigned/InProgress/WaitingForChoice), and Backlog
+	//     never appears in that set, so no change was needed at those sites.
+	//   - The few call sites that used a *negative* match instead ("anything
+	//     except InProgress is runnable") needed an explicit Backlog exclusion:
+	//     coordinator.go's entry-agent defaulting/claim sweep, scheduler.go's
+	//     executeTaskSchedule/rerunTargetTask, and orchestrationhttp/
+	//     task_execution.go's ExecuteTaskHandler/StartTaskAsync/
+	//     executeTaskWithDependencies/executeInputTasksIfNeeded — see
+	//     RequireTaskNotBacklog in task_backlog.go, used by all of them.
+	//   - The legacy kanban_column_id value "backlog" (the old default board
+	//     column in internal/session/kanban_board.go) is unrelated
+	//     presentation metadata that never implied this status; it is migrated
+	//     separately to "ready" by the board-config version bump.
+	TaskStatusBacklog TaskStatus = "backlog"
+
 	TaskStatusPending          TaskStatus = "pending"
 	TaskStatusAssigned         TaskStatus = "assigned"
 	TaskStatusInProgress       TaskStatus = "in_progress"

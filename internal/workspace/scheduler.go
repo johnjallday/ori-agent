@@ -396,6 +396,13 @@ func (ts *TaskScheduler) checkLegacyScheduledTasks(ws *Workspace, now time.Time)
 func (ts *TaskScheduler) executeTaskSchedule(ws *Workspace, task *Task, now time.Time) {
 	logger.Debug("📅 Executing scheduled task", logger.Fields{"task_id": task.ID, "name": task.ScheduleName})
 
+	// A Backlog task cannot legitimately carry a schedule (see
+	// ValidateBacklogTaskInvariants), but guard explicitly anyway (FR7-9).
+	if err := RequireTaskNotBacklog(task, "cannot schedule task"); err != nil {
+		ts.recordTaskScheduleFailure(ws, task, err)
+		return
+	}
+
 	// Validate task is assigned to an agent
 	if task.To == "" || task.To == "unassigned" {
 		ts.recordTaskScheduleFailure(ws, task, fmt.Errorf("task is not assigned to an agent"))
@@ -564,6 +571,11 @@ func (ts *TaskScheduler) rerunTargetTask(ws *Workspace, st *ScheduledTask, now t
 	targetTask, err := ws.GetTask(st.TargetTaskID)
 	if err != nil {
 		ts.recordScheduleFailure(ws, st, fmt.Errorf("target task %s not found: %w", st.TargetTaskID, err), st.TargetTaskID)
+		return
+	}
+
+	if err := RequireTaskNotBacklog(targetTask, "cannot schedule task"); err != nil {
+		ts.recordScheduleFailure(ws, st, err, targetTask.ID)
 		return
 	}
 

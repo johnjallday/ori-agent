@@ -138,6 +138,72 @@ func TestSetStatus_ZeroStateInitial(t *testing.T) {
 	}
 }
 
+func TestSetStatus_BacklogCaptureAndPromotion(t *testing.T) {
+	t.Parallel()
+
+	// Zero-state → Backlog is the explicit capture entry point.
+	tk := &Task{ID: "t"}
+	if err := tk.SetStatus(TaskStatusBacklog); err != nil {
+		t.Fatalf("zero-state → Backlog rejected: %v", err)
+	}
+	// Promotion to Ready is the only legal forward transition.
+	if err := tk.SetStatus(TaskStatusPending); err != nil {
+		t.Fatalf("Backlog → Pending (promotion) rejected: %v", err)
+	}
+}
+
+func TestSetStatus_BacklogRejectsEverythingButPromotion(t *testing.T) {
+	t.Parallel()
+
+	illegal := []TaskStatus{
+		TaskStatusAssigned,
+		TaskStatusInProgress,
+		TaskStatusWaitingForChoice,
+		TaskStatusCompleted,
+		TaskStatusFailed,
+		TaskStatusCancelled,
+		TaskStatusTimeout,
+		TaskStatusBacklog, // same-state no-op
+	}
+	for _, to := range illegal {
+		t.Run(string(to), func(t *testing.T) {
+			tk := &Task{ID: "t", Status: TaskStatusBacklog}
+			if err := tk.SetStatus(to); err == nil {
+				t.Fatalf("Backlog → %s should be illegal, got nil error", to)
+			}
+			if tk.Status != TaskStatusBacklog {
+				t.Fatalf("status changed despite error: now %q", tk.Status)
+			}
+		})
+	}
+}
+
+func TestSetStatus_NothingTransitionsIntoBacklog(t *testing.T) {
+	t.Parallel()
+
+	// Backlog is only reachable from the zero state (explicit capture).
+	// Nothing that already has a status may fall or be reset back into
+	// Backlog — deletion, not demotion, is the only supported removal path.
+	from := []TaskStatus{
+		TaskStatusPending,
+		TaskStatusAssigned,
+		TaskStatusInProgress,
+		TaskStatusWaitingForChoice,
+		TaskStatusCompleted,
+		TaskStatusFailed,
+		TaskStatusCancelled,
+		TaskStatusTimeout,
+	}
+	for _, s := range from {
+		t.Run(string(s), func(t *testing.T) {
+			tk := &Task{ID: "t", Status: s}
+			if err := tk.SetStatus(TaskStatusBacklog); err == nil {
+				t.Fatalf("%s → Backlog should be illegal, got nil error", s)
+			}
+		})
+	}
+}
+
 func TestForceStatus_BypassesTable(t *testing.T) {
 	t.Parallel()
 

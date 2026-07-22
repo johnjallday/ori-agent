@@ -20,10 +20,18 @@ import "fmt"
 // migrations, tests) call ForceStatus.
 var legalTaskTransitions = map[TaskStatus]map[TaskStatus]struct{}{
 	"": {
+		TaskStatusBacklog:    {}, // explicit backlog capture
 		TaskStatusPending:    {},
 		TaskStatusAssigned:   {},
 		TaskStatusInProgress: {},
 		TaskStatusCompleted:  {}, // markdown-import: a [x] item is created already-completed
+	},
+	TaskStatusBacklog: {
+		// Promote to Ready is the only legal forward transition (FR9-11). A
+		// Backlog item has no assignee/schedule/execution state to reset from
+		// (enforced by ValidateBacklogTaskInvariants), so no other target
+		// applies here. Deletion goes through DeleteTask, not a status move.
+		TaskStatusPending: {},
 	},
 	TaskStatusPending: {
 		TaskStatusAssigned:   {},
