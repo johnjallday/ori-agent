@@ -3118,7 +3118,7 @@ export class WorkspaceCommandView {
     return {
       taskLabel: String(task.description || task.name || task.title || 'Untitled task'),
       statusLabel: this.taskStatusLabel(task.status),
-      activityLabel: activity?.label || this.taskStatusLabel(task.status),
+      activityLabel: activity?.label || '',
       whenLabel: this.formatRelativeTime(timestamp),
       timestamp: task.updated_at || task.created_at || ''
     };
@@ -4757,17 +4757,46 @@ export class WorkspaceCommandView {
   }
 
   renderMapAgentLoadout(agent) {
-    const modelLine =
-      !agent?.model?.empty && agent?.model?.label
-        ? '<div class="ws-cmd-rpg-loadout-model"><small>Model</small>' +
-          escapeHtml(agent.model.label) +
-          '</div>'
-        : '';
     return (
       '<section class="ws-cmd-rpg-loadout is-editable"><span>Loadout</span>' +
-      modelLine +
       this.renderLoadoutEditor(agent) +
       '</section>'
+    );
+  }
+
+  renderMapAgentModelCard(agent) {
+    const page = this.page || {};
+    const modelLabel = agent?.model?.empty
+      ? 'Model not set'
+      : agent?.model?.label || agent?.model?.model || 'Model not set';
+    const editable =
+      typeof page.agentAllowsModelEditing === 'function' &&
+      page.agentAllowsModelEditing(agent?.profile);
+    const contents =
+      '<span>Model</span><strong translate="no">' +
+      escapeHtml(modelLabel) +
+      '</strong>' +
+      (editable
+        ? '<small aria-hidden="true"><i class="bi bi-pencil" aria-hidden="true"></i>' +
+          (agent?.model?.empty ? 'Set model' : 'Change') +
+          '</small>'
+        : '');
+
+    if (!editable) {
+      return '<div class="ws-cmd-rpg-class-card">' + contents + '</div>';
+    }
+
+    const actionLabel = agent?.model?.empty
+      ? 'Set model for ' + agent.name
+      : 'Change model for ' + agent.name + '. Current model: ' + modelLabel;
+    return (
+      '<button type="button" class="ws-cmd-rpg-class-card is-editable" data-cmd-edit-model="' +
+      escapeHtml(agent.encodedName) +
+      '" aria-label="' +
+      escapeHtml(actionLabel) +
+      '">' +
+      contents +
+      '</button>'
     );
   }
 
@@ -5183,19 +5212,30 @@ export class WorkspaceCommandView {
       return !['completed', 'cancelled', 'timeout'].includes(status);
     }).length;
     const detailTarget = this.agentDetailTarget(agent);
-    const classLabel = agent.role?.detail || agent.role?.label || 'Agent';
-    const modelLabel = agent.model?.empty ? 'Model not set' : agent.model?.label || 'Model not set';
+    const profileRole = String(agent.profile?.role || agent.role?.roles?.[0] || '').trim();
+    const roleLabel = agent.entry
+      ? this.commanderLabel(profileRole)
+      : agent.role?.detail || agent.role?.label || 'Agent';
+    const questStatusLabel = summary?.statusLabel || agent.status?.label || 'Idle';
+    const questActivityLabel = String(summary?.activityLabel || '').trim();
+    const questMeta = [
+      questStatusLabel,
+      questActivityLabel.toLowerCase() === String(questStatusLabel).trim().toLowerCase()
+        ? ''
+        : questActivityLabel,
+      summary?.whenLabel || ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    const recentActivityMeta = questActivityLabel
+      ? [questActivityLabel, summary?.whenLabel || ''].filter(Boolean).join(' · ')
+      : 'No recorded activity';
     const statCards = [
       { label: 'Quests', value: openTaskCount },
       { label: 'Skills', value: Number(agent.skills?.count || 0) },
       { label: 'Tools', value: agent.mcpNames.length },
       { label: 'Units', value: agent.instanceCount }
     ];
-    const statusEffects = [
-      agent.entry ? this.commanderLabel(agent.profile && agent.profile.role) : '',
-      agent.status?.label || 'Idle',
-      agent.model?.empty ? '' : agent.model?.label || ''
-    ].filter(Boolean);
     return (
       '<div class="ws-cmd-map-inspector-card ' +
       escapeHtml(agent.tone) +
@@ -5204,19 +5244,15 @@ export class WorkspaceCommandView {
       ' sheet">' +
       '<div class="ws-cmd-map-agent-sheet-head">' +
       this.agentCharacterHTML(agent, 'roster') +
-      '<div class="ws-cmd-map-agent-sheet-title"><span>Unit Sheet</span><strong>' +
+      '<div class="ws-cmd-map-agent-sheet-title"><strong>' +
       escapeHtml(agent.name) +
-      '</strong><p>' +
-      escapeHtml(agent.role?.label || 'Agent') +
-      '</p></div></div>' +
+      '</strong></div></div>' +
       '<div class="ws-cmd-rpg-sheet">' +
       '<div class="ws-cmd-rpg-class-grid">' +
-      '<div class="ws-cmd-rpg-class-card"><span>Class</span><strong>' +
-      escapeHtml(classLabel) +
+      '<div class="ws-cmd-rpg-class-card"><span>Role</span><strong>' +
+      escapeHtml(roleLabel) +
       '</strong></div>' +
-      '<div class="ws-cmd-rpg-class-card"><span>Model</span><strong>' +
-      escapeHtml(modelLabel) +
-      '</strong></div>' +
+      this.renderMapAgentModelCard(agent) +
       '</div>' +
       '<div class="ws-cmd-rpg-status-strip"><span class="ws-cmd-led ' +
       escapeHtml(agent.tone) +
@@ -5240,18 +5276,12 @@ export class WorkspaceCommandView {
       '<section class="ws-cmd-rpg-quest-card"><span>Current Quest</span><strong>' +
       escapeHtml(summary?.taskLabel || 'No task in progress') +
       '</strong><p>' +
-      escapeHtml(summary?.statusLabel || agent.status?.label || 'Idle') +
-      (summary?.activityLabel ? ' · ' + escapeHtml(summary.activityLabel) : '') +
-      (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
+      escapeHtml(questMeta) +
       '</p></section>' +
       this.renderMapAgentLoadout(agent) +
       '<div class="ws-cmd-rpg-sheet-row"><span>Recent Activity</span><strong>' +
-      escapeHtml(summary?.activityLabel || 'No recent activity') +
-      (summary?.whenLabel ? ' · ' + escapeHtml(summary.whenLabel) : '') +
-      '</strong></div>' +
-      '<div class="ws-cmd-rpg-effects">' +
-      statusEffects.map(effect => '<span>' + escapeHtml(effect) + '</span>').join('') +
-      '</div></div>' +
+      escapeHtml(recentActivityMeta) +
+      '</strong></div></div>' +
       this.renderMapAgentCommandMenu(agent, detailTarget) +
       '</div>'
     );
@@ -5679,6 +5709,11 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (this.handleLoadoutClick(event)) return;
+      const modelBtn = event.target.closest('[data-cmd-edit-model]');
+      if (modelBtn && page && typeof page.openAgentModelModal === 'function') {
+        page.openAgentModelModal(modelBtn.getAttribute('data-cmd-edit-model'));
+        return;
+      }
       const questToggle = event.target.closest('[data-cmd-map-quest-toggle]');
       if (questToggle) {
         if (this.taskComposerOpen) this.closeTaskComposer();
