@@ -87,13 +87,26 @@ type BacklogSynchronizer interface {
 	RenderAfterMutation(workspaceID string) error
 	// Status returns the current sync-health summary for a workspace.
 	Status(workspaceID string) BacklogSyncStatus
+	// Conflicts returns every unresolved same-item conflict for a workspace
+	// (FR86-87). Both versions are retained until ResolveConflict is called.
+	Conflicts(workspaceID string) []BacklogSyncConflict
+	// ResolveConflict applies the chosen side for one conflicted item —
+	// useFile true applies the retained file version to the structured task,
+	// false discards it and keeps Ori's current value — and clears the
+	// conflict record. No silent last-write-wins: this is always an explicit
+	// user choice (FR87).
+	ResolveConflict(workspaceID, itemID string, useFile bool) error
 }
 
 type noopBacklogSynchronizer struct{}
 
-func (noopBacklogSynchronizer) ImportBeforeRead(string) error    { return nil }
-func (noopBacklogSynchronizer) RenderAfterMutation(string) error { return nil }
-func (noopBacklogSynchronizer) Status(string) BacklogSyncStatus  { return BacklogSyncStatus{} }
+func (noopBacklogSynchronizer) ImportBeforeRead(string) error          { return nil }
+func (noopBacklogSynchronizer) RenderAfterMutation(string) error       { return nil }
+func (noopBacklogSynchronizer) Status(string) BacklogSyncStatus        { return BacklogSyncStatus{} }
+func (noopBacklogSynchronizer) Conflicts(string) []BacklogSyncConflict { return nil }
+func (noopBacklogSynchronizer) ResolveConflict(string, string, bool) error {
+	return fmt.Errorf("no backlog synchronizer configured")
+}
 
 // BacklogService is the single hierarchy-safe entry point for Backlog
 // capture, query, mutation, ordering, deletion, and promotion.
@@ -136,10 +149,26 @@ func (s *BacklogService) SyncStatus(workspaceID string) BacklogSyncStatus {
 	return s.sync.Status(workspaceID)
 }
 
-// SyncNow triggers an on-demand render, satisfying the drawer/panel's manual
-// Sync Now control (FR84).
+// SyncNow triggers an on-demand import-then-render, satisfying the drawer/
+// panel's manual Sync Now control so missed file-watch events cannot leave
+// state permanently stale (FR84).
 func (s *BacklogService) SyncNow(workspaceID string) error {
+	if err := s.sync.ImportBeforeRead(workspaceID); err != nil {
+		return err
+	}
 	return s.sync.RenderAfterMutation(workspaceID)
+}
+
+// Conflicts returns every unresolved same-item BACKLOG.md conflict for a
+// workspace (FR86-87).
+func (s *BacklogService) Conflicts(workspaceID string) []BacklogSyncConflict {
+	return s.sync.Conflicts(workspaceID)
+}
+
+// ResolveConflict applies the user's whole-item Use Ori / Use File choice
+// for a conflicted Backlog item (FR87).
+func (s *BacklogService) ResolveConflict(workspaceID, itemID string, useFile bool) error {
+	return s.sync.ResolveConflict(workspaceID, itemID, useFile)
 }
 
 // WorkspaceName returns workspaceID's display name, or "" if it cannot be

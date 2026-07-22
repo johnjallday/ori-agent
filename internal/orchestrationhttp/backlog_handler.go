@@ -24,11 +24,22 @@ import (
 // route mutations through that ID.
 type BacklogHandler struct {
 	service *workspace.BacklogService
+	// fileSync is optional and only used for the collision preview/adopt/
+	// replace routes (FR89), which are inherently file-specific and so are
+	// not part of the generic workspace.BacklogSynchronizer interface the
+	// service depends on. Nil disables those three routes (400, not a panic).
+	fileSync *workspace.FileBacklogSynchronizer
 }
 
 // NewBacklogHandler constructs a BacklogHandler over the given service.
 func NewBacklogHandler(service *workspace.BacklogService) *BacklogHandler {
 	return &BacklogHandler{service: service}
+}
+
+// SetFileSynchronizer wires the concrete file synchronizer used only by the
+// collision preview/adopt/replace routes.
+func (bh *BacklogHandler) SetFileSynchronizer(fs *workspace.FileBacklogSynchronizer) {
+	bh.fileSync = fs
 }
 
 func (bh *BacklogHandler) itemResponse(task *workspace.Task) workspace.BacklogItemView {
@@ -129,8 +140,23 @@ func (bh *BacklogHandler) BacklogItemPathHandler(w http.ResponseWriter, r *http.
 	case path == "sync":
 		bh.handleSyncNow(w, r)
 		return
+	case path == "conflicts":
+		bh.handleListConflicts(w, r)
+		return
+	case path == "collision":
+		bh.handlePreviewCollision(w, r)
+		return
+	case path == "collision/adopt":
+		bh.handleAdoptCollision(w, r)
+		return
+	case path == "collision/replace":
+		bh.handleReplaceCollision(w, r)
+		return
 	case strings.HasSuffix(path, "/promote"):
 		bh.handlePromote(w, r, strings.TrimSuffix(path, "/promote"))
+		return
+	case strings.HasSuffix(path, "/resolve-conflict"):
+		bh.handleResolveConflict(w, r, strings.TrimSuffix(path, "/resolve-conflict"))
 		return
 	}
 
@@ -276,4 +302,125 @@ func (bh *BacklogHandler) handleSyncNow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	orihttp.WriteJSON(w, map[string]any{"success": true, "sync": bh.service.SyncStatus(workspaceID)})
+}
+
+func (bh *BacklogHandler) handleListConflicts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+	conflicts := bh.service.Conflicts(workspaceID)
+	if conflicts == nil {
+		conflicts = []workspace.BacklogSyncConflict{}
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true, "conflicts": conflicts})
+}
+
+func (bh *BacklogHandler) handleResolveConflict(w http.ResponseWriter, r *http.Request, taskID string) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+		UseFile     bool   `json:"use_file"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		workspaceID = strings.TrimSpace(req.WorkspaceID)
+	}
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+	if err := bh.service.ResolveConflict(workspaceID, taskID, req.UseFile); err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true})
+}
+
+func (bh *BacklogHandler) handlePreviewCollision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	if bh.fileSync == nil {
+		orihttp.BadRequest(w, "file synchronization is not available")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+	collision, err := bh.fileSync.PreviewCollision(workspaceID)
+	if err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to check for a collision", err)
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true, "collision": collision})
+}
+
+func (bh *BacklogHandler) handleAdoptCollision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	if bh.fileSync == nil {
+		orihttp.BadRequest(w, "file synchronization is not available")
+		return
+	}
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+	result, err := bh.fileSync.AdoptCollision(workspaceID)
+	if err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true, "result": result})
+}
+
+func (bh *BacklogHandler) handleReplaceCollision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	if bh.fileSync == nil {
+		orihttp.BadRequest(w, "file synchronization is not available")
+		return
+	}
+	var req struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace_id is required")
+		return
+	}
+	if err := bh.fileSync.ReplaceCollision(workspaceID); err != nil {
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to replace the file", err)
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true})
 }

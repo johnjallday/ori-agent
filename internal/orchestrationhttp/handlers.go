@@ -167,9 +167,12 @@ func (h *Handler) initializeSubHandlers() {
 	}
 	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)
+	backlogFileSync := workspace.NewFileBacklogSynchronizer(h.workspaceStore)
 	backlogService := workspace.NewBacklogService(h.workspaceStore)
 	backlogService.SetEventBus(h.eventBus)
+	backlogService.SetSynchronizer(backlogFileSync)
 	h.backlogHandler = NewBacklogHandler(backlogService)
+	h.backlogHandler.SetFileSynchronizer(backlogFileSync)
 
 	// Optional sub-handlers (created if dependencies are available)
 	if h.orchestrator != nil {
@@ -223,9 +226,12 @@ func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb, h.sessionStore)
 	h.messageHandler = NewMessageHandler(h.workspaceStore, eb)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, eb)
+	legacyBacklogFileSync := workspace.NewFileBacklogSynchronizer(h.workspaceStore)
 	backlogService := workspace.NewBacklogService(h.workspaceStore)
 	backlogService.SetEventBus(eb)
+	backlogService.SetSynchronizer(legacyBacklogFileSync)
 	h.backlogHandler = NewBacklogHandler(backlogService)
+	h.backlogHandler.SetFileSynchronizer(legacyBacklogFileSync)
 	h.initializeTemplateHandlerLegacy()
 	h.initializeStreamingHandlerLegacy()
 	h.initializeTaskHandlerLegacy()

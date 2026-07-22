@@ -205,6 +205,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			if err := b.sessionHandler.BackfillGroupScaffolding(context.Background()); err != nil {
 				logger.Warn("Startup group scaffolding backfill failed", logger.Fields{"error": err.Error()})
 			}
+			// Backfill BACKLOG.md for every managed workspace created before
+			// this feature shipped (PRD workspace-backlog FR68, 99).
+			// Idempotent; non-fatal — a pre-existing unmanaged collision is
+			// left untouched by design, not an error.
+			if written, errs := workspace.BackfillBacklogMarkdownForAllWorkspaces(fileStore); len(errs) > 0 {
+				logger.Warn("Startup BACKLOG.md backfill had errors", logger.Fields{"written": written, "error_count": len(errs), "first_error": errs[0].Error()})
+			} else {
+				logger.Debug("Startup BACKLOG.md backfill complete", logger.Fields{"written": written})
+			}
 			// Personal HQ designation projection: the folder store only exists
 			// now (Phase 18), after personalHQService was constructed (Phase
 			// 17), so wire the syncer here and reconcile the workspace-side
