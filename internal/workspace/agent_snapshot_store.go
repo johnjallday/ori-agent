@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -112,6 +113,36 @@ type metadataLister interface {
 // forward to it so the scheduler avoids deserializing chat history every tick.
 type schedulingLister interface {
 	ListActiveForScheduling() ([]*Workspace, error)
+}
+
+// GetFolderPath forwards to the wrapped store's folder resolution (FileStore,
+// SyncStore) when available. Without this, task_markdown_sync.go/
+// backlog_markdown_sync.go's workspaceFolderForTaskMarkdown type-asserts for
+// GetFolderPath and silently no-ops (ok=false, err=nil) against a plain
+// *AgentSnapshotStore: Go only promotes methods declared on the embedded
+// Store INTERFACE, and GetFolderPath is not part of that interface — the
+// concrete FileStore/SyncStore wrapped inside never gets promoted on its own.
+// That silent no-op previously meant tasks.md/BACKLOG.md never actually
+// synchronized through any handler holding an *AgentSnapshotStore, which is
+// the store production wiring hands to orchestrationhttp (see
+// builder_workflow.go's NewAgentSnapshotStore wrapping).
+func (s *AgentSnapshotStore) GetFolderPath(workspaceID string) (string, error) {
+	if withFolder, ok := s.Store.(interface {
+		GetFolderPath(string) (string, error)
+	}); ok {
+		return withFolder.GetFolderPath(workspaceID)
+	}
+	return "", fmt.Errorf("workspace folder storage is unavailable")
+}
+
+// FileStore forwards to the wrapped store's FileStore accessor (SyncStore),
+// or nil when the wrapped store has no disk-backed FileStore. See
+// GetFolderPath above for why this passthrough is required.
+func (s *AgentSnapshotStore) FileStore() *FileStore {
+	if withFileSync, ok := s.Store.(interface{ FileStore() *FileStore }); ok {
+		return withFileSync.FileStore()
+	}
+	return nil
 }
 
 // ListActiveForScheduling forwards to the wrapped store's scheduling-optimized

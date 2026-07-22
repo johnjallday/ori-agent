@@ -92,6 +92,29 @@ export class WorkspaceCommandView {
     this.taskDrawerFilter = FILTER.ACTIONABLE;
     this.taskDrawerSelectedId = '';
     this._drawerAnnounce = '';
+    // Persistent, non-modal Backlog drawer (PRD workspace-backlog FR30, 35-37)
+    // — the shared full interaction surface opened from both the Details rail
+    // panel and the Map Quest Board (group 5). Backlog is presented
+    // separately from Tasks: capture stays non-executable until an explicit
+    // Promote to Ready action (FR19, 39).
+    this.backlogDrawerOpen = false;
+    this.backlogDrawerEl = null;
+    this.backlogDrawerTrigger = null;
+    this.backlogDrawerSelectedId = '';
+    this.backlogQuickCaptureOpen = false;
+    this.backlogQuickCaptureDraft = '';
+    this.backlogQuickCaptureError = '';
+    this.backlogQuickCaptureSubmitting = false;
+    this.backlogPromoteConfirmId = '';
+    this.backlogPromoteBusy = false;
+    // Post-creation supported-field editing (FR20: details/tags/priority/
+    // reference URL may be added or edited before or after creation, not
+    // only at quick-capture time).
+    this.backlogEditItemId = '';
+    this.backlogEditDraft = null;
+    this.backlogEditError = '';
+    this.backlogEditSubmitting = false;
+    this._backlogDrawerAnnounce = '';
     // Sticky execution tray (group 4) — a collapsible mini-player that renders
     // from the workspace-scoped execution controller. Monitoring survives
     // collapse and any view change (it lives in the controller, not a modal).
@@ -449,6 +472,10 @@ export class WorkspaceCommandView {
   handleGlobalKeydown(event) {
     if (!this.active || !event || event.key !== 'Escape') return;
     if (this.statModalSection || this.identityEditMode) return;
+    if (this.backlogDrawerOpen) {
+      this.closeBacklogDrawer();
+      return;
+    }
     if (this.taskDrawerOpen) {
       this.closeTaskDrawer();
       return;
@@ -1027,6 +1054,15 @@ export class WorkspaceCommandView {
       if (this.taskDrawerOpen) {
         this.taskDrawerEl.hidden = false;
         this.renderTaskDrawerBody();
+      }
+    }
+
+    // The Backlog drawer survives full re-renders too — same pattern.
+    if (this.backlogDrawerEl && this.container && this.container.appendChild) {
+      this.container.appendChild(this.backlogDrawerEl);
+      if (this.backlogDrawerOpen) {
+        this.backlogDrawerEl.hidden = false;
+        this.renderBacklogDrawerBody();
       }
     }
 
@@ -3600,6 +3636,755 @@ export class WorkspaceCommandView {
         if (typeof page.openTask === 'function') page.openTask(id);
         break;
     }
+  }
+
+  // ---------- Backlog panel + drawer (PRD workspace-backlog) ----------
+  //
+  // Backlog is a dedicated, separate surface from executable Tasks (FR32-33):
+  // a compact rail panel (count, top previews, Add to Backlog, Open Backlog,
+  // compact sync status) plus a persistent non-modal drawer — the same
+  // pattern as the Task drawer above — for the full list, editing, ordering,
+  // promotion, and sync/conflict controls (FR34-37). The drawer is the single
+  // shared interaction surface opened from both Details and the Map Quest
+  // Board (group 5); there is exactly one drawer instance and one client
+  // record cache (page.backlogItems), never a per-entry-point copy.
+
+  backlogItems() {
+    const page = this.page || {};
+    return Array.isArray(page.backlogItems) ? page.backlogItems : [];
+  }
+
+  backlogSync() {
+    const page = this.page || {};
+    return page.backlogSync || null;
+  }
+
+  backlogIncludeDescendants() {
+    const page = this.page || {};
+    return Boolean(page.backlogIncludeDescendants);
+  }
+
+  // Toggling re-fetches from the server with/without the roll-up so ownership
+  // badges and owning-workspace routing always reflect real data, never a
+  // client-side guess (FR62-66).
+  toggleBacklogDescendants() {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page) return;
+    page.backlogIncludeDescendants = !page.backlogIncludeDescendants;
+    if (typeof page.loadBacklog === 'function') page.loadBacklog();
+  }
+
+  renderBacklogPanel() {
+    const page = this.page || {};
+    const items = this.backlogItems();
+    const count = items.length;
+    const preview = items.slice(0, 5);
+    const sync = this.backlogSync();
+    // Distinct loading/error/empty states (FR38): none of these implies
+    // Tasks is empty — they describe the Backlog panel's own fetch state.
+    let body;
+    if (page.backlogLoading && !count) {
+      body = '<div class="ws-cmd-rail-empty">Loading backlog…</div>';
+    } else if (page.backlogLoadFailed) {
+      body = '<div class="ws-cmd-rail-empty is-error">Couldn’t load the backlog. Try again shortly.</div>';
+    } else if (count) {
+      const rows = preview.map(item => {
+        const task = (item && item.task) || item || {};
+        const id = String(task.id || '');
+        const title = String(task.description || 'Untitled idea');
+        return (
+          '<button type="button" class="ws-cmd-rail-item" data-cmd-open-backlog-drawer data-cmd-backlog-select="' +
+          escapeHtml(id) +
+          '"><span class="ws-cmd-rail-t">' +
+          escapeHtml(title) +
+          '</span></button>'
+        );
+      });
+      body =
+        rows.join('') +
+        (count > preview.length
+          ? '<button type="button" class="ws-cmd-rail-more" data-cmd-open-backlog-drawer>+ ' +
+            (count - preview.length) +
+            ' more</button>'
+          : '');
+    } else {
+      body =
+        '<div class="ws-cmd-rail-empty">Nothing saved for later. Add an idea without committing it to an agent.</div>';
+    }
+    return (
+      '<section class="ws-cmd-panel ws-cmd-panel-backlog' +
+      (count ? '' : ' is-empty') +
+      '">' +
+      '<div class="ws-cmd-panel-head">' +
+      '<div class="ws-cmd-panel-title"><h4>Backlog</h4><span class="ws-cmd-panel-count">' +
+      count +
+      '</span></div>' +
+      '<div class="ws-cmd-panel-tools">' +
+      '<button type="button" class="ws-cmd-panel-action" data-cmd-backlog-add>Add to Backlog</button>' +
+      '<button type="button" class="ws-cmd-panel-more" data-cmd-open-backlog-drawer aria-label="Open Backlog" title="Open Backlog">▸</button>' +
+      '</div></div>' +
+      '<div class="ws-cmd-panel-body">' +
+      body +
+      '</div>' +
+      this.backlogSyncBadgeHTML(sync) +
+      '</section>'
+    );
+  }
+
+  backlogSyncBadgeHTML(sync) {
+    if (!sync) return '';
+    const hasIssue = Boolean(sync.warning) || Boolean(sync.conflict);
+    const label = hasIssue
+      ? sync.conflict
+        ? 'Sync conflict'
+        : 'Sync warning'
+      : sync.last_synced_at
+        ? 'Synced'
+        : 'Not yet synced';
+    return (
+      '<div class="ws-cmd-panel-sync' +
+      (hasIssue ? ' is-warning' : '') +
+      '" title="' +
+      escapeHtml(sync.warning || '') +
+      '">' +
+      escapeHtml(label) +
+      '</div>'
+    );
+  }
+
+  // All Backlog items for this workspace (and, opt-in, its descendants),
+  // ordered by persistent rank as returned by the server (FR43, 61, 76).
+  backlogDrawerItems() {
+    return this.backlogItems();
+  }
+
+  backlogDrawerSelectedItem() {
+    const id = this.backlogDrawerSelectedId;
+    return this.backlogDrawerItems().find(it => String((it.task || it).id || '') === id) || null;
+  }
+
+  openBacklogDrawer(trigger, opts) {
+    const options = opts || {};
+    this.backlogDrawerTrigger = trigger || null;
+    // Close the Map's Quest Board window so the drawer never opens beneath it
+    // (mirrors openTaskDrawer's Objectives-window handling).
+    if (this.activeMapWindow) this.activeMapWindow = '';
+    this.backlogDrawerOpen = true;
+    if (options.selectId) {
+      this.backlogDrawerSelectedId = String(options.selectId);
+    } else if (!this.backlogDrawerSelectedId) {
+      const first = this.backlogDrawerItems()[0];
+      this.backlogDrawerSelectedId = first ? String((first.task || first).id || '') : '';
+    }
+    if (options.openCapture) {
+      this.backlogQuickCaptureOpen = true;
+    }
+    this.render();
+    const el = this.ensureBacklogDrawer();
+    if (el) {
+      el.hidden = false;
+      this.renderBacklogDrawerBody();
+      const focusTarget = options.openCapture
+        ? el.querySelector('[data-cmd-backlog-quick-input]')
+        : el.querySelector('.ws-cmd-drawer-title');
+      if (focusTarget && typeof focusTarget.focus === 'function') {
+        try {
+          focusTarget.focus({ preventScroll: true });
+        } catch (_e) {
+          focusTarget.focus();
+        }
+      }
+    }
+    this.syncURLState();
+  }
+
+  closeBacklogDrawer() {
+    const trigger = this.backlogDrawerTrigger;
+    this.backlogDrawerOpen = false;
+    this.backlogDrawerTrigger = null;
+    this.backlogQuickCaptureOpen = false;
+    this.backlogQuickCaptureError = '';
+    this.backlogPromoteConfirmId = '';
+    if (this.backlogDrawerEl) this.backlogDrawerEl.hidden = true;
+    let target = trigger && typeof trigger.focus === 'function' ? trigger : null;
+    if (!target && this.container) {
+      const fallback = this.container.querySelector('[data-cmd-open-backlog-drawer]');
+      if (fallback && typeof fallback.focus === 'function') target = fallback;
+    }
+    if (target) target.focus();
+    this.syncURLState();
+  }
+
+  selectBacklogDrawerItem(itemId) {
+    const id = String(itemId || '').trim();
+    if (!id) return;
+    this.backlogDrawerSelectedId = id;
+    this.backlogPromoteConfirmId = '';
+    this.renderBacklogDrawerBody();
+    this.syncURLState();
+  }
+
+  toggleBacklogQuickCapture(open) {
+    this.backlogQuickCaptureOpen = open != null ? Boolean(open) : !this.backlogQuickCaptureOpen;
+    if (!this.backlogQuickCaptureOpen) {
+      this.backlogQuickCaptureDraft = '';
+      this.backlogQuickCaptureError = '';
+    }
+    this.renderBacklogDrawerBody();
+    if (this.backlogQuickCaptureOpen && this.backlogDrawerEl) {
+      const input = this.backlogDrawerEl.querySelector('[data-cmd-backlog-quick-input]');
+      if (input && typeof input.focus === 'function') input.focus();
+    }
+  }
+
+  async submitBacklogQuickCapture() {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const title = String(this.backlogQuickCaptureDraft || '').trim();
+    if (!title) {
+      this.backlogQuickCaptureError = 'Title is required.';
+      this.renderBacklogDrawerBody();
+      return;
+    }
+    if (!page || typeof page.createBacklogItem !== 'function') return;
+    this.backlogQuickCaptureSubmitting = true;
+    this.backlogQuickCaptureError = '';
+    this.renderBacklogDrawerBody();
+    const created = await page.createBacklogItem({ description: title });
+    this.backlogQuickCaptureSubmitting = false;
+    if (created) {
+      this.backlogQuickCaptureOpen = false;
+      this.backlogQuickCaptureDraft = '';
+      this.backlogDrawerSelectedId = String(created.id || created.task?.id || '');
+    } else {
+      this.backlogQuickCaptureError = 'Failed to add to backlog.';
+    }
+    // page.createBacklogItem() already reloads and calls refresh(); no
+    // explicit renderBacklogDrawerBody() needed here beyond what refresh does.
+  }
+
+  // Toggle the post-creation supported-field editor for a backlog item
+  // (FR6, 20: title/details/tags/priority/reference URL, editable before or
+  // after creation — quick capture only covers the title at creation time).
+  openBacklogEdit(itemId) {
+    const id = String(itemId || '').trim();
+    if (!id) return;
+    const item = this.backlogDrawerItems().find(it => String((it.task || it).id || '') === id);
+    const task = item ? item.task || item : null;
+    if (!task) return;
+    this.backlogEditItemId = id;
+    this.backlogEditDraft = {
+      description: String(task.description || ''),
+      details: String(task.details || ''),
+      tags: Array.isArray(task.tags) ? task.tags.join(', ') : '',
+      priority: Number.isFinite(Number(task.priority)) ? Number(task.priority) : 3,
+      referenceUrl: String(task.reference_url || '')
+    };
+    this.backlogEditError = '';
+    this.renderBacklogDrawerBody();
+  }
+
+  closeBacklogEdit() {
+    this.backlogEditItemId = '';
+    this.backlogEditDraft = null;
+    this.backlogEditError = '';
+    this.renderBacklogDrawerBody();
+  }
+
+  updateBacklogEditField(field, value) {
+    if (!this.backlogEditDraft) return;
+    this.backlogEditDraft[field] = value;
+  }
+
+  // The owning workspace ID for a Backlog item, from the roll-up view's own
+  // record — never inferred from the current page (FR48-50, 60, 63-65). A
+  // roll-up card always carries its own owning_workspace_id; mutations must
+  // route there, not to whichever workspace happens to be open.
+  backlogItemOwner(itemId) {
+    const id = String(itemId || '').trim();
+    const found = this.backlogDrawerItems().find(it => String((it.task || it).id || '') === id);
+    return (found && found.owning_workspace_id) || this.workspaceId();
+  }
+
+  backlogItemIsLocal(itemId) {
+    return this.backlogItemOwner(itemId) === this.workspaceId();
+  }
+
+  async submitBacklogEdit() {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = this.backlogEditItemId;
+    const draft = this.backlogEditDraft;
+    if (!page || !id || !draft) return;
+    const description = String(draft.description || '').trim();
+    if (!description) {
+      this.backlogEditError = 'Title is required.';
+      this.renderBacklogDrawerBody();
+      return;
+    }
+    this.backlogEditSubmitting = true;
+    this.renderBacklogDrawerBody();
+    const ok = await page.updateBacklogItem(
+      id,
+      {
+        description,
+        details: String(draft.details || ''),
+        tags: String(draft.tags || '')
+          .split(',')
+          .map(t => t.trim())
+          .filter(Boolean),
+        priority: Number(draft.priority) || 3,
+        referenceUrl: String(draft.referenceUrl || '')
+      },
+      this.backlogItemOwner(id)
+    );
+    this.backlogEditSubmitting = false;
+    if (ok) {
+      this.closeBacklogEdit();
+    } else {
+      this.backlogEditError = 'Failed to save changes.';
+      this.renderBacklogDrawerBody();
+    }
+  }
+
+  confirmBacklogPromote(itemId) {
+    this.backlogPromoteConfirmId = String(itemId || '');
+    this.renderBacklogDrawerBody();
+  }
+
+  cancelBacklogPromote() {
+    this.backlogPromoteConfirmId = '';
+    this.renderBacklogDrawerBody();
+  }
+
+  async runBacklogPromote(itemId) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(itemId || '').trim();
+    if (!page || !id || typeof page.promoteBacklogItem !== 'function') return;
+    this.backlogPromoteBusy = true;
+    this.renderBacklogDrawerBody();
+    await page.promoteBacklogItem(id, this.backlogItemOwner(id));
+    this.backlogPromoteBusy = false;
+    this.backlogPromoteConfirmId = '';
+    // page.promoteBacklogItem() reloads backlog+tasks and calls refresh(),
+    // which repaints the drawer body for us.
+  }
+
+  async runBacklogDelete(itemId) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(itemId || '').trim();
+    if (!page || !id || typeof page.deleteBacklogItem !== 'function') return;
+    await page.deleteBacklogItem(id, this.backlogItemOwner(id));
+  }
+
+  async runBacklogSyncNow() {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    if (!page || typeof page.syncBacklogNow !== 'function') return;
+    await page.syncBacklogNow();
+  }
+
+  async runBacklogResolveConflict(itemId, useFile) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(itemId || '').trim();
+    if (!page || !id || typeof page.resolveBacklogConflict !== 'function') return;
+    await page.resolveBacklogConflict(id, useFile);
+  }
+
+  // Non-drag reordering (FR18, 20, 37, 57): move the selected item one slot
+  // up/down within the current rank order and persist the full new order.
+  // Restricted to this workspace's own items: BacklogRank is a per-workspace
+  // rank space, and a descendant roll-up's combined list has no single
+  // coherent order to reorder across workspaces (FR65 — roll-up must not
+  // apply this workspace's structure to a child record). moveBacklogItem
+  // reorders only among the local items, ignoring rolled-up rows entirely.
+  async moveBacklogItem(itemId, direction) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(itemId || '').trim();
+    if (!page || !id || typeof page.reorderBacklog !== 'function') return;
+    if (!this.backlogItemIsLocal(id)) return;
+    const ids = this.backlogDrawerItems()
+      .filter(it => this.backlogItemIsLocal(String((it.task || it).id || '')))
+      .map(it => String((it.task || it).id || ''));
+    const idx = ids.indexOf(id);
+    if (idx === -1) return;
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapWith < 0 || swapWith >= ids.length) return;
+    [ids[idx], ids[swapWith]] = [ids[swapWith], ids[idx]];
+    await page.reorderBacklog(ids);
+  }
+
+  // If the selected item vanished on a live refresh (promoted/deleted), pick
+  // the next item and announce it, mirroring reconcileDrawerSelection.
+  reconcileBacklogDrawerSelection() {
+    this._backlogDrawerAnnounce = '';
+    if (!this.backlogDrawerSelectedId) return;
+    const stillHere = this.backlogDrawerItems().some(
+      it => String((it.task || it).id || '') === this.backlogDrawerSelectedId
+    );
+    if (stillHere) return;
+    this._backlogDrawerAnnounce = 'The selected backlog item is no longer available.';
+    const next = this.backlogDrawerItems()[0];
+    this.backlogDrawerSelectedId = next ? String((next.task || next).id || '') : '';
+  }
+
+  ensureBacklogDrawer() {
+    if (this.backlogDrawerEl) return this.backlogDrawerEl;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function')
+      return null;
+    const el = document.createElement('aside');
+    el.className = 'ws-cmd-drawer ws-cmd-drawer-backlog';
+    el.setAttribute('role', 'region');
+    el.setAttribute('aria-label', 'Backlog');
+    el.hidden = true;
+    el.style.zIndex = 'var(--wsx-layer-drawer)';
+    el.addEventListener('click', event => {
+      if (event.target.closest('[data-cmd-drawer-close]')) {
+        this.closeBacklogDrawer();
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-quick-cancel]')) {
+        this.toggleBacklogQuickCapture(false);
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-quick-open]')) {
+        this.toggleBacklogQuickCapture(true);
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-descendants-toggle]')) {
+        this.toggleBacklogDescendants();
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-sync-now]')) {
+        this.runBacklogSyncNow();
+        return;
+      }
+      const conflictBtn = event.target.closest('[data-cmd-backlog-resolve-conflict]');
+      if (conflictBtn) {
+        this.runBacklogResolveConflict(
+          conflictBtn.getAttribute('data-cmd-backlog-item'),
+          conflictBtn.getAttribute('data-cmd-backlog-resolve-conflict') === 'file'
+        );
+        return;
+      }
+      const moveBtn = event.target.closest('[data-cmd-backlog-move]');
+      if (moveBtn) {
+        this.moveBacklogItem(
+          moveBtn.getAttribute('data-cmd-backlog-item'),
+          moveBtn.getAttribute('data-cmd-backlog-move')
+        );
+        return;
+      }
+      const promoteBtn = event.target.closest('[data-cmd-backlog-promote]');
+      if (promoteBtn) {
+        this.confirmBacklogPromote(promoteBtn.getAttribute('data-cmd-backlog-item'));
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-promote-confirm]')) {
+        this.runBacklogPromote(this.backlogPromoteConfirmId);
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-promote-cancel]')) {
+        this.cancelBacklogPromote();
+        return;
+      }
+      const deleteBtn = event.target.closest('[data-cmd-backlog-delete]');
+      if (deleteBtn) {
+        this.runBacklogDelete(deleteBtn.getAttribute('data-cmd-backlog-item'));
+        return;
+      }
+      const editBtn = event.target.closest('[data-cmd-backlog-edit]');
+      if (editBtn) {
+        this.openBacklogEdit(editBtn.getAttribute('data-cmd-backlog-item'));
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-edit-cancel]')) {
+        this.closeBacklogEdit();
+        return;
+      }
+      const row = event.target.closest('[data-cmd-backlog-select]');
+      if (row) this.selectBacklogDrawerItem(row.getAttribute('data-cmd-backlog-select'));
+    });
+    el.addEventListener('submit', event => {
+      if (event.target.closest('[data-cmd-backlog-quick-form]')) {
+        event.preventDefault();
+        this.submitBacklogQuickCapture();
+        return;
+      }
+      if (event.target.closest('[data-cmd-backlog-edit-form]')) {
+        event.preventDefault();
+        this.submitBacklogEdit();
+      }
+    });
+    const captureFieldInput = event => {
+      const quickInput = event.target.closest('[data-cmd-backlog-quick-input]');
+      if (quickInput) {
+        this.backlogQuickCaptureDraft = quickInput.value;
+        return;
+      }
+      const editField = event.target.closest('[data-cmd-backlog-edit-field]');
+      if (editField) {
+        this.updateBacklogEditField(editField.getAttribute('data-cmd-backlog-edit-field'), editField.value);
+      }
+    };
+    el.addEventListener('input', captureFieldInput);
+    // <select> reliably fires 'change' across browsers; 'input' support for
+    // select elements is inconsistent, so listen for both.
+    el.addEventListener('change', captureFieldInput);
+    this.backlogDrawerEl = el;
+    if (this.container && this.container.appendChild) this.container.appendChild(el);
+    return el;
+  }
+
+  renderBacklogDrawerBody() {
+    const el = this.ensureBacklogDrawer();
+    if (!el || el.hidden) return;
+    this.reconcileBacklogDrawerSelection();
+    const prevList = el.querySelector('.ws-cmd-drawer-list');
+    const prevScroll = prevList ? prevList.scrollTop : 0;
+    const activeInput = el.querySelector('[data-cmd-backlog-quick-input]');
+    const hadFocus = activeInput === document.activeElement;
+    el.innerHTML = this.backlogDrawerHTML();
+    const nextList = el.querySelector('.ws-cmd-drawer-list');
+    if (nextList) nextList.scrollTop = prevScroll;
+    if (hadFocus) {
+      const nextInput = el.querySelector('[data-cmd-backlog-quick-input]');
+      if (nextInput && typeof nextInput.focus === 'function') nextInput.focus();
+    }
+  }
+
+  backlogDrawerHTML() {
+    const items = this.backlogDrawerItems();
+    const includeDescendants = this.backlogIncludeDescendants();
+    return (
+      '<header class="ws-cmd-drawer-head">' +
+      '<h2 class="ws-cmd-drawer-title" tabindex="-1">Backlog</h2>' +
+      '<div class="ws-cmd-drawer-head-actions">' +
+      '<button type="button" class="ws-cmd-drawer-add" data-cmd-backlog-quick-open aria-label="Add to backlog">＋ Add to Backlog</button>' +
+      '<button type="button" class="ws-cmd-drawer-close" data-cmd-drawer-close aria-label="Close backlog">×</button>' +
+      '</div>' +
+      '</header>' +
+      '<div class="ws-cmd-drawer-live sr-only" role="status" aria-live="polite" aria-atomic="true">' +
+      escapeHtml(this._backlogDrawerAnnounce || '') +
+      '</div>' +
+      (this.backlogQuickCaptureOpen ? this.backlogQuickCaptureHTML() : '') +
+      '<label class="ws-cmd-backlog-descendants">' +
+      '<input type="checkbox" data-cmd-backlog-descendants-toggle' +
+      (includeDescendants ? ' checked' : '') +
+      ' /> Include descendant workspaces</label>' +
+      '<div class="ws-cmd-drawer-list" role="list">' +
+      this.backlogDrawerListHTML(items) +
+      '</div>' +
+      '<div class="ws-cmd-drawer-preview">' +
+      this.backlogDrawerPreviewHTML() +
+      '</div>' +
+      this.backlogSyncPanelHTML()
+    );
+  }
+
+  backlogQuickCaptureHTML() {
+    return (
+      '<form class="ws-cmd-backlog-quick" data-cmd-backlog-quick-form>' +
+      '<label class="sr-only" for="ws-cmd-backlog-quick-input">Backlog item title</label>' +
+      '<input id="ws-cmd-backlog-quick-input" type="text" class="ws-cmd-backlog-quick-input" placeholder="Add an idea…" value="' +
+      escapeHtml(this.backlogQuickCaptureDraft) +
+      '" data-cmd-backlog-quick-input />' +
+      '<button type="submit" class="ws-cmd-backlog-quick-submit"' +
+      (this.backlogQuickCaptureSubmitting ? ' disabled' : '') +
+      '>Add</button>' +
+      '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-quick-cancel aria-label="Cancel">×</button>' +
+      (this.backlogQuickCaptureError
+        ? '<div class="ws-cmd-backlog-quick-error" role="alert">' +
+          escapeHtml(this.backlogQuickCaptureError) +
+          '</div>'
+        : '') +
+      '<p class="ws-cmd-backlog-quick-hint">Saved without an agent or schedule — promote it to Ready when you decide to do it.</p>' +
+      '</form>'
+    );
+  }
+
+  backlogDrawerListHTML(items) {
+    if (!items.length) {
+      return (
+        '<div class="ws-cmd-drawer-empty"><strong>Nothing saved for later</strong>' +
+        '<span>Add an idea without committing it to an agent.</span></div>'
+      );
+    }
+    return items
+      .map(item => {
+        const task = (item && item.task) || item || {};
+        const id = String(task.id || '');
+        const title = String(task.description || 'Untitled idea');
+        const selected = id === this.backlogDrawerSelectedId;
+        const owner = item && item.owning_workspace_name;
+        const ownerBadge =
+          owner && this.backlogIncludeDescendants()
+            ? '<span class="ws-cmd-drawer-row-owner">' + escapeHtml(owner) + '</span>'
+            : '';
+        return (
+          '<button type="button" role="listitem" class="ws-cmd-drawer-row' +
+          (selected ? ' is-selected' : '') +
+          '" data-cmd-backlog-select="' +
+          escapeHtml(id) +
+          '" aria-current="' +
+          (selected ? 'true' : 'false') +
+          '">' +
+          ownerBadge +
+          '<span class="ws-cmd-drawer-row-main">' +
+          '<span class="ws-cmd-drawer-row-title">' +
+          escapeHtml(title) +
+          '</span>' +
+          '</span></button>'
+        );
+      })
+      .join('');
+  }
+
+  backlogDrawerPreviewHTML() {
+    const item = this.backlogDrawerSelectedItem();
+    if (!item) {
+      return '<div class="ws-cmd-drawer-preview-empty">Select a backlog item to see details.</div>';
+    }
+    const task = item.task || item;
+    const id = String(task.id || '');
+    const title = String(task.description || 'Untitled idea');
+    const details = String(task.details || '').trim();
+    const isOwnedElsewhere =
+      item.owning_workspace_id && item.owning_workspace_id !== this.workspaceId();
+    const ownerLink =
+      isOwnedElsewhere && item.owning_workspace_id
+        ? '<a class="ws-cmd-drawer-row-owner-link" href="/workspaces/' +
+          encodeURIComponent(item.owning_workspace_id) +
+          '">' +
+          escapeHtml(item.owning_workspace_name || 'Owning workspace') +
+          '</a>'
+        : '';
+    if (this.backlogEditItemId === id && this.backlogEditDraft) {
+      return this.backlogEditFormHTML(id);
+    }
+    const confirming = this.backlogPromoteConfirmId === id;
+    const promoteControl = confirming
+      ? '<div class="ws-cmd-backlog-promote-confirm">' +
+        '<p>Promote to Ready? The item becomes eligible for assignment and execution, but nothing runs automatically.</p>' +
+        '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote-confirm' +
+        (this.backlogPromoteBusy ? ' disabled' : '') +
+        '>Confirm Promote to Ready</button>' +
+        '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-promote-cancel>Cancel</button>' +
+        '</div>'
+      : '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote data-cmd-backlog-item="' +
+        escapeHtml(id) +
+        '">Promote to Ready</button>';
+    // Reordering only has a coherent meaning within this workspace's own
+    // rank space (FR65) — a rolled-up descendant item hides the move
+    // controls rather than reordering across unrelated workspaces.
+    const moveControls = this.backlogItemIsLocal(id)
+      ? '<button type="button" class="ws-cmd-backlog-move" data-cmd-backlog-move="up" data-cmd-backlog-item="' +
+        escapeHtml(id) +
+        '" aria-label="Move up">▲</button>' +
+        '<button type="button" class="ws-cmd-backlog-move" data-cmd-backlog-move="down" data-cmd-backlog-item="' +
+        escapeHtml(id) +
+        '" aria-label="Move down">▼</button>'
+      : '';
+    return (
+      '<div class="ws-cmd-drawer-preview-head">' +
+      '<span class="ws-cmd-drawer-preview-state tone-neutral">Backlog</span>' +
+      '<h3 class="ws-cmd-drawer-preview-title">' +
+      escapeHtml(title) +
+      '</h3>' +
+      ownerLink +
+      '</div>' +
+      (details
+        ? '<p class="ws-cmd-drawer-preview-brief">' + escapeHtml(details.slice(0, 400)) + '</p>'
+        : '') +
+      '<div class="ws-cmd-drawer-preview-actions">' +
+      promoteControl +
+      moveControls +
+      '<button type="button" class="ws-cmd-backlog-move" data-cmd-backlog-edit data-cmd-backlog-item="' +
+      escapeHtml(id) +
+      '">Edit</button>' +
+      '<button type="button" class="ws-cmd-drawer-action is-danger" data-cmd-backlog-delete data-cmd-backlog-item="' +
+      escapeHtml(id) +
+      '">Delete</button>' +
+      '</div>'
+    );
+  }
+
+  // Post-creation supported-field editor (FR6, 20): title, details, tags,
+  // priority, reference URL — the same fields quick capture accepts, editable
+  // any time afterward. No lifecycle/ownership/provenance/id field appears
+  // here, matching the service's BacklogUpdateInput contract (FR6).
+  backlogEditFormHTML(id) {
+    const draft = this.backlogEditDraft || {};
+    const priorityOptions = [
+      { value: 1, label: 'High' },
+      { value: 3, label: 'Medium' },
+      { value: 5, label: 'Low' }
+    ]
+      .map(
+        opt =>
+          '<option value="' +
+          opt.value +
+          '"' +
+          (Number(draft.priority) === opt.value ? ' selected' : '') +
+          '>' +
+          opt.label +
+          '</option>'
+      )
+      .join('');
+    return (
+      '<form class="ws-cmd-backlog-edit" data-cmd-backlog-edit-form data-cmd-backlog-item="' +
+      escapeHtml(id) +
+      '">' +
+      '<label class="ws-cmd-backlog-edit-label" for="ws-cmd-backlog-edit-title">Title</label>' +
+      '<input id="ws-cmd-backlog-edit-title" type="text" class="ws-cmd-backlog-edit-input" data-cmd-backlog-edit-field="description" value="' +
+      escapeHtml(draft.description || '') +
+      '" />' +
+      '<label class="ws-cmd-backlog-edit-label" for="ws-cmd-backlog-edit-details">Details</label>' +
+      '<textarea id="ws-cmd-backlog-edit-details" class="ws-cmd-backlog-edit-textarea" data-cmd-backlog-edit-field="details">' +
+      escapeHtml(draft.details || '') +
+      '</textarea>' +
+      '<label class="ws-cmd-backlog-edit-label" for="ws-cmd-backlog-edit-tags">Tags (comma-separated)</label>' +
+      '<input id="ws-cmd-backlog-edit-tags" type="text" class="ws-cmd-backlog-edit-input" data-cmd-backlog-edit-field="tags" value="' +
+      escapeHtml(draft.tags || '') +
+      '" />' +
+      '<label class="ws-cmd-backlog-edit-label" for="ws-cmd-backlog-edit-priority">Priority</label>' +
+      '<select id="ws-cmd-backlog-edit-priority" class="ws-cmd-backlog-edit-input" data-cmd-backlog-edit-field="priority">' +
+      priorityOptions +
+      '</select>' +
+      '<label class="ws-cmd-backlog-edit-label" for="ws-cmd-backlog-edit-url">Reference URL</label>' +
+      '<input id="ws-cmd-backlog-edit-url" type="url" class="ws-cmd-backlog-edit-input" data-cmd-backlog-edit-field="referenceUrl" value="' +
+      escapeHtml(draft.referenceUrl || '') +
+      '" />' +
+      (this.backlogEditError
+        ? '<div class="ws-cmd-backlog-quick-error" role="alert">' + escapeHtml(this.backlogEditError) + '</div>'
+        : '') +
+      '<div class="ws-cmd-backlog-edit-actions">' +
+      '<button type="submit" class="ws-cmd-drawer-action"' +
+      (this.backlogEditSubmitting ? ' disabled' : '') +
+      '>Save</button>' +
+      '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-edit-cancel aria-label="Cancel edit">×</button>' +
+      '</div>' +
+      '</form>'
+    );
+  }
+
+  // Conflict resolution (Use Ori / Use File) is deferred to a follow-up: the
+  // backend (BacklogService.Conflicts/ResolveConflict, runBacklogResolveConflict
+  // above) is already wired, but no UI yet lists individual conflicts here —
+  // sync.conflict/sync.warning below still surface that one exists.
+  backlogSyncPanelHTML() {
+    const sync = this.backlogSync();
+    const lastSynced = sync && sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Never';
+    const warning =
+      sync && sync.warning
+        ? '<div class="ws-cmd-backlog-sync-warning" role="alert">' + escapeHtml(sync.warning) + '</div>'
+        : '';
+    return (
+      '<div class="ws-cmd-backlog-sync">' +
+      '<span>Last synced: ' +
+      escapeHtml(lastSynced) +
+      '</span>' +
+      '<button type="button" class="ws-cmd-backlog-sync-now" data-cmd-backlog-sync-now>Sync Now</button>' +
+      warning +
+      '</div>'
+    );
   }
 
   // ---------- Sticky execution tray (group 4) ----------
@@ -6760,6 +7545,7 @@ export class WorkspaceCommandView {
     const folderItems = this.folderRailItems(dirs, foldersExpanded);
 
     return (
+      this.renderBacklogPanel() +
       this.renderNotesPanel(notes, notesExpanded) +
       this.railPanelHTML(
         'schedules',
@@ -7034,6 +7820,17 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', event => {
+      const backlogAdd = event.target.closest('[data-cmd-backlog-add]');
+      if (backlogAdd) {
+        this.openBacklogDrawer(backlogAdd, { openCapture: true });
+        return;
+      }
+      const openBacklogDrawer = event.target.closest('[data-cmd-open-backlog-drawer]');
+      if (openBacklogDrawer) {
+        const selectId = openBacklogDrawer.getAttribute('data-cmd-backlog-select') || '';
+        this.openBacklogDrawer(openBacklogDrawer, selectId ? { selectId } : {});
+        return;
+      }
       // HQ station rows + the panel's primary action dispatch through the same
       // registry action as the map structures (FR14). Checked before the
       // generic section buttons since these carry no data-cmd-*-section attr.

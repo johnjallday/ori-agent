@@ -212,6 +212,15 @@ export class WorkspaceDetailPage {
     this.directories = [];
     this.schedules = [];
     this.children = [];
+    // Backlog (uncommitted capture, PRD workspace-backlog): a separate list
+    // from this.tasks, which now begins at Ready — Backlog items are never
+    // mixed into task surfaces. backlogIncludeDescendants is a page-session
+    // filter only (not persisted), reset on reload (FR66).
+    this.backlogItems = [];
+    this.backlogLoading = false;
+    this.backlogLoadFailed = false;
+    this.backlogSync = null;
+    this.backlogIncludeDescendants = false;
     this.directoryExplorer = new WorkspaceDirectoryExplorer(this);
     // Group-only Members panel + header identity; no-op for concrete workspaces.
     this.membersPanel = new WorkspaceMembersPanel(workspaceId);
@@ -315,6 +324,7 @@ export class WorkspaceDetailPage {
     await this.loadWorkspaceAgentSnapshots();
     await Promise.all([
       this.loadTasks(),
+      this.loadBacklog(),
       this.loadSessions(),
       this.loadFiles(),
       this.loadNotes(),
@@ -3122,6 +3132,228 @@ export class WorkspaceDetailPage {
       // Keep the opt-in Command view (and its open stat manager) in sync after
       // task mutations, which reload tasks without a full workspace reload.
       window.workspaceCommand?.refresh();
+    }
+  }
+
+  // ---------- Backlog (PRD workspace-backlog) ----------
+  //
+  // Uncommitted capture, separate from this.tasks (which begins at Ready).
+  // Every mutation here funnels through the dedicated /api/orchestration/backlog
+  // API and refreshes window.workspaceCommand so the Details panel, drawer,
+  // and Quest Board stay in sync without a page reload.
+
+  /** Load this workspace's Backlog items (and, opt-in, its descendants' — FR62). */
+  async loadBacklog() {
+    this.backlogLoading = true;
+    this.backlogLoadFailed = false;
+    try {
+      const params = new URLSearchParams({ workspace_id: this.workspaceId });
+      if (this.backlogIncludeDescendants) params.set('include_descendants', 'true');
+      const response = await fetch(`/api/orchestration/backlog?${params.toString()}`);
+      if (!response.ok) throw new Error('Failed to load backlog');
+      const data = await response.json();
+      this.backlogItems = Array.isArray(data.items) ? data.items : [];
+      this.backlogSync = data.sync || null;
+      this.backlogLoadFailed = false;
+    } catch (error) {
+      console.error('Failed to load backlog:', error);
+      this.backlogItems = [];
+      this.backlogLoadFailed = true;
+    } finally {
+      this.backlogLoading = false;
+      window.workspaceCommand?.refresh();
+    }
+  }
+
+  /**
+   * Quick capture (FR20): only `description` is required. Returns the
+   * created item view on success, or null on failure (Toast reports why).
+   */
+  async createBacklogItem(input = {}) {
+    const description = String(input.description || '').trim();
+    if (!description) return null;
+    try {
+      const response = await fetch('/api/orchestration/backlog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: this.workspaceId,
+          description,
+          details: String(input.details || ''),
+          tags: Array.isArray(input.tags) ? input.tags : [],
+          priority: Number.isFinite(Number(input.priority)) ? Number(input.priority) : 0,
+          reference_url: String(input.referenceUrl || ''),
+          source_type: 'manual'
+        })
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to add to backlog');
+      }
+      const data = await response.json();
+      if (window.Toast) window.Toast.success('Added to backlog');
+      await this.loadBacklog();
+      return (data && data.item) || null;
+    } catch (error) {
+      console.error('Failed to add to backlog:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to add to backlog');
+      return null;
+    }
+  }
+
+  /**
+   * Supported-field edit (FR6, 20): description/details/tags/priority/
+   * referenceUrl. ownerWorkspaceId targets a rolled-up child item's actual
+   * owning workspace (FR64) — defaults to this workspace for local items;
+   * callers viewing a descendant roll-up must pass the item's own
+   * owning_workspace_id rather than trusting the parent's context.
+   */
+  async updateBacklogItem(itemId, fields = {}, ownerWorkspaceId) {
+    const id = String(itemId || '').trim();
+    if (!id) return false;
+    const ownerId = String(ownerWorkspaceId || this.workspaceId);
+    const body = {};
+    if (fields.description !== undefined) body.description = fields.description;
+    if (fields.details !== undefined) body.details = fields.details;
+    if (fields.tags !== undefined) body.tags = fields.tags;
+    if (fields.priority !== undefined) body.priority = fields.priority;
+    if (fields.referenceUrl !== undefined) body.reference_url = fields.referenceUrl;
+    try {
+      const response = await fetch(
+        `/api/orchestration/backlog/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(ownerId)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to update backlog item');
+      }
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to update backlog item:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to update backlog item');
+      return false;
+    }
+  }
+
+  /**
+   * Explicit delete, routed through Ori's existing task-deletion safeguards
+   * (FR18). See updateBacklogItem for the ownerWorkspaceId contract (FR64).
+   */
+  async deleteBacklogItem(itemId, ownerWorkspaceId) {
+    const id = String(itemId || '').trim();
+    if (!id) return false;
+    const ownerId = String(ownerWorkspaceId || this.workspaceId);
+    if (!confirm('Delete this backlog item? This cannot be undone.')) return false;
+    try {
+      const response = await fetch(
+        `/api/orchestration/backlog/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(ownerId)}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) throw new Error('Failed to delete backlog item');
+      if (window.Toast) window.Toast.success('Backlog item deleted');
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to delete backlog item:', error);
+      if (window.Toast) window.Toast.error('Failed to delete backlog item');
+      return false;
+    }
+  }
+
+  /**
+   * Atomic, idempotent Promote to Ready (FR9-12): makes the item an
+   * executable Ready task without assigning or running it. Refreshes both
+   * Backlog and Tasks state so the item disappears from one and appears in
+   * the other in a single cycle (FR54). See updateBacklogItem for the
+   * ownerWorkspaceId contract (FR64).
+   */
+  async promoteBacklogItem(itemId, ownerWorkspaceId) {
+    const id = String(itemId || '').trim();
+    if (!id) return false;
+    const ownerId = String(ownerWorkspaceId || this.workspaceId);
+    try {
+      const response = await fetch(
+        `/api/orchestration/backlog/${encodeURIComponent(id)}/promote?workspace_id=${encodeURIComponent(ownerId)}`,
+        { method: 'POST' }
+      );
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to promote item');
+      }
+      if (window.Toast) window.Toast.success('Promoted to Ready');
+      await Promise.all([this.loadBacklog(), this.loadTasks()]);
+      return true;
+    } catch (error) {
+      console.error('Failed to promote backlog item:', error);
+      if (window.Toast) window.Toast.error(error.message || 'Failed to promote item');
+      return false;
+    }
+  }
+
+  /** Atomic full-order reorder (FR31, 43; non-drag callers compute orderedIds). */
+  async reorderBacklog(orderedIds) {
+    if (!Array.isArray(orderedIds) || !orderedIds.length) return false;
+    try {
+      const response = await fetch('/api/orchestration/backlog/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: this.workspaceId, ordered_ids: orderedIds })
+      });
+      if (!response.ok) throw new Error('Failed to reorder backlog');
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to reorder backlog:', error);
+      if (window.Toast) window.Toast.error('Failed to reorder backlog');
+      return false;
+    }
+  }
+
+  /** Manual Sync Now (FR84): import any pending file-side changes, then re-render. */
+  async syncBacklogNow() {
+    try {
+      const response = await fetch('/api/orchestration/backlog/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace_id: this.workspaceId })
+      });
+      if (!response.ok) throw new Error('Sync failed');
+      if (window.Toast) window.Toast.success('Backlog synced');
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to sync backlog:', error);
+      if (window.Toast) window.Toast.error('Failed to sync backlog');
+      return false;
+    }
+  }
+
+  /** Whole-item conflict resolution (FR87): useFile true applies the file version. */
+  async resolveBacklogConflict(itemId, useFile) {
+    const id = String(itemId || '').trim();
+    if (!id) return false;
+    try {
+      const response = await fetch(
+        `/api/orchestration/backlog/${encodeURIComponent(id)}/resolve-conflict?workspace_id=${encodeURIComponent(this.workspaceId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ use_file: Boolean(useFile) })
+        }
+      );
+      if (!response.ok) throw new Error('Failed to resolve conflict');
+      if (window.Toast) window.Toast.success('Conflict resolved');
+      await this.loadBacklog();
+      return true;
+    } catch (error) {
+      console.error('Failed to resolve backlog conflict:', error);
+      if (window.Toast) window.Toast.error('Failed to resolve conflict');
+      return false;
     }
   }
 
@@ -15480,6 +15712,17 @@ export class WorkspaceDetailPage {
         this.loadTasks();
         break;
       }
+      case 'task.backlog.captured':
+      case 'task.backlog.updated':
+      case 'task.backlog.reordered':
+        this.loadBacklog();
+        break;
+      case 'task.backlog.promoted':
+        // Promotion moves an item out of Backlog and into Tasks in one cycle
+        // (FR54): refresh both projections together.
+        this.loadBacklog();
+        this.loadTasks();
+        break;
       case 'task.resumed': {
         const payload = event?.data?.data || event?.data || {};
         const resumedTaskId = String(payload.task_id || event?.data?.task_id || '').trim();

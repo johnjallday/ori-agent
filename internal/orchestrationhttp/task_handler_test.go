@@ -2058,3 +2058,47 @@ func TestHandleAssistTask_PersistsFieldValues(t *testing.T) {
 		t.Fatalf("unexpected first field value %#v", userAssistFields[0])
 	}
 }
+
+// TestHandleGetTasks_ExcludesBacklog covers task-list 4.11/1.10 (PRD
+// workspace-backlog FR40): the list endpoint every Tasks surface (modal,
+// drawer, board, Active Tasks Map window, task counts) reads from must never
+// return canonical Backlog items — Backlog has its own dedicated surface.
+func TestHandleGetTasks_ExcludesBacklog(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr"})
+	if err := ws.AddTask(workspace.Task{Status: workspace.TaskStatusBacklog, Description: "someday maybe"}); err != nil {
+		t.Fatalf("add backlog task: %v", err)
+	}
+	if err := ws.AddTask(workspace.Task{Status: workspace.TaskStatusPending, Description: "ready to go"}); err != nil {
+		t.Fatalf("add ready task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orchestration/tasks?workspace_id="+ws.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.TasksHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Tasks []workspace.Task `json:"tasks"`
+		Count int              `json:"count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 1 || len(resp.Tasks) != 1 {
+		t.Fatalf("expected 1 task (Backlog excluded), got %+v", resp.Tasks)
+	}
+	if resp.Tasks[0].Description != "ready to go" {
+		t.Fatalf("unexpected task returned: %+v", resp.Tasks[0])
+	}
+}

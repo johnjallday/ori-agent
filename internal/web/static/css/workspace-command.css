@@ -2492,6 +2492,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-faint);
   letter-spacing: 0.5px;
 }
+.ws-cmd-rail-empty.is-error {
+  color: var(--ws-alert);
+}
 .ws-cmd-rail-item {
   display: flex;
   flex-direction: column;
@@ -5063,6 +5066,218 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-drawer-openfull {
   font-size: 12px;
   color: var(--ws-idle);
+}
+.ws-cmd-drawer-action.is-danger {
+  background: var(--ws-alert);
+}
+
+/* ---------- Backlog panel + drawer (PRD workspace-backlog) ----------
+   The rail panel and drawer reuse .ws-cmd-panel/.ws-cmd-drawer wholesale;
+   these rules cover only the backlog-specific additions (quick capture,
+   descendant toggle, ownership badges, promote confirmation, non-drag
+   reorder, sync status). */
+
+.ws-cmd-panel-sync {
+  margin: 0 14px 12px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ws-ink-faint);
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-clip-sm);
+  width: fit-content;
+}
+.ws-cmd-panel-sync.is-warning {
+  color: var(--ws-input);
+  border-color: var(--ws-input);
+}
+
+.ws-cmd-backlog-descendants {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+  border-bottom: 1px solid var(--ws-line);
+  cursor: pointer;
+}
+
+.ws-cmd-backlog-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ws-line);
+  background: var(--ws-bg-2);
+}
+.ws-cmd-backlog-quick-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--ws-ink);
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip-sm);
+}
+.ws-cmd-backlog-quick-input:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 1px;
+}
+.ws-cmd-backlog-quick-submit {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ws-bg);
+  background: var(--ws-working);
+  border: none;
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-backlog-quick-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ws-cmd-backlog-quick-cancel {
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--ws-ink-dim);
+  background: transparent;
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-backlog-quick-error {
+  flex: 1 0 100%;
+  font-size: 11px;
+  color: var(--ws-alert);
+}
+.ws-cmd-backlog-quick-hint {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  font-size: 10px;
+  color: var(--ws-ink-faint);
+}
+
+.ws-cmd-drawer-row-owner {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font-size: 9px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--ws-idle);
+  background: var(--ws-faction-deep);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.ws-cmd-drawer-row-owner-link {
+  font-size: 11px;
+  color: var(--ws-idle);
+}
+
+.ws-cmd-backlog-promote-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--ws-panel-2);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip-sm);
+}
+.ws-cmd-backlog-promote-confirm p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+}
+
+.ws-cmd-backlog-move {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--ws-ink-dim);
+  background: var(--ws-bg-2);
+  border: 1px solid var(--ws-line);
+  border-radius: var(--ws-clip-sm);
+  cursor: pointer;
+}
+.ws-cmd-backlog-move:hover {
+  color: var(--ws-ink);
+  border-color: var(--ws-line-bright);
+}
+
+.ws-cmd-backlog-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  color: var(--ws-ink-faint);
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-backlog-sync-now {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--ws-idle);
+  background: transparent;
+  border: 1px solid var(--ws-idle);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ws-cmd-backlog-sync-warning {
+  flex: 1 0 100%;
+  color: var(--ws-input);
+}
+
+.ws-cmd-backlog-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-cmd-backlog-edit-label {
+  font-size: 10px;
+  font-family: var(--ws-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ws-ink-faint);
+  margin-top: 4px;
+}
+.ws-cmd-backlog-edit-input,
+.ws-cmd-backlog-edit-textarea {
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ws-ink);
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip-sm);
+  width: 100%;
+}
+.ws-cmd-backlog-edit-textarea {
+  min-height: 60px;
+  resize: vertical;
+}
+.ws-cmd-backlog-edit-input:focus-visible,
+.ws-cmd-backlog-edit-textarea:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 1px;
+}
+.ws-cmd-backlog-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 /* Narrow layout: the drawer becomes a bottom sheet spanning the width. */

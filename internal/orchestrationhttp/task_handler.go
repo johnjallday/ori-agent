@@ -170,7 +170,18 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		tasks := ws.Tasks
+		// Tasks surfaces begin at Ready: Backlog items are excluded from this
+		// list so no client (Tasks modal/drawer/board, Active Tasks Map
+		// window, task assignment lists, open-task counts) needs its own
+		// backlog filter (PRD workspace-backlog FR40). Backlog has its own
+		// dedicated surface via /api/orchestration/backlog.
+		tasks := make([]workspace.Task, 0, len(ws.Tasks))
+		for _, t := range ws.Tasks {
+			if t.Status == workspace.TaskStatusBacklog {
+				continue
+			}
+			tasks = append(tasks, t)
+		}
 		stats := ws.GetTaskStats()
 
 		orihttp.WriteJSON(w, map[string]any{
