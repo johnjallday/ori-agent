@@ -34,6 +34,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 ## Doing
 - Email Ops workspace spin-off → PRD at tasks/prd-email-ops-workspace.md (template Email Ops; personal-ops v5 drops Inbox; station → portal; follow-ups re-keyed) — task list next
 - calendar-ops-mcp -> PRD at tasks/prd-calendar-ops-mcp.md (started 2026-07-20)
+- workspace-backlog -> PRD at tasks/prd-workspace-backlog.md (started 2026-07-22)
 
 ## Shipped / dropped
 - 2026-07-21 unit-sheet-model-editing - PR #246 merged to dev (2026-07-21)
