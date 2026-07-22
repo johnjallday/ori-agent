@@ -107,7 +107,15 @@ function setup() {
   globalThis.window = globalThis;
   globalThis.window.currentWorkspaceId = 'ws-1';
   globalThis.window.location = { search: '' };
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ linked: false }) });
   return doc;
+}
+
+// mockFetchJSON installs a fetch stub that resolves every call with body,
+// regardless of URL -- sufficient for tests that only exercise one endpoint
+// at a time.
+function mockFetchJSON(body, ok = true) {
+  globalThis.fetch = async () => ({ ok, json: async () => body });
 }
 
 const mod = await (async () => {
@@ -529,6 +537,62 @@ test('renderErrorState falls back to the raw error message for an unrecognized c
   const doc = setup();
   mod._internal.renderErrorState(new Error('connector timed out'));
   assert.match(doc.getElementById('calendarConsoleStatus').textContent, /connector timed out/);
+});
+
+// --- meeting prep gating and drawer rendering (task 6.2 / 6.6) --------------
+
+test('isPreparableEvent requires a stable id, title, and usable [start,end)', () => {
+  const base = { id: 'evt-1', title: 'Sync', start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z' };
+  assert.equal(pure.isPreparableEvent(base), true);
+  assert.equal(pure.isPreparableEvent({ ...base, id: '' }), false);
+  assert.equal(pure.isPreparableEvent({ ...base, title: '' }), false);
+  assert.equal(pure.isPreparableEvent({ ...base, start_time: 'garbage' }), false);
+  assert.equal(pure.isPreparableEvent({ ...base, end_time: base.start_time }), false, 'end must be strictly after start');
+  assert.equal(pure.isPreparableEvent(null), false);
+});
+
+test('opening the detail drawer for a preparable event shows a Prepare me action', async () => {
+  const doc = setup();
+  mockFetchJSON({ linked: false });
+  mod._internal.setTestState({ capabilities: { display_time_zone: 'UTC' }, allCalendars: [] });
+  mod._internal.openDetailDrawer({
+    id: 'evt-1', title: 'Sync', calendar_id: 'cal-1',
+    start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z'
+  });
+  // renderPrepSection is async (awaits the prep-status fetch); flush microtasks.
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+  const drawer = doc.getElementById('calendarConsoleDrawer');
+  assert.match(drawer.textContent, /Prepare me/);
+});
+
+test('a private event never shows a Prepare me action even if otherwise preparable', async () => {
+  const doc = setup();
+  mockFetchJSON({ linked: false });
+  mod._internal.setTestState({ capabilities: { display_time_zone: 'UTC' }, allCalendars: [] });
+  mod._internal.openDetailDrawer({
+    id: 'evt-1', title: 'Secret', private: true, calendar_id: 'cal-1',
+    start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z'
+  });
+  await new Promise(r => setTimeout(r, 0));
+  const drawer = doc.getElementById('calendarConsoleDrawer');
+  assert.ok(!drawer.textContent.includes('Prepare me'), 'a private event must never expose the prep action');
+});
+
+test('a ready prep status renders a View prep note link using the /notes/{id} convention', async () => {
+  const doc = setup();
+  mockFetchJSON({ linked: true, status: 'ready', note_id: 'note-abc' });
+  mod._internal.setTestState({ capabilities: { display_time_zone: 'UTC' }, allCalendars: [] });
+  mod._internal.openDetailDrawer({
+    id: 'evt-1', title: 'Sync', calendar_id: 'cal-1',
+    start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z'
+  });
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+  const drawer = doc.getElementById('calendarConsoleDrawer');
+  const link = collectByTag(drawer, 'A').find(a => a.textContent === 'View prep note');
+  assert.ok(link, 'expected a View prep note link');
+  assert.equal(link.getAttribute('href'), '/notes/note-abc');
 });
 
 // --- preview payload / checkpoint (FR30) ------------------------------------

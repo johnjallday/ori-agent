@@ -516,6 +516,8 @@ func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/calendar-ops/events", s.Handlers.CalendarOps.Events)
 	mux.HandleFunc("GET /api/calendar-ops/events/detail", s.Handlers.CalendarOps.EventDetail)
 	mux.HandleFunc("GET /api/calendar-ops/free-windows", s.Handlers.CalendarOps.FreeWindows)
+	mux.HandleFunc("POST /api/calendar-ops/events/prepare", s.Handlers.CalendarOps.Prepare)
+	mux.HandleFunc("GET /api/calendar-ops/events/prep-status", s.Handlers.CalendarOps.PrepStatus)
 	mux.HandleFunc("POST /api/calendar-ops/mutations/preview", s.Handlers.CalendarOps.Preview)
 	mux.HandleFunc("POST /api/calendar-ops/mutations/confirm", s.Handlers.CalendarOps.Confirm)
 

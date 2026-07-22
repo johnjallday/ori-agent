@@ -669,9 +669,113 @@
       if (capabilities && capabilities.can_edit && evt.id) {
         drawer.appendChild(button('Edit', { primary: true, onClick: () => openForm('update_event', evt) }));
       }
+
+      if (isPreparableEvent(evt)) {
+        const prepSection = el('div', { className: 'calendar-console-prep-section' });
+        drawer.appendChild(prepSection);
+        void renderPrepSection(prepSection, evt);
+      }
     }
 
     closeBtn.focus();
+  }
+
+  /**
+   * isPreparableEvent mirrors the backend's validatePreparableEvent gate
+   * (task 6.2): only events with a stable id, a title, and a usable
+   * [start,end) range get a Prepare-me action. The backend re-validates this
+   * independently and never trusts this client-side gate.
+   */
+  function isPreparableEvent(evt) {
+    if (!evt || !evt.id || !evt.title) return false;
+    const start = Date.parse(evt.start_time);
+    const end = Date.parse(evt.end_time);
+    return Number.isFinite(start) && Number.isFinite(end) && end > start;
+  }
+
+  const prepPollIntervalMs = 2000;
+  const prepPollMaxAttempts = 30; // ~1 minute
+
+  async function renderPrepSection(container, evt) {
+    container.textContent = '';
+    container.appendChild(el('h4', { text: 'Meeting prep' }));
+    const body = el('div', { className: 'calendar-console-prep-body' });
+    container.appendChild(body);
+
+    const params = new URLSearchParams({
+      workspace_id: wsId(), calendar_id: evt.calendar_id || '', event_id: evt.id,
+      title: evt.title || '', start_time: evt.start_time || '', end_time: evt.end_time || '',
+      location: evt.location || '', description: evt.description || ''
+    });
+    let status;
+    try {
+      status = await apiGet('/api/calendar-ops/events/prep-status?' + params.toString());
+    } catch (err) {
+      body.appendChild(el('div', { className: 'calendar-console-form-error', text: 'Could not load prep status: ' + err.message }));
+      return;
+    }
+    renderPrepStatusBody(body, evt, status, 0);
+  }
+
+  function renderPrepStatusBody(body, evt, status, pollAttempt) {
+    body.textContent = '';
+
+    if (!status.linked || status.status === 'failed') {
+      if (status.linked && status.status === 'failed') {
+        body.appendChild(el('div', { className: 'calendar-console-form-error', text: 'Prep failed: ' + (status.error || 'unknown error') }));
+      }
+      body.appendChild(
+        button(status.linked ? 'Retry prepare' : 'Prepare me', {
+          primary: true,
+          onClick: () => startPrepare(body, evt)
+        })
+      );
+      return;
+    }
+
+    if (status.status === 'pending') {
+      body.appendChild(el('div', { text: 'Preparing…', attrs: { 'aria-live': 'polite' } }));
+      if (pollAttempt < prepPollMaxAttempts) {
+        setTimeout(async () => {
+          if (!body.isConnected) return; // drawer was closed/replaced; stop polling
+          try {
+            const params = new URLSearchParams({
+              workspace_id: wsId(), calendar_id: evt.calendar_id || '', event_id: evt.id,
+              title: evt.title || '', start_time: evt.start_time || '', end_time: evt.end_time || '',
+              location: evt.location || '', description: evt.description || ''
+            });
+            const next = await apiGet('/api/calendar-ops/events/prep-status?' + params.toString());
+            renderPrepStatusBody(body, evt, next, pollAttempt + 1);
+          } catch (_) {
+            // Transient fetch failure while polling; try again next tick.
+            renderPrepStatusBody(body, evt, status, pollAttempt + 1);
+          }
+        }, prepPollIntervalMs);
+      }
+      return;
+    }
+
+    // Ready.
+    const row = el('div', { className: 'calendar-console-prep-ready' });
+    row.appendChild(el('a', { text: 'View prep note', attrs: { href: '/notes/' + encodeURIComponent(status.note_id) } }));
+    if (status.is_stale) {
+      row.appendChild(el('span', { className: 'calendar-console-badge', text: 'may be outdated' }));
+    }
+    body.appendChild(row);
+    body.appendChild(button('Re-prepare', { onClick: () => startPrepare(body, evt) }));
+  }
+
+  async function startPrepare(body, evt) {
+    body.textContent = '';
+    body.appendChild(el('div', { text: 'Starting…' }));
+    try {
+      await apiPost('/api/calendar-ops/events/prepare', { workspace_id: wsId(), event: evt });
+      renderPrepStatusBody(body, evt, { linked: true, status: 'pending' }, 0);
+    } catch (err) {
+      body.textContent = '';
+      body.appendChild(el('div', { className: 'calendar-console-form-error', text: 'Could not start prep: ' + err.message }));
+      body.appendChild(button('Prepare me', { primary: true, onClick: () => startPrepare(body, evt) }));
+    }
   }
 
   function closeDetailDrawer() {
@@ -991,7 +1095,8 @@
       attendeeImpactLabel,
       formatTimeRangeLabel,
       dayKey,
-      cssColorOrNone
+      cssColorOrNone,
+      isPreparableEvent
     },
     _internal: {
       renderAgenda,

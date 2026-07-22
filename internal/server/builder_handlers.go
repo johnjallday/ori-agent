@@ -32,6 +32,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/mailboxvault"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcphttp"
+	"github.com/johnjallday/ori-agent/internal/meetingprep"
 	"github.com/johnjallday/ori-agent/internal/modelcategoryhttp"
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
@@ -184,6 +185,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		// Structured follow-ups (Group 6): a dedicated SQLite domain over the
 		// shared database.
 		b.followUpService = followup.NewService(followup.NewSQLiteStore(sessionStore.DB()))
+		// Calendar Ops meeting-prep event-to-note links (Group 6): a dedicated
+		// SQLite domain over the shared database, same pattern as follow-ups.
+		b.meetingPrepStore = meetingprep.NewSQLiteStore(sessionStore.DB())
 		b.personalHQHandler.SetFollowUps(b.followUpService)
 		// End-of-day journal (Group 7): grounded on the day's closed follow-ups,
 		// saved as a dated Personal HQ note (never MEMORY.md by default).
@@ -498,6 +502,23 @@ func (b *ServerBuilder) wireCalendarOpsSetup() {
 		return
 	}
 	b.calendarOpsHandler = calendarhttp.NewHandler(folders, b.sessionStore, b.mcpRegistry, b.mcpConfigManager, b.userProvider)
+	b.calendarOpsHandler.SetNotes(b.sessionStore)
+	if b.meetingPrepStore != nil {
+		b.calendarOpsHandler.SetMeetingPreps(b.meetingPrepStore)
+	}
+}
+
+// wireCalendarOpsPrepTaskExecutor gives the already-constructed Calendar Ops
+// handler its task executor. Split out from wireCalendarOpsSetup because
+// b.workspaceOrchestrator does not exist until initializeWorkspaceOrchestrator
+// (Phase 22), which runs after the workspace-store phase (18) where
+// wireCalendarOpsSetup itself is called -- same later-phase-dependency
+// pattern as wireReaperSetup/wireCalendarOpsSetup's own doc comment describes.
+func (b *ServerBuilder) wireCalendarOpsPrepTaskExecutor() {
+	if b.calendarOpsHandler == nil || b.workspaceOrchestrator == nil {
+		return
+	}
+	b.calendarOpsHandler.SetTaskExecutor(b.workspaceOrchestrator)
 }
 
 func (b *ServerBuilder) registerWorkspaceRunTaskValidationMirror() {

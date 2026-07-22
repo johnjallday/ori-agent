@@ -101,6 +101,38 @@ func TestEvents_UsesSelectedCalendarsByDefault(t *testing.T) {
 	}
 }
 
+func TestEvents_BackfillsCalendarIDWhenConnectorDoesNotEchoIt(t *testing.T) {
+	// Some connectors' list_events results don't repeat calendar_id per item
+	// (it's already implied by the request); this fixture's mapping has no
+	// Fields entry for calendar_id, mirroring that shape. Callers downstream
+	// (meeting prep's link key, the edit form's update_event call) require a
+	// populated CalendarID on every event this endpoint returns.
+	h, _, rec := newMutableGatewayHandler(t, "local")
+	rec.resultFn = func(tool string, args map[string]any) (any, error) {
+		return map[string]any{
+			"items": []any{
+				map[string]any{
+					"id": "evt-1", "summary": "Sync",
+					"start": map[string]any{"dateTime": "2026-07-20T10:00:00Z"},
+					"end":   map[string]any{"dateTime": "2026-07-20T11:00:00Z"},
+				},
+			},
+		}, nil
+	}
+	w := doJSONRequest(t, h.Events, http.MethodGet,
+		"/api/calendar-ops/events?workspace_id=ws-cal&start=2026-07-20T00:00:00Z&end=2026-07-21T00:00:00Z&calendar_id=primary", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	resp := decodeSuccess[eventsResponse](t, w)
+	if len(resp.Events) != 1 {
+		t.Fatalf("expected 1 event, got %+v", resp.Events)
+	}
+	if resp.Events[0].CalendarID != "primary" {
+		t.Fatalf("expected CalendarID backfilled to the queried calendar 'primary', got %q", resp.Events[0].CalendarID)
+	}
+}
+
 func TestEvents_PassesExplicitTimeZoneFromWorkspaceSettings(t *testing.T) {
 	h, _, rec := newMutableGatewayHandler(t, "local")
 	rec.resultFn = func(tool string, args map[string]any) (any, error) {

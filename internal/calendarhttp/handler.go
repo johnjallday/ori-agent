@@ -90,6 +90,16 @@ type Handler struct {
 	cache *readCache
 	// confirmations is the mutation confirmation store (FR31). Always non-nil.
 	confirmations *confirmationStore
+
+	// notes, meetingPreps, and taskExecutor back the on-demand meeting-prep
+	// flow (FR42-48). meetingPreps/notes are wired at construction time
+	// (available from Phase 18); taskExecutor is wired later via
+	// SetTaskExecutor (only available from Phase 22 of server startup) -- see
+	// prep.go. All three may be nil until wired; Prepare responds 503 rather
+	// than panicking when they are.
+	notes        NoteStore
+	meetingPreps MeetingPrepStore
+	taskExecutor TaskExecutor
 }
 
 // NewHandler constructs a Calendar Ops setup handler. registry and config may be

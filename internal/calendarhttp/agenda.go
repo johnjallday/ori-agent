@@ -214,7 +214,7 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		raw, cached := h.cachedCall(r.Context(), gw, calendar.OpListEvents, args, func(ctx context.Context, call calendar.ToolCaller, op agentworkspace.OperationMapping) (any, error) {
-			return listEventsRaw(ctx, call, op, args)
+			return listEventsRaw(ctx, call, op, args, calID)
 		})
 		if cached.err != nil {
 			// One calendar failing (e.g. connector-side per-calendar
@@ -232,7 +232,14 @@ func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondSuccess(w, eventsResponse{Events: events, StartTime: startStr, EndTime: endStr, TimeZone: timeZone})
 }
 
-func listEventsRaw(ctx context.Context, call calendar.ToolCaller, op agentworkspace.OperationMapping, args map[string]any) ([]calendar.Event, error) {
+// listEventsRaw fetches events for calendarID and applies the mapping.
+// calendarID backfills Event.CalendarID whenever the connector's list_events
+// mapping doesn't resolve it per-item (a real, observed connector shape: the
+// calendar being queried is already implied by the request, so some
+// connectors simply don't echo it back on every result row) -- callers
+// downstream (meeting prep's link key, the update_event mapping argument)
+// require a populated CalendarID on every event this package hands out.
+func listEventsRaw(ctx context.Context, call calendar.ToolCaller, op agentworkspace.OperationMapping, args map[string]any, calendarID string) ([]calendar.Event, error) {
 	raw, err := call(ctx, op.Tool, args)
 	if err != nil {
 		return nil, err
@@ -246,6 +253,9 @@ func listEventsRaw(ctx context.Context, call calendar.ToolCaller, op agentworksp
 		evt := calendar.SanitizeEvent(calendar.ApplyEvent(item, op))
 		if evt.ID == "" || evt.StartTime == "" || evt.EndTime == "" {
 			continue
+		}
+		if evt.CalendarID == "" {
+			evt.CalendarID = calendarID
 		}
 		out = append(out, evt)
 		if len(out) >= maxAgendaEvents {
