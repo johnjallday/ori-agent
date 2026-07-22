@@ -3,6 +3,7 @@ package calendarhttp
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/calendar"
@@ -12,7 +13,14 @@ import (
 
 // --- fakes -------------------------------------------------------------
 
+// fakeFolderStore.mu guards workspaces: several tests (e.g.
+// TestPrepare_ConcurrentRequestsDedupeToOneRun) deliberately fire concurrent
+// requests at the same Handler, and Prepare's own resolveGateway (a read)
+// and Save (a write) race against each other without it -- caught by the
+// race detector on some platforms/schedules but not others, so this isn't
+// optional even though a sequential test run never shows it.
 type fakeFolderStore struct {
+	mu         sync.Mutex
 	workspaces map[string]*agentworkspace.Workspace
 }
 
@@ -21,6 +29,8 @@ func newFakeFolderStore() *fakeFolderStore {
 }
 
 func (f *fakeFolderStore) GetFolderWorkspace(id string) (*agentworkspace.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	ws, ok := f.workspaces[id]
 	if !ok {
 		return nil, fmt.Errorf("workspace %q not found", id)
@@ -29,6 +39,8 @@ func (f *fakeFolderStore) GetFolderWorkspace(id string) (*agentworkspace.Workspa
 }
 
 func (f *fakeFolderStore) Save(ws *agentworkspace.Workspace) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.workspaces[ws.ID] = ws
 	return nil
 }

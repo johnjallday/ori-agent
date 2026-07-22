@@ -27,7 +27,6 @@
   });
 
   let workspaceId = '';
-  let busy = false;
   let lastState = null; // last GET /setup response
   let mappingText = ''; // editable JSON mapping textarea contents
   let selectedCalendarIds = new Set();
@@ -88,7 +87,6 @@
   }
 
   function setBusy(on) {
-    busy = on;
     const { actions } = els();
     if (actions) actions.querySelectorAll('button, input').forEach(n => (n.disabled = on));
   }

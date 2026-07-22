@@ -77,8 +77,21 @@ async function installFixtureRoutes(page: Page) {
   }
   const unexpectedRequests: string[] = [];
   const consoleErrors: string[] = [];
+  // Chrome's own automatic "Failed to load resource: the server responded
+  // with a status of NNN" line fires for *any* non-2xx fetch response,
+  // independent of whether the page's own JS handled it gracefully -- it is
+  // categorically different from a real application bug (a thrown exception
+  // or an explicit console.error(...) call from our own code), and several
+  // fixture mocks in this file deliberately return a non-2xx status to match
+  // a real handler's documented "not applicable"/"not ready" response
+  // (e.g. Calendar Ops's capabilities probe on a non-Calendar-Ops
+  // workspace). Filtering only this exact network-layer message keeps the
+  // check strict for everything that actually indicates a bug.
+  const resourceLoadStatusPattern = /^Failed to load resource: the server responded with a status of \d+/;
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleErrors.push(message.text());
+    if (message.type() === 'error' && !resourceLoadStatusPattern.test(message.text())) {
+      consoleErrors.push(message.text());
+    }
   });
   await page.addInitScript(({ clock }) => {
     const RealDate = Date;
@@ -197,6 +210,16 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    // Calendar Ops portal: fired unconditionally by home-calendar-ops-portal.js
+    // on every page load. None of these README fixtures have a Calendar Ops
+    // workspace, so the real API's own "no workspace" shape is the accurate
+    // mock (matches internal/calendarhttp.PortalSummary's has_workspace:false
+    // branch) -- this keeps the Home scene's Calendar section hidden, same as
+    // a genuinely unconfigured profile.
+    if (url.pathname === '/api/calendar-ops/home-portal-summary') {
+      await json(route, { has_workspace: false });
+      return;
+    }
     if (
       [
         '/api/updates/check',
@@ -308,6 +331,24 @@ async function installFixtureRoutes(page: Page) {
     }
     if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/template-setup/start`) {
       await json(route, { started: false });
+      return;
+    }
+    // Calendar Ops: calendar-ops-setup.js and calendar-console.js are loaded
+    // globally and both auto-check the current workspace on page load. This
+    // fixture workspace isn't a Calendar Ops workspace, so the accurate mocks
+    // are each real handler's own "not applicable"/"no binding" shape --
+    // internal/calendarhttp.Setup's applicable:false and Capabilities'
+    // resolveGateway connector_missing (409), matching production exactly and
+    // keeping both modules dormant for this scene.
+    if (url.pathname === '/api/calendar-ops/setup' && url.searchParams.get('workspace_id') === README_SCENES.workspace_command.workspace_id) {
+      await json(route, { applicable: false });
+      return;
+    }
+    if (
+      url.pathname === '/api/calendar-ops/capabilities' &&
+      url.searchParams.get('workspace_id') === README_SCENES.workspace_command.workspace_id
+    ) {
+      await json(route, { error: 'no calendar connector is configured for this workspace', code: 'connector_missing' }, 409);
       return;
     }
     if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}`) {
