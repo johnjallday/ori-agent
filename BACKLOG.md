@@ -35,4 +35,5 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - calendar-ops-mcp -> PRD at tasks/prd-calendar-ops-mcp.md (started 2026-07-20)
 
 ## Shipped / dropped
+- 2026-07-21 unit-sheet-model-editing - PR #246 merged to dev (2026-07-21)
 - 2026-07-19 HQ cross-workspace visibility (hq_overview + Watchtower) — PR #240 merged to dev; post-merge live demo verified (badge/panel/navigation/all-clear + Chief hq_overview call on local model)
