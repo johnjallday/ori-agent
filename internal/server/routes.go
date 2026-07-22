@@ -527,6 +527,9 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/orchestration/tasks/output-contract/telemetry", s.Handlers.AutoTask.HandleOutputContractTelemetry)
 	}
 	mux.HandleFunc("/api/orchestration/tasks/", s.Handlers.Orchestration.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
+	mux.HandleFunc("/api/orchestration/backlog", s.Handlers.Orchestration.BacklogListHandler)
+	// Handles /api/orchestration/backlog/{id}, /{id}/promote, /reorder, /sync
+	mux.HandleFunc("/api/orchestration/backlog/", s.Handlers.Orchestration.BacklogItemPathHandler)
 	mux.HandleFunc("/api/orchestration/task-results", s.Handlers.Orchestration.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.Handlers.Orchestration.WorkflowStatusHandler)
 	mux.HandleFunc("/api/orchestration/workflow/stream", s.Handlers.Orchestration.WorkflowStatusStreamHandler)

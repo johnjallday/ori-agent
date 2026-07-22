@@ -111,6 +111,7 @@ type Handler struct {
 	streamingHandler    *StreamingHandler
 	taskHandlerSub      *TaskHandler
 	dynamicAgentHandler *DynamicAgentHandler
+	backlogHandler      *BacklogHandler
 }
 
 // NewHandler creates a new orchestration handler with all dependencies.
@@ -166,6 +167,9 @@ func (h *Handler) initializeSubHandlers() {
 	}
 	h.messageHandler = NewMessageHandler(h.workspaceStore, h.eventBus)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, h.eventBus)
+	backlogService := workspace.NewBacklogService(h.workspaceStore)
+	backlogService.SetEventBus(h.eventBus)
+	h.backlogHandler = NewBacklogHandler(backlogService)
 
 	// Optional sub-handlers (created if dependencies are available)
 	if h.orchestrator != nil {
@@ -219,6 +223,9 @@ func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 	h.workspaceHandler = NewWorkspaceHandler(h.agentStore, h.workspaceStore, eb, h.sessionStore)
 	h.messageHandler = NewMessageHandler(h.workspaceStore, eb)
 	h.capabilitiesHandler = NewCapabilitiesHandler(h.agentStore, h.workspaceStore, h.communicator, eb)
+	backlogService := workspace.NewBacklogService(h.workspaceStore)
+	backlogService.SetEventBus(eb)
+	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.initializeTemplateHandlerLegacy()
 	h.initializeStreamingHandlerLegacy()
 	h.initializeTaskHandlerLegacy()
@@ -431,6 +438,18 @@ func (h *Handler) ScheduledTaskHandler(w http.ResponseWriter, r *http.Request) {
 // Delegates to TaskHandler for modular organization
 func (h *Handler) BulkDeleteTasksHandler(w http.ResponseWriter, r *http.Request) {
 	h.taskHandlerSub.BulkDeleteTasksHandler(w, r)
+}
+
+// BacklogListHandler handles GET (list) and POST (create) on
+// /api/orchestration/backlog. Delegates to BacklogHandler.
+func (h *Handler) BacklogListHandler(w http.ResponseWriter, r *http.Request) {
+	h.backlogHandler.BacklogListHandler(w, r)
+}
+
+// BacklogItemPathHandler handles /api/orchestration/backlog/{id}[/promote],
+// reorder, and sync. Delegates to BacklogHandler.
+func (h *Handler) BacklogItemPathHandler(w http.ResponseWriter, r *http.Request) {
+	h.backlogHandler.BacklogItemPathHandler(w, r)
 }
 
 // ProgressStreamHandler streams real-time progress updates using Server-Sent Events (SSE)

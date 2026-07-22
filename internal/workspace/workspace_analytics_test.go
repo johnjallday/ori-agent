@@ -24,6 +24,8 @@ func TestComputeMapSummaryFields(t *testing.T) {
 			{Status: TaskStatusCompleted},
 			{Status: TaskStatusFailed},
 			{Status: TaskStatusTimeout},
+			{Status: TaskStatusBacklog},
+			{Status: TaskStatusBacklog},
 		},
 		SharedData: workspacesettings.Store(map[string]any{}, settings),
 	}
@@ -46,7 +48,10 @@ func TestComputeMapSummaryFields(t *testing.T) {
 		t.Errorf("OpsMode = %q, want %q", fields.OpsMode, "direct")
 	}
 	if fields.OpenTaskCount != 2 {
-		t.Errorf("OpenTaskCount = %d, want 2 (pending + in_progress, excludes completed)", fields.OpenTaskCount)
+		t.Errorf("OpenTaskCount = %d, want 2 (pending + in_progress, excludes completed and Backlog)", fields.OpenTaskCount)
+	}
+	if fields.BacklogCount != 2 {
+		t.Errorf("BacklogCount = %d, want 2, tracked separately from OpenTaskCount (PRD workspace-backlog FR7, 40, 49)", fields.BacklogCount)
 	}
 	if fields.NeedsAttentionCount != 2 {
 		t.Errorf("NeedsAttentionCount = %d, want 2 (failed + timeout)", fields.NeedsAttentionCount)

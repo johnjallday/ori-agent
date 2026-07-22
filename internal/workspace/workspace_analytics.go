@@ -38,10 +38,15 @@ type MapSummaryFields struct {
 	AgentCount          int
 	OpenTaskCount       int
 	NeedsAttentionCount int
-	MCPCount            int
-	SkillCount          int
-	OpsMode             string
-	Active              bool
+	// BacklogCount is the workspace's own (non-descendant) Backlog item count
+	// (tasks/prd-workspace-backlog.md FR40, 49, 58). It is tracked separately
+	// from OpenTaskCount, which remains Ready-and-later only — Backlog is
+	// never "open" work (FR7).
+	BacklogCount int
+	MCPCount     int
+	SkillCount   int
+	OpsMode      string
+	Active       bool
 }
 
 // ComputeMapSummaryFields derives entry agent, roster, tool/skill counts, ops
@@ -66,6 +71,8 @@ func ComputeMapSummaryFields(w *Workspace) MapSummaryFields {
 
 	for _, t := range w.Tasks {
 		switch t.Status {
+		case TaskStatusBacklog:
+			fields.BacklogCount++
 		case TaskStatusPending:
 			fields.OpenTaskCount++
 		case TaskStatusInProgress:

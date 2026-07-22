@@ -340,15 +340,19 @@ type Workspace struct {
 	// workspace by hydrateWorkspaceMetadataInto (sessionhttp), mirroring
 	// workspace.ComputeMapSummaryFields. No SQLite column backs these; they
 	// are display-only, same precedent as SessionCount above.
-	EntryAgentName      string   `json:"entry_agent_name,omitempty"`
-	Agents              []string `json:"agents,omitempty"`
-	AgentCount          int      `json:"agent_count"`
-	OpenTaskCount       int      `json:"open_task_count"`
-	NeedsAttentionCount int      `json:"needs_attention_count"`
-	MCPCount            int      `json:"mcp_count"`
-	SkillCount          int      `json:"skill_count"`
-	OpsMode             string   `json:"ops_mode,omitempty"`
-	Active              bool     `json:"active"`
+	EntryAgentName string   `json:"entry_agent_name,omitempty"`
+	Agents         []string `json:"agents,omitempty"`
+	AgentCount     int      `json:"agent_count"`
+	OpenTaskCount  int      `json:"open_task_count"`
+	// BacklogCount is this workspace's own Backlog item count (PRD
+	// workspace-backlog FR40, 49, 58) — separate from OpenTaskCount, which
+	// stays Ready-and-later only.
+	BacklogCount        int    `json:"backlog_count"`
+	NeedsAttentionCount int    `json:"needs_attention_count"`
+	MCPCount            int    `json:"mcp_count"`
+	SkillCount          int    `json:"skill_count"`
+	OpsMode             string `json:"ops_mode,omitempty"`
+	Active              bool   `json:"active"`
 
 	// CreatedAt is when the workspace was created.
 	CreatedAt time.Time `json:"created_at"`
