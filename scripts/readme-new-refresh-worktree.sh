@@ -42,9 +42,10 @@ if git -C "${REPO_ROOT}" worktree list --porcelain | rg -q "^branch refs/heads/$
   fail "a worktree already uses ${BRANCH_NAME}; refusing to overwrite it"
 fi
 
-# shellcheck source=scripts/wt.sh
-source "${REPO_ROOT}/scripts/wt.sh"
-wt new "${WORKTREE_NAME}"
+# `wt.sh` is intentionally Zsh-native. Execute the lifecycle command in Zsh
+# instead of sourcing it into this Bash wrapper (where `set -e` and Zsh
+# parameter expansions make the helper exit before creating the worktree).
+zsh -c 'source "$1"; wt new "$2"' _ "${REPO_ROOT}/scripts/wt.sh" "${WORKTREE_NAME}"
 
 target="$(git -C "${REPO_ROOT}" worktree list --porcelain | awk -v branch="refs/heads/${BRANCH_NAME}" '
   /^worktree / { path = substr($0, 10) }
