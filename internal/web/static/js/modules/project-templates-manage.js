@@ -674,7 +674,36 @@ async function ptcPopulate() {
     }
   }
 
+  const pendingCard = ptcConsumePendingSelection(els);
+  if (pendingCard) {
+    // Reuses the card's own click handler (which calls ptcSelect with the
+    // closure-captured template object) rather than re-deriving it here.
+    pendingCard.click();
+    return;
+  }
   ptcSelect(PTC_BLANK, blankCard);
+}
+
+// ptcConsumePendingSelection reads and clears #addFolderModal's one-shot
+// pendingTemplateSelectId dataset field (set by e.g.
+// workspace-command.js's openCalendarOpsConstruct or sessions.js's
+// showAddWorkspaceModal({ templateId }) -- task 7.5's "route the
+// absent-workspace CTA into Construct with a blueprint preselected"), and
+// returns the matching card/row element if the library actually has it.
+function ptcConsumePendingSelection(els) {
+  const modal = document.getElementById('addFolderModal');
+  if (!modal) return null;
+  const id = String(modal.dataset.pendingTemplateSelectId || '').trim();
+  delete modal.dataset.pendingTemplateSelectId;
+  if (!id) return null;
+  const containers = [els.grid, els.userList];
+  for (const container of containers) {
+    if (!container) continue;
+    for (const el of container.querySelectorAll('.workspace-template-card, .workspace-template-row')) {
+      if (el.dataset.templateId === id) return el;
+    }
+  }
+  return null;
 }
 
 async function ptcBrowse() {

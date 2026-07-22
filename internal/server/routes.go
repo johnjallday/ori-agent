@@ -244,6 +244,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 		})
 	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
+	homeAssistantRouteHandler.SetCalendarOpsPreference(s.Handlers.CalendarOps)
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
 			workspace.NewAgentRuntimeResolver(
@@ -520,6 +521,10 @@ func registerMCPRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/calendar-ops/events/prep-status", s.Handlers.CalendarOps.PrepStatus)
 	mux.HandleFunc("POST /api/calendar-ops/mutations/preview", s.Handlers.CalendarOps.Preview)
 	mux.HandleFunc("POST /api/calendar-ops/mutations/confirm", s.Handlers.CalendarOps.Confirm)
+
+	// Home/Personal HQ Calendar Ops portal (FR49-51): a single bounded read,
+	// resolved for the current user rather than a caller-supplied workspace id.
+	mux.HandleFunc("GET /api/calendar-ops/home-portal-summary", s.Handlers.CalendarOps.PortalSummary)
 
 	mux.HandleFunc("POST /api/mcp/import", s.Handlers.MCP.ImportServersHandler)
 	mux.HandleFunc("GET /api/mcp/marketplace", s.Handlers.MCP.GetMarketplaceServersHandler)

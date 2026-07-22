@@ -6278,6 +6278,14 @@ const sessionManager = {
     modalElement.dataset.pendingEntryPoint = String(
       options.entryPoint || (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create')
     );
+    // Consumed one-shot by project-templates-manage.js's own populate flow to
+    // preselect a blueprint card (task 7.5) -- never applies an inline
+    // creation shortcut, just pre-picks the card in the existing wizard.
+    if (options.templateId) {
+      modalElement.dataset.pendingTemplateSelectId = String(options.templateId);
+    } else {
+      delete modalElement.dataset.pendingTemplateSelectId;
+    }
 
     const modal = new bootstrap.Modal(modalElement);
     modal.show();
@@ -10326,16 +10334,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
   // history so a refresh doesn't re-open. Previously handled by the now-removed
   // workspace-create.js on a different (unrouted) page.
+  // ?template=<id> additionally preselects that blueprint (task 7.5's
+  // absent-workspace Calendar Ops CTA: /workspaces?create=1&template=calendar-ops).
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get('create') === '1') {
+      const templateId = params.get('template') || '';
       params.delete('create');
+      params.delete('template');
       const qs = params.toString();
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
       requestAnimationFrame(() =>
-        sessionManager.showAddWorkspaceModal({ entryPoint: 'home_first_run' })
+        sessionManager.showAddWorkspaceModal({
+          entryPoint: 'home_first_run',
+          templateId: templateId || undefined
+        })
       );
     }
   } catch (_) {

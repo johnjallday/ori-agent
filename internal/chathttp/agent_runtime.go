@@ -21,6 +21,24 @@ type chatRuntimeResolver interface {
 	ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 }
 
+// chatCalendarOpsPreference mirrors agenthttp.CalendarOpsPreference so the
+// per-request specialist-handoff router (assistant_specialist_handoff.go)
+// can prefer the Calendar Ops Scheduler the same way the Home route handler
+// does (FR53), without chathttp importing agenthttp's full package for one
+// method signature.
+type chatCalendarOpsPreference interface {
+	PreferredCalendarAgent(ctx context.Context) (agentName string, ok bool)
+}
+
+// SetCalendarOpsPreference configures the Calendar Ops routing preference
+// used by the assistant specialist handoff (FR53).
+func (h *Handler) SetCalendarOpsPreference(pref chatCalendarOpsPreference) {
+	if h == nil {
+		return
+	}
+	h.calendarOpsPreference = pref
+}
+
 type resolvedChatAgent struct {
 	*agent.Agent
 	MCPServers      []string

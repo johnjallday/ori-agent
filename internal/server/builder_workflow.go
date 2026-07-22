@@ -364,6 +364,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.runtimeResolver = runtimeResolver
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
+	if b.calendarOpsHandler != nil {
+		b.chatHandler.SetCalendarOpsPreference(b.calendarOpsHandler)
+	}
 	if b.sessionStore != nil {
 		b.taskHandler.SetContextStore(session.NewWorkspaceTaskContextAdapter(b.sessionStore))
 	}
