@@ -132,7 +132,7 @@ To guide an AI assistant in creating a detailed, step-by-step task list in Markd
 2.  **Analyze Requirements:** The AI analyzes the functional requirements, user needs, and implementation scope from the provided information
 3.  **Phase 1: Generate Parent Tasks:** Based on the requirements analysis, create the file and generate the main, high-level tasks required to implement the feature. Use your judgement on how many high-level tasks to use. It's likely to be about 5. Present these tasks to the user in the specified format (without sub-tasks yet). Inform the user: "I have generated the high-level tasks based on your requirements. Ready to generate the sub-tasks? Respond with 'Go' to proceed."
 4.  **Wait for Confirmation:** Pause and wait for the user to respond with "Go".
-5.  **Phase 2: Generate Sub-Tasks:** Once the user confirms, break down each parent task into smaller, actionable sub-tasks necessary to complete the parent task. Ensure sub-tasks logically follow from the parent task and cover the implementation details implied by the requirements. Include a `Commit: "<conventional message>"` sub-task after each parent group that represents a tested, reviewable milestone, and end the final group with the feature-delivery steps described below.
+5.  **Phase 2: Generate Sub-Tasks:** Once the user confirms, break down each parent task into smaller, actionable sub-tasks necessary to complete the parent task. Ensure sub-tasks logically follow from the parent task and cover the implementation details implied by the requirements. **Prefer vertical slices over layer-first grouping** — a group should be a thin end-to-end feature, not "all backend" then "all frontend" (see "Slicing & Build Order"); within a group, order the sub-tasks for the fastest honest feedback. Include a `Commit: "<conventional message>"` sub-task after each parent group that represents a tested, reviewable milestone, and end the final group with the feature-delivery steps described below.
 6.  **Identify Relevant Files:** Based on the tasks and requirements, identify potential files that will need to be created or modified. List these under the `Relevant Files` section, including corresponding test files if applicable.
 7.  **Generate Final Output:** Combine the parent tasks, sub-tasks, relevant files, and notes into the final Markdown structure.
 8.  **Save Task List:** Save the generated document in the planning artifact location with the filename `tasks-[feature-name].md`, where `[feature-name]` describes the main feature or task being implemented (e.g., if the request was about user profile editing, the output is `tasks-user-profile-editing.md`).
@@ -169,6 +169,15 @@ Update the file after completing each sub-task, not just after completing an ent
 ## Delivery Checkpoints
 
 By default, one PRD and task list maps to one feature worktree, one branch, and one PR targeting `dev`. Keep commits conventional and focused. Include a `Commit: "<conventional message>"` sub-task after every parent group that is a tested, reviewable milestone. The final parent group must end with `Open PR → squash-merge to dev` (using `wt pr` when authorized) and `Run wt done [feature-name] after merge` to archive the completed checklist back to the dev worktree and clean up the feature worktree.
+
+## Slicing & Build Order
+
+The problem to avoid is not "backend before frontend" — it's building one whole **layer** before the other, in either direction. Backend-first leaves nothing to look at until late; strict frontend-first leaves the demo wired to fake data, which *looks* done but does nothing.
+
+- **Default to vertical slices, not layer-first.** Structure parent-task groups as thin end-to-end features (one narrow real path through both layers, demoable), not "Group 1 = all backend, Group 2 = all frontend." Thicken both sides in later groups.
+- **Within a single branch, dev order is free — order it for the fastest honest feedback.** When the UX is the uncertain part (new screen, novel interaction), build the frontend first against hardcoded stubs, react to the layout, *then* wire the real backend, *then* open the PR. Throwaway stub scaffolding is a cheap price for seeing the surface early.
+- **The one guardrail — never merge a mock-backed frontend.** Frontend-first is a *within-branch development order*, not a *merge order*. Every PR that merges to `dev` must be real end-to-end; a fake-data UI merged as-is ships dead/lying surface.
+- **Optional prototype demo.** To get eyes on the UX before committing backend effort, add an early `Prototype demo: <surface> against stubs (not wired) — design sign-off only` sub-task, kept clearly distinct from the real end-to-end validation so a stubbed prototype is never mistaken for working software.
 
 ## Tasks
 
