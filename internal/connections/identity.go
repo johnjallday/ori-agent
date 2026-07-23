@@ -163,6 +163,17 @@ type CompleteConnectParams struct {
 	OAuthError string // non-empty when Google redirected with error=...
 }
 
+// Complete consumes an OAuth callback and dispatches on the product recorded in
+// the pending state: a base identity connect, or a product enablement (Gmail).
+// A single callback route can therefore serve every flow. An unknown/expired
+// state falls through to the identity path, which reports ErrExpiredFlow.
+func (f *IdentityFlow) Complete(ctx context.Context, p CompleteConnectParams) (*Connection, error) {
+	if product, ok := f.states.Product(p.State); ok && product == ProductGmail {
+		return f.CompleteEnableGmail(ctx, p)
+	}
+	return f.CompleteConnect(ctx, p)
+}
+
 // CompleteConnect consumes the callback: it validates the state, exchanges the
 // code (with PKCE), verifies the returned ID token and nonce, and persists the
 // identity keyed on the Google subject. Reconnecting the same subject preserves

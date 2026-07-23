@@ -120,6 +120,24 @@ func (s *StateStore) Consume(state string) (PendingAuth, bool) {
 	return pa, true
 }
 
+// Product returns the product recorded for a pending state WITHOUT consuming it,
+// so a single OAuth callback route can dispatch to the right completion (base
+// identity vs product enablement). ok is false for an unknown or expired state.
+func (s *StateStore) Product(state string) (ProductKey, bool) {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evictExpiredLocked()
+	pa, ok := s.entries[state]
+	if !ok {
+		return "", false
+	}
+	return pa.Product, true
+}
+
 // Discard drops a state whose flow the caller abandoned (timeout/cancel) so a
 // late duplicate callback finds nothing to replay against.
 func (s *StateStore) Discard(state string) {

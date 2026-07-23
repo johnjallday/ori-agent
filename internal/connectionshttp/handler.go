@@ -72,6 +72,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/connect", h.guard.Wrap(http.HandlerFunc(h.connect)))
 	mux.Handle("/api/connections/google/disconnect", h.guard.Wrap(http.HandlerFunc(h.disconnect)))
 	mux.Handle("/api/connections/google/status", h.guard.Wrap(http.HandlerFunc(h.status)))
+	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
 	mux.HandleFunc("/api/connections/google/callback", h.callback)
 }
 
@@ -101,7 +102,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	conn, err := h.flow.CompleteConnect(r.Context(), connections.CompleteConnectParams{
+	conn, err := h.flow.Complete(r.Context(), connections.CompleteConnectParams{
 		State:      q.Get("state"),
 		Code:       q.Get("code"),
 		OAuthError: q.Get("error"),
@@ -132,6 +133,35 @@ func (h *Handler) disconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, connections.Project(nil))
+}
+
+// gmailEnable starts the Gmail product-enablement authorization for the active
+// identity (identity + gmail.readonly). The frontend opens the returned URL; the
+// shared callback route completes it (the pending state records the product).
+func (h *Handler) gmailEnable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	res, err := h.flow.BeginEnableGmail(connections.BeginConnectParams{
+		LocalUserID: h.resolveLocalUser(r),
+		RedirectURL: h.buildRedirectURL(r),
+		ReturnTo:    strings.TrimSpace(r.URL.Query().Get("return_to")),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, connections.ErrOAuthNotConfigured):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "not_configured", "message": "Google sign-in isn't configured in this build yet."})
+		case errors.Is(err, connections.ErrNoActiveIdentity):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "no_identity", "message": "Connect your Google account before enabling Gmail."})
+		case errors.Is(err, connections.ErrNoCredentialSink):
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unavailable", "message": "Gmail can't be enabled in this build."})
+		default:
+			http.Error(w, "failed to start Gmail enable", http.StatusInternalServerError)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": res.AuthorizeURL})
 }
 
 // userMessageFor maps a flow error to a safe, specific user-facing message. It

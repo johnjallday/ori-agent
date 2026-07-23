@@ -19,13 +19,20 @@ func (f fakeVerifier) Verify(_ context.Context, _, _ string) (connections.Identi
 	return f.id, nil
 }
 
+type fakeSink struct{}
+
+func (fakeSink) SaveGmailCredential(_ context.Context, _ connections.GmailCredential) (string, error) {
+	return "vault://email/acct-test", nil
+}
+
 func newTestServer(t *testing.T) (*http.ServeMux, *connections.Store) {
 	t.Helper()
-	// Fake Google token endpoint.
+	// Fake Google token endpoint (returns a granted scope set incl. gmail.readonly).
 	tok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "at", "token_type": "Bearer", "refresh_token": "rt", "expires_in": 3600, "id_token": "fake",
+			"scope": "openid email profile " + connections.GmailReadonlyScope,
 		})
 	}))
 	t.Cleanup(tok.Close)
@@ -33,7 +40,8 @@ func newTestServer(t *testing.T) (*http.ServeMux, *connections.Store) {
 	cfg := connections.OAuthConfig{ClientID: "ori-desktop", AuthURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: tok.URL}
 	store := connections.NewStore(t.TempDir())
 	flow := connections.NewIdentityFlow(cfg, connections.NewStateStore(time.Minute), store,
-		fakeVerifier{id: connections.Identity{Subject: "sub-1", Email: "jane@example.com", Name: "Jane"}})
+		fakeVerifier{id: connections.Identity{Subject: "sub-1", Email: "jane@example.com", Name: "Jane"}}).
+		WithCredentialSink(fakeSink{})
 
 	h := NewHandler(Deps{
 		Flow: flow, Store: store, Guard: NewOriginGuard(),
@@ -127,5 +135,53 @@ func TestHandler_Disconnect(t *testing.T) {
 	}
 	if got, _ := store.Load(); got != nil {
 		t.Fatal("disconnect should clear the stored connection")
+	}
+}
+
+func TestHandler_GmailEnable_RequiresIdentity(t *testing.T) {
+	mux, _ := newTestServer(t)
+	rec := do(mux, http.MethodPost, "http://localhost/api/connections/google/gmail/enable", "http://localhost")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "no_identity") {
+		t.Fatalf("gmail enable without identity = %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_GmailEnable_EndToEnd(t *testing.T) {
+	mux, store := newTestServer(t)
+	_ = store.Save(&connections.Connection{ID: "c", Provider: connections.ProviderGoogle, Subject: "sub-1", Email: "jane@example.com", VaultID: "v1"})
+
+	// Begin enable -> authorize URL carrying gmail.readonly.
+	rec := do(mux, http.MethodPost, "http://localhost/api/connections/google/gmail/enable", "http://localhost")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gmail enable = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		AuthorizeURL string `json:"authorize_url"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	u, _ := url.Parse(resp.AuthorizeURL)
+	if !strings.Contains(u.Query().Get("scope"), connections.GmailReadonlyScope) {
+		t.Fatalf("authorize scope missing gmail.readonly: %q", u.Query().Get("scope"))
+	}
+	state := u.Query().Get("state")
+
+	// The shared callback route dispatches to the Gmail-enable completion.
+	rec = do(mux, http.MethodGet, "http://localhost/api/connections/google/callback?state="+state+"&code=abc", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("gmail callback = %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	// Status now shows Gmail Healthy + enabled.
+	rec = do(mux, http.MethodGet, "http://localhost/api/connections/google/status", "")
+	var pub connections.PublicConnection
+	_ = json.Unmarshal(rec.Body.Bytes(), &pub)
+	var gmail connections.PublicGrant
+	for _, g := range pub.Grants {
+		if g.Product == connections.ProductGmail {
+			gmail = g
+		}
+	}
+	if gmail.Health != connections.HealthHealthy || !gmail.Enabled {
+		t.Fatalf("gmail grant after enable = %+v", gmail)
 	}
 }

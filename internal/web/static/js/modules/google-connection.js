@@ -101,15 +101,48 @@
         name.className = "gc-product-name";
         name.textContent = PRODUCT_LABELS[g.product] || g.product;
 
+        const right = document.createElement("div");
+        right.className = "gc-product-right";
+
         const pill = document.createElement("span");
         pill.className = "gc-pill";
         pill.setAttribute("data-health", g.health || "not_enabled");
         pill.textContent = HEALTH_LABELS[g.health] || (g.enabled ? "Enabled" : "Not enabled");
+        right.appendChild(pill);
+
+        // Gmail can be enabled from here; Calendar/Drive enablement arrives later.
+        if (g.product === "gmail" && !g.enabled) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "modern-btn modern-btn-secondary gc-enable-btn";
+          btn.textContent = "Enable";
+          btn.addEventListener("click", () => this.enableGmail(btn));
+          right.appendChild(btn);
+        }
 
         row.appendChild(name);
-        row.appendChild(pill);
+        row.appendChild(right);
         this.el.products.appendChild(row);
       });
+    }
+
+    async enableGmail(btn) {
+      this.hideError();
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch("/api/connections/google/gmail/enable", { method: "POST", headers: { Accept: "application/json" } });
+        const data = await res.json().catch(() => ({}));
+        if ((res.status === 409 || res.status === 503) && data.message) {
+          this.showError(data.message);
+          return;
+        }
+        if (!res.ok || !data.authorize_url) throw new Error("enable failed");
+        window.location.assign(data.authorize_url);
+      } catch (e) {
+        this.showError("Couldn't start Gmail access. Please try again.");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     async connect() {
