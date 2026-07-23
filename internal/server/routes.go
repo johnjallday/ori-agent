@@ -288,6 +288,9 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/mac-wake", s.Handlers.Settings.MacWakeSettingsHandler)
 	mux.HandleFunc("/api/settings/mac-wake/permission", s.Handlers.Settings.MacWakePermissionHandler)
 	mux.HandleFunc("/api/transcribe", s.Handlers.Speech.Transcribe)
+	if s.Handlers.Connections != nil {
+		s.Handlers.Connections.Register(mux)
+	}
 	if s.Handlers.Vault != nil {
 		mux.Handle("/api/vault", s.Handlers.Vault)
 		mux.Handle("/api/vault/", s.Handlers.Vault)

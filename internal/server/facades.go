@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
@@ -139,6 +140,7 @@ type HandlerFacade struct {
 	Review           *reviewhttp.Handler
 	Evolution        *evolutionhttp.Handler
 	Vault            *vaulthttp.Handler
+	Connections      *connectionshttp.Handler
 	ExternalAgents   *externalagentshttp.Handler
 	Skills           *skillshttp.Handler
 	CLIAgents        *cliagenthttp.Handler
