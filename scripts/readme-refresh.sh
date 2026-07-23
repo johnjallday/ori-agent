@@ -133,9 +133,6 @@ capture() {
     )" || fail "could not resolve the installed Playwright Chromium cache"
   fi
   [[ -d "$playwright_browsers_path" ]] || fail "the Playwright Chromium cache is unavailable: $playwright_browsers_path"
-  GO_ROOT="${README_CAPTURE_GOROOT:-$(go env GOROOT)}" || fail "could not resolve the active Go toolchain"
-  GO_MODULE_CACHE="${README_CAPTURE_GOMODCACHE:-$(go env GOMODCACHE)}" || fail "could not resolve the Go module cache"
-  [[ -x "${GO_ROOT}/bin/go" && -d "${GO_MODULE_CACHE}" ]] || fail "the active Go toolchain or module cache is unavailable"
   if [[ -z "${RUN_ID}" ]]; then
     RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git -C "${REPO_ROOT}" rev-parse --short HEAD)-$$"
   fi
@@ -173,6 +170,10 @@ capture() {
     [[ -x "${server_binary}" ]] || fail "test server override is not executable"
     printf 'Test-only server override: %s\n' "${server_binary}" >"${RUN_DIR}/logs/build.log"
   else
+    GO_ROOT="${README_CAPTURE_GOROOT:-$(go env GOROOT)}" || fail "could not resolve the active Go toolchain"
+    GO_MODULE_CACHE="${README_CAPTURE_GOMODCACHE:-$(go env GOMODCACHE)}" || fail "could not resolve the Go module cache"
+    [[ -x "${GO_ROOT}/bin/go" ]] || fail "the active Go toolchain is unavailable at ${GO_ROOT}/bin/go"
+    mkdir -p "${GO_MODULE_CACHE}" || fail "could not create the Go module cache directory: ${GO_MODULE_CACHE}"
     server_binary="${RUN_DIR}/ori-agent"
     (
       cd "${REPO_ROOT}"
