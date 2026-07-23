@@ -532,7 +532,7 @@ function wt_repl {
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, backlog, merge, help  (q to quit)"
+  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, backlog, herd, merge, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -558,6 +558,23 @@ function wt {
     return $?
   fi
   wt_dispatch "$@"
+}
+
+function wt_herd {
+  # Delegate bridge behavior to a small Go helper rather than growing the
+  # worktree manager into a terminal/session implementation. The helper finds
+  # repository-local configuration and keeps mutable runtime state outside Git.
+  local repo_root helper
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "wt herd must run from an Ori Git worktree"
+    return 1
+  }
+  helper="$repo_root/scripts/herdr-devflow.sh"
+  if [[ ! -f "$helper" ]]; then
+    echo "Herdr bridge helper not found: $helper"
+    return 1
+  fi
+  bash "$helper" "$@"
 }
 
 function wt_dispatch {
@@ -654,6 +671,10 @@ function wt_dispatch {
 
     cd "$target"
     echo "Changed to: $target"
+    ;;
+  herd)
+    shift
+    wt_herd "$@"
     ;;
   new)
     local name="$2"
@@ -1144,6 +1165,7 @@ function wt_dispatch {
     echo "  wt status        - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
+    echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
     echo "  wt backlog [sub] - BACKLOG.md: list (default) | add <idea> | sync (scoped commit+push to $BASE_BRANCH)"
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;

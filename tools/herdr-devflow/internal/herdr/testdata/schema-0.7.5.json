@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "protocol": 17,
+  "schema_version": 1,
+  "schemas": {
+    "request": {
+      "oneOf": [
+        { "properties": { "method": { "const": "plugin.link" } } },
+        { "properties": { "method": { "const": "plugin.enable" } } },
+        { "properties": { "method": { "const": "session.snapshot" } } },
+        { "properties": { "method": { "const": "worktree.open" } } },
+        { "properties": { "method": { "const": "workspace.close" } } },
+        { "properties": { "method": { "const": "pane.split" } } },
+        { "properties": { "method": { "const": "agent.start" } } },
+        { "properties": { "method": { "const": "agent.view.set" } } },
+        { "properties": { "method": { "const": "events.subscribe" } } }
+      ]
+    }
+  }
+}

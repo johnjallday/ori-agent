@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow
 
 # Default target
 .DEFAULT_GOAL := help
@@ -80,6 +80,11 @@ menubar: ## Build the menu bar app
 	$(GOBUILD) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(MENUBAR_BINARY_NAME) ./cmd/menubar
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/$(MENUBAR_BINARY_NAME)$(NC)"
 
+herdr-devflow: ## Build the Ori-to-Herdr devflow helper
+	@echo "$(BLUE)Building Herdr devflow helper...$(NC)"
+	$(GOBUILD) -o $(BUILD_DIR)/herdr-devflow ./tools/herdr-devflow/cmd/herdr-devflow
+	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/herdr-devflow$(NC)"
+
 
 icons: ## Generate menubar and app icons from SVG
 	@echo "$(BLUE)Generating icons...$(NC)"
@@ -157,6 +162,10 @@ test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
 	$(GOTEST) -v -short $$(go list ./... | grep -v '/tests$$')
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
+
+test-herdr-devflow: ## Run focused Ori-to-Herdr bridge tests
+	$(GOTEST) ./tools/herdr-devflow/...
+	@bash scripts/herdr-devflow.test.sh
 
 test-integration: ## Run integration tests
 	@echo "$(BLUE)Running integration tests...$(NC)"

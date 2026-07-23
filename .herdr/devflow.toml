@@ -1,0 +1,30 @@
+# Opt-in defaults for the Ori <-> Herdr devflow bridge.
+# Runtime state, installed plugin files, schedules, and logs live outside Git.
+
+[bridge]
+enabled = true
+min_herdr_version = "0.7.5"
+source_id = "ori.devflow"
+
+[primary]
+role = "builder"
+kind = "claude"
+
+[roles]
+default_kind = "claude"
+
+[roles.defaults]
+reviewer = "claude"
+tester = "claude"
+
+[bootstrap]
+timeout_seconds = 30
+
+[scheduler]
+retry_window = "15m"
+
+[metadata]
+enabled = true
+
+[status]
+watch_poll_interval = "2s"
