@@ -19,6 +19,7 @@ const (
 type Paths struct {
 	RepoRoot         string
 	RepositoryID     string
+	GitCommonDir     string
 	ConfigPath       string
 	RuntimeRoot      string
 	StateDir         string
@@ -78,9 +79,11 @@ func Resolve(repoRoot string, lookupEnv func(string) (string, bool)) (Paths, err
 		return Paths{}, fmt.Errorf("%s must be outside the Git checkout", HomeOverrideEnv)
 	}
 
+	commonDir := gitCommonDir(canonicalRepo)
 	return Paths{
 		RepoRoot:         canonicalRepo,
-		RepositoryID:     repositoryID(canonicalRepo),
+		RepositoryID:     RepositoryID(commonDir),
+		GitCommonDir:     commonDir,
 		ConfigPath:       configPath,
 		RuntimeRoot:      runtimeRoot,
 		StateDir:         filepath.Join(runtimeRoot, "state"),
@@ -138,10 +141,13 @@ func within(parent, candidate string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func repositoryID(repoRoot string) string {
-	sum := sha256.Sum256([]byte(repoRoot))
+// RepositoryID creates a stable local identity from a common Git directory.
+// All linked worktrees of one repository share that directory, unlike their
+// separate checkout roots.
+func RepositoryID(gitCommonDir string) string {
+	sum := sha256.Sum256([]byte(gitCommonDir))
 	short := hex.EncodeToString(sum[:])[:10]
-	base := strings.ToLower(filepath.Base(repoRoot))
+	base := strings.ToLower(filepath.Base(gitCommonDir))
 	base = strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
 			return r
@@ -153,4 +159,49 @@ func repositoryID(repoRoot string) string {
 		base = "repo"
 	}
 	return base + "-" + short
+}
+
+func gitCommonDir(repoRoot string) string {
+	gitPath := filepath.Join(repoRoot, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return repoRoot
+	}
+	if info.IsDir() {
+		if canonical, err := canonicalPath(gitPath); err == nil {
+			return canonical
+		}
+		return gitPath
+	}
+	contents, err := os.ReadFile(gitPath)
+	if err != nil {
+		return repoRoot
+	}
+	line := strings.TrimSpace(string(contents))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return repoRoot
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(repoRoot, gitDir)
+	}
+	gitDir, err = canonicalPath(gitDir)
+	if err != nil {
+		return repoRoot
+	}
+	commonFile := filepath.Join(gitDir, "commondir")
+	commonContents, err := os.ReadFile(commonFile)
+	if err != nil {
+		return gitDir
+	}
+	commonDir := strings.TrimSpace(string(commonContents))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(gitDir, commonDir)
+	}
+	canonical, err := canonicalPath(commonDir)
+	if err != nil {
+		return commonDir
+	}
+	return canonical
 }

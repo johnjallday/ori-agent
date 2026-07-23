@@ -1,8 +1,12 @@
 package state
 
 import (
+	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
@@ -48,5 +52,31 @@ func TestStoreRejectsCorruptOrFutureState(t *testing.T) {
 	}
 	if _, err := store.Load(); err == nil {
 		t.Fatal("Load() accepted a future state version")
+	}
+}
+
+func TestStoreLockSerializesBridgeOperations(t *testing.T) {
+	t.Parallel()
+	store := New(t.TempDir())
+	unlock, err := store.Lock(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	_, err = store.Lock(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second Lock() error = %v, want deadline while first lock is held", err)
+	}
+	unlock()
+
+	unlockAgain, err := store.Lock(context.Background())
+	if err != nil {
+		t.Fatalf("Lock() after release: %v", err)
+	}
+	unlockAgain()
+	info, err := os.Stat(filepath.Join(store.dir, lockFileName))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("lock file = %#v, %v", info, err)
 	}
 }

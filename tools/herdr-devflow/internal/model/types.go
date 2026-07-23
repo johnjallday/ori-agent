@@ -129,8 +129,31 @@ type FeatureState struct {
 	WorkspaceID string               `json:"workspace_id,omitempty"`
 	Agents      map[string]RoleAgent `json:"agents,omitempty"`
 	Schedules   map[string]Schedule  `json:"schedules,omitempty"`
+	Handoff     HandoffState         `json:"handoff,omitempty"`
 	UpdatedAt   time.Time            `json:"updated_at"`
 }
+
+// HandoffState is persisted before the bridge changes Herdr. Each completed
+// stage is written atomically so retry can resume only missing work and never
+// resend a confirmed bootstrap prompt without an explicit later override.
+type HandoffState struct {
+	Stage             HandoffStage `json:"stage,omitempty"`
+	RootPaneID        string       `json:"root_pane_id,omitempty"`
+	PrimaryRole       string       `json:"primary_role,omitempty"`
+	PrimaryAgentName  string       `json:"primary_agent_name,omitempty"`
+	BootstrapPrompted bool         `json:"bootstrap_prompted,omitempty"`
+	UpdatedAt         time.Time    `json:"updated_at,omitempty"`
+}
+
+type HandoffStage string
+
+const (
+	HandoffRecorded        HandoffStage = "recorded"
+	HandoffWorkspaceOpened HandoffStage = "workspace_opened"
+	HandoffPrimaryStarted  HandoffStage = "primary_started"
+	HandoffReady           HandoffStage = "ready"
+	HandoffPrompted        HandoffStage = "prompted"
+)
 
 func NewBridgeState() BridgeState {
 	return BridgeState{

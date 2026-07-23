@@ -5,7 +5,7 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt start [prd]          # Create a worktree from a PRD in the dev tasks/ folder
+#   wt start [prd] [--no-herdr] # Create a worktree from a PRD in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name]          # Archive tasks back to dev, then remove worktree+branch
@@ -36,7 +36,7 @@ PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
 #   bypassPermissions - skip all prompts, fully unattended (use for headless runs)
 FEATURE_WORKTREE_PERMISSION_MODE="acceptEdits"
 
-unalias wt 2>/dev/null
+unalias wt 2>/dev/null || true
 
 function wt_is_protected_worktree {
   local candidate="$1"
@@ -612,7 +612,26 @@ function wt_dispatch {
       return 1
     fi
 
-    local chosen="$2"
+    local chosen="" no_herdr=0 start_arg
+    for start_arg in "${@:2}"; do
+      case "$start_arg" in
+        --no-herdr)
+          no_herdr=1
+          ;;
+        --*)
+          echo "Unknown wt start option: $start_arg"
+          echo "Usage: wt start [feature] [--no-herdr]"
+          return 1
+          ;;
+        *)
+          if [[ -n "$chosen" ]]; then
+            echo "wt start accepts one PRD/feature name (got: $chosen and $start_arg)"
+            return 1
+          fi
+          chosen="$start_arg"
+          ;;
+      esac
+    done
     if [[ -z "$chosen" ]]; then
       echo "Select a PRD to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
       local i
@@ -667,6 +686,20 @@ function wt_dispatch {
     if [[ -f "$dev_path/BACKLOG.md" ]]; then
       wt_backlog_ensure_doing "$dev_path/BACKLOG.md" "$feature" \
         && wt_backlog_commit_push "$dev_path" "docs(backlog): promote $feature to Doing"
+    fi
+
+    # Git provisioning remains successful even when Herdr isn't installed,
+    # unavailable, or needs recovery. Handoff happens only after the real
+    # worktree and its planning artifacts exist; it never rolls them back.
+    if (( ! no_herdr )); then
+      echo "Handing the existing worktree to Herdr..."
+      if ! wt_herd handoff --feature "$feature" --worktree "$target" --branch "$branch"; then
+        echo "Herdr handoff did not finish, but the Git worktree is ready."
+        echo "  Retry: wt herd retry --feature '$feature' --worktree '$target' --branch '$branch'"
+        echo "  Diagnose: wt herd doctor"
+      fi
+    else
+      echo "Skipping Herdr handoff (--no-herdr)."
     fi
 
     cd "$target"
@@ -1156,7 +1189,7 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt start [prd]   - Create worktree from a PRD in the dev tasks/ folder"
+    echo "  wt start [prd] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name]   - Archive tasks to dev, remove worktree+branch, rebase dev"

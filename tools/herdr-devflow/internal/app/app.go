@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
@@ -108,12 +109,56 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.setup(ctx, opts)
 	case "doctor":
 		return a.doctor(ctx, opts)
+	case "handoff":
+		return a.handoff(ctx, opts, commandArgs, false)
+	case "retry":
+		return a.handoff(ctx, opts, commandArgs, true)
 	case "plugin":
 		return a.plugin(ctx, opts, commandArgs)
 	default:
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
 	}
+}
+
+type handoffArgs struct {
+	feature  string
+	worktree string
+	branch   string
+	resend   bool
+}
+
+func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
+	var parsed handoffArgs
+	for len(args) > 0 {
+		switch args[0] {
+		case "--feature", "--worktree", "--branch":
+			if len(args) < 2 || strings.HasPrefix(args[1], "--") {
+				return handoffArgs{}, fmt.Errorf("%s requires a value", args[0])
+			}
+			switch args[0] {
+			case "--feature":
+				parsed.feature = args[1]
+			case "--worktree":
+				parsed.worktree = args[1]
+			case "--branch":
+				parsed.branch = args[1]
+			}
+			args = args[2:]
+		case "--resend":
+			if !retry {
+				return handoffArgs{}, fmt.Errorf("--resend is only available with retry")
+			}
+			parsed.resend = true
+			args = args[1:]
+		default:
+			return handoffArgs{}, fmt.Errorf("unknown handoff option %q", args[0])
+		}
+	}
+	if !retry && (parsed.feature == "" || parsed.worktree == "") {
+		return handoffArgs{}, fmt.Errorf("handoff requires --feature and --worktree")
+	}
+	return parsed, nil
 }
 
 func parseArgs(args []string) (options, string, []string, error) {
@@ -274,6 +319,104 @@ func (a *App) setup(ctx context.Context, opts options) int {
 		},
 	})
 	return 0
+}
+
+func (a *App) handoff(ctx context.Context, opts options, args []string, retry bool) int {
+	parsed, err := parseHandoffArgs(args, retry)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return 1
+	}
+	if !runtime.config.Bridge.Enabled {
+		a.writeResult(opts.json, map[string]any{"status": "disabled", "message": "Ori Herdr Devflow is disabled; the Git worktree remains ready without a Herdr handoff."})
+		return 0
+	}
+	if err := verifyCompatibility(ctx, runtime.herdr, runtime.config); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if retry {
+		if parsed.worktree == "" {
+			cwd, cwdErr := a.getwd()
+			if cwdErr != nil {
+				a.writeError(&model.StageError{Stage: "retry", Code: model.ErrWorktreeInvalid, Message: "could not resolve the current worktree", Recovery: "pass --worktree <path>", Cause: cwdErr}, opts.json)
+				return 1
+			}
+			parsed.worktree, cwdErr = worktree.FindRepoRoot(cwd)
+			if cwdErr != nil {
+				a.writeError(&model.StageError{Stage: "retry", Code: model.ErrWorktreeInvalid, Message: "retry must run from a feature Git worktree", Recovery: "pass --worktree <path>", Cause: cwdErr}, opts.json)
+				return 1
+			}
+		}
+		if parsed.feature == "" {
+			parsed.feature = a.featureForPath(runtime.paths.StateDir, runtime.paths.RepositoryID, parsed.worktree)
+			if parsed.feature == "" {
+				parsed.feature = filepath.Base(parsed.worktree)
+			}
+		}
+	}
+	service := &agents.Service{
+		Config:       runtime.config,
+		RepositoryID: runtime.paths.RepositoryID,
+		GitCommonDir: runtime.paths.GitCommonDir,
+		Client:       runtime.herdr,
+		Store:        state.New(runtime.paths.StateDir),
+	}
+	result, err := service.Handoff(ctx, agents.HandoffRequest{
+		FeatureName:  parsed.feature,
+		WorktreePath: parsed.worktree,
+		Branch:       parsed.branch,
+		Resend:       parsed.resend,
+	})
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	a.writeResult(opts.json, map[string]any{
+		"status":           "ready",
+		"feature":          result.Feature.Name,
+		"worktree":         result.Feature.Path,
+		"workspace_id":     result.WorkspaceID,
+		"primary_agent":    result.Primary.Name,
+		"primary_role":     result.Primary.Role,
+		"prompt_delivered": result.PromptDelivered,
+		"prompt_skipped":   result.PromptSkipped,
+	})
+	return 0
+}
+
+func (a *App) featureForPath(stateDir, repositoryID, candidatePath string) string {
+	store := state.New(stateDir)
+	bridgeState, err := store.Load()
+	if err != nil {
+		return ""
+	}
+	for key, featureState := range bridgeState.Features {
+		if !strings.HasPrefix(key, repositoryID+":") {
+			continue
+		}
+		if sameFilesystemPath(featureState.Feature.Path, candidatePath) {
+			return featureState.Feature.Name
+		}
+	}
+	return ""
+}
+
+func sameFilesystemPath(left, right string) bool {
+	leftResolved, leftErr := filepath.EvalSymlinks(left)
+	rightResolved, rightErr := filepath.EvalSymlinks(right)
+	if leftErr == nil {
+		left = leftResolved
+	}
+	if rightErr == nil {
+		right = rightResolved
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
 }
 
 func verifyCompatibility(ctx context.Context, client *herdr.Client, cfg config.Config) error {
@@ -524,6 +667,10 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
+  wt herd handoff --feature NAME --worktree PATH [--branch NAME]
+                                Open an existing Git worktree and launch its primary agent
+  wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
+                                Resume only missing handoff stages; --resend repeats a confirmed prompt
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 
 Global options (before the command):

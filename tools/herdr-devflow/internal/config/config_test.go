@@ -84,6 +84,12 @@ func TestLoadRejectsUnknownAndUnsafeConfiguration(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "primary.role") {
 		t.Fatalf("Load() error = %v, want role validation error", err)
 	}
+	if err := os.WriteFile(path, []byte("[primary]\nkind = \"invented-agent\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, nil); err == nil || !strings.Contains(err.Error(), "Herdr-supported") {
+		t.Fatalf("Load() error = %v, want supported-kind validation error", err)
+	}
 }
 
 func TestParseVersion(t *testing.T) {

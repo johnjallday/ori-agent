@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -209,6 +210,62 @@ type PluginInfo struct {
 	Warnings   []string `json:"warnings"`
 }
 
+type WorkspaceInfo struct {
+	WorkspaceID string `json:"workspace_id"`
+	Cwd         string `json:"cwd"`
+	Label       string `json:"label"`
+}
+
+type TabInfo struct {
+	TabID       string `json:"tab_id"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type PaneInfo struct {
+	PaneID           string               `json:"pane_id"`
+	TerminalID       string               `json:"terminal_id"`
+	WorkspaceID      string               `json:"workspace_id"`
+	TabID            string               `json:"tab_id"`
+	Cwd              string               `json:"cwd"`
+	ForegroundCwd    string               `json:"foreground_cwd"`
+	Agent            string               `json:"agent"`
+	Name             string               `json:"name"`
+	AgentStatus      model.AgentStatus    `json:"agent_status"`
+	InteractiveReady bool                 `json:"interactive_ready"`
+	LaunchPending    bool                 `json:"launch_pending"`
+	AgentSession     *model.NativeSession `json:"agent_session"`
+}
+
+type AgentInfo = PaneInfo
+
+type WorktreeInfo struct {
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	Repository string `json:"repository"`
+}
+
+type WorktreeOpenResult struct {
+	Type        string        `json:"type"`
+	AlreadyOpen bool          `json:"already_open"`
+	Workspace   WorkspaceInfo `json:"workspace"`
+	Tab         TabInfo       `json:"tab"`
+	RootPane    PaneInfo      `json:"root_pane"`
+	Worktree    WorktreeInfo  `json:"worktree"`
+}
+
+type PaneProcessInfo struct {
+	PaneID                   string              `json:"pane_id"`
+	ShellPID                 *int64              `json:"shell_pid"`
+	ForegroundProcessGroupID *int64              `json:"foreground_process_group_id"`
+	ForegroundProcesses      []ForegroundProcess `json:"foreground_processes"`
+}
+
+type ForegroundProcess struct {
+	PID  int64  `json:"pid"`
+	Name string `json:"name"`
+	Cwd  string `json:"cwd"`
+}
+
 func (c *Client) PluginList(ctx context.Context, pluginID string) ([]PluginInfo, error) {
 	args := []string{"plugin", "list", "--json"}
 	if pluginID != "" {
@@ -292,12 +349,44 @@ func (c *Client) WorktreeOpen(ctx context.Context, path string) (json.RawMessage
 	return c.CLIJSON(ctx, "worktree", "open", "--path", path, "--no-focus", "--json")
 }
 
+func (c *Client) OpenExistingWorktree(ctx context.Context, path string) (WorktreeOpenResult, error) {
+	raw, err := c.WorktreeOpen(ctx, path)
+	if err != nil {
+		return WorktreeOpenResult{}, err
+	}
+	var result WorktreeOpenResult
+	if err := decodeResult("worktree open", raw, &result); err != nil {
+		return WorktreeOpenResult{}, err
+	}
+	if result.Type != "worktree_opened" || result.Workspace.WorkspaceID == "" || result.RootPane.PaneID == "" || result.Tab.TabID == "" {
+		return WorktreeOpenResult{}, &model.StageError{Stage: "worktree open", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return an existing workspace, tab, and root pane", Recovery: "wt herd doctor"}
+	}
+	return result, nil
+}
+
 func (c *Client) WorkspaceClose(ctx context.Context, workspaceID string) (json.RawMessage, error) {
 	return c.CLIJSON(ctx, "workspace", "close", workspaceID)
 }
 
 func (c *Client) PaneSplit(ctx context.Context, paneID, direction, cwd string) (json.RawMessage, error) {
 	return c.CLIJSON(ctx, "pane", "split", paneID, "--direction", direction, "--cwd", cwd, "--no-focus")
+}
+
+func (c *Client) PaneProcessInfo(ctx context.Context, paneID string) (PaneProcessInfo, error) {
+	raw, err := c.CLIJSON(ctx, "pane", "process-info", "--pane", paneID)
+	if err != nil {
+		return PaneProcessInfo{}, err
+	}
+	var response struct {
+		ProcessInfo PaneProcessInfo `json:"process_info"`
+	}
+	if err := decodeResult("pane process info", raw, &response); err != nil {
+		return PaneProcessInfo{}, err
+	}
+	if response.ProcessInfo.PaneID == "" {
+		return PaneProcessInfo{}, &model.StageError{Stage: "pane process info", Code: model.ErrHerdrUnavailable, Message: "Herdr returned no pane process information", Recovery: "wt herd retry"}
+	}
+	return response.ProcessInfo, nil
 }
 
 func (c *Client) AgentList(ctx context.Context) (json.RawMessage, error) {
@@ -308,12 +397,71 @@ func (c *Client) AgentGet(ctx context.Context, target string) (json.RawMessage, 
 	return c.CLIJSON(ctx, "agent", "get", target)
 }
 
+func (c *Client) AgentGetInfo(ctx context.Context, target string) (AgentInfo, error) {
+	raw, err := c.AgentGet(ctx, target)
+	if err != nil {
+		return AgentInfo{}, err
+	}
+	var response struct {
+		Agent AgentInfo `json:"agent"`
+	}
+	if err := decodeResult("agent get", raw, &response); err != nil {
+		return AgentInfo{}, err
+	}
+	if response.Agent.PaneID == "" {
+		return AgentInfo{}, &model.StageError{Stage: "agent get", Code: model.ErrAgentMissing, Message: "Herdr returned no agent identity", Recovery: "wt herd status"}
+	}
+	return response.Agent, nil
+}
+
+func (c *Client) AgentListInfo(ctx context.Context) ([]AgentInfo, error) {
+	raw, err := c.AgentList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Agents []AgentInfo `json:"agents"`
+	}
+	if err := decodeResult("agent list", raw, &response); err != nil {
+		return nil, err
+	}
+	return response.Agents, nil
+}
+
 func (c *Client) AgentStart(ctx context.Context, name, kind, paneID string, timeout time.Duration) (json.RawMessage, error) {
 	return c.CLIJSON(ctx, "agent", "start", name, "--kind", kind, "--pane", paneID, "--timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
 }
 
+func (c *Client) AgentStartInfo(ctx context.Context, name, kind, paneID string, timeout time.Duration) (AgentInfo, error) {
+	raw, err := c.AgentStart(ctx, name, kind, paneID, timeout)
+	if err != nil {
+		return AgentInfo{}, err
+	}
+	var response struct {
+		Agent AgentInfo `json:"agent"`
+	}
+	if err := decodeResult("agent start", raw, &response); err != nil {
+		return AgentInfo{}, err
+	}
+	return response.Agent, nil
+}
+
 func (c *Client) AgentPrompt(ctx context.Context, target, text string, timeout time.Duration) (json.RawMessage, error) {
 	return c.CLIJSON(ctx, "agent", "prompt", target, text, "--wait", "--timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+}
+
+func (c *Client) AgentPromptInfo(ctx context.Context, target, text string, timeout time.Duration) (AgentInfo, error) {
+	raw, err := c.AgentPrompt(ctx, target, text, timeout)
+	if err != nil {
+		return AgentInfo{}, err
+	}
+	var response struct {
+		Agent AgentInfo `json:"agent"`
+	}
+	if err := decodeResult("agent prompt", raw, &response); err != nil {
+		return AgentInfo{}, err
+	}
+	return response.Agent, nil
 }
 
 func (c *Client) AgentRename(ctx context.Context, target, name string) (json.RawMessage, error) {
@@ -329,19 +477,44 @@ func (c *Client) AgentRead(ctx context.Context, target string, lines int) (json.
 }
 
 func (c *Client) ReportWorkspaceMetadata(ctx context.Context, workspaceID, source string, tokens map[string]string) (json.RawMessage, error) {
-	return c.CallSocket(ctx, "workspace.report_metadata", map[string]any{
-		"workspace_id": workspaceID,
-		"source":       source,
-		"tokens":       tokens,
-	})
+	if c.SocketPath != "" {
+		return c.CallSocket(ctx, "workspace.report_metadata", map[string]any{
+			"workspace_id": workspaceID,
+			"source":       source,
+			"tokens":       tokens,
+		})
+	}
+	args := []string{"workspace", "report-metadata", workspaceID, "--source", source}
+	for _, key := range sortedTokenKeys(tokens) {
+		value := tokens[key]
+		args = append(args, "--token", key+"="+value)
+	}
+	return c.CLIJSON(ctx, args...)
 }
 
 func (c *Client) ReportPaneMetadata(ctx context.Context, paneID, source string, tokens map[string]string) (json.RawMessage, error) {
-	return c.CallSocket(ctx, "pane.report_metadata", map[string]any{
-		"pane_id": paneID,
-		"source":  source,
-		"tokens":  tokens,
-	})
+	if c.SocketPath != "" {
+		return c.CallSocket(ctx, "pane.report_metadata", map[string]any{
+			"pane_id": paneID,
+			"source":  source,
+			"tokens":  tokens,
+		})
+	}
+	args := []string{"pane", "report-metadata", paneID, "--source", source}
+	for _, key := range sortedTokenKeys(tokens) {
+		value := tokens[key]
+		args = append(args, "--token", key+"="+value)
+	}
+	return c.CLIJSON(ctx, args...)
+}
+
+func sortedTokenKeys(tokens map[string]string) []string {
+	keys := make([]string, 0, len(tokens))
+	for key := range tokens {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (c *Client) SetAgentView(ctx context.Context, params map[string]any) (json.RawMessage, error) {
@@ -463,6 +636,13 @@ func (s *EventStream) Close() error {
 		return nil
 	}
 	return s.Connection.Close()
+}
+
+func decodeResult(stage string, raw json.RawMessage, destination any) error {
+	if err := json.Unmarshal(raw, destination); err != nil {
+		return &model.StageError{Stage: stage, Code: model.ErrHerdrUnavailable, Message: "Herdr returned an unexpected structured response", Recovery: "wt herd doctor", Cause: err}
+	}
+	return nil
 }
 
 func decodeJSONResponse(raw []byte) (json.RawMessage, error) {

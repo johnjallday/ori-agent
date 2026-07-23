@@ -110,3 +110,55 @@ func TestIntegrationStatusIsOpaqueAndRedacted(t *testing.T) {
 		t.Fatalf("IntegrationStatus() = %q", status)
 	}
 }
+
+func TestOpenExistingWorktreeUsesOnlyTheDocumentedOpenOperation(t *testing.T) {
+	t.Parallel()
+	const path = "/tmp/ori-feature"
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"worktree open --path /tmp/ori-feature --no-focus --json": {
+			Stdout: []byte(`{"result":{"type":"worktree_opened","already_open":true,"workspace":{"workspace_id":"w1","cwd":"/tmp/ori-feature"},"tab":{"tab_id":"w1:t1","workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1","terminal_id":"term-1","workspace_id":"w1","tab_id":"w1:t1","cwd":"/tmp/ori-feature","foreground_cwd":"/tmp/ori-feature"},"worktree":{"path":"/tmp/ori-feature","branch":"feature/bridge"}}}`),
+		},
+	}}
+	opened, err := New("fake-herdr", "", runner).OpenExistingWorktree(context.Background(), path)
+	if err != nil || !opened.AlreadyOpen || opened.RootPane.PaneID != "w1:p1" || opened.Worktree.Path != path {
+		t.Fatalf("OpenExistingWorktree() = %#v, %v", opened, err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("Herdr calls = %#v, want exactly one open", runner.calls)
+	}
+	for _, argument := range runner.calls[0].Args {
+		if argument == "create" || argument == "remove" {
+			t.Fatalf("forbidden Herdr worktree mutation in %#v", runner.calls[0])
+		}
+	}
+}
+
+func TestMetadataCommandUsesStableTokenOrder(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"workspace report-metadata w1 --source ori.devflow --token branch=feature/bridge --token feature=bridge --token repository=repo-1": {Stdout: []byte(`{"result":{"type":"workspace_metadata"}}`)},
+	}}
+	_, err := New("fake-herdr", "", runner).ReportWorkspaceMetadata(context.Background(), "w1", "ori.devflow", map[string]string{
+		"repository": "repo-1",
+		"feature":    "bridge",
+		"branch":     "feature/bridge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(runner.calls[0].Args, " "); got != "workspace report-metadata w1 --source ori.devflow --token branch=feature/bridge --token feature=bridge --token repository=repo-1" {
+		t.Fatalf("metadata command = %q", got)
+	}
+}
+
+func TestCallSocketReportsAnActionableUnavailableError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket fixture")
+	}
+	t.Parallel()
+	_, err := New("unused", filepath.Join(t.TempDir(), "missing.sock"), nil).Ping(context.Background())
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrHerdrUnavailable || stage.Recovery == "" {
+		t.Fatalf("Ping() error = %#v, want actionable unavailable error", err)
+	}
+}

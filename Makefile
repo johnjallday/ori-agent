@@ -166,6 +166,7 @@ test-unit: ## Run unit tests only
 test-herdr-devflow: ## Run focused Ori-to-Herdr bridge tests
 	$(GOTEST) ./tools/herdr-devflow/...
 	@bash scripts/herdr-devflow.test.sh
+	@zsh scripts/wt-herd.test.sh
 
 test-integration: ## Run integration tests
 	@echo "$(BLUE)Running integration tests...$(NC)"

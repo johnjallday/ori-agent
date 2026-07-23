@@ -17,6 +17,9 @@ const DefaultConfigRelativePath = ".herdr/devflow.toml"
 
 var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 var sourcePattern = regexp.MustCompile(`^[A-Za-z0-9:._-]{1,80}$`)
+var supportedAgentKinds = map[string]struct{}{
+	"pi": {}, "claude": {}, "codex": {}, "gemini": {}, "cursor": {}, "devin": {}, "agy": {}, "cline": {}, "omp": {}, "mastracode": {}, "opencode": {}, "copilot": {}, "kimi": {}, "kiro": {}, "droid": {}, "amp": {}, "grok": {}, "hermes": {}, "kilo": {}, "qodercli": {}, "maki": {},
+}
 
 type Config struct {
 	Bridge    BridgeConfig    `toml:"bridge"`
@@ -29,6 +32,7 @@ type Config struct {
 }
 
 type BridgeConfig struct {
+	SchemaVersion   int    `toml:"schema_version"`
 	Enabled         bool   `toml:"enabled"`
 	MinHerdrVersion string `toml:"min_herdr_version"`
 	SourceID        string `toml:"source_id"`
@@ -45,7 +49,8 @@ type RolesConfig struct {
 }
 
 type BootstrapConfig struct {
-	TimeoutSeconds int `toml:"timeout_seconds"`
+	Template       string `toml:"template"`
+	TimeoutSeconds int    `toml:"timeout_seconds"`
 }
 
 type SchedulerConfig struct {
@@ -63,6 +68,7 @@ type StatusConfig struct {
 func Default() Config {
 	return Config{
 		Bridge: BridgeConfig{
+			SchemaVersion:   1,
 			Enabled:         true,
 			MinHerdrVersion: "0.7.5",
 			SourceID:        "ori.devflow",
@@ -75,7 +81,7 @@ func Default() Config {
 				"tester":   "claude",
 			},
 		},
-		Bootstrap: BootstrapConfig{TimeoutSeconds: 30},
+		Bootstrap: BootstrapConfig{Template: "primary-v1", TimeoutSeconds: 30},
 		Scheduler: SchedulerConfig{RetryWindow: "15m"},
 		Metadata:  MetadataConfig{Enabled: true},
 		Status:    StatusConfig{WatchPollInterval: "2s"},
@@ -112,6 +118,9 @@ func Load(path string, lookupEnv func(string) (string, bool)) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if c.Bridge.SchemaVersion != 1 {
+		return fmt.Errorf("bridge.schema_version must be 1")
+	}
 	if !sourcePattern.MatchString(c.Bridge.SourceID) {
 		return fmt.Errorf("bridge.source_id must use 1-80 ASCII letters, digits, colon, dot, underscore, or hyphen")
 	}
@@ -121,19 +130,22 @@ func (c Config) Validate() error {
 	if !identifierPattern.MatchString(c.Primary.Role) {
 		return fmt.Errorf("primary.role must match %s", identifierPattern.String())
 	}
-	if !identifierPattern.MatchString(c.Primary.Kind) {
-		return fmt.Errorf("primary.kind must match %s", identifierPattern.String())
+	if !supportedAgentKind(c.Primary.Kind) {
+		return fmt.Errorf("primary.kind must be a Herdr-supported agent kind")
 	}
-	if !identifierPattern.MatchString(c.Roles.DefaultKind) {
-		return fmt.Errorf("roles.default_kind must match %s", identifierPattern.String())
+	if !supportedAgentKind(c.Roles.DefaultKind) {
+		return fmt.Errorf("roles.default_kind must be a Herdr-supported agent kind")
 	}
 	for role, kind := range c.Roles.Defaults {
 		if !identifierPattern.MatchString(role) {
 			return fmt.Errorf("roles.defaults.%s must match %s", role, identifierPattern.String())
 		}
-		if !identifierPattern.MatchString(kind) {
-			return fmt.Errorf("roles.defaults.%s must be an agent kind matching %s", role, identifierPattern.String())
+		if !supportedAgentKind(kind) {
+			return fmt.Errorf("roles.defaults.%s must be a Herdr-supported agent kind", role)
 		}
+	}
+	if c.Bootstrap.Template != "primary-v1" {
+		return fmt.Errorf("bootstrap.template must be primary-v1")
 	}
 	if c.Bootstrap.TimeoutSeconds < 3 || c.Bootstrap.TimeoutSeconds > 300 {
 		return fmt.Errorf("bootstrap.timeout_seconds must be between 3 and 300")
@@ -145,6 +157,14 @@ func (c Config) Validate() error {
 		return fmt.Errorf("status.watch_poll_interval must be a positive Go duration")
 	}
 	return nil
+}
+
+func supportedAgentKind(kind string) bool {
+	if !identifierPattern.MatchString(kind) {
+		return false
+	}
+	_, ok := supportedAgentKinds[kind]
+	return ok
 }
 
 func (c Config) RoleKind(role string) string {

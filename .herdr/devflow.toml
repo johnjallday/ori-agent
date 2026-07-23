@@ -2,6 +2,7 @@
 # Runtime state, installed plugin files, schedules, and logs live outside Git.
 
 [bridge]
+schema_version = 1
 enabled = true
 min_herdr_version = "0.7.5"
 source_id = "ori.devflow"
@@ -18,6 +19,7 @@ reviewer = "claude"
 tester = "claude"
 
 [bootstrap]
+template = "primary-v1"
 timeout_seconds = 30
 
 [scheduler]

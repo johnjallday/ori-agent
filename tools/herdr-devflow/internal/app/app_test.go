@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
 
 type setupRunner struct {
@@ -145,6 +148,87 @@ func TestSetupDisabledDoesNotBuildOrCallHerdr(t *testing.T) {
 	if built || len(runner.calls) != 0 {
 		t.Fatalf("disabled setup mutated state: built=%v calls=%#v", built, runner.calls)
 	}
+}
+
+func TestDisabledHandoffIsANoOpAfterArgumentValidation(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	writeSetupFixture(t, repo)
+	configPath := filepath.Join(repo, ".herdr", "devflow.toml")
+	contents, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(strings.Replace(string(contents), "enabled = true", "enabled = false", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &setupRunner{}
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout:    &output,
+		Stderr:    &stderr,
+		Getwd:     func() (string, error) { return repo, nil },
+		LookupEnv: func(string) (string, bool) { return "", false },
+		Runner:    runner,
+	})
+	exit := application.Run(context.Background(), []string{"--repo-root", repo, "--home", t.TempDir(), "handoff", "--feature", "bridge", "--worktree", filepath.Join(repo, "bridge")})
+	if exit != 0 || !strings.Contains(output.String(), "disabled") || len(runner.calls) != 0 {
+		t.Fatalf("disabled handoff exit=%d output=%q stderr=%q calls=%#v", exit, output.String(), stderr.String(), runner.calls)
+	}
+}
+
+func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testing.T) {
+	t.Parallel()
+	parsed, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--branch", "feature/bridge"}, false)
+	if err != nil || parsed.feature != "bridge" || parsed.worktree != "/tmp/bridge" || parsed.branch != "feature/bridge" {
+		t.Fatalf("parseHandoffArgs() = %#v, %v", parsed, err)
+	}
+	if _, err := parseHandoffArgs([]string{"--feature", "bridge"}, false); err == nil {
+		t.Fatal("initial handoff accepted a missing worktree")
+	}
+	parsed, err = parseHandoffArgs([]string{"--resend"}, true)
+	if err != nil || !parsed.resend {
+		t.Fatalf("retry parse = %#v, %v", parsed, err)
+	}
+	if _, err := parseHandoffArgs([]string{"--resend"}, false); err == nil {
+		t.Fatal("initial handoff accepted --resend")
+	}
+}
+
+func TestVerifyCompatibilityRejectsOldHerdrAndMissingHandoffMethods(t *testing.T) {
+	t.Parallel()
+	old := herdr.New("fake-herdr", "", compatibilityRunner{version: "0.7.4", schema: schemaFixture()})
+	err := verifyCompatibility(context.Background(), old, configForTest())
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrHerdrIncompatible {
+		t.Fatalf("old Herdr error = %#v", err)
+	}
+
+	missing := herdr.New("fake-herdr", "", compatibilityRunner{version: "0.7.5", schema: `{"protocol":17,"schema_version":1,"requests":[{"method":{"const":"worktree.open"}}]}`})
+	err = verifyCompatibility(context.Background(), missing, configForTest())
+	if !errors.As(err, &stage) || stage.Code != model.ErrSchemaUnsupported || !strings.Contains(stage.Message, "plugin.link") {
+		t.Fatalf("missing handoff method error = %#v", err)
+	}
+}
+
+type compatibilityRunner struct {
+	version string
+	schema  string
+}
+
+func (r compatibilityRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
+	switch strings.Join(command.Args, " ") {
+	case "--version":
+		return herdr.CommandResult{Stdout: []byte("herdr " + r.version + "\n")}, nil
+	case "api schema --json":
+		return herdr.CommandResult{Stdout: []byte(r.schema)}, nil
+	default:
+		return herdr.CommandResult{}, fmt.Errorf("unexpected Herdr command: %s", strings.Join(command.Args, " "))
+	}
+}
+
+func configForTest() config.Config {
+	return config.Default()
 }
 
 func writeSetupFixture(t *testing.T, repo string) {
