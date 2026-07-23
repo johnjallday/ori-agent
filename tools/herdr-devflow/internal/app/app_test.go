@@ -195,6 +195,33 @@ func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testin
 	}
 }
 
+func TestParseScopedAgentCommandsKeepsContextAndTargetExplicit(t *testing.T) {
+	t.Parallel()
+	add, err := parseAddAgentArgs([]string{"reviewer", "--kind", "codex", "--feature", "bridge"})
+	if err != nil || add.Role != "reviewer" || add.Kind != "codex" || add.Context.FeatureName != "bridge" {
+		t.Fatalf("parseAddAgentArgs() = %#v, %v", add, err)
+	}
+	prompt, err := parsePromptAgentArgs([]string{"reviewer", "Please", "inspect", "this", "--target", "w1:p2", "--worktree", "/tmp/bridge"})
+	if err != nil || prompt.Role != "reviewer" || prompt.Target != "w1:p2" || prompt.Text != "Please inspect this" || prompt.Context.WorktreePath != "/tmp/bridge" {
+		t.Fatalf("parsePromptAgentArgs() = %#v, %v", prompt, err)
+	}
+	read, lines, err := parseTargetAgentArgs([]string{"--target", "ori-bridge-reviewer", "--lines", "240", "reviewer"}, "read", true)
+	if err != nil || read.Role != "reviewer" || read.Target != "ori-bridge-reviewer" || lines != 240 {
+		t.Fatalf("parseTargetAgentArgs() = %#v, %d, %v", read, lines, err)
+	}
+	renamed, err := parseRenameAgentArgs([]string{"reviewer", "tester", "--feature", "bridge"})
+	if err != nil || renamed.Role != "reviewer" || renamed.NewRole != "tester" || renamed.Context.FeatureName != "bridge" {
+		t.Fatalf("parseRenameAgentArgs() = %#v, %v", renamed, err)
+	}
+	rebound, err := parseRebindAgentArgs([]string{"reviewer", "--target", "w1:p4"})
+	if err != nil || rebound.Role != "reviewer" || rebound.Target != "w1:p4" {
+		t.Fatalf("parseRebindAgentArgs() = %#v, %v", rebound, err)
+	}
+	if _, _, err := parseTargetAgentArgs([]string{"reviewer", "tester"}, "focus", false); err == nil {
+		t.Fatal("focus parser accepted two roles")
+	}
+}
+
 func TestVerifyCompatibilityRejectsOldHerdrAndMissingHandoffMethods(t *testing.T) {
 	t.Parallel()
 	old := herdr.New("fake-herdr", "", compatibilityRunner{version: "0.7.4", schema: schemaFixture()})

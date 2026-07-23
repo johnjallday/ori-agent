@@ -26,10 +26,14 @@ var actionableTaskPattern = regexp.MustCompile(`^\d+\.[1-9]\d*\s+`)
 type Herdr interface {
 	OpenExistingWorktree(context.Context, string) (herdr.WorktreeOpenResult, error)
 	PaneProcessInfo(context.Context, string) (herdr.PaneProcessInfo, error)
+	PaneSplitInfo(context.Context, string, string, string) (herdr.PaneInfo, error)
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
 	AgentGetInfo(context.Context, string) (herdr.AgentInfo, error)
 	AgentStartInfo(context.Context, string, string, string, time.Duration) (herdr.AgentInfo, error)
 	AgentPromptInfo(context.Context, string, string, time.Duration) (herdr.AgentInfo, error)
+	AgentRenameInfo(context.Context, string, string) (herdr.AgentInfo, error)
+	FocusAgent(context.Context, string) error
+	AgentReadText(context.Context, string, int) (string, error)
 	ReportWorkspaceMetadata(context.Context, string, string, map[string]string) (json.RawMessage, error)
 	ReportPaneMetadata(context.Context, string, string, map[string]string) (json.RawMessage, error)
 }
@@ -136,6 +140,8 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	featureState.Feature = feature
 	if featureState.Handoff.Stage == "" {
 		featureState.Handoff = model.HandoffState{Stage: model.HandoffRecorded, PrimaryRole: s.Config.Primary.Role, UpdatedAt: s.now()}
+	} else if featureState.Handoff.PrimaryRole == "" {
+		featureState.Handoff.PrimaryRole = s.Config.Primary.Role
 	}
 	featureState.UpdatedAt = s.now()
 	state.Features[featureKey] = featureState
@@ -183,11 +189,12 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		return HandoffResult{}, wrapHerdrError("report workspace metadata", err, "wt herd retry")
 	}
 
-	name, err := ScopedAgentName(feature.RepositoryID, feature.Name, s.Config.Primary.Role)
+	primaryRole := featureState.Handoff.PrimaryRole
+	name, err := ScopedAgentName(feature.RepositoryID, feature.Name, primaryRole)
 	if err != nil {
 		return HandoffResult{}, &model.StageError{Stage: "primary agent name", Code: model.ErrConfigInvalid, Message: "could not create a safe primary agent name", Recovery: "check the feature and role names", Cause: err}
 	}
-	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, opened, name)
+	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, opened, name, primaryRole, s.Config.Primary.Kind)
 	if err != nil {
 		return HandoffResult{}, err
 	}
@@ -210,7 +217,7 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		result.PromptSkipped = true
 		return result, nil
 	}
-	prompt := BootstrapPrompt(feature, s.Config.Primary.Role)
+	prompt := BootstrapPrompt(feature, primaryRole)
 	prompted, err := s.Client.AgentPromptInfo(ctx, primary.Name, prompt, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
 	if err != nil {
 		return HandoffResult{}, wrapHerdrError("deliver bootstrap prompt", err, "wt herd retry; use --resend only when you intentionally want a second prompt")
@@ -231,8 +238,7 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	return result, nil
 }
 
-func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, featureKey string, featureState model.FeatureState, opened herdr.WorktreeOpenResult, expectedName string) (model.RoleAgent, bool, error) {
-	role := s.Config.Primary.Role
+func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, featureKey string, featureState model.FeatureState, opened herdr.WorktreeOpenResult, expectedName, role, kind string) (model.RoleAgent, bool, error) {
 	if saved, ok := featureState.Agents[role]; ok {
 		if saved.Name != expectedName {
 			return model.RoleAgent{}, true, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "saved primary agent name does not match this feature's identity", Recovery: "wt herd rebind " + role + " --target <live-target>"}
@@ -241,12 +247,15 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		if err != nil {
 			return model.RoleAgent{}, true, wrapHerdrError("resolve saved primary agent", err, "wt herd rebind "+role+" --target <live-target>")
 		}
-		primary, err := s.validateLivePrimary(live, opened, expectedName)
+		primary, err := s.validateLivePrimary(live, opened, expectedName, role, kind)
 		if err != nil {
 			return model.RoleAgent{}, true, err
 		}
 		primary.Role = role
 		primary.Kind = saved.Kind
+		if primary.Kind == "" {
+			primary.Kind = kind
+		}
 		featureState.Agents[role] = primary
 		if !featureState.Handoff.BootstrapPrompted {
 			featureState.Handoff.Stage = model.HandoffReady
@@ -269,12 +278,12 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		if live.Name != expectedName {
 			continue
 		}
-		primary, err := s.validateLivePrimary(live, opened, expectedName)
+		primary, err := s.validateLivePrimary(live, opened, expectedName, role, kind)
 		if err != nil {
 			return model.RoleAgent{}, false, err
 		}
 		primary.Role = role
-		primary.Kind = s.Config.Primary.Kind
+		primary.Kind = kind
 		featureState.Agents[role] = primary
 		if !featureState.Handoff.BootstrapPrompted {
 			featureState.Handoff.Stage = model.HandoffReady
@@ -289,7 +298,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		return primary, true, nil
 	}
 
-	started, err := s.Client.AgentStartInfo(ctx, expectedName, s.Config.Primary.Kind, opened.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
+	started, err := s.Client.AgentStartInfo(ctx, expectedName, kind, opened.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
 	if err != nil {
 		return model.RoleAgent{}, false, wrapHerdrError("start primary agent", err, "wt herd retry")
 	}
@@ -297,12 +306,12 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 	if err != nil {
 		return model.RoleAgent{}, false, err
 	}
-	primary, err := s.validateLivePrimary(ready, opened, expectedName)
+	primary, err := s.validateLivePrimary(ready, opened, expectedName, role, kind)
 	if err != nil {
 		return model.RoleAgent{}, false, err
 	}
 	primary.Role = role
-	primary.Kind = s.Config.Primary.Kind
+	primary.Kind = kind
 	featureState.Agents[role] = primary
 	featureState.Handoff.Stage = model.HandoffPrimaryStarted
 	featureState.Handoff.PrimaryAgentName = expectedName
@@ -365,15 +374,15 @@ func (s *Service) waitForReady(ctx context.Context, name string, started herdr.A
 	}
 }
 
-func (s *Service) validateLivePrimary(live herdr.AgentInfo, opened herdr.WorktreeOpenResult, expectedName string) (model.RoleAgent, error) {
+func (s *Service) validateLivePrimary(live herdr.AgentInfo, opened herdr.WorktreeOpenResult, expectedName, role, kind string) (model.RoleAgent, error) {
 	if live.Name != expectedName {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "Herdr returned a different agent than the managed primary", Recovery: "wt herd status"}
 	}
 	if live.WorkspaceID != opened.Workspace.WorkspaceID || live.PaneID != opened.RootPane.PaneID || live.TerminalID == "" {
-		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "the named primary agent belongs to a different Herdr workspace or pane", Recovery: "wt herd rebind " + s.Config.Primary.Role + " --target <live-target>"}
+		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "the named primary agent belongs to a different Herdr workspace or pane", Recovery: "wt herd rebind " + role + " --target <live-target>"}
 	}
-	if live.Agent != "" && live.Agent != s.Config.Primary.Kind {
-		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "the named primary agent has a different configured kind", Recovery: "wt herd rebind " + s.Config.Primary.Role + " --target <live-target>"}
+	if live.Agent != "" && live.Agent != kind {
+		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "the named primary agent has a different configured kind", Recovery: "wt herd rebind " + role + " --target <live-target>"}
 	}
 	if !live.InteractiveReady || live.LaunchPending {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrHerdrUnavailable, Message: "the primary agent is not ready for a prompt", Recovery: "wt herd retry"}

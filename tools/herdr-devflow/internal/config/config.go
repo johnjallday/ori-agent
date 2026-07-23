@@ -167,6 +167,12 @@ func supportedAgentKind(kind string) bool {
 	return ok
 }
 
+// IsSupportedAgentKind exposes the current Herdr 0.7.5 kind allow-list to
+// command handlers that accept an explicit `--kind` argument.
+func IsSupportedAgentKind(kind string) bool {
+	return supportedAgentKind(kind)
+}
+
 func (c Config) RoleKind(role string) string {
 	if role == c.Primary.Role {
 		return c.Primary.Kind

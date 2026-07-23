@@ -162,3 +162,31 @@ func TestCallSocketReportsAnActionableUnavailableError(t *testing.T) {
 		t.Fatalf("Ping() error = %#v, want actionable unavailable error", err)
 	}
 }
+
+func TestPaneSplitAndRenameDecodeStructuredAgentIdentity(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"pane split w1:p1 --direction right --cwd /tmp/bridge --no-focus": {Stdout: []byte(`{"result":{"pane":{"pane_id":"w1:p2","terminal_id":"term-2","workspace_id":"w1","tab_id":"w1:t1","cwd":"/tmp/bridge","foreground_cwd":"/tmp/bridge"}}}`)},
+		"agent rename old-name ori-bridge-reviewer":                       {Stdout: []byte(`{"result":{"agent":{"name":"ori-bridge-reviewer","agent":"claude","pane_id":"w1:p2","terminal_id":"term-2","workspace_id":"w1","tab_id":"w1:t1"}}}`)},
+	}}
+	client := New("fake-herdr", "", runner)
+	pane, err := client.PaneSplitInfo(context.Background(), "w1:p1", "right", "/tmp/bridge")
+	if err != nil || pane.PaneID != "w1:p2" || pane.TerminalID != "term-2" {
+		t.Fatalf("PaneSplitInfo() = %#v, %v", pane, err)
+	}
+	agent, err := client.AgentRenameInfo(context.Background(), "old-name", "ori-bridge-reviewer")
+	if err != nil || agent.Name != "ori-bridge-reviewer" || agent.PaneID != "w1:p2" {
+		t.Fatalf("AgentRenameInfo() = %#v, %v", agent, err)
+	}
+}
+
+func TestAgentReadReturnsTerminalTextWithoutJSONParsing(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"agent read ori-bridge-builder --source recent-unwrapped --lines 120": {Stdout: []byte("working on 3.2\n$ ")},
+	}}
+	text, err := New("fake-herdr", "", runner).AgentReadText(context.Background(), "ori-bridge-builder", 120)
+	if err != nil || text != "working on 3.2\n$ " {
+		t.Fatalf("AgentReadText() = %q, %v", text, err)
+	}
+}

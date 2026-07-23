@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
@@ -113,6 +114,18 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.handoff(ctx, opts, commandArgs, false)
 	case "retry":
 		return a.handoff(ctx, opts, commandArgs, true)
+	case "add":
+		return a.addAgent(ctx, opts, commandArgs)
+	case "prompt":
+		return a.promptAgent(ctx, opts, commandArgs)
+	case "rename":
+		return a.renameAgent(ctx, opts, commandArgs)
+	case "focus":
+		return a.focusAgent(ctx, opts, commandArgs)
+	case "read":
+		return a.readAgent(ctx, opts, commandArgs)
+	case "rebind":
+		return a.rebindAgent(ctx, opts, commandArgs)
 	case "plugin":
 		return a.plugin(ctx, opts, commandArgs)
 	default:
@@ -126,6 +139,179 @@ type handoffArgs struct {
 	worktree string
 	branch   string
 	resend   bool
+}
+
+type controlContextArgs struct {
+	feature  string
+	worktree string
+}
+
+func parseControlContext(args []string) (controlContextArgs, []string, error) {
+	var contextArgs controlContextArgs
+	remaining := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		if args[index] == "--" {
+			remaining = append(remaining, args[index+1:]...)
+			break
+		}
+		switch args[index] {
+		case "--feature", "--worktree":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return controlContextArgs{}, nil, fmt.Errorf("%s requires a value", args[index])
+			}
+			if args[index] == "--feature" {
+				contextArgs.feature = args[index+1]
+			} else {
+				contextArgs.worktree = args[index+1]
+			}
+			index++
+		default:
+			remaining = append(remaining, args[index])
+		}
+	}
+	return contextArgs, remaining, nil
+}
+
+func parseAddAgentArgs(args []string) (agents.AddRequest, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return agents.AddRequest{}, err
+	}
+	var kind string
+	var positional []string
+	for index := 0; index < len(remaining); index++ {
+		switch remaining[index] {
+		case "--kind":
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.AddRequest{}, fmt.Errorf("--kind requires a value")
+			}
+			kind = remaining[index+1]
+			index++
+		default:
+			if strings.HasPrefix(remaining[index], "--") {
+				return agents.AddRequest{}, fmt.Errorf("unknown add option %q", remaining[index])
+			}
+			positional = append(positional, remaining[index])
+		}
+	}
+	if len(positional) != 1 {
+		return agents.AddRequest{}, fmt.Errorf("add requires one role: wt herd add <role> [--kind <kind>]")
+	}
+	return agents.AddRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Kind: kind}, nil
+}
+
+func parsePromptAgentArgs(args []string) (agents.PromptRequest, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return agents.PromptRequest{}, err
+	}
+	var target string
+	var positional []string
+	for index := 0; index < len(remaining); index++ {
+		switch remaining[index] {
+		case "--target":
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.PromptRequest{}, fmt.Errorf("--target requires a value")
+			}
+			target = remaining[index+1]
+			index++
+		default:
+			positional = append(positional, remaining[index])
+		}
+	}
+	if len(positional) == 0 {
+		return agents.PromptRequest{}, fmt.Errorf("prompt requires text")
+	}
+	role := ""
+	if len(positional) > 1 {
+		role = positional[0]
+		positional = positional[1:]
+	}
+	return agents.PromptRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: role, Target: target, Text: strings.Join(positional, " ")}, nil
+}
+
+func parseTargetAgentArgs(args []string, command string, allowLines bool) (agents.TargetRequest, int, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return agents.TargetRequest{}, 0, err
+	}
+	var target string
+	lines := 120
+	var positional []string
+	for index := 0; index < len(remaining); index++ {
+		switch remaining[index] {
+		case "--target":
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.TargetRequest{}, 0, fmt.Errorf("--target requires a value")
+			}
+			target = remaining[index+1]
+			index++
+		case "--lines":
+			if !allowLines {
+				return agents.TargetRequest{}, 0, fmt.Errorf("--lines is only available with read")
+			}
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.TargetRequest{}, 0, fmt.Errorf("--lines requires a value")
+			}
+			parsed, parseErr := strconv.Atoi(remaining[index+1])
+			if parseErr != nil || parsed < 1 || parsed > 1000 {
+				return agents.TargetRequest{}, 0, fmt.Errorf("--lines must be a number between 1 and 1000")
+			}
+			lines = parsed
+			index++
+		default:
+			if strings.HasPrefix(remaining[index], "--") {
+				return agents.TargetRequest{}, 0, fmt.Errorf("unknown %s option %q", command, remaining[index])
+			}
+			positional = append(positional, remaining[index])
+		}
+	}
+	if len(positional) > 1 {
+		return agents.TargetRequest{}, 0, fmt.Errorf("%s accepts at most one role", command)
+	}
+	role := ""
+	if len(positional) == 1 {
+		role = positional[0]
+	}
+	return agents.TargetRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: role, Target: target}, lines, nil
+}
+
+func parseRenameAgentArgs(args []string) (agents.RenameRequest, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return agents.RenameRequest{}, err
+	}
+	if len(remaining) != 2 {
+		return agents.RenameRequest{}, fmt.Errorf("rename requires <role> <new-role>")
+	}
+	return agents.RenameRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: remaining[0], NewRole: remaining[1]}, nil
+}
+
+func parseRebindAgentArgs(args []string) (agents.RebindRequest, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return agents.RebindRequest{}, err
+	}
+	var target string
+	var positional []string
+	for index := 0; index < len(remaining); index++ {
+		if remaining[index] == "--target" {
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.RebindRequest{}, fmt.Errorf("--target requires a value")
+			}
+			target = remaining[index+1]
+			index++
+			continue
+		}
+		if strings.HasPrefix(remaining[index], "--") {
+			return agents.RebindRequest{}, fmt.Errorf("unknown rebind option %q", remaining[index])
+		}
+		positional = append(positional, remaining[index])
+	}
+	if len(positional) != 1 || target == "" {
+		return agents.RebindRequest{}, fmt.Errorf("rebind requires <role> --target <live-target>")
+	}
+	return agents.RebindRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Target: target}, nil
 }
 
 func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
@@ -387,6 +573,181 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		"prompt_delivered": result.PromptDelivered,
 		"prompt_skipped":   result.PromptSkipped,
 	})
+	return 0
+}
+
+func (a *App) loadAgentControl(ctx context.Context, opts options) (*agents.Service, runtimeContext, int) {
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return nil, runtimeContext{}, 1
+	}
+	if !runtime.config.Bridge.Enabled {
+		a.writeResult(opts.json, map[string]any{"status": "disabled", "message": "Ori Herdr Devflow is disabled; no Herdr agent was changed."})
+		return nil, runtime, 0
+	}
+	if err := verifyCompatibility(ctx, runtime.herdr, runtime.config); err != nil {
+		a.writeError(err, opts.json)
+		return nil, runtime, 1
+	}
+	return &agents.Service{
+		Config:       runtime.config,
+		RepositoryID: runtime.paths.RepositoryID,
+		GitCommonDir: runtime.paths.GitCommonDir,
+		Client:       runtime.herdr,
+		Store:        state.New(runtime.paths.StateDir),
+	}, runtime, -1
+}
+
+func defaultControlContext(request *agents.ContextRequest, runtime runtimeContext) {
+	if request.FeatureName == "" && request.WorktreePath == "" {
+		request.WorktreePath = runtime.paths.RepoRoot
+	}
+}
+
+func (a *App) addAgent(ctx context.Context, opts options, args []string) int {
+	request, err := parseAddAgentArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&request.Context, runtime)
+	result, err := service.Add(ctx, request)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "reused": result.Reused})
+	} else if result.Reused {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: using existing %s agent %s for %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+	} else {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: added %s agent %s for %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+	}
+	return 0
+}
+
+func (a *App) promptAgent(ctx context.Context, opts options, args []string) int {
+	request, err := parsePromptAgentArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&request.Context, runtime)
+	result, err := service.Prompt(ctx, request)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "prompt_delivered": true})
+	} else {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: prompt delivered to %s (%s) in %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+	}
+	return 0
+}
+
+func (a *App) renameAgent(ctx context.Context, opts options, args []string) int {
+	request, err := parseRenameAgentArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&request.Context, runtime)
+	result, err := service.Rename(ctx, request)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent})
+	} else {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: renamed agent to %s (%s) in %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+	}
+	return 0
+}
+
+func (a *App) focusAgent(ctx context.Context, opts options, args []string) int {
+	request, _, err := parseTargetAgentArgs(args, "focus", false)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&request.Context, runtime)
+	agent, feature, err := service.Focus(ctx, request)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ready", "feature": feature.Name, "agent": agent, "focused": true})
+	} else {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: focused %s (%s) in %s\n", agent.Role, agent.Name, feature.Name)
+	}
+	return 0
+}
+
+func (a *App) readAgent(ctx context.Context, opts options, args []string) int {
+	request, lines, err := parseTargetAgentArgs(args, "read", true)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&request.Context, runtime)
+	result, err := service.Read(ctx, request, lines)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "text": result.Text})
+	} else {
+		fmt.Fprint(a.stdout, result.Text)
+	}
+	return 0
+}
+
+func (a *App) rebindAgent(ctx context.Context, opts options, args []string) int {
+	request, err := parseRebindAgentArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&request.Context, runtime)
+	result, err := service.Rebind(ctx, request)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "rebound": true})
+	} else {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: rebound %s to %s in %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+	}
 	return 0
 }
 
@@ -671,6 +1032,14 @@ Usage:
                                 Open an existing Git worktree and launch its primary agent
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
                                 Resume only missing handoff stages; --resend repeats a confirmed prompt
+  wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
+                                Start one explicit secondary role agent in the managed workspace
+  wt herd prompt [role] <text> [--target TARGET] [--feature NAME|--worktree PATH]
+                                Prompt the selected feature-scoped agent (primary role by default)
+  wt herd rename <role> <new-role> [--feature NAME|--worktree PATH]
+  wt herd focus [role] [--target TARGET] [--feature NAME|--worktree PATH]
+  wt herd read [role] [--target TARGET] [--lines N] [--feature NAME|--worktree PATH]
+  wt herd rebind <role> --target TARGET [--feature NAME|--worktree PATH]
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 
 Global options (before the command):

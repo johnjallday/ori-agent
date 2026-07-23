@@ -120,6 +120,25 @@ func (c *Client) CLIJSON(ctx context.Context, args ...string) (json.RawMessage, 
 	return response, nil
 }
 
+// CLIText executes a documented command whose successful payload is terminal
+// text rather than JSON (currently `agent read`). The text is returned exactly
+// as Herdr supplied it; it is never parsed as a terminal table or identity.
+func (c *Client) CLIText(ctx context.Context, args ...string) (string, error) {
+	result, runErr := c.Runner.Run(ctx, Command{Path: c.Binary, Args: args})
+	if runErr != nil {
+		if response, responseErr := decodeJSONResponse(result.Stdout); responseErr == nil && len(response) > 0 {
+			return "", &model.StageError{Stage: strings.Join(args, " "), Code: model.ErrHerdrUnavailable, Message: "Herdr rejected the requested operation", Recovery: "wt herd doctor"}
+		} else {
+			var stageErr *model.StageError
+			if errors.As(responseErr, &stageErr) {
+				return "", stageErr
+			}
+		}
+		return "", c.commandError(strings.Join(args, " "), result, runErr)
+	}
+	return string(result.Stdout), nil
+}
+
 type Schema struct {
 	Protocol      int
 	SchemaVersion int
@@ -372,6 +391,23 @@ func (c *Client) PaneSplit(ctx context.Context, paneID, direction, cwd string) (
 	return c.CLIJSON(ctx, "pane", "split", paneID, "--direction", direction, "--cwd", cwd, "--no-focus")
 }
 
+func (c *Client) PaneSplitInfo(ctx context.Context, paneID, direction, cwd string) (PaneInfo, error) {
+	raw, err := c.PaneSplit(ctx, paneID, direction, cwd)
+	if err != nil {
+		return PaneInfo{}, err
+	}
+	var response struct {
+		Pane PaneInfo `json:"pane"`
+	}
+	if err := decodeResult("pane split", raw, &response); err != nil {
+		return PaneInfo{}, err
+	}
+	if response.Pane.PaneID == "" || response.Pane.TerminalID == "" {
+		return PaneInfo{}, &model.StageError{Stage: "pane split", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return the new shell pane", Recovery: "wt herd retry"}
+	}
+	return response.Pane, nil
+}
+
 func (c *Client) PaneProcessInfo(ctx context.Context, paneID string) (PaneProcessInfo, error) {
 	raw, err := c.CLIJSON(ctx, "pane", "process-info", "--pane", paneID)
 	if err != nil {
@@ -468,12 +504,37 @@ func (c *Client) AgentRename(ctx context.Context, target, name string) (json.Raw
 	return c.CLIJSON(ctx, "agent", "rename", target, name)
 }
 
+func (c *Client) AgentRenameInfo(ctx context.Context, target, name string) (AgentInfo, error) {
+	raw, err := c.AgentRename(ctx, target, name)
+	if err != nil {
+		return AgentInfo{}, err
+	}
+	var response struct {
+		Agent AgentInfo `json:"agent"`
+	}
+	if err := decodeResult("agent rename", raw, &response); err != nil {
+		return AgentInfo{}, err
+	}
+	if response.Agent.Name == "" {
+		return AgentInfo{}, &model.StageError{Stage: "agent rename", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return the renamed agent", Recovery: "wt herd rebind <role> --target <live-target>"}
+	}
+	return response.Agent, nil
+}
+
 func (c *Client) AgentFocus(ctx context.Context, target string) (json.RawMessage, error) {
 	return c.CLIJSON(ctx, "agent", "focus", target)
 }
 
-func (c *Client) AgentRead(ctx context.Context, target string, lines int) (json.RawMessage, error) {
-	return c.CLIJSON(ctx, "agent", "read", target, "--source", "recent-unwrapped", "--lines", fmt.Sprintf("%d", lines))
+func (c *Client) FocusAgent(ctx context.Context, target string) error {
+	_, err := c.AgentFocus(ctx, target)
+	return err
+}
+
+func (c *Client) AgentReadText(ctx context.Context, target string, lines int) (string, error) {
+	if lines <= 0 {
+		lines = 120
+	}
+	return c.CLIText(ctx, "agent", "read", target, "--source", "recent-unwrapped", "--lines", fmt.Sprintf("%d", lines))
 }
 
 func (c *Client) ReportWorkspaceMetadata(ctx context.Context, workspaceID, source string, tokens map[string]string) (json.RawMessage, error) {

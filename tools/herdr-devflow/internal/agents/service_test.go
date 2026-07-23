@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -59,38 +61,107 @@ func (f fakeInspector) Inspect(_ context.Context, _, _, _ string) (worktree.GitW
 }
 
 type fakeHerdr struct {
-	opened        herdr.WorktreeOpenResult
-	process       herdr.PaneProcessInfo
-	agents        []herdr.AgentInfo
-	byName        map[string]herdr.AgentInfo
-	startCalls    int
-	getCalls      int
-	promptCalls   int
-	metadataCalls int
-	startedReady  bool
-	startResult   *herdr.AgentInfo
-	promptResult  *herdr.AgentInfo
-	fail          map[string]error
+	opened           herdr.WorktreeOpenResult
+	process          herdr.PaneProcessInfo
+	panes            map[string]herdr.PaneInfo
+	processByPane    map[string]herdr.PaneProcessInfo
+	agents           []herdr.AgentInfo
+	byName           map[string]herdr.AgentInfo
+	startCalls       int
+	splitCalls       int
+	renameCalls      int
+	focusCalls       int
+	readCalls        int
+	getCalls         int
+	promptCalls      int
+	metadataCalls    int
+	startedReady     bool
+	startResult      *herdr.AgentInfo
+	promptResult     *herdr.AgentInfo
+	readText         string
+	focusTarget      string
+	lastPromptTarget string
+	lastPromptText   string
+	calls            []string
+	fail             map[string]error
 }
 
 func (f *fakeHerdr) OpenExistingWorktree(_ context.Context, _ string) (herdr.WorktreeOpenResult, error) {
+	f.record("worktree.open")
 	return f.opened, f.fail["open"]
 }
 
-func (f *fakeHerdr) PaneProcessInfo(_ context.Context, _ string) (herdr.PaneProcessInfo, error) {
-	return f.process, f.fail["process"]
+func (f *fakeHerdr) PaneProcessInfo(_ context.Context, paneID string) (herdr.PaneProcessInfo, error) {
+	f.record("pane.process-info:" + paneID)
+	if paneID == f.process.PaneID {
+		return f.process, f.fail["process"]
+	}
+	if process, ok := f.processByPane[paneID]; ok {
+		return process, f.fail["process"]
+	}
+	return herdr.PaneProcessInfo{}, &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "pane not found"}
+}
+
+func (f *fakeHerdr) PaneSplitInfo(_ context.Context, paneID, _ string, cwd string) (herdr.PaneInfo, error) {
+	f.record("pane.split:" + paneID)
+	if err := f.fail["split"]; err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	parent, ok := f.panes[paneID]
+	if !ok {
+		return herdr.PaneInfo{}, &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "source pane not found"}
+	}
+	f.splitCalls++
+	created := parent
+	created.PaneID = "w1:p" + strconv.Itoa(f.splitCalls+1)
+	created.TerminalID = "term-" + strconv.Itoa(f.splitCalls+1)
+	created.Cwd = cwd
+	created.ForegroundCwd = cwd
+	created.Name = ""
+	created.Agent = ""
+	created.AgentStatus = model.AgentUnknown
+	created.InteractiveReady = false
+	created.LaunchPending = false
+	created.AgentSession = nil
+	f.panes[created.PaneID] = created
+	f.processByPane[created.PaneID] = herdr.PaneProcessInfo{PaneID: created.PaneID, ShellPID: int64ptr(int64(42 + f.splitCalls)), ForegroundProcesses: []herdr.ForegroundProcess{{PID: int64(42 + f.splitCalls), Name: "zsh", Cwd: cwd}}}
+	return created, nil
 }
 
 func (f *fakeHerdr) AgentListInfo(_ context.Context) ([]herdr.AgentInfo, error) {
-	return append([]herdr.AgentInfo(nil), f.agents...), f.fail["list"]
+	f.record("agent.list")
+	if err := f.fail["list"]; err != nil {
+		return nil, err
+	}
+	agents := append([]herdr.AgentInfo(nil), f.agents...)
+	seen := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		seen[agent.Name] = struct{}{}
+	}
+	for name, agent := range f.byName {
+		if _, ok := seen[name]; !ok {
+			agents = append(agents, agent)
+		}
+	}
+	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
+	return agents, nil
 }
 
 func (f *fakeHerdr) AgentGetInfo(_ context.Context, target string) (herdr.AgentInfo, error) {
+	f.record("agent.get:" + target)
 	f.getCalls++
 	if err := f.fail["get"]; err != nil {
 		return herdr.AgentInfo{}, err
 	}
 	agent, ok := f.byName[target]
+	if !ok {
+		for _, candidate := range f.agents {
+			if candidate.PaneID == target {
+				agent, ok = candidate, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return herdr.AgentInfo{}, &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "agent not found"}
 	}
@@ -98,18 +169,22 @@ func (f *fakeHerdr) AgentGetInfo(_ context.Context, target string) (herdr.AgentI
 }
 
 func (f *fakeHerdr) AgentStartInfo(_ context.Context, name, kind, paneID string, _ time.Duration) (herdr.AgentInfo, error) {
+	f.record("agent.start:" + name + ":" + kind + ":" + paneID)
 	if err := f.fail["start"]; err != nil {
 		return herdr.AgentInfo{}, err
 	}
 	f.startCalls++
-	agent := f.opened.RootPane
+	agent, ok := f.panes[paneID]
+	if !ok {
+		agent = f.opened.RootPane
+	}
 	agent.Name = name
 	agent.Agent = kind
 	agent.PaneID = paneID
 	agent.InteractiveReady = f.startedReady
 	agent.LaunchPending = !f.startedReady
 	agent.AgentStatus = model.AgentIdle
-	agent.AgentSession = &model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "session-1"}
+	agent.AgentSession = &model.NativeSession{Source: "herdr:" + kind, Agent: kind, Kind: "id", Value: "session-" + strconv.Itoa(f.startCalls)}
 	if f.startResult != nil {
 		agent = *f.startResult
 	}
@@ -117,11 +192,68 @@ func (f *fakeHerdr) AgentStartInfo(_ context.Context, name, kind, paneID string,
 	return agent, nil
 }
 
-func (f *fakeHerdr) AgentPromptInfo(_ context.Context, target, _ string, _ time.Duration) (herdr.AgentInfo, error) {
+func (f *fakeHerdr) AgentRenameInfo(_ context.Context, target, name string) (herdr.AgentInfo, error) {
+	f.record("agent.rename:" + target + ":" + name)
+	if err := f.fail["rename"]; err != nil {
+		return herdr.AgentInfo{}, err
+	}
+	agent, ok := f.byName[target]
+	if !ok {
+		for _, candidate := range f.agents {
+			if candidate.PaneID == target {
+				agent, ok = candidate, true
+				break
+			}
+		}
+	}
+	if !ok {
+		return herdr.AgentInfo{}, &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "agent not found"}
+	}
+	f.renameCalls++
+	delete(f.byName, agent.Name)
+	agent.Name = name
+	f.byName[name] = agent
+	for index := range f.agents {
+		if f.agents[index].PaneID == agent.PaneID {
+			f.agents[index] = agent
+		}
+	}
+	return agent, nil
+}
+
+func (f *fakeHerdr) FocusAgent(_ context.Context, target string) error {
+	f.record("agent.focus:" + target)
+	if err := f.fail["focus"]; err != nil {
+		return err
+	}
+	if _, ok := f.byName[target]; !ok {
+		return &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "agent not found"}
+	}
+	f.focusCalls++
+	f.focusTarget = target
+	return nil
+}
+
+func (f *fakeHerdr) AgentReadText(_ context.Context, target string, _ int) (string, error) {
+	f.record("agent.read:" + target)
+	if err := f.fail["read"]; err != nil {
+		return "", err
+	}
+	if _, ok := f.byName[target]; !ok {
+		return "", &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "agent not found"}
+	}
+	f.readCalls++
+	return f.readText, nil
+}
+
+func (f *fakeHerdr) AgentPromptInfo(_ context.Context, target, text string, _ time.Duration) (herdr.AgentInfo, error) {
+	f.record("agent.prompt:" + target)
 	if err := f.fail["prompt"]; err != nil {
 		return herdr.AgentInfo{}, err
 	}
 	f.promptCalls++
+	f.lastPromptTarget = target
+	f.lastPromptText = text
 	if f.promptResult != nil {
 		return *f.promptResult, nil
 	}
@@ -129,13 +261,19 @@ func (f *fakeHerdr) AgentPromptInfo(_ context.Context, target, _ string, _ time.
 }
 
 func (f *fakeHerdr) ReportWorkspaceMetadata(_ context.Context, _, _ string, _ map[string]string) (json.RawMessage, error) {
+	f.record("workspace.report-metadata")
 	f.metadataCalls++
 	return json.RawMessage(`{"type":"workspace_metadata"}`), f.fail["workspace_metadata"]
 }
 
 func (f *fakeHerdr) ReportPaneMetadata(_ context.Context, _, _ string, _ map[string]string) (json.RawMessage, error) {
+	f.record("pane.report-metadata")
 	f.metadataCalls++
 	return json.RawMessage(`{"type":"pane_metadata"}`), f.fail["pane_metadata"]
+}
+
+func (f *fakeHerdr) record(call string) {
+	f.calls = append(f.calls, call)
 }
 
 func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) {
@@ -405,7 +543,11 @@ func newFakeHerdr(path string) *fakeHerdr {
 			RootPane:  root,
 			Worktree:  herdr.WorktreeInfo{Path: path, Branch: "feature/bridge"},
 		},
-		process:      herdr.PaneProcessInfo{PaneID: "w1:p1", ShellPID: int64ptr(42), ForegroundProcesses: []herdr.ForegroundProcess{{PID: 42, Name: "zsh", Cwd: path}}},
+		process: herdr.PaneProcessInfo{PaneID: "w1:p1", ShellPID: int64ptr(42), ForegroundProcesses: []herdr.ForegroundProcess{{PID: 42, Name: "zsh", Cwd: path}}},
+		panes:   map[string]herdr.PaneInfo{"w1:p1": root},
+		processByPane: map[string]herdr.PaneProcessInfo{
+			"w1:p1": {PaneID: "w1:p1", ShellPID: int64ptr(42), ForegroundProcesses: []herdr.ForegroundProcess{{PID: 42, Name: "zsh", Cwd: path}}},
+		},
 		byName:       make(map[string]herdr.AgentInfo),
 		startedReady: true,
 		fail:         make(map[string]error),
