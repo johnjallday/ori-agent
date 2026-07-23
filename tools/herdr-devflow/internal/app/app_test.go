@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -44,6 +46,8 @@ func (r *setupRunner) Run(_ context.Context, command herdr.Command) (herdr.Comma
 	case strings.HasPrefix(key, "plugin link --enabled "):
 		r.pluginRoot = command.Args[len(command.Args)-1]
 		return herdr.CommandResult{Stdout: []byte(fmt.Sprintf(`{"result":{"plugin":{"plugin_id":"ori.devflow","plugin_root":%q,"enabled":true}}}`, r.pluginRoot))}, nil
+	case key == "plugin action invoke ori.devflow.refresh":
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"plugin_action_invoke"}}`)}, nil
 	default:
 		return herdr.CommandResult{}, fmt.Errorf("unexpected Herdr command: %s", key)
 	}
@@ -118,6 +122,9 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	}
 	if containsIntegrationCommand(runner.calls) {
 		t.Fatalf("setup attempted a forbidden integration mutation: %#v", runner.calls)
+	}
+	if !containsHerdrCommand(runner.calls, "plugin action invoke ori.devflow.refresh") {
+		t.Fatalf("setup did not invoke the installed plugin refresh action: %#v", runner.calls)
 	}
 
 	output.Reset()
@@ -258,6 +265,13 @@ func TestParseOneTimeContinuationAndScheduleCommands(t *testing.T) {
 	if _, err := parseScheduleArgs([]string{"cancel"}); err == nil {
 		t.Fatal("parseScheduleArgs accepted cancel without an id")
 	}
+	status, err := parseStatusArgs([]string{"--current", "--watch", "--json", "--no-color"})
+	if err != nil || !status.current || !status.watch || !status.json || !status.noColor {
+		t.Fatalf("parseStatusArgs() = %#v, %v", status, err)
+	}
+	if _, err := parseStatusArgs([]string{"--current", "--feature", "bridge"}); err == nil {
+		t.Fatal("parseStatusArgs accepted a conflicting current/feature filter")
+	}
 }
 
 type dispatchRunner struct {
@@ -313,15 +327,20 @@ func TestDetachedDispatchUsesOnlyUserLocalStateAndDeliversOnce(t *testing.T) {
 type continuationRunner struct{}
 
 func (continuationRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
-	switch strings.Join(command.Args, " ") {
-	case "--version":
+	key := strings.Join(command.Args, " ")
+	switch {
+	case key == "--version":
 		return herdr.CommandResult{Stdout: []byte("herdr 0.7.5\n")}, nil
-	case "api schema --json":
+	case key == "api schema --json":
 		return herdr.CommandResult{Stdout: []byte(schemaFixture())}, nil
-	case "agent list":
+	case key == "agent list":
 		return herdr.CommandResult{Stdout: []byte(`{"result":{"agents":[{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":"idle","workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}]}}`)}, nil
+	case strings.HasPrefix(key, "workspace report-metadata "):
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"workspace_metadata"}}`)}, nil
+	case strings.HasPrefix(key, "pane report-metadata "):
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"pane_metadata"}}`)}, nil
 	default:
-		return herdr.CommandResult{}, fmt.Errorf("unexpected continuation Herdr command: %s", strings.Join(command.Args, " "))
+		return herdr.CommandResult{}, fmt.Errorf("unexpected continuation Herdr command: %s", key)
 	}
 }
 
@@ -409,6 +428,68 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	}
 	if filepath.Clean(repo) == filepath.Clean(feature) {
 		t.Fatal("fixture did not create a linked feature worktree")
+	}
+}
+
+func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testing.T) {
+	_, feature := createLinkedFeatureWorktree(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
+		if key == worktree.HomeOverrideEnv {
+			return home, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
+	agent := model.RoleAgent{Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude", WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native, UpdatedAt: time.Now().Add(-time.Minute)}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
+		WorkspaceID: "w1",
+		Agents:      map[string]model.RoleAgent{"builder": agent},
+		Schedules:   map[string]model.Schedule{},
+	}
+	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout:    &output,
+		Stderr:    &stderr,
+		Getwd:     func() (string, error) { return feature, nil },
+		LookupEnv: func(string) (string, bool) { return "", false },
+		Runner:    continuationRunner{},
+	})
+	args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
+	if exit := application.Run(context.Background(), args); exit != 0 {
+		t.Fatalf("status exit=%d stderr=%s", exit, stderr.String())
+	}
+	var snapshot status.Snapshot
+	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+		t.Fatalf("status JSON = %q: %v", output.String(), err)
+	}
+	if snapshot.Version != 1 || snapshot.Stale || len(snapshot.Rows) != 1 || snapshot.Rows[0].ObservedStatus != model.AgentIdle || snapshot.Rows[0].Task.Total != 1 || snapshot.Rows[0].Task.Next != "1.1 Continue implementation" {
+		t.Fatalf("status snapshot = %#v", snapshot)
+	}
+
+	output.Reset()
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--no-color"}); exit != 0 {
+		t.Fatalf("human status exit=%d stderr=%s", exit, stderr.String())
+	}
+	if strings.ContainsRune(output.String(), '\x1b') || !strings.Contains(output.String(), "NEXT INCOMPLETE") || !strings.Contains(output.String(), "idle") {
+		t.Fatalf("human status = %q", output.String())
+	}
+
+	output.Reset()
+	if exit := application.Run(context.Background(), []string{"--home", home, "--herdr-bin", "fake-herdr", "plugin", "refresh"}); exit != 0 {
+		t.Fatalf("plugin refresh exit=%d stderr=%s", exit, stderr.String())
+	}
+	if !strings.Contains(output.String(), "Ori Herdr Devflow: ready") {
+		t.Fatalf("plugin refresh output = %q", output.String())
 	}
 }
 
@@ -546,6 +627,15 @@ watch_poll_interval = "2s"
 func containsIntegrationCommand(commands []herdr.Command) bool {
 	for _, command := range commands {
 		if len(command.Args) > 0 && command.Args[0] == "integration" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsHerdrCommand(commands []herdr.Command, want string) bool {
+	for _, command := range commands {
+		if strings.Join(command.Args, " ") == want {
 			return true
 		}
 	}

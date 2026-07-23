@@ -138,6 +138,12 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		featureState.Schedules = make(map[string]model.Schedule)
 	}
 	featureState.Feature = feature
+	// The installed plugin can outlive this checkout, so persist the
+	// configured display-metadata source on this feature record. State is
+	// shared across repositories, therefore this must not be a global value.
+	featureState.SourceID = s.Config.Bridge.SourceID
+	metadataEnabled := s.Config.Metadata.Enabled
+	featureState.MetadataEnabled = &metadataEnabled
 	if featureState.Handoff.Stage == "" {
 		featureState.Handoff = model.HandoffState{Stage: model.HandoffRecorded, PrimaryRole: s.Config.Primary.Role, UpdatedAt: s.now()}
 	} else if featureState.Handoff.PrimaryRole == "" {
@@ -185,8 +191,10 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		"path":        feature.Path,
 		"ori_devflow": "managed",
 	}
-	if _, err := s.Client.ReportWorkspaceMetadata(ctx, opened.Workspace.WorkspaceID, s.Config.Bridge.SourceID, metadata); err != nil {
-		return HandoffResult{}, wrapHerdrError("report workspace metadata", err, "wt herd retry")
+	if metadataEnabledFor(featureState) {
+		if _, err := s.Client.ReportWorkspaceMetadata(ctx, opened.Workspace.WorkspaceID, s.Config.Bridge.SourceID, metadata); err != nil {
+			return HandoffResult{}, wrapHerdrError("report workspace metadata", err, "wt herd retry")
+		}
 	}
 
 	primaryRole := featureState.Handoff.PrimaryRole
@@ -199,12 +207,14 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		return HandoffResult{}, err
 	}
 	featureState = state.Features[featureKey]
-	if _, err := s.Client.ReportPaneMetadata(ctx, primary.PaneID, s.Config.Bridge.SourceID, map[string]string{
-		"feature": feature.Name,
-		"role":    primary.Role,
-		"branch":  feature.Branch,
-	}); err != nil {
-		return HandoffResult{}, wrapHerdrError("report agent metadata", err, "wt herd retry")
+	if metadataEnabledFor(featureState) {
+		if _, err := s.Client.ReportPaneMetadata(ctx, primary.PaneID, s.Config.Bridge.SourceID, map[string]string{
+			"feature": feature.Name,
+			"role":    primary.Role,
+			"branch":  feature.Branch,
+		}); err != nil {
+			return HandoffResult{}, wrapHerdrError("report agent metadata", err, "wt herd retry")
+		}
 	}
 
 	result := HandoffResult{
@@ -420,6 +430,12 @@ func validatePromptAcknowledgement(ack herdr.AgentInfo, primary model.RoleAgent)
 		return &model.StageError{Stage: "deliver bootstrap prompt", Code: model.ErrAgentAmbiguous, Message: "Herdr acknowledged a prompt for a different terminal", Recovery: "wt herd status; do not resend until the target is verified"}
 	}
 	return nil
+}
+
+// metadataEnabledFor treats records created before this setting was persisted
+// as enabled, matching the original opt-in bridge default.
+func metadataEnabledFor(feature model.FeatureState) bool {
+	return feature.MetadataEnabled == nil || *feature.MetadataEnabled
 }
 
 // ScopedAgentName produces a globally unique, Herdr-valid name without

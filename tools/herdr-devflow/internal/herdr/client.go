@@ -361,6 +361,13 @@ func (c *Client) EnablePlugin(ctx context.Context, pluginID string) (PluginInfo,
 	return response.Plugin, nil
 }
 
+// InvokePluginAction starts a manifest-declared action through Herdr so the
+// child receives the current plugin/socket context. It is useful after a
+// relink, when a startup hook may not run until the next server restore.
+func (c *Client) InvokePluginAction(ctx context.Context, actionID string) (json.RawMessage, error) {
+	return c.CLIJSON(ctx, "plugin", "action", "invoke", actionID)
+}
+
 // WorktreeOpen opens an existing checkout only. This adapter intentionally has
 // no worktree-create or worktree-remove method because Git remains Ori's
 // authority for worktree lifecycle.

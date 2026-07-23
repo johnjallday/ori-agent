@@ -323,12 +323,14 @@ func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role
 	if err := s.saveResolved(resolved); err != nil {
 		return AddResult{}, err
 	}
-	if _, err := s.Client.ReportPaneMetadata(ctx, agent.PaneID, s.Config.Bridge.SourceID, map[string]string{
-		"feature": resolved.feature.Feature.Name,
-		"role":    agent.Role,
-		"branch":  resolved.feature.Feature.Branch,
-	}); err != nil {
-		return AddResult{}, wrapHerdrError("report role metadata", err, "wt herd retry --feature "+resolved.feature.Feature.Name)
+	if metadataEnabledFor(resolved.feature) {
+		if _, err := s.Client.ReportPaneMetadata(ctx, agent.PaneID, s.Config.Bridge.SourceID, map[string]string{
+			"feature": resolved.feature.Feature.Name,
+			"role":    agent.Role,
+			"branch":  resolved.feature.Feature.Branch,
+		}); err != nil {
+			return AddResult{}, wrapHerdrError("report role metadata", err, "wt herd retry --feature "+resolved.feature.Feature.Name)
+		}
 	}
 	return AddResult{Feature: resolved.feature.Feature, Agent: agent}, nil
 }
@@ -437,12 +439,14 @@ func (s *Service) Rename(ctx context.Context, request RenameRequest) (RenameResu
 	if err := s.saveResolved(&resolved); err != nil {
 		return RenameResult{}, err
 	}
-	if _, err := s.Client.ReportPaneMetadata(ctx, agent.PaneID, s.Config.Bridge.SourceID, map[string]string{
-		"feature": resolved.feature.Feature.Name,
-		"role":    agent.Role,
-		"branch":  resolved.feature.Feature.Branch,
-	}); err != nil {
-		return RenameResult{}, wrapHerdrError("report role metadata", err, "wt herd retry --feature "+resolved.feature.Feature.Name)
+	if metadataEnabledFor(resolved.feature) {
+		if _, err := s.Client.ReportPaneMetadata(ctx, agent.PaneID, s.Config.Bridge.SourceID, map[string]string{
+			"feature": resolved.feature.Feature.Name,
+			"role":    agent.Role,
+			"branch":  resolved.feature.Feature.Branch,
+		}); err != nil {
+			return RenameResult{}, wrapHerdrError("report role metadata", err, "wt herd retry --feature "+resolved.feature.Feature.Name)
+		}
 	}
 	return RenameResult{Feature: resolved.feature.Feature, Agent: agent}, nil
 }

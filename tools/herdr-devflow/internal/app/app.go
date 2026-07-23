@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -147,6 +148,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.continueAgent(ctx, opts, commandArgs)
 	case "schedule":
 		return a.schedule(ctx, opts, commandArgs)
+	case "status":
+		return a.status(ctx, opts, commandArgs)
 	case "dispatch":
 		return a.dispatch(ctx, opts)
 	case "plugin":
@@ -167,6 +170,15 @@ type handoffArgs struct {
 type controlContextArgs struct {
 	feature  string
 	worktree string
+}
+
+type statusArgs struct {
+	context   controlContextArgs
+	current   bool
+	watch     bool
+	noColor   bool
+	json      bool
+	clearView bool
 }
 
 func parseControlContext(args []string) (controlContextArgs, []string, error) {
@@ -193,6 +205,37 @@ func parseControlContext(args []string) (controlContextArgs, []string, error) {
 		}
 	}
 	return contextArgs, remaining, nil
+}
+
+func parseStatusArgs(args []string) (statusArgs, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return statusArgs{}, err
+	}
+	parsed := statusArgs{context: contextArgs}
+	for _, argument := range remaining {
+		switch argument {
+		case "--current":
+			parsed.current = true
+		case "--watch":
+			parsed.watch = true
+		case "--no-color":
+			parsed.noColor = true
+		case "--json":
+			parsed.json = true
+		case "--clear-view":
+			parsed.clearView = true
+		default:
+			return statusArgs{}, fmt.Errorf("unknown status option %q", argument)
+		}
+	}
+	if parsed.current && (parsed.context.feature != "" || parsed.context.worktree != "") {
+		return statusArgs{}, fmt.Errorf("--current cannot be combined with --feature or --worktree")
+	}
+	if parsed.clearView && parsed.watch {
+		return statusArgs{}, fmt.Errorf("--clear-view cannot be combined with --watch")
+	}
+	return parsed, nil
 }
 
 func parseAddAgentArgs(args []string) (agents.AddRequest, error) {
@@ -641,6 +684,21 @@ func (a *App) setup(ctx context.Context, opts options) int {
 		a.writeError(&model.StageError{Stage: "state", Code: model.ErrStateCorrupt, Message: "bridge state could not be saved", Recovery: "check the local bridge state directory permissions, then run wt herd doctor", Cause: err}, opts.json)
 		return 1
 	}
+	// Linking/relinking a plugin can happen while Herdr is already running.
+	// Reapply display-only state now instead of waiting for a server restart or
+	// a later hook; an unavailable live session remains a non-fatal stale view.
+	statusService := a.statusService(runtime)
+	if snapshot, snapshotErr := statusService.Snapshot(ctx, status.Options{}); snapshotErr == nil {
+		a.rehydrateStatus(ctx, runtime, statusService, snapshot)
+	} else {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: status metadata was not refreshed after plugin setup: %v\n", snapshotErr)
+	}
+	// Plugin actions receive HERDR_SOCKET_PATH from the host. Invoking the
+	// installed refresh action is what restores the source-owned Agent view
+	// immediately after a relink, rather than waiting for the next restart.
+	if _, refreshErr := runtime.herdr.InvokePluginAction(ctx, PluginID+".refresh"); refreshErr != nil {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: plugin refresh was not started after setup: %v\n", refreshErr)
+	}
 	schedulerStatus := "unsupported on this platform; one-time continuations require macOS"
 	if a.goos == "darwin" {
 		plist, schedulerErr := a.installScheduler(ctx, runtime)
@@ -727,6 +785,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.refreshStatusDisplay(ctx, runtime)
 	a.writeResult(opts.json, map[string]any{
 		"status":           "ready",
 		"feature":          result.Feature.Name,
@@ -808,6 +867,7 @@ func (a *App) addAgent(ctx context.Context, opts options, args []string) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.refreshStatusDisplay(ctx, runtime)
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "reused": result.Reused})
 	} else if result.Reused {
@@ -858,6 +918,7 @@ func (a *App) renameAgent(ctx context.Context, opts options, args []string) int 
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.refreshStatusDisplay(ctx, runtime)
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent})
 	} else {
@@ -930,6 +991,7 @@ func (a *App) rebindAgent(ctx context.Context, opts options, args []string) int 
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.refreshStatusDisplay(ctx, runtime)
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "rebound": true})
 	} else {
@@ -1001,6 +1063,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.refreshStatusDisplay(ctx, runtime)
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "scheduled", "preview": preview, "schedule": scheduleView(target.Feature, record)})
 	} else {
@@ -1069,6 +1132,7 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 			a.writeError(cancelErr, opts.json)
 			return 1
 		}
+		a.refreshStatusDisplay(ctx, runtime)
 		if opts.json {
 			a.writeResult(true, map[string]any{"status": "canceled", "schedule": scheduleView(feature, record)})
 		} else {
@@ -1079,6 +1143,158 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 		a.writeError(fmt.Errorf("unknown schedule command %q", parsed.command), opts.json)
 		return 2
 	}
+}
+
+// status is deliberately read-only with respect to bridge state. It treats a
+// live Herdr outage as stale data rather than hiding the local feature and
+// schedule records that help an operator recover.
+func (a *App) status(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseStatusArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	if parsed.json {
+		opts.json = true
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return 1
+	}
+	if !runtime.config.Bridge.Enabled {
+		a.writeResult(opts.json, map[string]any{"status": "disabled", "message": "Ori Herdr Devflow is disabled; no status view was changed."})
+		return 0
+	}
+	service := a.statusService(runtime)
+	if parsed.clearView {
+		if err := service.ClearManagedView(ctx); err != nil {
+			a.writeError(err, opts.json)
+			return 1
+		}
+		a.writeResult(opts.json, map[string]any{"status": "view_cleared", "message": "Cleared the source-scoped Ori Devflow Herdr view."})
+		return 0
+	}
+	filter := status.Options{FeatureName: parsed.context.feature, Worktree: parsed.context.worktree}
+	if parsed.current {
+		filter.Worktree = runtime.paths.RepoRoot
+	}
+
+	firstSnapshot := true
+	wasStale := false
+	rendered := false
+	emit := func(snapshot status.Snapshot) {
+		// Reconnects and a fresh command are the two points where Herdr's
+		// display-only metadata may need rebuilding. These calls never report
+		// semantic agent lifecycle state.
+		if firstSnapshot || (wasStale && !snapshot.Stale) {
+			a.rehydrateStatus(ctx, runtime, service, snapshot)
+		}
+		firstSnapshot = false
+		wasStale = snapshot.Stale
+		if parsed.watch && rendered && !opts.json && a.statusColorEnabled(parsed.noColor) {
+			// We never enter raw or alternate-screen mode, so Ctrl-C leaves a
+			// normal terminal with the most recent complete board visible.
+			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
+		}
+		a.writeStatusSnapshot(opts.json, parsed.noColor, snapshot)
+		rendered = true
+	}
+	if parsed.watch {
+		if err := service.Watch(ctx, filter, emit); err != nil {
+			a.writeError(err, opts.json)
+			return 1
+		}
+		return 0
+	}
+	snapshot, err := service.Snapshot(ctx, filter)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	emit(snapshot)
+	return 0
+}
+
+func (a *App) statusService(runtime runtimeContext) *status.Service {
+	service := &status.Service{
+		Store:             state.New(runtime.paths.StateDir),
+		Client:            runtime.herdr,
+		SourceID:          runtime.config.Bridge.SourceID,
+		ViewSource:        status.PluginViewSource,
+		WatchPollInterval: runtime.config.WatchPollInterval(),
+	}
+	if runtime.herdr.SocketPath != "" {
+		service.Subscribe = func(ctx context.Context, subscriptions []map[string]any) (status.EventStream, error) {
+			stream, err := runtime.herdr.Subscribe(ctx, subscriptions)
+			if err != nil {
+				return nil, err
+			}
+			return stream, nil
+		}
+	}
+	return service
+}
+
+func (a *App) rehydrateStatus(ctx context.Context, runtime runtimeContext, service *status.Service, snapshot status.Snapshot) {
+	if runtime.config.Metadata.Enabled {
+		if err := service.RehydrateMetadata(ctx, snapshot); err != nil {
+			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: status metadata was not refreshed: %v\n", err)
+		}
+	}
+	// Agent views use the socket API. A normal shell status command may have
+	// no socket context, while the installed plugin does; avoid presenting the
+	// absence of that optional context as a status-board failure.
+	if runtime.herdr.SocketPath != "" {
+		if err := service.ApplyManagedView(ctx); err != nil {
+			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: managed Herdr view was not refreshed: %v\n", err)
+		}
+	}
+}
+
+// refreshStatusDisplay is best-effort after a command changes managed local
+// state. It keeps schedule/task tokens current without turning an otherwise
+// successful agent or scheduler operation into a failure.
+func (a *App) refreshStatusDisplay(ctx context.Context, runtime runtimeContext) {
+	service := a.statusService(runtime)
+	snapshot, err := service.Snapshot(ctx, status.Options{})
+	if err != nil {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: status display was not refreshed: %v\n", err)
+		return
+	}
+	a.rehydrateStatus(ctx, runtime, service, snapshot)
+}
+
+func (a *App) writeStatusSnapshot(asJSON, noColor bool, snapshot status.Snapshot) {
+	if asJSON {
+		encoded, err := json.Marshal(snapshot)
+		if err != nil {
+			fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not encode status snapshot")
+			return
+		}
+		fmt.Fprintln(a.stdout, string(encoded))
+		return
+	}
+	fmt.Fprint(a.stdout, status.RenderHuman(snapshot, status.RenderOptions{Color: a.statusColorEnabled(noColor)}))
+}
+
+func (a *App) statusColorEnabled(noColor bool) bool {
+	if noColor {
+		return false
+	}
+	if _, disabled := a.lookupEnv("NO_COLOR"); disabled {
+		return false
+	}
+	return a.stdoutIsTerminal()
+}
+
+func (a *App) stdoutIsTerminal() bool {
+	file, ok := a.stdout.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // dispatch is intentionally detached from repository/config resolution. It
@@ -1398,21 +1614,100 @@ func (a *App) plugin(ctx context.Context, opts options, args []string) int {
 		a.writeError(fmt.Errorf("plugin requires startup, setup, refresh, or board"), opts.json)
 		return 2
 	}
-	// Plugin actions are deliberately passive in this milestone. They never
-	// install integrations, create worktrees, start agents, or change keybinds.
+	// Plugin actions are passive observers. They never install integrations,
+	// create worktrees, start agents, or change keybindings.
 	switch args[0] {
 	case "startup", "refresh":
-		a.writeResult(opts.json, map[string]any{"status": "ok", "message": "Ori Devflow plugin is ready; use wt herd status after a feature handoff."})
-		return 0
+		return a.pluginRefresh(ctx, opts)
 	case "setup":
 		a.writeResult(opts.json, map[string]any{"status": "manual_setup_required", "message": "Run wt herd setup from an Ori Git worktree to refresh the stable helper."})
 		return 0
 	case "board":
-		a.writeResult(opts.json, map[string]any{"status": "empty", "message": "No managed Ori Devflow features are registered yet."})
-		return 0
+		return a.pluginBoard(ctx, opts)
 	default:
 		a.writeError(fmt.Errorf("unknown plugin command %q", args[0]), opts.json)
 		return 2
+	}
+}
+
+func (a *App) pluginStatusService(opts options) (*status.Service, *herdr.Client, error) {
+	store, err := a.dispatcherStore(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	client := a.newHerdrClient(opts, a.withOverrides(opts))
+	service := &status.Service{
+		Store:             store,
+		Client:            client,
+		SourceID:          PluginID,
+		ViewSource:        status.PluginViewSource,
+		WatchPollInterval: 2 * time.Second,
+	}
+	if client.SocketPath != "" {
+		service.Subscribe = func(ctx context.Context, subscriptions []map[string]any) (status.EventStream, error) {
+			stream, err := client.Subscribe(ctx, subscriptions)
+			if err != nil {
+				return nil, err
+			}
+			return stream, nil
+		}
+	}
+	return service, client, nil
+}
+
+func (a *App) pluginRefresh(ctx context.Context, opts options) int {
+	service, client, err := a.pluginStatusService(opts)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: could not open local status state: %v\n", err)
+		return 0
+	}
+	snapshot, err := service.Snapshot(ctx, status.Options{})
+	if err != nil {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: could not refresh status: %v\n", err)
+		return 0
+	}
+	a.rehydratePluginStatus(ctx, service, client, snapshot)
+	a.writeResult(opts.json, map[string]any{"status": "ready", "managed_agents": len(snapshot.Rows), "stale": snapshot.Stale})
+	return 0
+}
+
+func (a *App) pluginBoard(ctx context.Context, opts options) int {
+	service, client, err := a.pluginStatusService(opts)
+	if err != nil {
+		a.writeError(&model.StageError{Stage: "plugin board", Code: model.ErrStateCorrupt, Message: "could not open the user-local Ori Devflow status state", Recovery: "run wt herd setup from an Ori Git worktree", Cause: err}, opts.json)
+		return 1
+	}
+	firstSnapshot := true
+	wasStale := false
+	rendered := false
+	emit := func(snapshot status.Snapshot) {
+		if firstSnapshot || (wasStale && !snapshot.Stale) {
+			a.rehydratePluginStatus(ctx, service, client, snapshot)
+		}
+		firstSnapshot = false
+		wasStale = snapshot.Stale
+		if rendered && !opts.json && a.statusColorEnabled(false) {
+			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
+		}
+		a.writeStatusSnapshot(opts.json, false, snapshot)
+		rendered = true
+	}
+	if err := service.Watch(ctx, status.Options{}, emit); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	return 0
+}
+
+func (a *App) rehydratePluginStatus(ctx context.Context, service *status.Service, client *herdr.Client, snapshot status.Snapshot) {
+	if err := service.RehydrateMetadata(ctx, snapshot); err != nil {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: status metadata was not refreshed: %v\n", err)
+	}
+	if client.SocketPath == "" {
+		return
+	}
+	if err := service.ApplyManagedView(ctx); err != nil {
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: managed Herdr view was not refreshed: %v\n", err)
 	}
 }
 
@@ -1440,6 +1735,9 @@ Usage:
   wt herd schedule show <schedule-id> [--feature NAME|--worktree PATH]
   wt herd schedule cancel <schedule-id> [--feature NAME|--worktree PATH]
                                 Inspect or cancel local one-time continuations without prompting
+  wt herd status [--current|--feature NAME|--worktree PATH] [--watch] [--json] [--no-color]
+                                Show all managed features by default, or a filtered live status board
+  wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
   wt herd dispatch              Run due local schedules (used by the macOS LaunchAgent)
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 

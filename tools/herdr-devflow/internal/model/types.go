@@ -157,12 +157,14 @@ type BridgeState struct {
 }
 
 type FeatureState struct {
-	Feature     Feature              `json:"feature"`
-	WorkspaceID string               `json:"workspace_id,omitempty"`
-	Agents      map[string]RoleAgent `json:"agents,omitempty"`
-	Schedules   map[string]Schedule  `json:"schedules,omitempty"`
-	Handoff     HandoffState         `json:"handoff,omitempty"`
-	UpdatedAt   time.Time            `json:"updated_at"`
+	Feature         Feature              `json:"feature"`
+	WorkspaceID     string               `json:"workspace_id,omitempty"`
+	SourceID        string               `json:"source_id,omitempty"`
+	MetadataEnabled *bool                `json:"metadata_enabled,omitempty"`
+	Agents          map[string]RoleAgent `json:"agents,omitempty"`
+	Schedules       map[string]Schedule  `json:"schedules,omitempty"`
+	Handoff         HandoffState         `json:"handoff,omitempty"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 // HandoffState is persisted before the bridge changes Herdr. Each completed

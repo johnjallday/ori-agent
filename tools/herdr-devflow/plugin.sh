@@ -12,4 +12,6 @@ if [ ! -x "$helper" ]; then
   exit 1
 fi
 
-exec "$helper" "$@"
+# The installed plugin must operate only from its stable user-local runtime;
+# a Herdr pane can outlive the Git worktree that originally installed it.
+exec "$helper" --home "$runtime_root" "$@"
