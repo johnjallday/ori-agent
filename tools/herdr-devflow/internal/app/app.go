@@ -14,11 +14,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
@@ -26,25 +28,31 @@ import (
 const PluginID = "ori.devflow"
 
 type Dependencies struct {
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Getwd       func() (string, error)
-	LookupEnv   func(string) (string, bool)
-	LookPath    func(string) (string, error)
-	Runner      herdr.Runner
-	BuildHelper func(context.Context, string, string) error
-	GOOS        string
+	Stdout       io.Writer
+	Stderr       io.Writer
+	Getwd        func() (string, error)
+	LookupEnv    func(string) (string, bool)
+	LookPath     func(string) (string, error)
+	Runner       herdr.Runner
+	BuildHelper  func(context.Context, string, string) error
+	GOOS         string
+	UserHomeDir  func() (string, error)
+	Getuid       func() int
+	LaunchctlRun func(context.Context, string, ...string) error
 }
 
 type App struct {
-	stdout      io.Writer
-	stderr      io.Writer
-	getwd       func() (string, error)
-	lookupEnv   func(string) (string, bool)
-	lookPath    func(string) (string, error)
-	runner      herdr.Runner
-	buildHelper func(context.Context, string, string) error
-	goos        string
+	stdout       io.Writer
+	stderr       io.Writer
+	getwd        func() (string, error)
+	lookupEnv    func(string) (string, bool)
+	lookPath     func(string) (string, error)
+	runner       herdr.Runner
+	buildHelper  func(context.Context, string, string) error
+	goos         string
+	userHomeDir  func() (string, error)
+	getuid       func() int
+	launchctlRun func(context.Context, string, ...string) error
 }
 
 func New(deps Dependencies) *App {
@@ -72,15 +80,24 @@ func New(deps Dependencies) *App {
 	if deps.GOOS == "" {
 		deps.GOOS = runtime.GOOS
 	}
+	if deps.UserHomeDir == nil {
+		deps.UserHomeDir = os.UserHomeDir
+	}
+	if deps.Getuid == nil {
+		deps.Getuid = os.Getuid
+	}
 	return &App{
-		stdout:      deps.Stdout,
-		stderr:      deps.Stderr,
-		getwd:       deps.Getwd,
-		lookupEnv:   deps.LookupEnv,
-		lookPath:    deps.LookPath,
-		runner:      deps.Runner,
-		buildHelper: deps.BuildHelper,
-		goos:        deps.GOOS,
+		stdout:       deps.Stdout,
+		stderr:       deps.Stderr,
+		getwd:        deps.Getwd,
+		lookupEnv:    deps.LookupEnv,
+		lookPath:     deps.LookPath,
+		runner:       deps.Runner,
+		buildHelper:  deps.BuildHelper,
+		goos:         deps.GOOS,
+		userHomeDir:  deps.UserHomeDir,
+		getuid:       deps.Getuid,
+		launchctlRun: deps.LaunchctlRun,
 	}
 }
 
@@ -126,6 +143,12 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.readAgent(ctx, opts, commandArgs)
 	case "rebind":
 		return a.rebindAgent(ctx, opts, commandArgs)
+	case "continue":
+		return a.continueAgent(ctx, opts, commandArgs)
+	case "schedule":
+		return a.schedule(ctx, opts, commandArgs)
+	case "dispatch":
+		return a.dispatch(ctx, opts)
 	case "plugin":
 		return a.plugin(ctx, opts, commandArgs)
 	default:
@@ -314,6 +337,82 @@ func parseRebindAgentArgs(args []string) (agents.RebindRequest, error) {
 	return agents.RebindRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Target: target}, nil
 }
 
+type continueArgs struct {
+	context agents.ContextRequest
+	role    string
+	at      string
+	prompt  string
+}
+
+func parseContinueArgs(args []string) (continueArgs, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return continueArgs{}, err
+	}
+	parsed := continueArgs{context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}}
+	var positional []string
+	for index := 0; index < len(remaining); index++ {
+		switch remaining[index] {
+		case "--at", "--prompt":
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return continueArgs{}, fmt.Errorf("%s requires a value", remaining[index])
+			}
+			if remaining[index] == "--at" {
+				parsed.at = remaining[index+1]
+			} else {
+				parsed.prompt = remaining[index+1]
+			}
+			index++
+		default:
+			if strings.HasPrefix(remaining[index], "--") {
+				return continueArgs{}, fmt.Errorf("unknown continue option %q", remaining[index])
+			}
+			positional = append(positional, remaining[index])
+		}
+	}
+	if len(positional) > 1 {
+		return continueArgs{}, fmt.Errorf("continue accepts at most one role")
+	}
+	if len(positional) == 1 {
+		parsed.role = positional[0]
+	}
+	if parsed.at == "" {
+		return continueArgs{}, fmt.Errorf("continue requires --at <RFC3339-or-local-time>")
+	}
+	return parsed, nil
+}
+
+type scheduleArgs struct {
+	context agents.ContextRequest
+	command string
+	id      string
+}
+
+func parseScheduleArgs(args []string) (scheduleArgs, error) {
+	contextArgs, remaining, err := parseControlContext(args)
+	if err != nil {
+		return scheduleArgs{}, err
+	}
+	if len(remaining) == 0 {
+		return scheduleArgs{}, fmt.Errorf("schedule requires list, show <schedule-id>, or cancel <schedule-id>")
+	}
+	parsed := scheduleArgs{context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, command: remaining[0]}
+	switch parsed.command {
+	case "list":
+		if len(remaining) != 1 {
+			return scheduleArgs{}, fmt.Errorf("schedule list accepts no additional arguments")
+		}
+	case "show", "cancel":
+		if len(remaining) != 2 {
+			return scheduleArgs{}, fmt.Errorf("schedule %s requires one schedule id", parsed.command)
+		}
+		parsed.id = remaining[1]
+	default:
+		return scheduleArgs{}, fmt.Errorf("unknown schedule command %q", parsed.command)
+	}
+	return parsed, nil
+}
+
 func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	var parsed handoffArgs
 	for len(args) > 0 {
@@ -410,19 +509,10 @@ func (a *App) load(opts options) (runtimeContext, error) {
 		return runtimeContext{}, err
 	}
 
-	binary := opts.herdrBin
-	if binary == "" {
-		if value, ok := lookup("HERDR_BIN_PATH"); ok && strings.TrimSpace(value) != "" {
-			binary = value
-		} else if value, ok := lookup("HERDR_DEVFLOW_HERDR_BIN"); ok && strings.TrimSpace(value) != "" {
-			binary = value
-		}
-	}
-	socketPath, _ := lookup("HERDR_SOCKET_PATH")
 	return runtimeContext{
 		paths:  paths,
 		config: cfg,
-		herdr:  herdr.New(binary, socketPath, a.runner),
+		herdr:  a.newHerdrClient(opts, lookup),
 	}, nil
 }
 
@@ -440,6 +530,71 @@ func (a *App) withOverrides(opts options) func(string) (string, bool) {
 		}
 		return a.lookupEnv(key)
 	}
+}
+
+func (a *App) newHerdrClient(opts options, lookup func(string) (string, bool)) *herdr.Client {
+	binary := opts.herdrBin
+	if binary == "" {
+		if value, ok := lookup("HERDR_BIN_PATH"); ok && strings.TrimSpace(value) != "" {
+			binary = value
+		} else if value, ok := lookup("HERDR_DEVFLOW_HERDR_BIN"); ok && strings.TrimSpace(value) != "" {
+			binary = value
+		}
+	}
+	socketPath, _ := lookup("HERDR_SOCKET_PATH")
+	return herdr.New(binary, socketPath, a.runner)
+}
+
+func (a *App) runtimeRootFor(opts options) (string, error) {
+	lookup := a.withOverrides(opts)
+	if value, ok := lookup(worktree.HomeOverrideEnv); ok && strings.TrimSpace(value) != "" {
+		root, err := filepath.Abs(value)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", worktree.HomeOverrideEnv, err)
+		}
+		return filepath.Clean(root), nil
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config directory: %w", err)
+	}
+	return filepath.Join(base, "herdr", "ori-devflow"), nil
+}
+
+func (a *App) dispatcherStore(opts options) (*state.Store, error) {
+	runtimeRoot, err := a.runtimeRootFor(opts)
+	if err != nil {
+		return nil, err
+	}
+	return state.New(filepath.Join(runtimeRoot, "state")), nil
+}
+
+func (a *App) installScheduler(ctx context.Context, runtime runtimeContext) (string, error) {
+	if a.goos != "darwin" {
+		return scheduler.InstallLaunchAgent(ctx, scheduler.LaunchdConfig{GOOS: a.goos})
+	}
+	if info, err := os.Stat(runtime.paths.HelperPath); err != nil || info.Mode()&0111 == 0 {
+		return "", &model.StageError{Stage: "scheduler setup", Code: model.ErrPluginUnavailable, Message: "the stable Ori Devflow helper is not installed or executable", Recovery: "run wt herd setup before scheduling a continuation", Cause: err}
+	}
+	home, err := a.userHomeDir()
+	if err != nil {
+		return "", &model.StageError{Stage: "scheduler setup", Code: model.ErrSchedulerUnsupported, Message: "could not resolve the current macOS home directory", Recovery: "run wt herd setup from a logged-in macOS account", Cause: err}
+	}
+	herdrBinary := runtime.herdr.Binary
+	if herdrBinary == herdr.DefaultBinary {
+		if path, lookupErr := a.lookPath(herdrBinary); lookupErr == nil {
+			herdrBinary = path
+		}
+	}
+	return scheduler.InstallLaunchAgent(ctx, scheduler.LaunchdConfig{
+		GOOS:        a.goos,
+		HomeDir:     home,
+		UID:         a.getuid(),
+		HelperPath:  runtime.paths.HelperPath,
+		RuntimeRoot: runtime.paths.RuntimeRoot,
+		HerdrBinary: herdrBinary,
+		Run:         a.launchctlRun,
+	})
 }
 
 func (a *App) setup(ctx context.Context, opts options) int {
@@ -486,6 +641,15 @@ func (a *App) setup(ctx context.Context, opts options) int {
 		a.writeError(&model.StageError{Stage: "state", Code: model.ErrStateCorrupt, Message: "bridge state could not be saved", Recovery: "check the local bridge state directory permissions, then run wt herd doctor", Cause: err}, opts.json)
 		return 1
 	}
+	schedulerStatus := "unsupported on this platform; one-time continuations require macOS"
+	if a.goos == "darwin" {
+		plist, schedulerErr := a.installScheduler(ctx, runtime)
+		if schedulerErr != nil {
+			a.writeError(schedulerErr, opts.json)
+			return 1
+		}
+		schedulerStatus = "LaunchAgent registered: " + plist
+	}
 
 	a.writeResult(opts.json, map[string]any{
 		"status":        "ready",
@@ -497,7 +661,7 @@ func (a *App) setup(ctx context.Context, opts options) int {
 			"root":    plugin.PluginRoot,
 			"enabled": plugin.Enabled,
 		},
-		"scheduler": "not registered until a continuation is scheduled",
+		"scheduler": schedulerStatus,
 		"integrations": map[string]string{
 			"policy": "not changed by setup",
 			"claude": "inspect with: herdr integration status; install manually with: herdr integration install claude",
@@ -589,6 +753,29 @@ func (a *App) loadAgentControl(ctx context.Context, opts options) (*agents.Servi
 	if err := verifyCompatibility(ctx, runtime.herdr, runtime.config); err != nil {
 		a.writeError(err, opts.json)
 		return nil, runtime, 1
+	}
+	return &agents.Service{
+		Config:       runtime.config,
+		RepositoryID: runtime.paths.RepositoryID,
+		GitCommonDir: runtime.paths.GitCommonDir,
+		Client:       runtime.herdr,
+		Store:        state.New(runtime.paths.StateDir),
+	}, runtime, -1
+}
+
+// loadScheduleControl intentionally does not contact Herdr. Schedule list,
+// show, and cancel remain useful when the detached dispatcher or Herdr server
+// is unavailable; exact live-agent verification happens only at creation and
+// delivery time.
+func (a *App) loadScheduleControl(opts options) (*agents.Service, runtimeContext, int) {
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return nil, runtimeContext{}, 1
+	}
+	if !runtime.config.Bridge.Enabled {
+		a.writeResult(opts.json, map[string]any{"status": "disabled", "message": "Ori Herdr Devflow is disabled; no continuation schedule was changed."})
+		return nil, runtime, 0
 	}
 	return &agents.Service{
 		Config:       runtime.config,
@@ -749,6 +936,211 @@ func (a *App) rebindAgent(ctx context.Context, opts options, args []string) int 
 		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: rebound %s to %s in %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
 	}
 	return 0
+}
+
+func (a *App) continueAgent(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseContinueArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadAgentControl(ctx, opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&parsed.context, runtime)
+	target, err := service.ResolveScheduleTarget(ctx, parsed.context, parsed.role)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	dueAt, timezone, err := scheduler.ParseDueAt(parsed.at, time.Now(), time.Local)
+	if err != nil {
+		a.writeError(&model.StageError{Stage: "schedule time", Code: model.ErrScheduleInvalid, Message: err.Error(), Recovery: "use --at 2026-07-24T09:30:00-04:00 or --at '2026-07-24 09:30'"}, opts.json)
+		return 2
+	}
+	prompt := parsed.prompt
+	promptSummary := "default planning-aware continuation prompt"
+	if prompt == "" {
+		prompt = agents.ContinuationPrompt(target.Feature, target.Agent.Role)
+	} else {
+		promptSummary = fmt.Sprintf("custom continuation prompt (%d characters)", len([]rune(prompt)))
+	}
+	preview := map[string]any{
+		"feature":        target.Feature.Name,
+		"worktree":       target.Feature.Path,
+		"role":           target.Agent.Role,
+		"agent":          target.Agent.Name,
+		"agent_kind":     target.Agent.Kind,
+		"due_at":         dueAt.Format(time.RFC3339),
+		"timezone":       timezone,
+		"retry_until":    dueAt.Add(runtime.config.RetryWindow()).Format(time.RFC3339),
+		"prompt_summary": promptSummary,
+	}
+	if !opts.json {
+		fmt.Fprintln(a.stdout, "Continuation preview (not saved yet):")
+		fmt.Fprintf(a.stdout, "  Feature: %s\n  Worktree: %s\n  Role: %s\n  Agent: %s (%s)\n  Due: %s (%s)\n  Retry until: %s\n  Prompt: %s\n", target.Feature.Name, target.Feature.Path, target.Agent.Role, target.Agent.Name, target.Agent.Kind, dueAt.Format(time.RFC3339), timezone, dueAt.Add(runtime.config.RetryWindow()).Format(time.RFC3339), promptSummary)
+	}
+	// Register before saving so unsupported platforms cannot leave behind a
+	// continuation that nothing is capable of dispatching. Registration is
+	// idempotent and always uses the stable installed helper path.
+	if _, err := a.installScheduler(ctx, runtime); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	scheduleService := &scheduler.Service{Store: state.New(runtime.paths.StateDir)}
+	record, err := scheduleService.Create(ctx, scheduler.CreateRequest{
+		Feature:     target.Feature,
+		Agent:       target.Agent,
+		DueAt:       dueAt,
+		Timezone:    timezone,
+		Prompt:      prompt,
+		RetryWindow: runtime.config.RetryWindow(),
+	})
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "scheduled", "preview": preview, "schedule": scheduleView(target.Feature, record)})
+	} else {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: scheduled %s for %s at %s (%s)\n", record.ID, target.Agent.Name, record.DueAt.Format(time.RFC3339), record.Timezone)
+	}
+	return 0
+}
+
+func (a *App) schedule(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseScheduleArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	service, runtime, exit := a.loadScheduleControl(opts)
+	if service == nil {
+		return exit
+	}
+	defaultControlContext(&parsed.context, runtime)
+	feature, err := service.ResolveScheduleFeature(ctx, parsed.context)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	scheduleService := &scheduler.Service{Store: state.New(runtime.paths.StateDir)}
+	ref := scheduler.ScheduleRef{RepositoryID: feature.RepositoryID, FeatureName: feature.Name}
+	switch parsed.command {
+	case "list":
+		records, listErr := scheduleService.List(ctx, ref)
+		if listErr != nil {
+			a.writeError(listErr, opts.json)
+			return 1
+		}
+		views := make([]map[string]any, 0, len(records))
+		for _, record := range records {
+			views = append(views, scheduleView(feature, record))
+		}
+		if opts.json {
+			a.writeResult(true, map[string]any{"status": "ready", "feature": feature.Name, "schedules": views})
+		} else if len(views) == 0 {
+			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: no continuation schedules for %s\n", feature.Name)
+		} else {
+			fmt.Fprintf(a.stdout, "Continuation schedules for %s:\n", feature.Name)
+			for _, view := range views {
+				fmt.Fprintf(a.stdout, "  %s  %-10s %s (%s)  due %s  attempts %d\n", view["id"], view["state"], view["role"], view["agent"], view["due_at"], view["attempts"])
+			}
+		}
+		return 0
+	case "show":
+		record, showErr := scheduleService.Show(ctx, ref, parsed.id)
+		if showErr != nil {
+			a.writeError(showErr, opts.json)
+			return 1
+		}
+		view := scheduleView(feature, record)
+		if opts.json {
+			a.writeResult(true, map[string]any{"status": "ready", "schedule": view})
+		} else {
+			encoded, _ := json.MarshalIndent(view, "", "  ")
+			fmt.Fprintln(a.stdout, string(encoded))
+		}
+		return 0
+	case "cancel":
+		record, cancelErr := scheduleService.Cancel(ctx, ref, parsed.id)
+		if cancelErr != nil {
+			a.writeError(cancelErr, opts.json)
+			return 1
+		}
+		if opts.json {
+			a.writeResult(true, map[string]any{"status": "canceled", "schedule": scheduleView(feature, record)})
+		} else {
+			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: canceled continuation %s for %s\n", record.ID, feature.Name)
+		}
+		return 0
+	default:
+		a.writeError(fmt.Errorf("unknown schedule command %q", parsed.command), opts.json)
+		return 2
+	}
+}
+
+// dispatch is intentionally detached from repository/config resolution. It
+// reads only the user-local state root supplied by launchd and never attempts
+// to create workspaces, panes, agents, or sessions.
+func (a *App) dispatch(ctx context.Context, opts options) int {
+	store, err := a.dispatcherStore(opts)
+	if err != nil {
+		a.writeError(&model.StageError{Stage: "schedule dispatch", Code: model.ErrStateCorrupt, Message: "could not resolve the user-local scheduler state", Recovery: "run wt herd doctor from the Ori repository", Cause: err}, opts.json)
+		return 1
+	}
+	service := &scheduler.Service{Store: store, Client: a.newHerdrClient(opts, a.withOverrides(opts))}
+	results, err := service.DispatchDue(ctx)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	views := make([]map[string]any, 0, len(results))
+	for _, result := range results {
+		views = append(views, scheduleView(result.Feature, result.Schedule))
+	}
+	if opts.json {
+		a.writeResult(true, map[string]any{"status": "ok", "processed": len(views), "schedules": views})
+	} else if len(views) > 0 {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow dispatcher: processed %d schedule(s)\n", len(views))
+	} else {
+		fmt.Fprintln(a.stdout, "Ori Herdr Devflow dispatcher: no due schedules")
+	}
+	return 0
+}
+
+func scheduleView(feature model.Feature, record model.Schedule) map[string]any {
+	return map[string]any{
+		"id":                   record.ID,
+		"feature":              feature.Name,
+		"worktree":             record.FeaturePath,
+		"role":                 record.Role,
+		"agent":                record.AgentName,
+		"agent_kind":           record.AgentKind,
+		"workspace_id":         record.WorkspaceID,
+		"pane_id":              record.PaneID,
+		"terminal_id":          record.TerminalID,
+		"native_session_bound": record.NativeSession.Value != "",
+		"due_at":               record.DueAt.Format(time.RFC3339),
+		"timezone":             record.Timezone,
+		"retry_until":          record.RetryUntil.Format(time.RFC3339),
+		"state":                record.State,
+		"attempts":             record.Attempts,
+		"last_checked_at":      formatOptionalTime(record.LastCheckedAt),
+		"last_attempt_at":      formatOptionalTime(record.LastAttemptAt),
+		"delivered_at":         formatOptionalTime(record.DeliveredAt),
+		"failure_reason":       record.FailureReason,
+		"recovery":             record.RecoveryCommand,
+		"prompt_summary":       fmt.Sprintf("stored continuation prompt (%d characters)", len([]rune(record.Prompt))),
+	}
+}
+
+func formatOptionalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format(time.RFC3339)
 }
 
 func (a *App) featureForPath(stateDir, repositoryID, candidatePath string) string {
@@ -981,11 +1373,13 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 		diagnostics = append(diagnostics, diagnostic{Name: "agent integrations", Status: "PASS", Detail: integrationStatus, Recovery: "setup never installs or changes integrations; use herdr integration install claude|codex explicitly"})
 	}
 	if a.goos == "darwin" {
-		plist := filepath.Join(userHomeOrEmpty(), "Library", "LaunchAgents", "com.ori.herdr-devflow.plist")
-		if _, err := os.Stat(plist); err == nil {
+		home, homeErr := a.userHomeDir()
+		if homeErr != nil {
+			diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "could not resolve the macOS home directory", Recovery: "run wt herd setup from a logged-in macOS account"})
+		} else if _, err := os.Stat(scheduler.LaunchAgentPath(home)); err == nil {
 			diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "PASS", Detail: "LaunchAgent registered"})
 		} else {
-			diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "no continuation dispatcher is registered", Recovery: "create a one-time continuation with wt herd continue ..."})
+			diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "no continuation dispatcher is registered", Recovery: "run wt herd setup or create a one-time continuation with wt herd continue ..."})
 		}
 	} else {
 		diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "one-time continuation scheduling is macOS-only", Recovery: "run scheduling commands on macOS"})
@@ -1040,6 +1434,13 @@ Usage:
   wt herd focus [role] [--target TARGET] [--feature NAME|--worktree PATH]
   wt herd read [role] [--target TARGET] [--lines N] [--feature NAME|--worktree PATH]
   wt herd rebind <role> --target TARGET [--feature NAME|--worktree PATH]
+  wt herd continue [role] --at TIME [--prompt TEXT] [--feature NAME|--worktree PATH]
+                                Schedule one safe continuation for an existing managed agent
+  wt herd schedule list [--feature NAME|--worktree PATH]
+  wt herd schedule show <schedule-id> [--feature NAME|--worktree PATH]
+  wt herd schedule cancel <schedule-id> [--feature NAME|--worktree PATH]
+                                Inspect or cancel local one-time continuations without prompting
+  wt herd dispatch              Run due local schedules (used by the macOS LaunchAgent)
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 
 Global options (before the command):
@@ -1124,12 +1525,4 @@ func diagnosticFromError(name string, err error) diagnostic {
 
 func samePath(left, right string) bool {
 	return filepath.Clean(left) == filepath.Clean(right)
-}
-
-func userHomeOrEmpty() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return home
 }

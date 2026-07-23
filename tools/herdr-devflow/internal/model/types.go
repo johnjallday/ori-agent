@@ -103,18 +103,50 @@ type PromptDelivery struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Schedule records a one-time continuation. The prompt itself is deliberately
-// held in local state only and is never rendered by status or diagnostics.
+// Schedule records a one-time continuation. Prompt text stays in user-local
+// state and must never be rendered by status or diagnostics.
 type Schedule struct {
-	ID            string        `json:"id"`
-	FeaturePath   string        `json:"feature_path"`
-	Role          string        `json:"role"`
-	NativeSession NativeSession `json:"native_session"`
-	DueAt         time.Time     `json:"due_at"`
-	State         string        `json:"state"`
-	Attempts      int           `json:"attempts"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	ID              string        `json:"id"`
+	FeaturePath     string        `json:"feature_path"`
+	Role            string        `json:"role"`
+	AgentName       string        `json:"agent_name"`
+	AgentKind       string        `json:"agent_kind"`
+	WorkspaceID     string        `json:"workspace_id"`
+	PaneID          string        `json:"pane_id"`
+	TerminalID      string        `json:"terminal_id"`
+	NativeSession   NativeSession `json:"native_session"`
+	DueAt           time.Time     `json:"due_at"`
+	RetryUntil      time.Time     `json:"retry_until"`
+	Timezone        string        `json:"timezone"`
+	Prompt          string        `json:"prompt"`
+	State           ScheduleState `json:"state"`
+	Attempts        int           `json:"attempts"`
+	LastCheckedAt   time.Time     `json:"last_checked_at,omitempty"`
+	LastAttemptAt   time.Time     `json:"last_attempt_at,omitempty"`
+	DeliveredAt     time.Time     `json:"delivered_at,omitempty"`
+	CanceledAt      time.Time     `json:"canceled_at,omitempty"`
+	FailureReason   string        `json:"failure_reason,omitempty"`
+	RecoveryCommand string        `json:"recovery_command,omitempty"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+}
+
+// ScheduleState is intentionally richer than a boolean so users can see
+// whether a continuation is waiting safely, was delivered, or needs review.
+type ScheduleState string
+
+const (
+	SchedulePending    ScheduleState = "pending"
+	ScheduleWaiting    ScheduleState = "waiting"
+	ScheduleDelivering ScheduleState = "delivering"
+	ScheduleDelivered  ScheduleState = "delivered"
+	ScheduleFailed     ScheduleState = "failed"
+	ScheduleUncertain  ScheduleState = "uncertain"
+	ScheduleCanceled   ScheduleState = "canceled"
+)
+
+func (s ScheduleState) IsUnresolved() bool {
+	return s == SchedulePending || s == ScheduleWaiting || s == ScheduleDelivering || s == ScheduleUncertain
 }
 
 // BridgeState is the versioned state-file envelope. It lives in a user-local

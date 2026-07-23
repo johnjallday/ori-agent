@@ -6,14 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
 type setupRunner struct {
@@ -71,6 +75,7 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	runner := &setupRunner{}
 	var output, errors bytes.Buffer
 	builds := 0
+	launchHome := t.TempDir()
 	application := New(Dependencies{
 		Stdout:    &output,
 		Stderr:    &errors,
@@ -82,7 +87,12 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 			builds++
 			return os.WriteFile(destination, []byte("helper"), 0755)
 		},
-		GOOS: "darwin",
+		GOOS:        "darwin",
+		UserHomeDir: func() (string, error) { return launchHome, nil },
+		Getuid:      func() int { return 501 },
+		LaunchctlRun: func(context.Context, string, ...string) error {
+			return nil
+		},
 	})
 	args := []string{"--repo-root", repo, "--home", home, "setup"}
 	if exit := application.Run(context.Background(), args); exit != 0 {
@@ -96,6 +106,9 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	}
 	if _, err := os.Stat(filepath.Join(home, "state", "state.json")); err != nil {
 		t.Fatalf("state file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(launchHome, "Library", "LaunchAgents", "com.ori.herdr-devflow.plist")); err != nil {
+		t.Fatalf("LaunchAgent plist missing: %v", err)
 	}
 	if !strings.Contains(output.String(), "Ori Herdr Devflow: ready") {
 		t.Fatalf("setup output = %q", output.String())
@@ -219,6 +232,238 @@ func TestParseScopedAgentCommandsKeepsContextAndTargetExplicit(t *testing.T) {
 	}
 	if _, _, err := parseTargetAgentArgs([]string{"reviewer", "tester"}, "focus", false); err == nil {
 		t.Fatal("focus parser accepted two roles")
+	}
+}
+
+func TestParseOneTimeContinuationAndScheduleCommands(t *testing.T) {
+	t.Parallel()
+	continuation, err := parseContinueArgs([]string{"reviewer", "--at", "2026-07-24 09:30", "--prompt", "Resume safely", "--feature", "bridge"})
+	if err != nil || continuation.role != "reviewer" || continuation.at != "2026-07-24 09:30" || continuation.prompt != "Resume safely" || continuation.context.FeatureName != "bridge" {
+		t.Fatalf("parseContinueArgs() = %#v, %v", continuation, err)
+	}
+	if _, err := parseContinueArgs([]string{"--at", "every hour"}); err != nil {
+		t.Fatalf("parseContinueArgs() should leave recurrence rejection to timestamp validation: %v", err)
+	}
+	if _, err := parseContinueArgs([]string{"builder"}); err == nil {
+		t.Fatal("parseContinueArgs accepted a missing --at")
+	}
+	list, err := parseScheduleArgs([]string{"list", "--worktree", "/tmp/bridge"})
+	if err != nil || list.command != "list" || list.context.WorktreePath != "/tmp/bridge" {
+		t.Fatalf("parseScheduleArgs(list) = %#v, %v", list, err)
+	}
+	show, err := parseScheduleArgs([]string{"show", "sch-123", "--feature", "bridge"})
+	if err != nil || show.command != "show" || show.id != "sch-123" || show.context.FeatureName != "bridge" {
+		t.Fatalf("parseScheduleArgs(show) = %#v, %v", show, err)
+	}
+	if _, err := parseScheduleArgs([]string{"cancel"}); err == nil {
+		t.Fatal("parseScheduleArgs accepted cancel without an id")
+	}
+}
+
+type dispatchRunner struct {
+	mu          sync.Mutex
+	promptCalls int
+}
+
+func (r *dispatchRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := strings.Join(command.Args, " ")
+	switch {
+	case key == "agent list":
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"agents":[{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":"idle","workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}]}}`)}, nil
+	case strings.HasPrefix(key, "agent prompt ori-repo-bridge-builder "):
+		r.promptCalls++
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"agent":{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":"idle","workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}}}`)}, nil
+	default:
+		return herdr.CommandResult{}, fmt.Errorf("unexpected dispatcher Herdr command: %s", key)
+	}
+}
+
+func TestDetachedDispatchUsesOnlyUserLocalStateAndDeliversOnce(t *testing.T) {
+	t.Parallel()
+	home := filepath.Join(t.TempDir(), "runtime")
+	now := time.Now().UTC()
+	feature := model.Feature{RepositoryID: "repo-123", Name: "bridge", Path: "/tmp/bridge"}
+	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
+	agent := model.RoleAgent{Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude", WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native}
+	schedule := model.Schedule{ID: "sch-dispatch", FeaturePath: feature.Path, Role: agent.Role, AgentName: agent.Name, AgentKind: agent.Kind, WorkspaceID: agent.WorkspaceID, PaneID: agent.PaneID, TerminalID: agent.TerminalID, NativeSession: native, DueAt: now.Add(-time.Minute), RetryUntil: now.Add(10 * time.Minute), Prompt: "Resume safely.", State: model.SchedulePending, CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now.Add(-2 * time.Minute)}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features["repo-123:bridge"] = model.FeatureState{Feature: feature, WorkspaceID: "w1", Agents: map[string]model.RoleAgent{"builder": agent}, Schedules: map[string]model.Schedule{schedule.ID: schedule}}
+	store := state.New(filepath.Join(home, "state"))
+	if err := store.Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+	runner := &dispatchRunner{}
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{Stdout: &output, Stderr: &stderr, LookupEnv: func(string) (string, bool) { return "", false }, Runner: runner})
+	args := []string{"--home", home, "--herdr-bin", "fake-herdr", "--json", "dispatch"}
+	if exit := application.Run(context.Background(), args); exit != 0 {
+		t.Fatalf("dispatch exit = %d; stderr=%s", exit, stderr.String())
+	}
+	if runner.promptCalls != 1 || !strings.Contains(output.String(), `"state": "delivered"`) {
+		t.Fatalf("dispatch output=%s promptCalls=%d", output.String(), runner.promptCalls)
+	}
+	output.Reset()
+	if exit := application.Run(context.Background(), args); exit != 0 || runner.promptCalls != 1 {
+		t.Fatalf("second dispatch exit=%d promptCalls=%d stderr=%s", exit, runner.promptCalls, stderr.String())
+	}
+}
+
+type continuationRunner struct{}
+
+func (continuationRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
+	switch strings.Join(command.Args, " ") {
+	case "--version":
+		return herdr.CommandResult{Stdout: []byte("herdr 0.7.5\n")}, nil
+	case "api schema --json":
+		return herdr.CommandResult{Stdout: []byte(schemaFixture())}, nil
+	case "agent list":
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"agents":[{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":"idle","workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}]}}`)}, nil
+	default:
+		return herdr.CommandResult{}, fmt.Errorf("unexpected continuation Herdr command: %s", strings.Join(command.Args, " "))
+	}
+}
+
+func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *testing.T) {
+	repo, feature := createLinkedFeatureWorktree(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
+		if key == worktree.HomeOverrideEnv {
+			return home, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(paths.HelperPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.HelperPath, []byte("helper"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
+	agent := model.RoleAgent{Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude", WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native, Status: model.AgentIdle}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{Feature: model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature}, WorkspaceID: "w1", Agents: map[string]model.RoleAgent{"builder": agent}, Schedules: map[string]model.Schedule{}, Handoff: model.HandoffState{PrimaryRole: "builder", PrimaryAgentName: agent.Name}}
+	store := state.New(paths.StateDir)
+	if err := store.Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+
+	launchHome := t.TempDir()
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout:      &output,
+		Stderr:      &stderr,
+		Getwd:       func() (string, error) { return feature, nil },
+		LookupEnv:   func(string) (string, bool) { return "", false },
+		Runner:      continuationRunner{},
+		GOOS:        "darwin",
+		UserHomeDir: func() (string, error) { return launchHome, nil },
+		Getuid:      func() int { return 501 },
+		LaunchctlRun: func(context.Context, string, ...string) error {
+			return nil
+		},
+	})
+	due := time.Now().Add(time.Hour).Format(time.RFC3339)
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due}); exit != 0 {
+		t.Fatalf("continue exit = %d; stderr=%s", exit, stderr.String())
+	}
+	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") {
+		t.Fatalf("continue output = %q", output.String())
+	}
+	stateAfter, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedules := stateAfter.Features[paths.RepositoryID+":bridge"].Schedules
+	if len(schedules) != 1 {
+		t.Fatalf("schedule count = %d, want 1", len(schedules))
+	}
+	scheduleID := ""
+	for _, record := range schedules {
+		scheduleID = record.ID
+		if record.AgentName != agent.Name || record.State != model.SchedulePending || !strings.Contains(record.Prompt, "scheduled continuation") {
+			t.Fatalf("schedule = %#v", record)
+		}
+	}
+	output.Reset()
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "schedule", "show", scheduleID}); exit != 0 {
+		t.Fatalf("schedule show exit = %d; stderr=%s", exit, stderr.String())
+	}
+	if strings.Contains(output.String(), "This is a scheduled continuation") || !strings.Contains(output.String(), "stored continuation prompt") {
+		t.Fatalf("schedule show leaked prompt or omitted safe summary: %q", output.String())
+	}
+	output.Reset()
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "schedule", "cancel", scheduleID}); exit != 0 {
+		t.Fatalf("schedule cancel exit = %d; stderr=%s", exit, stderr.String())
+	}
+	stateAfter, err = store.Load()
+	if err != nil || stateAfter.Features[paths.RepositoryID+":bridge"].Schedules[scheduleID].State != model.ScheduleCanceled {
+		t.Fatalf("schedule cancel state = %#v, %v", stateAfter.Features[paths.RepositoryID+":bridge"].Schedules[scheduleID], err)
+	}
+	if _, err := os.Stat(filepath.Join(launchHome, "Library", "LaunchAgents", "com.ori.herdr-devflow.plist")); err != nil {
+		t.Fatalf("continuation did not install a stable LaunchAgent: %v", err)
+	}
+	if filepath.Clean(repo) == filepath.Clean(feature) {
+		t.Fatal("fixture did not create a linked feature worktree")
+	}
+}
+
+func createLinkedFeatureWorktree(t *testing.T) (string, string) {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "repo")
+	runAppGit(t, "", "init", "-b", "dev", repo)
+	if err := os.MkdirAll(filepath.Join(repo, ".herdr"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".herdr", "devflow.toml"), []byte(`
+[bridge]
+enabled = true
+min_herdr_version = "0.7.5"
+source_id = "ori.devflow"
+[primary]
+role = "builder"
+kind = "claude"
+[roles]
+default_kind = "claude"
+[bootstrap]
+timeout_seconds = 30
+[scheduler]
+retry_window = "15m"
+[metadata]
+enabled = true
+[status]
+watch_poll_interval = "2s"
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runAppGit(t, repo, "add", ".")
+	runAppGit(t, repo, "-c", "user.name=Ori Test", "-c", "user.email=ori@example.test", "commit", "-m", "fixture")
+	feature := filepath.Join(filepath.Dir(repo), "bridge")
+	runAppGit(t, repo, "worktree", "add", "-b", "feature/bridge", feature)
+	if err := os.MkdirAll(filepath.Join(feature, "tasks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(feature, "tasks", "tasks-bridge.md"), []byte("- [ ] 1.1 Continue implementation\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return repo, feature
+}
+
+func runAppGit(t *testing.T, directory string, args ...string) {
+	t.Helper()
+	if directory != "" {
+		args = append([]string{"-C", directory}, args...)
+	}
+	command := exec.Command("git", args...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
 }
 

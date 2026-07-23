@@ -83,6 +83,14 @@ type RebindResult struct {
 	Agent   model.RoleAgent `json:"agent"`
 }
 
+// ScheduleTargetResult is the exact saved role/session identity a one-time
+// continuation may target. It deliberately has no low-level target override:
+// schedules bind only to a reconciled managed role, never a loose label.
+type ScheduleTargetResult struct {
+	Feature model.Feature   `json:"feature"`
+	Agent   model.RoleAgent `json:"agent"`
+}
+
 type resolvedFeature struct {
 	key         string
 	bridgeState model.BridgeState
@@ -478,6 +486,41 @@ func (s *Service) Read(ctx context.Context, request TargetRequest, lines int) (R
 		return ReadResult{}, wrapHerdrError("read role agent", err, "wt herd rebind "+agent.Role+" --target <live-target>")
 	}
 	return ReadResult{Feature: resolved.feature.Feature, Agent: agent, Text: text}, nil
+}
+
+// ResolveScheduleTarget reconciles a managed role before a schedule is
+// written. It never starts or rebinds a replacement conversation; a missing
+// target remains an actionable error from resolveSavedRole.
+func (s *Service) ResolveScheduleTarget(ctx context.Context, request ContextRequest, role string) (ScheduleTargetResult, error) {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return ScheduleTargetResult{}, handoffLockError(err)
+	}
+	defer unlock()
+	resolved, err := s.resolveFeature(ctx, request)
+	if err != nil {
+		return ScheduleTargetResult{}, err
+	}
+	agent, err := s.resolveTarget(ctx, &resolved, role, "")
+	if err != nil {
+		return ScheduleTargetResult{}, err
+	}
+	return ScheduleTargetResult{Feature: resolved.feature.Feature, Agent: agent}, nil
+}
+
+// ResolveScheduleFeature resolves only the managed feature context. Read-only
+// schedule inspection remains available when Herdr is temporarily offline.
+func (s *Service) ResolveScheduleFeature(ctx context.Context, request ContextRequest) (model.Feature, error) {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return model.Feature{}, handoffLockError(err)
+	}
+	defer unlock()
+	resolved, err := s.resolveFeature(ctx, request)
+	if err != nil {
+		return model.Feature{}, err
+	}
+	return resolved.feature.Feature, nil
 }
 
 func (s *Service) Rebind(ctx context.Context, request RebindRequest) (RebindResult, error) {

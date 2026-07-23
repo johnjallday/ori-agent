@@ -311,6 +311,33 @@ func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) 
 	}
 }
 
+func TestContinuationPromptIsPlanningAwareWithoutEmbeddingTaskContents(t *testing.T) {
+	path := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(path, "tasks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "AGENTS.md"), []byte("follow local rules\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "tasks", "tasks-bridge.md"), []byte("- [ ] 2.1 Deliver the scheduled continuation\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	feature := model.Feature{Name: "bridge", Path: path}
+	prompt := ContinuationPrompt(feature, "builder")
+	for _, want := range []string{
+		"scheduled continuation",
+		"Read and follow: " + filepath.Join(path, "AGENTS.md"),
+		filepath.Join(path, "tasks", "prd-bridge.md"),
+		filepath.Join(path, "tasks", "tasks-bridge.md"),
+		"Next incomplete checklist item: 2.1 Deliver the scheduled continuation",
+		"wt done bridge",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("ContinuationPrompt() missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestHandoffDoesNotReplaceSavedMissingAgent(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "bridge")

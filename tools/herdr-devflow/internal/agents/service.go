@@ -489,6 +489,32 @@ func BootstrapPrompt(feature model.Feature, role string) string {
 	return strings.Join(lines, "\n")
 }
 
+// ContinuationPrompt is the conservative default for a one-time scheduled
+// delivery. It names only local planning paths and never embeds task file
+// contents in the persisted prompt.
+func ContinuationPrompt(feature model.Feature, role string) string {
+	prdPath := filepath.Join(feature.Path, "tasks", "prd-"+feature.Name+".md")
+	taskPath := filepath.Join(feature.Path, "tasks", "tasks-"+feature.Name+".md")
+	nextTask := nextIncompleteTask(taskPath)
+	agentsPath := filepath.Join(feature.Path, "AGENTS.md")
+	agentsInstruction := "Read and follow any applicable AGENTS.md instructions in this worktree before editing."
+	if _, err := os.Stat(agentsPath); err == nil {
+		agentsInstruction = "Read and follow: " + agentsPath
+	}
+	lines := []string{
+		"This is a scheduled continuation for the managed " + role + " role on Ori feature " + feature.Name + ".",
+		"Work only in this Git worktree: " + feature.Path,
+		agentsInstruction,
+		"Re-read the planning artifacts before making changes.",
+		"PRD: " + prdPath,
+		"Task checklist: " + taskPath,
+		"Next incomplete checklist item: " + nextTask,
+		"Continue safely from that task. Update the checklist from [ ] to [x] only after completing each sub-task.",
+		"Do not create or remove Git worktrees. Use the existing wt pr and wt done " + feature.Name + " lifecycle when the feature is ready.",
+	}
+	return strings.Join(lines, "\n")
+}
+
 func nextIncompleteTask(path string) string {
 	contents, err := os.ReadFile(path)
 	if err != nil {
