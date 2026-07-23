@@ -31,8 +31,11 @@ func (h *Handler) maybeHandleAssistantSpecialistHandoff(
 	if h.runtimeResolver != nil {
 		router.SetRuntimeResolver(h.runtimeResolver)
 	}
+	if h.calendarOpsPreference != nil {
+		router.SetCalendarOpsPreference(h.calendarOpsPreference)
+	}
 
-	routeResp, err := router.RoutePrompt(prompt, &agenthttp.HomeAssistantRouteContext{
+	routeResp, err := router.RoutePrompt(r.Context(), prompt, &agenthttp.HomeAssistantRouteContext{
 		Surface:     routeCtx.Surface,
 		PagePath:    routeCtx.PagePath,
 		WorkspaceID: routeCtx.WorkspaceID,

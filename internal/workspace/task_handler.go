@@ -87,6 +87,10 @@ type resolvedTaskAgent struct {
 	*agent.Agent
 	MCPServers      []string
 	EffectiveSkills []ResolvedSkill
+	// MCPToolAllowlist maps a runtime server name (see RuntimeMCPServerName)
+	// to the tool names its binding permits; a missing key means no
+	// restriction. See ResolvedAgentRuntime.MCPToolAllowlist.
+	MCPToolAllowlist map[string][]string
 }
 
 const (
@@ -1537,10 +1541,38 @@ func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []toolapi.Tool 
 			})
 			continue
 		}
-		tools = append(tools, serverTools...)
+		tools = append(tools, filterAllowedMCPTools(serverTools, ag.MCPToolAllowlist, name)...)
 	}
 
 	return tools
+}
+
+// filterAllowedMCPTools restricts tools to those permitted by allowlist for
+// serverName. A nil allowlist, or the absence of serverName in it, means no
+// restriction (legacy all-tools behavior); a present entry -- even an empty
+// slice -- means only those tool names (case-insensitive) pass through.
+func filterAllowedMCPTools(tools []toolapi.Tool, allowlist map[string][]string, serverName string) []toolapi.Tool {
+	if len(allowlist) == 0 {
+		return tools
+	}
+	allowed, restricted := allowlist[serverName]
+	if !restricted {
+		return tools
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		allowedSet[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	filtered := make([]toolapi.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		if _, ok := allowedSet[strings.ToLower(strings.TrimSpace(tool.Definition().Name))]; ok {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func (h *LLMTaskHandler) getMCPToolsForServer(serverName string) ([]toolapi.Tool, error) {

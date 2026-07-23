@@ -24,6 +24,10 @@ func NewRegistry() *Registry {
 
 // AddServer adds a new MCP server to the registry
 func (r *Registry) AddServer(config ServerConfig) error {
+	if err := ValidateServerConfig(config); err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

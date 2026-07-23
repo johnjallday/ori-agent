@@ -94,14 +94,16 @@ func (h *HTTPHandler) normalizeEmailBindingConfig(ctx context.Context, workspace
 
 func (h *HTTPHandler) mcpBindingResponse(ctx context.Context, binding MCPBinding) map[string]any {
 	resp := map[string]any{
-		"id":          binding.ID,
-		"server_name": binding.ServerName,
-		"alias":       binding.Alias,
-		"enabled":     binding.Enabled,
-		"scope":       binding.Scope,
-		"config":      binding.Config,
-		"created_at":  binding.CreatedAt,
-		"updated_at":  binding.UpdatedAt,
+		"id":                  binding.ID,
+		"server_name":         binding.ServerName,
+		"alias":               binding.Alias,
+		"enabled":             binding.Enabled,
+		"scope":               binding.Scope,
+		"config":              binding.Config,
+		"allowed_tools":       binding.AllowedTools,
+		"capability_mappings": binding.CapabilityMappings,
+		"created_at":          binding.CreatedAt,
+		"updated_at":          binding.UpdatedAt,
 	}
 
 	account, err := h.lookupEmailAccountForBinding(ctx, binding)

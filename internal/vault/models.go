@@ -42,6 +42,7 @@ var (
 
 const DefaultVaultID = "default"
 const RecordTypeEmailAccount = "email_account"
+const RecordTypeMCPOAuth = "mcp_oauth"
 
 const (
 	VaultStorageModeManaged   = "managed"
@@ -419,7 +420,7 @@ func normalizeTags(tags []string) []string {
 
 func capabilitiesForRecordType(recordType string) (Capability, Capability) {
 	switch normalizeRecordType(recordType) {
-	case "secret", "credential", "credentials", "token", "api_key", "oauth_token", RecordTypeEmailAccount:
+	case "secret", "credential", "credentials", "token", "api_key", "oauth_token", RecordTypeEmailAccount, RecordTypeMCPOAuth:
 		return CapabilitySecretsRead, CapabilitySecretsWrite
 	case "email", "email_snippet", "email_address":
 		return CapabilityEmailRead, CapabilityEmailWrite

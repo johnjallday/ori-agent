@@ -4,6 +4,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
+	"github.com/johnjallday/ori-agent/internal/calendarhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -119,6 +120,7 @@ type HandlerFacade struct {
 	Workspace        *workspace.HTTPHandler
 	Usage            *usagehttp.Handler
 	MCP              *mcphttp.Handler
+	CalendarOps      *calendarhttp.Handler
 	Plugin           *pluginhttp.Handler
 	Location         *locationhttp.Handler
 	Workflow         *workflowhttp.Handler

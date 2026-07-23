@@ -68,6 +68,132 @@ type StarterTask struct {
 // rules (more than one task flagged `setup: true`).
 var ErrInvalidStarterTasks = errors.New("invalid starter tasks")
 
+// ErrInvalidCapabilityRequirements reports a capability-requirement edit with
+// a blank key, a blank operation name, or a duplicate key.
+var ErrInvalidCapabilityRequirements = errors.New("invalid capability requirements")
+
+// CapabilityRequirement declares an abstract capability (e.g. "calendar")
+// this template needs, without naming a specific MCP server, skill, or
+// plugin. Workspace creation carries an unresolved requirement into setup
+// readiness rather than auto-installing or silently choosing a connector —
+// the user picks or connects one during guided setup. Key and operation
+// names are always normalized (trimmed, lower-cased); see
+// normalizeCapabilityRequirements / validateCapabilityRequirements.
+type CapabilityRequirement struct {
+	// Key identifies the capability (e.g. "calendar"). Consuming code (e.g.
+	// internal/calendar for "calendar") defines what the key means and which
+	// operation names are valid; this package only stores and normalizes the
+	// data, staying domain-blind like the rest of the template system.
+	Key string `json:"key"`
+	// RequiredOperations must be mapped before the capability is ready.
+	RequiredOperations []string `json:"required_operations,omitempty"`
+	// OptionalOperations may be mapped; the corresponding UI action only
+	// appears when they are.
+	OptionalOperations []string `json:"optional_operations,omitempty"`
+}
+
+// validateCapabilityRequirements enforces authoring-save invariants on a raw
+// (pre-normalization) edit: every key must be non-blank and unique, and every
+// operation name must be non-blank. Mirrors validateStarterTasks: normalize
+// functions are lenient (self-healing on load), while the authoring save path
+// returns an error instead of silently dropping bad data.
+func validateCapabilityRequirements(reqs []CapabilityRequirement) error {
+	seen := make(map[string]bool, len(reqs))
+	for _, req := range reqs {
+		key := strings.ToLower(strings.TrimSpace(req.Key))
+		if key == "" {
+			return fmt.Errorf("%w: capability key is required", ErrInvalidCapabilityRequirements)
+		}
+		if seen[key] {
+			return fmt.Errorf("%w: duplicate capability key %q", ErrInvalidCapabilityRequirements, key)
+		}
+		seen[key] = true
+		for _, op := range append(append([]string{}, req.RequiredOperations...), req.OptionalOperations...) {
+			if strings.TrimSpace(op) == "" {
+				return fmt.Errorf("%w: capability %q has a blank operation name", ErrInvalidCapabilityRequirements, key)
+			}
+		}
+	}
+	return nil
+}
+
+// normalizeCapabilityRequirements trims/lower-cases keys and operation names,
+// drops requirements with a blank key, drops blank operation names, and
+// merges duplicate keys (first-seen wins, later operations unioned in) rather
+// than failing — matching normalizeStarterTasks' load-time leniency.
+func normalizeCapabilityRequirements(reqs []CapabilityRequirement) []CapabilityRequirement {
+	if len(reqs) == 0 {
+		return nil
+	}
+	out := make([]CapabilityRequirement, 0, len(reqs))
+	index := make(map[string]int, len(reqs))
+	for _, req := range reqs {
+		key := strings.ToLower(strings.TrimSpace(req.Key))
+		if key == "" {
+			continue
+		}
+		required := normalizeOperationNames(req.RequiredOperations)
+		optional := normalizeOperationNames(req.OptionalOperations)
+		if pos, exists := index[key]; exists {
+			out[pos].RequiredOperations = mergeUniqueStrings(out[pos].RequiredOperations, required)
+			out[pos].OptionalOperations = mergeUniqueStrings(out[pos].OptionalOperations, optional)
+			continue
+		}
+		index[key] = len(out)
+		out = append(out, CapabilityRequirement{Key: key, RequiredOperations: required, OptionalOperations: optional})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeOperationNames(ops []string) []string {
+	if len(ops) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ops))
+	out := make([]string, 0, len(ops))
+	for _, op := range ops {
+		op = strings.ToLower(strings.TrimSpace(op))
+		if op == "" {
+			continue
+		}
+		if _, exists := seen[op]; exists {
+			continue
+		}
+		seen[op] = struct{}{}
+		out = append(out, op)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func mergeUniqueStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, v := range a {
+		if _, exists := seen[v]; exists {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	for _, v := range b {
+		if _, exists := seen[v]; exists {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // validateStarterTasks enforces the at-most-one setup task rule on a raw
 // (pre-normalization) edit, naming the offending tasks. Normalization silently
 // demotes extra flags for resilience on load; this save-path check exists so an
@@ -147,6 +273,10 @@ type Template struct {
 	// API so the /templates UI can flag them; they never block loading or
 	// instantiation.
 	Warnings []string `json:"warnings,omitempty"`
+	// CapabilityRequirements are the abstract capabilities (e.g. "calendar")
+	// this template needs. Carried as data only, same as Tools/Agents — the
+	// workspace-creation layer resolves them against connected MCP servers.
+	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
 }
 
 // HasOnboarding reports whether the template still carries a legacy intake-era
@@ -168,20 +298,21 @@ func (t Template) HasAgents() bool {
 // warning detection and strip-on-save — never interpreted, so the file-copy
 // engine stays domain-blind.
 type manifest struct {
-	Name            string          `json:"name"`
-	Description     string          `json:"description"`
-	Tags            []string        `json:"tags,omitempty"`
-	Icon            string          `json:"icon,omitempty"`
-	Tagline         string          `json:"tagline,omitempty"`
-	Addons          []string        `json:"addons,omitempty"`
-	BehaviorProfile string          `json:"behavior_profile,omitempty"`
-	StarterTasks    []StarterTask   `json:"starter_tasks,omitempty"`
-	ProjectEntry    json.RawMessage `json:"project_entry,omitempty"`
-	Builtin         bool            `json:"builtin,omitempty"`
-	BuiltinVersion  int             `json:"builtin_version,omitempty"`
-	Onboarding      json.RawMessage `json:"onboarding,omitempty"`
-	Tools           *ToolDefaults   `json:"tools,omitempty"`
-	Agents          []AgentSpec     `json:"agents,omitempty"`
+	Name                   string                  `json:"name"`
+	Description            string                  `json:"description"`
+	Tags                   []string                `json:"tags,omitempty"`
+	Icon                   string                  `json:"icon,omitempty"`
+	Tagline                string                  `json:"tagline,omitempty"`
+	Addons                 []string                `json:"addons,omitempty"`
+	BehaviorProfile        string                  `json:"behavior_profile,omitempty"`
+	StarterTasks           []StarterTask           `json:"starter_tasks,omitempty"`
+	ProjectEntry           json.RawMessage         `json:"project_entry,omitempty"`
+	Builtin                bool                    `json:"builtin,omitempty"`
+	BuiltinVersion         int                     `json:"builtin_version,omitempty"`
+	Onboarding             json.RawMessage         `json:"onboarding,omitempty"`
+	Tools                  *ToolDefaults           `json:"tools,omitempty"`
+	Agents                 []AgentSpec             `json:"agents,omitempty"`
+	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -230,6 +361,7 @@ func newTemplate(path string) Template {
 		t.Tools = normalizeToolDefaults(*m.Tools)
 	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
+	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
 	t.Warnings = manifestWarnings(m, t.Agents)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))

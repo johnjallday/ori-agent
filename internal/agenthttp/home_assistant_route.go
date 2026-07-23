@@ -1,6 +1,7 @@
 package agenthttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -13,16 +14,34 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// CalendarOpsPreference is the narrow read Home calendar-intent routing needs
+// to prefer the user's Calendar Ops Scheduler over generic agent scoring for
+// personal-calendar prompts (FR53), instead of reimplementing Calendar Ops
+// workspace resolution here. Implemented by calendarhttp.Handler.
+type CalendarOpsPreference interface {
+	// PreferredCalendarAgent reports the Calendar Ops entry agent's name when
+	// the current user's active Calendar Ops workspace has an effective,
+	// ready calendar binding. ok=false means "no preference" -- routing falls
+	// back to normal generic agent scoring unchanged.
+	PreferredCalendarAgent(ctx context.Context) (agentName string, ok bool)
+}
+
 type HomeAssistantRouteHandler struct {
-	State             store.Store
-	WorkspaceResolver *HomeAssistantWorkspaceResolver
-	IntakeTraceStore  HomeAssistantIntakeTraceStore
-	RuntimeResolver   interface {
+	State                 store.Store
+	WorkspaceResolver     *HomeAssistantWorkspaceResolver
+	IntakeTraceStore      HomeAssistantIntakeTraceStore
+	CalendarOpsPreference CalendarOpsPreference
+	RuntimeResolver       interface {
 		ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error)
 	}
 	SystemModelReader interface {
 		GetSystemModel() (provider, model string)
 	}
+}
+
+// SetCalendarOpsPreference wires the Calendar Ops preference read (FR53).
+func (h *HomeAssistantRouteHandler) SetCalendarOpsPreference(pref CalendarOpsPreference) {
+	h.CalendarOpsPreference = pref
 }
 
 type resolvedRouteAgent struct {
@@ -278,7 +297,7 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	resp, err := h.RoutePrompt(req.Prompt, req.Context)
+	resp, err := h.RoutePrompt(r.Context(), req.Prompt, req.Context)
 	if err != nil {
 		if errors.Is(err, errHomeAssistantPromptRequired) {
 			orihttp.BadRequest(w, err.Error())
@@ -290,7 +309,7 @@ func (h *HomeAssistantRouteHandler) RouteHandler(w http.ResponseWriter, r *http.
 	orihttp.WriteJSON(w, resp)
 }
 
-func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error) {
+func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt string, context *HomeAssistantRouteContext) (*HomeAssistantRouteResponse, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, errHomeAssistantPromptRequired
@@ -318,7 +337,10 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssi
 		agentRouteContext.WorkspaceID = strings.TrimSpace(workspaceResolution.SelectedWorkspaceID)
 	}
 
-	match := h.findBestMatch(prompt, intent, agentRouteContext)
+	match := h.calendarOpsPreferredMatch(ctx, intent, intentVariant, routeContext)
+	if match == nil {
+		match = h.findBestMatch(prompt, intent, agentRouteContext)
+	}
 	if match == nil {
 		match = h.systemAssistantFallback(intent)
 	}
@@ -347,6 +369,41 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(prompt string, context *HomeAssi
 	}
 
 	return resp, nil
+}
+
+// calendarOpsPreferredMatch prefers the user's Calendar Ops Scheduler for a
+// calendar_check prompt when their Calendar Ops workspace has an effective,
+// ready calendar binding (FR53). It returns nil (no preference, fall back to
+// findBestMatch unchanged) whenever CalendarOpsPreference isn't wired, the
+// intent isn't calendar_check, the request is workspace-schedule ambiguity
+// inside a workspace (which must keep routing to that workspace's own task
+// scheduler, not Calendar Ops), or the preference read itself says no.
+func (h *HomeAssistantRouteHandler) calendarOpsPreferredMatch(ctx context.Context, intent homeAssistantIntent, intentVariant string, routeContext normalizedHomeAssistantRouteContext) *routedAgentMatch {
+	if h == nil || h.CalendarOpsPreference == nil || h.State == nil {
+		return nil
+	}
+	if intent.Key != homeAssistantCalendarIntent.Key {
+		return nil
+	}
+	if intentVariant == "workspace_schedule" && routeContext.hasWorkspaceContext() {
+		return nil
+	}
+
+	agentName, ok := h.CalendarOpsPreference.PreferredCalendarAgent(ctx)
+	agentName = strings.TrimSpace(agentName)
+	if !ok || agentName == "" {
+		return nil
+	}
+	ag, exists := h.State.GetAgent(agentName)
+	if !exists || ag == nil || ag.Status == types.AgentStatusDisabled {
+		return nil
+	}
+	return &routedAgentMatch{
+		Name:    agentName,
+		Agent:   ag,
+		Score:   intent.MinScore,
+		Reasons: []string{"calendar ops workspace has a ready calendar connector"},
+	}
 }
 
 func (h *HomeAssistantRouteHandler) systemAssistantFallback(intent homeAssistantIntent) *routedAgentMatch {

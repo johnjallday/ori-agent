@@ -13,15 +13,89 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// Transport identifies how Ori talks to an MCP server process/endpoint.
+const (
+	TransportStdio          = "stdio"
+	TransportStreamableHTTP = "streamable_http"
+)
+
 // ServerConfig contains configuration for an MCP server
 type ServerConfig struct {
 	Name        string            `json:"name"`
-	Command     string            `json:"command"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
 	EnvRequired map[string]string `json:"env_required,omitempty"`
-	Transport   string            `json:"transport"` // currently only "stdio" is supported at runtime
+	Transport   string            `json:"transport"`          // "stdio" (default) or "streamable_http"
+	URL         string            `json:"url,omitempty"`      // HTTPS endpoint; required for streamable_http
+	AuthRef     string            `json:"auth_ref,omitempty"` // opaque vault credential reference; never a raw secret
 	Enabled     bool              `json:"enabled"`
+}
+
+// NormalizedTransport returns cfg.Transport lower-cased and trimmed, defaulting
+// an empty value to TransportStdio so callers never have to special-case the
+// historical "omitted means stdio" configs.
+func NormalizedTransport(cfg ServerConfig) string {
+	transport := strings.ToLower(strings.TrimSpace(cfg.Transport))
+	if transport == "" {
+		return TransportStdio
+	}
+	return transport
+}
+
+// IsRemoteTransport reports whether cfg describes a remote Streamable HTTP
+// server rather than a local stdio subprocess.
+func IsRemoteTransport(cfg ServerConfig) bool {
+	return NormalizedTransport(cfg) == TransportStreamableHTTP
+}
+
+// ValidateServerConfig enforces the invariants that keep stdio and remote
+// server definitions from bleeding into each other: a remote definition must
+// carry an HTTPS URL and no local command, while a stdio definition must
+// carry a command and no remote-only fields.
+func ValidateServerConfig(cfg ServerConfig) error {
+	if strings.TrimSpace(cfg.Name) == "" {
+		return fmt.Errorf("server name is required")
+	}
+
+	switch NormalizedTransport(cfg) {
+	case TransportStdio:
+		// Command is intentionally not required here: it's validated at
+		// Start() time (exec.LookPath), and some callers build partial
+		// stdio configs before the command is known.
+		if strings.TrimSpace(cfg.URL) != "" {
+			return fmt.Errorf("stdio server %q must not specify a url", cfg.Name)
+		}
+	case TransportStreamableHTTP:
+		if strings.TrimSpace(cfg.Command) != "" {
+			return fmt.Errorf("remote server %q must not specify a command", cfg.Name)
+		}
+		if len(cfg.Args) > 0 {
+			return fmt.Errorf("remote server %q must not specify args", cfg.Name)
+		}
+		if len(cfg.Env) > 0 || len(cfg.EnvRequired) > 0 {
+			return fmt.Errorf("remote server %q must not specify env", cfg.Name)
+		}
+		if _, err := ValidateRemoteEndpoint(cfg.URL); err != nil {
+			return fmt.Errorf("remote server %q: %w", cfg.Name, err)
+		}
+	default:
+		return fmt.Errorf("server %q: unsupported transport %q", cfg.Name, cfg.Transport)
+	}
+
+	return nil
+}
+
+// NormalizedAuthRef returns cfg.AuthRef if set, otherwise a stable reference
+// derived from the server name. Remote servers always have a non-empty
+// reference so vault lookups never depend on a value generated after the
+// fact; the field stays structurally independent from the name so a future
+// credential-sharing or rename scenario doesn't require a schema change.
+func NormalizedAuthRef(cfg ServerConfig) string {
+	if ref := strings.TrimSpace(cfg.AuthRef); ref != "" {
+		return ref
+	}
+	return "mcp:" + strings.TrimSpace(cfg.Name)
 }
 
 // Server manages an MCP server process and client
@@ -37,17 +111,19 @@ type Server struct {
 	cancel       context.CancelFunc
 	mu           sync.RWMutex
 	status       ServerStatus
+	authorizeURL string // set while status == StatusAuthRequired; browser URL to open
 }
 
 // ServerStatus represents the current status of a server
 type ServerStatus string
 
 const (
-	StatusStopped    ServerStatus = "stopped"
-	StatusStarting   ServerStatus = "starting"
-	StatusRunning    ServerStatus = "running"
-	StatusError      ServerStatus = "error"
-	StatusRestarting ServerStatus = "restarting"
+	StatusStopped      ServerStatus = "stopped"
+	StatusStarting     ServerStatus = "starting"
+	StatusRunning      ServerStatus = "running"
+	StatusError        ServerStatus = "error"
+	StatusRestarting   ServerStatus = "restarting"
+	StatusAuthRequired ServerStatus = "auth_required" // remote server awaiting/needing browser authorization
 )
 
 const (
@@ -55,6 +131,8 @@ const (
 	mcpHealthCheckIntervalEnvVar  = "ORI_MCP_HEALTHCHECK_INTERVAL"
 	defaultMCPInitTimeout         = 45 * time.Second
 	mcpInitTimeoutEnvVar          = "ORI_MCP_INIT_TIMEOUT"
+	defaultMCPOAuthTimeout        = 5 * time.Minute
+	mcpOAuthTimeoutEnvVar         = "ORI_MCP_OAUTH_TIMEOUT"
 )
 
 // NewServer creates a new MCP server instance
@@ -68,7 +146,10 @@ func NewServer(config ServerConfig) *Server {
 	}
 }
 
-// Start starts the MCP server process and initializes the client
+// Start starts the MCP server process/connection and initializes the client.
+// It dispatches to the stdio subprocess path or the remote Streamable HTTP
+// path based on the configured transport; both converge on finishConnect for
+// tool discovery, status, and the health-check loop.
 func (s *Server) Start() error {
 	s.mu.Lock()
 	if s.status == StatusRunning || s.status == StatusStarting {
@@ -76,6 +157,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server already running")
 	}
 	s.status = StatusStarting
+	s.authorizeURL = ""
 
 	// Create fresh context if the previous one was cancelled
 	if s.ctx.Err() != nil {
@@ -83,6 +165,17 @@ func (s *Server) Start() error {
 	}
 	s.mu.Unlock()
 
+	switch NormalizedTransport(s.config) {
+	case TransportStreamableHTTP:
+		return s.startRemote()
+	default:
+		return s.startStdio()
+	}
+}
+
+// startStdio launches the configured command and connects over stdio. This
+// is the pre-existing behavior, unchanged, for local subprocess MCP servers.
+func (s *Server) startStdio() error {
 	// Validate required environment variables
 	if len(s.config.EnvRequired) > 0 {
 		var missing []string
@@ -111,11 +204,6 @@ func (s *Server) Start() error {
 		return fmt.Errorf("command %q not found in PATH: %w. Please ensure the required runtime (e.g., Node.js/npm for npx commands) is installed and available in your PATH", s.config.Command, err)
 	}
 
-	if !strings.EqualFold(strings.TrimSpace(s.config.Transport), "stdio") {
-		s.setStatus(StatusError)
-		return fmt.Errorf("unsupported transport %q; only stdio is supported", s.config.Transport)
-	}
-
 	cmd := exec.CommandContext(s.ctx, s.config.Command, s.config.Args...)
 	cmd.Env = env
 	cmd.Stderr = os.Stderr
@@ -135,9 +223,75 @@ func (s *Server) Start() error {
 	}
 
 	s.mu.Lock()
+	s.cmd = cmd
+	s.mu.Unlock()
+
+	return s.finishConnect(client, session)
+}
+
+// startRemote connects to a remote Streamable HTTP MCP server, wiring in the
+// hardened SSRF-safe transport and (when the server requires it) a
+// vault-backed OAuth handler. See remote_transport.go and oauth.go.
+func (s *Server) startRemote() error {
+	endpoint, err := ValidateRemoteEndpoint(s.config.URL)
+	if err != nil {
+		s.setStatus(StatusError)
+		return fmt.Errorf("invalid remote MCP endpoint: %w", err)
+	}
+	if strings.TrimSpace(s.config.Command) != "" {
+		s.setStatus(StatusError)
+		return fmt.Errorf("remote MCP servers must not specify a command")
+	}
+
+	httpClient := newRemoteHTTPClient()
+
+	oauthHandler, err := s.buildOAuthHandler(s.ctx, httpClient)
+	if err != nil {
+		if isOAuthReconnectError(err) {
+			s.setStatus(StatusAuthRequired)
+		} else {
+			s.setStatus(StatusError)
+		}
+		return fmt.Errorf("failed to configure oauth: %w", err)
+	}
+
+	transport := &sdkmcp.StreamableClientTransport{
+		Endpoint:     endpoint.String(),
+		HTTPClient:   httpClient,
+		OAuthHandler: oauthHandler,
+	}
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{
+		Name:    "ori-agent",
+		Version: "0.1.0",
+	}, nil)
+
+	// Remote connects may require a human to complete a browser consent
+	// screen, so they get a much longer budget than the local-subprocess
+	// init timeout.
+	initCtx, cancel := context.WithTimeout(s.ctx, resolveMCPOAuthTimeout())
+	defer cancel()
+
+	session, err := client.Connect(initCtx, transport, nil)
+	if err != nil {
+		if isOAuthReconnectError(err) {
+			s.setStatus(StatusAuthRequired)
+		} else {
+			s.setStatus(StatusError)
+		}
+		return fmt.Errorf("failed to initialize: %w", err)
+	}
+
+	return s.finishConnect(client, session)
+}
+
+// finishConnect completes the shared tail of Start(): capture identity,
+// discover tools, flip to running, and start the health-check loop.
+func (s *Server) finishConnect(client *sdkmcp.Client, session *sdkmcp.ClientSession) error {
+	s.mu.Lock()
 	s.client = client
 	s.conn = session
-	s.cmd = cmd
+	s.authorizeURL = ""
 	// Capture the server's self-reported usage instructions and identity from
 	// the initialize handshake so callers can surface them in the UI.
 	if initRes := session.InitializeResult(); initRes != nil {
@@ -164,6 +318,20 @@ func (s *Server) Start() error {
 	go s.healthCheckLoop()
 
 	return nil
+}
+
+// GetAuthorizeURL returns the pending browser authorization URL while status
+// is StatusAuthRequired. Empty otherwise.
+func (s *Server) GetAuthorizeURL() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.authorizeURL
+}
+
+func (s *Server) setAuthorizeURL(url string) {
+	s.mu.Lock()
+	s.authorizeURL = url
+	s.mu.Unlock()
 }
 
 // Stop stops the MCP server process
@@ -336,6 +504,7 @@ func (s *Server) healthCheckLoop() {
 			conn := s.conn
 			cmd := s.cmd
 			status := s.status
+			remote := IsRemoteTransport(s.config)
 			s.mu.RUnlock()
 
 			if status != StatusRunning {
@@ -346,12 +515,10 @@ func (s *Server) healthCheckLoop() {
 				s.setStatus(StatusError)
 				continue
 			}
-			if cmd == nil {
-				// Server died, try to restart
-				s.setStatus(StatusError)
-				continue
-			}
-			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			// Remote servers have no local subprocess to check; fall through
+			// to the ping below. Stdio servers additionally verify the
+			// subprocess is still alive.
+			if !remote && (cmd == nil || (cmd.ProcessState != nil && cmd.ProcessState.Exited())) {
 				s.setStatus(StatusError)
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -414,4 +581,24 @@ func resolveMCPInitTimeout() time.Duration {
 	}
 
 	return defaultMCPInitTimeout
+}
+
+// resolveMCPOAuthTimeout bounds a remote connect that may require a human to
+// complete a browser consent screen, so it defaults much higher than
+// resolveMCPInitTimeout (which only bounds a local subprocess handshake).
+func resolveMCPOAuthTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(mcpOAuthTimeoutEnvVar))
+	if raw == "" {
+		return defaultMCPOAuthTimeout
+	}
+
+	if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+		return parsed
+	}
+
+	if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+
+	return defaultMCPOAuthTimeout
 }

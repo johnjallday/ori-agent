@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 32
+const schemaVersion = 33
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -129,6 +129,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration031DailyBrief(ctx)
 	case 32:
 		return db.migration032FollowUps(ctx)
+	case 33:
+		return db.migration033CalendarMeetingPreps(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1285,6 +1287,42 @@ func (db *DB) migration032FollowUps(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create follow-up schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration033CalendarMeetingPreps creates the durable link between a
+// Calendar Ops event and the Calendar Ops note prepared for it: workspace +
+// binding + calendar + event identifies the meeting uniquely (the same raw
+// event id can otherwise collide across different calendars/bindings); the
+// row stores only the linked note id, the last normalized event fingerprint,
+// and run status -- never the event body itself, which stays a live read
+// through the gateway rather than a cache.
+func (db *DB) migration033CalendarMeetingPreps(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS calendar_meeting_prep (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			binding_id TEXT NOT NULL,
+			calendar_id TEXT NOT NULL,
+			event_id TEXT NOT NULL,
+			note_id TEXT NOT NULL DEFAULT '',
+			event_fingerprint TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'pending',
+			task_id TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		// One link per (workspace, binding, calendar, event) -- the natural key
+		// this feature upserts against on every "Prepare me" run.
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_meeting_prep_key
+			ON calendar_meeting_prep(workspace_id, binding_id, calendar_id, event_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create calendar meeting prep schema: %w", err)
 		}
 	}
 	return nil

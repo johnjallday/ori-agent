@@ -30,6 +30,8 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-20 commander allow codex models #small
 - 2026-07-20 "workspace-details-unit-sheetallow edit models" #small
 - 2026-07-21 multiple-hq persisted in directory investigate why they are not imported
+- 2026-07-22 google-account easy connection setup
+- 2026-07-22 wt.sh create new worktree below dev
 
 ## Doing
 - Email Ops workspace spin-off → PRD at tasks/prd-email-ops-workspace.md (template Email Ops; personal-ops v5 drops Inbox; station → portal; follow-ups re-keyed) — task list next

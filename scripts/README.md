@@ -50,6 +50,12 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 - `docker-test-installers.sh` — Installer tests inside Docker.
 - `test-with-ollama.sh` — Run the suite against a local Ollama provider.
 - `diagnose-test-failures.sh` — Summarize and triage failing Go tests.
+- `clean-test-artifacts.sh` — Preview or delete Ori-owned test logs and
+  temporary directories left in the system temp folder. Run it with no
+  arguments for a dry run, with `--delete` to clean, or use
+  `make clean-test-artifacts`. It only matches known `ori-test-*`,
+  `ori-vault-files-*`, `ori-agent-test-*`, `ori-db-test-*`, and
+  `ori-db-migration-*` names.
 - `check-cross-platform.sh` — Verify the code cross-compiles for release targets.
 - `check-go-version.sh` — Assert the toolchain matches the required Go version.
 

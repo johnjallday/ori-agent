@@ -40,7 +40,9 @@ func (w *Workspace) FindAgentInstance(agentName, nodeID string) (*AgentInstance,
 	return nil, false
 }
 
-// GetMCPBindings returns a copy of the workspace MCP bindings.
+// GetMCPBindings returns a deep copy of the workspace MCP bindings so callers
+// can never mutate the workspace's internal maps/slices (e.g. AllowedTools,
+// CapabilityMappings) through the returned value.
 func (w *Workspace) GetMCPBindings() []MCPBinding {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -50,7 +52,9 @@ func (w *Workspace) GetMCPBindings() []MCPBinding {
 	}
 
 	out := make([]MCPBinding, len(w.MCPBindings))
-	copy(out, w.MCPBindings)
+	for i, binding := range w.MCPBindings {
+		out[i] = cloneBinding(binding)
+	}
 	return out
 }
 
@@ -74,6 +78,8 @@ func (w *Workspace) GetMCPBinding(bindingID string) (*MCPBinding, bool) {
 			if len(binding.Config) > 0 {
 				copy.Config = cloneInterfaceMap(binding.Config)
 			}
+			copy.AllowedTools = cloneStringSlice(binding.AllowedTools)
+			copy.CapabilityMappings = CloneCapabilityMappings(binding.CapabilityMappings)
 			return &copy, true
 		}
 	}
@@ -237,6 +243,8 @@ func cloneBinding(binding MCPBinding) MCPBinding {
 	if len(binding.ToolOverrides) > 0 {
 		copy.ToolOverrides = cloneSideEffectMap(binding.ToolOverrides)
 	}
+	copy.AllowedTools = normalizeAllowedTools(cloneStringSlice(binding.AllowedTools))
+	copy.CapabilityMappings = NormalizeCapabilityMappings(CloneCapabilityMappings(binding.CapabilityMappings))
 	return copy
 }
 

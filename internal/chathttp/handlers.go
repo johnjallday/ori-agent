@@ -50,23 +50,24 @@ const (
 )
 
 type Handler struct {
-	utilityRegistry  *UtilityToolRegistry
-	utilityTelemetry *utilitytelemetry.Tracker
-	settingsMu       sync.RWMutex
-	browserMCPPref   string
-	store            store.Store
-	clientFactory    *client.Factory
-	llmFactory       *llm.Factory
-	commandHandler   *CommandHandler
-	orchestrator     *orchestration.Orchestrator
-	costTracker      *llm.CostTracker
-	sessionStore     session.HybridStore
-	workspaceStore   workspace.Store
-	fileStore        *workspace.FileStore
-	userProfileStore userprofile.UserStore
-	userProvider     userprofile.UserProvider
-	runtimeResolver  chatRuntimeResolver
-	toolCallStore    session.ToolCallStore
+	utilityRegistry       *UtilityToolRegistry
+	utilityTelemetry      *utilitytelemetry.Tracker
+	settingsMu            sync.RWMutex
+	browserMCPPref        string
+	store                 store.Store
+	clientFactory         *client.Factory
+	llmFactory            *llm.Factory
+	commandHandler        *CommandHandler
+	orchestrator          *orchestration.Orchestrator
+	costTracker           *llm.CostTracker
+	sessionStore          session.HybridStore
+	workspaceStore        workspace.Store
+	fileStore             *workspace.FileStore
+	userProfileStore      userprofile.UserStore
+	userProvider          userprofile.UserProvider
+	runtimeResolver       chatRuntimeResolver
+	toolCallStore         session.ToolCallStore
+	calendarOpsPreference chatCalendarOpsPreference
 
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
 	templatesRootResolver func() string
@@ -591,6 +592,7 @@ func (h *Handler) findMCPToolByName(ag *resolvedChatAgent, toolName string) (too
 		if err != nil {
 			continue
 		}
+		mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
 		for _, mcpTool := range mcpTools {
 			defName := strings.TrimSpace(mcpTool.Definition().Name)
 			for _, candidate := range candidateNames {
@@ -1507,6 +1509,7 @@ func (h *Handler) buildChatToolList(ag *resolvedChatAgent, current string, invok
 				logger.Warn("Failed to get MCP tools for server", logger.Fields{"server": serverName, "error": err})
 				continue
 			}
+			mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
 			for _, mcpTool := range mcpTools {
 				mcpDef := mcpTool.Definition()
 				appendTool(llm.Tool{

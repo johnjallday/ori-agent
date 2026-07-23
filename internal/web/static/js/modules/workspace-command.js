@@ -51,6 +51,19 @@ function clampFraction(value) {
   return Math.min(1, Math.max(0, n));
 }
 
+// Formats a Calendar Ops portal event's start_time as a short clock label
+// ("2:30 PM") for the HQ station/panel. Returns '' for a missing/unparsable
+// value rather than throwing.
+function calendarOpsMeetingTimeLabel(evt) {
+  const start = Date.parse(String((evt && evt.start_time) || ''));
+  if (!Number.isFinite(start)) return '';
+  try {
+    return new Date(start).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  } catch (_) {
+    return '';
+  }
+}
+
 // Pointer travel (px) from the press origin past which a press on a station
 // becomes a drag rather than a click (FR9).
 const STATION_DRAG_THRESHOLD_PX = 5;
@@ -1332,6 +1345,8 @@ export class WorkspaceCommandView {
     switch (String(section || '')) {
       case 'watchtower':
         return { title: 'Watchtower', addLabel: '' };
+      case 'calendar-ops':
+        return { title: 'Calendar Ops', addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -1674,6 +1689,7 @@ export class WorkspaceCommandView {
     const meta = this.statSectionMeta(section);
     if (!meta) return '';
     if (section === 'watchtower') return this.watchtowerPanelHTML();
+    if (section === 'calendar-ops') return this.calendarOpsPanelHTML();
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
     // Find Tools discovery flow behind one tabbed surface.
     if (section === 'tools') {
@@ -2070,6 +2086,27 @@ export class WorkspaceCommandView {
       if (!workspaceID) return;
       this.closeStatModal();
       const target = '/workspaces/' + encodeURIComponent(workspaceID);
+      if (typeof window !== 'undefined' && window.location) {
+        if (typeof window.location.assign === 'function') window.location.assign(target);
+        else window.location.href = target;
+      }
+      return;
+    }
+    if (a === 'refresh-calendar-ops' && section === 'calendar-ops') {
+      this.requestCalendarOpsPortalData(true);
+      this.renderStatModalBody();
+      return;
+    }
+    if (a === 'calendar-ops-setup' && section === 'calendar-ops') {
+      this.closeStatModal();
+      this.openCalendarOpsConstruct();
+      return;
+    }
+    if (a === 'calendar-ops-open' && section === 'calendar-ops') {
+      const workspaceID = String(this.calendarOpsPortalState().calendarWorkspaceID || '').trim();
+      if (!workspaceID) return;
+      this.closeStatModal();
+      const target = '/workspaces/' + encodeURIComponent(workspaceID) + '?panel=calendar';
       if (typeof window !== 'undefined' && window.location) {
         if (typeof window.location.assign === 'function') window.location.assign(target);
         else window.location.href = target;
@@ -4919,6 +4956,13 @@ export class WorkspaceCommandView {
         icon: 'bi-envelope',
         state: () => this.hqEmailStationState(),
         action: () => this.openHQEmailSetup()
+      },
+      {
+        key: 'calendar-ops',
+        label: 'Calendar Ops',
+        icon: 'bi-calendar-check',
+        state: () => this.hqCalendarOpsStationState(),
+        action: trigger => this.openCalendarOpsPanel(trigger)
       }
     ];
   }
@@ -5166,6 +5210,196 @@ export class WorkspaceCommandView {
     const state = this.watchtowerState();
     this.requestWatchtowerData(state.status === 'error');
     this.openStatModal('watchtower', trigger);
+  }
+
+  // Calendar Ops station (task 7.4): same bounded-summary contract as the
+  // Home portal (FR50/FR51), rendered here as an HQ Map station + Stations
+  // rail entry. Scoped per-HQ like Watchtower so a workspace switch never
+  // briefly shows another HQ's calendar summary.
+  calendarOpsPortalState() {
+    const workspaceID = this.watchtowerWorkspaceID();
+    if (!this._calendarOpsPortal || this._calendarOpsPortal.workspaceID !== workspaceID) {
+      this._calendarOpsPortal = {
+        workspaceID,
+        status: 'idle',
+        hasWorkspace: false,
+        calendarWorkspaceID: '',
+        state: '',
+        nextMeeting: null,
+        eventCount: 0,
+        conflictCount: 0,
+        dataGap: false,
+        error: ''
+      };
+    }
+    return this._calendarOpsPortal;
+  }
+
+  hqCalendarOpsStationState() {
+    const state = this.calendarOpsPortalState();
+    if (state.status === 'idle' && this.active) this.requestCalendarOpsPortalData();
+    switch (state.status) {
+      case 'loading':
+        return { value: 'Loading…', description: 'loading calendar summary', tone: 'loading' };
+      case 'error':
+        return { value: 'Unavailable', description: 'calendar summary unavailable', tone: 'degraded' };
+      case 'ready':
+        return this.calendarOpsStationReadyState(state);
+      default:
+        return { value: 'Loading…', description: 'loading calendar summary', tone: 'loading' };
+    }
+  }
+
+  calendarOpsStationReadyState(state) {
+    if (!state.hasWorkspace) {
+      return { value: 'Set up', description: 'Calendar Ops is not set up yet', tone: 'attention' };
+    }
+    if (state.state !== 'ready') {
+      return { value: 'Finish setup', description: 'calendar connector needs attention', tone: 'attention' };
+    }
+    if (state.nextMeeting && state.nextMeeting.title) {
+      const conflictNote = state.conflictCount
+        ? ', ' + state.conflictCount + (state.conflictCount === 1 ? ' conflict' : ' conflicts')
+        : '';
+      return {
+        value: state.nextMeeting.title,
+        description: calendarOpsMeetingTimeLabel(state.nextMeeting) + conflictNote,
+        tone: state.dataGap || state.conflictCount ? 'attention' : 'clear'
+      };
+    }
+    return {
+      value: state.dataGap ? 'Degraded' : 'Clear',
+      description: state.eventCount ? state.eventCount + ' events today' : 'no events today',
+      tone: state.dataGap ? 'degraded' : 'clear'
+    };
+  }
+
+  requestCalendarOpsPortalData(force = false) {
+    if (!this.isPersonalHQ()) return;
+    const state = this.calendarOpsPortalState();
+    if (!state.workspaceID) return;
+    if (state.status === 'loading') return;
+    if (!force && state.status === 'ready') return;
+    if (typeof fetch !== 'function') {
+      state.status = 'error';
+      state.error = 'Calendar Ops portal is unavailable in this browser.';
+      return;
+    }
+
+    state.status = 'loading';
+    const requestID = (this._calendarOpsPortalRequestID || 0) + 1;
+    this._calendarOpsPortalRequestID = requestID;
+
+    Promise.resolve(fetch('/api/calendar-ops/home-portal-summary'))
+      .then(async response => {
+        if (!response || !response.ok) {
+          throw new Error(
+            'Calendar Ops portal request failed' + (response ? ': ' + response.status : '')
+          );
+        }
+        return response.json();
+      })
+      .then(payload => {
+        if (this._calendarOpsPortalRequestID !== requestID) return;
+        const current = this.calendarOpsPortalState();
+        if (current.workspaceID !== state.workspaceID) return;
+        current.status = 'ready';
+        current.hasWorkspace = !!(payload && payload.has_workspace);
+        current.calendarWorkspaceID = String((payload && payload.workspace_id) || '');
+        current.state = String((payload && payload.state) || '');
+        current.nextMeeting = (payload && payload.next_meeting) || null;
+        current.eventCount = Number((payload && payload.event_count) || 0);
+        current.conflictCount = Number((payload && payload.conflict_count) || 0);
+        current.dataGap = !!(payload && payload.data_gap);
+        current.error = '';
+        this.refreshCalendarOpsPortalSurface();
+      })
+      .catch(error => {
+        if (this._calendarOpsPortalRequestID !== requestID) return;
+        const current = this.calendarOpsPortalState();
+        if (current.workspaceID !== state.workspaceID) return;
+        current.status = 'error';
+        current.error =
+          error && error.message ? error.message : 'Calendar Ops portal could not be loaded.';
+        this.refreshCalendarOpsPortalSurface();
+      });
+  }
+
+  refreshCalendarOpsPortalSurface() {
+    if (this.active) {
+      this.render();
+    } else if (this.statModalSection === 'calendar-ops') {
+      this.renderStatModalBody();
+    }
+  }
+
+  openCalendarOpsPanel(trigger) {
+    const state = this.calendarOpsPortalState();
+    this.requestCalendarOpsPortalData(state.status === 'error');
+    this.openStatModal('calendar-ops', trigger);
+  }
+
+  // Routes the "no Calendar Ops workspace yet" CTA into the existing
+  // Construct wizard with the Calendar Ops blueprint preselected (FR52/task
+  // 7.5) -- sessionManager.showAddWorkspaceModal is the one workspace-
+  // creation entry point; this never creates a workspace inline.
+  openCalendarOpsConstruct() {
+    if (
+      typeof window === 'undefined' ||
+      !window.sessionManager ||
+      typeof window.sessionManager.showAddWorkspaceModal !== 'function'
+    ) {
+      return;
+    }
+    window.sessionManager.showAddWorkspaceModal({
+      entryPoint: 'calendar_ops_portal',
+      blueprint: 'calendar-ops'
+    });
+  }
+
+  calendarOpsPanelHTML() {
+    const state = this.calendarOpsPortalState();
+    let content = '';
+    if (state.status === 'loading' || state.status === 'idle') {
+      content = this.modalEmptyHTML('Loading your calendar summary…');
+    } else if (state.status === 'error') {
+      content =
+        '<div class="ws-cmd-watchtower-degraded" role="status"><i class="bi bi-exclamation-diamond" aria-hidden="true"></i><p>Calendar Ops summary could not refresh.</p><button type="button" data-cmd-modal-action="refresh-calendar-ops">Retry</button></div>';
+    } else if (!state.hasWorkspace) {
+      content =
+        '<div class="ws-cmd-watchtower-all-clear"><i class="bi bi-calendar-plus" aria-hidden="true"></i><strong>Set up Calendar Ops</strong><span>Connect a calendar to see your day at a glance.</span><button type="button" data-cmd-modal-action="calendar-ops-setup">Set up Calendar Ops</button></div>';
+    } else if (state.state !== 'ready') {
+      content =
+        '<div class="ws-cmd-watchtower-degraded" role="status"><i class="bi bi-exclamation-diamond" aria-hidden="true"></i><p>Calendar Ops setup needs attention.</p><button type="button" data-cmd-modal-action="calendar-ops-open">Finish setup</button></div>';
+    } else {
+      const meetingHTML =
+        state.nextMeeting && state.nextMeeting.title
+          ? '<div class="ws-cmd-calendar-ops-next"><strong>' +
+            escapeHtml(state.nextMeeting.title) +
+            '</strong><span>' +
+            escapeHtml(calendarOpsMeetingTimeLabel(state.nextMeeting)) +
+            '</span></div>'
+          : '<div class="ws-cmd-calendar-ops-next"><strong>No more meetings today</strong></div>';
+      const gapHTML = state.dataGap
+        ? '<aside class="ws-cmd-watchtower-gaps" role="status"><strong>Partial signal</strong><span>Some calendars could not be read.</span></aside>'
+        : '';
+      content =
+        meetingHTML +
+        '<div class="ws-cmd-calendar-ops-stats"><span>' +
+        state.eventCount +
+        (state.eventCount === 1 ? ' event today' : ' events today') +
+        '</span><span>' +
+        state.conflictCount +
+        (state.conflictCount === 1 ? ' conflict' : ' conflicts') +
+        '</span></div>' +
+        gapHTML +
+        '<button type="button" data-cmd-modal-action="calendar-ops-open">Open Calendar Ops</button>';
+    }
+    return (
+      '<header class="ws-cmd-modal-head"><div><h3 class="ws-cmd-modal-title">Calendar Ops</h3></div><div class="ws-cmd-modal-head-actions"><button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Calendar Ops">×</button></div></header><div class="ws-cmd-modal-body">' +
+      content +
+      '</div>'
+    );
   }
 
   watchtowerRelativeTime(timestamp) {
@@ -7499,7 +7733,13 @@ export class WorkspaceCommandView {
         tabId: 'workspace-detail-config-plugins-tab',
         host: 'config'
       },
-      { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' }
+      { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' },
+      {
+        key: 'calendar',
+        label: 'Calendar',
+        tabId: 'workspace-detail-config-calendar-tab',
+        host: 'config'
+      }
     ];
   }
 
@@ -7525,6 +7765,8 @@ export class WorkspaceCommandView {
         return 'workspace-detail-config-mission-tab';
       case 'intent':
         return 'workspace-detail-config-intent-tab';
+      case 'calendar':
+        return 'workspace-detail-config-calendar-tab';
       default:
         return '';
     }

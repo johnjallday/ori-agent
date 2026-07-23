@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/mcp/mcpregistry"
+	"github.com/johnjallday/ori-agent/internal/vault"
 
 	"github.com/google/uuid"
 )
@@ -20,6 +21,7 @@ type Handler struct {
 	configManager *mcp.ConfigManager
 	regStore      *mcpregistry.Store
 	regFetcher    *mcpregistry.Fetcher
+	vaultOAuth    *vault.Store
 }
 
 // NewHandler creates a new MCP HTTP handler
@@ -34,6 +36,13 @@ func NewHandler(registry *mcp.Registry, configManager *mcp.ConfigManager) *Handl
 func (h *Handler) SetRegistryStore(s *mcpregistry.Store) {
 	h.regStore = s
 	h.regFetcher = mcpregistry.NewFetcher()
+}
+
+// SetVaultOAuthStore wires the vault store used to read safe (secret-free)
+// OAuth status for remote servers. Set once the vault store exists, later
+// than NewHandler (see internal/server/builder_handlers.go).
+func (h *Handler) SetVaultOAuthStore(store *vault.Store) {
+	h.vaultOAuth = store
 }
 
 // ListServersHandler lists all MCP servers
@@ -92,6 +101,11 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Look up the config before removal so a remote server's OAuth
+	// credentials can be revoked from the vault too -- removal must not
+	// leave an orphaned credential record behind.
+	cfg, cfgErr := h.configManager.GetServer(serverName)
+
 	// Remove from registry (stops if running)
 	if err := h.registry.RemoveServer(serverName); err != nil {
 		logger.Error("Failed to remove MCP server from registry", logger.Fields{"server": serverName, "error": err})
@@ -105,6 +119,12 @@ func (h *Handler) RemoveServerHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Error("Failed to remove MCP server from config", logger.Fields{"server": serverName, "error": err})
 		orihttp.InternalError(w, err.Error())
 		return
+	}
+
+	if cfgErr == nil && mcp.IsRemoteTransport(*cfg) {
+		if err := mcp.DisconnectOAuth(r.Context(), *cfg); err != nil {
+			logger.Warn("Failed to revoke MCP server oauth credentials", logger.Fields{"server": serverName, "error": err})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -250,7 +270,7 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	status, err := h.registry.GetServerStatus(serverName)
+	server, err := h.registry.GetServer(serverName)
 	if err != nil {
 		orihttp.NotFound(w, err.Error())
 		return
@@ -258,8 +278,9 @@ func (h *Handler) GetServerStatusHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
-		"server": serverName,
-		"status": status,
+		"server":        serverName,
+		"status":        server.GetStatus(),
+		"authorize_url": server.GetAuthorizeURL(),
 	}); encErr != nil {
 		logger.Error("Failed to encode response", logger.Fields{"error": encErr})
 	}

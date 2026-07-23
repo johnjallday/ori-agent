@@ -11,10 +11,15 @@
       "Bash(gofmt -l *)",
       "Bash(git fetch *)",
       "Bash(golangci-lint run *)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\n\" http://localhost:*)",
+      "Bash(npm run test:modules)",
       "mcp__claude-in-chrome__tabs_context_mcp",
       "mcp__claude-in-chrome__read_console_messages",
       "mcp__claude-in-chrome__read_network_requests",
-      "mcp__claude-in-chrome__find"
+      "mcp__claude-in-chrome__find",
+      "mcp__claude-in-chrome__read_page",
+      "mcp__claude-in-chrome__get_page_text"
     ]
   },
   "hooks": {
