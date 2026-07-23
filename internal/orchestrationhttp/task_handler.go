@@ -760,6 +760,20 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 			if ws.Tasks[i].ID == req.TaskID {
 				taskIndex = i
 
+				// Assigning or scheduling a Backlog item through this generic
+				// update endpoint would corrupt it (an assignee/schedule on a
+				// still-Backlog task, bypassing the invariants Create/Promote
+				// enforce) — found via a regression audit tracing every write
+				// path that touches To/AssignedNodeID/Schedule back to whether
+				// it funnels through RequireTaskNotBacklog. Plain field edits
+				// (description/details/etc.) remain allowed here.
+				if req.To != nil || req.AssignedNodeID != nil || schedule != nil {
+					if err := workspace.RequireTaskNotBacklog(&ws.Tasks[i], "cannot assign or schedule task"); err != nil {
+						orihttp.BadRequest(w, err.Error())
+						return
+					}
+				}
+
 				// Apply basic field updates
 				th.applyBasicFieldUpdates(&ws.Tasks[i], &req)
 

@@ -220,6 +220,12 @@ func resolveHomeWindowRange(window HomeDateWindow, now time.Time) (start, end ti
 }
 
 func taskActiveInWindow(t workspace.Task, start, end time.Time) bool {
+	// An uncommitted Backlog capture is not "activity" in this window sense —
+	// exclude it up front so the CreatedAt check below (which has no status
+	// filter of its own) can't sweep it into "what's happening today."
+	if t.Status == workspace.TaskStatusBacklog {
+		return false
+	}
 	inRange := func(ts time.Time) bool {
 		return !ts.IsZero() && !ts.Before(start) && !ts.After(end)
 	}

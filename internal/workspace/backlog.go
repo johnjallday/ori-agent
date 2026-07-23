@@ -516,6 +516,16 @@ func (s *BacklogService) Reorder(workspaceID string, orderedIDs []string) ([]Tas
 		return nil, err
 	}
 
+	// Render BACKLOG.md to match the just-persisted order BEFORE calling
+	// List(): List() always imports the file first (FR84), and until the file
+	// is regenerated here it still reflects the PREVIOUS order — importing it
+	// at that point would treat the now-stale file as authoritative and
+	// silently revert the reorder that store.Update just persisted. This bit
+	// a real second-reorder-in-a-row case (found via live/e2e testing): a
+	// workspace's first-ever reorder looked fine (no file existed yet to
+	// clobber it), but every reorder after that got immediately undone.
+	s.renderAfterMutation(workspaceID)
+
 	items, err := s.List(workspaceID, false)
 	if err != nil {
 		return nil, err
@@ -526,7 +536,6 @@ func (s *BacklogService) Reorder(workspaceID string, orderedIDs []string) ([]Tas
 	}
 
 	s.publish(EventTaskBacklogReordered, workspaceID, "", map[string]any{"ordered_ids": orderedIDs})
-	s.renderAfterMutation(workspaceID)
 	return result, nil
 }
 

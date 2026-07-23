@@ -666,3 +666,66 @@ func TestBackfillBacklogMarkdownForAllWorkspaces(t *testing.T) {
 		}
 	})
 }
+
+// TestBacklogService_ReorderSurvivesASecondReorder is a regression test for a
+// bug found via live/e2e testing: with a real FileBacklogSynchronizer wired
+// (every production BacklogService has one; only bare-service unit tests
+// don't), a SECOND reorder call in a row was silently reverted back to the
+// first reorder's order. Root cause: Reorder() called List() — which always
+// imports BACKLOG.md first (FR84) — before renderAfterMutation() had
+// regenerated the file to match the just-persisted order, so the still-stale
+// file's row order was treated as authoritative and immediately overwrote the
+// fresh ranks. The first-ever reorder on a workspace looked fine only because
+// no file existed yet to clobber it.
+func TestBacklogService_ReorderSurvivesASecondReorder(t *testing.T) {
+	store, ws := newBacklogSyncTestStore(t)
+	sync := NewFileBacklogSynchronizer(store)
+	svc := NewBacklogService(store)
+	svc.SetSynchronizer(sync)
+
+	a, err := svc.Create(BacklogCreateInput{WorkspaceID: ws.ID, Description: "Item A"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	b, err := svc.Create(BacklogCreateInput{WorkspaceID: ws.ID, Description: "Item B"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// First reorder: B, A.
+	if _, err := svc.Reorder(ws.ID, []string{b.ID, a.ID}); err != nil {
+		t.Fatalf("first Reorder() error = %v", err)
+	}
+	afterFirst, err := svc.List(ws.ID, false)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(afterFirst) != 2 || afterFirst[0].Task.ID != b.ID || afterFirst[1].Task.ID != a.ID {
+		t.Fatalf("first reorder didn't apply: %+v", afterFirst)
+	}
+
+	// Second reorder: back to A, B. This is the one the bug clobbered.
+	if _, err := svc.Reorder(ws.ID, []string{a.ID, b.ID}); err != nil {
+		t.Fatalf("second Reorder() error = %v", err)
+	}
+	afterSecond, err := svc.List(ws.ID, false)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(afterSecond) != 2 || afterSecond[0].Task.ID != a.ID || afterSecond[1].Task.ID != b.ID {
+		t.Fatalf("second reorder was reverted (the bug): got %+v, want [A, B]", afterSecond)
+	}
+
+	// A third reorder for good measure, proving this isn't just "the second
+	// one specifically" but every reorder after the file exists.
+	if _, err := svc.Reorder(ws.ID, []string{b.ID, a.ID}); err != nil {
+		t.Fatalf("third Reorder() error = %v", err)
+	}
+	afterThird, err := svc.List(ws.ID, false)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(afterThird) != 2 || afterThird[0].Task.ID != b.ID || afterThird[1].Task.ID != a.ID {
+		t.Fatalf("third reorder was reverted: got %+v, want [B, A]", afterThird)
+	}
+}

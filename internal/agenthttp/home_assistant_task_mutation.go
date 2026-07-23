@@ -421,7 +421,7 @@ func (h *HomeAssistantAskHandler) buildStartTaskConfirmation(store workspace.Sto
 // cancelled, and timed-out tasks may be retried.
 func isRunnableTaskStatus(status workspace.TaskStatus) bool {
 	switch status {
-	case workspace.TaskStatusInProgress, workspace.TaskStatusCompleted:
+	case workspace.TaskStatusInProgress, workspace.TaskStatusCompleted, workspace.TaskStatusBacklog:
 		return false
 	default:
 		return true

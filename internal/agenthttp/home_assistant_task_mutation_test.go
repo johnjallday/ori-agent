@@ -179,6 +179,19 @@ func TestExtractTaskDescription(t *testing.T) {
 	}
 }
 
+// Regression test for a gap found via a Group 7 cross-surface audit:
+// isRunnableTaskStatus (used by the "start task" NLU matcher) had no Backlog
+// exclusion, so a Backlog item whose description matched a "start the X
+// task" prompt could be proposed for execution.
+func TestIsRunnableTaskStatus_ExcludesBacklog(t *testing.T) {
+	if isRunnableTaskStatus(workspace.TaskStatusBacklog) {
+		t.Error("Backlog must not be considered runnable")
+	}
+	if !isRunnableTaskStatus(workspace.TaskStatusPending) {
+		t.Error("Pending must remain runnable")
+	}
+}
+
 func TestExtractBacklogDescription(t *testing.T) {
 	cases := []struct {
 		prompt string

@@ -183,8 +183,20 @@ func (w *Workspace) GetWorkspaceProgress() Progress {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	// An uncommitted Backlog capture isn't work-in-progress toward completion
+	// — excluded from TotalTasks (not just left out of the status buckets
+	// below) so it doesn't inflate the denominator and skew Percentage low
+	// (found via a regression audit: the switch below has no "backlog" case,
+	// but the old TotalTasks := len(w.Tasks) counted it anyway).
+	totalTasks := 0
+	for _, task := range w.Tasks {
+		if task.Status != TaskStatusBacklog {
+			totalTasks++
+		}
+	}
+
 	progress := Progress{
-		TotalTasks:  len(w.Tasks),
+		TotalTasks:  totalTasks,
 		TotalAgents: len(w.agentNamesLocked()),
 	}
 
@@ -198,6 +210,9 @@ func (w *Workspace) GetWorkspaceProgress() Progress {
 	var completedCount int
 
 	for _, task := range w.Tasks {
+		if task.Status == TaskStatusBacklog {
+			continue
+		}
 		switch task.Status {
 		case "completed":
 			progress.CompletedTasks++
