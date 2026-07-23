@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 )
@@ -95,4 +96,33 @@ func (g *GoogleVerifier) Verify(ctx context.Context, rawIDToken, expectedNonce s
 		Name:          claims.Name,
 		Picture:       claims.Picture,
 	}, nil
+}
+
+// NewLazyGoogleVerifier returns an IDVerifier that defers OIDC discovery (a
+// network call to Google's issuer) until the first Verify, so it never blocks
+// or fails server startup. Discovery is retried on each call until it succeeds,
+// then cached — a transient startup-time network failure is not sticky.
+func NewLazyGoogleVerifier(clientID string) IDVerifier {
+	return &lazyVerifier{clientID: clientID}
+}
+
+type lazyVerifier struct {
+	clientID string
+	mu       sync.Mutex
+	inner    *GoogleVerifier
+}
+
+func (l *lazyVerifier) Verify(ctx context.Context, rawIDToken, expectedNonce string) (Identity, error) {
+	l.mu.Lock()
+	if l.inner == nil {
+		v, err := NewGoogleVerifier(ctx, l.clientID)
+		if err != nil {
+			l.mu.Unlock()
+			return Identity{}, fmt.Errorf("%w: %v", ErrIDTokenInvalid, err)
+		}
+		l.inner = v
+	}
+	inner := l.inner
+	l.mu.Unlock()
+	return inner.Verify(ctx, rawIDToken, expectedNonce)
 }

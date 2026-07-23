@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
@@ -16,6 +17,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
@@ -289,6 +292,28 @@ func (b *ServerBuilder) initializeHandlers() {
 		// (Phase 18) — same reason wireReaperSetup is deferred.
 		b.vaultStore = vaultStore
 		logger.Info("Vault system initialized", logger.Fields{})
+	}
+
+	// Google Account connection (identity connect flow). Identity-only in this
+	// group — product grants arrive later. The verifier is lazy so startup does
+	// no network call; client credentials come from env in dev and are baked in
+	// for official builds.
+	{
+		clientID := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_ID"))
+		clientSecret := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_SECRET"))
+		connStore := connections.NewStore(config.DefaultDataDir())
+		connFlow := connections.NewIdentityFlow(
+			connections.OAuthConfig{ClientID: clientID, ClientSecret: clientSecret},
+			connections.NewStateStore(10*time.Minute),
+			connStore,
+			connections.NewLazyGoogleVerifier(clientID),
+		)
+		b.connectionsHandler = connectionshttp.NewHandler(connectionshttp.Deps{
+			Flow:  connFlow,
+			Store: connStore,
+			Guard: connectionshttp.NewOriginGuard(),
+		})
+		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 
 	// Initialize external agents (Claude Code, Codex)
