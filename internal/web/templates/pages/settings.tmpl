@@ -978,7 +978,7 @@
             <p class="settings-section-description">
               To let your Personal HQ connect Gmail, register a Google OAuth 2.0 <strong>Web application</strong>
               client (Google Cloud Console → Credentials; enable the Gmail API), add
-              <code id="hqEmailRedirectHint">this server's <em>/api/vault/email/oauth/callback</em></code> as an
+              <code id="hqEmailRedirectHint">this server's <em>/api/vault/email-oauth/callback</em></code> as an
               authorized redirect URI, then paste the client ID and secret below. Read-only Gmail access is
               requested; nothing is sent without your explicit confirmation.
             </p>
@@ -1835,7 +1835,7 @@
       if (!idInput || !saveBtn) return;
 
       if (redirectHint) {
-        redirectHint.textContent = window.location.origin + '/api/vault/email/oauth/callback';
+        redirectHint.textContent = window.location.origin + '/api/vault/email-oauth/callback';
       }
 
       function setStatus(text, isError) {

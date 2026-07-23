@@ -130,7 +130,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
   }
 
   function connectEmail() {
-    const popup = window.open('/api/vault/email/oauth/start?provider=gmail', 'ori-hq-email', 'width=520,height=680');
+    const popup = window.open('/api/vault/email-oauth/start?provider=gmail', 'ori-hq-email', 'width=520,height=680');
     if (!popup) {
       toast('Allow pop-ups to connect your email.', 'danger');
       return;
