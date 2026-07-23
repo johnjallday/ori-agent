@@ -23,7 +23,11 @@ type PendingAuth struct {
 	ActiveSubject string
 	ReturnTo      string
 	CallbackURI   string
-	CreatedAt     time.Time
+	// CodeVerifier is the PKCE code verifier for this authorization. It is a
+	// per-flow secret that must be remembered between the authorize request and
+	// the token exchange; it never leaves the server.
+	CodeVerifier string
+	CreatedAt    time.Time
 }
 
 // BeginParams are the caller-supplied inputs to start an authorization; the
@@ -34,6 +38,7 @@ type BeginParams struct {
 	ActiveSubject string
 	ReturnTo      string
 	CallbackURI   string
+	CodeVerifier  string
 }
 
 // StateStore tracks in-flight authorizations keyed by their state value.
@@ -84,6 +89,7 @@ func (s *StateStore) Begin(p BeginParams) (PendingAuth, error) {
 		ActiveSubject: p.ActiveSubject,
 		ReturnTo:      p.ReturnTo,
 		CallbackURI:   p.CallbackURI,
+		CodeVerifier:  p.CodeVerifier,
 		CreatedAt:     s.now(),
 	}
 
