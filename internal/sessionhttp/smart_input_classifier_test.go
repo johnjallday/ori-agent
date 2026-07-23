@@ -35,6 +35,32 @@ func TestClassifySmartInputHeuristic_Imperative(t *testing.T) {
 	}
 }
 
+func TestClassifySmartInputHeuristic_BacklogPrefix(t *testing.T) {
+	cases := []string{
+		"backlog: explore competitor pricing",
+		"idea: dark mode toggle",
+		"someday redesign the onboarding flow",
+	}
+	for _, input := range cases {
+		result := classifySmartInputHeuristic(input)
+		if result.Decision != SmartInputDecisionBacklog {
+			t.Errorf("classifySmartInputHeuristic(%q) decision = %s, want backlog", input, result.Decision)
+		}
+		if result.Confidence < 0.9 {
+			t.Errorf("classifySmartInputHeuristic(%q) confidence = %f, want >= 0.9", input, result.Confidence)
+		}
+	}
+}
+
+func TestClassifySmartInputHeuristic_BacklogPrefixTakesPrecedenceOverTaskPrefix(t *testing.T) {
+	// "backlog: fix the header" also reads as an imperative task once the
+	// prefix is stripped, but the explicit backlog framing must win.
+	result := classifySmartInputHeuristic("backlog: fix the header")
+	if result.Decision != SmartInputDecisionBacklog {
+		t.Fatalf("expected backlog decision, got %s", result.Decision)
+	}
+}
+
 func TestClassifySmartInputHeuristic_DefaultsToTask(t *testing.T) {
 	result := classifySmartInputHeuristic("roadmap")
 

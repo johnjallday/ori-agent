@@ -112,6 +112,7 @@ func (f *fakeOppStore) MarkSeen(string, string) error                           
 func (f *fakeOppStore) Dismiss(string, string, workspace.DismissalReason) error { return nil }
 func (f *fakeOppStore) Snooze(string, string, time.Time) error                  { return nil }
 func (f *fakeOppStore) MarkResolved(string, string) error                       { return nil }
+func (f *fakeOppStore) MarkPlanned(string, string, string, string) error        { return nil }
 
 func webhookFire() PendingFire {
 	return PendingFire{

@@ -61,9 +61,21 @@
   }
 
   function statusChip(s) {
-    const labels = { new: 'New', snoozed: 'Snoozed', resolved: 'Resolved', dismissed: 'Dismissed' };
-    const muted = s === 'resolved' || s === 'dismissed';
+    const labels = { new: 'New', snoozed: 'Snoozed', resolved: 'Resolved', dismissed: 'Dismissed', planned: 'Planned' };
+    const muted = s === 'resolved' || s === 'dismissed' || s === 'planned';
     return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; opacity: ${muted ? 0.6 : 1}; border: 1px solid var(--border-color, #ddd);">${escapeHtml(labels[s] || s || '')}</span>`;
+  }
+
+  function backlogActionHTML(item) {
+    // A planned finding already has a linked Backlog item — offer a direct
+    // deep link to it (Group 5's ?panel=backlog&task= contract) instead of
+    // re-showing the capture action; the endpoint is idempotent either way,
+    // but a direct link is the clearer affordance once linked (FR26, 29).
+    if (item.status === 'planned' && item.linked_task_id) {
+      const href = `/workspaces/${encodeURIComponent(item.linked_workspace_id || item.workspace_id)}?panel=backlog&task=${encodeURIComponent(item.linked_task_id)}`;
+      return `<a class="btn btn-sm btn-outline-primary" href="${href}" title="View in Backlog">View in Backlog</a>`;
+    }
+    return `<button class="btn btn-sm btn-outline-primary" data-action="add-to-backlog" title="Add to Backlog">Add to Backlog</button>`;
   }
 
   function rowHTML(item) {
@@ -88,6 +100,7 @@
           </div>
         </div>
         <div style="display: flex; flex-direction: column; gap: 0.25rem; min-width: 96px;">
+          ${backlogActionHTML(item)}
           <button class="btn btn-sm btn-outline-success" data-action="resolve" title="Mark resolved">Resolve</button>
           <button class="btn btn-sm btn-outline-secondary" data-action="snooze" title="Snooze">Snooze</button>
           <button class="btn btn-sm btn-outline-danger" data-action="dismiss" title="Dismiss">Dismiss</button>
@@ -135,6 +148,15 @@
     el.style.color = kind === 'error' ? 'var(--danger-color, #c0392b)' : 'var(--text-secondary, #666)';
   }
 
+  // Success message with a clickable link to the created/linked item, so the
+  // user doesn't have to hunt for it after Add to Backlog (FR26, 29).
+  function setStatusWithLink(msg, href, linkLabel) {
+    const el = $('#action-center-status');
+    if (!el) return;
+    el.style.color = 'var(--text-secondary, #666)';
+    el.innerHTML = `${escapeHtml(msg)} <a href="${href}">${escapeHtml(linkLabel)}</a>`;
+  }
+
   // --- API ---
   async function fetchList() {
     const status = $('#action-center-status-filter').value || '';
@@ -174,13 +196,47 @@
     }
   }
 
+  // Add to Backlog (PRD workspace-backlog FR26-29): non-destructive like
+  // Resolve, so it fires directly (no confirm modal) — but shows an explicit
+  // pending state on the clicked button and a success link to the created
+  // item, since unlike Resolve it produces a new record worth navigating to.
+  async function handleAddToBacklog(workspaceID, opportunityID, triggerBtn) {
+    const originalLabel = triggerBtn ? triggerBtn.textContent : '';
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = 'Adding…';
+    }
+    try {
+      const data = await callMutation(workspaceID, opportunityID, 'add-to-backlog');
+      await reload();
+      const item = data && data.item;
+      const linkedWs = (item && item.workspace_id) || workspaceID;
+      if (item && item.id) {
+        setStatusWithLink(
+          'Added to backlog.',
+          `/workspaces/${encodeURIComponent(linkedWs)}?panel=backlog&task=${encodeURIComponent(item.id)}`,
+          'Open item'
+        );
+      } else {
+        setStatus('Added to backlog.');
+      }
+    } catch (e) {
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+        triggerBtn.textContent = originalLabel;
+      }
+      setStatus(`Add to Backlog failed: ${e.message}`, 'error');
+    }
+  }
+
   // --- Event wiring ---
   function handleRowClick(evt) {
     const row = evt.target.closest('.action-center-row');
     if (!row) return;
     const workspaceID = row.dataset.ws;
     const opportunityID = row.dataset.id;
-    const action = evt.target.closest('[data-action]')?.dataset.action;
+    const triggerBtn = evt.target.closest('[data-action]');
+    const action = triggerBtn?.dataset.action;
     if (!action) return;
 
     if (action === 'open') {
@@ -194,6 +250,10 @@
     }
 
     activeTarget = { workspaceID, opportunityID };
+    if (action === 'add-to-backlog') {
+      void handleAddToBacklog(workspaceID, opportunityID, triggerBtn);
+      return;
+    }
     if (action === 'resolve') {
       callMutation(workspaceID, opportunityID, 'resolve')
         .then(reload)
@@ -286,6 +346,19 @@
     wireModals();
     reload();
   }
+
+  // Test-only export surface (mirrors workspace-map.js/workspace-hub-smart-
+  // input.js's window.X pattern) — purely additive, changes no runtime
+  // behavior. init() still fires automatically below.
+  window.ActionCenter = {
+    rowHTML,
+    statusChip,
+    priorityChip,
+    backlogActionHTML,
+    handleAddToBacklog,
+    escapeHtml,
+    fmtTime
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

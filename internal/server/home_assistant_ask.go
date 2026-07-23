@@ -111,9 +111,10 @@ func (a homeAgentsAdapter) AgentRoster() ([]agenthttp.HomeAgentSummary, bool) {
 // orchestrator path the workspace UI uses, so coordinator-driven assignment and
 // the delegation loop apply identically.
 type homeActionMutator struct {
-	workspaces   workspace.Store
-	agents       store.Store
-	orchestrator *workspace.Orchestrator
+	workspaces     workspace.Store
+	agents         store.Store
+	orchestrator   *workspace.Orchestrator
+	backlogService *workspace.BacklogService
 }
 
 func (m homeActionMutator) defaultAgentName() string {
@@ -178,6 +179,27 @@ func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, descript
 		return "", "", err
 	}
 	return taskID, "/workspaces/" + workspaceID, nil
+}
+
+// CreateBacklogItem adds an uncommitted Backlog item through the canonical
+// BacklogService (PRD workspace-backlog FR5, 20-25) rather than
+// Workspace.Update+ApplyEntryAgentDefault the way CreateTask does above —
+// assistant-created backlog items must not be assigned to an agent or become
+// runnable (FR25).
+func (m homeActionMutator) CreateBacklogItem(ctx context.Context, workspaceID, description string) (string, string, error) {
+	href := "/workspaces/" + workspaceID
+	if m.backlogService == nil {
+		return "", href, fmt.Errorf("backlog capture is unavailable right now")
+	}
+	task, err := m.backlogService.Create(workspace.BacklogCreateInput{
+		WorkspaceID: workspaceID,
+		Description: description,
+		SourceType:  workspace.BacklogSourceAssistant,
+	})
+	if err != nil {
+		return "", href, err
+	}
+	return task.ID, href, nil
 }
 
 func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID string) (string, error) {
@@ -334,6 +356,20 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		mutator := homeActionMutator{
 			workspaces: s.Storage.WorkspaceStore,
 			agents:     s.Storage.AgentStore,
+		}
+		if s.Storage.WorkspaceStore != nil {
+			// A dedicated instance over the same store/event bus/file
+			// synchronizer as orchestrationhttp's — BacklogService is a
+			// stateless holder of those references, so every capture surface
+			// stays hierarchy-safe and BACKLOG.md-consistent without needing
+			// a single shared singleton (mirrors orchestrationhttp.Handler's
+			// own construction in initializeSubHandlers).
+			backlogService := workspace.NewBacklogService(s.Storage.WorkspaceStore)
+			backlogService.SetSynchronizer(workspace.NewFileBacklogSynchronizer(s.Storage.WorkspaceStore))
+			if s.Workflow != nil {
+				backlogService.SetEventBus(s.Workflow.EventBus)
+			}
+			mutator.backlogService = backlogService
 		}
 		if s.Workflow != nil {
 			mutator.orchestrator = s.Workflow.WorkspaceOrchestrator

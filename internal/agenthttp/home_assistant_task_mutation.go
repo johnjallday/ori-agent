@@ -190,6 +190,132 @@ func detectWorkspaceCreationRequest(prompt string) *HomeActionConfirmation {
 	return nil
 }
 
+// homeBacklogConnectivePhrases are the connective phrases that distinguish an
+// actual "add to the backlog" capture request from a task whose description
+// merely mentions the word "backlog" (e.g. "new task that reviews the
+// backlog in Roadmap" is a normal task-creation request, not backlog
+// capture — it contains "backlog" but not one of these more specific
+// phrases). Shared by the detection guard and extractBacklogDescription so
+// the two can never drift out of sync.
+var homeBacklogConnectivePhrases = []string{"to the backlog", "to backlog", "in the backlog", "in backlog"}
+
+// detectBacklogCaptureRequest matches "add X to the backlog in <workspace>"
+// and proposes a create_backlog_item confirmation (PRD workspace-backlog
+// FR23-25). Unlike the other detectors it returns a second, non-empty decline
+// message when the "backlog" phrasing is confidently recognized but the named
+// workspace can't be resolved unambiguously — the caller uses that to give a
+// direct, user-readable answer instead of silently falling through to a
+// normal chat response (FR23-25, 6.6). A nil confirmation with an empty
+// decline means "not a backlog request at all", identical in effect to every
+// other detector's plain nil.
+func (h *HomeAssistantAskHandler) detectBacklogCaptureRequest(prompt string) (*HomeActionConfirmation, string) {
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+	if lower == "" || !hasCreateVerb(lower) || !containsAny(lower, homeBacklogConnectivePhrases) {
+		return nil, ""
+	}
+	store := h.Sources.Workspaces
+	if store == nil {
+		return nil, ""
+	}
+
+	wsID, wsName, ok, ambiguous := matchRoutableWorkspaceInPrompt(store, prompt)
+	if ambiguous {
+		return nil, "More than one workspace matches that name — try naming it more specifically."
+	}
+	if !ok {
+		return nil, "I couldn't find a workspace matching that name for the backlog item. Try naming it exactly, e.g. \"add X to the backlog in Website Redesign\"."
+	}
+
+	desc := extractBacklogDescription(trimmed, wsName)
+	if desc == "" {
+		return nil, "I need a short description of what to add to the backlog."
+	}
+
+	return &HomeActionConfirmation{
+		ActionID:   "create-backlog-item",
+		ActionType: HomeActionCreateBacklogItem,
+		Summary:    fmt.Sprintf("Add %q to the backlog in %q? It stays uncommitted — no agent or schedule — until you promote it to Ready.", desc, wsName),
+		Arguments:  map[string]any{"workspace_id": wsID, "description": desc},
+	}, ""
+}
+
+// matchRoutableWorkspaceInPrompt is matchWorkspaceInPrompt (home_nav_catalog.go)
+// narrowed to workspaces a new item could actually be captured into: active
+// only (excludes trashed/completed/failed/cancelled/missing — FR23-25, 6.6
+// "deleted... workspace targets") and never a group roll-up (mirrors
+// isHomeAssistantRoutableWorkspace's "unauthorized" carve-out, since a group
+// has no content root of its own to capture into). It additionally reports a
+// tie between two distinct, equally-specific name matches as ambiguous rather
+// than silently picking one, which the simpler matchWorkspaceInPrompt does not.
+func matchRoutableWorkspaceInPrompt(store workspace.Store, prompt string) (id, name string, ok, ambiguous bool) {
+	if store == nil {
+		return "", "", false, false
+	}
+	active, err := store.ListActive()
+	if err != nil {
+		return "", "", false, false
+	}
+	p := strings.ToLower(prompt)
+	bestLen := 0
+	for _, ws := range active {
+		if !isHomeAssistantRoutableWorkspace(ws) {
+			continue
+		}
+		n := strings.ToLower(strings.TrimSpace(ws.Name))
+		if len(n) < 3 || !strings.Contains(p, n) {
+			continue
+		}
+		switch {
+		case len(n) > bestLen:
+			id, name, bestLen, ambiguous = ws.ID, ws.Name, len(n), false
+		case len(n) == bestLen && !strings.EqualFold(ws.Name, name):
+			ambiguous = true
+		}
+	}
+	return id, name, bestLen > 0, ambiguous
+}
+
+// extractBacklogDescription pulls the free-text idea out of a backlog-capture
+// prompt by removing the workspace mention, the leading "add/create/new/make"
+// verb, and the trailing "to/in [the] backlog" phrase. Returns "" when no
+// description remains. The description sits BETWEEN the verb and "backlog"
+// ("add X to the backlog in Y"), unlike extractTaskDescription's task
+// phrasing where the description follows the "task" keyword.
+func extractBacklogDescription(prompt, wsName string) string {
+	s := stripWorkspaceMention(prompt, wsName)
+	lower := strings.ToLower(s)
+
+	for _, verb := range []string{"add ", "create ", "new ", "make "} {
+		if strings.HasPrefix(lower, verb) {
+			s = s[len(verb):]
+			lower = lower[len(verb):]
+			break
+		}
+	}
+
+	for _, phrase := range homeBacklogConnectivePhrases {
+		if idx := strings.Index(lower, phrase); idx >= 0 {
+			s = s[:idx]
+			lower = lower[:idx]
+			break
+		}
+	}
+
+	s = strings.Trim(strings.TrimSpace(s), " :\"'.-")
+	return strings.TrimSpace(s)
+}
+
+// containsAny reports whether s contains any of the given substrings.
+func containsAny(s string, substrings []string) bool {
+	for _, sub := range substrings {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 // detectTaskMutationRequest matches task creation ("create a task to X in
 // <workspace>") and task execution ("start/run the <task> task in
 // <workspace>"). Both require the named workspace to resolve to real state;

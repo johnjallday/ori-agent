@@ -575,8 +575,14 @@ func (b *ServerBuilder) initializeMissionBridge() {
 
 	// Wire the Action Center handler with the same OpportunityStore so list,
 	// dismiss, snooze, and resolve operations stay in lockstep with mission
-	// runs that produce findings.
-	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore)
+	// runs that produce findings. Its own BacklogService instance (Add to
+	// Backlog) shares the same store/event bus/file synchronizer as every
+	// other capture surface (mirrors orchestrationhttp.Handler's own
+	// construction — BacklogService is a stateless holder of those refs).
+	actionCenterBacklogService := workspace.NewBacklogService(b.workspaceStore)
+	actionCenterBacklogService.SetEventBus(b.eventBus)
+	actionCenterBacklogService.SetSynchronizer(workspace.NewFileBacklogSynchronizer(b.workspaceStore))
+	b.actionCenterHandler = actioncenterhttp.NewHandler(b.workspaceStore, opportunityStore, actionCenterBacklogService)
 
 	// Event triggers reuse the same mission bridge (for mission_run actions)
 	// and opportunity store (for failure findings).

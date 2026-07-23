@@ -28,12 +28,18 @@ import (
 type Handler struct {
 	workspaces    workspace.Store
 	opportunities workspace.OpportunityStore
+	// backlogService routes Add to Backlog through the same canonical
+	// capture path every other surface uses (PRD workspace-backlog FR5,
+	// 26-29). Optional: AddToBacklog degrades to 503 if unset so the rest of
+	// the Action Center keeps working even in a build that hasn't wired it.
+	backlogService *workspace.BacklogService
 }
 
-// NewHandler constructs an Action Center handler. Both stores are required;
-// passing nil for either is a programmer error and will panic on first use.
-func NewHandler(ws workspace.Store, opps workspace.OpportunityStore) *Handler {
-	return &Handler{workspaces: ws, opportunities: opps}
+// NewHandler constructs an Action Center handler. workspaces and opps are
+// required; passing nil for either is a programmer error and will panic on
+// first use. backlogService may be nil (only AddToBacklog degrades).
+func NewHandler(ws workspace.Store, opps workspace.OpportunityStore, backlogService *workspace.BacklogService) *Handler {
+	return &Handler{workspaces: ws, opportunities: opps, backlogService: backlogService}
 }
 
 // AggregatedOpportunity is the row shape the Action Center list returns.
@@ -240,6 +246,124 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"status": "resolved"})
 }
 
+// addToBacklogResponse is the response shape for AddToBacklog: the now-planned
+// opportunity plus the linked Backlog item, so the client can navigate
+// straight to it without a second round-trip.
+type addToBacklogResponse struct {
+	Status      string                `json:"status"`
+	Opportunity AggregatedOpportunity `json:"opportunity"`
+	Item        *workspace.Task       `json:"item,omitempty"`
+}
+
+// AddToBacklog handles POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/add-to-backlog.
+// Uses the opportunity's own workspace as the target (FR26) and routes
+// through the canonical BacklogService so the created item is a normal,
+// uncommitted Backlog task (FR5, 27) — never marked resolved, since the
+// underlying finding isn't fixed, only turned into tracked work (FR29).
+// Idempotent: repeating the call for an already-planned opportunity returns
+// the existing linked item rather than creating a duplicate (FR28-29, 99).
+func (h *Handler) AddToBacklog(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.backlogService == nil || h.opportunities == nil {
+		orihttp.ServiceUnavailable(w, "backlog capture is not configured")
+		return
+	}
+	wsID := r.PathValue("workspaceID")
+	oppID := r.PathValue("opportunityID")
+	if wsID == "" || oppID == "" {
+		orihttp.BadRequest(w, "workspace ID and opportunity ID are required")
+		return
+	}
+
+	opp, err := h.opportunities.Get(wsID, oppID)
+	if err != nil {
+		writeMutationError(w, err)
+		return
+	}
+
+	if opp.Status == workspace.OpportunityPlanned && opp.LinkedTaskID != "" {
+		item, err := h.backlogService.Get(opp.LinkedWorkspaceID, opp.LinkedTaskID)
+		if err != nil {
+			orihttp.InternalError(w, fmt.Sprintf("get linked backlog item: %v", err))
+			return
+		}
+		writeJSON(w, addToBacklogResponse{Status: "planned", Opportunity: h.aggregate(wsID, opp), Item: &item.Task})
+		return
+	}
+
+	task, err := h.backlogService.Create(workspace.BacklogCreateInput{
+		WorkspaceID: wsID,
+		Description: opp.Title,
+		Details:     buildBacklogDetailsFromOpportunity(opp),
+		Priority:    backlogPriorityFromOpportunityPriority(opp.Priority),
+		SourceType:  workspace.BacklogSourceActionCenter,
+		SourceID:    opp.ID,
+	})
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("create backlog item: %v", err))
+		return
+	}
+
+	if err := h.opportunities.MarkPlanned(wsID, oppID, task.ID, wsID); err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("mark opportunity planned: %v", err))
+		return
+	}
+
+	planned, err := h.opportunities.Get(wsID, oppID)
+	if err != nil {
+		orihttp.InternalError(w, fmt.Sprintf("get updated opportunity: %v", err))
+		return
+	}
+	writeJSON(w, addToBacklogResponse{Status: "planned", Opportunity: h.aggregate(wsID, planned), Item: task})
+}
+
+// aggregate attaches the source workspace's display name/kind to an
+// opportunity, matching the shape List/Get already return.
+func (h *Handler) aggregate(wsID string, opp workspace.Opportunity) AggregatedOpportunity {
+	resp := AggregatedOpportunity{Opportunity: opp}
+	if ws, err := h.workspaces.Get(wsID); err == nil && ws != nil {
+		resp.WorkspaceName = ws.Name
+		resp.WorkspaceKind = ws.Kind
+	}
+	return resp
+}
+
+// buildBacklogDetailsFromOpportunity folds the opportunity's evidence,
+// recommended action, and source run ID into the Backlog item's free-text
+// Details field (FR27) — BacklogCreateInput has no separate field for each,
+// so they're clearly labeled sections instead of silently dropped.
+func buildBacklogDetailsFromOpportunity(opp workspace.Opportunity) string {
+	var sections []string
+	if s := strings.TrimSpace(opp.Summary); s != "" {
+		sections = append(sections, s)
+	}
+	if e := strings.TrimSpace(opp.Evidence); e != "" {
+		sections = append(sections, "Evidence:\n"+e)
+	}
+	if a := strings.TrimSpace(opp.RecommendedAction); a != "" {
+		sections = append(sections, "Recommended action:\n"+a)
+	}
+	if r := strings.TrimSpace(opp.SourceRunID); r != "" {
+		sections = append(sections, "Source run: "+r)
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+// backlogPriorityFromOpportunityPriority maps an opportunity's priority word
+// (low|medium|high|critical) onto the Backlog/Task 1-5 int scale used
+// elsewhere (1=high, 3=medium, 5=low — see backlog_markdown_sync.go).
+// critical maps to the same top rank as high since the task scale has no
+// higher tier.
+func backlogPriorityFromOpportunityPriority(p string) int {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "critical", "high":
+		return 1
+	case "low":
+		return 5
+	default:
+		return 3
+	}
+}
+
 // --- helpers ---
 
 func parseStatusFilter(s string) map[workspace.OpportunityStatus]bool {
@@ -262,7 +386,8 @@ func parseStatusFilter(s string) map[workspace.OpportunityStatus]bool {
 		key := workspace.OpportunityStatus(strings.TrimSpace(raw))
 		switch key {
 		case workspace.OpportunityNew, workspace.OpportunitySnoozed,
-			workspace.OpportunityResolved, workspace.OpportunityDismissed:
+			workspace.OpportunityResolved, workspace.OpportunityDismissed,
+			workspace.OpportunityPlanned:
 			out[key] = true
 		}
 	}

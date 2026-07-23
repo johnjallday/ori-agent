@@ -89,6 +89,32 @@ func TestSmartInputHandler_Classify_FallbackPrompt(t *testing.T) {
 	}
 }
 
+func TestSmartInputHandler_Classify_Backlog(t *testing.T) {
+	handler := NewSmartInputHandler(nil, nil, nil)
+
+	body := `{"workspace_id":"ws-1","input":"backlog: explore competitor pricing"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/smart-input/classify", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleClassify(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var resp SmartInputClassifyResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Decision != SmartInputDecisionBacklog {
+		t.Fatalf("expected backlog decision, got %s", resp.Decision)
+	}
+	if resp.NeedsConfirmation {
+		t.Fatalf("expected no confirmation for a high-confidence backlog prefix match")
+	}
+}
+
 func TestSmartInputHandler_Classify_BadRequest(t *testing.T) {
 	handler := NewSmartInputHandler(nil, nil, nil)
 
@@ -154,5 +180,27 @@ func TestSmartInputHandler_OverrideLogs(t *testing.T) {
 	}
 	if confidence != 0.55 {
 		t.Fatalf("unexpected confidence: %f", confidence)
+	}
+}
+
+func TestSmartInputHandler_OverrideAcceptsBacklogDecision(t *testing.T) {
+	handler, cleanup, _ := createTestSmartInputHandler(t)
+	defer cleanup()
+
+	body := `{
+		"workspace_id":"ws-1",
+		"input":"revisit the pricing page",
+		"predicted_decision":"task",
+		"selected_decision":"backlog",
+		"confidence":0.6,
+		"method":"heuristic"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/smart-input/override", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+
+	handler.HandleOverride(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for a backlog override, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

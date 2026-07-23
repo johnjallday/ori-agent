@@ -979,6 +979,7 @@ func registerActionCenterRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/dismiss", s.Handlers.ActionCenter.Dismiss)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/snooze", s.Handlers.ActionCenter.Snooze)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/resolve", s.Handlers.ActionCenter.Resolve)
+		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/add-to-backlog", s.Handlers.ActionCenter.AddToBacklog)
 	}
 }
 

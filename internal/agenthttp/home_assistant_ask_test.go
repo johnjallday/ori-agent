@@ -48,6 +48,9 @@ func (m *fakeMutator) CreateWorkspace(_ context.Context, name, _ string) (string
 func (m *fakeMutator) CreateTask(_ context.Context, wsID, _ string) (string, string, error) {
 	return "t1", "/workspaces/" + wsID, nil
 }
+func (m *fakeMutator) CreateBacklogItem(_ context.Context, wsID, _ string) (string, string, error) {
+	return "b1", "/workspaces/" + wsID, nil
+}
 func (m *fakeMutator) StartTask(_ context.Context, wsID, _ string) (string, error) {
 	return "/workspaces/" + wsID, nil
 }
@@ -112,6 +115,56 @@ func TestAsk_ConfirmationRequiredForCreateWorkspace(t *testing.T) {
 	}
 	if name, _ := resp.Confirmation.Arguments["name"].(string); name != "Beta" {
 		t.Errorf("name arg = %v, want Beta", resp.Confirmation.Arguments["name"])
+	}
+}
+
+func TestAsk_ConfirmAndExecuteAddToBacklog(t *testing.T) {
+	h := newAskHandlerWithProvider(t, "irrelevant")
+	mut := &fakeMutator{}
+	h.SetMutator(mut)
+
+	// 1. The natural-language request should require confirmation.
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Prompt: "add explore new markets to the backlog in Alpha",
+		Intent: "app_introspection",
+	})
+	if !resp.RequiresConfirmation || resp.Confirmation == nil {
+		t.Fatalf("expected a create_backlog_item confirmation, got %+v", resp)
+	}
+	if resp.Confirmation.ActionType != HomeActionCreateBacklogItem {
+		t.Errorf("confirmation type = %q, want %q", resp.Confirmation.ActionType, HomeActionCreateBacklogItem)
+	}
+
+	// 2. Confirming executes through the mutator's CreateBacklogItem, not CreateTask.
+	resp2 := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent: "app_introspection",
+		ConfirmedAction: &HomeAction{
+			Type:      HomeActionCreateBacklogItem,
+			Arguments: resp.Confirmation.Arguments,
+		},
+	})
+	foundOpen := false
+	for _, a := range resp2.Actions {
+		if a.Type == HomeActionOpenWorkspace && a.WorkspaceID == "ws-1" {
+			foundOpen = true
+		}
+	}
+	if !foundOpen {
+		t.Errorf("expected an open_workspace action after adding to backlog, got %+v", resp2.Actions)
+	}
+}
+
+func TestAsk_DeclineMessageForUnresolvedBacklogWorkspace(t *testing.T) {
+	h := newAskHandlerWithProvider(t, "irrelevant")
+	resp := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Prompt: "add explore new markets to the backlog in Nonexistent",
+		Intent: "app_introspection",
+	})
+	if resp.RequiresConfirmation {
+		t.Fatalf("expected no confirmation for an unresolved workspace target, got %+v", resp)
+	}
+	if resp.Response == "" {
+		t.Fatal("expected a user-readable decline response, got an empty one")
 	}
 }
 

@@ -82,6 +82,50 @@ func TestBacklogService_Create(t *testing.T) {
 		}
 	})
 
+	// Every capture surface (manual UI, workspace/Home assistant, Action
+	// Center, BACKLOG.md import) funnels through this single Create() with
+	// its own BacklogSource* constant as SourceType — proving here that every
+	// source produces an equally safe, equally-shaped record is what makes
+	// that funneling meaningful rather than incidental (PRD workspace-backlog
+	// FR5, 20, 23-29; task 6.13).
+	t.Run("every capture source produces an equivalent, safe Backlog record", func(t *testing.T) {
+		sources := []string{
+			BacklogSourceManual,
+			BacklogSourceAssistant,
+			BacklogSourceActionCenter,
+			BacklogSourceBacklogFile,
+		}
+		for _, source := range sources {
+			task, err := svc.Create(BacklogCreateInput{
+				WorkspaceID: ws.ID,
+				Description: "idea via " + source,
+				SourceType:  source,
+				SourceID:    "src-" + source,
+			})
+			if err != nil {
+				t.Fatalf("Create() for source %q error = %v", source, err)
+			}
+			if task.Status != TaskStatusBacklog {
+				t.Errorf("source %q: Status = %q, want Backlog", source, task.Status)
+			}
+			if task.SourceType != source {
+				t.Errorf("source %q: SourceType not preserved, got %q", source, task.SourceType)
+			}
+			if task.SourceID != "src-"+source {
+				t.Errorf("source %q: SourceID not preserved, got %q", source, task.SourceID)
+			}
+			if task.To != "" {
+				t.Errorf("source %q: To = %q, want unassigned regardless of capture path", source, task.To)
+			}
+			if task.AwaitingExecutionIntent {
+				t.Errorf("source %q: AwaitingExecutionIntent must not be set by capture alone", source)
+			}
+			if err := ValidateBacklogTaskInvariants(task); err != nil {
+				t.Errorf("source %q: ValidateBacklogTaskInvariants failed: %v", source, err)
+			}
+		}
+	})
+
 	t.Run("deterministic increasing rank", func(t *testing.T) {
 		a, err := svc.Create(BacklogCreateInput{WorkspaceID: ws.ID, Description: "first"})
 		if err != nil {
