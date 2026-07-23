@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept
 
 # Default target
 .DEFAULT_GOAL := help
@@ -98,6 +98,9 @@ clean: ## Clean build artifacts
 	rm -rf $(COVERAGE_DIR)
 	rm -rf build-dmg
 	@echo "$(GREEN)✓ Clean complete$(NC)"
+
+clean-test-artifacts: ## Delete Ori test artifacts from the system temp directory
+	@./scripts/clean-test-artifacts.sh --delete
 
 clean-state: ## Delete all configuration and state files (fresh start)
 	@echo "$(YELLOW)⚠️  WARNING: This will delete ALL configuration, agents, workspaces, and settings!$(NC)"
@@ -253,6 +256,9 @@ test-js: ## Run JS unit tests (Node 18+ built-in test runner; no npm install nee
 	@echo "$(BLUE)Running JS unit tests...$(NC)"
 	node --test internal/web/static/js/modules/*.test.js
 	@echo "$(GREEN)✓ JS tests passed$(NC)"
+
+test-clean-test-artifacts: ## Test the temp artifact cleanup script in an isolated directory
+	@./scripts/clean-test-artifacts.test.sh
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)
 	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"
