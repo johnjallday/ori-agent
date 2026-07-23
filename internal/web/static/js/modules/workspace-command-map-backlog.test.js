@@ -65,11 +65,10 @@ test('renderMapBacklogPanel shows the local count and up to 4 ranked items (FR51
   assert.match(html, /<span>Backlog<\/span>/);
   const rowMatches = html.match(/data-cmd-map-open-backlog="/g) || [];
   assert.equal(rowMatches.length, 4, 'no more than 4 ranked items shown (FR51)');
-  assert.match(
-    html,
-    /data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">\+</,
-    'Add is a compact "+" icon (accessible name still says Add to Backlog), distinct from Open Backlog'
-  );
+  // No separate Add action here — it's redundant with the drawer's own Add
+  // once Open Backlog gets you there, and previously read as a near-duplicate
+  // of "Open Backlog" sitting right next to it (user feedback).
+  assert.ok(!html.includes('data-cmd-backlog-add'), 'no Add action in the Quest Board window');
   assert.ok(html.includes('Open Backlog'));
 });
 

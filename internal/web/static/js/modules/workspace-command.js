@@ -3395,7 +3395,6 @@ export class WorkspaceCommandView {
       rows +
       '</div>' +
       '<div class="ws-cmd-map-zone-actions">' +
-      '<button type="button" class="ws-cmd-map-zone-action is-icon-only" data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">+</button>' +
       '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-backlog-drawer>Open Backlog</button>' +
       '</div></div>'
     );
@@ -4330,7 +4329,7 @@ export class WorkspaceCommandView {
       '<header class="ws-cmd-drawer-head">' +
       '<h2 class="ws-cmd-drawer-title" tabindex="-1">Backlog</h2>' +
       '<div class="ws-cmd-drawer-head-actions">' +
-      '<button type="button" class="ws-cmd-drawer-add" data-cmd-backlog-quick-open aria-label="Add to backlog">＋ Add to Backlog</button>' +
+      '<button type="button" class="ws-cmd-drawer-add is-icon-only" data-cmd-backlog-quick-open aria-label="Add to backlog" title="Add to backlog">+</button>' +
       '<button type="button" class="ws-cmd-drawer-close" data-cmd-drawer-close aria-label="Close backlog">×</button>' +
       '</div>' +
       '</header>' +

@@ -55,6 +55,16 @@ test('renderBacklogPanel shows the local count and up to 5 previews (FR34)', () 
   assert.ok(html.includes('Open Backlog'));
 });
 
+test('backlogDrawerHTML header shows a compact "+" Add action, not full "Add to Backlog" text', () => {
+  const view = makeView(items);
+  const html = view.backlogDrawerHTML();
+  assert.match(
+    html,
+    /data-cmd-backlog-quick-open aria-label="Add to backlog" title="Add to backlog">\+</,
+    'the drawer header Add button is icon-only (accessible name still says Add to backlog)'
+  );
+});
+
 test('renderBacklogPanel shows an inviting empty state without implying Tasks is empty (FR38)', () => {
   const view = makeView([]);
   const html = view.renderBacklogPanel();

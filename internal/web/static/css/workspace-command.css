@@ -817,21 +817,14 @@
   line-height: 1.4;
 }
 
-/* Quest Board window action row (FR51): compact + Add beside the full Open Backlog action. */
+/* Quest Board window action row (FR51): Open Backlog is the only action here —
+   Add lives in the drawer itself once opened, so it isn't duplicated here too. */
 .ws-cmd-map-zone-actions {
   display: flex;
   gap: 8px;
 }
 .ws-cmd-map-zone-actions .ws-cmd-map-zone-action {
   flex: 1;
-}
-.ws-cmd-map-zone-actions .ws-cmd-map-zone-action.is-icon-only {
-  flex: 0 0 auto;
-  width: 36px;
-  padding: 8px 0;
-  text-align: center;
-  font-size: 14px;
-  line-height: 1;
 }
 
 .ws-cmd-map-window-backdrop {
@@ -4889,6 +4882,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-cmd-drawer-add:hover {
   background: var(--ws-faction-deep);
+}
+.ws-cmd-drawer-add.is-icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
 }
 
 .ws-cmd-drawer-close {
