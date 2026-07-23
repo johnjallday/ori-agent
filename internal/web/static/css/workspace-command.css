@@ -782,6 +782,50 @@
   letter-spacing: 0.2px;
 }
 
+/* New Quest commitment choice (FR56): Ready vs Add to Backlog. */
+.ws-cmd-map-quest-intent {
+  display: flex;
+  gap: 6px;
+}
+.ws-cmd-map-quest-intent-btn {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(9, 11, 15, 0.84);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-display);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.ws-cmd-map-quest-intent-btn.is-active {
+  border-color: var(--ws-faction);
+  background: linear-gradient(180deg, rgba(70, 211, 154, 0.22), rgba(15, 59, 48, 0.9));
+  color: var(--ws-ink);
+}
+.ws-cmd-map-quest-intent-btn:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-map-quest-consequence {
+  margin: 0;
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+/* Quest Board window action row (FR51): Add to Backlog + Open Backlog side by side. */
+.ws-cmd-map-zone-actions {
+  display: flex;
+  gap: 8px;
+}
+.ws-cmd-map-zone-actions .ws-cmd-map-zone-action {
+  flex: 1;
+}
+
 .ws-cmd-map-window-backdrop {
   position: fixed;
   inset: clamp(76px, 10vh, 112px) 16px 16px;

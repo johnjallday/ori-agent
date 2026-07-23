@@ -426,6 +426,38 @@ test('overviewBodyHTML labels the delete action "Delete group" for group workspa
   assert.match(html, /data-ws-delete="grp-1"[^>]*>✕ Delete group</);
 });
 
+test("overviewBodyHTML shows the selected workspace's local backlog count and an Open Backlog action (FR58)", () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research', backlog_count: 5 });
+  assert.match(html, /ws-map-ov-k">Backlog<\/span>/);
+  assert.match(html, /data-ws-open-backlog="ws-42"/);
+  assert.match(html, /<span class="ws-map-ov-v">5<\/span> Open Backlog/);
+});
+
+test('overviewBodyHTML shows a zero backlog count without hiding the Open Backlog action', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({ id: 'ws-42', name: 'Deep Sea Research' });
+  assert.match(html, /data-ws-open-backlog="ws-42"/);
+  assert.match(html, /<span class="ws-map-ov-v">0<\/span> Open Backlog/);
+});
+
+test('overviewBodyHTML never renders backlog item content, edit, promote, or delete controls (FR58-59, no global aggregate/edit surface)', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const html = overviewBodyHTML({
+    id: 'ws-42',
+    name: 'Deep Sea Research',
+    backlog_count: 3,
+    backlog_items: [{ id: 'b1', description: 'should never leak onto the global map' }]
+  });
+  assert.ok(
+    !html.includes('should never leak onto the global map'),
+    'no individual backlog items rendered'
+  );
+  assert.ok(!/data-cmd-backlog-promote/.test(html), 'no promote control');
+  assert.ok(!/data-cmd-backlog-delete/.test(html), 'no delete control');
+  assert.ok(!/data-cmd-backlog-edit/.test(html), 'no edit control');
+});
+
 test('tileHTML marks the designated Personal HQ workspace with a badge, aria-label, and class', () => {
   const api = loadOriWorkspaceMap();
   api._setHQWorkspaceIdForTest('ws-hq');

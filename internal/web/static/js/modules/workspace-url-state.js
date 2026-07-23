@@ -8,16 +8,19 @@
  * calling `history.pushState`/`replaceState`, and re-rendering.
  *
  * Canonical query params (FR80-81): `mode` (map|details, replaces the retired
- * `view` param), `panel` (currently only `tasks`), `task`, `agent`, and an
- * optional `run`. Per the group-1 backend audit, execution monitoring is
- * TASK-ID-KEYED (there is no separate run-ID surfaced to the frontend yet), so
- * `run` is treated as a task ID naming which tracked run the tray should show —
- * documented here rather than invented silently.
+ * `view` param), `panel` (`tasks` or `backlog` — PRD workspace-backlog FR59:
+ * the global Workspace Map's owning-workspace deep link opens the Backlog
+ * drawer this way), `task` (the selected item ID within whichever drawer
+ * `panel` names), `agent`, and an optional `run`. Per the group-1 backend
+ * audit, execution monitoring is TASK-ID-KEYED (there is no separate run-ID
+ * surfaced to the frontend yet), so `run` is treated as a task ID naming
+ * which tracked run the tray should show — documented here rather than
+ * invented silently.
  */
 
 export const MODE = Object.freeze({ MAP: 'map', DETAILS: 'details' });
 const VALID_MODES = new Set([MODE.MAP, MODE.DETAILS]);
-const VALID_PANELS = new Set(['tasks']);
+const VALID_PANELS = new Set(['tasks', 'backlog']);
 
 /** Parse a query string (with or without a leading `?`) into raw URL state. */
 export function parseWorkspaceURLState(search) {
@@ -50,13 +53,14 @@ export function serializeWorkspaceURLState(state) {
  * `context` supplies the authoritative sets to validate against.
  *
  * @param {object} state
- * @param {{validTaskIds?: Iterable<string>, validAgentKeys?: Iterable<string>, validRunTaskIds?: Iterable<string>}} context
+ * @param {{validTaskIds?: Iterable<string>, validAgentKeys?: Iterable<string>, validRunTaskIds?: Iterable<string>, validBacklogIds?: Iterable<string>}} context
  * @returns {{state: object, dropped: string[]}} the sanitized state and which fields were dropped (for a concise notice).
  */
 export function sanitizeWorkspaceURLState(state, context = {}) {
   const validTaskIds = new Set(context.validTaskIds || []);
   const validAgentKeys = new Set(context.validAgentKeys || []);
   const validRunTaskIds = new Set(context.validRunTaskIds || validTaskIds);
+  const validBacklogIds = new Set(context.validBacklogIds || []);
   const s = state || {};
   const dropped = [];
   const out = { mode: s.mode || null, panel: '', task: '', agent: '', run: '' };
@@ -64,7 +68,11 @@ export function sanitizeWorkspaceURLState(state, context = {}) {
   if (s.panel && VALID_PANELS.has(s.panel)) out.panel = s.panel;
   else if (s.panel) dropped.push('panel');
 
-  if (s.task && validTaskIds.has(s.task)) out.task = s.task;
+  // `task` names the selected item within whichever drawer `panel` opens —
+  // validate it against that drawer's own ID set (tasks and backlog items
+  // are disjoint since Ready+ excludes Backlog, FR40).
+  const taskIdSet = out.panel === 'backlog' ? validBacklogIds : validTaskIds;
+  if (s.task && taskIdSet.has(s.task)) out.task = s.task;
   else if (s.task) dropped.push('task');
 
   if (s.agent && validAgentKeys.has(s.agent)) out.agent = s.agent;

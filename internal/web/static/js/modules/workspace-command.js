@@ -107,6 +107,10 @@ export class WorkspaceCommandView {
     this.backlogQuickCaptureSubmitting = false;
     this.backlogPromoteConfirmId = '';
     this.backlogPromoteBusy = false;
+    // Map Quest Board "Accept Quest" (group 5) — id of the item currently
+    // being promoted directly from the Map window, separate from the
+    // drawer's own confirm/busy state above.
+    this.mapAcceptQuestBusyId = '';
     // Post-creation supported-field editing (FR20: details/tags/priority/
     // reference URL may be added or edited before or after creation, not
     // only at quick-capture time).
@@ -127,6 +131,11 @@ export class WorkspaceCommandView {
     this.taskComposerDraft = '';
     this.taskComposerError = '';
     this.taskComposerSubmitting = false;
+    // Composer commitment choice (FR56): 'ready' creates a direct, unassigned
+    // Ready task (existing default behavior); 'backlog' routes through the
+    // same createBacklogItem() the Backlog panel/drawer use. Resets to
+    // 'ready' each time the composer opens (openTaskComposer).
+    this.taskComposerIntent = 'ready';
     this.identityExpanded = false;
     this.identityEditMode = '';
     this.identitySaving = false;
@@ -263,13 +272,17 @@ export class WorkspaceCommandView {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
     const validTaskIds = tasks.map(t => String(t?.id || '')).filter(Boolean);
+    const backlogItems = Array.isArray(page.backlogItems) ? page.backlogItems : [];
+    const validBacklogIds = backlogItems
+      .map(it => String((it && (it.task || it).id) || ''))
+      .filter(Boolean);
     let validAgentKeys = [];
     try {
       validAgentKeys = this.agentGroups().agents.map(g => this.normalizeAgentKey(g.key || g.name));
     } catch (_error) {
       validAgentKeys = [];
     }
-    return { validTaskIds, validAgentKeys, validRunTaskIds: validTaskIds };
+    return { validTaskIds, validAgentKeys, validRunTaskIds: validTaskIds, validBacklogIds };
   }
 
   /**
@@ -296,8 +309,11 @@ export class WorkspaceCommandView {
 
     const context = this.urlStateContext();
     const boot = this._urlBootState;
+    const bootWantsBacklogTask = Boolean(boot.task) && boot.panel === 'backlog';
+    const bootWantsTaskDrawerTask = Boolean(boot.task) && boot.panel !== 'backlog';
     const dataLooksUnready =
-      (boot.task && context.validTaskIds.length === 0) ||
+      (bootWantsTaskDrawerTask && context.validTaskIds.length === 0) ||
+      (bootWantsBacklogTask && context.validBacklogIds.length === 0) ||
       (boot.agent && context.validAgentKeys.length === 0) ||
       (boot.run && (context.validRunTaskIds || context.validTaskIds).length === 0);
     this._bootApplyAttempts = (this._bootApplyAttempts || 0) + 1;
@@ -324,6 +340,11 @@ export class WorkspaceCommandView {
     if (state.panel === 'tasks') {
       this.taskDrawerOpen = true;
       if (state.task) this.taskDrawerSelectedId = state.task;
+    } else if (state.panel === 'backlog') {
+      // Global Workspace Map deep link (FR59): opens the shared Backlog
+      // drawer, never mutates/promotes/deletes directly.
+      this.backlogDrawerOpen = true;
+      if (state.task) this.backlogDrawerSelectedId = state.task;
     }
     if (state.run) this.trackAndShowTray(state.run);
 
@@ -334,6 +355,13 @@ export class WorkspaceCommandView {
       if (el) {
         el.hidden = false;
         this.renderTaskDrawerBody();
+      }
+    }
+    if (this.backlogDrawerOpen) {
+      const el = this.ensureBacklogDrawer();
+      if (el) {
+        el.hidden = false;
+        this.renderBacklogDrawerBody();
       }
     }
     // Normalize the URL to the sanitized state without adding a history entry.
@@ -347,8 +375,12 @@ export class WorkspaceCommandView {
       // stays clean (no ?mode=details noise) and only an explicit `map` needs
       // to survive reload/sharing.
       mode: this.viewMode === 'map' ? 'map' : null,
-      panel: this.taskDrawerOpen ? 'tasks' : '',
-      task: this.taskDrawerOpen ? this.taskDrawerSelectedId : '',
+      panel: this.taskDrawerOpen ? 'tasks' : this.backlogDrawerOpen ? 'backlog' : '',
+      task: this.taskDrawerOpen
+        ? this.taskDrawerSelectedId
+        : this.backlogDrawerOpen
+          ? this.backlogDrawerSelectedId
+          : '',
       agent: this.selectedAgentKey || '',
       run:
         this.execController && typeof this.execController.getSelectedTaskId === 'function'
@@ -365,7 +397,9 @@ export class WorkspaceCommandView {
     for (const attr of [
       'data-cmd-map-select-agent',
       'data-cmd-drawer-select',
-      'data-cmd-open-task-drawer'
+      'data-cmd-open-task-drawer',
+      'data-cmd-backlog-select',
+      'data-cmd-open-backlog-drawer'
     ]) {
       const value = active.getAttribute(attr);
       if (value) return '[' + attr + '="' + value.replace(/"/g, '\\"') + '"]';
@@ -3202,10 +3236,13 @@ export class WorkspaceCommandView {
   mapWindowOptions() {
     // Labels are presentation-only (FR3-5): the underlying panel keys
     // ('objective'/'objectives') are unchanged so activeMapWindow state and
-    // every reference to them elsewhere keeps working.
+    // every reference to them elsewhere keeps working. 'backlog' carries
+    // "Backlog" in its own accessible name/title (not just "Quest Board") so
+    // the tool-belt button never obscures the real Backlog lifecycle (FR50).
     return [
       { key: 'objective', label: 'Workspace Mission', icon: 'bi-bullseye' },
       { key: 'objectives', label: 'Tasks', icon: 'bi-list-check' },
+      { key: 'backlog', label: 'Backlog · Quest Board', icon: 'bi-journal-bookmark' },
       { key: 'inventory', label: 'Inventory', icon: 'bi-box-seam' },
       { key: 'stations', label: 'Stations', icon: 'bi-cpu' }
     ];
@@ -3298,6 +3335,83 @@ export class WorkspaceCommandView {
     );
   }
 
+  // Map Backlog window — presented as the Quest Board (FR50-57). Reuses the
+  // exact same backlogItems()/backlogSync() state and shared drawer as the
+  // Details panel (group 4): no separate list state, no duplicate records.
+  renderMapBacklogPanel() {
+    const page = this.page || {};
+    const items = this.backlogItems();
+    const count = items.length;
+    const shown = items.slice(0, 4);
+    const sync = this.backlogSync();
+    let rows;
+    if (page.backlogLoading && !count) {
+      rows =
+        '<div class="ws-cmd-map-empty is-quest-empty"><strong>Loading…</strong><span>Fetching the backlog.</span></div>';
+    } else if (page.backlogLoadFailed) {
+      rows =
+        '<div class="ws-cmd-map-empty is-quest-empty is-error"><strong>Couldn’t load the backlog</strong><span>Try Sync Now or Open Backlog.</span></div>';
+    } else if (count) {
+      rows = shown
+        .map((item, index) => {
+          const task = (item && item.task) || item || {};
+          const id = String(task.id || '');
+          const label = String(task.description || 'Untitled idea');
+          const questNumber = String(index + 1).padStart(2, '0');
+          const busy = this.mapAcceptQuestBusyId === id;
+          const openButton =
+            '<button type="button" class="ws-cmd-map-task-row is-idea" data-cmd-map-open-backlog="' +
+            escapeHtml(id) +
+            '"><span class="ws-cmd-map-task-marker">Idea ' +
+            escapeHtml(questNumber) +
+            '</span><span class="ws-cmd-map-task-name">' +
+            escapeHtml(label) +
+            '</span></button>';
+          // "Accept Quest" is the presentation label; the accessible name spells
+          // out Promote to Ready so the control never obscures the real action (FR53).
+          const acceptButton =
+            '<button type="button" class="ws-cmd-map-task-start" data-cmd-map-accept-quest="' +
+            escapeHtml(id) +
+            '" aria-label="Accept Quest — Promote ' +
+            escapeHtml(label) +
+            ' to Ready"' +
+            (busy ? ' disabled' : '') +
+            '><i class="bi bi-check2" aria-hidden="true"></i><span>' +
+            (busy ? 'Accepting…' : 'Accept Quest') +
+            '</span></button>';
+          return '<div class="ws-cmd-map-task-row-wrap">' + openButton + acceptButton + '</div>';
+        })
+        .join('');
+    } else {
+      rows =
+        '<div class="ws-cmd-map-empty is-quest-empty"><strong>Quest Board clear</strong><span>Nothing saved for later. Add an idea without committing it.</span></div>';
+    }
+    return (
+      '<div class="ws-cmd-map-window-section is-backlog">' +
+      this.mapZoneHeaderHTML('Backlog', 'Quest Board', count) +
+      this.backlogSyncBadgeHTML(sync) +
+      '<div class="ws-cmd-map-task-list">' +
+      rows +
+      '</div>' +
+      '<div class="ws-cmd-map-zone-actions">' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-backlog-add>Add to Backlog</button>' +
+      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-backlog-drawer>Open Backlog</button>' +
+      '</div></div>'
+    );
+  }
+
+  async runMapAcceptQuest(itemId) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const id = String(itemId || '').trim();
+    if (!page || !id || typeof page.promoteBacklogItem !== 'function') return;
+    this.mapAcceptQuestBusyId = id;
+    this.render();
+    await page.promoteBacklogItem(id, this.backlogItemOwner(id));
+    this.mapAcceptQuestBusyId = '';
+    // page.promoteBacklogItem() reloads backlog+tasks and calls refresh(),
+    // which repaints the Quest Board and Active Tasks together (FR54).
+  }
+
   // ---------- Task drawer (group 3) ----------
   //
   // A persistent, NON-modal side panel that replaces the Objectives → Open Tasks
@@ -3322,6 +3436,13 @@ export class WorkspaceCommandView {
     this.taskDrawerTrigger = trigger || null;
     // Close the Objectives Map window so the drawer never opens beneath it (FR11).
     if (this.activeMapWindow) this.activeMapWindow = '';
+    // The two persistent drawers share the same screen position; only one may
+    // be open at a time (reachable via Details→Map view switches, or a
+    // ?panel=backlog deep link landing while Tasks was already open).
+    if (this.backlogDrawerOpen) {
+      this.backlogDrawerOpen = false;
+      if (this.backlogDrawerEl) this.backlogDrawerEl.hidden = true;
+    }
     this.taskDrawerOpen = true;
     if (!this.taskDrawerSelectedId) {
       const first = this.drawerFilteredTasks()[0] || this.drawerTasks()[0];
@@ -3769,6 +3890,11 @@ export class WorkspaceCommandView {
     // Close the Map's Quest Board window so the drawer never opens beneath it
     // (mirrors openTaskDrawer's Objectives-window handling).
     if (this.activeMapWindow) this.activeMapWindow = '';
+    // Only one persistent drawer may be open at a time (see openTaskDrawer).
+    if (this.taskDrawerOpen) {
+      this.taskDrawerOpen = false;
+      if (this.taskDrawerEl) this.taskDrawerEl.hidden = true;
+    }
     this.backlogDrawerOpen = true;
     if (options.selectId) {
       this.backlogDrawerSelectedId = String(options.selectId);
@@ -6292,6 +6418,7 @@ export class WorkspaceCommandView {
     const body = {
       objective: () => this.renderMapMissionPanel(),
       objectives: () => this.renderMapTasksPanel(),
+      backlog: () => this.renderMapBacklogPanel(),
       inventory: () => this.renderMapInventory(),
       stations: () => this.renderMapStationsPanel(),
       inspector: () => this.renderMapInspector(selectedAgent)
@@ -6348,6 +6475,7 @@ export class WorkspaceCommandView {
     if (!open) {
       return '<div class="ws-cmd-map-quest-dock">' + button + '</div>';
     }
+    const intent = this.taskComposerIntent === 'backlog' ? 'backlog' : 'ready';
     const draft = escapeHtml(this.taskComposerDraft || '');
     const error = this.taskComposerError
       ? '<p class="ws-cmd-map-quest-error" role="alert">' +
@@ -6355,30 +6483,71 @@ export class WorkspaceCommandView {
         '</p>'
       : '';
     const disabledAttr = submitting ? ' disabled' : '';
+    // FR56: distinguish direct Ready creation from Add to Backlog, and show
+    // the commitment consequence before saving.
+    const intentToggle =
+      '<div class="ws-cmd-map-quest-intent" role="group" aria-label="Quest commitment">' +
+      '<button type="button" class="ws-cmd-map-quest-intent-btn' +
+      (intent === 'ready' ? ' is-active' : '') +
+      '" data-cmd-map-quest-intent="ready" aria-pressed="' +
+      (intent === 'ready' ? 'true' : 'false') +
+      '">Ready Quest</button>' +
+      '<button type="button" class="ws-cmd-map-quest-intent-btn' +
+      (intent === 'backlog' ? ' is-active' : '') +
+      '" data-cmd-map-quest-intent="backlog" aria-pressed="' +
+      (intent === 'backlog' ? 'true' : 'false') +
+      '">Add to Backlog</button></div>';
+    const consequence =
+      '<p class="ws-cmd-map-quest-consequence">' +
+      (intent === 'backlog'
+        ? 'Saves the idea without committing it — nothing is assigned, scheduled, or run until you promote it to Ready.'
+        : 'Commits now — creates an unassigned Ready quest that waits for an explicit assign, run, or schedule.') +
+      '</p>';
+    const placeholder =
+      intent === 'backlog' ? 'Describe the idea…' : 'Describe the quest… (assigned to the Commander)';
+    const primaryLabel = submitting
+      ? intent === 'backlog'
+        ? 'Adding…'
+        : 'Creating…'
+      : intent === 'backlog'
+        ? 'Add to Backlog'
+        : 'Create';
+    const hint =
+      intent === 'backlog'
+        ? 'Enter to add to the backlog'
+        : 'Enter to create · ⌘/Ctrl+Enter to create &amp; start';
     return (
       '<div class="ws-cmd-map-quest-dock is-open">' +
       button +
       '<section class="ws-cmd-map-quest-composer" role="dialog" aria-modal="false" aria-label="New quest">' +
       '<header class="ws-cmd-map-quest-head"><span>New Quest</span>' +
       '<button type="button" class="ws-cmd-map-quest-close" data-cmd-map-quest-cancel aria-label="Close new quest">×</button></header>' +
+      intentToggle +
       '<textarea class="ws-cmd-map-quest-input" data-cmd-map-quest-input rows="2" ' +
-      'placeholder="Describe the quest… (assigned to the Commander)"' +
+      'placeholder="' +
+      escapeHtml(placeholder) +
+      '"' +
       disabledAttr +
       '>' +
       draft +
       '</textarea>' +
+      consequence +
       error +
       '<div class="ws-cmd-map-quest-actions">' +
       '<button type="button" class="ws-cmd-map-quest-btn is-primary" data-cmd-map-quest-create' +
       disabledAttr +
       '>' +
-      (submitting ? 'Creating…' : 'Create') +
+      primaryLabel +
       '</button>' +
-      '<button type="button" class="ws-cmd-map-quest-btn" data-cmd-map-quest-start' +
-      disabledAttr +
-      '>Create &amp; Start</button>' +
+      (intent === 'ready'
+        ? '<button type="button" class="ws-cmd-map-quest-btn" data-cmd-map-quest-start' +
+          disabledAttr +
+          '>Create &amp; Start</button>'
+        : '') +
       '</div>' +
-      '<p class="ws-cmd-map-quest-hint">Enter to create · ⌘/Ctrl+Enter to create &amp; start</p>' +
+      '<p class="ws-cmd-map-quest-hint">' +
+      hint +
+      '</p>' +
       '</section></div>'
     );
   }
@@ -6386,6 +6555,7 @@ export class WorkspaceCommandView {
   openTaskComposer() {
     this.taskComposerOpen = true;
     this.taskComposerError = '';
+    this.taskComposerIntent = 'ready';
     this.render();
   }
 
@@ -6394,6 +6564,14 @@ export class WorkspaceCommandView {
     this.taskComposerError = '';
     this.taskComposerSubmitting = false;
     if (clearDraft) this.taskComposerDraft = '';
+    this.render();
+  }
+
+  setTaskComposerIntent(intent) {
+    const next = intent === 'backlog' ? 'backlog' : 'ready';
+    if (this.taskComposerIntent === next) return;
+    this.taskComposerIntent = next;
+    this.taskComposerError = '';
     this.render();
   }
 
@@ -6406,7 +6584,30 @@ export class WorkspaceCommandView {
       return;
     }
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    if (!page || typeof page.createTask !== 'function') return;
+    if (!page) return;
+
+    if (this.taskComposerIntent === 'backlog') {
+      if (typeof page.createBacklogItem !== 'function') return;
+      this.taskComposerSubmitting = true;
+      this.taskComposerError = '';
+      this.render();
+      const created = await page.createBacklogItem({ description });
+      this.taskComposerSubmitting = false;
+      if (!created) {
+        this.taskComposerError = 'Could not add to the backlog. Try again.';
+        this.render();
+        return;
+      }
+      // page.createBacklogItem() already toasts "Added to backlog" and
+      // refreshes the Backlog panel/Quest Board via loadBacklog().
+      this.taskComposerDraft = '';
+      this.taskComposerOpen = false;
+      this.taskComposerError = '';
+      this.render();
+      return;
+    }
+
+    if (typeof page.createTask !== 'function') return;
 
     this.taskComposerSubmitting = true;
     this.taskComposerError = '';
@@ -6509,6 +6710,11 @@ export class WorkspaceCommandView {
         this.closeTaskComposer();
         return;
       }
+      const intentBtn = event.target.closest('[data-cmd-map-quest-intent]');
+      if (intentBtn) {
+        this.setTaskComposerIntent(intentBtn.getAttribute('data-cmd-map-quest-intent'));
+        return;
+      }
       if (event.target.closest('[data-cmd-map-quest-create]')) {
         this.submitTaskComposer({ start: false });
         return;
@@ -6597,6 +6803,31 @@ export class WorkspaceCommandView {
         this.openTaskDrawer(drawerBtn);
         return;
       }
+      // Quest Board → shared Backlog drawer handoff (FR52): the drawer opener
+      // itself closes this Map window before opening, so the two layers never
+      // compete.
+      const backlogAddBtn = event.target.closest('[data-cmd-backlog-add]');
+      if (backlogAddBtn) {
+        this.openBacklogDrawer(backlogAddBtn, { openCapture: true });
+        return;
+      }
+      const backlogDrawerBtn = event.target.closest('[data-cmd-open-backlog-drawer]');
+      if (backlogDrawerBtn) {
+        this.openBacklogDrawer(backlogDrawerBtn);
+        return;
+      }
+      const mapOpenBacklogBtn = event.target.closest('[data-cmd-map-open-backlog]');
+      if (mapOpenBacklogBtn) {
+        this.openBacklogDrawer(mapOpenBacklogBtn, {
+          selectId: mapOpenBacklogBtn.getAttribute('data-cmd-map-open-backlog')
+        });
+        return;
+      }
+      const acceptQuestBtn = event.target.closest('[data-cmd-map-accept-quest]');
+      if (acceptQuestBtn) {
+        this.runMapAcceptQuest(acceptQuestBtn.getAttribute('data-cmd-map-accept-quest'));
+        return;
+      }
       const modalBtn = event.target.closest('[data-cmd-map-open-modal]');
       if (modalBtn) {
         this.openStatModal(modalBtn.getAttribute('data-cmd-map-open-modal'), modalBtn);
@@ -6676,7 +6907,8 @@ export class WorkspaceCommandView {
         // Newlines are not needed for a one-line quest; Enter submits.
         event.preventDefault();
         this.taskComposerDraft = event.target.value;
-        this.submitTaskComposer({ start: event.metaKey || event.ctrlKey });
+        const start = this.taskComposerIntent !== 'backlog' && (event.metaKey || event.ctrlKey);
+        this.submitTaskComposer({ start });
       }
     });
     // Restore focus + caret after the re-render that opened/updated the composer.

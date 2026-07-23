@@ -14,6 +14,7 @@ function makeView(over = {}) {
       statModalSection: '',
       identityEditMode: false,
       taskDrawerOpen: false,
+      backlogDrawerOpen: false,
       trayOpen: false,
       trayCollapsed: false,
       taskComposerOpen: false,
@@ -25,6 +26,9 @@ function makeView(over = {}) {
       renderTrayBody() {},
       closeTaskDrawer() {
         this.taskDrawerOpen = false;
+      },
+      closeBacklogDrawer() {
+        this.backlogDrawerOpen = false;
       },
       captureHistoryPresentationState() {}
     },
@@ -48,6 +52,62 @@ test('terminology: Map window labels are presentation-only Mission/Tasks, keys u
   // them elsewhere keeps working without a rename.
   assert.equal(objective.key, 'objective');
   assert.equal(objectives.key, 'objectives');
+});
+
+test('terminology: the Map Backlog tool-belt entry names Backlog even though its window is presented as Quest Board (FR50, 53, 57)', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  const options = view.mapWindowOptions();
+  const backlog = options.find(o => o.key === 'backlog');
+  assert.ok(backlog, 'a dedicated Backlog map window option exists');
+  assert.match(backlog.label, /Backlog/, 'accessible name/title never says only "Quest Board"');
+});
+
+test('terminology: the Quest Board window body carries "Backlog" as supporting copy alongside the Quest Board title (FR50)', () => {
+  const view = makeView({
+    page: {
+      backlogItems: [],
+      backlogSync: null,
+      backlogIncludeDescendants: false,
+      workspaceId: 'w1'
+    }
+  });
+  const html = view.renderMapBacklogPanel();
+  assert.match(html, /Quest Board/, 'presentation title is Quest Board');
+  assert.match(html, /<span>Backlog<\/span>/, 'kicker names the real Backlog lifecycle');
+});
+
+test('terminology: Accept Quest always spells out Promote to Ready in its accessible name (FR9, 31, 53)', () => {
+  const view = makeView({
+    page: {
+      backlogItems: [{ task: { id: 'b1', description: 'Ship it' } }],
+      backlogSync: null,
+      backlogIncludeDescendants: false,
+      workspaceId: 'w1'
+    }
+  });
+  const html = view.renderMapBacklogPanel();
+  assert.match(html, />Accept Quest</, 'visible label may use the Quest metaphor');
+  assert.match(
+    html,
+    /aria-label="Accept Quest — Promote Ship it to Ready"/,
+    'accessible name spells out the real action'
+  );
+});
+
+test('Escape prioritizes the Backlog drawer over the Tasks drawer (only one drawer is ever open, but Escape must still close it first)', () => {
+  const view = makeView({
+    backlogDrawerOpen: true,
+    taskDrawerOpen: false,
+    trayOpen: true,
+    trayCollapsed: false
+  });
+  esc(view);
+  assert.equal(view.backlogDrawerOpen, false);
+  assert.equal(
+    view.trayCollapsed,
+    false,
+    'tray is untouched once the Backlog drawer handled Escape'
+  );
 });
 
 test('Escape collapses an expanded tray rather than closing it (FR123)', () => {
@@ -114,6 +174,13 @@ test('trayHTML never marks the raw activity log as a live region (FR127)', () =>
   view.trayCollapsed = false;
   view.trayElapsedLabel = () => '5s';
   const html = view.trayHTML();
-  assert.ok(!html.includes('class="ws-cmd-tray-log" role="log" aria-live'), 'the raw log is not a live region');
-  assert.match(html, /ws-cmd-tray-live sr-only.*aria-live="polite"/s, 'a small dedicated live region exists instead');
+  assert.ok(
+    !html.includes('class="ws-cmd-tray-log" role="log" aria-live'),
+    'the raw log is not a live region'
+  );
+  assert.match(
+    html,
+    /ws-cmd-tray-live sr-only.*aria-live="polite"/s,
+    'a small dedicated live region exists instead'
+  );
 });
