@@ -47,7 +47,11 @@ test('renderBacklogPanel shows the local count and up to 5 previews (FR34)', () 
   const previewMatches = html.match(/data-cmd-backlog-select="/g) || [];
   assert.equal(previewMatches.length, 5, 'no more than 5 previews (FR34)');
   assert.ok(html.includes('+ 1 more'), 'overflow count shown');
-  assert.ok(html.includes('Add to Backlog'));
+  assert.match(
+    html,
+    /data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">\+</,
+    'Add is a compact "+" icon (accessible name still says Add to Backlog), distinct from Open Backlog'
+  );
   assert.ok(html.includes('Open Backlog'));
 });
 

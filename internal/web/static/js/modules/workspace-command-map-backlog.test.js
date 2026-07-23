@@ -65,7 +65,11 @@ test('renderMapBacklogPanel shows the local count and up to 4 ranked items (FR51
   assert.match(html, /<span>Backlog<\/span>/);
   const rowMatches = html.match(/data-cmd-map-open-backlog="/g) || [];
   assert.equal(rowMatches.length, 4, 'no more than 4 ranked items shown (FR51)');
-  assert.ok(html.includes('Add to Backlog'));
+  assert.match(
+    html,
+    /data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">\+</,
+    'Add is a compact "+" icon (accessible name still says Add to Backlog), distinct from Open Backlog'
+  );
   assert.ok(html.includes('Open Backlog'));
 });
 

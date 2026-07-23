@@ -3395,7 +3395,7 @@ export class WorkspaceCommandView {
       rows +
       '</div>' +
       '<div class="ws-cmd-map-zone-actions">' +
-      '<button type="button" class="ws-cmd-map-zone-action" data-cmd-backlog-add>Add to Backlog</button>' +
+      '<button type="button" class="ws-cmd-map-zone-action is-icon-only" data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">+</button>' +
       '<button type="button" class="ws-cmd-map-zone-action" data-cmd-open-backlog-drawer>Open Backlog</button>' +
       '</div></div>'
     );
@@ -3870,7 +3870,7 @@ export class WorkspaceCommandView {
       count +
       '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
-      '<button type="button" class="ws-cmd-panel-action" data-cmd-backlog-add>Add to Backlog</button>' +
+      '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">+</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-open-backlog-drawer aria-label="Open Backlog" title="Open Backlog">▸</button>' +
       '</div></div>' +
       '<div class="ws-cmd-panel-body">' +

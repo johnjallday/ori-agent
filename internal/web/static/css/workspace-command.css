@@ -817,13 +817,21 @@
   line-height: 1.4;
 }
 
-/* Quest Board window action row (FR51): Add to Backlog + Open Backlog side by side. */
+/* Quest Board window action row (FR51): compact + Add beside the full Open Backlog action. */
 .ws-cmd-map-zone-actions {
   display: flex;
   gap: 8px;
 }
 .ws-cmd-map-zone-actions .ws-cmd-map-zone-action {
   flex: 1;
+}
+.ws-cmd-map-zone-actions .ws-cmd-map-zone-action.is-icon-only {
+  flex: 0 0 auto;
+  width: 36px;
+  padding: 8px 0;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .ws-cmd-map-window-backdrop {
@@ -2527,6 +2535,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-panel-action:focus-visible {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
+}
+.ws-cmd-panel-action.is-icon-only {
+  width: 24px;
+  padding: 5px 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1;
 }
 .ws-cmd-rail-empty {
   padding: 16px 6px;
