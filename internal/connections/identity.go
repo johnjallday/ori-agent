@@ -58,6 +58,14 @@ type OAuthConfig struct {
 // IsConfigured reports whether a client id is present.
 func (c OAuthConfig) IsConfigured() bool { return strings.TrimSpace(c.ClientID) != "" }
 
+// tokenURL returns the effective token endpoint (Google's default when unset).
+func (c OAuthConfig) tokenURL() string {
+	if c.TokenURL != "" {
+		return c.TokenURL
+	}
+	return googleTokenURL
+}
+
 func (c OAuthConfig) oauth2Config(redirectURL string, scopes []string) *oauth2.Config {
 	authURL := c.AuthURL
 	if authURL == "" {
@@ -82,12 +90,14 @@ type IDVerifier interface {
 	Verify(ctx context.Context, rawIDToken, expectedNonce string) (Identity, error)
 }
 
-// IdentityFlow drives the Connect-Google identity handshake.
+// IdentityFlow drives the Connect-Google identity handshake and product
+// enablement (see product.go).
 type IdentityFlow struct {
 	config   OAuthConfig
 	states   *StateStore
 	store    *Store
 	verifier IDVerifier
+	sink     CredentialSink
 	newID    func() string
 	now      func() time.Time
 }
