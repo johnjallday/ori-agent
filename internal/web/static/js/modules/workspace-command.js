@@ -103,6 +103,7 @@ export class WorkspaceCommandView {
     this.backlogDrawerSelectedId = '';
     this.backlogQuickCaptureOpen = false;
     this.backlogQuickCaptureDraft = '';
+    this.backlogQuickCaptureDetailsDraft = '';
     this.backlogQuickCaptureError = '';
     this.backlogQuickCaptureSubmitting = false;
     this.backlogPromoteConfirmId = '';
@@ -3406,10 +3407,38 @@ export class WorkspaceCommandView {
     if (!page || !id || typeof page.promoteBacklogItem !== 'function') return;
     this.mapAcceptQuestBusyId = id;
     this.render();
-    await page.promoteBacklogItem(id, this.backlogItemOwner(id));
+    const promotedTask = await page.promoteBacklogItem(id, this.backlogItemOwner(id));
     this.mapAcceptQuestBusyId = '';
     // page.promoteBacklogItem() reloads backlog+tasks and calls refresh(),
     // which repaints the Quest Board and Active Tasks together (FR54).
+    if (promotedTask) {
+      this.activeMapWindow = '';
+      this.render();
+      this.openPromotedTaskModal(promotedTask);
+    }
+  }
+
+  // After Promote to Ready (which never assigns or schedules on its own,
+  // FR9-12), open the real Task modal on the now-Ready task so the user can
+  // pick an agent/schedule right away if they want to. Cancelling the modal
+  // leaves the task promoted-but-unassigned — the promotion already
+  // happened and is not gated on this modal being saved. `item` is the
+  // BacklogItemView shape promoteBacklogItem resolves with — {task, owning_workspace_id,
+  // owning_workspace_name} — same convention as every other backlog item in this file.
+  openPromotedTaskModal(item) {
+    const task = (item && item.task) || item;
+    if (!task) return;
+    if (
+      typeof window === 'undefined' ||
+      !window.taskModalController ||
+      typeof window.taskModalController.openForEdit !== 'function'
+    ) {
+      return;
+    }
+    const page = this.page || window.workspaceDetail || null;
+    window.taskModalController.openForEdit(task, () => {
+      if (page && typeof page.loadTasks === 'function') page.loadTasks();
+    });
   }
 
   // ---------- Task drawer (group 3) ----------
@@ -3954,6 +3983,7 @@ export class WorkspaceCommandView {
     this.backlogQuickCaptureOpen = open != null ? Boolean(open) : !this.backlogQuickCaptureOpen;
     if (!this.backlogQuickCaptureOpen) {
       this.backlogQuickCaptureDraft = '';
+      this.backlogQuickCaptureDetailsDraft = '';
       this.backlogQuickCaptureError = '';
     }
     this.renderBacklogDrawerBody();
@@ -3975,17 +4005,25 @@ export class WorkspaceCommandView {
     this.backlogQuickCaptureSubmitting = true;
     this.backlogQuickCaptureError = '';
     this.renderBacklogDrawerBody();
-    const created = await page.createBacklogItem({ description: title });
+    const created = await page.createBacklogItem({
+      description: title,
+      details: String(this.backlogQuickCaptureDetailsDraft || '').trim()
+    });
     this.backlogQuickCaptureSubmitting = false;
     if (created) {
       this.backlogQuickCaptureOpen = false;
       this.backlogQuickCaptureDraft = '';
+      this.backlogQuickCaptureDetailsDraft = '';
       this.backlogDrawerSelectedId = String(created.id || created.task?.id || '');
     } else {
       this.backlogQuickCaptureError = 'Failed to add to backlog.';
     }
-    // page.createBacklogItem() already reloads and calls refresh(); no
-    // explicit renderBacklogDrawerBody() needed here beyond what refresh does.
+    // page.createBacklogItem() already reloads and calls refresh(), but that
+    // refresh fires while backlogQuickCaptureOpen was still true (it runs
+    // inside the awaited call, before the flag flips above) — so its render
+    // still shows the form open. Render again now that the flag is correct,
+    // or the form visually never closes despite the item having saved.
+    this.renderBacklogDrawerBody();
   }
 
   // Toggle the post-creation supported-field editor for a backlog item
@@ -4087,11 +4125,15 @@ export class WorkspaceCommandView {
     if (!page || !id || typeof page.promoteBacklogItem !== 'function') return;
     this.backlogPromoteBusy = true;
     this.renderBacklogDrawerBody();
-    await page.promoteBacklogItem(id, this.backlogItemOwner(id));
+    const promotedTask = await page.promoteBacklogItem(id, this.backlogItemOwner(id));
     this.backlogPromoteBusy = false;
     this.backlogPromoteConfirmId = '';
     // page.promoteBacklogItem() reloads backlog+tasks and calls refresh(),
     // which repaints the drawer body for us.
+    if (promotedTask) {
+      this.closeBacklogDrawer();
+      this.openPromotedTaskModal(promotedTask);
+    }
   }
 
   async runBacklogDelete(itemId) {
@@ -4245,6 +4287,11 @@ export class WorkspaceCommandView {
         this.backlogQuickCaptureDraft = quickInput.value;
         return;
       }
+      const quickDetails = event.target.closest('[data-cmd-backlog-quick-details]');
+      if (quickDetails) {
+        this.backlogQuickCaptureDetailsDraft = quickDetails.value;
+        return;
+      }
       const editField = event.target.closest('[data-cmd-backlog-edit-field]');
       if (editField) {
         this.updateBacklogEditField(editField.getAttribute('data-cmd-backlog-edit-field'), editField.value);
@@ -4312,6 +4359,10 @@ export class WorkspaceCommandView {
       '<input id="ws-cmd-backlog-quick-input" type="text" class="ws-cmd-backlog-quick-input" placeholder="Add an idea…" value="' +
       escapeHtml(this.backlogQuickCaptureDraft) +
       '" data-cmd-backlog-quick-input />' +
+      '<label class="sr-only" for="ws-cmd-backlog-quick-details">Details (optional)</label>' +
+      '<textarea id="ws-cmd-backlog-quick-details" class="ws-cmd-backlog-quick-details" placeholder="Details (optional)" rows="2" data-cmd-backlog-quick-details>' +
+      escapeHtml(this.backlogQuickCaptureDetailsDraft) +
+      '</textarea>' +
       '<button type="submit" class="ws-cmd-backlog-quick-submit"' +
       (this.backlogQuickCaptureSubmitting ? ' disabled' : '') +
       '>Add</button>' +
@@ -4388,15 +4439,15 @@ export class WorkspaceCommandView {
     const confirming = this.backlogPromoteConfirmId === id;
     const promoteControl = confirming
       ? '<div class="ws-cmd-backlog-promote-confirm">' +
-        '<p>Promote to Ready? The item becomes eligible for assignment and execution, but nothing runs automatically.</p>' +
+        '<p>Turn into a task? It becomes eligible for assignment and execution (promoted to Ready), but nothing runs automatically — you’ll get a chance to assign it next.</p>' +
         '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote-confirm' +
         (this.backlogPromoteBusy ? ' disabled' : '') +
-        '>Confirm Promote to Ready</button>' +
+        '>Confirm — Turn into Task</button>' +
         '<button type="button" class="ws-cmd-backlog-quick-cancel" data-cmd-backlog-promote-cancel>Cancel</button>' +
         '</div>'
       : '<button type="button" class="ws-cmd-drawer-action" data-cmd-backlog-promote data-cmd-backlog-item="' +
         escapeHtml(id) +
-        '">Promote to Ready</button>';
+        '">Turn into Task</button>';
     // Reordering only has a coherent meaning within this workspace's own
     // rank space (FR65) — a rolled-up descendant item hides the move
     // controls rather than reordering across unrelated workspaces.

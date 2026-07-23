@@ -5173,6 +5173,22 @@ button.ws-cmd-rpg-class-card:focus-visible {
   outline: 2px solid var(--ws-idle);
   outline-offset: 1px;
 }
+.ws-cmd-backlog-quick-details {
+  flex: 1 0 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ws-ink);
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: var(--ws-clip-sm);
+  resize: vertical;
+}
+.ws-cmd-backlog-quick-details:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 1px;
+}
 .ws-cmd-backlog-quick-submit {
   padding: 7px 14px;
   font-size: 12px;

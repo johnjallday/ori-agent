@@ -113,14 +113,21 @@ test.describe('Workspace Backlog', () => {
       await expect(drawer).toContainText(firstTitle);
 
       // --- 5. Promote the first item to Ready (FR9-12, 31) ---
+      // "Turn into Task" promotes atomically (still no auto-assignment) and
+      // then opens the real Task modal on the now-Ready task so the user can
+      // assign/schedule it right away if they choose to.
       const promoteRow = drawer.locator('.ws-cmd-drawer-row', { hasText: firstTitle });
       await promoteRow.click();
       await drawer.locator('[data-cmd-backlog-promote]').click();
       await drawer.locator('[data-cmd-backlog-promote-confirm]').click();
 
-      // Leaves every Backlog projection: drawer list, Details panel count.
-      await expect(drawer.locator('.ws-cmd-drawer-row', { hasText: firstTitle })).toHaveCount(0);
-      await page.locator('[data-cmd-drawer-close]').click();
+      const taskModal = page.locator('#taskModal');
+      await expect(taskModal).toBeVisible();
+      await expect(page.locator('#taskModalDescription')).toHaveValue(firstTitle);
+      // The drawer closes in the same transition so the modal is never stacked on top of it.
+      await expect(drawer).toBeHidden();
+      await page.locator('#taskModalClose').click();
+      await expect(taskModal).toBeHidden();
 
       // --- 6. Verify it now appears in Active Tasks, without a page reload (FR47, 54) ---
       await page.locator('[data-cmd-map-window="objectives"]').click();

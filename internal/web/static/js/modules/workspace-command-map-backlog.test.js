@@ -128,6 +128,41 @@ test('runMapAcceptQuest is a no-op with no item id or missing page hook', async 
   assert.equal(view.mapAcceptQuestBusyId, '');
 });
 
+test('runMapAcceptQuest opens the real Task modal on the promoted task and closes the Quest Board window', async () => {
+  // promoteBacklogItem resolves with the BacklogItemView shape ({task, owning_workspace_id,
+  // owning_workspace_name}), same as every other backlog item in this codebase — not a flat task.
+  const promotedTaskFlat = { id: 'a', workspace_id: 'w1', description: 'Ship it' };
+  const promotedItem = {
+    task: promotedTaskFlat,
+    owning_workspace_id: 'w1',
+    owning_workspace_name: 'Alpha'
+  };
+  const view = makeView([item('a', 'Ship it')], {
+    promoteBacklogItem: async () => promotedItem
+  });
+  view.activeMapWindow = 'backlog';
+  const openForEditCalls = [];
+  window.taskModalController = {
+    openForEdit: (task, onSave) => openForEditCalls.push({ task, onSave })
+  };
+  try {
+    await view.runMapAcceptQuest('a');
+    assert.equal(
+      view.activeMapWindow,
+      '',
+      'Quest Board window closes so the modal is never stacked on top'
+    );
+    assert.equal(openForEditCalls.length, 1);
+    assert.deepEqual(
+      openForEditCalls[0].task,
+      promotedTaskFlat,
+      'the modal is opened with the unwrapped flat task, not the {task:...} wrapper'
+    );
+  } finally {
+    delete window.taskModalController;
+  }
+});
+
 test('opening the shared drawer from the Quest Board closes the Map window first (FR52)', () => {
   const view = makeView(sixItems);
   view.activeMapWindow = 'backlog';

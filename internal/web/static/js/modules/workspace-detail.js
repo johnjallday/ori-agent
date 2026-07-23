@@ -3271,10 +3271,17 @@ export class WorkspaceDetailPage {
    * Backlog and Tasks state so the item disappears from one and appears in
    * the other in a single cycle (FR54). See updateBacklogItem for the
    * ownerWorkspaceId contract (FR64).
+   *
+   * Returns the promoted item on success (the usual BacklogItemView shape —
+   * {task, owning_workspace_id, owning_workspace_name}, same as every other
+   * backlog item this class hands back), or null on failure. Callers use
+   * this to immediately open the Task modal on the now-Ready task so the
+   * user can assign/schedule it, without the promotion step itself ever
+   * assigning anything.
    */
   async promoteBacklogItem(itemId, ownerWorkspaceId) {
     const id = String(itemId || '').trim();
-    if (!id) return false;
+    if (!id) return null;
     const ownerId = String(ownerWorkspaceId || this.workspaceId);
     try {
       const response = await fetch(
@@ -3285,13 +3292,14 @@ export class WorkspaceDetailPage {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to promote item');
       }
+      const data = await response.json();
       if (window.Toast) window.Toast.success('Promoted to Ready');
       await Promise.all([this.loadBacklog(), this.loadTasks()]);
-      return true;
+      return (data && data.item) || null;
     } catch (error) {
       console.error('Failed to promote backlog item:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to promote item');
-      return false;
+      return null;
     }
   }
 

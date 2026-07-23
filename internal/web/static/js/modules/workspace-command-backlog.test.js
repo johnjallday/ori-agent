@@ -166,6 +166,42 @@ test('quick capture submits a trimmed title and closes on success', async () => 
   assert.equal(view.backlogDrawerSelectedId, 'new-item');
 });
 
+test('backlogQuickCaptureHTML renders a Details textarea alongside the title input', () => {
+  const view = makeView(items);
+  const html = view.backlogQuickCaptureHTML();
+  assert.ok(html.includes('data-cmd-backlog-quick-details'), 'details textarea present');
+  assert.ok(html.includes('data-cmd-backlog-quick-input'), 'title input still present');
+});
+
+test('quick capture sends trimmed details alongside the title, and clears both on success', async () => {
+  const view = makeView(items);
+  const createCalls = [];
+  view.page.createBacklogItem = input => {
+    createCalls.push(input);
+    return Promise.resolve({ id: 'new-item' });
+  };
+  view.backlogQuickCaptureDraft = 'a new idea';
+  view.backlogQuickCaptureDetailsDraft = '  three competitors, summarize pricing  ';
+  view.backlogQuickCaptureOpen = true;
+  await view.submitBacklogQuickCapture();
+  assert.equal(createCalls.length, 1);
+  assert.equal(createCalls[0].description, 'a new idea');
+  assert.equal(createCalls[0].details, 'three competitors, summarize pricing');
+  assert.equal(view.backlogQuickCaptureDetailsDraft, '', 'details draft cleared after success');
+});
+
+test('quick capture works with no details entered (details stays optional)', async () => {
+  const view = makeView(items);
+  const createCalls = [];
+  view.page.createBacklogItem = input => {
+    createCalls.push(input);
+    return Promise.resolve({ id: 'new-item' });
+  };
+  view.backlogQuickCaptureDraft = 'a new idea';
+  await view.submitBacklogQuickCapture();
+  assert.equal(createCalls[0].details, '');
+});
+
 test('quick capture shows an error and stays open on failure', async () => {
   const view = makeView(items);
   view.page.createBacklogItem = () => Promise.resolve(null);
@@ -180,10 +216,7 @@ test('promote requires confirmation before calling the API (no accidental promot
   const view = makeView(items);
   view.backlogDrawerSelectedId = 'a';
   const html1 = view.backlogDrawerPreviewHTML();
-  assert.ok(
-    html1.includes('data-cmd-backlog-promote '),
-    'shows the initial Promote to Ready button'
-  );
+  assert.ok(html1.includes('data-cmd-backlog-promote '), 'shows the initial Turn into Task button');
   assert.ok(
     !html1.includes('data-cmd-backlog-promote-confirm'),
     'no confirm button until requested'
@@ -202,6 +235,48 @@ test('confirmBacklogPromote then runBacklogPromote calls the API exactly once an
   await view.runBacklogPromote('a');
   assert.deepEqual(promoteCalls, ['a']);
   assert.equal(view.backlogPromoteConfirmId, '', 'confirm state cleared after promotion');
+});
+
+test('runBacklogPromote opens the real Task modal on the promoted task and closes the drawer (deliberate PRD change: promotion still never assigns, FR9-12)', async () => {
+  const view = makeView(items);
+  // promoteBacklogItem resolves with the BacklogItemView shape ({task, owning_workspace_id,
+  // owning_workspace_name}), same as every other backlog item in this codebase — not a flat task.
+  const promotedTaskFlat = { id: 'a', workspace_id: 'w1', description: 'first idea' };
+  const promotedItem = {
+    task: promotedTaskFlat,
+    owning_workspace_id: 'w1',
+    owning_workspace_name: 'Alpha'
+  };
+  view.page.promoteBacklogItem = () => Promise.resolve(promotedItem);
+  const closeCalls = [];
+  view.closeBacklogDrawer = () => closeCalls.push(true);
+  const openForEditCalls = [];
+  globalThis.window = {
+    taskModalController: {
+      openForEdit: (task, onSave) => openForEditCalls.push({ task, onSave })
+    }
+  };
+  try {
+    await view.runBacklogPromote('a');
+    assert.equal(closeCalls.length, 1, 'drawer closes so the modal is never stacked beneath it');
+    assert.equal(openForEditCalls.length, 1);
+    assert.deepEqual(
+      openForEditCalls[0].task,
+      promotedTaskFlat,
+      'the modal is opened with the unwrapped flat task (task.description, task.id, etc.), not the {task:...} wrapper'
+    );
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test('runBacklogPromote does not open a modal or close the drawer when promotion fails', async () => {
+  const view = makeView(items);
+  view.page.promoteBacklogItem = () => Promise.resolve(null);
+  const closeCalls = [];
+  view.closeBacklogDrawer = () => closeCalls.push(true);
+  await view.runBacklogPromote('a');
+  assert.equal(closeCalls.length, 0);
 });
 
 test('cancelBacklogPromote clears confirm state without calling the API', () => {
