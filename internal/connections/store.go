@@ -62,7 +62,7 @@ func (s *Store) Save(c *Connection) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
 		return fmt.Errorf("create connection dir: %w", err)
 	}
 	tmp := s.path + ".tmp"

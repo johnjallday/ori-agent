@@ -19,7 +19,8 @@ import (
 // validation reuse the state store, verifier, and store built in Group 2.
 
 const (
-	googleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleAuthURL = "https://accounts.google.com/o/oauth2/v2/auth"
+	// #nosec G101 -- public Google OAuth token endpoint URL, not a credential
 	googleTokenURL = "https://oauth2.googleapis.com/token"
 )
 
