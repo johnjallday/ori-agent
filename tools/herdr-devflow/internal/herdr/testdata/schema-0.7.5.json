@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "protocol": 17,
+  "schema_version": 1,
+  "schemas": {
+    "request": {
+      "oneOf": [
+        { "properties": { "method": { "const": "ping" } } },
+        { "properties": { "method": { "const": "plugin.link" } } },
+        { "properties": { "method": { "const": "plugin.enable" } } },
+        { "properties": { "method": { "const": "plugin.list" } } },
+        { "properties": { "method": { "const": "plugin.action.invoke" } } },
+        { "properties": { "method": { "const": "session.snapshot" } } },
+        { "properties": { "method": { "const": "worktree.open" } } },
+        { "properties": { "method": { "const": "workspace.close" } } },
+        { "properties": { "method": { "const": "pane.split" } } },
+        { "properties": { "method": { "const": "pane.process_info" } } },
+        { "properties": { "method": { "const": "agent.start" } } },
+        { "properties": { "method": { "const": "agent.list" } } },
+        { "properties": { "method": { "const": "agent.get" } } },
+        { "properties": { "method": { "const": "agent.prompt" } } },
+        { "properties": { "method": { "const": "agent.rename" } } },
+        { "properties": { "method": { "const": "agent.focus" } } },
+        { "properties": { "method": { "const": "agent.read" } } },
+        { "properties": { "method": { "const": "workspace.report_metadata" } } },
+        { "properties": { "method": { "const": "pane.report_metadata" } } },
+        { "properties": { "method": { "const": "agent.view.set" } } },
+        { "properties": { "method": { "const": "agent.view.clear" } } },
+        { "properties": { "method": { "const": "events.subscribe" } } }
+      ]
+    }
+  }
+}

@@ -5,10 +5,10 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt start [prd]          # Create a worktree from a PRD in the dev tasks/ folder
+#   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
-#   wt done [name]          # Archive tasks back to dev, then remove worktree+branch
+#   wt done [name] [--herdr-override] # Archive tasks back to dev, then remove worktree+branch
 #   wt rm [name]            # Remove worktree and its branch
 #   wt ls                   # List worktrees
 #   wt status               # Show ahead/behind/merged vs dev for all worktrees
@@ -36,7 +36,7 @@ PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
 #   bypassPermissions - skip all prompts, fully unattended (use for headless runs)
 FEATURE_WORKTREE_PERMISSION_MODE="acceptEdits"
 
-unalias wt 2>/dev/null
+unalias wt 2>/dev/null || true
 
 function wt_is_protected_worktree {
   local candidate="$1"
@@ -532,7 +532,7 @@ function wt_repl {
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, backlog, merge, help  (q to quit)"
+  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, backlog, herd, merge, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -558,6 +558,92 @@ function wt {
     return $?
   fi
   wt_dispatch "$@"
+}
+
+function wt_herd {
+  # Delegate bridge behavior to a small Go helper rather than growing the
+  # worktree manager into a terminal/session implementation. The helper finds
+  # repository-local configuration and keeps mutable runtime state outside Git.
+  local repo_root helper
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "wt herd must run from an Ori Git worktree"
+    return 1
+  }
+  helper="$repo_root/scripts/herdr-devflow.sh"
+  if [[ ! -f "$helper" ]]; then
+    echo "Herdr bridge helper not found: $helper"
+    return 1
+  fi
+  bash "$helper" "$@"
+}
+
+# Run the cleanup preflight from the target worktree itself. Older worktrees
+# without the optional bridge remain fully compatible with wt done; only a
+# worktree carrying both its checked-in bridge config and helper is guarded.
+function wt_herd_cleanup_preflight {
+  local target_path="$1" override="${2:-0}"
+  local helper="$target_path/scripts/herdr-devflow.sh"
+  if [[ ! -f "$target_path/.herdr/devflow.toml" || ! -f "$helper" ]]; then
+    return 0
+  fi
+
+  local -a cleanup_args
+  cleanup_args=(cleanup --worktree "$target_path")
+  if [[ "$override" == "1" ]]; then
+    cleanup_args+=(--override)
+  fi
+  # Cleanup is safety-critical, so it deliberately uses the checked-in source
+  # from the target worktree rather than a possibly stale ignored dev binary.
+  HERDR_DEVFLOW_USE_SOURCE=1 bash "$helper" "${cleanup_args[@]}"
+}
+
+# Guard the destructive half of wt done. A known active agent or unresolved
+# schedule is never overridden. Unknown/unreachable Herdr state and a failed
+# workspace close may proceed only from an interactive terminal after a
+# dedicated acknowledgement (or the explicit flag), separate from the later
+# dirty-worktree prompt.
+function wt_done_herdr_guard {
+  local target_path="$1" requested_override="${2:-0}" cleanup_status
+  if wt_herd_cleanup_preflight "$target_path" 0; then
+    return 0
+  else
+    cleanup_status=$?
+  fi
+  if (( cleanup_status == 20 )); then
+    echo "Refusing wt done: managed Herdr work is still active. Resolve the listed agents or schedules, then retry."
+    return 1
+  fi
+
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "Refusing wt done: Herdr safety cannot be verified in a non-interactive shell."
+    echo "Run wt done from an interactive terminal after inspecting wt herd status."
+    return 1
+  fi
+
+  if [[ "$requested_override" == "1" ]]; then
+    echo "WARNING: --herdr-override was supplied after an unverified Herdr cleanup check."
+  else
+    echo "WARNING: Herdr state could not be verified or its workspace could not be closed."
+    local acknowledgement
+    read "acknowledgement?Type HERDR-OVERRIDE to continue and accept orphan-risk: "
+    if [[ "$acknowledgement" != "HERDR-OVERRIDE" ]]; then
+      echo "Aborted; Git worktree preserved."
+      return 1
+    fi
+  fi
+
+  if wt_herd_cleanup_preflight "$target_path" 1; then
+    echo "WARNING: continuing wt done with explicit Herdr-safety override; the removed Git worktree may remain open in Herdr."
+    return 0
+  else
+    cleanup_status=$?
+    if (( cleanup_status == 20 )); then
+      echo "Refusing wt done: managed Herdr work became active while cleanup was being confirmed."
+    else
+      echo "Herdr cleanup override did not complete; Git worktree preserved."
+    fi
+    return 1
+  fi
 }
 
 function wt_dispatch {
@@ -595,7 +681,48 @@ function wt_dispatch {
       return 1
     fi
 
-    local chosen="$2"
+    local chosen="" no_herdr=0 primary_kind="" start_arg start_index
+    local -a start_args
+    start_args=("${@:2}")
+    start_index=1
+    while (( start_index <= ${#start_args[@]} )); do
+      start_arg="${start_args[$start_index]}"
+      case "$start_arg" in
+        --no-herdr)
+          no_herdr=1
+          ;;
+        --kind)
+          start_index=$(( start_index + 1 ))
+          if (( start_index > ${#start_args[@]} )) || [[ "${start_args[$start_index]}" == --* ]]; then
+            echo "wt start --kind requires a Herdr agent kind"
+            echo "Usage: wt start [feature] [--kind KIND] [--no-herdr]"
+            return 1
+          fi
+          if [[ -n "$primary_kind" ]]; then
+            echo "wt start accepts --kind only once"
+            return 1
+          fi
+          primary_kind="${start_args[$start_index]}"
+          ;;
+        --*)
+          echo "Unknown wt start option: $start_arg"
+          echo "Usage: wt start [feature] [--kind KIND] [--no-herdr]"
+          return 1
+          ;;
+        *)
+          if [[ -n "$chosen" ]]; then
+            echo "wt start accepts one PRD/feature name (got: $chosen and $start_arg)"
+            return 1
+          fi
+          chosen="$start_arg"
+          ;;
+      esac
+      start_index=$(( start_index + 1 ))
+    done
+    if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
+      echo "wt start --kind cannot be combined with --no-herdr"
+      return 1
+    fi
     if [[ -z "$chosen" ]]; then
       echo "Select a PRD to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
       local i
@@ -652,8 +779,31 @@ function wt_dispatch {
         && wt_backlog_commit_push "$dev_path" "docs(backlog): promote $feature to Doing"
     fi
 
+    # Git provisioning remains successful even when Herdr isn't installed,
+    # unavailable, or needs recovery. Handoff happens only after the real
+    # worktree and its planning artifacts exist; it never rolls them back.
+    if (( ! no_herdr )); then
+      echo "Handing the existing worktree to Herdr..."
+      local -a handoff_args
+      handoff_args=(handoff --feature "$feature" --worktree "$target" --branch "$branch")
+      if [[ -n "$primary_kind" ]]; then
+        handoff_args+=(--kind "$primary_kind")
+      fi
+      if ! wt_herd "${handoff_args[@]}"; then
+        echo "Herdr handoff did not finish, but the Git worktree is ready."
+        echo "  Retry: wt herd retry --feature '$feature' --worktree '$target' --branch '$branch'"
+        echo "  Diagnose: wt herd doctor"
+      fi
+    else
+      echo "Skipping Herdr handoff (--no-herdr)."
+    fi
+
     cd "$target"
     echo "Changed to: $target"
+    ;;
+  herd)
+    shift
+    wt_herd "$@"
     ;;
   new)
     local name="$2"
@@ -699,7 +849,26 @@ function wt_dispatch {
     # Post-merge cleanup: archive the (completed) task list back to dev, remove
     # the worktree + local/remote branch, then rebase the dev worktree onto
     # origin/dev. Meant to run after the feature's PR has been squash-merged.
-    local name="$2" target_path branch merged_num=""
+    local name="" target_path branch merged_num="" herdr_override=0 done_arg
+    for done_arg in "${@:2}"; do
+      case "$done_arg" in
+        --herdr-override)
+          herdr_override=1
+          ;;
+        --*)
+          echo "Unknown wt done option: $done_arg"
+          echo "Usage: wt done [name] [--herdr-override]"
+          return 1
+          ;;
+        *)
+          if [[ -n "$name" ]]; then
+            echo "wt done accepts one worktree name (got: $name and $done_arg)"
+            return 1
+          fi
+          name="$done_arg"
+          ;;
+      esac
+    done
     if [[ -z "$name" ]]; then
       target_path="$(git rev-parse --show-toplevel 2>/dev/null)"
       name="${target_path:t}"
@@ -731,6 +900,12 @@ function wt_dispatch {
         read "cont?Continue cleaning up anyway? [y/N]: "
         [[ "$cont" == y* ]] || { echo "Aborted"; return 0; }
       fi
+    fi
+
+    # Do this after merged-PR resolution but before every existing mutation:
+    # backlog retirement, task archival, dirty confirmation, and Git removal.
+    if ! wt_done_herdr_guard "$target_path" "$herdr_override"; then
+      return 1
     fi
 
     # Backlog bookkeeping: move this feature from ## Doing to ## Shipped/dropped
@@ -1135,15 +1310,16 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt start [prd]   - Create worktree from a PRD in the dev tasks/ folder"
+    echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
-    echo "  wt done [name]   - Archive tasks to dev, remove worktree+branch, rebase dev"
+    echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
     echo "  wt rm [name]     - Remove worktree and branch (interactive if no name)"
     echo "  wt ls            - List worktrees"
     echo "  wt status        - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
+    echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
     echo "  wt backlog [sub] - BACKLOG.md: list (default) | add <idea> | sync (scoped commit+push to $BASE_BRANCH)"
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;
