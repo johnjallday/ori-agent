@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -63,10 +64,14 @@ func ValidateRemoteEndpoint(rawURL string) (*url.URL, error) {
 // point Server.startRemote at an httptest server. It is unexported and only
 // ever set from _test.go files in this package -- there is no env var or
 // exported API that could flip it in a running server.
-var allowPrivateRemoteHostsForTests = false
+//
+// It is an atomic.Bool because a test's t.Cleanup resets it on the test
+// goroutine while a still-in-flight transport dial (e.g. a reconnect the test
+// kicked off) may read it concurrently — a plain bool races there under -race.
+var allowPrivateRemoteHostsForTests atomic.Bool
 
 func isPrivateOrLocalRemoteHost(host string) bool {
-	if allowPrivateRemoteHostsForTests {
+	if allowPrivateRemoteHostsForTests.Load() {
 		return false
 	}
 	if host == "localhost" || strings.HasSuffix(host, ".local") {
@@ -120,7 +125,7 @@ func newRemoteHTTPClient() *http.Client {
 			if len(ips) == 0 {
 				return nil, fmt.Errorf("remote mcp: no addresses found for %q", host)
 			}
-			if !allowPrivateRemoteHostsForTests {
+			if !allowPrivateRemoteHostsForTests.Load() {
 				for _, ip := range ips {
 					if isPrivateRemoteIP(ip) {
 						return nil, fmt.Errorf("remote mcp: %q resolved to a blocked private address %s", host, ip)
@@ -135,7 +140,7 @@ func newRemoteHTTPClient() *http.Client {
 		ForceAttemptHTTP2:     true,
 		// #nosec G402 -- InsecureSkipVerify only ever engages via the
 		// unexported test-only flag above (never reachable in production).
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: allowPrivateRemoteHostsForTests},
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: allowPrivateRemoteHostsForTests.Load()},
 	}
 
 	return &http.Client{
