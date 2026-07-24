@@ -24,11 +24,12 @@ type WorkspaceLinker interface {
 // callback is a top-level browser navigation from Google and is instead
 // protected by the single-use state value it must carry (FR 20).
 type Handler struct {
-	flow    *connections.IdentityFlow
-	store   *connections.Store
-	guard   *OriginGuard
-	linker  WorkspaceLinker
-	impacts ImpactEnumerator
+	flow     *connections.IdentityFlow
+	store    *connections.Store
+	guard    *OriginGuard
+	linker   WorkspaceLinker
+	impacts  ImpactEnumerator
+	teardown ProductTeardown
 
 	resolveLocalUser func(*http.Request) string
 	buildRedirectURL func(*http.Request) string
@@ -43,6 +44,9 @@ type Deps struct {
 	// Impacts enumerates which workspaces use each product grant, for the
 	// disconnect impact preview (FR 77). Nil degrades to an empty preview.
 	Impacts ImpactEnumerator
+	// Teardown removes a product's local credentials/bindings on disconnect or
+	// unlink (FR 78, 79, 80). Nil still drops the grant but leaves credentials.
+	Teardown ProductTeardown
 	// ResolveLocalUser maps a request to Ori's local user id (single-user app
 	// defaults to "local").
 	ResolveLocalUser func(*http.Request) string
@@ -59,6 +63,7 @@ func NewHandler(d Deps) *Handler {
 		guard:            d.Guard,
 		linker:           d.Linker,
 		impacts:          d.Impacts,
+		teardown:         d.Teardown,
 		resolveLocalUser: d.ResolveLocalUser,
 		buildRedirectURL: d.BuildRedirectURL,
 	}
@@ -89,6 +94,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/disconnect", h.guard.Wrap(http.HandlerFunc(h.disconnect)))
 	mux.Handle("/api/connections/google/status", h.guard.Wrap(http.HandlerFunc(h.status)))
 	mux.Handle("/api/connections/google/impact", h.guard.Wrap(http.HandlerFunc(h.impact)))
+	mux.Handle("/api/connections/google/product/disconnect", h.guard.Wrap(http.HandlerFunc(h.productDisconnect)))
+	mux.Handle("/api/connections/google/product/unlink", h.guard.Wrap(http.HandlerFunc(h.productUnlink)))
 	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
 	mux.Handle("/api/connections/google/gmail/link", h.guard.Wrap(http.HandlerFunc(h.gmailLink)))
 	mux.HandleFunc("/api/connections/google/callback", h.callback)
@@ -145,6 +152,20 @@ func (h *Handler) disconnect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+	// Tear down every product's local credentials before dropping the identity, so
+	// a whole-account disconnect leaves no orphaned Google credentials behind. The
+	// MCP server definitions and workspace bindings survive, so each workspace
+	// lands in a recoverable "Connection required" rather than being deleted
+	// (FR 80). Teardown is best-effort — a failure never blocks the disconnect.
+	if h.teardown != nil {
+		if conn, err := h.store.Load(); err == nil && conn != nil {
+			for _, product := range connections.AllProducts() {
+				if g, ok := conn.Grant(product); ok && g != nil {
+					_ = h.teardown.DisconnectProduct(r.Context(), product, g.CredentialRef)
+				}
+			}
+		}
 	}
 	if err := h.store.Delete(); err != nil {
 		http.Error(w, "failed to disconnect", http.StatusInternalServerError)
