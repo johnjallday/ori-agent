@@ -61,3 +61,16 @@ func (b *ServerBuilder) googleMCPIdentityHook(serverName, endpoint, rawIDToken, 
 	}
 	logger.Info("google mcp grant attached to Google connection", logger.Fields{"server": serverName, "product": string(product)})
 }
+
+// googleConnectionEmail returns the active Google connection's email (or "") so
+// Google MCP authorizations can pre-select that account (FR 58).
+func (b *ServerBuilder) googleConnectionEmail() string {
+	if b.connStore == nil {
+		return ""
+	}
+	conn, err := b.connStore.Load()
+	if err != nil || conn == nil {
+		return ""
+	}
+	return conn.Email
+}

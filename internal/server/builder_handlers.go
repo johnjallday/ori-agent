@@ -327,6 +327,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
 		// token and attach the grant to this connection (FR 23, 40).
 		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)
+		mcp.SetGoogleMCPLoginHint(b.googleConnectionEmail)
 		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 

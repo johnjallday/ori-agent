@@ -69,6 +69,33 @@ func TestInjectGoogleIdentityScopes_NoExistingScope(t *testing.T) {
 	}
 }
 
+func TestInjectGoogleLoginHint(t *testing.T) {
+	base := "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc&state=xyz"
+
+	out, err := injectGoogleLoginHint(base, "jane@example.com")
+	if err != nil {
+		t.Fatalf("inject: %v", err)
+	}
+	q := mustQuery(t, out)
+	if q.Get("login_hint") != "jane@example.com" {
+		t.Fatalf("login_hint = %q", q.Get("login_hint"))
+	}
+	if q.Get("state") != "xyz" || q.Get("client_id") != "abc" {
+		t.Fatalf("other params changed: %v", q)
+	}
+
+	// Empty email leaves the URL unchanged.
+	if same, _ := injectGoogleLoginHint(base, ""); same != base {
+		t.Fatalf("empty email should not change the url")
+	}
+	// An existing login_hint is preserved.
+	withHint := base + "&login_hint=existing%40x.com"
+	out2, _ := injectGoogleLoginHint(withHint, "new@x.com")
+	if got := mustQuery(t, out2).Get("login_hint"); got != "existing@x.com" {
+		t.Fatalf("existing login_hint should be preserved, got %q", got)
+	}
+}
+
 func mustQuery(t *testing.T, rawURL string) url.Values {
 	t.Helper()
 	u, err := url.Parse(rawURL)

@@ -70,3 +70,33 @@ var googleMCPIdentityHook func(serverName, endpoint, rawIDToken, clientID string
 func SetGoogleMCPIdentityHook(fn func(serverName, endpoint, rawIDToken, clientID string)) {
 	googleMCPIdentityHook = fn
 }
+
+// googleMCPLoginHint, when set, returns the active Google connection's email so
+// a Google MCP authorization pre-selects that account in Google's chooser
+// (FR 58 "use active Google account"); the identity hook then binds the grant on
+// the matching subject. Empty return = no hint.
+var googleMCPLoginHint func() string
+
+// SetGoogleMCPLoginHint installs (or clears, with nil) the login-hint provider.
+func SetGoogleMCPLoginHint(fn func() string) {
+	googleMCPLoginHint = fn
+}
+
+// injectGoogleLoginHint sets login_hint=email (when email is non-empty and no
+// hint is already present), leaving every other parameter untouched.
+func injectGoogleLoginHint(authorizeURL, email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return authorizeURL, nil
+	}
+	u, err := url.Parse(authorizeURL)
+	if err != nil {
+		return authorizeURL, err
+	}
+	q := u.Query()
+	if q.Get("login_hint") == "" {
+		q.Set("login_hint", email)
+		u.RawQuery = q.Encode()
+	}
+	return u.String(), nil
+}

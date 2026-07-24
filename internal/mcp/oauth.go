@@ -387,6 +387,13 @@ func (s *Server) oauthFetcher(userID, redirectURL string) auth.AuthorizationCode
 			if injected, injErr := injectGoogleIdentityScopes(authorizeURL); injErr == nil {
 				authorizeURL = injected
 			}
+			// Pre-select the connected Google account so its subject matches the
+			// active identity (FR 58 "use active Google account").
+			if hint := googleMCPLoginHint; hint != nil {
+				if hinted, hErr := injectGoogleLoginHint(authorizeURL, hint()); hErr == nil {
+					authorizeURL = hinted
+				}
+			}
 		}
 
 		state, err := stateFromAuthorizeURL(authorizeURL)
