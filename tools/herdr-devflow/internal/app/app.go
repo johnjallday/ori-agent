@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
@@ -150,6 +151,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.schedule(ctx, opts, commandArgs)
 	case "status":
 		return a.status(ctx, opts, commandArgs)
+	case "cleanup":
+		return a.cleanup(ctx, opts, commandArgs)
 	case "dispatch":
 		return a.dispatch(ctx, opts)
 	case "plugin":
@@ -179,6 +182,11 @@ type statusArgs struct {
 	noColor   bool
 	json      bool
 	clearView bool
+}
+
+type cleanupArgs struct {
+	worktree string
+	override bool
 }
 
 func parseControlContext(args []string) (controlContextArgs, []string, error) {
@@ -234,6 +242,28 @@ func parseStatusArgs(args []string) (statusArgs, error) {
 	}
 	if parsed.clearView && parsed.watch {
 		return statusArgs{}, fmt.Errorf("--clear-view cannot be combined with --watch")
+	}
+	return parsed, nil
+}
+
+func parseCleanupArgs(args []string) (cleanupArgs, error) {
+	var parsed cleanupArgs
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--worktree":
+			if index+1 >= len(args) || strings.HasPrefix(args[index+1], "--") {
+				return cleanupArgs{}, fmt.Errorf("--worktree requires a value")
+			}
+			parsed.worktree = args[index+1]
+			index++
+		case "--override":
+			parsed.override = true
+		default:
+			return cleanupArgs{}, fmt.Errorf("unknown cleanup option %q", args[index])
+		}
+	}
+	if parsed.worktree == "" {
+		return cleanupArgs{}, fmt.Errorf("cleanup requires --worktree")
 	}
 	return parsed, nil
 }
@@ -1214,6 +1244,144 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	}
 	emit(snapshot)
 	return 0
+}
+
+// cleanup is intentionally narrow and is called by wt done before it makes
+// any archival, backlog, dirty-check, or Git removal changes. It never asks
+// Herdr to create or remove a Git worktree.
+func (a *App) cleanup(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseCleanupArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			a.writeCleanupResult(opts.json, cleanup.Result{Outcome: cleanup.OutcomeSkipped, Detail: "no checked-in Herdr Devflow configuration exists for this worktree"})
+			return 0
+		}
+		result := cleanup.Result{Outcome: cleanup.OutcomeUnavailable, Detail: "bridge configuration cannot be read, so Herdr cleanup safety cannot be verified"}
+		if parsed.override {
+			result.Outcome = cleanup.OutcomeOverridden
+			result.Overridden = true
+			result.Detail = "explicit Herdr-safety override accepted: bridge configuration cannot be read; the Git worktree may be orphaned from live Herdr state"
+			if runtimeRoot, rootErr := a.runtimeRootFor(opts); rootErr == nil {
+				a.recordCleanupOverrideAt(filepath.Join(runtimeRoot, "logs"), result)
+			}
+		}
+		a.writeCleanupResult(opts.json, result)
+		if result.Outcome == cleanup.OutcomeOverridden {
+			return 0
+		}
+		return cleanup.ExitNeedsOverride
+	}
+	if !runtime.config.Bridge.Enabled {
+		a.writeCleanupResult(opts.json, cleanup.Result{Outcome: cleanup.OutcomeSkipped, Detail: "Herdr Devflow is disabled for this worktree"})
+		return 0
+	}
+	service := cleanup.Service{
+		Store:        state.New(runtime.paths.StateDir),
+		Client:       runtime.herdr,
+		RepositoryID: runtime.paths.RepositoryID,
+		GitCommonDir: runtime.paths.GitCommonDir,
+	}
+	result := service.Preflight(ctx, cleanup.Request{WorktreePath: parsed.worktree, Override: parsed.override})
+	a.recordCleanupOverride(runtime, result)
+	a.writeCleanupResult(opts.json, result)
+	switch result.Outcome {
+	case cleanup.OutcomeReady, cleanup.OutcomeSkipped, cleanup.OutcomeOverridden:
+		return 0
+	case cleanup.OutcomeBlocked:
+		return cleanup.ExitBlocked
+	default:
+		return cleanup.ExitNeedsOverride
+	}
+}
+
+func (a *App) recordCleanupOverride(runtime runtimeContext, result cleanup.Result) {
+	a.recordCleanupOverrideAt(runtime.paths.LogDir, result)
+}
+
+func (a *App) recordCleanupOverrideAt(logDir string, result cleanup.Result) {
+	if !result.Overridden {
+		return
+	}
+	if err := os.MkdirAll(logDir, 0700); err != nil {
+		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the cleanup override audit event")
+		return
+	}
+	file, err := os.OpenFile(filepath.Join(logDir, "cleanup-audit.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the cleanup override audit event")
+		return
+	}
+	defer file.Close()
+	if err := file.Chmod(0600); err != nil {
+		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not secure the cleanup override audit log")
+		return
+	}
+	event := struct {
+		Timestamp   time.Time `json:"timestamp"`
+		Operation   string    `json:"operation"`
+		Outcome     string    `json:"outcome"`
+		Feature     string    `json:"feature,omitempty"`
+		WorkspaceID string    `json:"workspace_id,omitempty"`
+		Warning     string    `json:"warning"`
+	}{
+		Timestamp:   time.Now().UTC(),
+		Operation:   "cleanup_override",
+		Outcome:     result.Outcome.String(),
+		Feature:     result.Feature.Name,
+		WorkspaceID: result.WorkspaceID,
+		Warning:     "Git cleanup proceeded after an explicit Herdr-safety override; the workspace may remain open in Herdr.",
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not encode the cleanup override audit event")
+		return
+	}
+	if _, err := file.Write(append(encoded, '\n')); err != nil {
+		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the cleanup override audit event")
+	}
+}
+
+func (a *App) writeCleanupResult(asJSON bool, result cleanup.Result) {
+	if asJSON {
+		a.writeResult(true, result)
+		return
+	}
+	switch result.Outcome {
+	case cleanup.OutcomeReady:
+		fmt.Fprintln(a.stdout, "Ori Herdr Devflow cleanup: safe to continue.")
+	case cleanup.OutcomeSkipped:
+		fmt.Fprintln(a.stdout, "Ori Herdr Devflow cleanup: no managed Herdr state requires cleanup.")
+	case cleanup.OutcomeBlocked:
+		fmt.Fprintln(a.stdout, "Ori Herdr Devflow cleanup: refused because managed work is still active.")
+	case cleanup.OutcomeOverridden:
+		fmt.Fprintln(a.stdout, "WARNING: explicit Herdr-safety override accepted; continuing may orphan live Herdr state from this Git worktree.")
+	default:
+		fmt.Fprintln(a.stdout, "Ori Herdr Devflow cleanup: Herdr safety could not be verified; preserving the Git worktree.")
+	}
+	if result.Feature.Name != "" {
+		fmt.Fprintf(a.stdout, "  Feature: %s\n", result.Feature.Name)
+	}
+	if result.WorkspaceID != "" {
+		fmt.Fprintf(a.stdout, "  Herdr workspace: %s\n", result.WorkspaceID)
+	}
+	if result.Detail != "" {
+		fmt.Fprintf(a.stdout, "  Detail: %s\n", result.Detail)
+	}
+	for _, agent := range result.Agents {
+		fmt.Fprintf(a.stdout, "  Agent %s (%s): %s\n", agent.Role, agent.Name, agent.Status)
+		fmt.Fprintf(a.stdout, "    Focus: %s\n    Read: %s\n", agent.FocusCommand, agent.ReadCommand)
+	}
+	for _, schedule := range result.Schedules {
+		fmt.Fprintf(a.stdout, "  Schedule %s: %s\n    Show: %s\n", schedule.ID, schedule.State, schedule.ShowCommand)
+		if schedule.CancelCommand != "" {
+			fmt.Fprintf(a.stdout, "    Cancel: %s\n", schedule.CancelCommand)
+		}
+	}
 }
 
 func (a *App) statusService(runtime runtimeContext) *status.Service {

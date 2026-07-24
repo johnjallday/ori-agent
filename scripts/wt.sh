@@ -8,7 +8,7 @@
 #   wt start [prd] [--no-herdr] # Create a worktree from a PRD in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
-#   wt done [name]          # Archive tasks back to dev, then remove worktree+branch
+#   wt done [name] [--herdr-override] # Archive tasks back to dev, then remove worktree+branch
 #   wt rm [name]            # Remove worktree and its branch
 #   wt ls                   # List worktrees
 #   wt status               # Show ahead/behind/merged vs dev for all worktrees
@@ -577,6 +577,75 @@ function wt_herd {
   bash "$helper" "$@"
 }
 
+# Run the cleanup preflight from the target worktree itself. Older worktrees
+# without the optional bridge remain fully compatible with wt done; only a
+# worktree carrying both its checked-in bridge config and helper is guarded.
+function wt_herd_cleanup_preflight {
+  local target_path="$1" override="${2:-0}"
+  local helper="$target_path/scripts/herdr-devflow.sh"
+  if [[ ! -f "$target_path/.herdr/devflow.toml" || ! -f "$helper" ]]; then
+    return 0
+  fi
+
+  local -a cleanup_args
+  cleanup_args=(cleanup --worktree "$target_path")
+  if [[ "$override" == "1" ]]; then
+    cleanup_args+=(--override)
+  fi
+  # Cleanup is safety-critical, so it deliberately uses the checked-in source
+  # from the target worktree rather than a possibly stale ignored dev binary.
+  HERDR_DEVFLOW_USE_SOURCE=1 bash "$helper" "${cleanup_args[@]}"
+}
+
+# Guard the destructive half of wt done. A known active agent or unresolved
+# schedule is never overridden. Unknown/unreachable Herdr state and a failed
+# workspace close may proceed only from an interactive terminal after a
+# dedicated acknowledgement (or the explicit flag), separate from the later
+# dirty-worktree prompt.
+function wt_done_herdr_guard {
+  local target_path="$1" requested_override="${2:-0}" cleanup_status
+  if wt_herd_cleanup_preflight "$target_path" 0; then
+    return 0
+  else
+    cleanup_status=$?
+  fi
+  if (( cleanup_status == 20 )); then
+    echo "Refusing wt done: managed Herdr work is still active. Resolve the listed agents or schedules, then retry."
+    return 1
+  fi
+
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "Refusing wt done: Herdr safety cannot be verified in a non-interactive shell."
+    echo "Run wt done from an interactive terminal after inspecting wt herd status."
+    return 1
+  fi
+
+  if [[ "$requested_override" == "1" ]]; then
+    echo "WARNING: --herdr-override was supplied after an unverified Herdr cleanup check."
+  else
+    echo "WARNING: Herdr state could not be verified or its workspace could not be closed."
+    local acknowledgement
+    read "acknowledgement?Type HERDR-OVERRIDE to continue and accept orphan-risk: "
+    if [[ "$acknowledgement" != "HERDR-OVERRIDE" ]]; then
+      echo "Aborted; Git worktree preserved."
+      return 1
+    fi
+  fi
+
+  if wt_herd_cleanup_preflight "$target_path" 1; then
+    echo "WARNING: continuing wt done with explicit Herdr-safety override; the removed Git worktree may remain open in Herdr."
+    return 0
+  else
+    cleanup_status=$?
+    if (( cleanup_status == 20 )); then
+      echo "Refusing wt done: managed Herdr work became active while cleanup was being confirmed."
+    else
+      echo "Herdr cleanup override did not complete; Git worktree preserved."
+    fi
+    return 1
+  fi
+}
+
 function wt_dispatch {
   case "$1" in
   repl)
@@ -753,7 +822,26 @@ function wt_dispatch {
     # Post-merge cleanup: archive the (completed) task list back to dev, remove
     # the worktree + local/remote branch, then rebase the dev worktree onto
     # origin/dev. Meant to run after the feature's PR has been squash-merged.
-    local name="$2" target_path branch merged_num=""
+    local name="" target_path branch merged_num="" herdr_override=0 done_arg
+    for done_arg in "${@:2}"; do
+      case "$done_arg" in
+        --herdr-override)
+          herdr_override=1
+          ;;
+        --*)
+          echo "Unknown wt done option: $done_arg"
+          echo "Usage: wt done [name] [--herdr-override]"
+          return 1
+          ;;
+        *)
+          if [[ -n "$name" ]]; then
+            echo "wt done accepts one worktree name (got: $name and $done_arg)"
+            return 1
+          fi
+          name="$done_arg"
+          ;;
+      esac
+    done
     if [[ -z "$name" ]]; then
       target_path="$(git rev-parse --show-toplevel 2>/dev/null)"
       name="${target_path:t}"
@@ -785,6 +873,12 @@ function wt_dispatch {
         read "cont?Continue cleaning up anyway? [y/N]: "
         [[ "$cont" == y* ]] || { echo "Aborted"; return 0; }
       fi
+    fi
+
+    # Do this after merged-PR resolution but before every existing mutation:
+    # backlog retirement, task archival, dirty confirmation, and Git removal.
+    if ! wt_done_herdr_guard "$target_path" "$herdr_override"; then
+      return 1
     fi
 
     # Backlog bookkeeping: move this feature from ## Doing to ## Shipped/dropped
@@ -1192,7 +1286,7 @@ function wt_dispatch {
     echo "  wt start [prd] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
-    echo "  wt done [name]   - Archive tasks to dev, remove worktree+branch, rebase dev"
+    echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
     echo "  wt rm [name]     - Remove worktree and branch (interactive if no name)"
     echo "  wt ls            - List worktrees"
     echo "  wt status        - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"

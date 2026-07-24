@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
@@ -271,6 +272,111 @@ func TestParseOneTimeContinuationAndScheduleCommands(t *testing.T) {
 	}
 	if _, err := parseStatusArgs([]string{"--current", "--feature", "bridge"}); err == nil {
 		t.Fatal("parseStatusArgs accepted a conflicting current/feature filter")
+	}
+	cleanup, err := parseCleanupArgs([]string{"--worktree", "/tmp/bridge", "--override"})
+	if err != nil || cleanup.worktree != "/tmp/bridge" || !cleanup.override {
+		t.Fatalf("parseCleanupArgs() = %#v, %v", cleanup, err)
+	}
+	if _, err := parseCleanupArgs([]string{"--override"}); err == nil {
+		t.Fatal("parseCleanupArgs accepted a missing worktree")
+	}
+}
+
+type cleanupRunner struct {
+	status   model.AgentStatus
+	closeErr error
+	calls    []string
+}
+
+func (r *cleanupRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
+	key := strings.Join(command.Args, " ")
+	r.calls = append(r.calls, key)
+	switch key {
+	case "agent list":
+		return herdr.CommandResult{Stdout: []byte(fmt.Sprintf(`{"result":{"agents":[{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":%q,"workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}]}}`, r.status))}, nil
+	case "workspace close w1":
+		if r.closeErr != nil {
+			return herdr.CommandResult{}, r.closeErr
+		}
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"workspace_closed"}}`)}, r.closeErr
+	default:
+		return herdr.CommandResult{}, fmt.Errorf("unexpected cleanup Herdr command: %s", key)
+	}
+}
+
+func TestCleanupPreflightClosesOnlySettledWorkspaceAndBlocksActiveAgents(t *testing.T) {
+	_, feature := createLinkedFeatureWorktree(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
+		if key == worktree.HomeOverrideEnv {
+			return home, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
+	agent := model.RoleAgent{Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude", WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
+		WorkspaceID: "w1",
+		Agents:      map[string]model.RoleAgent{"builder": agent},
+		Schedules:   map[string]model.Schedule{},
+	}
+	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name      string
+		status    model.AgentStatus
+		closeErr  error
+		override  bool
+		wantExit  int
+		wantClose bool
+		wantAudit bool
+	}{
+		{name: "idle closes only the workspace", status: model.AgentIdle, wantExit: 0, wantClose: true},
+		{name: "working blocks before close", status: model.AgentWorking, wantExit: cleanup.ExitBlocked},
+		{name: "explicit override records orphan-risk audit without session data", status: model.AgentIdle, closeErr: errors.New("workspace close unavailable"), override: true, wantExit: 0, wantClose: true, wantAudit: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &cleanupRunner{status: test.status, closeErr: test.closeErr}
+			var output, stderr bytes.Buffer
+			application := New(Dependencies{Stdout: &output, Stderr: &stderr, LookupEnv: func(string) (string, bool) { return "", false }, Runner: runner})
+			args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "cleanup", "--worktree", feature}
+			if test.override {
+				args = append(args, "--override")
+			}
+			exit := application.Run(context.Background(), args)
+			if exit != test.wantExit {
+				t.Fatalf("cleanup exit = %d, want %d; stdout=%s stderr=%s", exit, test.wantExit, output.String(), stderr.String())
+			}
+			closed := containsHerdrCommandFromStrings(runner.calls, "workspace close w1")
+			if closed != test.wantClose {
+				t.Fatalf("workspace close=%v, want %v; calls=%#v", closed, test.wantClose, runner.calls)
+			}
+			for _, call := range runner.calls {
+				if strings.HasPrefix(call, "worktree ") {
+					t.Fatalf("cleanup must never ask Herdr to mutate a Git worktree: %#v", runner.calls)
+				}
+			}
+			if !strings.Contains(output.String(), "Agent builder") {
+				t.Fatalf("cleanup output did not identify scoped agent: %q", output.String())
+			}
+			if test.wantAudit {
+				auditPath := filepath.Join(home, "logs", "cleanup-audit.jsonl")
+				audit, err := os.ReadFile(auditPath)
+				if err != nil || !strings.Contains(string(audit), `"operation":"cleanup_override"`) || strings.Contains(string(audit), "native-123") {
+					t.Fatalf("cleanup audit = %q, err=%v", audit, err)
+				}
+				if info, err := os.Stat(auditPath); err != nil || info.Mode().Perm() != 0600 {
+					t.Fatalf("cleanup audit permissions = %v, %v", info, err)
+				}
+			}
+		})
 	}
 }
 
@@ -636,6 +742,15 @@ func containsIntegrationCommand(commands []herdr.Command) bool {
 func containsHerdrCommand(commands []herdr.Command, want string) bool {
 	for _, command := range commands {
 		if strings.Join(command.Args, " ") == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsHerdrCommandFromStrings(commands []string, want string) bool {
+	for _, command := range commands {
+		if command == want {
 			return true
 		}
 	}

@@ -7,7 +7,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
 binary="${HERDR_DEVFLOW_BINARY:-$repo_root/bin/herdr-devflow}"
 
-if [[ -x "$binary" ]]; then
+if [[ "${HERDR_DEVFLOW_USE_SOURCE:-}" != "1" && -x "$binary" ]]; then
   exec "$binary" --repo-root "$repo_root" "$@"
 fi
 
