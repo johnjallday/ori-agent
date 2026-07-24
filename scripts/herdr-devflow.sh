@@ -12,4 +12,8 @@ if [[ "${HERDR_DEVFLOW_USE_SOURCE:-}" != "1" && -x "$binary" ]]; then
 fi
 
 cd "$repo_root"
-exec go run ./tools/herdr-devflow/cmd/herdr-devflow -- --repo-root "$repo_root" "$@"
+# Once the package path is supplied, remaining values are program arguments.
+# Do not insert a standalone `--`: Go passes that token through to the helper,
+# which would turn the cleanup command invoked by `wt done` into an unknown
+# command when the safety-critical source fallback is selected.
+exec go run ./tools/herdr-devflow/cmd/herdr-devflow --repo-root "$repo_root" "$@"

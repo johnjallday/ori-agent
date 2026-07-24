@@ -91,6 +91,7 @@ func InspectLinkedGitWorktree(ctx context.Context, path, expectedBranch, expecte
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	// #nosec G204 -- callers validate the canonical linked worktree and use fixed Git plumbing arguments.
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	output, err := command.Output()
 	if err != nil {
