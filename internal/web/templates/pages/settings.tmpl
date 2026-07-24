@@ -976,11 +976,14 @@
             </div>
 
             <p class="settings-section-description">
-              To let your Personal HQ connect Gmail, register a Google OAuth 2.0 <strong>Web application</strong>
-              client (Google Cloud Console → Credentials; enable the Gmail API), add
-              <code id="hqEmailRedirectHint">this server's <em>/api/vault/email-oauth/callback</em></code> as an
-              authorized redirect URI, then paste the client ID and secret below. Read-only Gmail access is
-              requested; nothing is sent without your explicit confirmation.
+              Personal HQ email now connects through your
+              <a href="#google-account" style="color: var(--primary-color);">Google Account</a> above — connect
+              Google and enable Gmail there, then choose <strong>Connect account</strong> on your Personal HQ (no
+              client ID or secret needed). The fields below are only for a <strong>self-hosted</strong> setup with
+              your own Google OAuth <strong>Web</strong> client: register it in Google Cloud Console (enable the
+              Gmail API), add <code id="hqEmailRedirectHint">this server's <em>/api/vault/email-oauth/callback</em></code>
+              as an authorized redirect URI, then paste the client ID and secret. Read-only Gmail is requested;
+              nothing sends without your explicit confirmation.
             </p>
 
             <div class="settings-field">
