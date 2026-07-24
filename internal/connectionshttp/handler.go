@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
 // WorkspaceLinker gives a workspace its own Gmail account by reusing the global
@@ -30,6 +31,7 @@ type Handler struct {
 	linker   WorkspaceLinker
 	impacts  ImpactEnumerator
 	teardown ProductTeardown
+	health   GrantHealthChecker
 
 	resolveLocalUser func(*http.Request) string
 	buildRedirectURL func(*http.Request) string
@@ -47,6 +49,9 @@ type Deps struct {
 	// Teardown removes a product's local credentials/bindings on disconnect or
 	// unlink (FR 78, 79, 80). Nil still drops the grant but leaves credentials.
 	Teardown ProductTeardown
+	// Health reconciles each grant's live health on status load without opening a
+	// browser (FR 85). Nil keeps stored health as-is.
+	Health GrantHealthChecker
 	// ResolveLocalUser maps a request to Ori's local user id (single-user app
 	// defaults to "local").
 	ResolveLocalUser func(*http.Request) string
@@ -64,6 +69,7 @@ func NewHandler(d Deps) *Handler {
 		linker:           d.Linker,
 		impacts:          d.Impacts,
 		teardown:         d.Teardown,
+		health:           d.Health,
 		resolveLocalUser: d.ResolveLocalUser,
 		buildRedirectURL: d.BuildRedirectURL,
 	}
@@ -144,6 +150,13 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "failed to load connection", http.StatusInternalServerError)
 		return
+	}
+	// Refresh each grant's health from its live source (no browser) so a stale
+	// credential shows as Reconnect required (FR 85). Persist only when changed.
+	if h.reconcileGrantHealth(conn) {
+		if saveErr := h.store.Save(conn); saveErr != nil {
+			logger.Warn("connection status: failed to persist reconciled health", logger.Fields{"error": saveErr})
+		}
 	}
 	writeJSON(w, http.StatusOK, connections.Project(conn))
 }

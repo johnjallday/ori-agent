@@ -319,6 +319,7 @@ func (b *ServerBuilder) initializeHandlers() {
 			Guard:    connectionshttp.NewOriginGuard(),
 			Impacts:  connectionImpactEnumerator{b: b},
 			Teardown: connectionProductTeardown{b: b},
+			Health:   connectionGrantHealth{b: b},
 		}
 		if b.vaultStore != nil {
 			sink := newGmailCredentialSink(b.vaultStore)
