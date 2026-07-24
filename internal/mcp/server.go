@@ -417,6 +417,14 @@ func (s *Server) GetServerInfo() *sdkmcp.Implementation {
 
 // CallTool calls a tool on the MCP server
 func (s *Server) CallTool(ctx context.Context, name string, arguments map[string]any) (*ToolCallResult, error) {
+	// Fail-closed exposure policy (e.g. Google Drive read-only): a denied tool is
+	// rejected here even if a caller names it directly, not merely hidden from the
+	// listing (FR 66, 67). This is the single execution chokepoint both
+	// Registry.CallTool and Adapter.Execute funnel through.
+	if !toolAllowed(s.config.URL, name) {
+		return nil, fmt.Errorf("tool %q is not permitted on server %q", name, s.config.Name)
+	}
+
 	s.mu.RLock()
 	conn := s.conn
 	s.mu.RUnlock()

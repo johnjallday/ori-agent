@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/drive"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -60,6 +61,18 @@ func (b *ServerBuilder) googleMCPIdentityHook(serverName, endpoint, rawIDToken, 
 		return
 	}
 	logger.Info("google mcp grant attached to Google connection", logger.Fields{"server": serverName, "product": string(product)})
+}
+
+// mcpToolExposureAllowed is the server-side tool-exposure policy wired into the
+// MCP registry (SetToolExposureHook). Google Drive is capped to its fail-closed
+// read-only allowlist — mutations, permission tools, and any unknown/future tool
+// are denied at both listing and execution (FR 66, 67). Every other server is
+// unrestricted here; their tools are gated by workspace bindings elsewhere.
+func (b *ServerBuilder) mcpToolExposureAllowed(serverURL, toolName string) bool {
+	if connectionProductForMCPEndpoint(serverURL) == connections.ProductDrive {
+		return drive.IsAllowedTool(toolName)
+	}
+	return true
 }
 
 // googleConnectionEmail returns the active Google connection's email (or "") so
