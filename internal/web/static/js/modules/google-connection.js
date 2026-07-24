@@ -65,15 +65,19 @@
         badge: id("googleConnBadge"),
         products: id("googleConnProducts"),
         driveSetup: id("googleConnDriveSetup"),
+        confirm: id("googleConnConfirm"),
         connectBtn: id("googleConnConnectBtn"),
         disconnectBtn: id("googleConnDisconnectBtn"),
+        switchBtn: id("googleConnSwitchBtn"),
         error: id("googleConnError"),
       };
     }
 
     bind() {
       if (this.el.connectBtn) this.el.connectBtn.addEventListener("click", () => this.connect());
-      if (this.el.disconnectBtn) this.el.disconnectBtn.addEventListener("click", () => this.disconnect());
+      // Disconnect + Switch both preview their impact before acting.
+      if (this.el.disconnectBtn) this.el.disconnectBtn.addEventListener("click", () => this.confirmAccountDisconnect());
+      if (this.el.switchBtn) this.el.switchBtn.addEventListener("click", () => this.switchAccount());
     }
 
     async refresh() {
@@ -89,6 +93,7 @@
     render(conn) {
       this.conn = conn || null;
       this.el.status.classList.add("d-none");
+      this.hideConfirm();
       const connected = conn && conn.subject && conn.state !== "not_connected" && conn.state !== "disconnecting";
       if (connected) {
         this.el.disconnected.classList.add("d-none");
@@ -142,6 +147,16 @@
           btn.textContent = "Set up";
           btn.addEventListener("click", () => this.toggleDriveSetup());
           right.appendChild(btn);
+        }
+
+        // Any enabled product can be disconnected on its own (impact-previewed).
+        if (g.enabled) {
+          const dc = document.createElement("button");
+          dc.type = "button";
+          dc.className = "modern-btn modern-btn-secondary gc-disconnect-btn";
+          dc.textContent = "Disconnect";
+          dc.addEventListener("click", () => this.confirmProductDisconnect(g.product));
+          right.appendChild(dc);
         }
 
         row.appendChild(name);
@@ -198,21 +213,6 @@
         this.showError("Couldn't start Google sign-in. Please try again.");
       } finally {
         this.el.connectBtn.disabled = false;
-      }
-    }
-
-    async disconnect() {
-      this.el.disconnectBtn.disabled = true;
-      try {
-        const res = await fetch("/api/connections/google/disconnect", { method: "POST", headers: { Accept: "application/json" } });
-        if (!res.ok) throw new Error("disconnect failed");
-        this.el.status.classList.remove("d-none");
-        this.showStatusText("Checking Google connection…");
-        await this.refresh();
-      } catch (e) {
-        this.showError("Couldn't disconnect. Please try again.");
-      } finally {
-        this.el.disconnectBtn.disabled = false;
       }
     }
 
@@ -407,6 +407,129 @@
         window.removeEventListener("message", onMessage);
         window.location.assign(url);
       }
+    }
+
+    // --- Disconnect / switch with impact preview ------------------------------
+
+    async confirmProductDisconnect(product) {
+      const label = PRODUCT_LABELS[product] || product;
+      const impacts = await this.fetchImpact(product);
+      this.renderConfirm({
+        title: "Disconnect " + label + "?",
+        body:
+          "This removes " + label + " access from this device. Your Google account and other products stay connected.",
+        impacts,
+        confirmLabel: "Disconnect " + label,
+        onConfirm: () =>
+          this.doDisconnect("/api/connections/google/product/disconnect?product=" + encodeURIComponent(product)),
+      });
+    }
+
+    async confirmAccountDisconnect() {
+      const impacts = await this.fetchImpact(null);
+      this.renderConfirm({
+        title: "Disconnect Google?",
+        body:
+          'This removes all Google access (Gmail, Calendar, Drive) from this device. Workspaces keep their setup and show "Connection required" until you reconnect.',
+        impacts,
+        confirmLabel: "Disconnect Google",
+        onConfirm: () => this.doDisconnect("/api/connections/google/disconnect"),
+      });
+    }
+
+    async switchAccount() {
+      // Switching requires disconnecting the current account first (FR 83);
+      // removed workspace links are not auto-restored, so preview the impact.
+      const impacts = await this.fetchImpact(null);
+      this.renderConfirm({
+        title: "Switch Google account?",
+        body:
+          "To switch accounts you must disconnect the current one first. Removed workspace links are NOT restored automatically — even if you reconnect the same account.",
+        impacts,
+        confirmLabel: "Disconnect to switch",
+        onConfirm: () => this.doDisconnect("/api/connections/google/disconnect"),
+      });
+    }
+
+    async fetchImpact(product) {
+      try {
+        const url =
+          "/api/connections/google/impact" + (product ? "?product=" + encodeURIComponent(product) : "");
+        const res = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!res.ok) return [];
+        const data = await res.json().catch(() => ({}));
+        return (data.products || []).filter((p) => (p.workspaces || []).length > 0);
+      } catch (e) {
+        return [];
+      }
+    }
+
+    renderConfirm(opts) {
+      const host = this.el.confirm;
+      if (!host) return;
+      this.hideDriveSetup();
+      host.innerHTML = "";
+
+      const title = document.createElement("div");
+      title.className = "gc-confirm-title";
+      title.textContent = opts.title;
+
+      const body = document.createElement("p");
+      body.className = "gc-drive-note";
+      body.textContent = opts.body;
+      host.append(title, body);
+
+      const affected = (opts.impacts || []).flatMap((p) =>
+        (p.workspaces || []).map((ws) => (PRODUCT_LABELS[p.product] || p.product) + " — " + (ws.name || ws.id)),
+      );
+      if (affected.length) {
+        const lead = document.createElement("p");
+        lead.className = "gc-drive-note";
+        lead.textContent = "Workspaces that will lose access:";
+        const ul = document.createElement("ul");
+        ul.className = "gc-confirm-list";
+        affected.forEach((line) => {
+          const li = document.createElement("li");
+          li.textContent = line;
+          ul.appendChild(li);
+        });
+        host.append(lead, ul);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "gc-confirm-actions";
+      const confirmBtn = document.createElement("button");
+      confirmBtn.type = "button";
+      confirmBtn.className = "modern-btn modern-btn-danger";
+      confirmBtn.textContent = opts.confirmLabel;
+      confirmBtn.addEventListener("click", () => opts.onConfirm());
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "modern-btn modern-btn-secondary";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => this.hideConfirm());
+      actions.append(confirmBtn, cancelBtn);
+      host.appendChild(actions);
+
+      host.classList.remove("d-none");
+      host.scrollIntoView({ block: "nearest" });
+    }
+
+    hideConfirm() {
+      if (this.el.confirm) this.el.confirm.classList.add("d-none");
+    }
+
+    async doDisconnect(url) {
+      this.hideConfirm();
+      this.el.status.classList.remove("d-none");
+      this.showStatusText("Updating Google connection…");
+      try {
+        const res = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
+        if (!res.ok) throw new Error("request failed");
+      } catch (e) {
+        this.showError("Couldn't update the connection. Please try again.");
+      }
+      await this.refresh();
     }
   }
 
