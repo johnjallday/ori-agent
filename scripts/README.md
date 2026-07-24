@@ -110,7 +110,9 @@ an automatic Herdr handoff; for linked checkouts it supplies Herdr with the
 normal Git source checkout plus the feature path, while Ori remains the only
 Git-worktree creator/remover. wt start <feature> --no-herdr skips it once. See
 [Herdr Devflow Bridge](../docs/herdr-devflow.md) for exact feature-scoped agent
-selection, one-time continuations, guarded cleanup, and recovery.
+selection, one-time continuations, guarded cleanup, and recovery. Claude is the
+configured default; use wt start <feature> --kind codex for a one-feature
+override without changing that default.
 
 Run make test-herdr-devflow for focused helper, shell, and wt tests. It also
 runs make test-herdr-devflow-cross, which cross-compiles the local helper for

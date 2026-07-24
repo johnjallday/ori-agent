@@ -215,8 +215,8 @@ func TestDisabledHandoffIsANoOpAfterArgumentValidation(t *testing.T) {
 
 func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testing.T) {
 	t.Parallel()
-	parsed, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--branch", "feature/bridge"}, false)
-	if err != nil || parsed.feature != "bridge" || parsed.worktree != "/tmp/bridge" || parsed.branch != "feature/bridge" {
+	parsed, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--branch", "feature/bridge", "--kind", "codex"}, false)
+	if err != nil || parsed.feature != "bridge" || parsed.worktree != "/tmp/bridge" || parsed.branch != "feature/bridge" || parsed.kind != "codex" {
 		t.Fatalf("parseHandoffArgs() = %#v, %v", parsed, err)
 	}
 	if _, err := parseHandoffArgs([]string{"--feature", "bridge"}, false); err == nil {
@@ -228,6 +228,12 @@ func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testin
 	}
 	if _, err := parseHandoffArgs([]string{"--resend"}, false); err == nil {
 		t.Fatal("initial handoff accepted --resend")
+	}
+	if _, err := parseHandoffArgs([]string{"--kind", "codex"}, true); err == nil {
+		t.Fatal("retry accepted a primary-kind override")
+	}
+	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--kind", "unknown"}, false); err == nil {
+		t.Fatal("handoff accepted an unsupported primary kind")
 	}
 }
 

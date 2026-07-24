@@ -298,6 +298,9 @@ func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) 
 	if first.Primary.Name != name || client.startCalls != 1 || client.promptCalls != 1 {
 		t.Fatalf("first handoff = %#v, starts=%d prompts=%d", first, client.startCalls, client.promptCalls)
 	}
+	if first.Primary.Kind != "claude" {
+		t.Fatalf("default primary kind = %q, want claude", first.Primary.Kind)
+	}
 	if !first.PromptDelivered || client.metadataCalls != 2 {
 		t.Fatalf("first handoff delivery/metadata = %#v, %d", first, client.metadataCalls)
 	}
@@ -313,8 +316,40 @@ func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) 
 	}
 	state, _ := store.Load()
 	feature := state.Features["repo-123456:bridge"]
-	if feature.Handoff.Stage != model.HandoffPrompted || !feature.Handoff.BootstrapPrompted || feature.Agents["builder"].NativeSession.Value != "session-1" {
+	if feature.Handoff.Stage != model.HandoffPrompted || feature.Handoff.PrimaryKind != "claude" || !feature.Handoff.BootstrapPrompted || feature.Agents["builder"].NativeSession.Value != "session-1" {
 		t.Fatalf("stored handoff state = %#v", feature)
+	}
+}
+
+func TestHandoffPersistsRequestedPrimaryKindForRetries(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	client.fail["start"] = errors.New("agent launch failed")
+
+	_, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "codex"})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Stage != "start primary agent" {
+		t.Fatalf("initial Codex handoff error = %#v", err)
+	}
+	state, err := store.Load()
+	if err != nil || state.Features["repo-123456:bridge"].Handoff.PrimaryKind != "codex" {
+		t.Fatalf("primary kind was not retained after failed handoff: state=%#v err=%v", state, err)
+	}
+	_, err = service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "claude"})
+	if !errors.As(err, &stage) || stage.Stage != "record handoff" {
+		t.Fatalf("conflicting primary-kind override error = %#v", err)
+	}
+
+	delete(client.fail, "start")
+	result, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
+	if err != nil {
+		t.Fatalf("retry Handoff() error = %v", err)
+	}
+	if result.Primary.Kind != "codex" || client.startCalls != 1 {
+		t.Fatalf("retry should launch the saved Codex kind: result=%#v starts=%d calls=%#v", result, client.startCalls, client.calls)
 	}
 }
 

@@ -40,6 +40,12 @@ wt start bridge --no-herdr >/dev/null
 wt start bridge >/dev/null
 [[ "$(<"$fixture_root/herd-calls")" == "handoff --feature bridge --worktree $target_root --branch feature/bridge" ]]
 
+# An optional per-feature kind override is forwarded to the initial handoff;
+# omitting it above leaves the configured Claude default unchanged.
+> "$fixture_root/herd-calls"
+wt start bridge --kind codex >/dev/null
+[[ "$(<"$fixture_root/herd-calls")" == "handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex" ]]
+
 # A blocked Herdr cleanup guard must stop wt done before it mutates the
 # backlog, archives tasks, checks dirty state, or asks Git to remove anything.
 print -r -- "## Doing" > "$dev_root/BACKLOG.md"
