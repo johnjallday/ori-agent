@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
@@ -199,6 +200,7 @@ type ServerBuilder struct {
 	evolutionHandler   *evolutionhttp.Handler
 	vaultHandler       *vaulthttp.Handler
 	connectionsHandler *connectionshttp.Handler
+	connStore          *connections.Store
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache

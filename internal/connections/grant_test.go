@@ -44,3 +44,26 @@ func TestVerifyReconnectSubject(t *testing.T) {
 		t.Fatalf("empty subject must be rejected, got %v", err)
 	}
 }
+
+func TestAttachMCPGrant(t *testing.T) {
+	c := conn("sub-1")
+
+	if err := c.AttachMCPGrant(ProductCalendar, "sub-1", "google-calendar", []string{"cal.readonly"}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	g, ok := c.Grant(ProductCalendar)
+	if !ok || g.Health != HealthHealthy || g.Transport != TransportRemoteMCP || g.CredentialRef != "google-calendar" {
+		t.Fatalf("calendar grant = %+v", g)
+	}
+
+	if err := c.AttachMCPGrant(ProductCalendar, "sub-OTHER", "x", nil); !errors.Is(err, ErrSubjectMismatch) {
+		t.Fatalf("mismatched subject: want ErrSubjectMismatch, got %v", err)
+	}
+	if err := c.AttachMCPGrant(ProductGmail, "sub-1", "x", nil); err == nil {
+		t.Fatal("Gmail is native, not a remote-MCP product")
+	}
+	empty := &Connection{Provider: ProviderGoogle}
+	if err := empty.AttachMCPGrant(ProductCalendar, "sub-1", "x", nil); !errors.Is(err, ErrNoActiveIdentity) {
+		t.Fatalf("no identity: want ErrNoActiveIdentity, got %v", err)
+	}
+}

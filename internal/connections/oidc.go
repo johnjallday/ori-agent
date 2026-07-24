@@ -63,20 +63,40 @@ func NewGoogleVerifier(ctx context.Context, clientID string) (*GoogleVerifier, e
 }
 
 // Verify validates the raw ID token and that its nonce matches the one bound to
-// this flow, then extracts the identity. Expiry is checked strictly (go-oidc
-// adds no clock skew); being strict on expiry is a safe bound for FR 22.
+// this flow, then extracts the identity (FR 21, 22). Expiry is checked strictly
+// (go-oidc adds no clock skew), a safe bound.
 func (g *GoogleVerifier) Verify(ctx context.Context, rawIDToken, expectedNonce string) (Identity, error) {
-	if g == nil || g.verifier == nil {
-		return Identity{}, ErrIDTokenInvalid
-	}
-	tok, err := g.verifier.Verify(ctx, rawIDToken)
+	tok, id, err := g.verify(ctx, rawIDToken)
 	if err != nil {
-		return Identity{}, fmt.Errorf("%w: %v", ErrIDTokenInvalid, err)
+		return Identity{}, err
 	}
 	if expectedNonce == "" || tok.Nonce != expectedNonce {
 		return Identity{}, ErrNonceMismatch
 	}
+	return id, nil
+}
 
+// VerifyNoNonce validates issuer, audience, signature, and expiry and extracts
+// the identity WITHOUT a nonce check. It is for the MCP OAuth flow, whose
+// authorize request carries no nonce and whose replay protection comes from the
+// single-use state + PKCE; the ID token is captured server-side from Ori's own
+// token exchange (never an attacker-controlled redirect), so subject
+// verification is sound without a nonce (FR 23).
+func (g *GoogleVerifier) VerifyNoNonce(ctx context.Context, rawIDToken string) (Identity, error) {
+	_, id, err := g.verify(ctx, rawIDToken)
+	return id, err
+}
+
+// verify validates the token and extracts the identity, returning the raw token
+// too so callers can apply flow-specific checks (e.g. nonce).
+func (g *GoogleVerifier) verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, Identity, error) {
+	if g == nil || g.verifier == nil {
+		return nil, Identity{}, ErrIDTokenInvalid
+	}
+	tok, err := g.verifier.Verify(ctx, rawIDToken)
+	if err != nil {
+		return nil, Identity{}, fmt.Errorf("%w: %v", ErrIDTokenInvalid, err)
+	}
 	var claims struct {
 		Email         string `json:"email"`
 		EmailVerified bool   `json:"email_verified"`
@@ -84,12 +104,12 @@ func (g *GoogleVerifier) Verify(ctx context.Context, rawIDToken, expectedNonce s
 		Picture       string `json:"picture"`
 	}
 	if err := tok.Claims(&claims); err != nil {
-		return Identity{}, fmt.Errorf("%w: claims: %v", ErrIDTokenInvalid, err)
+		return nil, Identity{}, fmt.Errorf("%w: claims: %v", ErrIDTokenInvalid, err)
 	}
 	if tok.Subject == "" {
-		return Identity{}, fmt.Errorf("%w: empty subject", ErrIDTokenInvalid)
+		return nil, Identity{}, fmt.Errorf("%w: empty subject", ErrIDTokenInvalid)
 	}
-	return Identity{
+	return tok, Identity{
 		Subject:       tok.Subject,
 		Email:         claims.Email,
 		EmailVerified: claims.EmailVerified,

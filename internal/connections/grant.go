@@ -2,6 +2,7 @@ package connections
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -54,4 +55,35 @@ func (c *Connection) VerifyReconnectSubject(returnedSubject string) error {
 
 func (c *Connection) touch() {
 	c.UpdatedAt = time.Now()
+}
+
+// AttachMCPGrant attaches (or refreshes) a remote-MCP product grant — Calendar or
+// Drive — after the MCP flow's ID token has been verified. It enforces that the
+// verified subject matches the active identity (FR 23) and records the grant
+// Healthy with an opaque reference to the MCP server; the tokens stay in the MCP
+// vault seam, never on the connection (FR 40). It refuses a mismatched subject,
+// a missing identity, or a non-MCP product.
+func (c *Connection) AttachMCPGrant(product ProductKey, subject, credentialRef string, scopes []string) error {
+	if c == nil || !c.HasVerifiedIdentity() {
+		return ErrNoActiveIdentity
+	}
+	if subject == "" || subject != c.Subject {
+		return ErrSubjectMismatch
+	}
+	if product != ProductCalendar && product != ProductDrive {
+		return fmt.Errorf("connections: %q is not a remote-MCP product", product)
+	}
+	if c.Grants == nil {
+		c.Grants = map[ProductKey]*ProductGrant{}
+	}
+	c.Grants[product] = &ProductGrant{
+		ConnectionID:  c.ID,
+		Product:       product,
+		Transport:     TransportRemoteMCP,
+		CredentialRef: credentialRef,
+		GrantedScopes: scopes,
+		Health:        HealthHealthy,
+	}
+	c.touch()
+	return nil
 }
