@@ -14,7 +14,14 @@ import "time"
 // productOrder fixes the row order so the surface always shows Gmail, Calendar,
 // then Drive (FR 11), regardless of map iteration order or which products the
 // user has enabled.
-var productOrder = []ProductKey{ProductGmail, ProductCalendar, ProductDrive}
+var productOrder = AllProducts()
+
+// AllProducts returns the V1 products in stable display order (Gmail, Calendar,
+// Drive) — the canonical order used by the card and the disconnect impact
+// preview (FR 11). It returns a fresh slice so callers cannot mutate the order.
+func AllProducts() []ProductKey {
+	return []ProductKey{ProductGmail, ProductCalendar, ProductDrive}
+}
 
 // PublicGrant is the safe, per-product summary shown in a product row. It
 // deliberately omits CredentialRef and anything token-bearing.

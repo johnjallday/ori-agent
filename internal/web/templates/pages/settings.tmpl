@@ -917,6 +917,13 @@
               #google-account .gc-drive-field{display:flex;flex-direction:column;gap:0.25rem;font-size:0.82rem;color:var(--text-secondary)}
               #google-account .gc-drive-field .modern-input{width:100%}
               #google-account .gc-drive-actions{display:flex;gap:0.5rem;margin-top:0.25rem}
+              #google-account .gc-confirm{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid rgba(239,68,68,0.35);border-radius:0.5rem;background:rgba(239,68,68,0.05);display:flex;flex-direction:column;gap:0.55rem}
+              #google-account .gc-confirm-title{font-weight:600;color:var(--text-primary)}
+              #google-account .gc-confirm-list{margin:0;padding-left:1.1rem;font-size:0.83rem;color:var(--text-secondary)}
+              #google-account .gc-confirm-actions{display:flex;gap:0.5rem;margin-top:0.25rem}
+              #google-account .gc-disconnect-btn{padding:0.2rem 0.7rem;font-size:0.78rem}
+              #google-account .gc-advanced{font-size:0.85rem;color:var(--text-secondary)}
+              #google-account .gc-advanced summary{cursor:pointer;color:var(--text-secondary)}
             </style>
             <div class="settings-section-header">
               <span class="settings-section-icon">
@@ -949,12 +956,22 @@
               </div>
               <div id="googleConnProducts" class="gc-products"></div>
               <div id="googleConnDriveSetup" class="gc-drive-setup d-none"></div>
+              <div id="googleConnConfirm" class="gc-confirm d-none"></div>
               <div class="settings-actions mt-3">
                 <button id="googleConnDisconnectBtn" type="button" class="modern-btn modern-btn-danger">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2"><path d="M19,3H5C3.89,3 3,3.89 3,5V9H5V5H19V19H5V15H3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M10.08,15.58L11.5,17L16.5,12L11.5,7L10.08,8.41L12.67,11H3V13H12.67L10.08,15.58Z"/></svg>
                   Disconnect Google
                 </button>
+                <button id="googleConnSwitchBtn" type="button" class="modern-btn modern-btn-secondary">Switch account</button>
               </div>
+              <details class="gc-advanced mt-2">
+                <summary>Advanced</summary>
+                <p class="gc-drive-note">
+                  Disconnecting only removes Google access from this device. To also revoke Ori's access at Google —
+                  which affects every product at once and cannot be limited to one — visit
+                  <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">Google's third-party access controls ↗</a>.
+                </p>
+              </details>
             </div>
 
             <div id="googleConnDisconnected" class="d-none">
