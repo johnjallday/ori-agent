@@ -39,6 +39,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - workspace-backlog -> PRD at tasks/prd-workspace-backlog.md (started 2026-07-22)
 
 ## Shipped / dropped
+- 2026-07-24 herdr-start-kind - PR #260 merged to dev (2026-07-24)
 - 2026-07-24 herdr-devflow-cleanup-guard - PR #259 merged to dev (2026-07-24)
 - 2026-07-24 herdr-devflow-bridge -> PRD at tasks/prd-herdr-devflow-bridge.md (started 2026-07-23) - PR #258 merged to dev (2026-07-24)
 - 2026-07-21 unit-sheet-model-editing - PR #246 merged to dev (2026-07-21)
