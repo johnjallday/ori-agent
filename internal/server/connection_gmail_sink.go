@@ -43,3 +43,35 @@ func (s *gmailCredentialSink) SaveGmailCredential(ctx context.Context, cred conn
 	}
 	return account.ID, nil
 }
+
+// LinkGmailToWorkspace reuses the global Gmail grant's identity to give a
+// workspace its own email account WITHOUT re-authorizing with Google (FR 47, 54):
+// it reveals the grant's OAuth credential and creates a workspace-scoped
+// EmailAccount carrying the same tokens. Multiple workspaces thus share one
+// Google identity, each with its own account record the mailbox can resolve.
+func (s *gmailCredentialSink) LinkGmailToWorkspace(ctx context.Context, credentialRef, vaultID, workspaceID string) (string, error) {
+	creds, err := s.store.RevealEmailOAuthCredentials(ctx, credentialRef, vault.AccessContext{})
+	if err != nil {
+		return "", err
+	}
+	account, err := s.store.CreateEmailAccount(ctx, vault.EmailAccountInput{
+		VaultID:      vaultID,
+		WorkspaceID:  workspaceID,
+		Label:        creds.EmailAddress,
+		Source:       "google-connection",
+		Provider:     vault.EmailProviderGmail,
+		EmailAddress: creds.EmailAddress,
+		AuthType:     vault.EmailAuthTypeOAuth2,
+		Credentials: vault.EmailAccountCredentials{
+			AccessToken:   creds.AccessToken,
+			RefreshToken:  creds.RefreshToken,
+			ClientID:      creds.ClientID,
+			ClientSecret:  creds.ClientSecret,
+			TokenEndpoint: creds.TokenEndpoint,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return account.ID, nil
+}

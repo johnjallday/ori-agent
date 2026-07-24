@@ -25,6 +25,15 @@ func (fakeSink) SaveGmailCredential(_ context.Context, _ connections.GmailCreden
 	return "vault://email/acct-test", nil
 }
 
+type fakeLinker struct {
+	gotRef, gotWorkspace string
+}
+
+func (l *fakeLinker) LinkGmailToWorkspace(_ context.Context, ref, _, workspaceID string) (string, error) {
+	l.gotRef, l.gotWorkspace = ref, workspaceID
+	return "vault://email/ws-acct-1", nil
+}
+
 func newTestServer(t *testing.T) (*http.ServeMux, *connections.Store) {
 	t.Helper()
 	// Fake Google token endpoint (returns a granted scope set incl. gmail.readonly).
@@ -44,7 +53,7 @@ func newTestServer(t *testing.T) (*http.ServeMux, *connections.Store) {
 		WithCredentialSink(fakeSink{})
 
 	h := NewHandler(Deps{
-		Flow: flow, Store: store, Guard: NewOriginGuard(),
+		Flow: flow, Store: store, Guard: NewOriginGuard(), Linker: &fakeLinker{},
 		BuildRedirectURL: func(*http.Request) string { return "http://localhost/api/connections/google/callback" },
 	})
 	mux := http.NewServeMux()
@@ -183,5 +192,41 @@ func TestHandler_GmailEnable_EndToEnd(t *testing.T) {
 	}
 	if gmail.Health != connections.HealthHealthy || !gmail.Enabled {
 		t.Fatalf("gmail grant after enable = %+v", gmail)
+	}
+}
+
+func gmailEnabledConn() *connections.Connection {
+	return &connections.Connection{
+		ID: "c", Provider: connections.ProviderGoogle, Subject: "sub-1", Email: "jane@example.com", VaultID: "v1",
+		Grants: map[connections.ProductKey]*connections.ProductGrant{
+			connections.ProductGmail: {ConnectionID: "c", Product: connections.ProductGmail, Health: connections.HealthHealthy, CredentialRef: "vault://email/global"},
+		},
+	}
+}
+
+func TestHandler_GmailLink_Success(t *testing.T) {
+	mux, store := newTestServer(t)
+	_ = store.Save(gmailEnabledConn())
+	rec := do(mux, http.MethodPost, "http://localhost/api/connections/google/gmail/link?workspace_id=ws-7", "http://localhost")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "account_id") {
+		t.Fatalf("link = %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_GmailLink_RequiresEnabledGmail(t *testing.T) {
+	mux, store := newTestServer(t)
+	_ = store.Save(&connections.Connection{ID: "c", Provider: connections.ProviderGoogle, Subject: "sub-1"}) // identity only
+	rec := do(mux, http.MethodPost, "http://localhost/api/connections/google/gmail/link?workspace_id=ws-7", "http://localhost")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "gmail_not_enabled") {
+		t.Fatalf("link without gmail = %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_GmailLink_MissingWorkspace(t *testing.T) {
+	mux, store := newTestServer(t)
+	_ = store.Save(gmailEnabledConn())
+	rec := do(mux, http.MethodPost, "http://localhost/api/connections/google/gmail/link", "http://localhost")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("link without workspace id = %d", rec.Code)
 	}
 }

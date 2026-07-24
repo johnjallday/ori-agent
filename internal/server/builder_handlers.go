@@ -309,15 +309,20 @@ func (b *ServerBuilder) initializeHandlers() {
 			connections.NewLazyGoogleVerifier(clientID),
 		)
 		// Enabling Gmail stores its OAuth credential as a vault EmailAccount, so
-		// the native mailbox reuses it (FR 39). Requires the vault store (Phase 17).
-		if b.vaultStore != nil {
-			connFlow = connFlow.WithCredentialSink(newGmailCredentialSink(b.vaultStore))
-		}
-		b.connectionsHandler = connectionshttp.NewHandler(connectionshttp.Deps{
+		// the native mailbox reuses it (FR 39); the same adapter also links the
+		// grant to workspaces without re-auth (FR 47, 54). Requires the vault
+		// store (Phase 17).
+		connDeps := connectionshttp.Deps{
 			Flow:  connFlow,
 			Store: connStore,
 			Guard: connectionshttp.NewOriginGuard(),
-		})
+		}
+		if b.vaultStore != nil {
+			sink := newGmailCredentialSink(b.vaultStore)
+			connFlow.WithCredentialSink(sink)
+			connDeps.Linker = sink
+		}
+		b.connectionsHandler = connectionshttp.NewHandler(connDeps)
 		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 

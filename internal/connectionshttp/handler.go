@@ -1,6 +1,7 @@
 package connectionshttp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,14 +12,22 @@ import (
 	"github.com/johnjallday/ori-agent/internal/connections"
 )
 
+// WorkspaceLinker gives a workspace its own Gmail account by reusing the global
+// grant's identity — no Google re-authorization (FR 47, 54). Implemented by a
+// vault-backed adapter; nil disables workspace linking.
+type WorkspaceLinker interface {
+	LinkGmailToWorkspace(ctx context.Context, credentialRef, vaultID, workspaceID string) (accountID string, err error)
+}
+
 // Handler serves the Google Account connection endpoints. Mutating and
 // metadata-reading routes are wrapped by the OriginGuard (FR 34); the OAuth
 // callback is a top-level browser navigation from Google and is instead
 // protected by the single-use state value it must carry (FR 20).
 type Handler struct {
-	flow  *connections.IdentityFlow
-	store *connections.Store
-	guard *OriginGuard
+	flow   *connections.IdentityFlow
+	store  *connections.Store
+	guard  *OriginGuard
+	linker WorkspaceLinker
 
 	resolveLocalUser func(*http.Request) string
 	buildRedirectURL func(*http.Request) string
@@ -26,9 +35,10 @@ type Handler struct {
 
 // Deps are the Handler's collaborators.
 type Deps struct {
-	Flow  *connections.IdentityFlow
-	Store *connections.Store
-	Guard *OriginGuard
+	Flow   *connections.IdentityFlow
+	Store  *connections.Store
+	Guard  *OriginGuard
+	Linker WorkspaceLinker
 	// ResolveLocalUser maps a request to Ori's local user id (single-user app
 	// defaults to "local").
 	ResolveLocalUser func(*http.Request) string
@@ -43,6 +53,7 @@ func NewHandler(d Deps) *Handler {
 		flow:             d.Flow,
 		store:            d.Store,
 		guard:            d.Guard,
+		linker:           d.Linker,
 		resolveLocalUser: d.ResolveLocalUser,
 		buildRedirectURL: d.BuildRedirectURL,
 	}
@@ -73,6 +84,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/disconnect", h.guard.Wrap(http.HandlerFunc(h.disconnect)))
 	mux.Handle("/api/connections/google/status", h.guard.Wrap(http.HandlerFunc(h.status)))
 	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
+	mux.Handle("/api/connections/google/gmail/link", h.guard.Wrap(http.HandlerFunc(h.gmailLink)))
 	mux.HandleFunc("/api/connections/google/callback", h.callback)
 }
 
@@ -162,6 +174,53 @@ func (h *Handler) gmailEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": res.AuthorizeURL})
+}
+
+// gmailLink gives the target workspace its own Gmail account by reusing the
+// active identity's healthy Gmail grant — no Google re-authorization (FR 47, 54).
+func (h *Handler) gmailLink(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing_workspace", "message": "A workspace id is required."})
+		return
+	}
+	if h.linker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "unavailable", "message": "Workspace linking isn't available in this build."})
+		return
+	}
+	conn, err := h.store.Load()
+	if err != nil {
+		http.Error(w, "failed to load connection", http.StatusInternalServerError)
+		return
+	}
+	g, ok := connGmailGrant(conn)
+	if !ok {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "gmail_not_enabled", "message": "Enable Gmail on your Google account first."})
+		return
+	}
+	accountID, err := h.linker.LinkGmailToWorkspace(r.Context(), g.CredentialRef, conn.VaultID, workspaceID)
+	if err != nil {
+		http.Error(w, "failed to link Gmail to the workspace", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"account_id": accountID})
+}
+
+// connGmailGrant returns the connection's Gmail grant when it is healthy and
+// carries a credential reference.
+func connGmailGrant(conn *connections.Connection) (*connections.ProductGrant, bool) {
+	if conn == nil {
+		return nil, false
+	}
+	g, ok := conn.Grant(connections.ProductGmail)
+	if !ok || g == nil || g.Health != connections.HealthHealthy || strings.TrimSpace(g.CredentialRef) == "" {
+		return nil, false
+	}
+	return g, true
 }
 
 // userMessageFor maps a flow error to a safe, specific user-facing message. It
