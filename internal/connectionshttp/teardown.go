@@ -71,6 +71,8 @@ func (h *Handler) productDisconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to save connection", http.StatusInternalServerError)
 		return
 	}
+	// Record withdrawal of this product's consent (FR 96).
+	h.recordConsent(conn)
 	writeJSON(w, http.StatusOK, connections.Project(conn))
 }
 

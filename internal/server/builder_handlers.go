@@ -320,6 +320,7 @@ func (b *ServerBuilder) initializeHandlers() {
 			Impacts:  connectionImpactEnumerator{b: b},
 			Teardown: connectionProductTeardown{b: b},
 			Health:   connectionGrantHealth{b: b},
+			Consent:  connections.NewConsentLog(config.DefaultDataDir()),
 		}
 		if b.vaultStore != nil {
 			sink := newGmailCredentialSink(b.vaultStore)

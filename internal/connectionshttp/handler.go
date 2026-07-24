@@ -32,6 +32,7 @@ type Handler struct {
 	impacts  ImpactEnumerator
 	teardown ProductTeardown
 	health   GrantHealthChecker
+	consent  *connections.ConsentLog
 
 	resolveLocalUser func(*http.Request) string
 	buildRedirectURL func(*http.Request) string
@@ -52,6 +53,9 @@ type Deps struct {
 	// Health reconciles each grant's live health on status load without opening a
 	// browser (FR 85). Nil keeps stored health as-is.
 	Health GrantHealthChecker
+	// Consent is the token/content-free consent audit log (FR 96). Nil disables
+	// consent recording.
+	Consent *connections.ConsentLog
 	// ResolveLocalUser maps a request to Ori's local user id (single-user app
 	// defaults to "local").
 	ResolveLocalUser func(*http.Request) string
@@ -70,6 +74,7 @@ func NewHandler(d Deps) *Handler {
 		impacts:          d.Impacts,
 		teardown:         d.Teardown,
 		health:           d.Health,
+		consent:          d.Consent,
 		resolveLocalUser: d.ResolveLocalUser,
 		buildRedirectURL: d.BuildRedirectURL,
 	}
@@ -100,6 +105,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/disconnect", h.guard.Wrap(http.HandlerFunc(h.disconnect)))
 	mux.Handle("/api/connections/google/status", h.guard.Wrap(http.HandlerFunc(h.status)))
 	mux.Handle("/api/connections/google/impact", h.guard.Wrap(http.HandlerFunc(h.impact)))
+	mux.Handle("/api/connections/google/consent", h.guard.Wrap(http.HandlerFunc(h.consentAudit)))
 	mux.Handle("/api/connections/google/product/disconnect", h.guard.Wrap(http.HandlerFunc(h.productDisconnect)))
 	mux.Handle("/api/connections/google/product/unlink", h.guard.Wrap(http.HandlerFunc(h.productUnlink)))
 	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
@@ -158,6 +164,8 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("connection status: failed to persist reconciled health", logger.Fields{"error": saveErr})
 		}
 	}
+	// Keep the consent audit trail in step with the live grants (FR 96).
+	h.recordConsent(conn)
 	writeJSON(w, http.StatusOK, connections.Project(conn))
 }
 
@@ -184,6 +192,8 @@ func (h *Handler) disconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to disconnect", http.StatusInternalServerError)
 		return
 	}
+	// Record withdrawal of every remaining active consent (FR 96).
+	h.recordConsent(nil)
 	writeJSON(w, http.StatusOK, connections.Project(nil))
 }
 
