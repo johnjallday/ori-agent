@@ -302,6 +302,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		clientID := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_ID"))
 		clientSecret := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_SECRET"))
 		connStore := connections.NewStore(config.DefaultDataDir())
+		b.connStore = connStore
 		connFlow := connections.NewIdentityFlow(
 			connections.OAuthConfig{ClientID: clientID, ClientSecret: clientSecret},
 			connections.NewStateStore(10*time.Minute),
@@ -323,6 +324,9 @@ func (b *ServerBuilder) initializeHandlers() {
 			connDeps.Linker = sink
 		}
 		b.connectionsHandler = connectionshttp.NewHandler(connDeps)
+		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
+		// token and attach the grant to this connection (FR 23, 40).
+		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)
 		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 

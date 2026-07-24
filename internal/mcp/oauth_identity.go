@@ -59,3 +59,14 @@ func injectGoogleIdentityScopes(authorizeURL string) (string, error) {
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
+
+// googleMCPIdentityHook, when set by the server layer, receives the raw ID token
+// from a Google MCP authorization so it can verify the subject and attach the
+// grant to the active connection (FR 23). Decoupled via a package var so
+// internal/mcp never imports the connection domain.
+var googleMCPIdentityHook func(serverName, endpoint, rawIDToken, clientID string)
+
+// SetGoogleMCPIdentityHook installs (or clears, with nil) the identity hook.
+func SetGoogleMCPIdentityHook(fn func(serverName, endpoint, rawIDToken, clientID string)) {
+	googleMCPIdentityHook = fn
+}

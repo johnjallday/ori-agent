@@ -98,3 +98,20 @@ func TestGoogleVerifier_WrongSigningKey(t *testing.T) {
 		t.Fatalf("want ErrIDTokenInvalid (signature), got %v", err)
 	}
 }
+
+func TestGoogleVerifier_NoNonce(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+	gv := testVerifier(t, priv, "aud-123")
+	cl := baseClaims(time.Now())
+	delete(cl, "nonce") // MCP flow issues no nonce
+	raw := mintToken(t, priv, cl)
+
+	id, err := gv.VerifyNoNonce(context.Background(), raw)
+	if err != nil || id.Subject != "sub-123" {
+		t.Fatalf("VerifyNoNonce: id=%+v err=%v", id, err)
+	}
+	// The nonce-enforcing Verify must still reject a token with no nonce.
+	if _, err := gv.Verify(context.Background(), raw, "n1"); !errors.Is(err, ErrNonceMismatch) {
+		t.Fatalf("Verify should reject missing nonce, got %v", err)
+	}
+}
