@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
@@ -66,13 +67,37 @@ func (b *ServerBuilder) googleMCPIdentityHook(serverName, endpoint, rawIDToken, 
 // mcpToolExposureAllowed is the server-side tool-exposure policy wired into the
 // MCP registry (SetToolExposureHook). Google Drive is capped to its fail-closed
 // read-only allowlist — mutations, permission tools, and any unknown/future tool
-// are denied at both listing and execution (FR 66, 67). Every other server is
+// are denied at both listing and execution (FR 66, 67). Either Google product
+// can also be hard-disabled independently by feature flag, which denies all of
+// its tools regardless of any grant or binding (FR 75). Every other server is
 // unrestricted here; their tools are gated by workspace bindings elsewhere.
 func (b *ServerBuilder) mcpToolExposureAllowed(serverURL, toolName string) bool {
-	if connectionProductForMCPEndpoint(serverURL) == connections.ProductDrive {
+	switch connectionProductForMCPEndpoint(serverURL) {
+	case connections.ProductDrive:
+		if !googleProductEnabled("DRIVE") {
+			return false
+		}
 		return drive.IsAllowedTool(toolName)
+	case connections.ProductCalendar:
+		// Calendar is not allowlist-capped (it supports read+write via Calendar
+		// Ops), but the feature flag can still hard-disable it independently.
+		return googleProductEnabled("CALENDAR")
+	default:
+		return true
 	}
-	return true
+}
+
+// googleProductEnabled reports whether a Google product (DRIVE, CALENDAR) is
+// enabled. Products are ON by default; setting ORI_GOOGLE_<PRODUCT>_ENABLED to a
+// falsey value (0/false/no/off) hard-disables that product independently,
+// denying all of its MCP tools at listing and execution (FR 75).
+func googleProductEnabled(product string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ORI_GOOGLE_" + product + "_ENABLED"))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // sanitizeDriveResultText fences and bounds untrusted Google Drive result
