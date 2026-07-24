@@ -145,6 +145,7 @@
           btn.type = "button";
           btn.className = "modern-btn modern-btn-secondary gc-enable-btn";
           btn.textContent = "Set up";
+          btn.setAttribute("aria-label", "Set up Google Drive");
           btn.addEventListener("click", () => this.toggleDriveSetup());
           right.appendChild(btn);
         }
@@ -155,8 +156,9 @@
           dc.type = "button";
           dc.className = "modern-btn modern-btn-secondary gc-disconnect-btn";
           dc.textContent = "Disconnect";
-          dc.addEventListener("click", () => this.confirmProductDisconnect(g.product));
+          dc.setAttribute("aria-label", "Disconnect " + (PRODUCT_LABELS[g.product] || g.product));
           right.appendChild(dc);
+          dc.addEventListener("click", () => this.confirmProductDisconnect(g.product));
         }
 
         row.appendChild(name);
