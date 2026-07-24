@@ -75,6 +75,17 @@ func (b *ServerBuilder) mcpToolExposureAllowed(serverURL, toolName string) bool 
 	return true
 }
 
+// sanitizeDriveResultText fences and bounds untrusted Google Drive result
+// content — file bodies, names, metadata, comments, links — before it reaches
+// the LLM (FR 71, 73). The first block of each Drive result also gets the
+// untrusted-content notice. Non-Drive servers pass through unchanged.
+func (b *ServerBuilder) sanitizeDriveResultText(serverURL, text string, blockIndex int) string {
+	if connectionProductForMCPEndpoint(serverURL) == connections.ProductDrive {
+		return drive.FenceText(text, blockIndex == 0)
+	}
+	return text
+}
+
 // googleConnectionEmail returns the active Google connection's email (or "") so
 // Google MCP authorizations can pre-select that account (FR 58).
 func (b *ServerBuilder) googleConnectionEmail() string {

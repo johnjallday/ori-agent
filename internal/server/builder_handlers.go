@@ -333,6 +333,9 @@ func (b *ServerBuilder) initializeHandlers() {
 		// whether a Google account is connected — a manually added Drive MCP
 		// server is capped too.
 		mcp.SetToolExposureHook(b.mcpToolExposureAllowed)
+		// Fence + bound untrusted Google Drive result content before it reaches
+		// the LLM (FR 71, 73).
+		mcp.SetToolResultTextHook(b.sanitizeDriveResultText)
 		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 

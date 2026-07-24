@@ -441,7 +441,14 @@ func (s *Server) CallTool(ctx context.Context, name string, arguments map[string
 		params.Arguments = map[string]any{}
 	}
 
-	return conn.CallTool(ctx, params)
+	result, err := conn.CallTool(ctx, params)
+	if err != nil {
+		return result, err
+	}
+	// Fence + bound untrusted result content (e.g. Google Drive) before it
+	// reaches callers and the LLM (FR 71, 73). No-op for non-policied servers.
+	sanitizeResultText(s.config.URL, result)
+	return result, nil
 }
 
 // GetStatus returns the current server status
