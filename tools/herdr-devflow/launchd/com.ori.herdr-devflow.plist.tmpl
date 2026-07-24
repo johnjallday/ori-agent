@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ori.herdr-devflow</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{HELPER_PATH}}</string>
+    <string>--home</string>
+    <string>{{RUNTIME_ROOT}}</string>
+    <string>--herdr-bin</string>
+    <string>{{HERDR_BINARY}}</string>
+    <string>dispatch</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>{{RUNTIME_ROOT}}/logs/dispatch.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{RUNTIME_ROOT}}/logs/dispatch.err.log</string>
+</dict>
+</plist>

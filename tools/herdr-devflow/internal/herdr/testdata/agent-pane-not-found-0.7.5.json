@@ -1,0 +1,7 @@
+{
+  "id": "cli:agent:start",
+  "error": {
+    "code": "agent_pane_not_found",
+    "message": "agent target pane w1:p2 not found"
+  }
+}
