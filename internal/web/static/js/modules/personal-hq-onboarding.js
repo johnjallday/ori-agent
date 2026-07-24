@@ -645,7 +645,7 @@ export function followUpView(f) {
   // toast rather than a broken flow.
   function connectEmail() {
     const popup = window.open(
-      '/api/vault/email/oauth/start?provider=gmail',
+      '/api/vault/email-oauth/start?provider=gmail',
       'ori-hq-email',
       'width=520,height=680'
     );

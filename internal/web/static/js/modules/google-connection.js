@@ -9,6 +9,7 @@
   "use strict";
 
   const PRODUCT_LABELS = { gmail: "Gmail", calendar: "Calendar", drive: "Drive" };
+  const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
   const HEALTH_LABELS = {
     not_enabled: "Not enabled",
     connecting: "Connecting…",
@@ -101,15 +102,59 @@
         name.className = "gc-product-name";
         name.textContent = PRODUCT_LABELS[g.product] || g.product;
 
+        const right = document.createElement("div");
+        right.className = "gc-product-right";
+
         const pill = document.createElement("span");
         pill.className = "gc-pill";
         pill.setAttribute("data-health", g.health || "not_enabled");
         pill.textContent = HEALTH_LABELS[g.health] || (g.enabled ? "Enabled" : "Not enabled");
+        right.appendChild(pill);
+
+        // Gmail: enable when off, or offer the explicit send upgrade once healthy
+        // (Calendar/Drive enablement arrives later).
+        if (g.product === "gmail" && !g.enabled) {
+          right.appendChild(this.enableButton("Enable", null));
+        } else if (g.product === "gmail" && g.health === "healthy" && !(g.granted_scopes || []).includes(GMAIL_SEND_SCOPE)) {
+          right.appendChild(this.enableButton("Enable sending", "send"));
+        }
 
         row.appendChild(name);
-        row.appendChild(pill);
+        row.appendChild(right);
         this.el.products.appendChild(row);
       });
+    }
+
+    enableButton(label, scope) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "modern-btn modern-btn-secondary gc-enable-btn";
+      btn.textContent = label;
+      btn.addEventListener("click", () => this.enableGmail(btn, scope));
+      return btn;
+    }
+
+    async enableGmail(btn, scope) {
+      this.hideError();
+      if (btn) btn.disabled = true;
+      try {
+        const url =
+          scope === "send"
+            ? "/api/connections/google/gmail/enable?scope=send"
+            : "/api/connections/google/gmail/enable";
+        const res = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
+        const data = await res.json().catch(() => ({}));
+        if ((res.status === 409 || res.status === 503) && data.message) {
+          this.showError(data.message);
+          return;
+        }
+        if (!res.ok || !data.authorize_url) throw new Error("enable failed");
+        window.location.assign(data.authorize_url);
+      } catch (e) {
+        this.showError("Couldn't start Gmail access. Please try again.");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     async connect() {

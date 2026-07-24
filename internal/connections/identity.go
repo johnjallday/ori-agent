@@ -58,6 +58,14 @@ type OAuthConfig struct {
 // IsConfigured reports whether a client id is present.
 func (c OAuthConfig) IsConfigured() bool { return strings.TrimSpace(c.ClientID) != "" }
 
+// tokenURL returns the effective token endpoint (Google's default when unset).
+func (c OAuthConfig) tokenURL() string {
+	if c.TokenURL != "" {
+		return c.TokenURL
+	}
+	return googleTokenURL
+}
+
 func (c OAuthConfig) oauth2Config(redirectURL string, scopes []string) *oauth2.Config {
 	authURL := c.AuthURL
 	if authURL == "" {
@@ -82,12 +90,14 @@ type IDVerifier interface {
 	Verify(ctx context.Context, rawIDToken, expectedNonce string) (Identity, error)
 }
 
-// IdentityFlow drives the Connect-Google identity handshake.
+// IdentityFlow drives the Connect-Google identity handshake and product
+// enablement (see product.go).
 type IdentityFlow struct {
 	config   OAuthConfig
 	states   *StateStore
 	store    *Store
 	verifier IDVerifier
+	sink     CredentialSink
 	newID    func() string
 	now      func() time.Time
 }
@@ -151,6 +161,17 @@ type CompleteConnectParams struct {
 	State      string
 	Code       string
 	OAuthError string // non-empty when Google redirected with error=...
+}
+
+// Complete consumes an OAuth callback and dispatches on the product recorded in
+// the pending state: a base identity connect, or a product enablement (Gmail).
+// A single callback route can therefore serve every flow. An unknown/expired
+// state falls through to the identity path, which reports ErrExpiredFlow.
+func (f *IdentityFlow) Complete(ctx context.Context, p CompleteConnectParams) (*Connection, error) {
+	if product, ok := f.states.Product(p.State); ok && product == ProductGmail {
+		return f.CompleteEnableGmail(ctx, p)
+	}
+	return f.CompleteConnect(ctx, p)
 }
 
 // CompleteConnect consumes the callback: it validates the state, exchanges the
