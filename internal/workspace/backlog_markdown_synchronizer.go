@@ -72,7 +72,7 @@ func (s *FileBacklogSynchronizer) Import(workspaceID string) (*BacklogMarkdownIm
 		return result, err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from s.resolve(workspaceID), which resolves through the store, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return result, nil
@@ -344,7 +344,7 @@ func (s *FileBacklogSynchronizer) RenderAfterMutation(workspaceID string) error 
 	if err != nil || !ok {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil { // #nosec G301 -- 0755 matches this package's established workspace-folder directory permission (see task_markdown_sync.go and the other ~20 os.MkdirAll call sites in this package)
 		return err
 	}
 	content := RenderWorkspaceBacklogMarkdown(ws)
@@ -478,7 +478,7 @@ func (s *FileBacklogSynchronizer) AdoptCollision(workspaceID string) (*BacklogMa
 	if err != nil || !ok {
 		return &BacklogMarkdownImportResult{}, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path comes from s.resolve(workspaceID), which resolves through the store, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &BacklogMarkdownImportResult{}, nil

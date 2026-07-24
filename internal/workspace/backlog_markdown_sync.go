@@ -440,7 +440,7 @@ func parseBacklogMarkdownBody(body string, knownBacklogIDs map[string]struct{}) 
 // not Ori-managed. A nil, nil result means "safe to write" (no file, or an
 // Ori-managed file already there).
 func detectBacklogMarkdownCollision(path string) (*BacklogMarkdownCollision, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is BacklogMarkdownPath(folder, isGroup), where folder comes from a store-resolved workspace ID, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
