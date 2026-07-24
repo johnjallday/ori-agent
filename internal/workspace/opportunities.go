@@ -12,8 +12,6 @@ import (
 )
 
 // OpportunityStatus tracks where an opportunity sits in the user's triage flow.
-// v1 supports only the four below; richer states (reviewed, planned, in_progress)
-// land alongside Action Plans in v1.5.
 type OpportunityStatus string
 
 const (
@@ -21,6 +19,11 @@ const (
 	OpportunitySnoozed   OpportunityStatus = "snoozed"
 	OpportunityResolved  OpportunityStatus = "resolved"
 	OpportunityDismissed OpportunityStatus = "dismissed"
+	// OpportunityPlanned marks a finding promoted to a Backlog item via Add to
+	// Backlog (PRD workspace-backlog FR26-29). Distinct from OpportunityResolved:
+	// the underlying finding isn't fixed, it's just been turned into tracked
+	// work — using "resolved" here would misdescribe the finding as addressed.
+	OpportunityPlanned OpportunityStatus = "planned"
 )
 
 // DismissalReason captures why the user dismissed an opportunity. Used to power
@@ -58,6 +61,16 @@ type Opportunity struct {
 	DismissedAt     *time.Time      `json:"dismissed_at,omitempty"`
 	ResolvedAt      *time.Time      `json:"resolved_at,omitempty"`
 	SnoozedUntil    *time.Time      `json:"snoozed_until,omitempty"`
+	// PlannedAt/LinkedTaskID/LinkedWorkspaceID are set by MarkPlanned when this
+	// opportunity is promoted to a Backlog item (FR26-29). The link is a
+	// reference, not a move — the opportunity record itself is untouched
+	// besides these fields, so it retains its own evidence/history.
+	// LinkedTaskID/LinkedWorkspaceID double as the idempotency check: a repeat
+	// Add to Backlog call for the same opportunity returns the existing linked
+	// item instead of creating a duplicate.
+	PlannedAt         *time.Time `json:"planned_at,omitempty"`
+	LinkedTaskID      string     `json:"linked_task_id,omitempty"`
+	LinkedWorkspaceID string     `json:"linked_workspace_id,omitempty"`
 }
 
 // IsOpen reports whether the opportunity is in the active triage backlog.
@@ -148,6 +161,11 @@ type OpportunityStore interface {
 	Snooze(workspaceID, opportunityID string, until time.Time) error
 	// MarkResolved sets Status=resolved and ResolvedAt=now.
 	MarkResolved(workspaceID, opportunityID string) error
+	// MarkPlanned sets Status=planned, PlannedAt=now, and links the given
+	// Backlog task (FR26-29). Overwrites any previous link — callers that need
+	// idempotent "return the existing item" behavior should check
+	// Status==OpportunityPlanned && LinkedTaskID!="" via Get before calling.
+	MarkPlanned(workspaceID, opportunityID, taskID, taskWorkspaceID string) error
 }
 
 // workspaceOpportunityStore is the v1 implementation that reads and writes
@@ -321,6 +339,16 @@ func (s *workspaceOpportunityStore) MarkResolved(workspaceID, opportunityID stri
 		now := time.Now()
 		o.Status = OpportunityResolved
 		o.ResolvedAt = &now
+	})
+}
+
+func (s *workspaceOpportunityStore) MarkPlanned(workspaceID, opportunityID, taskID, taskWorkspaceID string) error {
+	return s.updateOpportunity(workspaceID, opportunityID, func(o *Opportunity) {
+		now := time.Now()
+		o.Status = OpportunityPlanned
+		o.PlannedAt = &now
+		o.LinkedTaskID = taskID
+		o.LinkedWorkspaceID = taskWorkspaceID
 	})
 }
 

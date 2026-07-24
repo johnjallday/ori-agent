@@ -16,6 +16,12 @@ type SmartInputDecision string
 const (
 	SmartInputDecisionTask SmartInputDecision = "task"
 	SmartInputDecisionChat SmartInputDecision = "chat"
+	// SmartInputDecisionBacklog captures an explicit "add X to the backlog"
+	// intent (PRD workspace-backlog FR21-22): the created item must remain
+	// uncommitted (no assignee, no execution) until explicitly promoted, so
+	// it is a distinct decision from SmartInputDecisionTask rather than a
+	// task variant.
+	SmartInputDecisionBacklog SmartInputDecision = "backlog"
 )
 
 type SmartInputMethod string
@@ -135,7 +141,7 @@ func (h *SmartInputHandler) HandleOverride(w http.ResponseWriter, r *http.Reques
 	}
 
 	if !isValidSmartInputDecision(req.PredictedDecision) || !isValidSmartInputDecision(req.SelectedDecision) {
-		_ = orihttp.RespondBadRequest(w, "predicted_decision and selected_decision must be task or chat")
+		_ = orihttp.RespondBadRequest(w, "predicted_decision and selected_decision must be task, chat, or backlog")
 		return
 	}
 
@@ -175,7 +181,12 @@ func (h *SmartInputHandler) HandleOverride(w http.ResponseWriter, r *http.Reques
 }
 
 func isValidSmartInputDecision(decision SmartInputDecision) bool {
-	return decision == SmartInputDecisionTask || decision == SmartInputDecisionChat
+	switch decision {
+	case SmartInputDecisionTask, SmartInputDecisionChat, SmartInputDecisionBacklog:
+		return true
+	default:
+		return false
+	}
 }
 
 func isValidSmartInputMethod(method SmartInputMethod) bool {

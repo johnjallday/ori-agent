@@ -401,11 +401,22 @@ func (sh *StreamingHandler) sendInitialProgress(w http.ResponseWriter, flusher h
 	progress := ws.GetWorkspaceProgress()
 	agentStats := ws.GetAgentStats()
 
+	// Tasks surfaces begin at Ready (PRD workspace-backlog FR40) — filter out
+	// Backlog the same way handleGetTasks does, so this SSE dashboard feed
+	// doesn't sweep uncommitted captures into the live task list either.
+	tasks := make([]workspace.Task, 0, len(ws.Tasks))
+	for _, t := range ws.Tasks {
+		if t.Status == workspace.TaskStatusBacklog {
+			continue
+		}
+		tasks = append(tasks, t)
+	}
+
 	data := map[string]any{
 		"workspace_id":       workspaceID,
 		"workspace_progress": progress,
 		"agent_stats":        agentStats,
-		"tasks":              ws.Tasks,
+		"tasks":              tasks,
 		"attachments":        ws.Attachments,
 	}
 

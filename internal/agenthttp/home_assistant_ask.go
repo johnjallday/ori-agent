@@ -18,28 +18,30 @@ var errHomeModelNotConfigured = errors.New("system model is not configured")
 
 // Home action types (PRD 4.5 / 5.1).
 const (
-	HomeActionNavigate        = "navigate"
-	HomeActionOpenWorkspace   = "open_workspace"
-	HomeActionOpenTask        = "open_task"
-	HomeActionOpenSession     = "open_session"
-	HomeActionCreateWorkspace = "create_workspace"
-	HomeActionCreateTask      = "create_task"
-	HomeActionStartTask       = "start_task"
-	HomeActionAssignAgent     = "assign_agent"
-	HomeActionCreateAgent     = "create_agent"
-	HomeActionRemoveAgent     = "remove_agent"
-	HomeActionAskFollowup     = "ask_followup"
+	HomeActionNavigate          = "navigate"
+	HomeActionOpenWorkspace     = "open_workspace"
+	HomeActionOpenTask          = "open_task"
+	HomeActionOpenSession       = "open_session"
+	HomeActionCreateWorkspace   = "create_workspace"
+	HomeActionCreateTask        = "create_task"
+	HomeActionCreateBacklogItem = "create_backlog_item"
+	HomeActionStartTask         = "start_task"
+	HomeActionAssignAgent       = "assign_agent"
+	HomeActionCreateAgent       = "create_agent"
+	HomeActionRemoveAgent       = "remove_agent"
+	HomeActionAskFollowup       = "ask_followup"
 )
 
 // homeMutatingActionTypes are the only action types that change state and thus
 // require confirmation before execution.
 var homeMutatingActionTypes = map[string]bool{
-	HomeActionCreateWorkspace: true,
-	HomeActionCreateTask:      true,
-	HomeActionStartTask:       true,
-	HomeActionAssignAgent:     true,
-	HomeActionCreateAgent:     true,
-	HomeActionRemoveAgent:     true,
+	HomeActionCreateWorkspace:   true,
+	HomeActionCreateTask:        true,
+	HomeActionCreateBacklogItem: true,
+	HomeActionStartTask:         true,
+	HomeActionAssignAgent:       true,
+	HomeActionCreateAgent:       true,
+	HomeActionRemoveAgent:       true,
 }
 
 // HomeAction is a serializable next-step action descriptor returned to the
@@ -90,6 +92,10 @@ type HomeAssistantAskResponse struct {
 type HomeActionMutator interface {
 	CreateWorkspace(ctx context.Context, name, description string) (workspaceID, href string, err error)
 	CreateTask(ctx context.Context, workspaceID, description string) (taskID, href string, err error)
+	// CreateBacklogItem adds an uncommitted Backlog item (PRD workspace-backlog
+	// FR23-25) — unlike CreateTask, it must not assign an agent or become
+	// runnable until an explicit Promote to Ready action.
+	CreateBacklogItem(ctx context.Context, workspaceID, description string) (itemID, href string, err error)
 	StartTask(ctx context.Context, workspaceID, taskID string) (href string, err error)
 	AssignAgent(ctx context.Context, workspaceID, agentName string) (href string, err error)
 	CreateAgent(ctx context.Context, name, description string) (href string, err error)
@@ -177,6 +183,22 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 
 	if prompt == "" {
 		return HomeAssistantAskResponse{Response: "What would you like to know about your workspaces, tasks, or activity?", Intent: intent}
+	}
+
+	// Backlog capture (PRD workspace-backlog FR23-25) is checked as its own
+	// step, separately from detectHomeMutationRequest, because a recognized-
+	// but-unresolved workspace target must produce a user-readable decline
+	// message rather than silently falling through to a normal chat answer.
+	if conf, decline := h.detectBacklogCaptureRequest(prompt); conf != nil {
+		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
+		return HomeAssistantAskResponse{
+			Response:             conf.Summary,
+			Intent:               intent,
+			RequiresConfirmation: true,
+			Confirmation:         conf,
+		}
+	} else if decline != "" {
+		return HomeAssistantAskResponse{Response: decline, Intent: intent}
 	}
 
 	// Explicit, supported mutation request: ask for confirmation before doing
@@ -362,6 +384,22 @@ func (h *HomeAssistantAskHandler) executeConfirmedAction(ctx context.Context, in
 			Response: "Created the task.",
 			Intent:   intent,
 			Actions:  []HomeAction{{ID: "open-created-task", Type: HomeActionOpenWorkspace, Label: "Open workspace", Href: href, WorkspaceID: wsID, TaskID: id}},
+		}
+	case HomeActionCreateBacklogItem:
+		wsID := firstNonEmpty(action.WorkspaceID, actionArgString(args, "workspace_id"))
+		desc := actionArgString(args, "description")
+		if wsID == "" || desc == "" {
+			return HomeAssistantAskResponse{Response: "I need a workspace and a description to add to the backlog.", Intent: intent}
+		}
+		id, href, err := h.Mutator.CreateBacklogItem(ctx, wsID, desc)
+		if err != nil {
+			return HomeAssistantAskResponse{Response: "I couldn't add that to the backlog: " + err.Error(), Intent: intent}
+		}
+		h.recordMutation(ctx, intent, HomeActionCreateBacklogItem)
+		return HomeAssistantAskResponse{
+			Response: "Added to the backlog. It stays uncommitted until you promote it to Ready.",
+			Intent:   intent,
+			Actions:  []HomeAction{{ID: "open-created-backlog-item", Type: HomeActionOpenWorkspace, Label: "Open workspace", Href: href, WorkspaceID: wsID, TaskID: id}},
 		}
 	case HomeActionStartTask:
 		wsID := firstNonEmpty(action.WorkspaceID, actionArgString(args, "workspace_id"))

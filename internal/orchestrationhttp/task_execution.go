@@ -121,6 +121,9 @@ func (th *TaskHandler) StartTaskAsync(workspaceID, taskID string) error {
 	if err != nil {
 		return fmt.Errorf("task %s not found: %w", taskID, err)
 	}
+	if err := workspace.RequireTaskNotBacklog(task, "cannot start task"); err != nil {
+		return err
+	}
 	if task.Status == workspace.TaskStatusInProgress {
 		return fmt.Errorf("task %s is already in progress", taskID)
 	}
@@ -207,6 +210,11 @@ func (th *TaskHandler) ExecuteTaskHandler(w http.ResponseWriter, r *http.Request
 
 	if foundTask == nil {
 		orihttp.NotFound(w, fmt.Sprintf("Task %s not found", req.TaskID))
+		return
+	}
+
+	if err := workspace.RequireTaskNotBacklog(foundTask, "cannot run task"); err != nil {
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
 
@@ -776,6 +784,10 @@ func (th *TaskHandler) executeParentTaskSequence(workspaceID, parentTaskID strin
 
 func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task *workspace.Task) (string, error) {
 	const manual = true
+
+	if err := workspace.RequireTaskNotBacklog(task, "cannot execute task"); err != nil {
+		return "", err
+	}
 
 	if task.To == "" || task.To == "unassigned" {
 		return "", fmt.Errorf("task %s has no assigned agent", task.Description)
@@ -1906,6 +1918,13 @@ func (th *TaskHandler) executeInputTasksIfNeeded(ws *workspace.Workspace, task *
 		if err != nil {
 			logger.Warn("Input task not found, skipping", logger.Fields{"input_task_id": inputTaskID})
 			continue
+		}
+
+		// A Backlog input task must be promoted before it can be auto-executed
+		// as a dependency (FR7-8) — reject explicitly rather than letting the
+		// SetStatus(InProgress) call below fail with an opaque transition error.
+		if err := workspace.RequireTaskNotBacklog(inputTask, fmt.Sprintf("cannot auto-execute input task %s", inputTaskID)); err != nil {
+			return err
 		}
 
 		// Check if input task needs execution

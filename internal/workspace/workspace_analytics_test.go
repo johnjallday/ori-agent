@@ -24,6 +24,8 @@ func TestComputeMapSummaryFields(t *testing.T) {
 			{Status: TaskStatusCompleted},
 			{Status: TaskStatusFailed},
 			{Status: TaskStatusTimeout},
+			{Status: TaskStatusBacklog},
+			{Status: TaskStatusBacklog},
 		},
 		SharedData: workspacesettings.Store(map[string]any{}, settings),
 	}
@@ -46,7 +48,10 @@ func TestComputeMapSummaryFields(t *testing.T) {
 		t.Errorf("OpsMode = %q, want %q", fields.OpsMode, "direct")
 	}
 	if fields.OpenTaskCount != 2 {
-		t.Errorf("OpenTaskCount = %d, want 2 (pending + in_progress, excludes completed)", fields.OpenTaskCount)
+		t.Errorf("OpenTaskCount = %d, want 2 (pending + in_progress, excludes completed and Backlog)", fields.OpenTaskCount)
+	}
+	if fields.BacklogCount != 2 {
+		t.Errorf("BacklogCount = %d, want 2, tracked separately from OpenTaskCount (PRD workspace-backlog FR7, 40, 49)", fields.BacklogCount)
 	}
 	if fields.NeedsAttentionCount != 2 {
 		t.Errorf("NeedsAttentionCount = %d, want 2 (failed + timeout)", fields.NeedsAttentionCount)
@@ -62,5 +67,38 @@ func TestComputeMapSummaryFieldsNilWorkspace(t *testing.T) {
 		fields.OpenTaskCount != 0 || fields.NeedsAttentionCount != 0 || fields.MCPCount != 0 ||
 		fields.SkillCount != 0 || fields.OpsMode != "" || fields.Active {
 		t.Errorf("ComputeMapSummaryFields(nil) = %+v, want zero value", fields)
+	}
+}
+
+// Regression test for a gap found via a Group 7 cross-surface audit:
+// GetWorkspaceProgress counted Backlog items in TotalTasks but the status
+// switch had no matching bucket for them, silently skewing Percentage low
+// for any workspace with Backlog items.
+func TestGetWorkspaceProgress_ExcludesBacklogFromTotals(t *testing.T) {
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Progress Test"})
+	tasks := []Task{
+		{Status: TaskStatusBacklog, Description: "idea 1"},
+		{Status: TaskStatusBacklog, Description: "idea 2"},
+		{Status: TaskStatusCompleted, Description: "done"},
+		{Status: TaskStatusPending, Description: "todo"},
+	}
+	for _, task := range tasks {
+		if err := ws.AddTask(task); err != nil {
+			t.Fatalf("add task: %v", err)
+		}
+	}
+
+	progress := ws.GetWorkspaceProgress()
+	if progress.TotalTasks != 2 {
+		t.Fatalf("TotalTasks = %d, want 2 (Backlog excluded)", progress.TotalTasks)
+	}
+	if progress.CompletedTasks != 1 {
+		t.Fatalf("CompletedTasks = %d, want 1", progress.CompletedTasks)
+	}
+	if progress.PendingTasks != 1 {
+		t.Fatalf("PendingTasks = %d, want 1", progress.PendingTasks)
+	}
+	if progress.Percentage != 50 {
+		t.Fatalf("Percentage = %d, want 50 (1 of 2 non-Backlog tasks complete, not 1 of 4)", progress.Percentage)
 	}
 }

@@ -175,6 +175,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     smartInputPrompt: document.getElementById('hubSmartInputPrompt'),
     smartInputPromptHint: document.getElementById('hubSmartInputPromptHint'),
     smartInputPromptTask: document.getElementById('hubSmartInputPromptTask'),
+    smartInputPromptBacklog: document.getElementById('hubSmartInputPromptBacklog'),
     smartInputPromptChat: document.getElementById('hubSmartInputPromptChat'),
     smartInputPromptCancel: document.getElementById('hubSmartInputPromptCancel'),
     smartInputAttachBtn: document.getElementById('hubSmartInputAttachBtn'),

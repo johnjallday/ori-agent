@@ -1351,6 +1351,7 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	workspace.Agents = mapFields.AgentNames
 	workspace.AgentCount = mapFields.AgentCount
 	workspace.OpenTaskCount = mapFields.OpenTaskCount
+	workspace.BacklogCount = mapFields.BacklogCount
 	workspace.NeedsAttentionCount = mapFields.NeedsAttentionCount
 	workspace.MCPCount = mapFields.MCPCount
 	workspace.SkillCount = mapFields.SkillCount

@@ -70,6 +70,32 @@ func TestApplyTaskAssignment(t *testing.T) {
 			t.Fatal("ApplyTaskAssignment(nil) = nil, want error")
 		}
 	})
+
+	t.Run("real assignment records execution intent", func(t *testing.T) {
+		task := &Task{ID: "t4", Status: TaskStatusPending, AwaitingExecutionIntent: true}
+		err := ws.ApplyTaskAssignment(task, TaskAssignment{
+			AgentName:  "Writer",
+			Mode:       TaskAssignmentModeManual,
+			AssignedBy: TaskAssignedByManual,
+		})
+		if err != nil {
+			t.Fatalf("ApplyTaskAssignment() error = %v", err)
+		}
+		if task.AwaitingExecutionIntent {
+			t.Fatalf("explicit assignment should clear AwaitingExecutionIntent: %+v", task)
+		}
+	})
+
+	t.Run("empty assignee does not clear execution intent", func(t *testing.T) {
+		task := &Task{ID: "t5", Status: TaskStatusPending, AwaitingExecutionIntent: true}
+		err := ws.ApplyTaskAssignment(task, TaskAssignment{AgentName: ""})
+		if err != nil {
+			t.Fatalf("ApplyTaskAssignment() error = %v", err)
+		}
+		if !task.AwaitingExecutionIntent {
+			t.Fatalf("clearing to no assignee should not record execution intent: %+v", task)
+		}
+	})
 }
 
 func TestResolveCoordinatorForAssignment(t *testing.T) {
@@ -314,6 +340,28 @@ func TestApplyEntryAgentDefault(t *testing.T) {
 			t.Fatal("ApplyEntryAgentDefault(nil) = true, want false")
 		}
 	})
+
+	t.Run("Backlog task is never defaulted", func(t *testing.T) {
+		ws := memberWorkspace("Solo")
+		task := &Task{ID: "t1", Status: TaskStatusBacklog}
+		if ws.ApplyEntryAgentDefault(task) {
+			t.Fatal("ApplyEntryAgentDefault() = true, want false for a Backlog task")
+		}
+		if task.To != "" {
+			t.Fatalf("Backlog task should stay unassigned: %+v", task)
+		}
+	})
+
+	t.Run("quiescent Ready task is not swept by the default", func(t *testing.T) {
+		ws := memberWorkspace("Solo")
+		task := &Task{ID: "t1", Status: TaskStatusPending, AwaitingExecutionIntent: true}
+		if ws.ApplyEntryAgentDefault(task) {
+			t.Fatal("ApplyEntryAgentDefault() = true, want false for a quiescent Ready task")
+		}
+		if task.To != "" || !task.AwaitingExecutionIntent {
+			t.Fatalf("quiescent task should stay untouched: %+v", task)
+		}
+	})
 }
 
 func TestClaimUnassignedTasksForCoordinator(t *testing.T) {
@@ -353,6 +401,29 @@ func TestClaimUnassignedTasksForCoordinator(t *testing.T) {
 		}
 		if ws.Tasks[0].To != "" {
 			t.Fatalf("task changed despite no coordinator: %+v", ws.Tasks[0])
+		}
+	})
+
+	t.Run("skips Backlog and quiescent Ready tasks", func(t *testing.T) {
+		ws := memberWorkspace("Manager", "Writer")
+		ws.SharedData = map[string]any{sharedDataEntryAgentNameKey: "Manager"}
+		ws.Tasks = []Task{
+			{ID: "a", Status: TaskStatusBacklog},                                 // Backlog -> never claimed
+			{ID: "b", Status: TaskStatusPending, AwaitingExecutionIntent: true},  // quiescent Ready -> never claimed
+			{ID: "c", Status: TaskStatusPending, AwaitingExecutionIntent: false}, // ordinary unassigned -> claimed
+		}
+
+		if claimed := ws.ClaimUnassignedTasksForCoordinator(); claimed != 1 {
+			t.Fatalf("claimed = %d, want 1", claimed)
+		}
+		if ws.Tasks[0].To != "" {
+			t.Fatalf("Backlog task claimed: %+v", ws.Tasks[0])
+		}
+		if ws.Tasks[1].To != "" || !ws.Tasks[1].AwaitingExecutionIntent {
+			t.Fatalf("quiescent Ready task claimed: %+v", ws.Tasks[1])
+		}
+		if ws.Tasks[2].To != "Manager" {
+			t.Fatalf("ordinary unassigned task not claimed: %+v", ws.Tasks[2])
 		}
 	})
 }

@@ -238,6 +238,72 @@ func TestOpportunityStore_UpsertKeepsDismissedOnRecurrence(t *testing.T) {
 	}
 }
 
+func TestOpportunityStore_MarkPlanned(t *testing.T) {
+	store, ws := newTestWorkspaceWithStore(t)
+	opps := NewOpportunityStore(store)
+
+	created, _, err := opps.Upsert(Opportunity{WorkspaceID: ws.ID, Title: "Missing alt text"})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	if err := opps.MarkPlanned(ws.ID, created.ID, "task-1", ws.ID); err != nil {
+		t.Fatalf("MarkPlanned: %v", err)
+	}
+
+	got, err := opps.Get(ws.ID, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != OpportunityPlanned {
+		t.Errorf("status = %q, want %q", got.Status, OpportunityPlanned)
+	}
+	if got.PlannedAt == nil {
+		t.Error("expected PlannedAt to be set")
+	}
+	if got.LinkedTaskID != "task-1" || got.LinkedWorkspaceID != ws.ID {
+		t.Errorf("link = (%q, %q), want (task-1, %q)", got.LinkedTaskID, got.LinkedWorkspaceID, ws.ID)
+	}
+	if got.IsOpen() {
+		t.Error("a planned opportunity must not remain in the active triage queue")
+	}
+}
+
+// A planned opportunity that recurs (the same finding surfaces again on a
+// later mission run) must keep its planned status and its link — the same
+// non-reopening behavior already proven for dismissed/snoozed, distinct from
+// resolved, which does reopen (TestOpportunityStore_UpsertReopensResolvedOnRecurrence).
+func TestOpportunityStore_UpsertKeepsPlannedOnRecurrence(t *testing.T) {
+	store, ws := newTestWorkspaceWithStore(t)
+	opps := NewOpportunityStore(store)
+
+	first, _, err := opps.Upsert(Opportunity{WorkspaceID: ws.ID, Title: "Off-brand emoji"})
+	if err != nil {
+		t.Fatalf("first Upsert: %v", err)
+	}
+	if err := opps.MarkPlanned(ws.ID, first.ID, "task-1", ws.ID); err != nil {
+		t.Fatalf("MarkPlanned: %v", err)
+	}
+
+	merged, wasMerged, err := opps.Upsert(Opportunity{
+		WorkspaceID: ws.ID,
+		Title:       "Off-brand emoji",
+		Evidence:    "still here",
+	})
+	if err != nil {
+		t.Fatalf("recurrence Upsert: %v", err)
+	}
+	if !wasMerged {
+		t.Fatal("expected merge into the planned record")
+	}
+	if merged.Status != OpportunityPlanned {
+		t.Errorf("a planned opportunity must survive recurrence; got %q", merged.Status)
+	}
+	if merged.LinkedTaskID != "task-1" {
+		t.Errorf("the backlog link must survive recurrence too (FR28-29, 99); got %q", merged.LinkedTaskID)
+	}
+}
+
 func TestOpportunityStore_GetAndDelete(t *testing.T) {
 	store, ws := newTestWorkspaceWithStore(t)
 	opps := NewOpportunityStore(store)
@@ -276,6 +342,7 @@ func TestOpportunity_IsOpen(t *testing.T) {
 		{OpportunitySnoozed, true},
 		{OpportunityResolved, false},
 		{OpportunityDismissed, false},
+		{OpportunityPlanned, false},
 	}
 	for _, c := range cases {
 		got := Opportunity{Status: c.status}.IsOpen()

@@ -179,6 +179,135 @@ func TestExtractTaskDescription(t *testing.T) {
 	}
 }
 
+// Regression test for a gap found via a Group 7 cross-surface audit:
+// isRunnableTaskStatus (used by the "start task" NLU matcher) had no Backlog
+// exclusion, so a Backlog item whose description matched a "start the X
+// task" prompt could be proposed for execution.
+func TestIsRunnableTaskStatus_ExcludesBacklog(t *testing.T) {
+	if isRunnableTaskStatus(workspace.TaskStatusBacklog) {
+		t.Error("Backlog must not be considered runnable")
+	}
+	if !isRunnableTaskStatus(workspace.TaskStatusPending) {
+		t.Error("Pending must remain runnable")
+	}
+}
+
+func TestExtractBacklogDescription(t *testing.T) {
+	cases := []struct {
+		prompt string
+		wsName string
+		want   string
+	}{
+		{"add explore competitor pricing to the backlog in Demo Quest Board", "Demo Quest Board", "explore competitor pricing"},
+		{"add draft onboarding copy to backlog in Operations", "Operations", "draft onboarding copy"},
+		{"create fix the header in the backlog in Website Redesign", "Website Redesign", "fix the header"},
+		{"add to the backlog in Ops", "Ops", ""},
+	}
+	for _, c := range cases {
+		if got := extractBacklogDescription(c.prompt, c.wsName); got != c.want {
+			t.Errorf("extractBacklogDescription(%q, %q) = %q, want %q", c.prompt, c.wsName, got, c.want)
+		}
+	}
+}
+
+func TestDetectMutation_AddToBacklog(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspace(t, store, "ws-1", "Demo Quest Board", nil)
+	h := newTaskMutationHandler(t, store)
+
+	conf, decline := h.detectBacklogCaptureRequest("add explore competitor pricing to the backlog in Demo Quest Board")
+	if decline != "" {
+		t.Fatalf("expected no decline, got %q", decline)
+	}
+	if conf == nil {
+		t.Fatal("expected a create_backlog_item confirmation")
+	}
+	if conf.ActionType != HomeActionCreateBacklogItem {
+		t.Errorf("action type = %q, want %q", conf.ActionType, HomeActionCreateBacklogItem)
+	}
+	if got, _ := conf.Arguments["workspace_id"].(string); got != "ws-1" {
+		t.Errorf("workspace_id = %q, want ws-1", got)
+	}
+	if got, _ := conf.Arguments["description"].(string); got != "explore competitor pricing" {
+		t.Errorf("description = %q, want %q", got, "explore competitor pricing")
+	}
+}
+
+// A prompt whose task description merely mentions the word "backlog" (as a
+// subject, not a request to capture into Ori's Backlog feature) must not be
+// misread as backlog capture — regression for the connective-phrase guard.
+func TestDetectMutation_TaskMentioningBacklogWordNotMisreadAsBacklogCapture(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspace(t, store, "ws-1", "Roadmap", nil)
+	h := newTaskMutationHandler(t, store)
+
+	conf, decline := h.detectBacklogCaptureRequest("new task that reviews the backlog in the Roadmap workspace")
+	if conf != nil || decline != "" {
+		t.Fatalf("expected no backlog-capture match, got conf=%+v decline=%q", conf, decline)
+	}
+	// The same prompt is still recognized as ordinary task creation by the
+	// ordinary detector chain.
+	taskConf := h.detectHomeMutationRequest("new task that reviews the backlog in the Roadmap workspace")
+	if taskConf == nil || taskConf.ActionType != HomeActionCreateTask {
+		t.Fatalf("expected the prompt to still resolve as create_task, got %+v", taskConf)
+	}
+}
+
+func TestDetectMutation_AddToBacklogUnknownWorkspaceDeclines(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspace(t, store, "ws-1", "Demo Quest Board", nil)
+	h := newTaskMutationHandler(t, store)
+
+	conf, decline := h.detectBacklogCaptureRequest("add fix the header to the backlog in Nonexistent")
+	if conf != nil {
+		t.Fatalf("expected no confirmation for an unresolved workspace, got %+v", conf)
+	}
+	if decline == "" {
+		t.Fatal("expected a user-readable decline message, got empty string")
+	}
+}
+
+func TestDetectMutation_AddToBacklogAmbiguousWorkspaceDeclines(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	// Same length (11 chars each) so neither wins the longest-match tiebreak.
+	makeTestWorkspace(t, store, "ws-1", "Alpha Squad", nil)
+	makeTestWorkspace(t, store, "ws-2", "Bravo Squad", nil)
+	h := newTaskMutationHandler(t, store)
+
+	conf, decline := h.detectBacklogCaptureRequest("add ship the launch email to the backlog in Alpha Squad or Bravo Squad")
+	if conf != nil {
+		t.Fatalf("expected no confirmation for an ambiguous workspace match, got %+v", conf)
+	}
+	if decline == "" {
+		t.Fatal("expected a user-readable ambiguity decline message, got empty string")
+	}
+}
+
+func TestDetectMutation_AddToBacklogExcludesTrashedAndGroupWorkspaces(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+
+	trashed := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Archive Project"})
+	trashed.Status = workspace.StatusTrashed
+	if err := store.Save(trashed); err != nil {
+		t.Fatalf("save trashed workspace: %v", err)
+	}
+
+	group := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Engineering Group"})
+	group.Kind = "group"
+	if err := store.Save(group); err != nil {
+		t.Fatalf("save group workspace: %v", err)
+	}
+
+	h := newTaskMutationHandler(t, store)
+
+	if conf, _ := h.detectBacklogCaptureRequest("add clean up the archive to the backlog in Archive Project"); conf != nil {
+		t.Fatalf("expected a trashed workspace to be unroutable, got %+v", conf)
+	}
+	if conf, _ := h.detectBacklogCaptureRequest("add plan the offsite to the backlog in Engineering Group"); conf != nil {
+		t.Fatalf("expected a group workspace to be unroutable, got %+v", conf)
+	}
+}
+
 func TestAsk_ConfirmAndExecuteStartTask(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	makeTestWorkspace(t, store, "ws-ops", "Operations", []workspace.Task{
@@ -231,16 +360,18 @@ func TestAsk_ConfirmAndExecuteStartTask(t *testing.T) {
 
 // recordingMutator captures the arguments passed to each mutator method.
 type recordingMutator struct {
-	startedWS       string
-	startedTask     string
-	createdTaskWS   string
-	createdTaskDsc  string
-	assignedWS      string
-	assignedAgent   string
-	createdAgent    string
-	createdAgentDsc string
-	removedWS       string
-	removedAgent    string
+	startedWS         string
+	startedTask       string
+	createdTaskWS     string
+	createdTaskDsc    string
+	createdBacklogWS  string
+	createdBacklogDsc string
+	assignedWS        string
+	assignedAgent     string
+	createdAgent      string
+	createdAgentDsc   string
+	removedWS         string
+	removedAgent      string
 }
 
 func (m *recordingMutator) CreateWorkspace(_ context.Context, name, _ string) (string, string, error) {
@@ -251,6 +382,12 @@ func (m *recordingMutator) CreateTask(_ context.Context, wsID, description strin
 	m.createdTaskWS = wsID
 	m.createdTaskDsc = description
 	return "t-new", "/workspaces/" + wsID, nil
+}
+
+func (m *recordingMutator) CreateBacklogItem(_ context.Context, wsID, description string) (string, string, error) {
+	m.createdBacklogWS = wsID
+	m.createdBacklogDsc = description
+	return "b-new", "/workspaces/" + wsID, nil
 }
 
 func (m *recordingMutator) StartTask(_ context.Context, wsID, taskID string) (string, error) {

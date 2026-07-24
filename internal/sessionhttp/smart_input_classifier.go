@@ -8,6 +8,18 @@ const (
 )
 
 var (
+	// smartInputBacklogPrefixes are the terse capture-box equivalent of "add
+	// X to the backlog" (PRD workspace-backlog FR21-22): explicit, distinct
+	// from the task prefixes below since a matched item must stay
+	// uncommitted rather than become an executable task.
+	smartInputBacklogPrefixes = []string{
+		"backlog:",
+		"backlog ",
+		"idea:",
+		"idea ",
+		"someday:",
+		"someday ",
+	}
 	smartInputTaskPrefixes = []string{
 		"todo:",
 		"todo ",
@@ -70,6 +82,13 @@ func classifySmartInputHeuristic(input string) smartInputHeuristicResult {
 		return smartInputHeuristicResult{
 			Decision:   SmartInputDecisionTask,
 			Confidence: 0,
+		}
+	}
+
+	if hasPrefixAny(normalized, smartInputBacklogPrefixes) {
+		return smartInputHeuristicResult{
+			Decision:   SmartInputDecisionBacklog,
+			Confidence: 0.9,
 		}
 	}
 

@@ -559,6 +559,9 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/orchestration/tasks/output-contract/telemetry", s.Handlers.AutoTask.HandleOutputContractTelemetry)
 	}
 	mux.HandleFunc("/api/orchestration/tasks/", s.Handlers.Orchestration.TasksPathHandler) // Handles /api/orchestration/tasks/{id} and /api/orchestration/tasks/{id}/complete
+	mux.HandleFunc("/api/orchestration/backlog", s.Handlers.Orchestration.BacklogListHandler)
+	// Handles /api/orchestration/backlog/{id}, /{id}/promote, /reorder, /sync
+	mux.HandleFunc("/api/orchestration/backlog/", s.Handlers.Orchestration.BacklogItemPathHandler)
 	mux.HandleFunc("/api/orchestration/task-results", s.Handlers.Orchestration.TaskResultsHandler)
 	mux.HandleFunc("/api/orchestration/workflow/status", s.Handlers.Orchestration.WorkflowStatusHandler)
 	mux.HandleFunc("/api/orchestration/workflow/stream", s.Handlers.Orchestration.WorkflowStatusStreamHandler)
@@ -1008,6 +1011,7 @@ func registerActionCenterRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/dismiss", s.Handlers.ActionCenter.Dismiss)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/snooze", s.Handlers.ActionCenter.Snooze)
 		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/resolve", s.Handlers.ActionCenter.Resolve)
+		mux.HandleFunc("POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/add-to-backlog", s.Handlers.ActionCenter.AddToBacklog)
 	}
 }
 
