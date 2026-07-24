@@ -157,6 +157,9 @@ func (r *Registry) GetAllTools() []toolapi.Tool {
 
 		mcpTools := server.GetTools()
 		for _, tool := range mcpTools {
+			if !toolAllowed(server.config.URL, tool.Name) {
+				continue
+			}
 			adapter := NewMCPAdapter(server, tool)
 			tools = append(tools, adapter)
 		}
@@ -180,6 +183,9 @@ func (r *Registry) GetToolsForServer(serverName string) ([]toolapi.Tool, error) 
 	tools := make([]toolapi.Tool, 0, len(mcpTools))
 
 	for _, tool := range mcpTools {
+		if !toolAllowed(server.config.URL, tool.Name) {
+			continue
+		}
 		adapter := NewMCPAdapter(server, tool)
 		tools = append(tools, adapter)
 	}

@@ -328,6 +328,14 @@ func (b *ServerBuilder) initializeHandlers() {
 		// token and attach the grant to this connection (FR 23, 40).
 		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)
 		mcp.SetGoogleMCPLoginHint(b.googleConnectionEmail)
+		// Cap Google Drive to its fail-closed read-only tool allowlist, enforced
+		// server-side at both listing and execution (FR 66, 67). Independent of
+		// whether a Google account is connected — a manually added Drive MCP
+		// server is capped too.
+		mcp.SetToolExposureHook(b.mcpToolExposureAllowed)
+		// Fence + bound untrusted Google Drive result content before it reaches
+		// the LLM (FR 71, 73).
+		mcp.SetToolResultTextHook(b.sanitizeDriveResultText)
 		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 
