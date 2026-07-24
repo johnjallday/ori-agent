@@ -173,6 +173,7 @@ type handoffArgs struct {
 	feature  string
 	worktree string
 	branch   string
+	kind     string
 	resend   bool
 }
 
@@ -496,7 +497,7 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	var parsed handoffArgs
 	for len(args) > 0 {
 		switch args[0] {
-		case "--feature", "--worktree", "--branch":
+		case "--feature", "--worktree", "--branch", "--kind":
 			if len(args) < 2 || strings.HasPrefix(args[1], "--") {
 				return handoffArgs{}, fmt.Errorf("%s requires a value", args[0])
 			}
@@ -507,6 +508,11 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 				parsed.worktree = args[1]
 			case "--branch":
 				parsed.branch = args[1]
+			case "--kind":
+				if retry {
+					return handoffArgs{}, fmt.Errorf("--kind is only available with handoff; retry uses the recorded primary kind")
+				}
+				parsed.kind = args[1]
 			}
 			args = args[2:]
 		case "--resend":
@@ -521,6 +527,9 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	}
 	if !retry && (parsed.feature == "" || parsed.worktree == "") {
 		return handoffArgs{}, fmt.Errorf("handoff requires --feature and --worktree")
+	}
+	if parsed.kind != "" && !config.IsSupportedAgentKind(parsed.kind) {
+		return handoffArgs{}, fmt.Errorf("--kind %q is not supported by Herdr", parsed.kind)
 	}
 	return parsed, nil
 }
@@ -816,6 +825,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		FeatureName:  parsed.feature,
 		WorktreePath: parsed.worktree,
 		Branch:       parsed.branch,
+		PrimaryKind:  parsed.kind,
 		Resend:       parsed.resend,
 	})
 	if err != nil {
@@ -835,6 +845,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		"workspace_id":     result.WorkspaceID,
 		"primary_agent":    result.Primary.Name,
 		"primary_role":     result.Primary.Role,
+		"primary_kind":     result.Primary.Kind,
 		"prompt_delivered": result.PromptDelivered,
 		"prompt_skipped":   result.PromptSkipped,
 	})
@@ -1911,10 +1922,10 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
-  wt herd handoff --feature NAME --worktree PATH [--branch NAME]
+  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND]
                                 Open an existing Git worktree and launch its primary agent
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
-                                Resume only missing handoff stages; --resend repeats a confirmed prompt
+                                Resume the recorded primary kind; --resend repeats a confirmed prompt
   wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
                                 Start one explicit secondary role agent in the managed workspace
   wt herd prompt [role] <text> [--target TARGET] [--feature NAME|--worktree PATH]

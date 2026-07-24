@@ -74,6 +74,7 @@ type HandoffRequest struct {
 	FeatureName  string
 	WorktreePath string
 	Branch       string
+	PrimaryKind  string
 	Resend       bool
 }
 
@@ -138,6 +139,27 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		featureState.Schedules = make(map[string]model.Schedule)
 	}
 	featureState.Feature = feature
+	primaryRole := featureState.Handoff.PrimaryRole
+	if primaryRole == "" {
+		primaryRole = s.Config.Primary.Role
+	}
+	primaryKind := featureState.Handoff.PrimaryKind
+	if request.PrimaryKind != "" {
+		if primaryKind != "" && primaryKind != request.PrimaryKind {
+			return HandoffResult{}, &model.StageError{Stage: "record handoff", Code: model.ErrAgentAmbiguous, Message: "the managed primary kind is already recorded as " + primaryKind, Recovery: "run wt herd retry to preserve the original primary kind"}
+		}
+		primaryKind = request.PrimaryKind
+	}
+	if primaryKind == "" {
+		if saved, ok := featureState.Agents[primaryRole]; ok && saved.Kind != "" {
+			primaryKind = saved.Kind
+		} else {
+			primaryKind = s.Config.Primary.Kind
+		}
+	}
+	if !config.IsSupportedAgentKind(primaryKind) {
+		return HandoffResult{}, &model.StageError{Stage: "primary agent kind", Code: model.ErrConfigInvalid, Message: "the requested primary agent kind is not supported by Herdr", Recovery: "choose a supported --kind or update .herdr/devflow.toml"}
+	}
 	// The installed plugin can outlive this checkout, so persist the
 	// configured display-metadata source on this feature record. State is
 	// shared across repositories, therefore this must not be a global value.
@@ -145,9 +167,14 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	metadataEnabled := s.Config.Metadata.Enabled
 	featureState.MetadataEnabled = &metadataEnabled
 	if featureState.Handoff.Stage == "" {
-		featureState.Handoff = model.HandoffState{Stage: model.HandoffRecorded, PrimaryRole: s.Config.Primary.Role, UpdatedAt: s.now()}
-	} else if featureState.Handoff.PrimaryRole == "" {
-		featureState.Handoff.PrimaryRole = s.Config.Primary.Role
+		featureState.Handoff = model.HandoffState{Stage: model.HandoffRecorded, PrimaryRole: primaryRole, PrimaryKind: primaryKind, UpdatedAt: s.now()}
+	} else {
+		if featureState.Handoff.PrimaryRole == "" {
+			featureState.Handoff.PrimaryRole = primaryRole
+		}
+		if featureState.Handoff.PrimaryKind == "" {
+			featureState.Handoff.PrimaryKind = primaryKind
+		}
 	}
 	featureState.UpdatedAt = s.now()
 	state.Features[featureKey] = featureState
@@ -200,12 +227,13 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		}
 	}
 
-	primaryRole := featureState.Handoff.PrimaryRole
+	primaryRole = featureState.Handoff.PrimaryRole
+	primaryKind = featureState.Handoff.PrimaryKind
 	name, err := ScopedAgentName(feature.RepositoryID, feature.Name, primaryRole)
 	if err != nil {
 		return HandoffResult{}, &model.StageError{Stage: "primary agent name", Code: model.ErrConfigInvalid, Message: "could not create a safe primary agent name", Recovery: "check the feature and role names", Cause: err}
 	}
-	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, opened, name, primaryRole, s.Config.Primary.Kind)
+	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, opened, name, primaryRole, primaryKind)
 	if err != nil {
 		return HandoffResult{}, err
 	}

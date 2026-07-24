@@ -174,6 +174,7 @@ type HandoffState struct {
 	Stage             HandoffStage `json:"stage,omitempty"`
 	RootPaneID        string       `json:"root_pane_id,omitempty"`
 	PrimaryRole       string       `json:"primary_role,omitempty"`
+	PrimaryKind       string       `json:"primary_kind,omitempty"`
 	PrimaryAgentName  string       `json:"primary_agent_name,omitempty"`
 	BootstrapPrompted bool         `json:"bootstrap_prompted,omitempty"`
 	UpdatedAt         time.Time    `json:"updated_at,omitempty"`

@@ -41,6 +41,9 @@ worktree as usual and then attempts the Herdr handoff:
 
 ~~~bash
 wt start herdr-devflow-bridge
+
+# Keep the configured Claude default for other features, but use Codex here.
+wt start experimental-codex-flow --kind codex
 ~~~
 
 The handoff opens the existing checkout, finds an interactive pane, starts the
@@ -59,6 +62,12 @@ is still preserved; wait for the shell and run the printed retry command:
 wt herd retry --feature herdr-devflow-bridge --worktree /absolute/path/to/herdr-devflow-bridge
 wt herd doctor
 ~~~
+
+The checked-in configuration defaults the primary agent to Claude. Use
+wt start <feature> --kind <kind> only when one feature should start with a
+different supported Herdr kind. The selected kind is recorded with the handoff,
+so a later wt herd retry keeps that choice instead of falling back to the
+default.
 
 Use wt start <feature> --no-herdr for a one-run opt-out. A successful retry
 completes only missing stages. It does not create a second workspace or primary

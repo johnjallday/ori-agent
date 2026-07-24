@@ -5,7 +5,7 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt start [prd] [--no-herdr] # Create a worktree from a PRD in the dev tasks/ folder
+#   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--herdr-override] # Archive tasks back to dev, then remove worktree+branch
@@ -681,15 +681,32 @@ function wt_dispatch {
       return 1
     fi
 
-    local chosen="" no_herdr=0 start_arg
-    for start_arg in "${@:2}"; do
+    local chosen="" no_herdr=0 primary_kind="" start_arg start_index
+    local -a start_args
+    start_args=("${@:2}")
+    start_index=1
+    while (( start_index <= ${#start_args[@]} )); do
+      start_arg="${start_args[$start_index]}"
       case "$start_arg" in
         --no-herdr)
           no_herdr=1
           ;;
+        --kind)
+          start_index=$(( start_index + 1 ))
+          if (( start_index > ${#start_args[@]} )) || [[ "${start_args[$start_index]}" == --* ]]; then
+            echo "wt start --kind requires a Herdr agent kind"
+            echo "Usage: wt start [feature] [--kind KIND] [--no-herdr]"
+            return 1
+          fi
+          if [[ -n "$primary_kind" ]]; then
+            echo "wt start accepts --kind only once"
+            return 1
+          fi
+          primary_kind="${start_args[$start_index]}"
+          ;;
         --*)
           echo "Unknown wt start option: $start_arg"
-          echo "Usage: wt start [feature] [--no-herdr]"
+          echo "Usage: wt start [feature] [--kind KIND] [--no-herdr]"
           return 1
           ;;
         *)
@@ -700,7 +717,12 @@ function wt_dispatch {
           chosen="$start_arg"
           ;;
       esac
+      start_index=$(( start_index + 1 ))
     done
+    if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
+      echo "wt start --kind cannot be combined with --no-herdr"
+      return 1
+    fi
     if [[ -z "$chosen" ]]; then
       echo "Select a PRD to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
       local i
@@ -762,7 +784,12 @@ function wt_dispatch {
     # worktree and its planning artifacts exist; it never rolls them back.
     if (( ! no_herdr )); then
       echo "Handing the existing worktree to Herdr..."
-      if ! wt_herd handoff --feature "$feature" --worktree "$target" --branch "$branch"; then
+      local -a handoff_args
+      handoff_args=(handoff --feature "$feature" --worktree "$target" --branch "$branch")
+      if [[ -n "$primary_kind" ]]; then
+        handoff_args+=(--kind "$primary_kind")
+      fi
+      if ! wt_herd "${handoff_args[@]}"; then
         echo "Herdr handoff did not finish, but the Git worktree is ready."
         echo "  Retry: wt herd retry --feature '$feature' --worktree '$target' --branch '$branch'"
         echo "  Diagnose: wt herd doctor"
@@ -1283,7 +1310,7 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt start [prd] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
+    echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
