@@ -83,9 +83,19 @@ function makePage(over = {}) {
       { id: 'task-1', status: 'pending', to: 'writer' },
       { id: 'task-2', status: 'in_progress', to: 'writer' }
     ],
+    backlogItems: [{ task: { id: 'backlog-1', description: 'Ship it' } }],
     workspaceId: 'ws-1',
     buildAgentGroups() {
-      return [{ key: 'writer', name: 'Writer', isWorkspaceAgent: true, instanceCount: 1, roles: ['Agent'], tasks: [] }];
+      return [
+        {
+          key: 'writer',
+          name: 'Writer',
+          isWorkspaceAgent: true,
+          instanceCount: 1,
+          roles: ['Agent'],
+          tasks: []
+        }
+      ];
     },
     isWorkspaceEntryAgent: () => false,
     getAgentRosterStatus: () => ({ key: 'idle', label: 'Idle' }),
@@ -145,14 +155,32 @@ test('a details-mode boot with an empty query string never rewrites the clean UR
   withHarness('', ({ harness }) => {
     const view = new WorkspaceCommandView(makePage({ buildAgentGroups: () => [] }));
     assert.ok(view);
-    assert.deepEqual(harness.calls, [], 'no history call for an already-clean URL at the default mode');
+    assert.deepEqual(
+      harness.calls,
+      [],
+      'no history call for an already-clean URL at the default mode'
+    );
   });
 });
 
 test('selecting a different agent pushes a new history entry with the agent param (FR86, FR88)', () => {
   const twoAgents = () => [
-    { key: 'writer', name: 'Writer', isWorkspaceAgent: true, instanceCount: 1, roles: ['Agent'], tasks: [] },
-    { key: 'editor', name: 'Editor', isWorkspaceAgent: true, instanceCount: 1, roles: ['Agent'], tasks: [] }
+    {
+      key: 'writer',
+      name: 'Writer',
+      isWorkspaceAgent: true,
+      instanceCount: 1,
+      roles: ['Agent'],
+      tasks: []
+    },
+    {
+      key: 'editor',
+      name: 'Editor',
+      isWorkspaceAgent: true,
+      instanceCount: 1,
+      roles: ['Agent'],
+      tasks: []
+    }
   ];
   withHarness('', ({ harness }) => {
     const view = new WorkspaceCommandView(makePage({ buildAgentGroups: twoAgents }));
@@ -182,9 +210,17 @@ test('collapsing the tray is presentational: no push/replace with a new URL, onl
     const searchBefore = harness.win.location.search;
     harness.calls.length = 0;
     view.toggleTrayCollapsed();
-    assert.equal(harness.calls.length, 1, 'exactly one replaceState for the presentation-state capture');
+    assert.equal(
+      harness.calls.length,
+      1,
+      'exactly one replaceState for the presentation-state capture'
+    );
     assert.equal(harness.calls[0][0], 'replace');
-    assert.equal(harness.win.location.search, searchBefore, 'the URL query itself is unchanged by a presentational toggle');
+    assert.equal(
+      harness.win.location.search,
+      searchBefore,
+      'the URL query itself is unchanged by a presentational toggle'
+    );
     assert.equal(harness.win.history.state.trayCollapsed, true);
   });
 });
@@ -220,7 +256,11 @@ test('taskHrefWithReturn builds a safe, workspace-scoped href with a validated r
     const href = view.taskHrefWithReturn('task-1');
     assert.match(href, /^\/workspaces\/ws-1\/task\/task-1\?return=/);
     const returnParam = decodeURIComponent(href.split('return=')[1]);
-    assert.match(returnParam, /^\/workspaces\/ws-1(\?|$)/, 'return target is relative and workspace-scoped');
+    assert.match(
+      returnParam,
+      /^\/workspaces\/ws-1(\?|$)/,
+      'return target is relative and workspace-scoped'
+    );
     assert.ok(!returnParam.startsWith('//'), 'not protocol-relative');
     assert.ok(!/^https?:/.test(returnParam), 'not an absolute URL');
   });
@@ -253,14 +293,29 @@ test('boot restoration survives the real async-load race: tasks/agents are empty
     // does in loadTasks()'s finally block.
     tasks.push({ id: 'task-1', status: 'pending', to: 'writer' });
     page.buildAgentGroups = () => [
-      { key: 'writer', name: 'Writer', isWorkspaceAgent: true, instanceCount: 1, roles: ['Agent'], tasks: [] }
+      {
+        key: 'writer',
+        name: 'Writer',
+        isWorkspaceAgent: true,
+        instanceCount: 1,
+        roles: ['Agent'],
+        tasks: []
+      }
     ];
     harness.calls.length = 0;
     view.refresh();
 
     assert.equal(view.taskDrawerOpen, true);
-    assert.equal(view.taskDrawerSelectedId, 'task-1', 'the task now resolves once real data has loaded');
-    assert.equal(view.selectedAgentKey, 'writer', 'the agent now resolves once real data has loaded');
+    assert.equal(
+      view.taskDrawerSelectedId,
+      'task-1',
+      'the task now resolves once real data has loaded'
+    );
+    assert.equal(
+      view.selectedAgentKey,
+      'writer',
+      'the agent now resolves once real data has loaded'
+    );
   });
 });
 
@@ -273,6 +328,73 @@ test('a boot reference to a task/agent that never appears is eventually dropped,
     for (let i = 0; i < 25; i++) view.refresh();
     assert.equal(view.taskDrawerSelectedId, '');
     assert.equal(view.selectedAgentKey, '');
+  });
+});
+
+test('boot with panel=backlog + a valid backlog item id opens the shared drawer with that item selected (FR59)', () => {
+  withHarness('?panel=backlog&task=backlog-1&agent=writer', ({ harness }) => {
+    const view = new WorkspaceCommandView(makePage());
+    assert.equal(view.backlogDrawerOpen, true);
+    assert.equal(view.backlogDrawerSelectedId, 'backlog-1');
+    assert.equal(view.taskDrawerOpen, false, 'the Tasks drawer stays closed');
+    // The incoming URL was already fully valid and canonical (agent included),
+    // so boot makes no history calls.
+    assert.deepEqual(harness.calls, []);
+  });
+});
+
+test('boot with panel=backlog validates task against backlog items, not Ready tasks (FR59)', () => {
+  withHarness('?panel=backlog&task=task-1', () => {
+    // task-1 is a real Ready task id but not a Backlog item id — it must not
+    // leak across the two disjoint id spaces.
+    const view = new WorkspaceCommandView(makePage());
+    assert.equal(view.backlogDrawerOpen, true, 'panel=backlog alone is still honored');
+    assert.equal(
+      view.backlogDrawerSelectedId,
+      '',
+      'a Ready task id is not a valid backlog item id'
+    );
+  });
+});
+
+test('opening the Backlog drawer via openBacklogDrawer() syncs panel=backlog into the URL', () => {
+  withHarness('', ({ harness }) => {
+    const view = new WorkspaceCommandView(makePage());
+    harness.calls.length = 0;
+    view.openBacklogDrawer(null);
+    const pushed = harness.calls.find(([kind]) => kind === 'push');
+    assert.ok(pushed);
+    assert.match(pushed[1], /panel=backlog/);
+  });
+});
+
+test('opening the Tasks drawer while the Backlog drawer is open closes the Backlog drawer (only one drawer at a time)', () => {
+  withHarness('', () => {
+    const view = new WorkspaceCommandView(makePage());
+    view.openBacklogDrawer(null);
+    assert.equal(view.backlogDrawerOpen, true);
+    view.openTaskDrawer(null);
+    assert.equal(view.taskDrawerOpen, true);
+    assert.equal(
+      view.backlogDrawerOpen,
+      false,
+      'opening Tasks closes the already-open Backlog drawer'
+    );
+  });
+});
+
+test('opening the Backlog drawer while the Tasks drawer is open closes the Tasks drawer (only one drawer at a time)', () => {
+  withHarness('', () => {
+    const view = new WorkspaceCommandView(makePage());
+    view.openTaskDrawer(null);
+    assert.equal(view.taskDrawerOpen, true);
+    view.openBacklogDrawer(null);
+    assert.equal(view.backlogDrawerOpen, true);
+    assert.equal(
+      view.taskDrawerOpen,
+      false,
+      'opening Backlog closes the already-open Tasks drawer'
+    );
   });
 });
 

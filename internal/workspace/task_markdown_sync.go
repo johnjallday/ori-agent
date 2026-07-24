@@ -371,6 +371,13 @@ func renderWorkspaceTasksMarkdownBody(ws *Workspace) string {
 	var activeRoots []Task
 	var doneRoots []Task
 	for _, task := range tasks {
+		// Backlog items are excluded from tasks.md entirely (PRD
+		// workspace-backlog FR90): they are not yet committed work and are
+		// synchronized separately through BACKLOG.md. Once promoted to
+		// Ready, a task is no longer Backlog and participates here normally.
+		if task.Status == TaskStatusBacklog {
+			continue
+		}
 		if task.ParentTaskID != "" {
 			if _, ok := taskIDs[task.ParentTaskID]; ok {
 				children[task.ParentTaskID] = append(children[task.ParentTaskID], task)

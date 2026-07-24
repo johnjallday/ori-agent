@@ -18,17 +18,18 @@ type smartInputLLMResponse struct {
 }
 
 func classifySmartInputLLM(ctx context.Context, provider llm.Provider, model, reasoningEffort string, input string) (smartInputHeuristicResult, error) {
-	systemPrompt := `You classify a user's input into exactly one intent: "task" or "chat".
+	systemPrompt := `You classify a user's input into exactly one intent: "task", "backlog", or "chat".
 
 Return ONLY a JSON object with:
-- decision: "task" or "chat"
+- decision: "task", "backlog", or "chat"
 - confidence: number between 0 and 1
 - reasoning: brief explanation
 
 Guidance:
-- "task" means an actionable to-do item or instruction.
+- "task" means an actionable to-do item or instruction meant to be worked on now (it will be assigned and become runnable).
+- "backlog" means a rough idea, someday/maybe item, or explicit request to save something for later without committing to it yet (no assignee, does not run) — e.g. "backlog: explore X", "idea: try Y", "someday redesign Z".
 - "chat" means a question, discussion, or request for explanation.
-- If unclear, choose the best guess but lower the confidence.`
+- If unclear, choose the best guess but lower the confidence. Default to "task" over "backlog" unless the input explicitly signals deferral (backlog/idea/someday framing).`
 
 	userMessage := fmt.Sprintf("Input:\n%s", strings.TrimSpace(input))
 
@@ -57,7 +58,7 @@ Guidance:
 	}
 
 	switch parsed.Decision {
-	case SmartInputDecisionTask, SmartInputDecisionChat:
+	case SmartInputDecisionTask, SmartInputDecisionChat, SmartInputDecisionBacklog:
 	default:
 		return smartInputHeuristicResult{}, fmt.Errorf("invalid LLM decision: %s", parsed.Decision)
 	}

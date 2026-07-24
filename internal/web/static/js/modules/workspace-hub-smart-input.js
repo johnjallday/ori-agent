@@ -158,15 +158,19 @@
 
   /**
    * Set default decision indicator in prompt
-   * @param {string} decision - 'task' or 'chat' or null
+   * @param {string} decision - 'task', 'backlog', 'chat', or null
    */
   function setDefaultDecision(decision) {
     const elements = window.WorkspaceHubState.getElements();
     const isTask = decision === 'task';
+    const isBacklog = decision === 'backlog';
     const isChat = decision === 'chat';
 
     if (elements.smartInputPromptTask) {
       elements.smartInputPromptTask.classList.toggle('is-default', isTask);
+    }
+    if (elements.smartInputPromptBacklog) {
+      elements.smartInputPromptBacklog.classList.toggle('is-default', isBacklog);
     }
     if (elements.smartInputPromptChat) {
       elements.smartInputPromptChat.classList.toggle('is-default', isChat);
@@ -174,6 +178,8 @@
     if (elements.smartInputPromptHint) {
       if (isTask) {
         elements.smartInputPromptHint.textContent = 'Suggested: Create Task';
+      } else if (isBacklog) {
+        elements.smartInputPromptHint.textContent = 'Suggested: Add to Backlog';
       } else if (isChat) {
         elements.smartInputPromptHint.textContent = 'Suggested: Start Assistant';
       } else {
@@ -617,6 +623,87 @@
     return { kind: 'task', fallback: false };
   }
 
+  // Mirrors internal/sessionhttp/smart_input_classifier.go's
+  // smartInputBacklogPrefixes — these are classification signals, not part
+  // of the idea itself, so a leading match is stripped before the raw input
+  // becomes the item's title (found via live testing: "backlog: fix X"
+  // otherwise saved a title literally starting with "backlog:").
+  const SMART_INPUT_BACKLOG_PREFIXES = ['backlog:', 'backlog ', 'idea:', 'idea ', 'someday:', 'someday '];
+
+  function stripBacklogCapturePrefix(input) {
+    const trimmed = String(input || '').trim();
+    const lower = trimmed.toLowerCase();
+    for (const prefix of SMART_INPUT_BACKLOG_PREFIXES) {
+      if (lower.startsWith(prefix)) {
+        return trimmed.slice(prefix.length).trim();
+      }
+    }
+    return trimmed;
+  }
+
+  /**
+   * Confirmation for backlog capture (PRD workspace-backlog FR23-25): shows
+   * the proposed title and makes the non-executable outcome explicit before
+   * mutation, mirroring confirmTaskCreation's shared-modal pattern.
+   * @param {Object} options
+   * @param {string} options.description
+   * @returns {Promise<boolean>}
+   */
+  async function confirmBacklogCreation(options = {}) {
+    const description = String(options.description || '').trim();
+    const details = description ? [description] : [];
+
+    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+      return window.WorkspaceHubModals.showExecutionConfirm({
+        eyebrow: 'Assistant Backlog',
+        title: 'Add this to the backlog?',
+        message: 'Saved in this workspace without an agent or schedule — nothing runs until you promote it to Ready.',
+        confirmLabel: 'Add to Backlog',
+        cancelLabel: 'Cancel',
+        metaItems: ['Assistant', 'Backlog'],
+        details
+      });
+    }
+
+    return window.confirm(['Add this to the backlog?', ...details].join('\n\n'));
+  }
+
+  /**
+   * Create a Backlog item from smart input (PRD workspace-backlog FR20-25).
+   * Only a title is required — no auto-parse, no assignee, no schedule; the
+   * item stays uncommitted until an explicit Promote to Ready.
+   * @param {string} input - Input text
+   * @returns {Promise<Object>} { cancelled: true } | the created item | null
+   */
+  async function createBacklogItemFromSmartInput(input) {
+    const state = window.WorkspaceHubState.getState();
+    const description = stripBacklogCapturePrefix(input);
+    if (!description) return null;
+
+    const confirmed = await confirmBacklogCreation({ description });
+    if (!confirmed) {
+      return { cancelled: true };
+    }
+
+    const response = await fetch('/api/orchestration/backlog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspace_id: state.selectedId,
+        description,
+        source_type: 'manual'
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Failed to add to backlog');
+    }
+
+    const payload = await response.json();
+    return (payload && payload.item) || null;
+  }
+
   /**
    * Create chat from smart input
    * @param {string} input - Input text
@@ -647,9 +734,15 @@
     await window.WorkspaceHubSessions.loadSessions(state.selectedId);
   }
 
+  const SMART_INPUT_DECISION_COPY = {
+    task: { busy: 'Creating task...', headline: 'Creating task', message: 'Building tasks in your workspace.' },
+    backlog: { busy: 'Adding to backlog...', headline: 'Adding to backlog', message: 'Saving the idea without committing it.' },
+    chat: { busy: 'Starting Assistant...', headline: 'Starting Assistant', message: 'Opening a new session.' }
+  };
+
   /**
-   * Handle smart input decision (task or chat)
-   * @param {string} decision - 'task' or 'chat'
+   * Handle smart input decision (task, backlog, or chat)
+   * @param {string} decision - 'task', 'backlog', or 'chat'
    * @param {Object} classification - Optional classification data
    */
   async function handleDecision(decision, classification = null) {
@@ -665,13 +758,11 @@
     const predictedDecision = meta.decision || meta.predictedDecision || decision;
     const confidence = meta.confidence || 0;
     const method = meta.method || 'fallback';
+    const copy = SMART_INPUT_DECISION_COPY[decision] || SMART_INPUT_DECISION_COPY.chat;
 
     hidePrompt();
-    setBusy(true, decision === 'task' ? 'Creating task...' : 'Starting Assistant...');
-    showProgress('execute', {
-      headline: decision === 'task' ? 'Creating task' : 'Starting Assistant',
-      message: decision === 'task' ? 'Building tasks in your workspace.' : 'Opening a new session.'
-    });
+    setBusy(true, copy.busy);
+    showProgress('execute', { headline: copy.headline, message: copy.message });
 
     try {
       if (decision === 'task') {
@@ -687,6 +778,21 @@
         }
         const createdLabel = createResult?.kind === 'workflow' ? 'Workflow created.' : 'Task created.';
         setBusy(false, createdLabel);
+      } else if (decision === 'backlog') {
+        const createResult = await createBacklogItemFromSmartInput(input);
+        if (createResult?.cancelled) {
+          setBusy(false, 'Backlog capture cancelled.');
+          setStatus('Backlog capture cancelled.', { busy: false });
+          if (window.Toast) {
+            window.Toast.info('Backlog capture cancelled');
+          }
+          state.smartInput = null;
+          return;
+        }
+        setBusy(false, 'Added to backlog.');
+        if (window.Toast) {
+          window.Toast.success('Added to backlog');
+        }
       } else {
         await createChatFromSmartInput(input);
         setBusy(false, 'Assistant started.');
@@ -698,9 +804,11 @@
       const autoParseFailed = error?.code === 'auto_parse_failed';
       setBusy(false, autoParseFailed ? 'Auto parsing did not work. No task was created.' : 'Something went wrong. Try again.');
       if (window.Toast) {
-        window.Toast.error(autoParseFailed
-          ? 'Auto parsing did not work. No task was created.'
-          : (decision === 'task' ? 'Failed to create task' : 'Failed to start chat'));
+        let failureMessage = 'Failed to start chat';
+        if (autoParseFailed) failureMessage = 'Auto parsing did not work. No task was created.';
+        else if (decision === 'task') failureMessage = 'Failed to create task';
+        else if (decision === 'backlog') failureMessage = 'Failed to add to backlog';
+        window.Toast.error(failureMessage);
       }
     } finally {
       hideProgress();
@@ -1040,6 +1148,10 @@
       elements.smartInputPromptTask.addEventListener('click', () => handleDecision('task'));
     }
 
+    if (elements.smartInputPromptBacklog) {
+      elements.smartInputPromptBacklog.addEventListener('click', () => handleDecision('backlog'));
+    }
+
     if (elements.smartInputPromptChat) {
       elements.smartInputPromptChat.addEventListener('click', () => handleDecision('chat'));
     }
@@ -1073,6 +1185,8 @@
     classifyInput,
     logOverride,
     createTaskFromSmartInput,
+    createBacklogItemFromSmartInput,
+    confirmBacklogCreation,
     createChatFromSmartInput,
     handleDecision,
     createQuickTask,

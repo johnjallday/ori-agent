@@ -60,6 +60,26 @@ func makeTestWorkspace(t *testing.T, store workspace.Store, id, name string, tas
 	}
 }
 
+// Regression test for a gap found via a Group 7 cross-surface audit:
+// taskActiveInWindow's CreatedAt check had no status filter, so a Backlog
+// item captured "today" was swept into the Home assistant's windowed task
+// activity/count even though it's an uncommitted capture, not real activity.
+func TestTaskActiveInWindow_ExcludesBacklogEvenWhenCreatedInWindow(t *testing.T) {
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 7, 23, 59, 59, 0, time.UTC)
+	createdInWindow := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+
+	backlogTask := workspace.Task{Status: workspace.TaskStatusBacklog, CreatedAt: createdInWindow}
+	if taskActiveInWindow(backlogTask, start, end) {
+		t.Error("a Backlog task created inside the window must still be excluded from window activity")
+	}
+
+	pendingTask := workspace.Task{Status: workspace.TaskStatusPending, CreatedAt: createdInWindow}
+	if !taskActiveInWindow(pendingTask, start, end) {
+		t.Error("a Pending task created inside the window must remain active-in-window")
+	}
+}
+
 func TestBuildHomeSnapshot_Empty(t *testing.T) {
 	store := workspace.NewInMemoryStore()
 	snap := BuildHomeSnapshot(context.Background(), HomeSnapshotSources{

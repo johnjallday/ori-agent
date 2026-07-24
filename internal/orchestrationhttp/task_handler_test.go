@@ -2058,3 +2058,114 @@ func TestHandleAssistTask_PersistsFieldValues(t *testing.T) {
 		t.Fatalf("unexpected first field value %#v", userAssistFields[0])
 	}
 }
+
+// TestHandleGetTasks_ExcludesBacklog covers task-list 4.11/1.10 (PRD
+// workspace-backlog FR40): the list endpoint every Tasks surface (modal,
+// drawer, board, Active Tasks Map window, task counts) reads from must never
+// return canonical Backlog items — Backlog has its own dedicated surface.
+func TestHandleGetTasks_ExcludesBacklog(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "amr"})
+	if err := ws.AddTask(workspace.Task{Status: workspace.TaskStatusBacklog, Description: "someday maybe"}); err != nil {
+		t.Fatalf("add backlog task: %v", err)
+	}
+	if err := ws.AddTask(workspace.Task{Status: workspace.TaskStatusPending, Description: "ready to go"}); err != nil {
+		t.Fatalf("add ready task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orchestration/tasks?workspace_id="+ws.ID, nil)
+	rec := httptest.NewRecorder()
+	handler.TasksHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Tasks []workspace.Task `json:"tasks"`
+		Count int              `json:"count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 1 || len(resp.Tasks) != 1 {
+		t.Fatalf("expected 1 task (Backlog excluded), got %+v", resp.Tasks)
+	}
+	if resp.Tasks[0].Description != "ready to go" {
+		t.Fatalf("unexpected task returned: %+v", resp.Tasks[0])
+	}
+}
+
+// Regression test for a gap found via a Group 7 cross-surface audit:
+// handleUpdateTask could assign AND schedule a Backlog task in a single
+// request, bypassing the invariants Create/Promote enforce (PRD
+// workspace-backlog: "zero backlog items become assigned, scheduled, or
+// executable before an explicit Promote to Ready action").
+func TestHandleUpdateTask_RejectsAssigningOrSchedulingBacklogTask(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "guard"})
+	if err := ws.AddTask(workspace.Task{ID: "b1", Status: workspace.TaskStatusBacklog, Description: "idea"}); err != nil {
+		t.Fatalf("add backlog task: %v", err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+
+	handler := &TaskHandler{
+		workspaceStore: store,
+		communicator:   agentcomm.NewCommunicator(store),
+	}
+
+	t.Run("assignment alone is rejected", func(t *testing.T) {
+		body := `{"task_id":"b1","to":"Some Agent"}`
+		req := httptest.NewRequest(http.MethodPut, "/api/orchestration/tasks", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.TasksHandler(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("schedule alone is rejected", func(t *testing.T) {
+		body := `{"task_id":"b1","schedule":{"type":"once","run_at":"2027-01-01T00:00:00Z"},"schedule_enabled":true}`
+		req := httptest.NewRequest(http.MethodPut, "/api/orchestration/tasks", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.TasksHandler(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	got, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	task, err := got.GetTask("b1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.To != "" {
+		t.Errorf("task.To = %q, want unchanged/empty", task.To)
+	}
+	if task.ScheduleEnabled {
+		t.Errorf("task.ScheduleEnabled = true, want unchanged/false")
+	}
+
+	// A plain field edit must still be allowed.
+	t.Run("plain field edit is allowed", func(t *testing.T) {
+		body := `{"task_id":"b1","details":"more context"}`
+		req := httptest.NewRequest(http.MethodPut, "/api/orchestration/tasks", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.TasksHandler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+}

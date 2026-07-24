@@ -130,6 +130,77 @@ func TestAgentSnapshotStore_SyncStoreWritesSnapshotToDisk(t *testing.T) {
 	}
 }
 
+// TestAgentSnapshotStore_GetFolderPathForwardsToWrappedStore covers a real
+// production bug found while verifying the workspace-backlog feature: the
+// server wires orchestrationhttp's workspace store as
+// NewAgentSnapshotStore(syncStore, agents) (see builder_workflow.go), and
+// AgentSnapshotStore embeds the Store INTERFACE, not SyncStore/FileStore
+// concretely. GetFolderPath is not part of the Store interface, so before
+// this fix it was never promoted — any handler holding only *AgentSnapshotStore
+// silently failed workspaceFolderForTaskMarkdown's type assertion (ok=false,
+// err=nil), which made BOTH tasks.md and BACKLOG.md synchronization silently
+// no-op on every write past the very first one. This test would have caught it.
+func TestAgentSnapshotStore_GetFolderPathForwardsToWrappedStore(t *testing.T) {
+	dir := t.TempDir()
+	fileStore, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	primary := NewInMemoryStore()
+	sync := NewSyncStore(primary, fileStore)
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
+	wrapped := NewAgentSnapshotStore(sync, agents)
+
+	ws := &Workspace{ID: "ws-folder", Name: "Folder Test", Status: StatusActive}
+	if err := wrapped.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// The interface-level assertions task_markdown_sync.go/
+	// backlog_markdown_sync.go actually use.
+	withFolder, ok := Store(wrapped).(interface {
+		GetFolderPath(string) (string, error)
+	})
+	if !ok {
+		t.Fatalf("AgentSnapshotStore does not implement GetFolderPath")
+	}
+	path, err := withFolder.GetFolderPath(ws.ID)
+	if err != nil {
+		t.Fatalf("GetFolderPath() error = %v", err)
+	}
+	wantPath, err := fileStore.GetFolderPath(ws.ID)
+	if err != nil {
+		t.Fatalf("fileStore.GetFolderPath() error = %v", err)
+	}
+	if path != wantPath {
+		t.Fatalf("GetFolderPath() = %q, want %q (the underlying FileStore's path)", path, wantPath)
+	}
+
+	withFileSync, ok := Store(wrapped).(interface{ FileStore() *FileStore })
+	if !ok {
+		t.Fatalf("AgentSnapshotStore does not implement FileStore()")
+	}
+	if withFileSync.FileStore() != fileStore {
+		t.Fatalf("FileStore() did not return the wrapped FileStore instance")
+	}
+}
+
+// TestAgentSnapshotStore_GetFolderPathErrorsWithoutFolderCapableStore covers
+// the case where the wrapped store has no folder concept at all (e.g. a bare
+// InMemoryStore): the passthrough must fail loudly, not silently no-op.
+func TestAgentSnapshotStore_GetFolderPathErrorsWithoutFolderCapableStore(t *testing.T) {
+	primary := NewInMemoryStore()
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
+	wrapped := NewAgentSnapshotStore(primary, agents)
+
+	if _, err := wrapped.GetFolderPath("any-id"); err == nil {
+		t.Fatalf("expected an error when the wrapped store has no folder capability")
+	}
+	if wrapped.FileStore() != nil {
+		t.Fatalf("expected nil FileStore() when the wrapped store has none")
+	}
+}
+
 // TestAgentSnapshotStore_GetFolderWorkspaceForwardsThroughWrapping guards a
 // real bug: production wraps the workspace store as
 // AgentSnapshotStore{Store: SyncStore{...}}, and AgentSnapshotStore embeds

@@ -95,6 +95,10 @@ func addWorkspaceMapFields(ws *workspace.Workspace, summary map[string]any) {
 	summary["skill_count"] = fields.SkillCount
 	summary["ops_mode"] = fields.OpsMode
 	summary["open_task_count"] = fields.OpenTaskCount
+	// backlog_count is the workspace's own Backlog item count, shown by the
+	// global Workspace Map as a local count/link only — never aggregated or
+	// editable from that surface (PRD workspace-backlog FR58-59).
+	summary["backlog_count"] = fields.BacklogCount
 	summary["needs_attention_count"] = fields.NeedsAttentionCount
 	summary["active"] = fields.Active
 }

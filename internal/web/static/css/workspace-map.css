@@ -1106,6 +1106,34 @@
   color: #e3e6ea;
 }
 
+/* Local-only Backlog count + deep link (PRD workspace-backlog FR58-59): no
+   border/background — reads as a link within the row, not a second primary
+   action competing with .ws-map-ov-open. */
+.ws-map-ov-backlog-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  color: var(--ws-faction);
+}
+.ws-map-ov-backlog-open .ws-map-ov-v {
+  color: inherit;
+}
+.ws-map-ov-backlog-open:hover,
+.ws-map-ov-backlog-open:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+.ws-map-ov-backlog-open:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
 /* Primary action lives in the hero row (top of the panel) so it stays reachable
    without scrolling to the bottom. */
 .ws-map-ov-open {

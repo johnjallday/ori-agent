@@ -37,6 +37,15 @@ const (
 	EventTaskResumed    EventType = "task.resumed"     // Task resumed after user input
 	EventTaskOutput     EventType = "task.output"      // Task output contract/storage lifecycle event
 
+	// Backlog lifecycle events (tasks/prd-workspace-backlog.md FR31, 47, 54).
+	// Reused alongside EventTaskCreated/EventTaskDeleted so first-party
+	// projections (Details panel/drawer, Quest Board, Tasks) can all refresh
+	// from the same event stream in one cycle.
+	EventTaskBacklogCaptured  EventType = "task.backlog.captured"
+	EventTaskBacklogUpdated   EventType = "task.backlog.updated"
+	EventTaskBacklogReordered EventType = "task.backlog.reordered"
+	EventTaskBacklogPromoted  EventType = "task.backlog.promoted"
+
 	// Delegation loop events (adaptive delegation; see DelegationLoop)
 	EventDelegationStarted   EventType = "delegation.started"
 	EventDelegationCompleted EventType = "delegation.completed"

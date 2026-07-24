@@ -37,6 +37,9 @@ func (s *spyOpportunityStore) Snooze(workspaceID, opportunityID string, until ti
 	return nil
 }
 func (s *spyOpportunityStore) MarkResolved(workspaceID, opportunityID string) error { return nil }
+func (s *spyOpportunityStore) MarkPlanned(workspaceID, opportunityID, taskID, taskWorkspaceID string) error {
+	return nil
+}
 
 func TestHomeOpportunitiesToolIsReadOnly(t *testing.T) {
 	store := workspace.NewInMemoryStore()

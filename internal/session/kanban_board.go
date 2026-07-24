@@ -9,6 +9,24 @@ import (
 
 const workspaceSharedDataKanbanBoardKey = "kanban_board"
 
+// kanbanBoardConfigVersion is the current board-config schema version (PRD
+// workspace-backlog FR40-44, 92-98). Version 1 boards defaulted to a
+// "backlog"-ID first column, which now collides with the canonical Backlog
+// lifecycle stage (workspace.TaskStatusBacklog); version 2 boards begin at
+// Ready instead. See MigrateLegacyKanbanBoardConfig.
+const kanbanBoardConfigVersion = 2
+
+// legacyBacklogColumnID/legacyBacklogColumnName are the version-1 default
+// first column's identifier and label, kept only so migration can recognize
+// an untouched legacy default and rename it to Ready.
+const legacyBacklogColumnID = "backlog"
+const legacyBacklogColumnName = "Todo"
+
+// legacyHyphenInProgressID is a second, inconsistent in-progress column ID
+// seen in one JS default-board implementation (FR98); normalized alongside
+// the backlog rename.
+const legacyHyphenInProgressID = "in-progress"
+
 type KanbanBoardColumn struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -22,14 +40,42 @@ type KanbanBoardConfig struct {
 
 func DefaultKanbanBoardConfig() KanbanBoardConfig {
 	return KanbanBoardConfig{
-		Version: 1,
+		Version: kanbanBoardConfigVersion,
 		Columns: []KanbanBoardColumn{
-			{ID: "backlog", Name: "Todo", Order: 1},
+			{ID: "ready", Name: "Ready", Order: 1},
 			{ID: "in_progress", Name: "In Progress", Order: 2},
 			{ID: "review", Name: "Review", Order: 3},
 			{ID: "done", Name: "Done", Order: 4},
 		},
 	}
+}
+
+// MigrateLegacyKanbanBoardConfig normalizes a possibly-legacy board config to
+// the current version (FR92, 98-99): it renames a column whose ID is the old
+// "backlog" default to "ready" (preserving a user-customized name, or
+// applying "Ready" when the name was still the untouched legacy "Todo"
+// default), normalizes the hyphenated "in-progress" identifier to
+// "in_progress", and bumps Version. User-created columns and their order are
+// left untouched. Safe to call repeatedly: a config already at the current
+// version is returned unchanged, and re-running finds no more legacy IDs to
+// rename.
+func MigrateLegacyKanbanBoardConfig(cfg KanbanBoardConfig) KanbanBoardConfig {
+	if cfg.Version >= kanbanBoardConfigVersion {
+		return cfg
+	}
+	for i := range cfg.Columns {
+		switch cfg.Columns[i].ID {
+		case legacyBacklogColumnID:
+			cfg.Columns[i].ID = "ready"
+			if cfg.Columns[i].Name == legacyBacklogColumnName || cfg.Columns[i].Name == "Backlog" {
+				cfg.Columns[i].Name = "Ready"
+			}
+		case legacyHyphenInProgressID:
+			cfg.Columns[i].ID = "in_progress"
+		}
+	}
+	cfg.Version = kanbanBoardConfigVersion
+	return cfg
 }
 
 func GetWorkspaceKanbanBoardConfig(ws *Workspace) (KanbanBoardConfig, bool) {
@@ -52,6 +98,8 @@ func GetWorkspaceKanbanBoardConfig(ws *Workspace) (KanbanBoardConfig, bool) {
 		return DefaultKanbanBoardConfig(), false
 	}
 
+	cfg = MigrateLegacyKanbanBoardConfig(cfg)
+
 	normalized, err := NormalizeKanbanBoardConfig(cfg)
 	if err != nil {
 		return DefaultKanbanBoardConfig(), false
@@ -64,6 +112,8 @@ func SetWorkspaceKanbanBoardConfig(ws *Workspace, cfg KanbanBoardConfig) error {
 	if ws == nil {
 		return errors.New("workspace is nil")
 	}
+
+	cfg = MigrateLegacyKanbanBoardConfig(cfg)
 
 	normalized, err := NormalizeKanbanBoardConfig(cfg)
 	if err != nil {

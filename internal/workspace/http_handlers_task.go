@@ -236,6 +236,10 @@ func (h *HTTPHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			// Reassignment through the HTTP API is a manual override: stamp manual
 			// provenance and validate membership through the shared service.
 			if req.To != nil || req.AssignedNodeID != nil {
+				if err := RequireTaskNotBacklog(&workspace.Tasks[i], "cannot assign task"); err != nil {
+					orihttp.BadRequest(w, err.Error())
+					return
+				}
 				newTo := workspace.Tasks[i].To
 				if req.To != nil {
 					newTo = *req.To
@@ -400,6 +404,10 @@ func (h *HTTPHandler) ExecuteTaskManually(w http.ResponseWriter, r *http.Request
 
 	if targetTask == nil {
 		orihttp.NotFound(w, "Task not found")
+		return
+	}
+	if err := RequireTaskNotBacklog(targetTask, "cannot execute task"); err != nil {
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
 

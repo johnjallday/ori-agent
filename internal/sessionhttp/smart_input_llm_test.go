@@ -78,6 +78,23 @@ func TestClassifySmartInputLLM_ParsesCodeBlock(t *testing.T) {
 	}
 }
 
+func TestClassifySmartInputLLM_ParsesBacklogDecision(t *testing.T) {
+	provider := &stubProvider{
+		content: `{"decision":"backlog","confidence":0.81,"reasoning":"someday framing"}`,
+	}
+
+	result, err := classifySmartInputLLM(context.Background(), provider, "stub", "high", "someday: revisit the pricing page")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Decision != SmartInputDecisionBacklog {
+		t.Fatalf("expected backlog decision, got %s", result.Decision)
+	}
+	if result.Confidence != 0.81 {
+		t.Fatalf("expected confidence 0.81, got %f", result.Confidence)
+	}
+}
+
 func TestClassifySmartInputLLM_InvalidDecision(t *testing.T) {
 	provider := &stubProvider{
 		content: `{"decision":"other","confidence":0.5}`,

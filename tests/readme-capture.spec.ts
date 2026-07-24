@@ -281,6 +281,10 @@ async function installFixtureRoutes(page: Page) {
       await json(route, taskPayload());
       return;
     }
+    if (url.pathname === '/api/orchestration/backlog') {
+      await json(route, { items: [], sync: null });
+      return;
+    }
     if (url.pathname === '/api/sessions') {
       await json(route, { sessions: [] });
       return;

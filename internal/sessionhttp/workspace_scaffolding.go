@@ -126,6 +126,14 @@ func (h *Handler) provisionWorkspaceScaffolding(ctx context.Context, ws *session
 	if err := h.workspaceStore.Save(folderWS); err != nil {
 		logger.Warn("Failed to resync workspace.json after creation", logger.Fields{"id": ws.ID, "error": err})
 	}
+
+	// Every newly created managed workspace gets an Ori-managed BACKLOG.md
+	// (PRD workspace-backlog FR67). A collision (a pre-existing unmanaged
+	// file at the target path) is left untouched — vanishingly unlikely for
+	// a brand-new folder, but scaffolding must never overwrite user content.
+	if _, err := agentworkspace.NewFileBacklogSynchronizer(h.workspaceStore).EnsureBacklogMarkdownFile(ws.ID); err != nil {
+		logger.Warn("Failed to create BACKLOG.md during workspace scaffolding", logger.Fields{"id": ws.ID, "error": err})
+	}
 }
 
 // rewriteWorkspaceContentPath maps path to its new location when it sits at or

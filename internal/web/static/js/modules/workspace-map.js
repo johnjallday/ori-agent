@@ -804,6 +804,7 @@
     var entry = String(ws.entry_agent_name || '').trim();
     var agents = (Array.isArray(ws.agents) ? ws.agents : []).filter(Boolean);
     var openTasks = Number(ws.open_task_count || 0);
+    var backlogCount = Number(ws.backlog_count || 0);
     var mcp = Number(ws.mcp_count || 0);
     var skills = Number(ws.skill_count || 0);
     var description = String(ws.description || '').trim();
@@ -868,6 +869,16 @@
       '<span class="ws-map-ov-v">' +
       openTasks +
       ' open</span></div>' +
+      // Local count + open action only (FR58-59): no individual items render on
+      // the global canvas and no global aggregate/edit surface exists here.
+      '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Backlog</span>' +
+      '<button type="button" class="ws-map-ov-backlog-open" data-ws-open-backlog="' +
+      escapeHtml(ws.id) +
+      '" aria-label="Open Backlog for ' +
+      escapeHtml(ws.name || 'workspace') +
+      '"><span class="ws-map-ov-v">' +
+      backlogCount +
+      '</span> Open Backlog ▸</button></div>' +
       '<div class="ws-map-ov-row"><span class="ws-map-ov-k">Tools · MCP</span>' +
       '<span class="ws-map-ov-v">' +
       mcp +
@@ -1030,8 +1041,14 @@
     });
   }
 
-  function openWorkspace(id) {
-    if (id) window.location.href = '/workspaces/' + encodeURIComponent(id);
+  function openWorkspace(id, opts) {
+    if (!id) return;
+    // Owning-workspace deep link (FR59): ?panel=backlog opens straight into
+    // the Details Backlog drawer. The global Map never mutates/promotes/
+    // deletes backlog items itself — it only ever navigates there.
+    var panel = opts && opts.panel;
+    var query = panel ? '?panel=' + encodeURIComponent(panel) : '';
+    window.location.href = '/workspaces/' + encodeURIComponent(id) + query;
   }
 
   function deleteWorkspace(id) {
@@ -1058,6 +1075,12 @@
     Array.prototype.forEach.call(opens, function (el) {
       el.addEventListener('click', function () {
         openWorkspace(el.getAttribute('data-ws-open'));
+      });
+    });
+    var openBacklogs = container.querySelectorAll('[data-ws-open-backlog]');
+    Array.prototype.forEach.call(openBacklogs, function (el) {
+      el.addEventListener('click', function () {
+        openWorkspace(el.getAttribute('data-ws-open-backlog'), { panel: 'backlog' });
       });
     });
     var deletes = container.querySelectorAll('[data-ws-delete]');

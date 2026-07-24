@@ -146,6 +146,24 @@ class WorkspaceRealtime {
       this.handleTaskEvent(workspaceId, 'task.deleted', e);
     });
 
+    // Backlog lifecycle events (PRD workspace-backlog FR31, 47, 54) — Backlog
+    // items are Task records, so these reuse handleTaskEvent's plumbing.
+    eventSource.addEventListener('task.backlog.captured', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.backlog.captured', e);
+    });
+
+    eventSource.addEventListener('task.backlog.updated', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.backlog.updated', e);
+    });
+
+    eventSource.addEventListener('task.backlog.reordered', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.backlog.reordered', e);
+    });
+
+    eventSource.addEventListener('task.backlog.promoted', (e) => {
+      this.handleTaskEvent(workspaceId, 'task.backlog.promoted', e);
+    });
+
     // Listen for workspace events
     eventSource.addEventListener('workspace.updated', (e) => {
       this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);

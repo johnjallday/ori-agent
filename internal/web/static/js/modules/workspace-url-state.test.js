@@ -19,19 +19,41 @@ test('parseWorkspaceURLState reads all canonical params (FR80)', () => {
 
 test('parseWorkspaceURLState rejects an unknown mode value rather than reusing the retired view param (FR81)', () => {
   assert.equal(parseWorkspaceURLState('?mode=grid').mode, null);
-  assert.equal(parseWorkspaceURLState('?view=command').mode, null, 'the legacy view param is not read at all');
+  assert.equal(
+    parseWorkspaceURLState('?view=command').mode,
+    null,
+    'the legacy view param is not read at all'
+  );
 });
 
 test('parseWorkspaceURLState handles an empty/missing query string', () => {
-  assert.deepEqual(parseWorkspaceURLState(''), { mode: null, panel: '', task: '', agent: '', run: '' });
-  assert.deepEqual(parseWorkspaceURLState(undefined), { mode: null, panel: '', task: '', agent: '', run: '' });
+  assert.deepEqual(parseWorkspaceURLState(''), {
+    mode: null,
+    panel: '',
+    task: '',
+    agent: '',
+    run: ''
+  });
+  assert.deepEqual(parseWorkspaceURLState(undefined), {
+    mode: null,
+    panel: '',
+    task: '',
+    agent: '',
+    run: ''
+  });
 });
 
 test('serializeWorkspaceURLState omits empty fields and round-trips', () => {
   const state = { mode: MODE.MAP, panel: 'tasks', task: 't1', agent: '', run: '' };
   const q = serializeWorkspaceURLState(state);
   assert.equal(q, 'mode=map&panel=tasks&task=t1');
-  assert.deepEqual(parseWorkspaceURLState(q), { mode: 'map', panel: 'tasks', task: 't1', agent: '', run: '' });
+  assert.deepEqual(parseWorkspaceURLState(q), {
+    mode: 'map',
+    panel: 'tasks',
+    task: 't1',
+    agent: '',
+    run: ''
+  });
 });
 
 test('serializeWorkspaceURLState drops an invalid mode rather than emitting it', () => {
@@ -74,13 +96,44 @@ test('sanitizeWorkspaceURLState allows panel=tasks with no task id (drawer opens
   assert.deepEqual(dropped, []);
 });
 
+test('sanitizeWorkspaceURLState accepts panel=backlog (global Map deep link, FR59)', () => {
+  const { state, dropped } = sanitizeWorkspaceURLState(
+    { panel: 'backlog', task: 'b1' },
+    { validBacklogIds: ['b1', 'b2'] }
+  );
+  assert.equal(state.panel, 'backlog');
+  assert.equal(state.task, 'b1');
+  assert.deepEqual(dropped, []);
+});
+
+test('sanitizeWorkspaceURLState validates task against validBacklogIds (not validTaskIds) when panel=backlog', () => {
+  const { state, dropped } = sanitizeWorkspaceURLState(
+    { panel: 'backlog', task: 't1' },
+    { validTaskIds: ['t1'], validBacklogIds: ['b1'] }
+  );
+  assert.equal(state.task, '', 'a Ready task id is not a valid Backlog item id');
+  assert.deepEqual(dropped, ['task']);
+});
+
+test('sanitizeWorkspaceURLState validates task against validTaskIds (not validBacklogIds) when panel=tasks', () => {
+  const { state, dropped } = sanitizeWorkspaceURLState(
+    { panel: 'tasks', task: 'b1' },
+    { validTaskIds: ['t1'], validBacklogIds: ['b1'] }
+  );
+  assert.equal(state.task, '', 'a Backlog item id is not a valid Ready task id');
+  assert.deepEqual(dropped, ['task']);
+});
+
 test('sanitizeWorkspaceURLState falls back run validation to validTaskIds when validRunTaskIds is omitted', () => {
   const { state } = sanitizeWorkspaceURLState({ run: 't1' }, { validTaskIds: ['t1'] });
   assert.equal(state.run, 't1');
 });
 
 test('statesEqual treats equivalent states as equal regardless of key order/omission (FR86)', () => {
-  assert.equal(statesEqual({ mode: 'map', task: 't1' }, { mode: 'map', task: 't1', agent: '' }), true);
+  assert.equal(
+    statesEqual({ mode: 'map', task: 't1' }, { mode: 'map', task: 't1', agent: '' }),
+    true
+  );
   assert.equal(statesEqual({ mode: 'map' }, { mode: 'details' }), false);
   assert.equal(statesEqual(null, {}), true);
 });
@@ -89,7 +142,11 @@ test('resolveEffectiveMode: URL wins over local preference, which wins over the 
   assert.equal(resolveEffectiveMode(MODE.MAP, MODE.DETAILS), MODE.MAP);
   assert.equal(resolveEffectiveMode(null, MODE.MAP), MODE.MAP);
   assert.equal(resolveEffectiveMode(null, null), MODE.DETAILS);
-  assert.equal(resolveEffectiveMode('bogus', MODE.MAP), MODE.MAP, 'an invalid URL mode falls through to the preference');
+  assert.equal(
+    resolveEffectiveMode('bogus', MODE.MAP),
+    MODE.MAP,
+    'an invalid URL mode falls through to the preference'
+  );
 });
 
 test('buildReturnTarget produces a relative, workspace-scoped path (FR92)', () => {
@@ -105,7 +162,7 @@ test('buildReturnTarget returns empty for a missing workspace id', () => {
   assert.equal(buildReturnTarget('', { mode: MODE.MAP }), '');
 });
 
-test('isSafeReturnTarget accepts only this workspace\'s relative path (FR93)', () => {
+test("isSafeReturnTarget accepts only this workspace's relative path (FR93)", () => {
   assert.equal(isSafeReturnTarget('/workspaces/ws-1', 'ws-1'), true);
   assert.equal(isSafeReturnTarget('/workspaces/ws-1?mode=map', 'ws-1'), true);
   assert.equal(isSafeReturnTarget('/workspaces/ws-1/task/t9', 'ws-1'), true);
@@ -115,7 +172,11 @@ test('isSafeReturnTarget rejects absolute URLs, protocol-relative links, and cro
   assert.equal(isSafeReturnTarget('https://evil.example.com/workspaces/ws-1', 'ws-1'), false);
   assert.equal(isSafeReturnTarget('//evil.example.com/workspaces/ws-1', 'ws-1'), false);
   assert.equal(isSafeReturnTarget('/workspaces/other-ws', 'ws-1'), false);
-  assert.equal(isSafeReturnTarget('/workspaces/ws-123', 'ws-1'), false, 'prefix match must not leak into a similar id');
+  assert.equal(
+    isSafeReturnTarget('/workspaces/ws-123', 'ws-1'),
+    false,
+    'prefix match must not leak into a similar id'
+  );
   assert.equal(isSafeReturnTarget('', 'ws-1'), false);
   assert.equal(isSafeReturnTarget('/workspaces/ws-1', ''), false);
 });

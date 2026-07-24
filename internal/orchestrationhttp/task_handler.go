@@ -170,7 +170,18 @@ func (th *TaskHandler) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		tasks := ws.Tasks
+		// Tasks surfaces begin at Ready: Backlog items are excluded from this
+		// list so no client (Tasks modal/drawer/board, Active Tasks Map
+		// window, task assignment lists, open-task counts) needs its own
+		// backlog filter (PRD workspace-backlog FR40). Backlog has its own
+		// dedicated surface via /api/orchestration/backlog.
+		tasks := make([]workspace.Task, 0, len(ws.Tasks))
+		for _, t := range ws.Tasks {
+			if t.Status == workspace.TaskStatusBacklog {
+				continue
+			}
+			tasks = append(tasks, t)
+		}
 		stats := ws.GetTaskStats()
 
 		orihttp.WriteJSON(w, map[string]any{
@@ -748,6 +759,20 @@ func (th *TaskHandler) handleUpdateTask(w http.ResponseWriter, r *http.Request) 
 		for i := range ws.Tasks {
 			if ws.Tasks[i].ID == req.TaskID {
 				taskIndex = i
+
+				// Assigning or scheduling a Backlog item through this generic
+				// update endpoint would corrupt it (an assignee/schedule on a
+				// still-Backlog task, bypassing the invariants Create/Promote
+				// enforce) — found via a regression audit tracing every write
+				// path that touches To/AssignedNodeID/Schedule back to whether
+				// it funnels through RequireTaskNotBacklog. Plain field edits
+				// (description/details/etc.) remain allowed here.
+				if req.To != nil || req.AssignedNodeID != nil || schedule != nil {
+					if err := workspace.RequireTaskNotBacklog(&ws.Tasks[i], "cannot assign or schedule task"); err != nil {
+						orihttp.BadRequest(w, err.Error())
+						return
+					}
+				}
 
 				// Apply basic field updates
 				th.applyBasicFieldUpdates(&ws.Tasks[i], &req)

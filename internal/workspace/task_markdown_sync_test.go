@@ -62,6 +62,41 @@ func TestRenderWorkspaceTasksMarkdown_NestedMultiAgentTasks(t *testing.T) {
 	}
 }
 
+// TestRenderWorkspaceTasksMarkdown_ExcludesBacklog covers task-list 3.19/3.22
+// (PRD workspace-backlog FR90): Backlog items must never appear in tasks.md,
+// while a promoted (Ready) task participates normally.
+func TestRenderWorkspaceTasksMarkdown_ExcludesBacklog(t *testing.T) {
+	ws := &Workspace{
+		ID:   "workspace-1",
+		Name: "Markdown Workspace",
+		Tasks: []Task{
+			{
+				ID:          "backlog-1",
+				WorkspaceID: "workspace-1",
+				Description: "someday maybe idea",
+				Status:      TaskStatusBacklog,
+				CreatedAt:   time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC),
+			},
+			{
+				ID:          "ready-1",
+				WorkspaceID: "workspace-1",
+				Description: "promoted and ready",
+				To:          "Writer",
+				Status:      TaskStatusPending,
+				CreatedAt:   time.Date(2026, 4, 28, 10, 1, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	rendered := RenderWorkspaceTasksMarkdown(ws)
+	if strings.Contains(rendered, "someday maybe idea") {
+		t.Fatalf("Backlog item must not appear in tasks.md:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "promoted and ready") {
+		t.Fatalf("Ready task must still appear in tasks.md:\n%s", rendered)
+	}
+}
+
 func TestParseWorkspaceTasksMarkdown_GeneratedFileDoesNotWarn(t *testing.T) {
 	ws := &Workspace{
 		ID:   "workspace-1",
