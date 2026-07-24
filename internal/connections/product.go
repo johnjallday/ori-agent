@@ -20,6 +20,10 @@ import (
 // GmailReadonlyScope is the restricted, read-only Gmail scope (FR 43, 48).
 const GmailReadonlyScope = "https://www.googleapis.com/auth/gmail.readonly"
 
+// GmailSendScope is the separate send scope, requested only as an explicit
+// upgrade (FR 44); sends still pass through the existing confirm-gated broker.
+const GmailSendScope = "https://www.googleapis.com/auth/gmail.send"
+
 var (
 	// ErrNoCredentialSink means product enablement was attempted without a sink.
 	ErrNoCredentialSink = errors.New("connections: no credential sink configured for product enablement")
@@ -43,6 +47,10 @@ type GmailCredential struct {
 	ClientSecret  string
 	TokenEndpoint string
 	VaultID       string
+	// ExistingRef, when set, is the vault reference of the account this credential
+	// should UPDATE in place (a re-auth or send upgrade) rather than create anew,
+	// so a scope upgrade never orphans the prior account.
+	ExistingRef string
 }
 
 // CredentialSink persists a product OAuth credential behind an opaque reference
@@ -66,10 +74,28 @@ func gmailEnableScopes() []string {
 	return append(append([]string{}, IdentityScopes...), GmailReadonlyScope)
 }
 
-// BeginEnableGmail starts a Gmail-enable authorization for the already-connected
-// identity. It uses the known account as a login hint (FR 25); the returned
-// subject is still verified against the active identity on completion.
+// gmailSendScopes add the send scope for the explicit send upgrade (FR 44).
+func gmailSendScopes() []string {
+	return append(gmailEnableScopes(), GmailSendScope)
+}
+
+// BeginEnableGmail starts a Gmail-enable authorization (identity + read-only
+// mail) for the already-connected identity.
 func (f *IdentityFlow) BeginEnableGmail(p BeginConnectParams) (BeginConnectResult, error) {
+	return f.beginGmail(p, gmailEnableScopes())
+}
+
+// BeginEnableGmailSend starts the explicit send upgrade (adds gmail.send) for
+// the already-connected identity (FR 44). Sends still pass through the existing
+// confirm-gated broker.
+func (f *IdentityFlow) BeginEnableGmailSend(p BeginConnectParams) (BeginConnectResult, error) {
+	return f.beginGmail(p, gmailSendScopes())
+}
+
+// beginGmail authorizes the active identity for the given Gmail scope set. It
+// uses the known account as a login hint (FR 25); the returned subject is still
+// verified against the active identity on completion.
+func (f *IdentityFlow) beginGmail(p BeginConnectParams, scopes []string) (BeginConnectResult, error) {
 	if !f.config.IsConfigured() {
 		return BeginConnectResult{}, ErrOAuthNotConfigured
 	}
@@ -105,7 +131,7 @@ func (f *IdentityFlow) BeginEnableGmail(p BeginConnectParams) (BeginConnectResul
 	if existing.Email != "" {
 		opts = append(opts, oauth2.SetAuthURLParam("login_hint", existing.Email))
 	}
-	authorizeURL := f.config.oauth2Config(p.RedirectURL, gmailEnableScopes()).AuthCodeURL(pending.State, opts...)
+	authorizeURL := f.config.oauth2Config(p.RedirectURL, scopes).AuthCodeURL(pending.State, opts...)
 	return BeginConnectResult{AuthorizeURL: authorizeURL, State: pending.State}, nil
 }
 
@@ -155,6 +181,10 @@ func (f *IdentityFlow) CompleteEnableGmail(ctx context.Context, p CompleteConnec
 	}
 
 	grantedScopes := scopesFromToken(token)
+	existingRef := ""
+	if g, ok := conn.Grant(ProductGmail); ok && g != nil {
+		existingRef = g.CredentialRef
+	}
 	ref, err := f.sink.SaveGmailCredential(ctx, GmailCredential{
 		Subject:       identity.Subject,
 		Email:         identity.Email,
@@ -167,6 +197,7 @@ func (f *IdentityFlow) CompleteEnableGmail(ctx context.Context, p CompleteConnec
 		ClientSecret:  f.config.ClientSecret,
 		TokenEndpoint: f.config.tokenURL(),
 		VaultID:       conn.VaultID,
+		ExistingRef:   existingRef,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("persist gmail credential: %w", err)

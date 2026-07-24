@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/vault"
@@ -22,6 +23,25 @@ func newGmailCredentialSink(store *vault.Store) *gmailCredentialSink {
 }
 
 func (s *gmailCredentialSink) SaveGmailCredential(ctx context.Context, cred connections.GmailCredential) (string, error) {
+	// Re-auth / scope upgrade: update the existing account in place so a scope
+	// change never orphans the prior record. Only overwrite the refresh token
+	// when Google returned a new one (it often omits it on re-auth).
+	if ref := strings.TrimSpace(cred.ExistingRef); ref != "" {
+		update := vault.EmailAccountUpdate{}
+		if cred.AccessToken != "" {
+			at := cred.AccessToken
+			update.AccessToken = &at
+		}
+		if cred.RefreshToken != "" {
+			rt := cred.RefreshToken
+			update.RefreshToken = &rt
+		}
+		if _, err := s.store.UpdateEmailAccount(ctx, ref, update); err != nil {
+			return "", err
+		}
+		return ref, nil
+	}
+
 	account, err := s.store.CreateEmailAccount(ctx, vault.EmailAccountInput{
 		VaultID:      cred.VaultID,
 		Label:        cred.Email,

@@ -155,11 +155,18 @@ func (h *Handler) gmailEnable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	res, err := h.flow.BeginEnableGmail(connections.BeginConnectParams{
+	params := connections.BeginConnectParams{
 		LocalUserID: h.resolveLocalUser(r),
 		RedirectURL: h.buildRedirectURL(r),
 		ReturnTo:    strings.TrimSpace(r.URL.Query().Get("return_to")),
-	})
+	}
+	var res connections.BeginConnectResult
+	var err error
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("scope")), "send") {
+		res, err = h.flow.BeginEnableGmailSend(params) // explicit send upgrade (FR 44)
+	} else {
+		res, err = h.flow.BeginEnableGmail(params)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, connections.ErrOAuthNotConfigured):

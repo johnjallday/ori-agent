@@ -9,6 +9,7 @@
   "use strict";
 
   const PRODUCT_LABELS = { gmail: "Gmail", calendar: "Calendar", drive: "Drive" };
+  const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
   const HEALTH_LABELS = {
     not_enabled: "Not enabled",
     connecting: "Connecting…",
@@ -110,14 +111,12 @@
         pill.textContent = HEALTH_LABELS[g.health] || (g.enabled ? "Enabled" : "Not enabled");
         right.appendChild(pill);
 
-        // Gmail can be enabled from here; Calendar/Drive enablement arrives later.
+        // Gmail: enable when off, or offer the explicit send upgrade once healthy
+        // (Calendar/Drive enablement arrives later).
         if (g.product === "gmail" && !g.enabled) {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "modern-btn modern-btn-secondary gc-enable-btn";
-          btn.textContent = "Enable";
-          btn.addEventListener("click", () => this.enableGmail(btn));
-          right.appendChild(btn);
+          right.appendChild(this.enableButton("Enable", null));
+        } else if (g.product === "gmail" && g.health === "healthy" && !(g.granted_scopes || []).includes(GMAIL_SEND_SCOPE)) {
+          right.appendChild(this.enableButton("Enable sending", "send"));
         }
 
         row.appendChild(name);
@@ -126,11 +125,24 @@
       });
     }
 
-    async enableGmail(btn) {
+    enableButton(label, scope) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "modern-btn modern-btn-secondary gc-enable-btn";
+      btn.textContent = label;
+      btn.addEventListener("click", () => this.enableGmail(btn, scope));
+      return btn;
+    }
+
+    async enableGmail(btn, scope) {
       this.hideError();
       if (btn) btn.disabled = true;
       try {
-        const res = await fetch("/api/connections/google/gmail/enable", { method: "POST", headers: { Accept: "application/json" } });
+        const url =
+          scope === "send"
+            ? "/api/connections/google/gmail/enable?scope=send"
+            : "/api/connections/google/gmail/enable";
+        const res = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
         const data = await res.json().catch(() => ({}));
         if ((res.status === 409 || res.status === 503) && data.message) {
           this.showError(data.message);

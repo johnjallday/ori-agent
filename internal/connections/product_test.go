@@ -143,3 +143,46 @@ func TestBeginEnableGmail_AuthorizeURL(t *testing.T) {
 		t.Fatalf("login_hint = %q, want jane@x.com", u.Query().Get("login_hint"))
 	}
 }
+
+func TestBeginEnableGmailSend_AuthorizeURL(t *testing.T) {
+	flow, store := newTestFlow(t, "https://token.example", fakeVerifier{id: Identity{Subject: "sub-1"}})
+	flow.WithCredentialSink(&fakeSink{})
+	seedIdentity(t, store, "sub-1", "jane@x.com")
+
+	res, err := flow.BeginEnableGmailSend(BeginConnectParams{RedirectURL: testRedirect})
+	if err != nil {
+		t.Fatalf("BeginEnableGmailSend: %v", err)
+	}
+	u, _ := url.Parse(res.AuthorizeURL)
+	scope := u.Query().Get("scope")
+	if !strings.Contains(scope, GmailSendScope) || !strings.Contains(scope, GmailReadonlyScope) {
+		t.Fatalf("send-upgrade scope should include send + readonly: %q", scope)
+	}
+}
+
+func TestEnableGmail_ReAuthUpdatesInPlace(t *testing.T) {
+	srv := gmailTokenServer(t, "openid email profile "+GmailReadonlyScope+" "+GmailSendScope)
+	sink := &fakeSink{ref: "vault://email/global"}
+	flow, store := newTestFlow(t, srv.URL, fakeVerifier{id: Identity{Subject: "sub-1"}})
+	flow.WithCredentialSink(sink)
+	// Gmail already enabled (grant has a ref): the send upgrade must UPDATE it, not duplicate.
+	_ = store.Save(&Connection{
+		ID: "c1", Provider: ProviderGoogle, Subject: "sub-1", VaultID: "v1",
+		Grants: map[ProductKey]*ProductGrant{
+			ProductGmail: {ConnectionID: "c1", Product: ProductGmail, Health: HealthHealthy, CredentialRef: "vault://email/global"},
+		},
+	})
+
+	begin, _ := flow.BeginEnableGmailSend(BeginConnectParams{RedirectURL: testRedirect})
+	conn, err := flow.CompleteEnableGmail(context.Background(), CompleteConnectParams{State: begin.State, Code: "c"})
+	if err != nil {
+		t.Fatalf("CompleteEnableGmail: %v", err)
+	}
+	if sink.got.ExistingRef != "vault://email/global" {
+		t.Fatalf("re-auth should pass ExistingRef for in-place update, got %q", sink.got.ExistingRef)
+	}
+	g, _ := conn.Grant(ProductGmail)
+	if !slices.Contains(g.GrantedScopes, GmailSendScope) || g.CredentialRef != "vault://email/global" {
+		t.Fatalf("grant should include send scope and keep its ref: %+v", g)
+	}
+}
