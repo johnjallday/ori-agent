@@ -30,11 +30,14 @@ func TestInspectLinkedGitWorktreeProvesPathBranchAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Branch != "feature/bridge" || got.CommonDir != paths.GitCommonDir {
-		t.Fatalf("InspectLinkedGitWorktree() = %#v, want branch/common dir", got)
+	if got.Branch != "feature/bridge" || got.CommonDir != paths.GitCommonDir || got.SourcePath != paths.RepoRoot {
+		t.Fatalf("InspectLinkedGitWorktree() = %#v, want branch/common dir/source checkout", got)
 	}
 	if _, err := InspectLinkedGitWorktree(context.Background(), feature, "feature/other", paths.GitCommonDir); err == nil {
 		t.Fatal("InspectLinkedGitWorktree accepted the wrong branch")
+	}
+	if _, err := InspectLinkedGitWorktree(context.Background(), repo, "dev", paths.GitCommonDir); err == nil {
+		t.Fatal("InspectLinkedGitWorktree accepted the repository source checkout")
 	}
 }
 

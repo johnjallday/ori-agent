@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
@@ -48,10 +50,63 @@ func TestClientUsesStructuredJSONAndMapsAPIErrors(t *testing.T) {
 	if err != nil || !schema.Supports("plugin.link") || !schema.Supports("agent.view.set") {
 		t.Fatalf("Schema() = %#v, %v", schema, err)
 	}
+	if missing := MissingRequiredSchemaMethods(schema); len(missing) != 0 {
+		t.Fatalf("recorded 0.7.5 schema is missing bridge methods: %v", missing)
+	}
 	_, err = client.AgentGet(context.Background(), "builder")
 	var stage *model.StageError
 	if !errors.As(err, &stage) || stage.Code != model.ErrAgentMissing {
 		t.Fatalf("AgentGet() error = %#v, want mapped missing-agent error", err)
+	}
+}
+
+func TestClientReadsStructuredAPIErrorsFromStderr(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"agent get missing": {Stderr: []byte(`{"error":{"code":"agent_not_found","message":"agent target missing not found"}}`)},
+	}, errors: map[string]error{
+		"agent get missing": errors.New("exit status 1"),
+	}}
+	_, err := New("fake-herdr", "", runner).AgentGetInfo(context.Background(), "missing")
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrAgentMissing {
+		t.Fatalf("stderr API error = %#v", err)
+	}
+}
+
+func TestRecorded075ResponsesDecodeStableBridgeIdentities(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"agent list": {Stdout: fixture(t, "agent-list-0.7.5.json")},
+		"worktree open --cwd /tmp/ori-source --path /tmp/ori-feature --no-focus --json": {Stdout: fixture(t, "worktree-open-0.7.5.json")},
+		"workspace close w1": {Stdout: fixture(t, "workspace-close-0.7.5.json")},
+	}}
+	client := New("fake-herdr", "", runner)
+	agents, err := client.AgentListInfo(context.Background())
+	if err != nil || len(agents) != 1 {
+		t.Fatalf("AgentListInfo() = %#v, %v", agents, err)
+	}
+	if agents[0].Name != "ori-repo-feature-builder" || agents[0].WorkspaceID != "w1" || agents[0].AgentSession == nil || agents[0].AgentSession.Value != "recorded-session-123" {
+		t.Fatalf("recorded agent identity = %#v", agents[0])
+	}
+	opened, err := client.OpenExistingWorktree(context.Background(), "/tmp/ori-source", "/tmp/ori-feature")
+	if err != nil || !opened.AlreadyOpen || opened.RootPane.PaneID != "w1:p1" || opened.Worktree.Branch != "feature/ori-feature" {
+		t.Fatalf("OpenExistingWorktree() = %#v, %v", opened, err)
+	}
+	closed, err := client.WorkspaceClose(context.Background(), "w1")
+	if err != nil || !strings.Contains(string(closed), `"workspace_closed"`) {
+		t.Fatalf("WorkspaceClose() = %s, %v", closed, err)
+	}
+}
+
+func TestPluginManifestPinsHerdr075Minimum(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "herdr-plugin.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `min_herdr_version = "0.7.5"`) {
+		t.Fatalf("plugin manifest does not pin the recorded 0.7.5 contract: %q", contents)
 	}
 }
 
@@ -97,6 +152,82 @@ func TestCallSocketUsesJSONLines(t *testing.T) {
 	}
 }
 
+func TestAgentListAndWorkspaceClosePreferTheStructuredSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket fixture")
+	}
+	t.Parallel()
+	runner := &fakeRunner{}
+	for _, test := range []struct {
+		name     string
+		response string
+		call     func(*Client) error
+		method   string
+	}{
+		{
+			name:     "agent list",
+			response: `{"id":"ori-devflow-1","result":{"type":"agent_list","agents":[{"name":"ori-bridge-builder","workspace_id":"w1","pane_id":"w1:p1","terminal_id":"term-1"}]}}` + "\n",
+			call: func(client *Client) error {
+				agents, err := client.AgentListInfo(context.Background())
+				if err != nil || len(agents) != 1 || agents[0].Name != "ori-bridge-builder" {
+					return fmt.Errorf("AgentListInfo() = %#v, %v", agents, err)
+				}
+				return nil
+			},
+			method: "agent.list",
+		},
+		{
+			name:     "workspace close",
+			response: `{"id":"ori-devflow-1","result":{"type":"workspace_closed","workspace_id":"w1"}}` + "\n",
+			call: func(client *Client) error {
+				_, err := client.WorkspaceClose(context.Background(), "w1")
+				return err
+			},
+			method: "workspace.close",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			pathFile, err := os.CreateTemp("", "herdr-socket-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := pathFile.Name()
+			if err := pathFile.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(socket); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close(); _ = os.Remove(socket) })
+			requests := make(chan string, 1)
+			go func() {
+				connection, acceptErr := listener.Accept()
+				if acceptErr != nil {
+					return
+				}
+				defer connection.Close()
+				line, _ := bufio.NewReader(connection).ReadString('\n')
+				requests <- line
+				_, _ = connection.Write([]byte(test.response))
+			}()
+			if err := test.call(New("unused", socket, runner)); err != nil {
+				t.Fatal(err)
+			}
+			if request := <-requests; !strings.Contains(request, `"method":"`+test.method+`"`) {
+				t.Fatalf("socket request = %q, want %s", request, test.method)
+			}
+		})
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("socket-enabled methods unexpectedly ran the CLI: %#v", runner.calls)
+	}
+}
+
 func TestIntegrationStatusIsOpaqueAndRedacted(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{responses: map[string]CommandResult{
@@ -111,25 +242,59 @@ func TestIntegrationStatusIsOpaqueAndRedacted(t *testing.T) {
 	}
 }
 
-func TestOpenExistingWorktreeUsesOnlyTheDocumentedOpenOperation(t *testing.T) {
+func TestOpenExistingWorktreeUsesTheSourceCheckoutAndOnlyTheDocumentedOpenOperation(t *testing.T) {
 	t.Parallel()
+	const source = "/tmp/ori-source"
 	const path = "/tmp/ori-feature"
 	runner := &fakeRunner{responses: map[string]CommandResult{
-		"worktree open --path /tmp/ori-feature --no-focus --json": {
+		"worktree open --cwd /tmp/ori-source --path /tmp/ori-feature --no-focus --json": {
 			Stdout: []byte(`{"result":{"type":"worktree_opened","already_open":true,"workspace":{"workspace_id":"w1","cwd":"/tmp/ori-feature"},"tab":{"tab_id":"w1:t1","workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1","terminal_id":"term-1","workspace_id":"w1","tab_id":"w1:t1","cwd":"/tmp/ori-feature","foreground_cwd":"/tmp/ori-feature"},"worktree":{"path":"/tmp/ori-feature","branch":"feature/bridge"}}}`),
 		},
 	}}
-	opened, err := New("fake-herdr", "", runner).OpenExistingWorktree(context.Background(), path)
+	opened, err := New("fake-herdr", "", runner).OpenExistingWorktree(context.Background(), source, path)
 	if err != nil || !opened.AlreadyOpen || opened.RootPane.PaneID != "w1:p1" || opened.Worktree.Path != path {
 		t.Fatalf("OpenExistingWorktree() = %#v, %v", opened, err)
 	}
 	if len(runner.calls) != 1 {
 		t.Fatalf("Herdr calls = %#v, want exactly one open", runner.calls)
 	}
+	if got := strings.Join(runner.calls[0].Args, " "); got != "worktree open --cwd /tmp/ori-source --path /tmp/ori-feature --no-focus --json" {
+		t.Fatalf("worktree open arguments = %q", got)
+	}
 	for _, argument := range runner.calls[0].Args {
 		if argument == "create" || argument == "remove" {
 			t.Fatalf("forbidden Herdr worktree mutation in %#v", runner.calls[0])
 		}
+	}
+}
+
+func TestAgentPromptUsesImmediateStructuredAcknowledgementAndRedactsFailures(t *testing.T) {
+	t.Parallel()
+	const target = "ori-repo-feature-builder"
+	const secretPrompt = "OPENAI_API_KEY=sk-not-a-real-secret"
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"agent prompt " + target + " " + secretPrompt: {Stdout: []byte(`{"result":{"type":"agent_prompted","agent":{"name":"ori-repo-feature-builder","workspace_id":"w1","pane_id":"w1:p1","terminal_id":"term-1"}}}`)},
+	}}
+	ack, err := New("fake-herdr", "", runner).AgentPromptInfo(context.Background(), target, secretPrompt, time.Second)
+	if err != nil || ack.Name != target {
+		t.Fatalf("AgentPromptInfo() = %#v, %v", ack, err)
+	}
+	if got := strings.Join(runner.calls[0].Args, " "); strings.Contains(got, "--wait") || strings.Contains(got, "--timeout") {
+		t.Fatalf("prompt command unexpectedly waits for a later state transition: %q", got)
+	}
+
+	failing := &fakeRunner{responses: map[string]CommandResult{
+		"agent prompt " + target + " " + secretPrompt: {Stderr: []byte(`{"error":{"code":"agent_not_found","message":"` + secretPrompt + `"}}`)},
+	}, errors: map[string]error{
+		"agent prompt " + target + " " + secretPrompt: errors.New("exit status 1"),
+	}}
+	_, err = New("fake-herdr", "", failing).AgentPromptInfo(context.Background(), target, secretPrompt, time.Second)
+	if err == nil || strings.Contains(err.Error(), secretPrompt) || strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Fatalf("prompt error leaked sensitive body: %v", err)
+	}
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Stage != "agent prompt" {
+		t.Fatalf("prompt error = %#v", err)
 	}
 }
 

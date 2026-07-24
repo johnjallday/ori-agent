@@ -1,0 +1,28 @@
+{
+  "id": "cli:worktree:open",
+  "result": {
+    "type": "worktree_opened",
+    "already_open": true,
+    "workspace": {
+      "workspace_id": "w1",
+      "cwd": "/tmp/ori-feature",
+      "label": "ori-feature"
+    },
+    "tab": {
+      "tab_id": "w1:t1",
+      "workspace_id": "w1"
+    },
+    "root_pane": {
+      "pane_id": "w1:p1",
+      "terminal_id": "term-recorded-1",
+      "workspace_id": "w1",
+      "tab_id": "w1:t1",
+      "cwd": "/tmp/ori-feature",
+      "foreground_cwd": "/tmp/ori-feature"
+    },
+    "worktree": {
+      "path": "/tmp/ori-feature",
+      "branch": "feature/ori-feature"
+    }
+  }
+}

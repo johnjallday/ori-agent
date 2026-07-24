@@ -53,6 +53,12 @@ func TestStoreRejectsCorruptOrFutureState(t *testing.T) {
 	if _, err := store.Load(); err == nil {
 		t.Fatal("Load() accepted a future state version")
 	}
+	if err := os.WriteFile(store.Path(), []byte(`{"version":0,"features":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(); err == nil {
+		t.Fatal("Load() silently accepted an unsupported legacy state version")
+	}
 }
 
 func TestStoreLockSerializesBridgeOperations(t *testing.T) {

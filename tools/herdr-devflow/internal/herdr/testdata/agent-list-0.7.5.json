@@ -1,0 +1,27 @@
+{
+  "id": "cli:agent:list",
+  "result": {
+    "agents": [
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "recorded-session-123"
+        },
+        "agent_status": "idle",
+        "cwd": "/tmp/ori-feature",
+        "focused": false,
+        "foreground_cwd": "/tmp/ori-feature",
+        "name": "ori-repo-feature-builder",
+        "pane_id": "w1:p1",
+        "revision": 8,
+        "state_change_seq": 24,
+        "tab_id": "w1:t1",
+        "terminal_id": "term-recorded-1",
+        "workspace_id": "w1"
+      }
+    ]
+  }
+}

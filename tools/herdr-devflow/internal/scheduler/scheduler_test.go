@@ -168,6 +168,49 @@ func TestParseDueAtAcceptsOneTimeAbsoluteOrLocalTimestamps(t *testing.T) {
 	if _, _, err := ParseDueAt("2026-03-08 02:30", time.Date(2026, time.March, 1, 0, 0, 0, 0, time.UTC), location); err == nil {
 		t.Fatal("ParseDueAt accepted a nonexistent spring-forward local timestamp")
 	}
+	for _, unsafe := range []string{"2026-07-24 09:30\x00", "2026-07-24 09:30; echo", "2026-07-24\n09:30"} {
+		if _, _, err := ParseDueAt(unsafe, now, location); err == nil {
+			t.Fatalf("ParseDueAt accepted unsafe timestamp %q", unsafe)
+		}
+	}
+}
+
+func TestScheduleCreateAndLookupRejectUnsafeIdentityValues(t *testing.T) {
+	now := testNow()
+	feature, agent, _ := testIdentity()
+	base := CreateRequest{Feature: feature, Agent: agent, DueAt: now.Add(time.Hour), Timezone: "America/New_York", Prompt: "Continue safely.", RetryWindow: 15 * time.Minute}
+	tests := []struct {
+		name   string
+		mutate func(*CreateRequest)
+	}{
+		{name: "feature traversal", mutate: func(request *CreateRequest) { request.Feature.Name = "../bridge" }},
+		{name: "role metacharacter", mutate: func(request *CreateRequest) { request.Agent.Role = "builder;echo" }},
+		{name: "unsupported kind", mutate: func(request *CreateRequest) { request.Agent.Kind = "claude$(touch)" }},
+		{name: "agent control character", mutate: func(request *CreateRequest) { request.Agent.Name = "builder\nnext" }},
+		{name: "worktree control character", mutate: func(request *CreateRequest) { request.Feature.Path = "/tmp/bridge\x00" }},
+		{name: "timezone metacharacter", mutate: func(request *CreateRequest) { request.Timezone = "America/New_York;echo" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := base
+			test.mutate(&request)
+			store := newMemoryStore()
+			store.seed(feature, agent)
+			service := &Service{Store: store, Now: func() time.Time { return now }, NewID: func() (string, error) { return "sch-safe", nil }}
+			if _, err := service.Create(context.Background(), request); err == nil {
+				t.Fatalf("Create(%#v) accepted unsafe identity", request)
+			}
+		})
+	}
+	service := &Service{}
+	for _, id := range []string{"sch;rm", "../sch", "sch\nnext", ""} {
+		if _, err := service.Show(context.Background(), ScheduleRef{}, id); err == nil {
+			t.Fatalf("Show(%q) accepted unsafe schedule ID", id)
+		}
+		if _, err := service.Cancel(context.Background(), ScheduleRef{}, id); err == nil {
+			t.Fatalf("Cancel(%q) accepted unsafe schedule ID", id)
+		}
+	}
 }
 
 func TestCreatePersistsFeatureScopedOneTimeSchedule(t *testing.T) {

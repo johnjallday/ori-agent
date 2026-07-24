@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
@@ -133,6 +134,18 @@ func TestPreflightUsesCanonicalFeatureIdentityAndWorkspaceCloseOnly(t *testing.T
 	}
 	if got.Agents[0].FocusCommand != "wt herd focus 'builder' --worktree '/tmp/ori/bridge'" || got.Agents[0].ReadCommand != "wt herd read 'builder' --worktree '/tmp/ori/bridge'" {
 		t.Fatalf("agent recovery commands = %#v", got.Agents[0])
+	}
+}
+
+func TestShellQuoteKeepsMetacharactersLiteralAndDropsControls(t *testing.T) {
+	t.Parallel()
+	got := shellQuote("agent'; $(touch never)\n")
+	want := `'agent'"'"'; $(touch never)'`
+	if got != want {
+		t.Fatalf("shellQuote() = %q, want %q", got, want)
+	}
+	if strings.ContainsAny(got, "\n\r\x00") {
+		t.Fatalf("shellQuote() leaked a control character: %q", got)
 	}
 }
 

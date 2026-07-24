@@ -24,7 +24,7 @@ var featurePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$`)
 var actionableTaskPattern = regexp.MustCompile(`^\d+\.[1-9]\d*\s+`)
 
 type Herdr interface {
-	OpenExistingWorktree(context.Context, string) (herdr.WorktreeOpenResult, error)
+	OpenExistingWorktree(context.Context, string, string) (herdr.WorktreeOpenResult, error)
 	PaneProcessInfo(context.Context, string) (herdr.PaneProcessInfo, error)
 	PaneSplitInfo(context.Context, string, string, string) (herdr.PaneInfo, error)
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
@@ -155,7 +155,10 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		return HandoffResult{}, &model.StageError{Stage: "record handoff", Code: model.ErrStateCorrupt, Message: "could not persist the feature handoff record before contacting Herdr", Recovery: "check the local bridge state directory, then run wt herd retry", Cause: err}
 	}
 
-	opened, err := s.Client.OpenExistingWorktree(ctx, feature.Path)
+	if gitWorktree.SourcePath == "" {
+		return HandoffResult{}, &model.StageError{Stage: "resolve source checkout", Code: model.ErrWorktreeInvalid, Message: "could not resolve the repository source checkout required by Herdr", Recovery: "wt herd doctor"}
+	}
+	opened, err := s.Client.OpenExistingWorktree(ctx, gitWorktree.SourcePath, feature.Path)
 	if err != nil {
 		return HandoffResult{}, wrapHerdrError("open existing worktree", err, "wt herd retry")
 	}
@@ -165,7 +168,7 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	if opened.RootPane.WorkspaceID != "" && opened.RootPane.WorkspaceID != opened.Workspace.WorkspaceID {
 		return HandoffResult{}, &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr returned a root pane from a different workspace", Recovery: "wt herd retry"}
 	}
-	if err := s.validateRootShell(ctx, opened.RootPane, feature.Path); err != nil {
+	if err := s.validateRootPane(opened.RootPane, feature.Path); err != nil {
 		return HandoffResult{}, err
 	}
 
@@ -308,6 +311,12 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		return primary, true, nil
 	}
 
+	// A saved or already-live primary owns this pane and may legitimately be a
+	// foreground coding-agent process. Only a new launch needs an idle shell.
+	if err := s.validateRootShell(ctx, opened.RootPane, featureState.Feature.Path); err != nil {
+		return model.RoleAgent{}, false, err
+	}
+
 	started, err := s.Client.AgentStartInfo(ctx, expectedName, kind, opened.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
 	if err != nil {
 		return model.RoleAgent{}, false, wrapHerdrError("start primary agent", err, "wt herd retry")
@@ -335,13 +344,8 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 }
 
 func (s *Service) validateRootShell(ctx context.Context, pane herdr.PaneInfo, worktreePath string) error {
-	if pane.PaneID == "" || pane.TerminalID == "" {
-		return &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return a live root shell pane", Recovery: "wt herd retry"}
-	}
-	for _, cwd := range []string{pane.Cwd, pane.ForegroundCwd} {
-		if cwd != "" && !samePath(cwd, worktreePath) {
-			return &model.StageError{Stage: "resolve root pane", Code: model.ErrWorktreeInvalid, Message: "Herdr root pane is not in the feature worktree", Recovery: "wt herd retry"}
-		}
+	if err := s.validateRootPane(pane, worktreePath); err != nil {
+		return err
 	}
 	process, err := s.Client.PaneProcessInfo(ctx, pane.PaneID)
 	if err != nil {
@@ -356,6 +360,22 @@ func (s *Service) validateRootShell(ctx context.Context, pane herdr.PaneInfo, wo
 		}
 		if foreground.Cwd != "" && !samePath(foreground.Cwd, worktreePath) {
 			return &model.StageError{Stage: "resolve root pane", Code: model.ErrWorktreeInvalid, Message: "Herdr root shell is not in the feature worktree", Recovery: "wt herd retry"}
+		}
+	}
+	return nil
+}
+
+// validateRootPane checks the stable, structured identity Herdr returned for
+// the feature workspace. Unlike validateRootShell it remains valid after a
+// coding agent has taken over the pane, so retries can resume a saved primary
+// without trying to launch another conversation.
+func (s *Service) validateRootPane(pane herdr.PaneInfo, worktreePath string) error {
+	if pane.PaneID == "" || pane.TerminalID == "" {
+		return &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return a live root shell pane", Recovery: "wt herd retry"}
+	}
+	for _, cwd := range []string{pane.Cwd, pane.ForegroundCwd} {
+		if cwd != "" && !samePath(cwd, worktreePath) {
+			return &model.StageError{Stage: "resolve root pane", Code: model.ErrWorktreeInvalid, Message: "Herdr root pane is not in the feature worktree", Recovery: "wt herd retry"}
 		}
 	}
 	return nil
@@ -442,7 +462,7 @@ func metadataEnabledFor(feature model.FeatureState) bool {
 // trusting a human role alias as a global target. The digest keeps collisions
 // distinct even when the readable parts are truncated to Herdr's 32-byte cap.
 func ScopedAgentName(repositoryID, feature, role string) (string, error) {
-	if !featurePattern.MatchString(feature) || !featurePattern.MatchString(role) || repositoryID == "" {
+	if !featurePattern.MatchString(feature) || !rolePattern.MatchString(role) || repositoryID == "" {
 		return "", errors.New("invalid repository, feature, or role identity")
 	}
 	raw := strings.Join([]string{repositoryID, feature, role}, ":")

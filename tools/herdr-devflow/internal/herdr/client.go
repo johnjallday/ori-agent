@@ -100,24 +100,19 @@ func (c *Client) Version(ctx context.Context) (config.Version, error) {
 // both response envelopes and raw JSON schema documents.
 func (c *Client) CLIJSON(ctx context.Context, args ...string) (json.RawMessage, error) {
 	result, runErr := c.Runner.Run(ctx, Command{Path: c.Binary, Args: args})
+	response, responseErr, structured := decodeCommandResponse(result)
 	if runErr != nil {
-		// Herdr emits structured API errors on stderr/stdout for command
-		// failures. Prefer that stable code when it is available.
-		if response, responseErr := decodeJSONResponse(result.Stdout); responseErr == nil {
-			return response, nil
-		} else {
-			var stageErr *model.StageError
-			if errors.As(responseErr, &stageErr) && stageErr.Stage == "Herdr API" {
-				return nil, responseErr
-			}
+		// Herdr 0.7.5 can emit a structured API error on either stream. Prefer
+		// that stable code over process-exit text whenever it is available.
+		if structured {
+			return response, responseErr
 		}
-		return nil, c.commandError(strings.Join(args, " "), result, runErr)
+		return nil, c.commandError(commandStage(args), result, runErr)
 	}
-	response, responseErr := decodeJSONResponse(result.Stdout)
-	if responseErr != nil {
-		return nil, responseErr
+	if structured {
+		return response, responseErr
 	}
-	return response, nil
+	return decodeJSONResponse(result.Stdout)
 }
 
 // CLIText executes a documented command whose successful payload is terminal
@@ -126,17 +121,39 @@ func (c *Client) CLIJSON(ctx context.Context, args ...string) (json.RawMessage, 
 func (c *Client) CLIText(ctx context.Context, args ...string) (string, error) {
 	result, runErr := c.Runner.Run(ctx, Command{Path: c.Binary, Args: args})
 	if runErr != nil {
-		if response, responseErr := decodeJSONResponse(result.Stdout); responseErr == nil && len(response) > 0 {
-			return "", &model.StageError{Stage: strings.Join(args, " "), Code: model.ErrHerdrUnavailable, Message: "Herdr rejected the requested operation", Recovery: "wt herd doctor"}
-		} else {
-			var stageErr *model.StageError
-			if errors.As(responseErr, &stageErr) {
-				return "", stageErr
+		response, responseErr, structured := decodeCommandResponse(result)
+		if structured {
+			if responseErr != nil {
+				return "", responseErr
+			}
+			if len(response) > 0 {
+				return "", &model.StageError{Stage: commandStage(args), Code: model.ErrHerdrUnavailable, Message: "Herdr rejected the requested operation", Recovery: "wt herd doctor"}
 			}
 		}
-		return "", c.commandError(strings.Join(args, " "), result, runErr)
+		return "", c.commandError(commandStage(args), result, runErr)
 	}
 	return string(result.Stdout), nil
+}
+
+// decodeCommandResponse accepts Herdr's structured response envelope from
+// either stdout or stderr. Some 0.7.5 commands write API errors to stderr
+// while retaining a nonzero process exit; treating those as opaque failures
+// would lose the safe missing/permission/not-found classification.
+func decodeCommandResponse(result CommandResult) (json.RawMessage, error, bool) {
+	for _, output := range [][]byte{result.Stdout, result.Stderr} {
+		if len(bytesTrimSpace(output)) == 0 {
+			continue
+		}
+		response, err := decodeJSONResponse(output)
+		if err == nil {
+			return response, nil, true
+		}
+		var stageErr *model.StageError
+		if errors.As(err, &stageErr) && stageErr.Stage == "Herdr API" {
+			return nil, err, true
+		}
+	}
+	return nil, nil, false
 }
 
 type Schema struct {
@@ -149,6 +166,49 @@ type Schema struct {
 func (s Schema) Supports(method string) bool {
 	_, ok := s.Methods[method]
 	return ok
+}
+
+// RequiredSchemaMethods is the recorded Herdr 0.7.5 structured contract used
+// by the bridge adapter. Keep this list here, next to the only version-specific
+// command and socket shapes, rather than duplicating it in the wt lifecycle.
+// Display-only opaque text (the integration diagnostic and agent read output)
+// is intentionally excluded: neither is used to resolve an agent identity or
+// semantic state.
+var RequiredSchemaMethods = []string{
+	"ping",
+	"plugin.link",
+	"plugin.enable",
+	"plugin.list",
+	"plugin.action.invoke",
+	"session.snapshot",
+	"worktree.open",
+	"workspace.close",
+	"pane.split",
+	"pane.process_info",
+	"workspace.report_metadata",
+	"pane.report_metadata",
+	"agent.list",
+	"agent.get",
+	"agent.start",
+	"agent.prompt",
+	"agent.rename",
+	"agent.focus",
+	"agent.read",
+	"agent.view.set",
+	"agent.view.clear",
+	"events.subscribe",
+}
+
+// MissingRequiredSchemaMethods returns a stable, adapter-owned compatibility
+// result for the installed Herdr schema.
+func MissingRequiredSchemaMethods(schema Schema) []string {
+	missing := make([]string, 0)
+	for _, method := range RequiredSchemaMethods {
+		if !schema.Supports(method) {
+			missing = append(missing, method)
+		}
+	}
+	return missing
 }
 
 func (c *Client) Schema(ctx context.Context) (Schema, error) {
@@ -368,15 +428,17 @@ func (c *Client) InvokePluginAction(ctx context.Context, actionID string) (json.
 	return c.CLIJSON(ctx, "plugin", "action", "invoke", actionID)
 }
 
-// WorktreeOpen opens an existing checkout only. This adapter intentionally has
-// no worktree-create or worktree-remove method because Git remains Ori's
+// WorktreeOpen opens an existing linked checkout only. Herdr 0.7.5 requires
+// the repository source checkout as the parent context for a linked worktree,
+// so callers must pass both paths. This adapter intentionally has no
+// worktree-create or worktree-remove method because Git remains Ori's
 // authority for worktree lifecycle.
-func (c *Client) WorktreeOpen(ctx context.Context, path string) (json.RawMessage, error) {
-	return c.CLIJSON(ctx, "worktree", "open", "--path", path, "--no-focus", "--json")
+func (c *Client) WorktreeOpen(ctx context.Context, sourceCheckout, path string) (json.RawMessage, error) {
+	return c.CLIJSON(ctx, "worktree", "open", "--cwd", sourceCheckout, "--path", path, "--no-focus", "--json")
 }
 
-func (c *Client) OpenExistingWorktree(ctx context.Context, path string) (WorktreeOpenResult, error) {
-	raw, err := c.WorktreeOpen(ctx, path)
+func (c *Client) OpenExistingWorktree(ctx context.Context, sourceCheckout, path string) (WorktreeOpenResult, error) {
+	raw, err := c.WorktreeOpen(ctx, sourceCheckout, path)
 	if err != nil {
 		return WorktreeOpenResult{}, err
 	}
@@ -391,6 +453,9 @@ func (c *Client) OpenExistingWorktree(ctx context.Context, path string) (Worktre
 }
 
 func (c *Client) WorkspaceClose(ctx context.Context, workspaceID string) (json.RawMessage, error) {
+	if c.SocketPath != "" {
+		return c.CallSocket(ctx, "workspace.close", map[string]any{"workspace_id": workspaceID})
+	}
 	return c.CLIJSON(ctx, "workspace", "close", workspaceID)
 }
 
@@ -433,6 +498,9 @@ func (c *Client) PaneProcessInfo(ctx context.Context, paneID string) (PaneProces
 }
 
 func (c *Client) AgentList(ctx context.Context) (json.RawMessage, error) {
+	if c.SocketPath != "" {
+		return c.CallSocket(ctx, "agent.list", map[string]any{})
+	}
 	return c.CLIJSON(ctx, "agent", "list")
 }
 
@@ -490,7 +558,20 @@ func (c *Client) AgentStartInfo(ctx context.Context, name, kind, paneID string, 
 }
 
 func (c *Client) AgentPrompt(ctx context.Context, target, text string, timeout time.Duration) (json.RawMessage, error) {
-	return c.CLIJSON(ctx, "agent", "prompt", target, text, "--wait", "--timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	// Do not use Herdr's --wait mode here. In 0.7.5 it intentionally requires
+	// observing a subsequent state transition, which can report a stalled
+	// delivery even after the prompt has reached an otherwise idle session. The
+	// structured agent_prompted response is the bounded acknowledgement.
+	raw, err := c.CLIJSON(ctx, "agent", "prompt", target, text)
+	if err != nil {
+		return nil, redactPromptError(err)
+	}
+	return raw, nil
 }
 
 func (c *Client) AgentPromptInfo(ctx context.Context, target, text string, timeout time.Duration) (AgentInfo, error) {
@@ -762,6 +843,39 @@ func (c *Client) commandError(stage string, result CommandResult, err error) err
 		return &model.StageError{Stage: stage, Code: model.ErrHerdrPermission, Message: "Herdr executable or socket permission was denied", Recovery: "check executable and socket permissions, then run wt herd doctor", Cause: err}
 	}
 	return &model.StageError{Stage: stage, Code: model.ErrHerdrUnavailable, Message: "Herdr command failed before returning a structured response", Recovery: "herdr status server && wt herd doctor", Cause: err}
+}
+
+// commandStage retains only a command family and verb in operator-visible
+// errors. Positional arguments can be full prompt bodies, local paths, or
+// other private data and must never be reflected into diagnostics.
+func commandStage(args []string) string {
+	if len(args) == 0 {
+		return "Herdr command"
+	}
+	if len(args) == 1 {
+		return args[0]
+	}
+	return args[0] + " " + args[1]
+}
+
+// redactPromptError guarantees that no failure path for a prompt command
+// returns a body supplied by the user or by Herdr's echoed error response.
+func redactPromptError(err error) error {
+	var stageErr *model.StageError
+	if errors.As(err, &stageErr) {
+		recovery := stageErr.Recovery
+		if recovery == "" {
+			recovery = "wt herd status; verify the target before retrying"
+		}
+		return &model.StageError{
+			Stage:    "agent prompt",
+			Code:     stageErr.Code,
+			Message:  "Herdr could not submit the agent prompt",
+			Recovery: recovery,
+			Cause:    stageErr.Cause,
+		}
+	}
+	return &model.StageError{Stage: "agent prompt", Code: model.ErrHerdrUnavailable, Message: "Herdr could not submit the agent prompt", Recovery: "wt herd status; verify the target before retrying", Cause: err}
 }
 
 func socketError(stage string, err error) error {

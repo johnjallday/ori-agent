@@ -1,0 +1,7 @@
+{
+  "id": "cli:workspace:close",
+  "result": {
+    "type": "workspace_closed",
+    "workspace_id": "w1"
+  }
+}

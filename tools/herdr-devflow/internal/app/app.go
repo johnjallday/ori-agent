@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
@@ -27,7 +28,10 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
-const PluginID = "ori.devflow"
+const (
+	PluginID              = "ori.devflow"
+	defaultCleanupTimeout = 5 * time.Second
+)
 
 type Dependencies struct {
 	Stdout       io.Writer
@@ -44,17 +48,18 @@ type Dependencies struct {
 }
 
 type App struct {
-	stdout       io.Writer
-	stderr       io.Writer
-	getwd        func() (string, error)
-	lookupEnv    func(string) (string, bool)
-	lookPath     func(string) (string, error)
-	runner       herdr.Runner
-	buildHelper  func(context.Context, string, string) error
-	goos         string
-	userHomeDir  func() (string, error)
-	getuid       func() int
-	launchctlRun func(context.Context, string, ...string) error
+	stdout         io.Writer
+	stderr         io.Writer
+	getwd          func() (string, error)
+	lookupEnv      func(string) (string, bool)
+	lookPath       func(string) (string, error)
+	runner         herdr.Runner
+	buildHelper    func(context.Context, string, string) error
+	goos           string
+	userHomeDir    func() (string, error)
+	getuid         func() int
+	launchctlRun   func(context.Context, string, ...string) error
+	cleanupTimeout time.Duration
 }
 
 func New(deps Dependencies) *App {
@@ -89,17 +94,18 @@ func New(deps Dependencies) *App {
 		deps.Getuid = os.Getuid
 	}
 	return &App{
-		stdout:       deps.Stdout,
-		stderr:       deps.Stderr,
-		getwd:        deps.Getwd,
-		lookupEnv:    deps.LookupEnv,
-		lookPath:     deps.LookPath,
-		runner:       deps.Runner,
-		buildHelper:  deps.BuildHelper,
-		goos:         deps.GOOS,
-		userHomeDir:  deps.UserHomeDir,
-		getuid:       deps.Getuid,
-		launchctlRun: deps.LaunchctlRun,
+		stdout:         deps.Stdout,
+		stderr:         deps.Stderr,
+		getwd:          deps.Getwd,
+		lookupEnv:      deps.LookupEnv,
+		lookPath:       deps.LookPath,
+		runner:         deps.Runner,
+		buildHelper:    deps.BuildHelper,
+		goos:           deps.GOOS,
+		userHomeDir:    deps.UserHomeDir,
+		getuid:         deps.Getuid,
+		launchctlRun:   deps.LaunchctlRun,
+		cleanupTimeout: defaultCleanupTimeout,
 	}
 }
 
@@ -738,6 +744,7 @@ func (a *App) setup(ctx context.Context, opts options) int {
 		}
 		schedulerStatus = "LaunchAgent registered: " + plist
 	}
+	a.recordAudit(runtime, audit.Event{Operation: "setup", Stage: "runtime", Outcome: "ready"})
 
 	a.writeResult(opts.json, map[string]any{
 		"status":        "ready",
@@ -816,6 +823,11 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		return 1
 	}
 	a.refreshStatusDisplay(ctx, runtime)
+	handoffOutcome := "prompt-delivered"
+	if result.PromptSkipped {
+		handoffOutcome = "prompt-skipped"
+	}
+	a.recordAudit(runtime, audit.Event{Operation: "handoff", Feature: result.Feature.Name, Role: result.Primary.Role, Stage: "bootstrap", Outcome: handoffOutcome})
 	a.writeResult(opts.json, map[string]any{
 		"status":           "ready",
 		"feature":          result.Feature.Name,
@@ -898,6 +910,11 @@ func (a *App) addAgent(ctx context.Context, opts options, args []string) int {
 		return 1
 	}
 	a.refreshStatusDisplay(ctx, runtime)
+	addOutcome := "created"
+	if result.Reused {
+		addOutcome = "reused"
+	}
+	a.recordAudit(runtime, audit.Event{Operation: "add", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "role-agent", Outcome: addOutcome})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "reused": result.Reused})
 	} else if result.Reused {
@@ -924,6 +941,7 @@ func (a *App) promptAgent(ctx context.Context, opts options, args []string) int 
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.recordAudit(runtime, audit.Event{Operation: "prompt", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "agent-prompt", Outcome: "delivered"})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "prompt_delivered": true})
 	} else {
@@ -949,6 +967,7 @@ func (a *App) renameAgent(ctx context.Context, opts options, args []string) int 
 		return 1
 	}
 	a.refreshStatusDisplay(ctx, runtime)
+	a.recordAudit(runtime, audit.Event{Operation: "rename", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "agent-name", Outcome: "renamed"})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent})
 	} else {
@@ -973,6 +992,7 @@ func (a *App) focusAgent(ctx context.Context, opts options, args []string) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	a.recordAudit(runtime, audit.Event{Operation: "focus", Feature: feature.Name, Role: agent.Role, Stage: "agent", Outcome: "focused"})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": feature.Name, "agent": agent, "focused": true})
 	} else {
@@ -997,6 +1017,9 @@ func (a *App) readAgent(ctx context.Context, opts options, args []string) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	// The event proves an intentional read without accepting or storing any
+	// terminal text in the audit record.
+	a.recordAudit(runtime, audit.Event{Operation: "read", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "agent-output", Outcome: "retrieved"})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "text": result.Text})
 	} else {
@@ -1022,6 +1045,7 @@ func (a *App) rebindAgent(ctx context.Context, opts options, args []string) int 
 		return 1
 	}
 	a.refreshStatusDisplay(ctx, runtime)
+	a.recordAudit(runtime, audit.Event{Operation: "rebind", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "native-session", Outcome: "rebound"})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "rebound": true})
 	} else {
@@ -1094,6 +1118,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		return 1
 	}
 	a.refreshStatusDisplay(ctx, runtime)
+	a.recordAudit(runtime, audit.Event{Operation: "continue", Feature: target.Feature.Name, Role: target.Agent.Role, Stage: "schedule", Outcome: "scheduled"})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "scheduled", "preview": preview, "schedule": scheduleView(target.Feature, record)})
 	} else {
@@ -1163,6 +1188,7 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 			return 1
 		}
 		a.refreshStatusDisplay(ctx, runtime)
+		a.recordAudit(runtime, audit.Event{Operation: "schedule", Feature: feature.Name, Role: record.Role, Stage: "cancel", Outcome: "canceled"})
 		if opts.json {
 			a.writeResult(true, map[string]any{"status": "canceled", "schedule": scheduleView(feature, record)})
 		} else {
@@ -1267,7 +1293,7 @@ func (a *App) cleanup(ctx context.Context, opts options, args []string) int {
 			result.Overridden = true
 			result.Detail = "explicit Herdr-safety override accepted: bridge configuration cannot be read; the Git worktree may be orphaned from live Herdr state"
 			if runtimeRoot, rootErr := a.runtimeRootFor(opts); rootErr == nil {
-				a.recordCleanupOverrideAt(filepath.Join(runtimeRoot, "logs"), result)
+				a.recordCleanupAuditAt(filepath.Join(runtimeRoot, "logs"), result)
 			}
 		}
 		a.writeCleanupResult(opts.json, result)
@@ -1285,9 +1311,10 @@ func (a *App) cleanup(ctx context.Context, opts options, args []string) int {
 		Client:       runtime.herdr,
 		RepositoryID: runtime.paths.RepositoryID,
 		GitCommonDir: runtime.paths.GitCommonDir,
+		HerdrTimeout: a.cleanupTimeout,
 	}
 	result := service.Preflight(ctx, cleanup.Request{WorktreePath: parsed.worktree, Override: parsed.override})
-	a.recordCleanupOverride(runtime, result)
+	a.recordCleanupAudit(runtime, result)
 	a.writeCleanupResult(opts.json, result)
 	switch result.Outcome {
 	case cleanup.OutcomeReady, cleanup.OutcomeSkipped, cleanup.OutcomeOverridden:
@@ -1299,51 +1326,39 @@ func (a *App) cleanup(ctx context.Context, opts options, args []string) int {
 	}
 }
 
-func (a *App) recordCleanupOverride(runtime runtimeContext, result cleanup.Result) {
-	a.recordCleanupOverrideAt(runtime.paths.LogDir, result)
+func (a *App) recordAudit(runtime runtimeContext, event audit.Event) {
+	a.recordAuditAt(runtime.paths.LogDir, event)
 }
 
-func (a *App) recordCleanupOverrideAt(logDir string, result cleanup.Result) {
-	if !result.Overridden {
-		return
+func (a *App) recordAuditAt(logDir string, event audit.Event) {
+	if err := (audit.Logger{Dir: logDir}).Record(audit.Event{
+		Operation: event.Operation,
+		Feature:   event.Feature,
+		Role:      event.Role,
+		Stage:     event.Stage,
+		Outcome:   event.Outcome,
+		Warning:   event.Warning,
+	}); err != nil {
+		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the local audit event")
 	}
-	if err := os.MkdirAll(logDir, 0700); err != nil {
-		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the cleanup override audit event")
-		return
+}
+
+func (a *App) recordCleanupAudit(runtime runtimeContext, result cleanup.Result) {
+	a.recordCleanupAuditAt(runtime.paths.LogDir, result)
+}
+
+func (a *App) recordCleanupAuditAt(logDir string, result cleanup.Result) {
+	warning := ""
+	if result.Overridden {
+		warning = "orphan-risk"
 	}
-	file, err := os.OpenFile(filepath.Join(logDir, "cleanup-audit.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the cleanup override audit event")
-		return
-	}
-	defer file.Close()
-	if err := file.Chmod(0600); err != nil {
-		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not secure the cleanup override audit log")
-		return
-	}
-	event := struct {
-		Timestamp   time.Time `json:"timestamp"`
-		Operation   string    `json:"operation"`
-		Outcome     string    `json:"outcome"`
-		Feature     string    `json:"feature,omitempty"`
-		WorkspaceID string    `json:"workspace_id,omitempty"`
-		Warning     string    `json:"warning"`
-	}{
-		Timestamp:   time.Now().UTC(),
-		Operation:   "cleanup_override",
-		Outcome:     result.Outcome.String(),
-		Feature:     result.Feature.Name,
-		WorkspaceID: result.WorkspaceID,
-		Warning:     "Git cleanup proceeded after an explicit Herdr-safety override; the workspace may remain open in Herdr.",
-	}
-	encoded, err := json.Marshal(event)
-	if err != nil {
-		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not encode the cleanup override audit event")
-		return
-	}
-	if _, err := file.Write(append(encoded, '\n')); err != nil {
-		fmt.Fprintln(a.stderr, "Ori Herdr Devflow warning: could not record the cleanup override audit event")
-	}
+	a.recordAuditAt(logDir, audit.Event{
+		Operation: "cleanup",
+		Feature:   result.Feature.Name,
+		Stage:     "workspace-close",
+		Outcome:   string(result.Outcome),
+		Warning:   warning,
+	})
 }
 
 func (a *App) writeCleanupResult(asJSON bool, result cleanup.Result) {
@@ -1482,6 +1497,16 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 	}
 	views := make([]map[string]any, 0, len(results))
 	for _, result := range results {
+		runtimeRoot, rootErr := a.runtimeRootFor(opts)
+		if rootErr == nil {
+			a.recordAuditAt(filepath.Join(runtimeRoot, "logs"), audit.Event{
+				Operation: "dispatch",
+				Feature:   result.Feature.Name,
+				Role:      result.Schedule.Role,
+				Stage:     "delivery",
+				Outcome:   string(result.Schedule.State),
+			})
+		}
 		views = append(views, scheduleView(result.Feature, result.Schedule))
 	}
 	if opts.json {
@@ -1574,14 +1599,12 @@ func verifyCompatibility(ctx context.Context, client *herdr.Client, cfg config.C
 	if err != nil {
 		return err
 	}
-	for _, method := range []string{"plugin.link", "plugin.enable", "session.snapshot", "worktree.open", "agent.start", "agent.view.set", "events.subscribe"} {
-		if !schema.Supports(method) {
-			return &model.StageError{
-				Stage:    "schema",
-				Code:     model.ErrSchemaUnsupported,
-				Message:  fmt.Sprintf("Herdr API schema does not provide %s", method),
-				Recovery: "update Herdr to 0.7.5 or newer, then run wt herd doctor",
-			}
+	if missing := herdr.MissingRequiredSchemaMethods(schema); len(missing) > 0 {
+		return &model.StageError{
+			Stage:    "schema",
+			Code:     model.ErrSchemaUnsupported,
+			Message:  fmt.Sprintf("Herdr API schema does not provide %s", missing[0]),
+			Recovery: "update Herdr to 0.7.5 or newer, then run wt herd doctor",
 		}
 	}
 	return nil
@@ -1723,10 +1746,10 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 	}
 	if schema, schemaErr := runtime.herdr.Schema(ctx); schemaErr != nil {
 		diagnostics = append(diagnostics, diagnosticFromError("Herdr schema", schemaErr))
-	} else if schema.Supports("plugin.link") && schema.Supports("agent.view.set") && schema.Supports("events.subscribe") {
+	} else if missing := herdr.MissingRequiredSchemaMethods(schema); len(missing) == 0 {
 		diagnostics = append(diagnostics, diagnostic{Name: "Herdr schema", Status: "PASS", Detail: fmt.Sprintf("protocol %d", schema.Protocol)})
 	} else {
-		diagnostics = append(diagnostics, diagnostic{Name: "Herdr schema", Status: "FAIL", Detail: "required structured API methods are absent", Recovery: "update Herdr, then run wt herd doctor"})
+		diagnostics = append(diagnostics, diagnostic{Name: "Herdr schema", Status: "FAIL", Detail: "required structured API method is absent: " + missing[0], Recovery: "update Herdr to 0.7.5 or newer, then run wt herd doctor"})
 	}
 	if runtime.herdr.SocketPath != "" {
 		if _, socketErr := runtime.herdr.Ping(ctx); socketErr != nil {

@@ -101,6 +101,31 @@ func TestScopedPrimaryNamesKeepSameRoleInDifferentFeatureWorktreesIsolated(t *te
 	}
 }
 
+func TestControlIdentityValidationRejectsTraversalMetacharactersAndControls(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{"../builder", "builder;echo", "builder$(touch)", "builder\nnext", "Builder", ""} {
+		if err := validateRole(role); err == nil {
+			t.Fatalf("validateRole(%q) accepted unsafe role", role)
+		}
+		if _, err := ScopedAgentName("repo-123", "feature", role); err == nil {
+			t.Fatalf("ScopedAgentName accepted unsafe role %q", role)
+		}
+	}
+	for _, feature := range []string{"../feature", "feature;echo", "feature\nnext", ""} {
+		if _, err := ScopedAgentName("repo-123", feature, "builder"); err == nil {
+			t.Fatalf("ScopedAgentName accepted unsafe feature %q", feature)
+		}
+	}
+	for _, target := range []string{"builder;echo", "builder$(touch)", "builder\nnext", "../builder", ""} {
+		if lowLevelTargetPattern.MatchString(target) {
+			t.Fatalf("low-level target pattern accepted unsafe target %q", target)
+		}
+	}
+	if !lowLevelTargetPattern.MatchString("ori-repo-feature-builder:1") {
+		t.Fatal("low-level target pattern rejected a documented Herdr-style target")
+	}
+}
+
 func TestControlsRestoreNativeSessionAndExplicitRebindWithoutReplacement(t *testing.T) {
 	t.Parallel()
 	service, client, store, path := seededFeature(t)

@@ -214,9 +214,27 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 		return stageError("status metadata", model.ErrHerdrUnavailable, "the Herdr client is unavailable", "wt herd doctor", nil)
 	}
 	featureByWorkspace := make(map[string]FeatureSnapshot, len(snapshot.Features))
+	liveWorkspaces := make(map[string]bool)
+	missingWorkspaces := make(map[string]bool)
+	for _, row := range snapshot.Rows {
+		if row.WorkspaceID == "" {
+			continue
+		}
+		if row.Live != nil {
+			liveWorkspaces[row.WorkspaceID] = true
+		} else if row.Missing {
+			missingWorkspaces[row.WorkspaceID] = true
+		}
+	}
 	for _, feature := range snapshot.Features {
 		featureByWorkspace[feature.WorkspaceID] = feature
 		if feature.WorkspaceID == "" || !feature.MetadataEnabled {
+			continue
+		}
+		// A successful cleanup closes the workspace before Git removes the
+		// worktree. Keep its saved state visible as missing, but do not attempt
+		// to rehydrate display metadata into that already-closed workspace.
+		if missingWorkspaces[feature.WorkspaceID] && !liveWorkspaces[feature.WorkspaceID] {
 			continue
 		}
 		if _, err := s.Client.ReportWorkspaceMetadata(ctx, feature.WorkspaceID, s.metadataSource(feature), workspaceTokens(feature)); err != nil {

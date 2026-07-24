@@ -64,3 +64,29 @@ func TestResolveUsesUserLocalRuntimeAndRejectsCheckoutState(t *testing.T) {
 		t.Fatalf("Resolve() error = %v, want checkout safety error", err)
 	}
 }
+
+func TestCanonicalPathRejectsControlCharactersAndResolvesSymlinks(t *testing.T) {
+	t.Parallel()
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "feature-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink fixture is unavailable: %v", err)
+	}
+	got, err := canonicalPath(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("canonicalPath(%q) = %q, want %q", link, got, want)
+	}
+
+	for _, input := range []string{"", "\x00", "/tmp/feature\nnext", "/tmp/feature\x7f"} {
+		if _, err := canonicalPath(input); err == nil {
+			t.Fatalf("canonicalPath(%q) accepted unsafe input", input)
+		}
+	}
+}

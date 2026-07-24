@@ -56,12 +56,27 @@ func (r *setupRunner) Run(_ context.Context, command herdr.Command) (herdr.Comma
 
 func schemaFixture() string {
 	return `{"protocol":17,"schema_version":1,"requests":[
+		{"method":{"const":"ping"}},
 		{"method":{"const":"plugin.link"}},
 		{"method":{"const":"plugin.enable"}},
+		{"method":{"const":"plugin.list"}},
+		{"method":{"const":"plugin.action.invoke"}},
 		{"method":{"const":"session.snapshot"}},
 		{"method":{"const":"worktree.open"}},
+		{"method":{"const":"workspace.close"}},
+		{"method":{"const":"pane.split"}},
+		{"method":{"const":"pane.process_info"}},
 		{"method":{"const":"agent.start"}},
+		{"method":{"const":"agent.list"}},
+		{"method":{"const":"agent.get"}},
+		{"method":{"const":"agent.prompt"}},
+		{"method":{"const":"agent.rename"}},
+		{"method":{"const":"agent.focus"}},
+		{"method":{"const":"agent.read"}},
+		{"method":{"const":"workspace.report_metadata"}},
+		{"method":{"const":"pane.report_metadata"}},
 		{"method":{"const":"agent.view.set"}},
+		{"method":{"const":"agent.view.clear"}},
 		{"method":{"const":"events.subscribe"}}
 	]}`
 }
@@ -283,16 +298,21 @@ func TestParseOneTimeContinuationAndScheduleCommands(t *testing.T) {
 }
 
 type cleanupRunner struct {
-	status   model.AgentStatus
-	closeErr error
-	calls    []string
+	status    model.AgentStatus
+	closeErr  error
+	blockList bool
+	calls     []string
 }
 
-func (r *cleanupRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
+func (r *cleanupRunner) Run(ctx context.Context, command herdr.Command) (herdr.CommandResult, error) {
 	key := strings.Join(command.Args, " ")
 	r.calls = append(r.calls, key)
 	switch key {
 	case "agent list":
+		if r.blockList {
+			<-ctx.Done()
+			return herdr.CommandResult{}, ctx.Err()
+		}
 		return herdr.CommandResult{Stdout: []byte(fmt.Sprintf(`{"result":{"agents":[{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":%q,"workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}]}}`, r.status))}, nil
 	case "workspace close w1":
 		if r.closeErr != nil {
@@ -301,6 +321,43 @@ func (r *cleanupRunner) Run(_ context.Context, command herdr.Command) (herdr.Com
 		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"workspace_closed"}}`)}, r.closeErr
 	default:
 		return herdr.CommandResult{}, fmt.Errorf("unexpected cleanup Herdr command: %s", key)
+	}
+}
+
+func TestCleanupFailsClosedWhenLiveAgentLookupExceedsDeadline(t *testing.T) {
+	_, feature := createLinkedFeatureWorktree(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
+		if key == worktree.HomeOverrideEnv {
+			return home, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := model.RoleAgent{Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude", WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2"}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
+		WorkspaceID: "w1",
+		Agents:      map[string]model.RoleAgent{"builder": agent},
+		Schedules:   map[string]model.Schedule{},
+	}
+	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+	runner := &cleanupRunner{blockList: true}
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{Stdout: &output, Stderr: &stderr, LookupEnv: func(string) (string, bool) { return "", false }, Runner: runner})
+	application.cleanupTimeout = 5 * time.Millisecond
+	started := time.Now()
+	exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "cleanup", "--worktree", feature})
+	if exit != cleanup.ExitNeedsOverride || time.Since(started) > time.Second {
+		t.Fatalf("cleanup timeout exit=%d elapsed=%s stdout=%s stderr=%s", exit, time.Since(started), output.String(), stderr.String())
+	}
+	if containsHerdrCommandFromStrings(runner.calls, "workspace close w1") || !strings.Contains(output.String(), "cannot be verified") {
+		t.Fatalf("timed out cleanup did not fail closed: calls=%#v output=%q", runner.calls, output.String())
 	}
 }
 
@@ -367,9 +424,9 @@ func TestCleanupPreflightClosesOnlySettledWorkspaceAndBlocksActiveAgents(t *test
 				t.Fatalf("cleanup output did not identify scoped agent: %q", output.String())
 			}
 			if test.wantAudit {
-				auditPath := filepath.Join(home, "logs", "cleanup-audit.jsonl")
+				auditPath := filepath.Join(home, "logs", "events.jsonl")
 				audit, err := os.ReadFile(auditPath)
-				if err != nil || !strings.Contains(string(audit), `"operation":"cleanup_override"`) || strings.Contains(string(audit), "native-123") {
+				if err != nil || !strings.Contains(string(audit), `"operation":"cleanup"`) || strings.Contains(string(audit), "native-123") {
 					t.Fatalf("cleanup audit = %q, err=%v", audit, err)
 				}
 				if info, err := os.Stat(auditPath); err != nil || info.Mode().Perm() != 0600 {
@@ -493,7 +550,8 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 		},
 	})
 	due := time.Now().Add(time.Hour).Format(time.RFC3339)
-	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due}); exit != 0 {
+	privatePrompt := "Continue after reading OPENAI_API_KEY=sk-not-a-real-secret and do not expose this prompt."
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due, "--prompt", privatePrompt}); exit != 0 {
 		t.Fatalf("continue exit = %d; stderr=%s", exit, stderr.String())
 	}
 	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") {
@@ -510,7 +568,7 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	scheduleID := ""
 	for _, record := range schedules {
 		scheduleID = record.ID
-		if record.AgentName != agent.Name || record.State != model.SchedulePending || !strings.Contains(record.Prompt, "scheduled continuation") {
+		if record.AgentName != agent.Name || record.State != model.SchedulePending || record.Prompt != privatePrompt {
 			t.Fatalf("schedule = %#v", record)
 		}
 	}
@@ -531,6 +589,13 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	}
 	if _, err := os.Stat(filepath.Join(launchHome, "Library", "LaunchAgents", "com.ori.herdr-devflow.plist")); err != nil {
 		t.Fatalf("continuation did not install a stable LaunchAgent: %v", err)
+	}
+	audit, err := os.ReadFile(filepath.Join(home, "logs", "events.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(audit), "\"operation\":\"continue\"") || strings.Contains(string(audit), privatePrompt) || strings.Contains(string(audit), "OPENAI_API_KEY") || strings.Contains(string(audit), "sk-not-a-real-secret") {
+		t.Fatalf("continuation audit exposed prompt data: %q", audit)
 	}
 	if filepath.Clean(repo) == filepath.Clean(feature) {
 		t.Fatal("fixture did not create a linked feature worktree")
@@ -663,7 +728,7 @@ func TestVerifyCompatibilityRejectsOldHerdrAndMissingHandoffMethods(t *testing.T
 		t.Fatalf("old Herdr error = %#v", err)
 	}
 
-	missing := herdr.New("fake-herdr", "", compatibilityRunner{version: "0.7.5", schema: `{"protocol":17,"schema_version":1,"requests":[{"method":{"const":"worktree.open"}}]}`})
+	missing := herdr.New("fake-herdr", "", compatibilityRunner{version: "0.7.5", schema: `{"protocol":17,"schema_version":1,"requests":[{"method":{"const":"ping"}},{"method":{"const":"worktree.open"}}]}`})
 	err = verifyCompatibility(context.Background(), missing, configForTest())
 	if !errors.As(err, &stage) || stage.Code != model.ErrSchemaUnsupported || !strings.Contains(stage.Message, "plugin.link") {
 		t.Fatalf("missing handoff method error = %#v", err)

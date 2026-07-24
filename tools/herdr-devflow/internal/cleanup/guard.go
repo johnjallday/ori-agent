@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
@@ -65,6 +66,7 @@ type Service struct {
 	Inspector    Inspector
 	RepositoryID string
 	GitCommonDir string
+	HerdrTimeout time.Duration
 }
 
 type Request struct {
@@ -184,7 +186,9 @@ func (s *Service) preflight(ctx context.Context, request Request) Result {
 		return s.unavailable(request, result)
 	}
 
-	liveAgents, err := s.Client.AgentListInfo(ctx)
+	liveCtx, cancel := s.herdrContext(ctx)
+	liveAgents, err := s.Client.AgentListInfo(liveCtx)
+	cancel()
 	if err != nil {
 		result.Agents = savedAgents(featureState.Feature, featureState.Agents, model.AgentUnknown)
 		result.Detail = "Herdr agent state cannot be verified"
@@ -206,7 +210,10 @@ func (s *Service) preflight(ctx context.Context, request Request) Result {
 		}
 	}
 
-	if _, err := s.Client.WorkspaceClose(ctx, featureState.WorkspaceID); err != nil {
+	closeCtx, cancel := s.herdrContext(ctx)
+	_, err = s.Client.WorkspaceClose(closeCtx, featureState.WorkspaceID)
+	cancel()
+	if err != nil {
 		result.Outcome = OutcomeCloseFailed
 		result.Detail = "Herdr workspace close did not complete; the Git worktree remains preserved"
 		return s.closeFailed(request, result)
@@ -215,6 +222,17 @@ func (s *Service) preflight(ctx context.Context, request Request) Result {
 	result.WorkspaceClosed = true
 	result.Detail = "associated agents are settled, schedules are resolved, and the Herdr workspace is closed"
 	return result
+}
+
+// herdrContext bounds only live Herdr calls. Git provenance and local state
+// verification must finish first; otherwise a short terminal timeout could
+// incorrectly classify a valid linked checkout as unsafe before any live
+// state was consulted.
+func (s *Service) herdrContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.HerdrTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, s.HerdrTimeout)
 }
 
 func (s *Service) unavailable(request Request, result Result) Result {
@@ -403,7 +421,13 @@ func samePath(left, right string) bool {
 }
 
 func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\\"'\\\"'") + "'"
+	value = strings.Map(func(r rune) rune {
+		if r == 0 || r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, value)
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (o Outcome) String() string {

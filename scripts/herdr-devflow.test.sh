@@ -10,4 +10,8 @@ if rg -n 'Worktree(Create|Remove)|"worktree", "(create|remove)"' "$repo_root/too
   printf 'Herdr Devflow must never create or remove Ori Git worktrees through Herdr.\n' >&2
   exit 1
 fi
+if rg -n -e '\beval\b' -e 'exec\.Command(Context)?\([^\n]*("|`)(sh|bash|zsh)("|`)' "$repo_root/tools/herdr-devflow" --glob '*.go'; then
+  printf 'Herdr Devflow must pass arguments directly and must not evaluate shell command strings.\n' >&2
+  exit 1
+fi
 go test ./tools/herdr-devflow/...

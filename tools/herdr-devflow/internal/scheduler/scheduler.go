@@ -14,13 +14,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
 
 const localTimeLayout = "2006-01-02 15:04"
 
-var scheduleIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{2,63}$`)
+var (
+	scheduleIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{2,63}$`)
+	featurePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$`)
+	rolePattern       = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	liveTargetPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,120}$`)
+	timezonePattern   = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{1,80}$`)
+)
 
 type Store interface {
 	Load() (model.BridgeState, error)
@@ -111,6 +118,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (model.Sche
 	if s.Store == nil {
 		return model.Schedule{}, stateError("schedule", "the local schedule store is unavailable", "wt herd doctor", nil)
 	}
+	if err := validateCreateIdentity(request); err != nil {
+		return model.Schedule{}, err
+	}
 	if request.Feature.RepositoryID == "" || request.Feature.Name == "" || request.Feature.Path == "" {
 		return model.Schedule{}, stateError("schedule", "a managed feature identity is required", "run wt herd continue from a feature worktree", nil)
 	}
@@ -193,6 +203,36 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (model.Sche
 		return model.Schedule{}, stateError("schedule state", "could not save the one-time continuation", "check local state permissions, then retry", err)
 	}
 	return schedule, nil
+}
+
+// validateCreateIdentity is defensive because schedules can be created by a
+// detached helper long after their feature state was first written. Every
+// value that becomes a Herdr target or durable state key stays bounded and
+// data-only; prompt text remains deliberately free-form user data.
+func validateCreateIdentity(request CreateRequest) error {
+	if !featurePattern.MatchString(request.Feature.Name) {
+		return stateError("schedule", "feature name is invalid", "run wt herd continue from a feature created by wt start", nil)
+	}
+	if !rolePattern.MatchString(request.Agent.Role) {
+		return stateError("schedule", "agent role is invalid", "use a lower-case managed role", nil)
+	}
+	if !config.IsSupportedAgentKind(request.Agent.Kind) {
+		return stateError("schedule", "agent kind is not supported by Herdr", "rebind the role to a supported agent kind", nil)
+	}
+	for _, value := range []string{request.Feature.RepositoryID, request.Agent.Name, request.Agent.WorkspaceID, request.Agent.PaneID, request.Agent.TerminalID} {
+		if value != "" && !liveTargetPattern.MatchString(value) {
+			return stateError("schedule", "saved schedule identity contains unsafe characters", "run wt herd rebind <role> --target <live-target>", nil)
+		}
+	}
+	if request.Timezone != "" && !timezonePattern.MatchString(request.Timezone) {
+		return stateError("schedule", "schedule timezone contains unsafe characters", "use an RFC 3339 timestamp or local YYYY-MM-DD HH:MM time", nil)
+	}
+	for _, value := range request.Feature.Path {
+		if value == 0 || value < 32 || value == 127 {
+			return stateError("schedule", "feature worktree path contains a control character", "run wt herd retry from the feature worktree", nil)
+		}
+	}
+	return nil
 }
 
 // DispatchDue evaluates every due one-time schedule. It deliberately holds

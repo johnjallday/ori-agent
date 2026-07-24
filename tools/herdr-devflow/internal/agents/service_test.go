@@ -82,11 +82,15 @@ type fakeHerdr struct {
 	focusTarget      string
 	lastPromptTarget string
 	lastPromptText   string
+	lastOpenSource   string
+	lastOpenPath     string
 	calls            []string
 	fail             map[string]error
 }
 
-func (f *fakeHerdr) OpenExistingWorktree(_ context.Context, _ string) (herdr.WorktreeOpenResult, error) {
+func (f *fakeHerdr) OpenExistingWorktree(_ context.Context, source, path string) (herdr.WorktreeOpenResult, error) {
+	f.lastOpenSource = source
+	f.lastOpenPath = path
 	f.record("worktree.open")
 	return f.opened, f.fail["open"]
 }
@@ -296,6 +300,9 @@ func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) 
 	}
 	if !first.PromptDelivered || client.metadataCalls != 2 {
 		t.Fatalf("first handoff delivery/metadata = %#v, %d", first, client.metadataCalls)
+	}
+	if client.lastOpenSource != "/tmp/source-checkout" || client.lastOpenPath != path {
+		t.Fatalf("handoff source/path = %q / %q", client.lastOpenSource, client.lastOpenPath)
 	}
 	second, err := service.Handoff(context.Background(), request)
 	if err != nil {
@@ -508,11 +515,46 @@ func TestHandoffRejectsBusyOrGuessedRootPane(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bridge")
 	client := newFakeHerdr(path)
 	client.process.ForegroundProcesses = append(client.process.ForegroundProcesses, herdr.ForegroundProcess{PID: 99, Name: "vim", Cwd: path})
-	service := newService(client, newMemoryStore(), path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
 	_, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
 	var stage *model.StageError
 	if !errors.As(err, &stage) || stage.Stage != "resolve root pane" || client.startCalls != 0 {
 		t.Fatalf("Handoff() = %v; starts=%d", err, client.startCalls)
+	}
+	state, loadErr := store.Load()
+	if loadErr != nil || state.Features["repo-123456:bridge"].WorkspaceID != "w1" {
+		t.Fatalf("busy root should retain the opened workspace for retry: state=%#v err=%v", state, loadErr)
+	}
+}
+
+func TestHandoffResumesSavedPrimaryAfterItOwnsTheRootPane(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	request := HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"}
+	if _, err := service.Handoff(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	feature := state.Features["repo-123456:bridge"]
+	feature.Handoff.BootstrapPrompted = false
+	feature.Handoff.Stage = model.HandoffPrimaryStarted
+	state.Features["repo-123456:bridge"] = feature
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	client.process.ForegroundProcesses = append(client.process.ForegroundProcesses, herdr.ForegroundProcess{PID: 99, Name: "claude", Cwd: path})
+	if _, err := service.Handoff(context.Background(), request); err != nil {
+		t.Fatalf("saved-primary retry should not require an idle root shell: %v", err)
+	}
+	if client.startCalls != 1 || client.promptCalls != 2 {
+		t.Fatalf("retry started a replacement or skipped the pending prompt: starts=%d prompts=%d", client.startCalls, client.promptCalls)
 	}
 }
 
@@ -547,7 +589,7 @@ func newService(client *fakeHerdr, store *memoryStore, path string) *Service {
 		GitCommonDir: "/tmp/common.git",
 		Client:       client,
 		Store:        store,
-		Inspector:    fakeInspector{worktree: worktree.GitWorktree{Path: path, Branch: "feature/bridge", CommonDir: "/tmp/common.git"}},
+		Inspector:    fakeInspector{worktree: worktree.GitWorktree{Path: path, Branch: "feature/bridge", CommonDir: "/tmp/common.git", SourcePath: "/tmp/source-checkout"}},
 		Now:          func() time.Time { return now },
 	}
 }

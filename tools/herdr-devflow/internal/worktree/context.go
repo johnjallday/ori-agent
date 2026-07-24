@@ -110,6 +110,14 @@ func runtimeRoot(lookupEnv func(string) (string, bool)) (string, error) {
 }
 
 func canonicalPath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	for _, value := range path {
+		if value == 0 || value < 32 || value == 127 {
+			return "", fmt.Errorf("path contains a control character")
+		}
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err

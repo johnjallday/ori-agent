@@ -93,6 +93,30 @@ wt cd <name>           # navigate to a worktree
 ```
 Source it (don't execute) so `cd` affects your current shell.
 
+### Herdr devflow bridge
+
+The opt-in repository-owned bridge lives in tools/herdr-devflow/ and is exposed
+through the sourced wt function:
+
+~~~bash
+wt herd setup
+wt herd doctor
+wt herd status --watch
+~~~
+
+wt herd setup installs a stable user-local helper/plugin copy, rather than
+linking Herdr to a removable feature worktree. wt start <feature> then attempts
+an automatic Herdr handoff; for linked checkouts it supplies Herdr with the
+normal Git source checkout plus the feature path, while Ori remains the only
+Git-worktree creator/remover. wt start <feature> --no-herdr skips it once. See
+[Herdr Devflow Bridge](../docs/herdr-devflow.md) for exact feature-scoped agent
+selection, one-time continuations, guarded cleanup, and recovery.
+
+Run make test-herdr-devflow for focused helper, shell, and wt tests. It also
+runs make test-herdr-devflow-cross, which cross-compiles the local helper for
+macOS, Linux, and Windows; only macOS registers and executes the LaunchAgent
+scheduler.
+
 ## Requirements
 
 - Go toolchain installed (see `check-go-version.sh` for the required version)

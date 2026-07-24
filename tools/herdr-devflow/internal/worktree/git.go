@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,10 @@ import (
 // to open an existing checkout. Ori remains the creator/remover of this Git
 // worktree; the bridge only proves and opens it in Herdr.
 type GitWorktree struct {
-	Path      string
-	Branch    string
-	CommonDir string
+	Path       string
+	Branch     string
+	CommonDir  string
+	SourcePath string
 }
 
 // InspectLinkedGitWorktree verifies that path is the root of an existing,
@@ -35,6 +37,13 @@ func InspectLinkedGitWorktree(ctx context.Context, path, expectedBranch, expecte
 	}
 	if topLevel != canonicalTarget {
 		return GitWorktree{}, fmt.Errorf("target must be the Git worktree root, not %s", topLevel)
+	}
+	gitEntry, err := os.Stat(filepath.Join(canonicalTarget, ".git"))
+	if err != nil {
+		return GitWorktree{}, fmt.Errorf("inspect Git worktree metadata: %w", err)
+	}
+	if gitEntry.IsDir() {
+		return GitWorktree{}, fmt.Errorf("target is the repository source checkout, not a linked Git worktree")
 	}
 	branch, err := gitOutput(ctx, canonicalTarget, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -74,7 +83,11 @@ func InspectLinkedGitWorktree(ctx context.Context, path, expectedBranch, expecte
 	if !listedWorktreeContains(listed, canonicalTarget, branch) {
 		return GitWorktree{}, fmt.Errorf("target is not present in Git's linked worktree list")
 	}
-	return GitWorktree{Path: canonicalTarget, Branch: branch, CommonDir: commonDir}, nil
+	sourcePath, err := sourceCheckoutPath(listed, canonicalTarget)
+	if err != nil {
+		return GitWorktree{}, err
+	}
+	return GitWorktree{Path: canonicalTarget, Branch: branch, CommonDir: commonDir, SourcePath: sourcePath}, nil
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
@@ -115,4 +128,47 @@ func listedWorktreeContains(output, target, branch string) bool {
 		}
 	}
 	return flush()
+}
+
+// sourceCheckoutPath finds the one normal source checkout in Git's linked
+// worktree listing. Herdr 0.7.5 requires that checkout as the parent context
+// when it opens an existing linked worktree. A normal checkout owns a .git
+// directory; linked worktrees have a .git file that points to common metadata.
+func sourceCheckoutPath(output, target string) (string, error) {
+	candidates := make([]string, 0, 1)
+	seen := make(map[string]struct{})
+	var currentPath string
+	flush := func() {
+		if currentPath == "" {
+			return
+		}
+		canonical, err := canonicalPath(currentPath)
+		if err != nil || canonical == target {
+			return
+		}
+		entry, err := os.Stat(filepath.Join(canonical, ".git"))
+		if err != nil || !entry.IsDir() {
+			return
+		}
+		if _, ok := seen[canonical]; ok {
+			return
+		}
+		seen[canonical] = struct{}{}
+		candidates = append(candidates, canonical)
+	}
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" {
+			flush()
+			currentPath = ""
+			continue
+		}
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+		}
+	}
+	flush()
+	if len(candidates) != 1 {
+		return "", fmt.Errorf("could not resolve exactly one repository source checkout for the linked worktree")
+	}
+	return candidates[0], nil
 }

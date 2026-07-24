@@ -227,6 +227,28 @@ func TestMetadataRespectsPerFeatureOptOut(t *testing.T) {
 	}
 }
 
+func TestMetadataSkipsAClosedWorkspaceWhoseSavedAgentsAreMissing(t *testing.T) {
+	client := &fakeHerdr{}
+	live := herdr.AgentInfo{PaneID: "w2:p1"}
+	service := &Service{Client: client, SourceID: "ori.devflow"}
+	snapshot := Snapshot{
+		Features: []FeatureSnapshot{
+			{Feature: model.Feature{Name: "closed"}, WorkspaceID: "w1", MetadataEnabled: true},
+			{Feature: model.Feature{Name: "live"}, WorkspaceID: "w2", MetadataEnabled: true},
+		},
+		Rows: []AgentRow{
+			{WorkspaceID: "w1", Missing: true},
+			{WorkspaceID: "w2", Live: &live},
+		},
+	}
+	if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.workspaceCalls) != 1 || client.workspaceCalls[0].id != "w2" || len(client.paneCalls) != 1 || client.paneCalls[0].id != "w2:p1" {
+		t.Fatalf("metadata calls should ignore the closed workspace: workspace=%#v pane=%#v", client.workspaceCalls, client.paneCalls)
+	}
+}
+
 func TestWorkspaceTokensClearAResolvedContinuation(t *testing.T) {
 	tokens := workspaceTokens(FeatureSnapshot{Feature: model.Feature{RepositoryID: "repo", Name: "bridge", Branch: "feature/bridge"}, Task: tasklist.Progress{Exists: true, Total: 1, Completed: 1, Next: "All checklist items are marked complete"}})
 	if value, found := tokens["next_schedule"]; !found || value != "" {
@@ -278,6 +300,44 @@ func TestWatchUsesEventRefreshAndPollingFallback(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("fallback Watch() error = %v", err)
+	}
+}
+
+func TestOverlappingStatusHooksKeepMetadataAndViewsSourceScoped(t *testing.T) {
+	now := time.Now().UTC()
+	state, agents, paths := fixtureState(t, now)
+	client := &fakeHerdr{agents: agents}
+	service := &Service{Store: testStore{state: state}, Client: client, SourceID: "ori.devflow", ViewSource: "plugin:ori.devflow", Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
+	snapshot, err := service.Snapshot(context.Background(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const hooks = 8
+	errors := make(chan error, hooks)
+	var group sync.WaitGroup
+	for index := 0; index < hooks; index++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
+				errors <- err
+				return
+			}
+			if err := service.ApplyManagedView(context.Background()); err != nil {
+				errors <- err
+			}
+		}()
+	}
+	group.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatalf("overlapping status hook failed: %v", err)
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.workspaceCalls) != hooks*2 || len(client.paneCalls) != hooks*2 || client.viewParams["source"] != "plugin:ori.devflow" {
+		t.Fatalf("overlapping hook calls = workspaces:%d panes:%d view:%#v", len(client.workspaceCalls), len(client.paneCalls), client.viewParams)
 	}
 }
 
