@@ -24,10 +24,11 @@ type WorkspaceLinker interface {
 // callback is a top-level browser navigation from Google and is instead
 // protected by the single-use state value it must carry (FR 20).
 type Handler struct {
-	flow   *connections.IdentityFlow
-	store  *connections.Store
-	guard  *OriginGuard
-	linker WorkspaceLinker
+	flow    *connections.IdentityFlow
+	store   *connections.Store
+	guard   *OriginGuard
+	linker  WorkspaceLinker
+	impacts ImpactEnumerator
 
 	resolveLocalUser func(*http.Request) string
 	buildRedirectURL func(*http.Request) string
@@ -39,6 +40,9 @@ type Deps struct {
 	Store  *connections.Store
 	Guard  *OriginGuard
 	Linker WorkspaceLinker
+	// Impacts enumerates which workspaces use each product grant, for the
+	// disconnect impact preview (FR 77). Nil degrades to an empty preview.
+	Impacts ImpactEnumerator
 	// ResolveLocalUser maps a request to Ori's local user id (single-user app
 	// defaults to "local").
 	ResolveLocalUser func(*http.Request) string
@@ -54,6 +58,7 @@ func NewHandler(d Deps) *Handler {
 		store:            d.Store,
 		guard:            d.Guard,
 		linker:           d.Linker,
+		impacts:          d.Impacts,
 		resolveLocalUser: d.ResolveLocalUser,
 		buildRedirectURL: d.BuildRedirectURL,
 	}
@@ -83,6 +88,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/connect", h.guard.Wrap(http.HandlerFunc(h.connect)))
 	mux.Handle("/api/connections/google/disconnect", h.guard.Wrap(http.HandlerFunc(h.disconnect)))
 	mux.Handle("/api/connections/google/status", h.guard.Wrap(http.HandlerFunc(h.status)))
+	mux.Handle("/api/connections/google/impact", h.guard.Wrap(http.HandlerFunc(h.impact)))
 	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
 	mux.Handle("/api/connections/google/gmail/link", h.guard.Wrap(http.HandlerFunc(h.gmailLink)))
 	mux.HandleFunc("/api/connections/google/callback", h.callback)
