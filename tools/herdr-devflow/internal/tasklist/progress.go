@@ -40,6 +40,7 @@ func (p Progress) Label() string {
 // checkboxes are ignored so presentation cannot be poisoned by arbitrary task
 // document content.
 func Read(path string) Progress {
+	// #nosec G304 -- bridge callers compose this from a canonical feature worktree and fixed task-list filename.
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

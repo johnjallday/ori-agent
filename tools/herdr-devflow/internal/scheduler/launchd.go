@@ -146,6 +146,7 @@ func writeFileAtomic(path string, contents []byte, mode os.FileMode) error {
 }
 
 func defaultLaunchctlRun(ctx context.Context, command string, args ...string) error {
+	// #nosec G204 -- production passes the fixed launchctl executable; the parameter preserves a test seam without shell evaluation.
 	return exec.CommandContext(ctx, command, args...).Run()
 }
 

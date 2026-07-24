@@ -1664,11 +1664,13 @@ func buildHelper(ctx context.Context, repoRoot, destination string) error {
 		return err
 	}
 	defer os.Remove(temporaryPath)
+	// #nosec G204 -- fixed go subcommand/package; temporaryPath is created in the private stable runtime directory above.
 	command := exec.CommandContext(ctx, "go", "build", "-o", temporaryPath, "./tools/herdr-devflow/cmd/herdr-devflow")
 	command.Dir = repoRoot
 	if err := command.Run(); err != nil {
 		return err
 	}
+	// #nosec G302 -- the stable helper must be executable by the current user and launchd; its directory is user-private.
 	if err := os.Chmod(temporaryPath, 0755); err != nil {
 		return err
 	}
@@ -1676,6 +1678,7 @@ func buildHelper(ctx context.Context, repoRoot, destination string) error {
 }
 
 func copyFileAtomic(source, destination string, mode os.FileMode) error {
+	// #nosec G304 -- source is a fixed repository plugin asset selected by the validated repository root during setup.
 	contents, err := os.ReadFile(source)
 	if err != nil {
 		return err

@@ -552,6 +552,7 @@ func ContinuationPrompt(feature model.Feature, role string) string {
 }
 
 func nextIncompleteTask(path string) string {
+	// #nosec G304 -- callers compose this from the canonical validated feature worktree and a fixed task filename.
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		return "No detailed task list was found; inspect the PRD and create or follow the next safe implementation step."

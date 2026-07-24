@@ -43,6 +43,7 @@ type Runner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, command Command) (CommandResult, error) {
+	// #nosec G204 -- adapter callers pass a structured executable and argument vector; no shell is invoked.
 	cmd := exec.CommandContext(ctx, command.Path, command.Args...)
 	cmd.Dir = command.Dir
 	if command.Env != nil {

@@ -181,6 +181,7 @@ func gitCommonDir(repoRoot string) string {
 		}
 		return gitPath
 	}
+	// #nosec G304 -- gitPath is under the canonical repository root passed through Resolve.
 	contents, err := os.ReadFile(gitPath)
 	if err != nil {
 		return repoRoot
@@ -199,6 +200,7 @@ func gitCommonDir(repoRoot string) string {
 		return repoRoot
 	}
 	commonFile := filepath.Join(gitDir, "commondir")
+	// #nosec G304 G703 -- gitDir was canonicalized above and commondir is a fixed Git metadata filename.
 	commonContents, err := os.ReadFile(commonFile)
 	if err != nil {
 		return gitDir

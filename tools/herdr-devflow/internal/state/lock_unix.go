@@ -12,6 +12,7 @@ import (
 )
 
 func acquireFileLock(ctx context.Context, path string) (func(), error) {
+	// #nosec G304 -- path is derived from the bridge's canonical user-local runtime root.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("open bridge lock: %w", err)

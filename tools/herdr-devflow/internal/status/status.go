@@ -284,7 +284,8 @@ func ManagedViewParams(source string) map[string]any {
 		"source": source,
 		"label":  "Ori Devflow",
 		"filter": map[string]any{
-			"op":    "eq",
+			"op": "eq",
+			// #nosec G101 -- token is the public Herdr metadata field required to filter bridge-owned agents, not a credential.
 			"field": map[string]any{"token": "ori_devflow"},
 			"value": "managed",
 		},
@@ -617,11 +618,13 @@ func samePath(left, right string) bool {
 type defaultGitInspector struct{}
 
 func (defaultGitInspector) Inspect(ctx context.Context, path string) (GitState, error) {
+	// #nosec G204 -- Snapshot supplies the canonical managed worktree path; Git receives a fixed argument vector.
 	status, err := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain").Output()
 	if err != nil {
 		return GitState{}, err
 	}
 	result := GitState{Dirty: strings.TrimSpace(string(status)) != ""}
+	// #nosec G204 -- same canonical managed worktree path and fixed Git subcommand as above.
 	ahead, err := exec.CommandContext(ctx, "git", "-C", path, "rev-list", "--count", "@{upstream}..HEAD").Output()
 	if err != nil {
 		return result, nil // An unset upstream is a normal local-worktree state.
