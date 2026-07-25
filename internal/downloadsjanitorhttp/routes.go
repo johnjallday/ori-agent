@@ -20,4 +20,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/scan", h.ScanNow)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/decisions", h.UpdateDecisions)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/skipped/reset", h.ResetSkipped)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/preview", h.PreviewMoves)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/apply", h.ConfirmMoves)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor/history", h.History)
 }

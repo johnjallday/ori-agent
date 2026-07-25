@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // Pagination bounds for batch listing. A stable default and a hard cap keep one
@@ -48,7 +49,7 @@ type candidateDTO struct {
 func toCandidateDTO(candidate downloadsjanitor.JanitorCandidate, filingRootName string) candidateDTO {
 	dto := candidateDTO{
 		ID:               candidate.ID,
-		Name:             candidate.Name,
+		Name:             candidate.Display(),
 		Extension:        candidate.Extension,
 		MIMEType:         candidate.MIMEType,
 		Size:             candidate.Size,
@@ -327,4 +328,181 @@ func (h *Handler) Categories(w http.ResponseWriter, r *http.Request) {
 		"success":    true,
 		"categories": downloadsjanitor.CategoryRegistry,
 	})
+}
+
+// ------------------------------------------------------- preview and confirm
+
+// decisionPayload is the shared request shape for preview and confirm. Note
+// what is absent: no source path, no destination, no filename. The server knows
+// where every candidate is, and a client able to name a path would be a client
+// able to redirect a move.
+type decisionPayload struct {
+	CandidateID string `json:"candidate_id"`
+	Operation   string `json:"operation"`
+	Category    string `json:"category"`
+}
+
+func (h *Handler) toPreviewItems(payload []decisionPayload) ([]downloadsjanitor.PreviewRequestItem, error) {
+	items := make([]downloadsjanitor.PreviewRequestItem, 0, len(payload))
+	for _, entry := range payload {
+		operation := downloadsjanitor.Operation(strings.ToLower(strings.TrimSpace(entry.Operation)))
+		if operation == "" {
+			operation = downloadsjanitor.OperationMove
+		}
+		if operation != downloadsjanitor.OperationMove {
+			// Trash arrives with its own confirmation flow. Accepting it here
+			// would let a destructive action ride a move approval.
+			return nil, errors.New("only move can be approved here")
+		}
+		items = append(items, downloadsjanitor.PreviewRequestItem{
+			CandidateID: entry.CandidateID,
+			Operation:   operation,
+			Category:    entry.Category,
+		})
+	}
+	return items, nil
+}
+
+// PreviewMoves handles POST
+// /api/workspaces/{workspaceID}/downloads-janitor/preview: the final,
+// server-derived plan plus a single-use approval bound to exactly it.
+func (h *Handler) PreviewMoves(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Decisions []decisionPayload `json:"decisions"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if len(req.Decisions) == 0 {
+		_ = orihttp.RespondBadRequest(w, "select at least one file")
+		return
+	}
+	items, err := h.toPreviewItems(req.Decisions)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
+	}
+	userID, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+
+	preview, err := h.service.PreviewMoves(downloadsjanitor.PreviewRequest{
+		WorkspaceID: workspaceID, UserID: userID, Items: items,
+	})
+	if err != nil {
+		h.respondReviewError(w, err, "Failed to prepare the Downloads Janitor preview")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "preview": preview})
+}
+
+// ConfirmMoves handles POST
+// /api/workspaces/{workspaceID}/downloads-janitor/apply: spend the approval and
+// apply the plan, reporting one outcome per file.
+func (h *Handler) ConfirmMoves(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		BatchID   string            `json:"batch_id"`
+		Token     string            `json:"approval_token"`
+		Decisions []decisionPayload `json:"decisions"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	items, err := h.toPreviewItems(req.Decisions)
+	if err != nil {
+		_ = orihttp.RespondBadRequest(w, err.Error())
+		return
+	}
+	userID, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.service.ConfirmMoves(r.Context(), downloadsjanitor.ConfirmRequest{
+		WorkspaceID: workspaceID, UserID: userID, BatchID: req.BatchID,
+		Token: req.Token, Items: items,
+	})
+	if err != nil {
+		h.respondReviewError(w, err, "Failed to apply the approved Downloads Janitor moves")
+		return
+	}
+	// A mixed result is a normal outcome, not an error: the response reports
+	// per-file results and the caller states them plainly.
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "result": result})
+}
+
+// History handles GET /api/workspaces/{workspaceID}/downloads-janitor/history.
+func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	actions, err := h.service.ListActions(workspaceID)
+	if err != nil {
+		h.respondError(w, err, "Failed to read Downloads Janitor history")
+		return
+	}
+	total := len(actions)
+	limit, offset := pagination(r)
+	if offset > total {
+		offset = total
+	}
+	end := min(offset+limit, total)
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"success": true,
+		"actions": actions[offset:end],
+		"total":   total,
+		"limit":   limit,
+		"offset":  offset,
+	})
+}
+
+// currentUser resolves the requesting user, whom an approval is bound to.
+func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) (string, bool) {
+	userID, err := h.provider.CurrentUserID(r.Context())
+	if err != nil {
+		_ = orihttp.RespondInternalError(w, "Failed to resolve the current user")
+		return "", false
+	}
+	if strings.TrimSpace(userID) == "" {
+		userID = userprofile.LocalUserID
+	}
+	return userID, true
+}
+
+// respondReviewError maps approval and candidate errors onto stable statuses.
+// An approval problem is a 409: the request was well formed, but the state it
+// assumed no longer holds.
+func (h *Handler) respondReviewError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, downloadsjanitor.ErrApprovalRequired):
+		_ = orihttp.RespondBadRequest(w, "an approval token is required")
+	case errors.Is(err, downloadsjanitor.ErrApprovalConsumed):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("approval_used", "That approval was already used."))
+	case errors.Is(err, downloadsjanitor.ErrApprovalExpired):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("approval_expired", "That approval has expired. Review the files and approve again."))
+	case errors.Is(err, downloadsjanitor.ErrApprovalInvalid):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("approval_invalid", "These files or categories changed since you approved them. Review them and approve again."))
+	case errors.Is(err, downloadsjanitor.ErrCandidateNotActionable):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("candidate_changed", err.Error()))
+	case errors.Is(err, downloadsjanitor.ErrCandidateNotFound):
+		_ = orihttp.RespondNotFound(w, "candidate not found")
+	case errors.Is(err, downloadsjanitor.ErrUnknownCategory), errors.Is(err, downloadsjanitor.ErrInvalidAction):
+		_ = orihttp.RespondBadRequest(w, err.Error())
+	default:
+		h.respondError(w, err, fallback)
+	}
 }

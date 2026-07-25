@@ -227,6 +227,13 @@ func (s *Service) LatestPendingBatch(workspaceID string) (JanitorBatch, []Janito
 	return JanitorBatch{}, nil, false, nil
 }
 
+// LatestPendingBatchCandidates returns the candidates of the newest batch still
+// awaiting the user.
+func (s *Service) LatestPendingBatchCandidates(workspaceID string) (JanitorBatch, []JanitorCandidate, error) {
+	batch, candidates, _, err := s.LatestPendingBatch(workspaceID)
+	return batch, candidates, err
+}
+
 // BatchDetail returns one batch and its candidates.
 func (s *Service) BatchDetail(workspaceID, batchID string) (JanitorBatch, []JanitorCandidate, error) {
 	state, err := s.store.LoadScanState(workspaceID)

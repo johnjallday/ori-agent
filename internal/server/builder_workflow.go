@@ -376,6 +376,8 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
+	// The Janitor's mover needs the runtime resolver, which only exists here.
+	b.wireDownloadsJanitorMover()
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.calendarOpsHandler != nil {

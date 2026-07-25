@@ -213,10 +213,13 @@ type JanitorCandidate struct {
 	WorkspaceID string `json:"workspace_id"`
 	BatchID     string `json:"batch_id,omitempty"`
 
-	// Name is the file's name, relative to the configured root and by
-	// construction a single top-level element. It is sanitized for display: see
-	// SanitizeFileName.
+	// Name is the file's name on disk, exactly as it appears in the configured
+	// folder, and by construction a single top-level element. Every filesystem
+	// operation uses this value; nothing "cleans it up" first.
 	Name string `json:"name"`
+	// DisplayName is Name rendered safe for a screen or a log line. It is what
+	// the review surface shows; it is never used to address a file.
+	DisplayName string `json:"display_name,omitempty"`
 	// Extension is the lower-cased extension including the dot, or empty.
 	Extension string `json:"extension,omitempty"`
 	// MIMEType is the type detected from the name/extension. Detecting it never
@@ -277,6 +280,15 @@ func (c JanitorCandidate) Actionable() bool {
 	default:
 		return false
 	}
+}
+
+// Display returns the candidate's display name, falling back to rendering the
+// stored name when an older record has none.
+func (c JanitorCandidate) Display() string {
+	if c.DisplayName != "" {
+		return c.DisplayName
+	}
+	return DisplayFileName(c.Name)
 }
 
 // IneligibleObservation is a file a scan looked at and deliberately did not
@@ -372,47 +384,52 @@ func SummarizeBatch(batch JanitorBatch, candidates []JanitorCandidate) JanitorBa
 	return batch
 }
 
-// maxDisplayNameRunes bounds a stored filename. Long names are truncated for
-// display and logging; the fingerprint keeps the untruncated name so file
-// identity is unaffected.
+// maxDisplayNameRunes bounds a rendered filename. Long names are truncated for
+// display and logging only; the stored name is untouched, so file identity is
+// unaffected.
 const maxDisplayNameRunes = 180
 
-// SanitizeFileName makes a filename safe to store, render, and log without
-// letting it impersonate anything.
+// ValidateFileName checks that a name could be a file directly inside the
+// configured folder: non-empty, not "." or "..", no path separator, no NUL.
 //
-// Filenames are untrusted input: they can carry control characters, newlines
-// that fake extra log lines, bidirectional overrides that disguise an
-// extension, or text shaped like instructions. This strips the characters that
-// enable those tricks and bounds the length. It never interprets the name, and
-// callers must never treat the result as an instruction (FR-53).
-//
-// It returns an error when the name could not be a top-level file at all: empty,
-// "."/"..", or containing a path separator. That is a containment check, not
-// cosmetics — a candidate whose name is a path could address a file outside the
-// configured root.
-func SanitizeFileName(name string) (string, error) {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return "", fmt.Errorf("%w: file name is empty", ErrInvalidCandidate)
+// It deliberately does not alter the name. The name Ori stores has to be the
+// name on disk, byte for byte — a name "cleaned up" for display cannot be
+// stat-ed, moved, or trashed, and a file whose name contains a control
+// character would silently become unactionable while appearing to be right
+// there. Rendering is DisplayFileName's job; this is the containment check.
+func ValidateFileName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%w: file name is empty", ErrInvalidCandidate)
 	}
-	if trimmed == "." || trimmed == ".." {
-		return "", fmt.Errorf("%w: %q is not a file name", ErrInvalidCandidate, trimmed)
+	if name == "." || name == ".." {
+		return fmt.Errorf("%w: %q is not a file name", ErrInvalidCandidate, name)
 	}
-	if strings.ContainsAny(trimmed, `/\`) || strings.ContainsRune(trimmed, 0) {
-		return "", fmt.Errorf("%w: file name must be a single top-level name", ErrInvalidCandidate)
+	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return fmt.Errorf("%w: file name must be a single top-level name", ErrInvalidCandidate)
 	}
-	if trimmed != filepath.Base(trimmed) {
-		return "", fmt.Errorf("%w: file name must be a single top-level name", ErrInvalidCandidate)
+	if name != filepath.Base(name) {
+		return fmt.Errorf("%w: file name must be a single top-level name", ErrInvalidCandidate)
 	}
+	return nil
+}
 
+// DisplayFileName renders a filename safely for a screen, a log line, or a
+// prompt — without changing what Ori considers the file to be called.
+//
+// Filenames are untrusted input. They can carry control characters, newlines
+// that forge extra log lines, or bidirectional overrides that disguise an
+// extension ("invoice<RLO>gpj.exe" renders as "invoice exe.jpg"). Those
+// characters are dropped here and the result is bounded, but the underlying
+// name is never modified: the text itself is preserved so a suspicious name
+// still reads as suspicious, and callers must never treat it as an instruction
+// (FR-53).
+func DisplayFileName(name string) string {
 	var b strings.Builder
-	for _, r := range trimmed {
+	for _, r := range name {
 		switch {
 		case r == utf8.RuneError:
-			b.WriteRune('�')
+			b.WriteRune('\uFFFD')
 		case unicode.IsControl(r), isBidiControl(r):
-			// Control and bidi-override characters are dropped: they are what
-			// makes "invoice‮gpj.exe" read as a JPEG.
 			continue
 		default:
 			b.WriteRune(r)
@@ -420,13 +437,13 @@ func SanitizeFileName(name string) (string, error) {
 	}
 	cleaned := strings.TrimSpace(b.String())
 	if cleaned == "" {
-		return "", fmt.Errorf("%w: file name has no displayable characters", ErrInvalidCandidate)
+		return "(unreadable name)"
 	}
 	if utf8.RuneCountInString(cleaned) > maxDisplayNameRunes {
 		runes := []rune(cleaned)
-		cleaned = string(runes[:maxDisplayNameRunes]) + "…"
+		cleaned = string(runes[:maxDisplayNameRunes]) + "\u2026"
 	}
-	return cleaned, nil
+	return cleaned
 }
 
 // isBidiControl reports whether r is a bidirectional formatting character.
@@ -434,8 +451,8 @@ func SanitizeFileName(name string) (string, error) {
 // apparent extension.
 func isBidiControl(r rune) bool {
 	switch r {
-	case '‎', '‏', '‪', '‫', '‬', '‭', '‮',
-		'⁦', '⁧', '⁨', '⁩':
+	case '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+		'\u2066', '\u2067', '\u2068', '\u2069':
 		return true
 	}
 	return false
@@ -453,7 +470,7 @@ func (c JanitorCandidate) Validate() error {
 	if strings.TrimSpace(c.WorkspaceID) == "" {
 		return fmt.Errorf("%w: workspace id is required", ErrInvalidCandidate)
 	}
-	if _, err := SanitizeFileName(c.Name); err != nil {
+	if err := ValidateFileName(c.Name); err != nil {
 		return err
 	}
 	if c.Fingerprint.Zero() {

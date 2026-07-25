@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
 	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
@@ -259,6 +260,7 @@ type ServerBuilder struct {
 	dailyBriefService       *dailybrief.Service
 	dailyBriefHandler       *dailybriefhttp.Handler
 	downloadsJanitorHandler *downloadsjanitorhttp.Handler
+	downloadsJanitorService *downloadsjanitor.Service
 	dailyBriefScheduler     *dailybrief.Scheduler
 }
 

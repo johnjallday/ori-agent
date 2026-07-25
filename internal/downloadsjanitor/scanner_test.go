@@ -360,12 +360,17 @@ func TestScan_HandlesHostileFilenamesAsData(t *testing.T) {
 			t.Fatalf("scanner produced an invalid candidate %q: %v", candidate.Name, err)
 		}
 	}
-	// The bidi override is stripped from what gets stored and displayed.
+	// The bidi override is stripped from what is *displayed*, while the stored
+	// name stays exactly what is on disk — otherwise Ori would later look for a
+	// file that does not exist.
 	for _, candidate := range result.Eligible {
-		for _, r := range candidate.Name {
+		for _, r := range candidate.Display() {
 			if r == '‮' {
-				t.Fatalf("bidi override survived into a candidate: %q", candidate.Name)
+				t.Fatalf("bidi override survived into the display name: %q", candidate.Display())
 			}
+		}
+		if _, err := os.Lstat(filepath.Join(root, candidate.Name)); err != nil {
+			t.Fatalf("the stored name must address the real file: %q (%v)", candidate.Name, err)
 		}
 	}
 }

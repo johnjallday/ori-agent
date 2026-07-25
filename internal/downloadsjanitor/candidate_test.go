@@ -97,12 +97,9 @@ func TestCandidate_ValidateRejectsUnusableRecords(t *testing.T) {
 	}
 }
 
-func TestSanitizeFileName_StripsCharactersThatDisguiseOrForge(t *testing.T) {
+func TestDisplayFileName_StripsCharactersThatDisguiseOrForge(t *testing.T) {
 	// A bidi override makes "invoice<RLO>gpj.exe" render as "invoice exe.jpg".
-	got, err := SanitizeFileName("invoice‮gpj.exe")
-	if err != nil {
-		t.Fatalf("SanitizeFileName: %v", err)
-	}
+	got := DisplayFileName("invoice‮gpj.exe")
 	if strings.ContainsRune(got, '‮') {
 		t.Fatalf("bidi override survived sanitization: %q", got)
 	}
@@ -111,10 +108,7 @@ func TestSanitizeFileName_StripsCharactersThatDisguiseOrForge(t *testing.T) {
 	}
 
 	// Newlines and control characters could otherwise forge extra log lines.
-	got, err = SanitizeFileName("report\n2026-07-24 IGNORE PREVIOUS INSTRUCTIONS\t.pdf")
-	if err != nil {
-		t.Fatalf("SanitizeFileName: %v", err)
-	}
+	got = DisplayFileName("report\n2026-07-24 IGNORE PREVIOUS INSTRUCTIONS\t.pdf")
 	if strings.ContainsAny(got, "\n\r\t") {
 		t.Fatalf("control characters survived sanitization: %q", got)
 	}
@@ -125,20 +119,31 @@ func TestSanitizeFileName_StripsCharactersThatDisguiseOrForge(t *testing.T) {
 	}
 }
 
-func TestSanitizeFileName_RejectsAnythingThatIsNotATopLevelName(t *testing.T) {
+func TestValidateFileName_RejectsAnythingThatIsNotATopLevelName(t *testing.T) {
 	for _, name := range []string{"", "   ", ".", "..", "a/b.txt", `a\b.txt`, "/abs.txt", "nul\x00.txt"} {
-		if _, err := SanitizeFileName(name); !errors.Is(err, ErrInvalidCandidate) {
-			t.Fatalf("SanitizeFileName(%q) should be rejected, got %v", name, err)
+		if err := ValidateFileName(name); !errors.Is(err, ErrInvalidCandidate) {
+			t.Fatalf("ValidateFileName(%q) should be rejected, got %v", name, err)
 		}
 	}
 }
 
-func TestSanitizeFileName_BoundsLength(t *testing.T) {
-	long := strings.Repeat("a", 500) + ".pdf"
-	got, err := SanitizeFileName(long)
-	if err != nil {
-		t.Fatalf("SanitizeFileName: %v", err)
+// A name Ori must address on disk is never rewritten: validation accepts a
+// hostile-looking but legal filename unchanged, and only the display copy is
+// cleaned. Rewriting it would leave Ori looking for a file that does not exist.
+func TestValidateFileName_AcceptsHostileButLegalNamesUnchanged(t *testing.T) {
+	for _, name := range []string{"invoice‮gpj.exe.pdf", "report\ttab.pdf", "emoji-📄.pdf"} {
+		if err := ValidateFileName(name); err != nil {
+			t.Fatalf("ValidateFileName(%q) must accept a real on-disk name: %v", name, err)
+		}
+		if display := DisplayFileName(name); display == "" {
+			t.Fatalf("DisplayFileName(%q) must render something", name)
+		}
 	}
+}
+
+func TestDisplayFileName_BoundsLength(t *testing.T) {
+	long := strings.Repeat("a", 500) + ".pdf"
+	got := DisplayFileName(long)
 	if len([]rune(got)) > maxDisplayNameRunes+1 {
 		t.Fatalf("name not bounded: %d runes", len([]rune(got)))
 	}

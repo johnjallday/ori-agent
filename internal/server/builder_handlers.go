@@ -491,7 +491,42 @@ func (b *ServerBuilder) wireDownloadsJanitor() {
 		return
 	}
 	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
+	b.downloadsJanitorService = service
 	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+}
+
+// wireDownloadsJanitorMover gives the Janitor its execution mechanism: the
+// workspace's own root-scoped filesystem MCP binding.
+//
+// Split from wireDownloadsJanitor because the runtime resolver is built later
+// in the same phase. Until this runs the service has no mover, and an apply
+// fails loudly rather than pretending — which is the right failure: a Janitor
+// that cannot move files must say so, not silently report success.
+func (b *ServerBuilder) wireDownloadsJanitorMover() {
+	if b.downloadsJanitorService == nil || b.runtimeResolver == nil || b.mcpRegistry == nil {
+		return
+	}
+	b.downloadsJanitorService.SetMover(downloadsjanitor.NewMCPMover(
+		b.workspaceStore,
+		b.runtimeResolver,
+		janitorToolCaller{registry: b.mcpRegistry},
+	))
+}
+
+// janitorToolCaller adapts the MCP registry to the narrow caller the Janitor
+// needs: whether the tool reported an error, not what it returned. What
+// actually happened to the file is decided against the filesystem.
+type janitorToolCaller struct{ registry *mcp.Registry }
+
+func (c janitorToolCaller) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]any) (bool, error) {
+	result, err := c.registry.CallTool(ctx, serverName, toolName, arguments)
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return true, nil
+	}
+	return result.IsError, nil
 }
 
 // wireCalendarOpsPrepTaskExecutor gives the already-constructed Calendar Ops

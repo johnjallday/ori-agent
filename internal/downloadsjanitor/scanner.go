@@ -181,9 +181,9 @@ func (s *Scanner) evaluate(
 		return JanitorCandidate{}, IneligibleTemporary, false
 	}
 	// A name that is not a plain top-level filename cannot be a candidate; the
-	// model forbids it, and this is where that is enforced.
-	sanitized, err := SanitizeFileName(name)
-	if err != nil {
+	// model forbids it, and this is where that is enforced. The name is checked,
+	// never rewritten: Ori has to address the file by the name it actually has.
+	if err := ValidateFileName(name); err != nil {
 		return JanitorCandidate{}, IneligibleUnreadable, false
 	}
 
@@ -206,7 +206,7 @@ func (s *Scanner) evaluate(
 		return JanitorCandidate{}, IneligibleNotRegularFile, false
 	}
 
-	fingerprint := fingerprintFor(sanitized, info)
+	fingerprint := fingerprintFor(name, info)
 
 	// A file state the user already dismissed stays dismissed (FR-41).
 	if state.IsSkipped(fingerprint) {
@@ -220,14 +220,15 @@ func (s *Scanner) evaluate(
 
 	// Settling is checked last because it is the only check that depends on a
 	// previous run.
-	if !settled(state, sanitized, info.Size(), info.ModTime(), now) {
+	if !settled(state, name, info.Size(), info.ModTime(), now) {
 		return JanitorCandidate{}, IneligibleUnsettled, false
 	}
 
 	candidate := JanitorCandidate{
 		WorkspaceID:  state.WorkspaceID,
-		Name:         sanitized,
-		Extension:    strings.ToLower(filepath.Ext(sanitized)),
+		Name:         name,
+		DisplayName:  DisplayFileName(name),
+		Extension:    strings.ToLower(filepath.Ext(name)),
 		Size:         info.Size(),
 		ModifiedAt:   info.ModTime(),
 		DiscoveredAt: now,
@@ -297,15 +298,14 @@ func (s *Scanner) ObserveForSettling(settings JanitorSettings, state *ScanState)
 		if strings.EqualFold(name, filingRoot) || filewatcher.ShouldIgnoreFile(name) {
 			continue
 		}
-		sanitized, err := SanitizeFileName(name)
-		if err != nil {
+		if err := ValidateFileName(name); err != nil {
 			continue
 		}
 		info, err := os.Lstat(filepath.Join(root, name))
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			continue
 		}
-		RecordObservation(state, sanitized, info.Size(), info.ModTime(), now)
+		RecordObservation(state, name, info.Size(), info.ModTime(), now)
 	}
 	return nil
 }
@@ -339,12 +339,8 @@ func detectMIMEType(extension string) string {
 	return strings.TrimSpace(detected)
 }
 
-// safeName sanitizes a name for reporting, falling back to a placeholder when
-// the name cannot be displayed at all. An ineligible observation must never be
-// the thing that puts a control character into a log line.
+// safeName renders a name for reporting. An ineligible observation must never
+// be the thing that puts a control character into a log line.
 func safeName(name string) string {
-	if sanitized, err := SanitizeFileName(name); err == nil {
-		return sanitized
-	}
-	return "(unreadable name)"
+	return DisplayFileName(name)
 }

@@ -33,6 +33,9 @@ const (
 	MaxRetainedObservations = 2000
 	// MaxRetainedSkips caps remembered skip decisions.
 	MaxRetainedSkips = 2000
+	// MaxRetainedActions caps the journal. History is what the user undoes
+	// from, so the bound is generous and the newest entries win.
+	MaxRetainedActions = 1000
 	// ObservationTTL bounds how long an unmatched settling observation is kept.
 	// A file that stopped appearing does not need its observation retained.
 	ObservationTTL = 7 * 24 * time.Hour
@@ -96,8 +99,15 @@ type ScanState struct {
 	// Observations back the settling check.
 	Observations []SettledObservation `json:"observations,omitempty"`
 	// Skipped remembers dismissed file states.
-	Skipped   []SkippedFingerprint `json:"skipped,omitempty"`
-	UpdatedAt time.Time            `json:"updated_at,omitempty"`
+	Skipped []SkippedFingerprint `json:"skipped,omitempty"`
+	// Approvals are issued, not-yet-consumed approval tokens. They live in the
+	// same record as candidates so consuming one and mutating the candidate it
+	// authorizes happen in a single atomic write — a token cannot be spent
+	// without the state change it paid for, and vice versa.
+	Approvals []ApprovalRecord `json:"approvals,omitempty"`
+	// Actions is the durable journal of every attempted mutation.
+	Actions   []FileAction `json:"actions,omitempty"`
+	UpdatedAt time.Time    `json:"updated_at,omitempty"`
 }
 
 // Candidate returns the candidate with the given ID.
@@ -108,6 +118,31 @@ func (s ScanState) Candidate(id string) (JanitorCandidate, bool) {
 		}
 	}
 	return JanitorCandidate{}, false
+}
+
+// Action returns the journal entry with the given ID.
+func (s ScanState) Action(id string) (FileAction, bool) {
+	for _, action := range s.Actions {
+		if action.ID == id {
+			return action, true
+		}
+	}
+	return FileAction{}, false
+}
+
+// ActionByIdempotencyKey finds a previously recorded action for an apply, which
+// is how a retried confirm is recognized instead of re-executed.
+func (s ScanState) ActionByIdempotencyKey(key string) (FileAction, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return FileAction{}, false
+	}
+	for _, action := range s.Actions {
+		if action.IdempotencyKey == key {
+			return action, true
+		}
+	}
+	return FileAction{}, false
 }
 
 // Batch returns the batch with the given ID.
@@ -382,6 +417,14 @@ func pruneScanState(state ScanState, now time.Time) ScanState {
 		observations = observations[len(observations)-MaxRetainedObservations:]
 	}
 	state.Observations = observations
+
+	state.Approvals = pruneApprovals(state.Approvals, now)
+
+	// Actions are the accountability record: they are capped, never aged out,
+	// and the newest are kept.
+	if len(state.Actions) > MaxRetainedActions {
+		state.Actions = state.Actions[len(state.Actions)-MaxRetainedActions:]
+	}
 
 	// Skips are user decisions, so they are only ever dropped by the cap —
 	// oldest first — never by age.
