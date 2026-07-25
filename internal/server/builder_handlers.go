@@ -314,13 +314,14 @@ func (b *ServerBuilder) initializeHandlers() {
 		// grant to workspaces without re-auth (FR 47, 54). Requires the vault
 		// store (Phase 17).
 		connDeps := connectionshttp.Deps{
-			Flow:     connFlow,
-			Store:    connStore,
-			Guard:    connectionshttp.NewOriginGuard(),
-			Impacts:  connectionImpactEnumerator{b: b},
-			Teardown: connectionProductTeardown{b: b},
-			Health:   connectionGrantHealth{b: b},
-			Consent:  connections.NewConsentLog(config.DefaultDataDir()),
+			Flow:           connFlow,
+			Store:          connStore,
+			Guard:          connectionshttp.NewOriginGuard(),
+			Impacts:        connectionImpactEnumerator{b: b},
+			Teardown:       connectionProductTeardown{b: b},
+			Health:         connectionGrantHealth{b: b},
+			HealthNotifier: connectionHealthNotifier{b: b},
+			Consent:        connections.NewConsentLog(config.DefaultDataDir()),
 		}
 		if b.vaultStore != nil {
 			sink := newGmailCredentialSink(b.vaultStore)

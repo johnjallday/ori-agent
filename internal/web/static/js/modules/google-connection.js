@@ -154,6 +154,17 @@
           right.appendChild(btn);
         }
 
+        // Failure states get an inline Reconnect action (FR 86), not just a pill.
+        if (g.enabled && (g.health === "reconnect_required" || g.health === "provider_unavailable")) {
+          const rc = document.createElement("button");
+          rc.type = "button";
+          rc.className = "modern-btn modern-btn-primary gc-enable-btn";
+          rc.textContent = "Reconnect";
+          rc.setAttribute("aria-label", "Reconnect " + (PRODUCT_LABELS[g.product] || g.product));
+          rc.addEventListener("click", () => this.reconnectProduct(g.product));
+          right.appendChild(rc);
+        }
+
         // Any enabled product can be disconnected on its own (impact-previewed).
         if (g.enabled) {
           const dc = document.createElement("button");
@@ -573,6 +584,20 @@
 
     hideMigrate() {
       if (this.el.migrate) this.el.migrate.classList.add("d-none");
+    }
+
+    reconnectProduct(product) {
+      this.hideError();
+      if (product === "drive") {
+        this.toggleDriveSetup(); // re-run the Drive Web-client authorization
+        return;
+      }
+      if (product === "gmail") {
+        this.enableGmail(null, null); // re-run Gmail authorization
+        return;
+      }
+      // Calendar's connector is set up in its Calendar Ops workspace.
+      this.showError("Reconnect Calendar from its Calendar Ops workspace setup.");
     }
 
     async migrateAccount(accountID, btn) {
