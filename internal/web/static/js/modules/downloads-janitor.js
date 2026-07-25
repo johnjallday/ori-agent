@@ -35,6 +35,9 @@
   let selected = new Set();
   // Active state filter: '' (all), 'needs_review', 'pending', 'skipped'.
   let filter = '';
+  // The approval issued by a preview, held only until the user confirms or
+  // cancels. It is never persisted: an abandoned approval simply expires.
+  let pendingPreview = null;
 
   function wsId() {
     return workspaceId || (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
@@ -414,12 +417,25 @@
 
   function updateSelectionSummary() {
     const node = document.getElementById('downloadsJanitorSelection');
-    if (!node) return;
-    const count = selected.size;
-    node.textContent =
-      count === 0
-        ? 'No files selected.'
-        : count + (count === 1 ? ' file selected.' : ' files selected.');
+    if (node) {
+      const count = selected.size;
+      node.textContent =
+        count === 0
+          ? 'No files selected.'
+          : count + (count === 1 ? ' file selected.' : ' files selected.');
+    }
+    const approve = document.getElementById('downloadsJanitorApprove');
+    if (approve) {
+      const count = selected.size;
+      // The control states exactly what it will attempt, and stays disabled
+      // until there is something valid to attempt (FR-69).
+      approve.textContent =
+        count === 0
+          ? 'Approve selected moves'
+          : 'Approve ' + count + (count === 1 ? ' move' : ' moves');
+      approve.disabled = count === 0;
+      approve.setAttribute('aria-disabled', count === 0 ? 'true' : 'false');
+    }
   }
 
   // renderBatch repaints only the review section, so changing a filter or
@@ -458,12 +474,232 @@
       container.appendChild(scroller);
     }
 
+    const footer = el('div', 'dj-footer');
     const selection = el('p', 'dj-selection');
     selection.id = 'downloadsJanitorSelection';
     selection.setAttribute('role', 'status');
     selection.setAttribute('aria-live', 'polite');
-    container.appendChild(selection);
+    footer.appendChild(selection);
+
+    const approve = button(
+      'Approve selected moves',
+      'dj-btn dj-btn-primary',
+      () => void startApproval()
+    );
+    approve.id = 'downloadsJanitorApprove';
+    footer.appendChild(approve);
+    container.appendChild(footer);
+
     updateSelectionSummary();
+  }
+
+  // ------------------------------------------------------- confirm and apply
+
+  // renderConfirmation shows the final, server-derived plan: the exact
+  // destination each file will get, including any rename forced by a name
+  // already in use. This is the last thing the user sees before anything moves.
+  function renderConfirmation(previewResult) {
+    const host = document.getElementById('downloadsJanitorConfirmHost');
+    if (!host) return;
+    clear(host);
+
+    const panel = el('section', 'dj-confirm');
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-labelledby', 'downloadsJanitorConfirmTitle');
+
+    const title = el('h3', 'dj-confirm-title', 'Confirm these moves');
+    title.id = 'downloadsJanitorConfirmTitle';
+    panel.appendChild(title);
+
+    const count = previewResult.move_count || (previewResult.items || []).length;
+    const lead = el(
+      'p',
+      'dj-confirm-lead',
+      count === 1
+        ? 'Ori will move 1 file. Nothing is deleted.'
+        : 'Ori will move ' + count + ' files. Nothing is deleted.'
+    );
+    lead.setAttribute('role', 'status');
+    panel.appendChild(lead);
+
+    const list = el('ul', 'dj-confirm-list');
+    (previewResult.items || []).forEach(item => {
+      const entry = el('li', 'dj-confirm-item');
+      entry.appendChild(el('span', 'dj-confirm-name', item.name));
+      entry.appendChild(el('span', 'dj-confirm-arrow', ' → '));
+      entry.appendChild(el('span', 'dj-confirm-destination', item.destination));
+      if (item.renamed) {
+        // Ori never overwrites, so a taken name means a new one. Saying so here
+        // is the difference between a surprise and an informed choice.
+        const note = el(
+          'span',
+          'dj-confirm-renamed',
+          ' (renamed — a file with that name is already there)'
+        );
+        entry.appendChild(note);
+      }
+      list.appendChild(entry);
+    });
+    panel.appendChild(list);
+
+    const actions = el('div', 'dj-actions');
+    const confirm = button(
+      count === 1 ? 'Move 1 file' : 'Move ' + count + ' files',
+      'dj-btn dj-btn-primary',
+      () => void applyApproval(previewResult)
+    );
+    confirm.id = 'downloadsJanitorConfirmApply';
+    actions.appendChild(confirm);
+    actions.appendChild(
+      button('Cancel', 'dj-btn dj-btn-secondary', () => {
+        // Cancelling abandons the approval; the decisions themselves are still
+        // recorded, so nothing the user chose is lost.
+        pendingPreview = null;
+        clear(host);
+      })
+    );
+    panel.appendChild(actions);
+    host.appendChild(panel);
+    confirm.focus?.();
+  }
+
+  const RESULT_LABELS = {
+    applied: 'Filed',
+    failed: 'Not moved',
+    stale: 'Changed — not moved'
+  };
+
+  const RESULT_MARKS = { applied: '✓', failed: '!', stale: '•' };
+
+  // renderResults reports what happened per file. A batch where some files
+  // moved and others did not is stated as exactly that — never summarized as
+  // success (FR-72).
+  function renderResults(result) {
+    const host = document.getElementById('downloadsJanitorConfirmHost');
+    if (!host) return;
+    clear(host);
+
+    const panel = el('section', 'dj-results');
+    panel.setAttribute('role', 'status');
+    panel.setAttribute('aria-live', 'polite');
+
+    const parts = [];
+    if (result.applied)
+      parts.push(result.applied + (result.applied === 1 ? ' file filed' : ' files filed'));
+    if (result.failed) parts.push(result.failed + ' could not be moved');
+    if (result.stale) parts.push(result.stale + ' changed since you approved');
+    if (parts.length === 0) parts.push('Nothing was moved');
+    panel.appendChild(el('p', 'dj-results-summary', parts.join(' · ') + '.'));
+
+    const list = el('ul', 'dj-results-list');
+    (result.outcomes || []).forEach(outcome => {
+      const entry = el('li', 'dj-results-item dj-results-' + (outcome.result || 'failed'));
+      const mark = el('span', 'dj-results-mark', RESULT_MARKS[outcome.result] || '!');
+      mark.setAttribute('aria-hidden', 'true');
+      entry.appendChild(mark);
+      entry.appendChild(el('span', 'dj-results-name', outcome.name));
+      entry.appendChild(
+        el('span', 'dj-results-state', ' — ' + (RESULT_LABELS[outcome.result] || outcome.result))
+      );
+      if (outcome.destination && outcome.result === 'applied') {
+        entry.appendChild(el('span', 'dj-results-destination', ' → ' + outcome.destination));
+      }
+      if (outcome.message) {
+        entry.appendChild(el('span', 'dj-results-message', ' ' + outcome.message));
+      }
+      list.appendChild(entry);
+    });
+    panel.appendChild(list);
+
+    if (result.stale) {
+      panel.appendChild(button('Scan again', 'dj-btn dj-btn-secondary', () => void scanNow()));
+    }
+    host.appendChild(panel);
+  }
+
+  // startApproval asks the server for the final plan and shows it for
+  // confirmation. Nothing moves at this step.
+  async function startApproval() {
+    const id = wsId();
+    if (!id || busy || selected.size === 0) return;
+    busy = true;
+    showError('');
+    const control = document.getElementById('downloadsJanitorApprove');
+    if (control) control.disabled = true;
+    try {
+      const decisions = Array.from(selected).map(candidateId => {
+        const candidate = lastCandidates.find(item => item.id === candidateId) || {};
+        return {
+          candidate_id: candidateId,
+          operation: 'move',
+          category: candidate.decision_category || candidate.category || ''
+        };
+      });
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/preview',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decisions })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not prepare these moves.');
+      }
+      pendingPreview = { preview: body.preview, decisions };
+      renderConfirmation(body.preview || {});
+    } catch (error) {
+      showError(error.message || 'Ori could not prepare these moves.');
+    } finally {
+      busy = false;
+      updateSelectionSummary();
+    }
+  }
+
+  // applyApproval spends the approval and reports the per-item outcome.
+  async function applyApproval() {
+    const id = wsId();
+    if (!id || busy || !pendingPreview) return;
+    busy = true;
+    showError('');
+    const control = document.getElementById('downloadsJanitorConfirmApply');
+    if (control) {
+      control.disabled = true;
+      control.textContent = 'Moving…';
+    }
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/apply',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            batch_id: pendingPreview.preview.batch_id,
+            approval_token: pendingPreview.preview.token,
+            decisions: pendingPreview.decisions
+          })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not apply these moves.');
+      }
+      const result = body.result || {};
+      pendingPreview = null;
+      // Reload first so the table reflects the new states, then report the
+      // outcome beneath it.
+      await loadBatch();
+      renderResults(result);
+    } catch (error) {
+      pendingPreview = null;
+      showError(error.message || 'Ori could not apply these moves.');
+      await loadBatch();
+    } finally {
+      busy = false;
+    }
   }
 
   function renderConfiguredCard(host, status) {
@@ -544,6 +780,14 @@
     const batchHost = el('div', 'dj-batch');
     batchHost.id = 'downloadsJanitorBatch';
     card.appendChild(batchHost);
+
+    // The confirmation step and the per-item results render below the batch,
+    // deliberately *outside* it: applying every file empties the batch, and the
+    // report of what just happened to the user's files must not be swept away
+    // with the table it came from.
+    const confirmHost = el('div', 'dj-confirm-host');
+    confirmHost.id = 'downloadsJanitorConfirmHost';
+    card.appendChild(confirmHost);
 
     card.appendChild(errorRegion());
     host.appendChild(card);
@@ -779,6 +1023,7 @@
       lastCandidates = [];
     }
     selected = new Set();
+    pendingPreview = null;
     renderBatch();
     refreshStats();
   }
@@ -834,6 +1079,10 @@
       selected = new Set();
       filter = '';
     },
-    _selected: () => Array.from(selected)
+    _selected: () => Array.from(selected),
+    _select: id => {
+      selected.add(id);
+      updateSelectionSummary();
+    }
   };
 })();

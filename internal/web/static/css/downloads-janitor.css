@@ -408,3 +408,112 @@
     transition: none;
   }
 }
+
+/* --------------------------------------------------- confirmation & results */
+
+.dj-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.dj-footer .dj-selection {
+  margin: 0;
+}
+
+.dj-confirm {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--accent-color, #3b7dd8);
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+}
+
+.dj-confirm-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-confirm-lead {
+  margin: 0.2rem 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-confirm-list,
+.dj-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.dj-confirm-item,
+.dj-results-item {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-confirm-name,
+.dj-results-name {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-confirm-destination {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
+/* A forced rename is called out in words: the user is told the file will not
+   land under the name they expected, and why. */
+.dj-confirm-renamed {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-results {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+}
+
+.dj-results-summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-results-mark {
+  display: inline-block;
+  width: 1rem;
+  font-weight: 700;
+}
+
+.dj-results-applied .dj-results-mark {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-results-failed .dj-results-mark,
+.dj-results-stale .dj-results-mark {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-results-destination {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
+.dj-results-message {
+  display: block;
+  padding-left: 1rem;
+}

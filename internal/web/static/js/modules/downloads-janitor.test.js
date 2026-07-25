@@ -573,3 +573,307 @@ test('a rejected decision is not left on screen as though it were saved', async 
   assert.match(doc.getElementById('downloadsJanitorError').textContent, /not allowed/);
   assert.ok(reloaded, 'the panel must repaint from the server after a rejected change');
 });
+
+// -------------------------------------------------- confirmation and results
+
+const PREVIEW = {
+  batch_id: 'batch-1',
+  token: 'tok-abc',
+  move_count: 2,
+  items: [
+    {
+      candidate_id: 'c1',
+      name: 'invoice-2026-07.pdf',
+      destination: 'Filed/Documents/invoice-2026-07.pdf',
+      renamed: false
+    },
+    {
+      candidate_id: 'c2',
+      name: 'payload.bin',
+      destination: 'Filed/Other/payload (2).bin',
+      renamed: true
+    }
+  ]
+};
+
+test('the approve control states the count and is disabled until something is selected', () => {
+  const doc = setup();
+  renderReview(doc);
+  const approve = doc.getElementById('downloadsJanitorApprove');
+  assert.equal(approve.disabled, true);
+  assert.match(approve.textContent, /Approve selected moves/);
+
+  panel._select('c1');
+  assert.equal(approve.disabled, false);
+  assert.match(approve.textContent, /Approve 1 move$/);
+
+  panel._select('c2');
+  assert.match(approve.textContent, /Approve 2 moves$/);
+});
+
+test('approving previews the plan without moving anything', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+
+  const calls = [];
+  globalThis.fetch = async url => {
+    calls.push(url);
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    }
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.ok(
+    calls.some(url => String(url).endsWith('/preview')),
+    'the preview endpoint should be called'
+  );
+  assert.ok(
+    !calls.some(url => String(url).endsWith('/apply')),
+    'previewing must not apply anything'
+  );
+
+  const body = text(doc);
+  assert.match(body, /Confirm these moves/);
+  assert.match(body, /Ori will move 2 files/);
+  assert.match(body, /Nothing is deleted/);
+});
+
+test('the confirmation shows each resolved destination and flags forced renames', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  globalThis.fetch = async url =>
+    String(url).endsWith('/preview')
+      ? { ok: true, json: async () => ({ preview: PREVIEW }) }
+      : {
+          ok: true,
+          json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+        };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const body = text(doc);
+  assert.match(body, /Filed\/Documents\/invoice-2026-07\.pdf/);
+  assert.match(body, /Filed\/Other\/payload \(2\)\.bin/);
+  // The user is told a name was taken rather than discovering it afterwards.
+  assert.match(body, /renamed — a file with that name is already there/);
+});
+
+test('confirming sends the approval token and reports per-file results', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  let applyBody = null;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      applyBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 1,
+            failed: 1,
+            stale: 0,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice-2026-07.pdf',
+                result: 'applied',
+                destination: 'Filed/Documents/invoice-2026-07.pdf'
+              },
+              {
+                candidate_id: 'c2',
+                name: 'payload.bin',
+                result: 'failed',
+                message: 'Ori could not move this file.'
+              }
+            ]
+          }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(applyBody.approval_token, 'tok-abc');
+  assert.equal(applyBody.batch_id, 'batch-1');
+  assert.equal(applyBody.decisions[0].candidate_id, 'c1');
+  // Still IDs only — the browser never names a path.
+  assert.ok(!JSON.stringify(applyBody).includes('/tmp/Inbox'));
+
+  // A mixed result is stated as mixed, never as success.
+  const body = text(doc);
+  assert.match(body, /1 file filed/);
+  assert.match(body, /1 could not be moved/);
+  assert.match(body, /Ori could not move this file/);
+  assert.doesNotMatch(body, /All files? moved/);
+});
+
+test('a stale result explains itself and offers a rescan', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview'))
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    if (String(url).endsWith('/apply')) {
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 0,
+            failed: 0,
+            stale: 1,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice-2026-07.pdf',
+                result: 'stale',
+                message: 'This file changed after you approved it, so Ori left it alone.'
+              }
+            ]
+          }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  const body = text(doc);
+  assert.match(body, /changed since you approved/);
+  assert.match(body, /Ori left it alone/);
+  assert.match(body, /Scan again/);
+});
+
+test('cancelling abandons the approval and moves nothing', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  const calls = [];
+  globalThis.fetch = async url => {
+    calls.push(String(url));
+    if (String(url).endsWith('/preview'))
+      return { ok: true, json: async () => ({ preview: PREVIEW }) };
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  const cancel = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Cancel')[0];
+  assert.ok(cancel, 'expected a Cancel control');
+  cancel.click();
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.ok(!calls.some(url => url.endsWith('/apply')), 'cancelling must not apply anything');
+  assert.doesNotMatch(text(doc), /Confirm these moves/);
+});
+
+test('a rejected approval is reported and nothing is left looking approved', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      return {
+        ok: false,
+        json: async () => ({
+          error: {
+            code: 'candidate_changed',
+            message: 'report.pdf changed since it was proposed — rescan to review it again.'
+          }
+        })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.match(doc.getElementById('downloadsJanitorError').textContent, /rescan/);
+  assert.doesNotMatch(text(doc), /Confirm these moves/);
+  // The approve control is usable again.
+  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, false);
+});
+
+// Applying every file in a batch empties it. The report of what happened must
+// still be on screen afterwards — that moment is the whole point of the flow.
+test('results survive the batch they emptied', async () => {
+  const doc = setup();
+  renderReview(doc, batchFixture(), [candidatesFixture()[0]]);
+  panel._select('c1');
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      return {
+        ok: true,
+        json: async () => ({ preview: { ...PREVIEW, move_count: 1, items: [PREVIEW.items[0]] } })
+      };
+    }
+    if (String(url).endsWith('/apply')) {
+      return {
+        ok: true,
+        json: async () => ({
+          result: {
+            applied: 1,
+            failed: 0,
+            stale: 0,
+            outcomes: [
+              {
+                candidate_id: 'c1',
+                name: 'invoice-2026-07.pdf',
+                result: 'applied',
+                destination: 'Filed/Documents/invoice-2026-07.pdf'
+              }
+            ]
+          }
+        })
+      };
+    }
+    // The batch is now resolved: nothing pending remains.
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  const body = text(doc);
+  assert.match(body, /1 file filed/, 'the outcome must remain visible after the batch empties');
+  assert.match(body, /Filed\/Documents\/invoice-2026-07\.pdf/);
+  // And the now-empty batch still explains itself.
+  assert.match(body, /Nothing to review/);
+});
