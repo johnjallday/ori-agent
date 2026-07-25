@@ -17,6 +17,24 @@ account that isn't enrolled surfaces the product as *Provider unavailable* with 
 prerequisite link (runtime), whereas a falsey feature flag hard-disables it
 (config). Drive/Calendar each gate independently.
 
+**Official-build client injection.** The identity client resolves in the order
+**env → embedded → none** (`connections.ResolveOAuthClient`). Official releases
+bake in a verified client at build time by passing the credentials to the build
+(never committing them):
+
+```bash
+make build \
+  ORI_GOOGLE_EMBEDDED_CLIENT_ID='…apps.googleusercontent.com' \
+  ORI_GOOGLE_EMBEDDED_CLIENT_SECRET='GOCSPX-…'
+```
+
+These land in `connections.embeddedClientID/Secret` via `-ldflags -X`. A
+from-source/dev build leaves them empty (stays "unconfigured"), and a self-hosted
+operator can always override the baked-in client at runtime with the
+`ORI_GOOGLE_CONNECTION_*` env vars. The resolved **source** (`env`/`embedded`/
+`none`) is logged at startup and is safe to surface in the UI — the id/secret are
+never echoed.
+
 Calendar/Drive MCP servers use the **operator's own Web OAuth client**, entered
 during setup and stored only in the vault — never shipped in the build.
 
@@ -76,13 +94,57 @@ Public availability is gated on completing, with Google:
 3. A **CASA (Cloud Application Security Assessment)** / third-party security
    assessment, required for restricted scopes.
 
-**CASA determination per model path** (to be completed and recorded here before
-release):
+**CASA determination per model path** (engineering determination — final scope is
+Google's assessor's call; recorded here to drive the submission):
 
 | Data path | Determination |
 | --- | --- |
-| Local model (Ollama / LM Studio / mlx_lm) — content stays on device | _TBD: likely out of CASA's cloud-data scope; document the on-device boundary._ |
-| Cloud model (OpenAI / Anthropic) — content sent to a third-party model | _TBD: in scope; CASA + the sub-processor relationship must be documented._ |
+| **Local model** (Ollama / LM Studio / mlx_lm) — content never leaves the device | **Likely out of CASA cloud-data scope.** Restricted-scope data stays on-device and is not transmitted to any third party. Document the on-device boundary and the fact that no sub-processor receives the data; still declare the data flow in the submission. |
+| **Cloud model** (OpenAI / Anthropic) — content is sent to a third-party model API | **In scope.** Restricted-scope content is transmitted to a sub-processor. Requires: the CASA assessment itself, a documented sub-processor/DPA relationship with the model provider, encryption in transit (TLS, already enforced), and the Limited-Use attestation. This path is what makes a public shared client CASA-bound. |
 
-Until 1–3 are complete, the feature ships **disabled/preview-only** and is not
-offered for public sign-in.
+**Recommendation:** pursue verification/CASA against the **cloud-model** path (the
+binding one). A local-model-only distribution can credibly argue reduced scope,
+but the shared public client must assume the cloud path.
+
+## 7. Verification submission checklist
+
+- [ ] OAuth **consent screen**: production app name, verified logo, homepage +
+      privacy-policy URLs on a verified domain.
+- [ ] **Scopes** requested limited to `openid`, `email`, `profile`,
+      `gmail.readonly`, and (for Drive) `drive.readonly` — justify each; do **not**
+      request write scopes.
+- [ ] **In-product disclosure** screenshot/recording showing the Google-data
+      disclosure + affirmative consent before content reaches a model (the card +
+      Drive setup surfaces satisfy this).
+- [ ] **Demo video** of the full connect → enable → use flow for each restricted
+      scope.
+- [ ] **Limited-Use** attestation in the privacy policy (no sale, no ads, no
+      generalized-model training).
+- [ ] **CASA** assessment engaged with an authorized assessor for the cloud-model
+      path; remediation tracked to closed.
+- [ ] Redirect/loopback + Desktop-vs-Web client types documented per product.
+
+## 8. First-release feature-flag gating
+
+For the first release (self-hosted, pre-public-verification):
+
+| Product | Ship state | Flag |
+| --- | --- | --- |
+| **Gmail** | **On** — the shippable-today product (standard Gmail API) | `ORI_GOOGLE_CALENDAR/DRIVE_ENABLED` do not affect Gmail |
+| **Calendar** | **Preview** — depends on Google's Calendar MCP Developer Preview | `ORI_GOOGLE_CALENDAR_ENABLED` (default on; operators without Preview access see *Provider unavailable*) |
+| **Drive** | **Preview** — depends on Google's Drive MCP Developer Preview | `ORI_GOOGLE_DRIVE_ENABLED` (default on; read-only fail-closed regardless) |
+
+An operator with no Developer-Preview enrollment gets a graceful *Provider
+unavailable* on Calendar/Drive (runtime), not an error. To hard-disable a product
+for a build, set its flag falsey (config).
+
+## 9. Go / no-go
+
+| Capability | Ships now (self-hosted) | Blocked on |
+| --- | --- | --- |
+| Identity + **Gmail** (own/embedded client, testing mode ≤100 users) | ✅ | — |
+| Public sign-in (shared verified client, unlimited users) | ❌ | §6 verification + §7 CASA |
+| **Calendar / Drive** | ⚠️ preview only | Google GA of the MCP APIs + operator Preview enrollment |
+
+Until §6–§7 are complete, the feature ships **self-hosted / preview-only** and is
+not offered for public sign-in.

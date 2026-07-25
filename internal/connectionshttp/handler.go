@@ -25,14 +25,16 @@ type WorkspaceLinker interface {
 // callback is a top-level browser navigation from Google and is instead
 // protected by the single-use state value it must carry (FR 20).
 type Handler struct {
-	flow     *connections.IdentityFlow
-	store    *connections.Store
-	guard    *OriginGuard
-	linker   WorkspaceLinker
-	impacts  ImpactEnumerator
-	teardown ProductTeardown
-	health   GrantHealthChecker
-	consent  *connections.ConsentLog
+	flow           *connections.IdentityFlow
+	store          *connections.Store
+	guard          *OriginGuard
+	linker         WorkspaceLinker
+	impacts        ImpactEnumerator
+	teardown       ProductTeardown
+	health         GrantHealthChecker
+	healthNotifier HealthNotifier
+	consent        *connections.ConsentLog
+	migrator       Migrator
 
 	resolveLocalUser func(*http.Request) string
 	buildRedirectURL func(*http.Request) string
@@ -53,9 +55,15 @@ type Deps struct {
 	// Health reconciles each grant's live health on status load without opening a
 	// browser (FR 85). Nil keeps stored health as-is.
 	Health GrantHealthChecker
+	// HealthNotifier proactively surfaces a grant's health transition via the
+	// event bus + Action Center (FR 86). Nil disables surfacing.
+	HealthNotifier HealthNotifier
 	// Consent is the token/content-free consent audit log (FR 96). Nil disables
 	// consent recording.
 	Consent *connections.ConsentLog
+	// Migrator detects + folds legacy Gmail accounts into the connection (FR 88/89).
+	// Nil disables migration.
+	Migrator Migrator
 	// ResolveLocalUser maps a request to Ori's local user id (single-user app
 	// defaults to "local").
 	ResolveLocalUser func(*http.Request) string
@@ -74,7 +82,9 @@ func NewHandler(d Deps) *Handler {
 		impacts:          d.Impacts,
 		teardown:         d.Teardown,
 		health:           d.Health,
+		healthNotifier:   d.HealthNotifier,
 		consent:          d.Consent,
+		migrator:         d.Migrator,
 		resolveLocalUser: d.ResolveLocalUser,
 		buildRedirectURL: d.BuildRedirectURL,
 	}
@@ -106,6 +116,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/status", h.guard.Wrap(http.HandlerFunc(h.status)))
 	mux.Handle("/api/connections/google/impact", h.guard.Wrap(http.HandlerFunc(h.impact)))
 	mux.Handle("/api/connections/google/consent", h.guard.Wrap(http.HandlerFunc(h.consentAudit)))
+	mux.Handle("/api/connections/google/migratable", h.guard.Wrap(http.HandlerFunc(h.migratable)))
+	mux.Handle("/api/connections/google/migrate", h.guard.Wrap(http.HandlerFunc(h.migrate)))
 	mux.Handle("/api/connections/google/product/disconnect", h.guard.Wrap(http.HandlerFunc(h.productDisconnect)))
 	mux.Handle("/api/connections/google/product/unlink", h.guard.Wrap(http.HandlerFunc(h.productUnlink)))
 	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
@@ -159,7 +171,7 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 	}
 	// Refresh each grant's health from its live source (no browser) so a stale
 	// credential shows as Reconnect required (FR 85). Persist only when changed.
-	if h.reconcileGrantHealth(conn) {
+	if h.reconcileGrantHealth(r.Context(), conn) {
 		if saveErr := h.store.Save(conn); saveErr != nil {
 			logger.Warn("connection status: failed to persist reconciled health", logger.Fields{"error": saveErr})
 		}

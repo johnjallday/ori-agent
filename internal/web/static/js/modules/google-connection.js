@@ -64,6 +64,7 @@
         avatar: id("googleConnAvatar"),
         badge: id("googleConnBadge"),
         products: id("googleConnProducts"),
+        migrate: id("googleConnMigrate"),
         driveSetup: id("googleConnDriveSetup"),
         confirm: id("googleConnConfirm"),
         connectBtn: id("googleConnConnectBtn"),
@@ -107,10 +108,13 @@
         // Collapse the Drive setup panel once Drive is connected.
         const drive = (conn.grants || []).find((g) => g.product === "drive");
         if (drive && drive.enabled) this.hideDriveSetup();
+        // Offer to migrate any legacy per-workspace Gmail setup (non-blocking).
+        this.refreshMigratable();
       } else {
         this.el.connected.classList.add("d-none");
         this.el.disconnected.classList.remove("d-none");
         this.hideDriveSetup();
+        this.hideMigrate();
       }
     }
 
@@ -148,6 +152,17 @@
           btn.setAttribute("aria-label", "Set up Google Drive");
           btn.addEventListener("click", () => this.toggleDriveSetup());
           right.appendChild(btn);
+        }
+
+        // Failure states get an inline Reconnect action (FR 86), not just a pill.
+        if (g.enabled && (g.health === "reconnect_required" || g.health === "provider_unavailable")) {
+          const rc = document.createElement("button");
+          rc.type = "button";
+          rc.className = "modern-btn modern-btn-primary gc-enable-btn";
+          rc.textContent = "Reconnect";
+          rc.setAttribute("aria-label", "Reconnect " + (PRODUCT_LABELS[g.product] || g.product));
+          rc.addEventListener("click", () => this.reconnectProduct(g.product));
+          right.appendChild(rc);
         }
 
         // Any enabled product can be disconnected on its own (impact-previewed).
@@ -519,6 +534,92 @@
 
     hideConfirm() {
       if (this.el.confirm) this.el.confirm.classList.add("d-none");
+    }
+
+    // --- Migrate legacy Gmail setup -------------------------------------------
+
+    async refreshMigratable() {
+      const host = this.el.migrate;
+      if (!host) return;
+      try {
+        const res = await fetch("/api/connections/google/migratable", { headers: { Accept: "application/json" } });
+        if (!res.ok) return this.hideMigrate();
+        const data = await res.json().catch(() => ({}));
+        const matches = (data.accounts || []).filter((a) => a.email_matches);
+        if (!matches.length) return this.hideMigrate();
+        this.renderMigrate(matches);
+      } catch (e) {
+        this.hideMigrate();
+      }
+    }
+
+    renderMigrate(accounts) {
+      const host = this.el.migrate;
+      if (!host) return;
+      host.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "gc-migrate-title";
+      title.textContent = "Move your existing email setup to this account";
+      const note = document.createElement("p");
+      note.className = "gc-drive-note";
+      note.textContent =
+        "You have Gmail set up the older per-workspace way for this same account. Move it onto your connected Google account — no re-authorization.";
+      host.append(title, note);
+      accounts.forEach((a) => {
+        const row = document.createElement("div");
+        row.className = "gc-migrate-row";
+        const label = document.createElement("span");
+        label.textContent = a.email + (a.workspace_id ? " · workspace" : "");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "modern-btn modern-btn-secondary gc-enable-btn";
+        btn.textContent = "Migrate";
+        btn.setAttribute("aria-label", "Migrate " + a.email);
+        btn.addEventListener("click", () => this.migrateAccount(a.id, btn));
+        row.append(label, btn);
+        host.appendChild(row);
+      });
+      host.classList.remove("d-none");
+    }
+
+    hideMigrate() {
+      if (this.el.migrate) this.el.migrate.classList.add("d-none");
+    }
+
+    reconnectProduct(product) {
+      this.hideError();
+      if (product === "drive") {
+        this.toggleDriveSetup(); // re-run the Drive Web-client authorization
+        return;
+      }
+      if (product === "gmail") {
+        this.enableGmail(null, null); // re-run Gmail authorization
+        return;
+      }
+      // Calendar's connector is set up in its Calendar Ops workspace.
+      this.showError("Reconnect Calendar from its Calendar Ops workspace setup.");
+    }
+
+    async migrateAccount(accountID, btn) {
+      this.hideError();
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch(
+          "/api/connections/google/migrate?account_id=" + encodeURIComponent(accountID),
+          { method: "POST", headers: { Accept: "application/json" } },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          this.showError(data.message || "That account couldn't be migrated.");
+          return;
+        }
+        if (!res.ok) throw new Error("migrate failed");
+        await this.refresh();
+      } catch (e) {
+        this.showError("Couldn't migrate the account. Please try again.");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     async doDisconnect(url) {

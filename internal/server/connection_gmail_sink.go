@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/vault"
 )
 
@@ -94,4 +96,46 @@ func (s *gmailCredentialSink) LinkGmailToWorkspace(ctx context.Context, credenti
 		return "", err
 	}
 	return account.ID, nil
+}
+
+// ListLegacyGmailAccounts returns Gmail vault accounts NOT sourced from the
+// unified connection — accounts set up the old per-workspace way — as migration
+// candidates (FR 88). Content-free: id, email, workspace only.
+func (s *gmailCredentialSink) ListLegacyGmailAccounts(ctx context.Context) ([]connectionshttp.LegacyAccount, error) {
+	accts, err := s.store.ListEmailAccounts(ctx, "", "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]connectionshttp.LegacyAccount, 0)
+	for _, a := range accts {
+		if a.Provider == vault.EmailProviderGmail && a.Source != googleConnectionEmailSource {
+			out = append(out, connectionshttp.LegacyAccount{ID: a.ID, Email: a.EmailAddress, WorkspaceID: a.WorkspaceID})
+		}
+	}
+	return out, nil
+}
+
+// MigrateAccount folds a legacy Gmail account into the unified connection
+// (FR 88/89): it verifies the legacy account is the SAME Google account (email
+// match, else ErrAccountMismatch), re-links its workspace to the connection with
+// no re-auth (reusing the connection's Gmail credential), and removes the legacy
+// record. A workspace-less legacy account is simply removed — the connection's
+// global Gmail already covers it.
+func (s *gmailCredentialSink) MigrateAccount(ctx context.Context, accountID, connectedEmail, credentialRef, vaultID string) error {
+	acct, err := s.store.GetEmailAccount(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if acct == nil {
+		return errors.New("connections: legacy account not found")
+	}
+	if !strings.EqualFold(strings.TrimSpace(acct.EmailAddress), strings.TrimSpace(connectedEmail)) {
+		return connections.ErrAccountMismatch
+	}
+	if strings.TrimSpace(acct.WorkspaceID) != "" {
+		if _, err := s.LinkGmailToWorkspace(ctx, credentialRef, vaultID, acct.WorkspaceID); err != nil {
+			return err
+		}
+	}
+	return s.store.DeleteEmailAccount(ctx, accountID)
 }
