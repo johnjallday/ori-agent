@@ -506,6 +506,10 @@ func (b *ServerBuilder) wireDownloadsJanitorMover() {
 	if b.downloadsJanitorService == nil || b.runtimeResolver == nil || b.mcpRegistry == nil {
 		return
 	}
+	// The Trash mechanism is Ori's own recoverable-Trash abstraction, never
+	// filesystem MCP: delete_file unlinks, and an unlinked file has no restore
+	// token and no way back.
+	b.downloadsJanitorService.SetTrash(downloadsjanitor.NewPlatformTrash())
 	b.downloadsJanitorService.SetMover(downloadsjanitor.NewMCPMover(
 		b.workspaceStore,
 		b.runtimeResolver,

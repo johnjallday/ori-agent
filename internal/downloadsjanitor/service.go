@@ -147,6 +147,7 @@ type Service struct {
 	workspaces WorkspaceStore
 	scanner    *Scanner
 	mover      Mover
+	trash      TrashRemover
 	now        func() time.Time
 }
 

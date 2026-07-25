@@ -117,20 +117,26 @@ func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyRe
 		if !ok {
 			return ApplyResult{}, fmt.Errorf("%w: %s", ErrCandidateNotFound, item.CandidateID)
 		}
-		category := candidate.EffectiveCategory()
-		if requested := strings.TrimSpace(item.Category); requested != "" {
-			definition, err := LookupCategory(requested)
-			if err != nil {
-				return ApplyResult{}, err
-			}
-			category = definition.ID
-		}
-		plan = append(plan, PlanItem{
+		entry := PlanItem{
 			CandidateID:    candidate.ID,
 			Operation:      item.Operation,
-			Category:       category,
 			FingerprintKey: candidate.Fingerprint.Key(),
-		})
+		}
+		// A Trash item has no category — it does not land anywhere inside the
+		// folder — and the plan must be reconstructed exactly as the preview
+		// built it, or the approval hash will not match what the user approved.
+		if item.Operation != OperationTrash {
+			category := candidate.EffectiveCategory()
+			if requested := strings.TrimSpace(item.Category); requested != "" {
+				definition, err := LookupCategory(requested)
+				if err != nil {
+					return ApplyResult{}, err
+				}
+				category = definition.ID
+			}
+			entry.Category = category
+		}
+		plan = append(plan, entry)
 	}
 
 	// Spend the approval before anything is touched. A replay, an expired or
@@ -152,7 +158,12 @@ func (s *Service) ConfirmMoves(ctx context.Context, req ConfirmRequest) (ApplyRe
 
 	result := ApplyResult{}
 	for _, item := range plan {
-		outcome := s.applyOne(ctx, settings, root, approval, item)
+		var outcome ItemOutcome
+		if item.Operation == OperationTrash {
+			outcome = s.trashOne(ctx, settings, root, approval, item)
+		} else {
+			outcome = s.applyOne(ctx, settings, root, approval, item)
+		}
 		result.Outcomes = append(result.Outcomes, outcome)
 	}
 	result.Applied, result.Failed, result.Stale = SummarizeOutcomes(result.Outcomes)

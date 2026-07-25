@@ -349,10 +349,10 @@ func (h *Handler) toPreviewItems(payload []decisionPayload) ([]downloadsjanitor.
 		if operation == "" {
 			operation = downloadsjanitor.OperationMove
 		}
-		if operation != downloadsjanitor.OperationMove {
-			// Trash arrives with its own confirmation flow. Accepting it here
-			// would let a destructive action ride a move approval.
-			return nil, errors.New("only move can be approved here")
+		if operation != downloadsjanitor.OperationMove && operation != downloadsjanitor.OperationTrash {
+			// Only the two real operations exist. Anything else is rejected
+			// rather than interpreted — there is no permanent delete to reach.
+			return nil, errors.New("unsupported operation: " + entry.Operation)
 		}
 		items = append(items, downloadsjanitor.PreviewRequestItem{
 			CandidateID: entry.CandidateID,
@@ -440,6 +440,34 @@ func (h *Handler) ConfirmMoves(w http.ResponseWriter, r *http.Request) {
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "result": result})
 }
 
+// Undo handles POST
+// /api/workspaces/{workspaceID}/downloads-janitor/history/{actionID}/undo:
+// put a moved file back, or restore a trashed one.
+func (h *Handler) Undo(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	actionID := strings.TrimSpace(r.PathValue("actionID"))
+	result, err := h.service.Undo(r.Context(), workspaceID, actionID, userID)
+	if err != nil {
+		if errors.Is(err, downloadsjanitor.ErrUndoUnavailable) {
+			_ = orihttp.RespondAPIError(w, http.StatusConflict,
+				orihttp.NewAPIError("undo_unavailable", err.Error()))
+			return
+		}
+		h.respondReviewError(w, err, "Failed to undo the Downloads Janitor action")
+		return
+	}
+	// A refused undo is not an error response: the request was fine, the file
+	// simply could not be put back, and the reason belongs in the result.
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "undo": result})
+}
+
 // History handles GET /api/workspaces/{workspaceID}/downloads-janitor/history.
 func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := h.resolveWorkspace(w, r)
@@ -450,6 +478,35 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.respondError(w, err, "Failed to read Downloads Janitor history")
 		return
+	}
+	// Filters: operation (move|trash) and result (applied|failed|stale), plus
+	// undoable=true for "what can I still get back".
+	if operation := strings.TrimSpace(r.URL.Query().Get("operation")); operation != "" {
+		filtered := actions[:0:0]
+		for _, action := range actions {
+			if string(action.Operation) == operation {
+				filtered = append(filtered, action)
+			}
+		}
+		actions = filtered
+	}
+	if result := strings.TrimSpace(r.URL.Query().Get("result")); result != "" {
+		filtered := actions[:0:0]
+		for _, action := range actions {
+			if string(action.Result) == result {
+				filtered = append(filtered, action)
+			}
+		}
+		actions = filtered
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("undoable")), "true") {
+		filtered := actions[:0:0]
+		for _, action := range actions {
+			if action.Undoable() {
+				filtered = append(filtered, action)
+			}
+		}
+		actions = filtered
 	}
 	total := len(actions)
 	limit, offset := pagination(r)

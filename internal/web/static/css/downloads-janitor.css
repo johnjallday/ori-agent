@@ -517,3 +517,92 @@
   display: block;
   padding-left: 1rem;
 }
+
+/* Destructive styling: a removal never looks like a move. The class is applied
+   alongside text that states the consequence, so the distinction never rests on
+   colour alone. */
+.dj-btn-destructive {
+  border-color: var(--danger-color, #c5442e);
+  color: var(--danger-color, #c5442e);
+  font-weight: 600;
+}
+
+.dj-btn-primary.dj-btn-destructive {
+  background: var(--danger-color, #c5442e);
+  border-color: transparent;
+  color: #fff;
+}
+
+.dj-confirm-trash .dj-confirm-destination {
+  color: var(--danger-color, #c5442e);
+}
+
+.dj-trash-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-primary, #e8e8e8);
+  cursor: pointer;
+}
+
+.dj-trash-ack input:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- history */
+
+.dj-history {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-history-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.dj-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-history-name {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-history-undone {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-history-message {
+  flex-basis: 100%;
+  padding-left: 1rem;
+}
+
+.dj-history-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-primary, #e8e8e8);
+}

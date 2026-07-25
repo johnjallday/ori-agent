@@ -105,17 +105,32 @@ func TestPreviewMoves_RejectsPathsAndUnknownCategories(t *testing.T) {
 	}
 }
 
-// Trash is destructive and gets its own confirmation. Accepting it in a move
-// preview would let it inherit an approval the user gave for moves.
-func TestPreviewMoves_RejectsTrashAndUnknownOperations(t *testing.T) {
+// Only the two real operations are approvable. Anything else — including a
+// hopeful "delete" — is rejected outright rather than interpreted.
+func TestPreviewMoves_RejectsUnknownOperations(t *testing.T) {
 	service, _, candidates := reviewFixture(t)
 
-	for _, operation := range []Operation{OperationTrash, "delete", ""} {
+	for _, operation := range []Operation{"delete", "remove", "permanent_delete", ""} {
 		items := moveItems(candidates, "")
 		items[0].Operation = operation
 		if _, err := service.PreviewMoves(PreviewRequest{WorkspaceID: "ws-1", UserID: "user-1", Items: items}); err == nil {
-			t.Fatalf("operation %q should have been rejected in a move preview", operation)
+			t.Fatalf("operation %q should have been rejected", operation)
 		}
+	}
+
+	// Trash is approvable, but as its own operation: the preview counts it
+	// separately so the confirmation can state the removal count on its own.
+	items := moveItems(candidates, "")
+	items[0].Operation = OperationTrash
+	preview, err := service.PreviewMoves(PreviewRequest{WorkspaceID: "ws-1", UserID: "user-1", Items: items})
+	if err != nil {
+		t.Fatalf("PreviewMoves: %v", err)
+	}
+	if preview.TrashCount != 1 || preview.MoveCount != 0 {
+		t.Fatalf("preview counts = %d moves / %d trash", preview.MoveCount, preview.TrashCount)
+	}
+	if preview.Items[0].Destination != "" || preview.Items[0].Category != "" {
+		t.Fatalf("a Trash item has no destination inside the folder: %+v", preview.Items[0])
 	}
 }
 

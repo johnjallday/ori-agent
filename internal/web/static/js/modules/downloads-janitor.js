@@ -38,6 +38,15 @@
   // The approval issued by a preview, held only until the user confirms or
   // cancels. It is never persisted: an abandoned approval simply expires.
   let pendingPreview = null;
+  // Files the user has explicitly marked for Trash. Kept apart from `selected`
+  // so a move selection and a removal can never be confused for one another.
+  let trashMarked = new Set();
+  let historyActions = [];
+  let historyLoaded = false;
+  let historyFilter = '';
+  // The last undo outcome, kept so the history reload that follows an undo does
+  // not wipe the explanation the user needs to read.
+  let historyStatusMessage = '';
 
   function wsId() {
     return workspaceId || (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
@@ -279,6 +288,7 @@
     checkbox.checked = selected.has(candidate.id);
     checkbox.setAttribute('aria-label', 'Select ' + candidate.name);
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
+    checkbox.disabled = checkbox.disabled || trashMarked.has(candidate.id);
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) selected.add(candidate.id);
       else selected.delete(candidate.id);
@@ -335,6 +345,29 @@
 
     const actionCell = el('td', 'dj-cell dj-cell-actions');
     if (candidate.state === 'pending' || candidate.state === 'approved') {
+      // Trash is a per-file choice with its own toggle. It is never part of the
+      // move selection, so a bulk selection cannot become a removal (FR-66).
+      const marked = trashMarked.has(candidate.id);
+      const trashToggle = button(
+        marked ? 'Trash ✓' : 'Trash',
+        'dj-btn dj-btn-quiet' + (marked ? ' dj-btn-destructive' : ''),
+        () => {
+          if (trashMarked.has(candidate.id)) trashMarked.delete(candidate.id);
+          else {
+            trashMarked.add(candidate.id);
+            // Marking for Trash takes the file out of the move selection:
+            // one file, one decision.
+            selected.delete(candidate.id);
+          }
+          renderBatch();
+        }
+      );
+      trashToggle.setAttribute('aria-pressed', marked ? 'true' : 'false');
+      trashToggle.setAttribute(
+        'aria-label',
+        (marked ? 'Unmark' : 'Mark') + ' ' + candidate.name + ' for Trash'
+      );
+      actionCell.appendChild(trashToggle);
       actionCell.appendChild(
         button('Skip', 'dj-btn dj-btn-quiet', () => {
           void submitDecisions([{ candidate_id: candidate.id, decision: 'skip' }]);
@@ -419,22 +452,29 @@
     const node = document.getElementById('downloadsJanitorSelection');
     if (node) {
       const count = selected.size;
-      node.textContent =
-        count === 0
-          ? 'No files selected.'
-          : count + (count === 1 ? ' file selected.' : ' files selected.');
+      const trashes = trashMarked.size;
+      const parts = [];
+      if (count) parts.push(count + (count === 1 ? ' file selected' : ' files selected'));
+      if (trashes)
+        parts.push(
+          trashes + (trashes === 1 ? ' file marked for Trash' : ' files marked for Trash')
+        );
+      node.textContent = parts.length === 0 ? 'No files selected.' : parts.join(' · ') + '.';
     }
     const approve = document.getElementById('downloadsJanitorApprove');
     if (approve) {
-      const count = selected.size;
-      // The control states exactly what it will attempt, and stays disabled
-      // until there is something valid to attempt (FR-69).
+      const moves = selected.size;
+      const trashes = trashMarked.size;
+      // The control states exactly what it will attempt — moves and removals
+      // counted separately — and stays disabled until there is something valid
+      // to attempt (FR-69).
+      const parts = [];
+      if (moves) parts.push(moves + (moves === 1 ? ' move' : ' moves'));
+      if (trashes) parts.push(trashes + ' to Trash');
       approve.textContent =
-        count === 0
-          ? 'Approve selected moves'
-          : 'Approve ' + count + (count === 1 ? ' move' : ' moves');
-      approve.disabled = count === 0;
-      approve.setAttribute('aria-disabled', count === 0 ? 'true' : 'false');
+        parts.length === 0 ? 'Approve selected' : 'Approve ' + parts.join(' and ');
+      approve.disabled = moves + trashes === 0;
+      approve.setAttribute('aria-disabled', approve.disabled ? 'true' : 'false');
     }
   }
 
@@ -511,23 +551,37 @@
     title.id = 'downloadsJanitorConfirmTitle';
     panel.appendChild(title);
 
-    const count = previewResult.move_count || (previewResult.items || []).length;
-    const lead = el(
-      'p',
-      'dj-confirm-lead',
-      count === 1
-        ? 'Ori will move 1 file. Nothing is deleted.'
-        : 'Ori will move ' + count + ' files. Nothing is deleted.'
-    );
+    const moveCount = previewResult.move_count || 0;
+    const trashCount = previewResult.trash_count || 0;
+    const sentences = [];
+    if (moveCount) {
+      sentences.push(
+        moveCount === 1 ? 'Ori will move 1 file.' : 'Ori will move ' + moveCount + ' files.'
+      );
+    }
+    if (trashCount) {
+      sentences.push(
+        (trashCount === 1
+          ? 'Ori will move 1 file to your system Trash'
+          : 'Ori will move ' + trashCount + ' files to your system Trash') +
+          ', where you can restore them. Nothing is deleted permanently.'
+      );
+    } else {
+      sentences.push('Nothing is deleted.');
+    }
+    const lead = el('p', 'dj-confirm-lead', sentences.join(' '));
     lead.setAttribute('role', 'status');
     panel.appendChild(lead);
 
     const list = el('ul', 'dj-confirm-list');
     (previewResult.items || []).forEach(item => {
-      const entry = el('li', 'dj-confirm-item');
+      const isTrash = item.operation === 'trash';
+      const entry = el('li', 'dj-confirm-item' + (isTrash ? ' dj-confirm-trash' : ''));
       entry.appendChild(el('span', 'dj-confirm-name', item.name));
       entry.appendChild(el('span', 'dj-confirm-arrow', ' → '));
-      entry.appendChild(el('span', 'dj-confirm-destination', item.destination));
+      entry.appendChild(
+        el('span', 'dj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
+      );
       if (item.renamed) {
         // Ori never overwrites, so a taken name means a new one. Saying so here
         // is the difference between a surprise and an informed choice.
@@ -544,11 +598,36 @@
 
     const actions = el('div', 'dj-actions');
     const confirm = button(
-      count === 1 ? 'Move 1 file' : 'Move ' + count + ' files',
-      'dj-btn dj-btn-primary',
+      confirmLabel(previewResult),
+      'dj-btn dj-btn-primary' + (trashCount > 0 ? ' dj-btn-destructive' : ''),
       () => void applyApproval(previewResult)
     );
     confirm.id = 'downloadsJanitorConfirmApply';
+    // A batch containing any removal needs a second, explicit acknowledgement
+    // stating the exact number of files going to Trash. Moves alone do not:
+    // reserving the extra step for the destructive case is what keeps it
+    // meaningful rather than something to click through (FR-70).
+    if (trashCount > 0) {
+      confirm.disabled = true;
+      const ack = el('label', 'dj-trash-ack');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.id = 'downloadsJanitorTrashAck';
+      box.addEventListener('change', () => {
+        confirm.disabled = !box.checked;
+      });
+      ack.appendChild(box);
+      ack.appendChild(
+        el(
+          'span',
+          'dj-trash-ack-text',
+          trashCount === 1
+            ? 'Yes, move 1 file to the Trash.'
+            : 'Yes, move ' + trashCount + ' files to the Trash.'
+        )
+      );
+      panel.appendChild(ack);
+    }
     actions.appendChild(confirm);
     actions.appendChild(
       button('Cancel', 'dj-btn dj-btn-secondary', () => {
@@ -561,6 +640,180 @@
     panel.appendChild(actions);
     host.appendChild(panel);
     confirm.focus?.();
+  }
+
+  // confirmLabel names both halves of a mixed batch so the button never
+  // understates what it is about to do.
+  function confirmLabel(previewResult) {
+    const moves = previewResult.move_count || 0;
+    const trashes = previewResult.trash_count || 0;
+    const parts = [];
+    if (moves) parts.push(moves === 1 ? 'Move 1 file' : 'Move ' + moves + ' files');
+    if (trashes) parts.push(trashes === 1 ? 'Trash 1 file' : 'Trash ' + trashes + ' files');
+    return parts.length === 0 ? 'Apply' : parts.join(' and ');
+  }
+
+  // ------------------------------------------------------------------ history
+
+  const HISTORY_FILTERS = [
+    { id: '', label: 'All' },
+    { id: 'move', label: 'Filed', query: 'operation=move' },
+    { id: 'trash', label: 'Trashed', query: 'operation=trash' },
+    { id: 'undoable', label: 'Can undo', query: 'undoable=true' }
+  ];
+
+  function historyLine(action) {
+    const entry = el('li', 'dj-history-item dj-history-' + (action.result || 'failed'));
+
+    const mark = el('span', 'dj-results-mark', RESULT_MARKS[action.result] || '!');
+    mark.setAttribute('aria-hidden', 'true');
+    entry.appendChild(mark);
+    entry.appendChild(el('span', 'dj-history-name', action.source_name || ''));
+
+    const what =
+      action.operation === 'trash'
+        ? action.result === 'applied'
+          ? ' — moved to Trash'
+          : ' — not removed'
+        : action.result === 'applied'
+          ? ' — filed to ' + (action.destination_relative || '')
+          : ' — not moved';
+    entry.appendChild(el('span', 'dj-history-what', what));
+
+    if (action.undo === 'undone') {
+      entry.appendChild(el('span', 'dj-history-undone', ' · put back'));
+    }
+    if (action.error_summary) {
+      entry.appendChild(el('span', 'dj-history-message', ' ' + action.error_summary));
+    }
+    if (action.undo_error) {
+      entry.appendChild(el('span', 'dj-history-message', ' ' + action.undo_error));
+    }
+
+    // Undo is offered only where the server says it is still possible, and the
+    // label names the actual reversal rather than a generic "undo".
+    if (action.result === 'applied' && action.undo === 'available') {
+      entry.appendChild(
+        button(
+          action.operation === 'trash' ? 'Restore from Trash' : 'Undo move',
+          'dj-btn dj-btn-quiet',
+          () => void undoAction(action.id)
+        )
+      );
+    } else if (action.result === 'applied' && action.undo !== 'undone') {
+      // Saying why it cannot be undone is more useful than hiding the control.
+      entry.appendChild(el('span', 'dj-muted', ' Cannot be undone'));
+    }
+    return entry;
+  }
+
+  function renderHistory() {
+    const host = document.getElementById('downloadsJanitorHistoryHost');
+    if (!host) return;
+    clear(host);
+    if (!historyLoaded) return;
+
+    const panel = el('section', 'dj-history');
+    panel.setAttribute('aria-labelledby', 'downloadsJanitorHistoryTitle');
+    const title = el('h3', 'dj-history-title', 'History');
+    title.id = 'downloadsJanitorHistoryTitle';
+    panel.appendChild(title);
+
+    const bar = el('div', 'dj-filters');
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', 'Filter history');
+    HISTORY_FILTERS.forEach(option => {
+      const control = button(
+        option.label,
+        'dj-filter' + (historyFilter === option.id ? ' dj-filter-active' : ''),
+        () => {
+          historyFilter = option.id;
+          void loadHistory();
+        }
+      );
+      control.setAttribute('aria-pressed', historyFilter === option.id ? 'true' : 'false');
+      bar.appendChild(control);
+    });
+    panel.appendChild(bar);
+
+    if (historyActions.length === 0) {
+      panel.appendChild(
+        el(
+          'p',
+          'dj-empty-copy',
+          'Nothing here yet. Applied moves and Trash actions are listed here.'
+        )
+      );
+    } else {
+      const list = el('ul', 'dj-history-list');
+      historyActions.forEach(action => list.appendChild(historyLine(action)));
+      panel.appendChild(list);
+    }
+
+    const status = el('p', 'dj-history-status', historyStatusMessage);
+    status.id = 'downloadsJanitorHistoryStatus';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    panel.appendChild(status);
+
+    host.appendChild(panel);
+  }
+
+  async function loadHistory() {
+    const id = wsId();
+    if (!id) return;
+    const option = HISTORY_FILTERS.find(entry => entry.id === historyFilter);
+    const query = option && option.query ? '?' + option.query : '';
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/history' + query
+      );
+      if (!response.ok) throw new Error('history failed');
+      const body = await response.json();
+      historyActions = Array.isArray(body.actions) ? body.actions : [];
+      historyLoaded = true;
+    } catch (_) {
+      historyActions = [];
+      historyLoaded = true;
+    }
+    renderHistory();
+  }
+
+  // undoAction reverses one applied action and reports the outcome honestly: a
+  // refusal is a normal answer, and the reason is what the user needs.
+  async function undoAction(actionID) {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    historyStatusMessage = 'Putting it back…';
+    const status = document.getElementById('downloadsJanitorHistoryStatus');
+    if (status) status.textContent = historyStatusMessage;
+    try {
+      const response = await fetch(
+        '/api/workspaces/' +
+          encodeURIComponent(id) +
+          '/downloads-janitor/history/' +
+          encodeURIComponent(actionID) +
+          '/undo',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not undo that.');
+      }
+      const undo = body.undo || {};
+      historyStatusMessage =
+        undo.result === 'undone'
+          ? (undo.message || 'Put back.') + ' ' + (undo.restored_to || '')
+          : undo.message || 'Ori could not undo that.';
+    } catch (error) {
+      historyStatusMessage = error.message || 'Ori could not undo that.';
+    } finally {
+      busy = false;
+      await loadHistory();
+      await loadBatch();
+    }
   }
 
   const RESULT_LABELS = {
@@ -621,7 +874,7 @@
   // confirmation. Nothing moves at this step.
   async function startApproval() {
     const id = wsId();
-    if (!id || busy || selected.size === 0) return;
+    if (!id || busy || selected.size + trashMarked.size === 0) return;
     busy = true;
     showError('');
     const control = document.getElementById('downloadsJanitorApprove');
@@ -634,6 +887,9 @@
           operation: 'move',
           category: candidate.decision_category || candidate.category || ''
         };
+      });
+      trashMarked.forEach(candidateId => {
+        decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
       });
       const response = await fetch(
         '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/preview',
@@ -690,9 +946,10 @@
       const result = body.result || {};
       pendingPreview = null;
       // Reload first so the table reflects the new states, then report the
-      // outcome beneath it.
+      // outcome beneath it. History gains the entries this apply just wrote.
       await loadBatch();
       renderResults(result);
+      await loadHistory();
     } catch (error) {
       pendingPreview = null;
       showError(error.message || 'Ori could not apply these moves.');
@@ -789,6 +1046,10 @@
     confirmHost.id = 'downloadsJanitorConfirmHost';
     card.appendChild(confirmHost);
 
+    const historyHost = el('div', 'dj-history-host');
+    historyHost.id = 'downloadsJanitorHistoryHost';
+    card.appendChild(historyHost);
+
     card.appendChild(errorRegion());
     host.appendChild(card);
     renderBatch();
@@ -829,6 +1090,12 @@
 
   function render(status) {
     lastStatus = status;
+    // Marks and selections belong to the batch that was on screen. A repaint
+    // from a fresh status must not carry a removal mark into a different set
+    // of files.
+    trashMarked = new Set();
+    selected = new Set();
+    pendingPreview = null;
     const host = mount();
     if (!host) return;
     if (!status || !status.applies) {
@@ -1023,6 +1290,7 @@
       lastCandidates = [];
     }
     selected = new Set();
+    trashMarked = new Set();
     pendingPreview = null;
     renderBatch();
     refreshStats();
@@ -1042,6 +1310,7 @@
       if (status && status.applies && status.settings && status.settings.root_path) {
         await loadCategories();
         await loadBatch();
+        await loadHistory();
       }
       return;
     } catch (_) {
@@ -1077,9 +1346,16 @@
       lastCandidates = candidates || [];
       if (cats) categories = cats;
       selected = new Set();
+      trashMarked = new Set();
+      pendingPreview = null;
       filter = '';
     },
     _selected: () => Array.from(selected),
+    _setHistory: actions => {
+      historyActions = actions || [];
+      historyLoaded = true;
+      renderHistory();
+    },
     _select: id => {
       selected.add(id);
       updateSelectionSummary();

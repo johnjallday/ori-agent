@@ -115,16 +115,43 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 			if !candidate.Actionable() {
 				return fmt.Errorf("%w: %s is %s", ErrCandidateNotActionable, candidate.Display(), candidate.State)
 			}
-			// Version 1's preview approves moves only. Trash is a destructive
-			// choice with its own confirmation, and quietly accepting it here
-			// would let it inherit this approval.
-			if requested.Operation != OperationMove {
-				return fmt.Errorf("%w: %q is not previewable here", ErrInvalidAction, requested.Operation)
+			// Move and Trash are both approvable, but they are never conflated:
+			// each item carries its own operation, a Trash decision can only
+			// come from an explicit per-file choice, and the plan hash covers
+			// the operation — so an approval given for moves can never be spent
+			// on a removal (FR-66, FR-70).
+			operation := requested.Operation
+			if operation != OperationMove && operation != OperationTrash {
+				return fmt.Errorf("%w: %q is not an operation Ori can approve", ErrInvalidAction, requested.Operation)
 			}
 			if batchID == "" {
 				batchID = candidate.BatchID
 			} else if candidate.BatchID != batchID {
 				return fmt.Errorf("%w: approve one batch at a time", ErrInvalidAction)
+			}
+
+			if operation == OperationTrash {
+				// A Trash item has no category and no destination inside the
+				// folder: it leaves the folder entirely, recoverably.
+				current, err := currentFingerprint(root, candidate.Name)
+				if err != nil {
+					return fmt.Errorf("%w: %s is no longer available", ErrCandidateNotActionable, candidate.Display())
+				}
+				if !candidate.Fingerprint.Matches(current) {
+					return fmt.Errorf("%w: %s changed since it was proposed — rescan to review it again", ErrCandidateNotActionable, candidate.Display())
+				}
+				items = append(items, PreviewItem{
+					CandidateID: candidate.ID,
+					Name:        candidate.Display(),
+					Operation:   OperationTrash,
+					Size:        candidate.Size,
+				})
+				plan = append(plan, PlanItem{
+					CandidateID:    candidate.ID,
+					Operation:      OperationTrash,
+					FingerprintKey: candidate.Fingerprint.Key(),
+				})
+				continue
 			}
 
 			category := candidate.EffectiveCategory()
@@ -198,10 +225,19 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 		}
 		state.Approvals = append(state.Approvals, record)
 
+		moves, trashes := 0, 0
+		for _, item := range items {
+			if item.Operation == OperationTrash {
+				trashes++
+			} else {
+				moves++
+			}
+		}
 		preview = Preview{
 			BatchID:        batchID,
 			Items:          items,
-			MoveCount:      len(items),
+			MoveCount:      moves,
+			TrashCount:     trashes,
 			Token:          token,
 			ExpiresAt:      record.ExpiresAt,
 			IdempotencyKey: record.IdempotencyKey,

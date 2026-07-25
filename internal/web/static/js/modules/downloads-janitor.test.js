@@ -601,7 +601,7 @@ test('the approve control states the count and is disabled until something is se
   renderReview(doc);
   const approve = doc.getElementById('downloadsJanitorApprove');
   assert.equal(approve.disabled, true);
-  assert.match(approve.textContent, /Approve selected moves/);
+  assert.match(approve.textContent, /Approve selected/);
 
   panel._select('c1');
   assert.equal(approve.disabled, false);
@@ -876,4 +876,351 @@ test('results survive the batch they emptied', async () => {
   assert.match(body, /Filed\/Documents\/invoice-2026-07\.pdf/);
   // And the now-empty batch still explains itself.
   assert.match(body, /Nothing to review/);
+});
+
+// ------------------------------------------------------------------- Trash
+
+function trashToggleFor(doc, name) {
+  const host = doc.getElementById('downloadsJanitorMount');
+  return host.all(
+    n => n.tagName === 'BUTTON' && String(n.getAttribute('aria-label') || '').includes(name)
+  )[0];
+}
+
+test('Trash is a per-file choice, never part of the move selection', () => {
+  const doc = setup();
+  renderReview(doc);
+
+  const toggle = trashToggleFor(doc, 'invoice-2026-07.pdf');
+  assert.ok(toggle, 'expected a Trash control on a pending row');
+  assert.match(toggle.getAttribute('aria-label'), /Mark .* for Trash/);
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+
+  toggle.click();
+  const marked = trashToggleFor(doc, 'invoice-2026-07.pdf');
+  assert.equal(marked.getAttribute('aria-pressed'), 'true');
+  // Marking for Trash does not put the file in the move selection.
+  assert.deepEqual(panel._selected(), []);
+  assert.match(text(doc), /1 file marked for Trash/);
+});
+
+test('a file marked for Trash cannot also be selected for a move', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  trashToggleFor(doc, 'invoice-2026-07.pdf').click();
+
+  // The move selection released it, and its checkbox is no longer selectable.
+  assert.deepEqual(panel._selected(), []);
+  const host = doc.getElementById('downloadsJanitorMount');
+  const box = host.all(n => n.className === 'dj-select')[0];
+  assert.equal(box.disabled, true, 'a file bound for Trash is not a move candidate');
+});
+
+test('the approve control counts moves and removals separately', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  trashToggleFor(doc, 'payload.bin').click();
+
+  const approve = doc.getElementById('downloadsJanitorApprove');
+  assert.match(approve.textContent, /1 move/);
+  assert.match(approve.textContent, /1 to Trash/);
+});
+
+test('a batch containing a removal requires a separate acknowledgement of the exact count', async () => {
+  const doc = setup();
+  renderReview(doc);
+  trashToggleFor(doc, 'payload.bin').click();
+  globalThis.fetch = async url =>
+    String(url).endsWith('/preview')
+      ? {
+          ok: true,
+          json: async () => ({
+            preview: {
+              batch_id: 'batch-1',
+              token: 'tok-abc',
+              move_count: 0,
+              trash_count: 1,
+              items: [{ candidate_id: 'c2', name: 'payload.bin', operation: 'trash' }]
+            }
+          })
+        }
+      : {
+          ok: true,
+          json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+        };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const body = text(doc);
+  // The consequence is stated plainly, including that it is recoverable.
+  assert.match(body, /system Trash/);
+  assert.match(body, /restore them/);
+  assert.match(body, /Nothing is deleted permanently/);
+  assert.match(body, /Trash \(restorable\)/);
+
+  // The confirm control is blocked until the removal is acknowledged by count.
+  const confirm = doc.getElementById('downloadsJanitorConfirmApply');
+  assert.equal(confirm.disabled, true, 'a removal must not be one click away');
+  const ack = doc.getElementById('downloadsJanitorTrashAck');
+  assert.ok(ack, 'expected a separate acknowledgement for the removal');
+  assert.match(body, /Yes, move 1 file to the Trash/);
+
+  ack.checked = true;
+  ack.dispatch('change');
+  assert.equal(confirm.disabled, false);
+});
+
+test('a move-only batch needs no extra acknowledgement', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  globalThis.fetch = async url =>
+    String(url).endsWith('/preview')
+      ? { ok: true, json: async () => ({ preview: { ...PREVIEW, trash_count: 0 } }) }
+      : {
+          ok: true,
+          json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+        };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(doc.getElementById('downloadsJanitorTrashAck'), null);
+  assert.equal(doc.getElementById('downloadsJanitorConfirmApply').disabled, false);
+  assert.match(text(doc), /Nothing is deleted/);
+});
+
+test('approving sends each file under the operation it was marked with', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  trashToggleFor(doc, 'payload.bin').click();
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/preview')) {
+      sent = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({ preview: { ...PREVIEW, trash_count: 1, move_count: 1 } })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const byId = Object.fromEntries(sent.decisions.map(d => [d.candidate_id, d]));
+  assert.equal(byId.c1.operation, 'move');
+  assert.equal(byId.c2.operation, 'trash');
+  assert.equal(byId.c2.category, '', 'a removal has no category');
+});
+
+// A removal mark belongs to the batch it was made in. Carrying one into a
+// different set of files is how the wrong file gets thrown away.
+test('Trash marks never survive a repaint into a different batch', () => {
+  const doc = setup();
+  renderReview(doc);
+  trashToggleFor(doc, 'payload.bin').click();
+  assert.match(text(doc), /1 file marked for Trash/);
+
+  // A fresh batch arrives.
+  renderReview(doc, batchFixture(), candidatesFixture());
+  assert.doesNotMatch(text(doc), /marked for Trash/);
+  const approve = doc.getElementById('downloadsJanitorApprove');
+  assert.equal(approve.disabled, true, 'nothing should be pending from the previous batch');
+});
+
+// A batch of removals alone is still approvable — guarding on the move
+// selection would make Trash unreachable.
+test('a Trash-only batch can be approved', async () => {
+  const doc = setup();
+  renderReview(doc);
+  trashToggleFor(doc, 'payload.bin').click();
+  let previewed = false;
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/preview')) {
+      previewed = true;
+      return {
+        ok: true,
+        json: async () => ({
+          preview: {
+            batch_id: 'batch-1',
+            token: 'tok',
+            move_count: 0,
+            trash_count: 1,
+            items: [{ candidate_id: 'c2', name: 'payload.bin', operation: 'trash' }]
+          }
+        })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(previewed, 'a Trash-only batch must reach the preview');
+  assert.match(text(doc), /Confirm these moves/);
+});
+
+// ----------------------------------------------------------------- history
+
+const HISTORY = [
+  {
+    id: 'a1',
+    operation: 'move',
+    source_name: 'report.pdf',
+    destination_relative: 'Filed/Documents/report.pdf',
+    result: 'applied',
+    undo: 'available'
+  },
+  {
+    id: 'a2',
+    operation: 'trash',
+    source_name: 'ad.png',
+    result: 'applied',
+    undo: 'available'
+  },
+  {
+    id: 'a3',
+    operation: 'move',
+    source_name: 'blocked.pdf',
+    result: 'failed',
+    error_summary: 'Ori could not move this file.',
+    undo: 'unavailable'
+  },
+  {
+    id: 'a4',
+    operation: 'move',
+    source_name: 'restored.pdf',
+    destination_relative: 'Filed/Documents/restored.pdf',
+    result: 'applied',
+    undo: 'undone'
+  }
+];
+
+test('history lists what happened and names the reversal each entry offers', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._setHistory(HISTORY);
+
+  const body = text(doc);
+  assert.match(body, /History/);
+  assert.match(body, /report\.pdf\s+— filed to Filed\/Documents\/report\.pdf/);
+  assert.match(body, /ad\.png\s+— moved to Trash/);
+  // The control says what it will actually do, not a generic "undo".
+  assert.match(body, /Undo move/);
+  assert.match(body, /Restore from Trash/);
+});
+
+test('history explains entries that cannot be undone instead of hiding them', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._setHistory(HISTORY);
+
+  const body = text(doc);
+  // A failed action is listed with its reason and offers no undo.
+  assert.match(body, /blocked\.pdf\s+— not moved/);
+  assert.match(body, /Ori could not move this file/);
+  // An already-undone action says so.
+  assert.match(body, /restored\.pdf/);
+  assert.match(body, /put back/);
+});
+
+test('undoing calls the action-specific endpoint and reports the outcome', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._setHistory(HISTORY);
+
+  let undoUrl = null;
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST' && String(url).includes('/undo')) {
+      undoUrl = String(url);
+      return {
+        ok: true,
+        json: async () => ({
+          undo: { result: 'undone', message: 'Put back in the folder.', restored_to: 'report.pdf' }
+        })
+      };
+    }
+    if (String(url).includes('/history'))
+      return { ok: true, json: async () => ({ actions: HISTORY }) };
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Undo move')[0].click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.match(undoUrl, /\/downloads-janitor\/history\/a1\/undo$/);
+});
+
+test('a refused undo is reported with its reason, not as a failure of the app', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._setHistory(HISTORY);
+
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST' && String(url).includes('/undo')) {
+      return {
+        ok: true,
+        json: async () => ({
+          undo: {
+            result: 'failed',
+            message:
+              'Something else is already using the original name, so Ori did not overwrite it.'
+          }
+        })
+      };
+    }
+    if (String(url).includes('/history'))
+      return { ok: true, json: async () => ({ actions: HISTORY }) };
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Undo move')[0].click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.match(
+    doc.getElementById('downloadsJanitorHistoryStatus').textContent,
+    /already using the original name/
+  );
+});
+
+test('history filters are exposed as pressed-state controls', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._setHistory(HISTORY);
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  const filters = host.all(
+    n => n.tagName === 'BUTTON' && ['Filed', 'Trashed', 'Can undo'].includes(n.textContent)
+  );
+  assert.equal(filters.length, 3);
+  filters.forEach(control => assert.ok(control.getAttribute('aria-pressed')));
+});
+
+test('an empty history explains what will appear there', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._setHistory([]);
+  assert.match(text(doc), /Applied moves and Trash actions are listed here/);
 });
