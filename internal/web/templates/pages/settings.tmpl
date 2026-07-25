@@ -924,6 +924,9 @@
               #google-account .gc-disconnect-btn{padding:0.2rem 0.7rem;font-size:0.78rem}
               #google-account .gc-advanced{font-size:0.85rem;color:var(--text-secondary)}
               #google-account .gc-advanced summary{cursor:pointer;color:var(--text-secondary)}
+              #google-account .gc-migrate{margin-top:0.6rem;padding:0.8rem 1rem;border:1px solid rgba(59,130,246,0.35);border-radius:0.5rem;background:rgba(59,130,246,0.06);display:flex;flex-direction:column;gap:0.5rem}
+              #google-account .gc-migrate-title{font-weight:600;color:var(--text-primary)}
+              #google-account .gc-migrate-row{display:flex;align-items:center;justify-content:space-between;gap:0.75rem;font-size:0.85rem;color:var(--text-secondary)}
             </style>
             <div class="settings-section-header">
               <span class="settings-section-icon">
@@ -955,6 +958,7 @@
                 </div>
               </div>
               <div id="googleConnProducts" class="gc-products"></div>
+              <div id="googleConnMigrate" class="gc-migrate d-none" role="group" aria-label="Migrate existing email" aria-live="polite"></div>
               <div id="googleConnDriveSetup" class="gc-drive-setup d-none" role="group" aria-label="Google Drive setup" aria-live="polite"></div>
               <div id="googleConnConfirm" class="gc-confirm d-none" role="group" aria-label="Disconnect confirmation" aria-live="polite"></div>
               <div class="settings-actions mt-3">

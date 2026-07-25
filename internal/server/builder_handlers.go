@@ -326,6 +326,7 @@ func (b *ServerBuilder) initializeHandlers() {
 			sink := newGmailCredentialSink(b.vaultStore)
 			connFlow.WithCredentialSink(sink)
 			connDeps.Linker = sink
+			connDeps.Migrator = sink
 		}
 		b.connectionsHandler = connectionshttp.NewHandler(connDeps)
 		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID

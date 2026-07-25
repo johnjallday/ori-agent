@@ -14,6 +14,10 @@ import (
 // different Google account than the active identity.
 var ErrSubjectMismatch = errors.New("connections: reconnect returned a different Google account")
 
+// ErrAccountMismatch is returned when a legacy account being migrated belongs to
+// a different email than the connected account, so it cannot be folded in (FR 89).
+var ErrAccountMismatch = errors.New("connections: legacy account is a different Google account")
+
 // SetGrantHealth updates only the named product's health, creating the grant
 // record if absent. Other grants are left untouched (FR 43).
 func (c *Connection) SetGrantHealth(p ProductKey, h GrantHealth) {
