@@ -203,3 +203,208 @@
     flex-direction: column;
   }
 }
+
+/* ------------------------------------------------------------------ review */
+
+.dj-stats {
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-batch {
+  margin-top: 1rem;
+}
+
+.dj-batch-summary {
+  font-size: 0.82rem;
+  margin: 0 0 0.6rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+
+.dj-filter {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.dj-filter-active {
+  color: var(--text-primary, #e8e8e8);
+  border-color: var(--accent-color, #3b7dd8);
+  font-weight: 600;
+}
+
+.dj-filter:focus-visible,
+.dj-select:focus-visible,
+.dj-category:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+/* A hundred-file batch has to stay usable: the table scrolls inside its own
+   container rather than pushing the page sideways. */
+.dj-table-scroll {
+  overflow-x: auto;
+  max-height: 28rem;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+}
+
+.dj-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.dj-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-secondary, #1c1c1e);
+  color: var(--text-secondary, #9aa0a6);
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-cell {
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-cell-name {
+  color: var(--text-primary, #e8e8e8);
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
+.dj-name {
+  font-weight: 500;
+}
+
+.dj-flag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-cell-size,
+.dj-cell-modified {
+  white-space: nowrap;
+}
+
+.dj-category {
+  max-width: 11rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.78rem;
+}
+
+.dj-destination {
+  display: block;
+  margin-top: 0.15rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.72rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-cell-reason {
+  max-width: 18rem;
+  overflow-wrap: anywhere;
+}
+
+.dj-confidence {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+}
+
+.dj-confidence-low {
+  color: var(--warning-color, #b26a00);
+  font-weight: 600;
+}
+
+.dj-state {
+  white-space: nowrap;
+}
+
+/* Low-confidence and changed rows are marked by text as well as tint, so the
+   distinction survives without colour. */
+.dj-row-state-stale,
+.dj-row-state-failed {
+  background: color-mix(in srgb, var(--warning-color, #b26a00) 8%, transparent);
+}
+
+.dj-row-state-skipped {
+  opacity: 0.65;
+}
+
+.dj-state-reason {
+  display: block;
+  font-size: 0.72rem;
+}
+
+.dj-btn-quiet {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.dj-muted {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-selection {
+  margin: 0.6rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-empty {
+  padding: 0.75rem 0;
+}
+
+.dj-empty-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-empty-copy {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dj-btn,
+  .dj-filter {
+    transition: none;
+  }
+}

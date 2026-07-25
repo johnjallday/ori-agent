@@ -43,6 +43,15 @@ class FakeElement {
   getAttribute(k) {
     return this._attrs[k];
   }
+  get selected() {
+    return this._selected === true;
+  }
+  set selected(v) {
+    this._selected = v;
+  }
+  dispatch(event) {
+    (this._listeners[event] || []).forEach(fn => fn());
+  }
   // Depth-first collection helpers used by the assertions below.
   all(predicate, out = []) {
     if (predicate(this)) out.push(this);
@@ -271,4 +280,296 @@ test('readiness rows carry a non-color mark and a status word per component', ()
   assert.match(body, /Not running yet/);
   // A failing folder check offers the repair path.
   assert.match(body, /Choose the folder again/);
+});
+
+// ------------------------------------------------------------------- review
+
+const CATEGORIES = [
+  { id: 'documents', label: 'Documents' },
+  { id: 'images', label: 'Images' },
+  { id: 'archives', label: 'Archives' },
+  { id: 'other', label: 'Other' }
+];
+
+function batchFixture(overrides = {}) {
+  return Object.assign(
+    {
+      id: 'batch-1',
+      source: 'manual',
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      state: 'pending',
+      summary: { proposed: 2, needs_review: 1, skipped: 1, ineligible: 3, total: 3 }
+    },
+    overrides
+  );
+}
+
+function candidatesFixture() {
+  return [
+    {
+      id: 'c1',
+      name: 'invoice-2026-07.pdf',
+      extension: '.pdf',
+      size: 204800,
+      modified_at: new Date(Date.now() - 3600_000).toISOString(),
+      category: 'documents',
+      destination: 'Filed/Documents',
+      reason: 'pdf file',
+      confidence: 'high',
+      state: 'pending'
+    },
+    {
+      id: 'c2',
+      name: 'payload.bin',
+      extension: '.bin',
+      size: 1024,
+      modified_at: new Date().toISOString(),
+      category: 'other',
+      destination: 'Filed/Other',
+      reason: '.bin files can hold anything',
+      confidence: 'low',
+      needs_review: true,
+      state: 'pending'
+    },
+    {
+      id: 'c3',
+      name: 'ad.png',
+      extension: '.png',
+      size: 500,
+      modified_at: new Date().toISOString(),
+      category: 'images',
+      destination: 'Filed/Images',
+      reason: 'png file',
+      confidence: 'high',
+      state: 'skipped'
+    }
+  ];
+}
+
+// renderReview paints the configured card with a batch already loaded.
+function renderReview(doc, batch = batchFixture(), candidates = candidatesFixture()) {
+  panel._setBatch(batch, candidates, CATEGORIES);
+  panel.render({
+    applies: true,
+    settings: {
+      root_path: '/tmp/Inbox',
+      directory_reference_id: 'ref-1',
+      filing_root_name: 'Filed'
+    },
+    readiness: {
+      state: 'needs_attention',
+      checks: [{ component: 'directory_access', status: 'ok' }]
+    }
+  });
+  return doc.getElementById('downloadsJanitorMount');
+}
+
+function rowsIn(host) {
+  return host.all(n => n.className && String(n.className).includes('dj-row-item'));
+}
+
+test('review table renders a row per candidate with the facts needed to judge it', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const rows = rowsIn(host);
+  assert.equal(rows.length, 3);
+
+  const body = text(doc);
+  assert.match(body, /invoice-2026-07\.pdf/);
+  assert.match(body, /Filed\/Documents/); // resolved destination
+  assert.match(body, /pdf file/); // reason
+  assert.match(body, /high confidence/);
+  assert.match(body, /200 KB/); // human-readable size
+});
+
+test('the batch summary states counts, scan source, and when it ran', () => {
+  const doc = setup();
+  renderReview(doc);
+  const body = text(doc);
+  assert.match(body, /2 proposed/);
+  assert.match(body, /1 needing review/);
+  assert.match(body, /1 skipped/);
+  assert.match(body, /3 not eligible/);
+  assert.match(body, /Scan now/); // the source label
+});
+
+test('every row starts unselected', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const boxes = host.all(n => n.className === 'dj-select');
+  assert.equal(boxes.length, 3);
+  boxes.forEach(box => assert.equal(box.checked, false));
+  assert.deepEqual(panel._selected(), []);
+  assert.match(text(doc), /No files selected/);
+});
+
+test('a low-confidence candidate is flagged for review in text, not colour alone', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const flags = host.all(n => n.className === 'dj-flag');
+  assert.equal(flags.length, 1);
+  assert.match(flags[0].textContent, /Needs review/);
+});
+
+test('changing a category records the decision immediately', async () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST') sent = { url, body: JSON.parse(opts.body) };
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  const select = host.all(n => n.className === 'dj-category')[0];
+  select.value = 'archives';
+  select.dispatch('change');
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.match(sent.url, /\/downloads-janitor\/decisions$/);
+  assert.equal(sent.body.decisions[0].decision, 'move');
+  assert.equal(sent.body.decisions[0].category, 'archives');
+  // IDs only: the browser never names a path.
+  assert.equal(sent.body.decisions[0].candidate_id, 'c1');
+  assert.ok(!JSON.stringify(sent.body).includes('/tmp/Inbox'));
+});
+
+test('Skip records a skip decision for that candidate only', async () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST') sent = JSON.parse(opts.body);
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  const skip = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Skip')[0];
+  assert.ok(skip, 'expected a Skip control on a pending row');
+  skip.click();
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(sent.decisions.length, 1);
+  assert.equal(sent.decisions[0].decision, 'skip');
+  assert.equal(sent.decisions[0].candidate_id, 'c1');
+});
+
+test('an already-skipped row offers no category control and no Skip', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const skipped = rowsIn(host).find(row => String(row.className).includes('dj-row-state-skipped'));
+  assert.ok(skipped, 'expected the skipped row');
+  assert.equal(skipped.all(n => n.className === 'dj-category').length, 0);
+  assert.equal(skipped.all(n => n.tagName === 'BUTTON' && n.textContent === 'Skip').length, 0);
+  const box = skipped.all(n => n.className === 'dj-select')[0];
+  assert.equal(box.disabled, true, 'a resolved row cannot be selected for action');
+});
+
+test('filters narrow the table without losing the batch', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  assert.equal(rowsIn(host).length, 3);
+
+  const needsReview = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Needs review')[0];
+  needsReview.click();
+  assert.equal(rowsIn(doc.getElementById('downloadsJanitorMount')).length, 1);
+
+  const all = doc
+    .getElementById('downloadsJanitorMount')
+    .all(n => n.tagName === 'BUTTON' && n.textContent === 'All')[0];
+  all.click();
+  assert.equal(rowsIn(doc.getElementById('downloadsJanitorMount')).length, 3);
+});
+
+test('a filter matching nothing says so rather than showing an empty table', () => {
+  const doc = setup();
+  const host = renderReview(doc, batchFixture(), [candidatesFixture()[2]]);
+  const pending = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Pending')[0];
+  pending.click();
+  assert.match(text(doc), /No files match this filter/);
+});
+
+test('the table and its controls carry screen-reader labels', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  const table = host.all(n => n.tagName === 'TABLE')[0];
+  assert.ok(table.getAttribute('aria-label'), 'the table needs a label');
+
+  const headers = host.all(n => n.tagName === 'TH');
+  assert.equal(headers.length, 9);
+  headers.forEach(header => assert.equal(header.getAttribute('scope'), 'col'));
+
+  const box = host.all(n => n.className === 'dj-select')[0];
+  assert.match(box.getAttribute('aria-label'), /Select invoice-2026-07\.pdf/);
+  const select = host.all(n => n.className === 'dj-category')[0];
+  assert.match(select.getAttribute('aria-label'), /Category for invoice-2026-07\.pdf/);
+
+  const filterButton = host.all(
+    n => n.tagName === 'BUTTON' && String(n.className).startsWith('dj-filter')
+  )[0];
+  assert.ok(filterButton.getAttribute('aria-pressed'), 'filters expose pressed state');
+});
+
+test('an empty workspace explains what will appear rather than showing a bare table', () => {
+  const doc = setup();
+  renderReview(doc, null, []);
+  const body = text(doc);
+  assert.match(body, /Nothing to review/);
+  assert.match(body, /Nothing is moved without your approval/);
+  assert.match(body, /No files waiting for review/);
+});
+
+test('the status line reports the pending count and the last scan', () => {
+  const doc = setup();
+  renderReview(doc);
+  assert.match(text(doc), /2 files waiting for review/);
+  assert.match(text(doc), /last scan/);
+});
+
+test('Scan now reports honestly when a scan finds nothing new', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST') {
+      return { ok: true, json: async () => ({ success: true, created: false }) };
+    }
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorScan').click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  const error = doc.getElementById('downloadsJanitorError');
+  assert.equal(error.hidden, false);
+  assert.match(error.textContent, /Nothing new to review/);
+  // The button is usable again.
+  assert.equal(doc.getElementById('downloadsJanitorScan').disabled, false);
+});
+
+test('a rejected decision is not left on screen as though it were saved', async () => {
+  const doc = setup();
+  const host = renderReview(doc);
+  let reloaded = false;
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'POST') {
+      return {
+        ok: false,
+        json: async () => ({ error: { message: 'That category is not allowed.' } })
+      };
+    }
+    reloaded = true;
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  const select = host.all(n => n.className === 'dj-category')[0];
+  select.value = 'archives';
+  select.dispatch('change');
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.match(doc.getElementById('downloadsJanitorError').textContent, /not allowed/);
+  assert.ok(reloaded, 'the panel must repaint from the server after a rejected change');
 });
