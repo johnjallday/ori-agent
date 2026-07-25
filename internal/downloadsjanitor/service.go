@@ -145,13 +145,14 @@ type FolderWorkspaceSource interface {
 type Service struct {
 	store      *Store
 	workspaces WorkspaceStore
+	scanner    *Scanner
 	now        func() time.Time
 }
 
 // NewService wires the Janitor service to its settings store and the workspace
 // store that owns directory references and MCP bindings.
 func NewService(store *Store, workspaces WorkspaceStore) *Service {
-	return &Service{store: store, workspaces: workspaces, now: time.Now}
+	return &Service{store: store, workspaces: workspaces, scanner: NewScanner(store, workspaces), now: time.Now}
 }
 
 // Status is the full setup/readiness picture for one workspace.
@@ -193,12 +194,22 @@ func (s *Service) readWorkspace(workspaceID string) (*workspace.Workspace, error
 	if s == nil || s.workspaces == nil {
 		return nil, errors.New("workspace storage is unavailable")
 	}
-	if folders, ok := s.workspaces.(FolderWorkspaceSource); ok {
+	return readWorkspaceRecord(s.workspaces, workspaceID)
+}
+
+// readWorkspaceRecord prefers the canonical folder record and falls back to the
+// store's own Get. Shared by the service and the scanner so both agree on where
+// a workspace's truth lives.
+func readWorkspaceRecord(store WorkspaceStore, workspaceID string) (*workspace.Workspace, error) {
+	if store == nil {
+		return nil, errors.New("workspace storage is unavailable")
+	}
+	if folders, ok := store.(FolderWorkspaceSource); ok {
 		if ws, err := folders.GetFolderWorkspace(workspaceID); err == nil && ws != nil {
 			return ws, nil
 		}
 	}
-	return s.workspaces.Get(workspaceID)
+	return store.Get(workspaceID)
 }
 
 // AppliesTo reports whether a workspace is a Downloads Janitor workspace: one
@@ -710,7 +721,7 @@ func (s *Service) checkBinding(settings JanitorSettings) ComponentCheck {
 	if s.workspaces == nil {
 		return fail(CodeBindingFailed, "Ori could not confirm this workspace's folder access.")
 	}
-	ws, err := s.workspaces.Get(settings.WorkspaceID)
+	ws, err := s.readWorkspace(settings.WorkspaceID)
 	if err != nil || ws == nil {
 		return fail(CodeWorkspaceMissing, "Ori could not load this workspace.")
 	}

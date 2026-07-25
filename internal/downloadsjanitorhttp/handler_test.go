@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -221,5 +223,241 @@ func TestGetStatus_IgnoresClientSuppliedPaths(t *testing.T) {
 	}
 	if len(store.workspaces["ws-1"].DirectoryReferences) != 0 {
 		t.Fatal("reading status must not link any folder")
+	}
+}
+
+// ---------------------------------------------------------------- batch API
+
+// agedFile writes a file and backdates it so the scanner treats it as a
+// finished download rather than one still being written.
+func agedFile(t *testing.T, root, name string, size int) {
+	t.Helper()
+	path := filepath.Join(root, name)
+	if err := os.WriteFile(path, make([]byte, size), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// configuredHandler returns a handler whose workspace is already set up against
+// an isolated inbox folder.
+func configuredHandler(t *testing.T) (*Handler, string) {
+	t.Helper()
+	h, _ := newTestHandler(t, map[string]string{"ws-1": userprofile.LocalUserID, "ws-other": "someone-else"})
+	root := inboxFixture(t)
+	payload, _ := json.Marshal(map[string]string{"path": root})
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/setup", string(payload)); rec.Code != http.StatusOK {
+		t.Fatalf("setup failed: %s", rec.Body.String())
+	}
+	return h, root
+}
+
+func TestTestScan_ReportsWithoutCreatingABatch(t *testing.T) {
+	h, root := configuredHandler(t)
+	agedFile(t, root, "report.pdf", 100)
+
+	rec, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/test-scan", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	report, _ := body["report"].(map[string]any)
+	if report["eligible_count"] != float64(1) {
+		t.Fatalf("eligible_count = %v", report["eligible_count"])
+	}
+
+	rec, body = serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches", "")
+	if rec.Code != http.StatusOK || body["total"] != float64(0) {
+		t.Fatalf("a test scan must create no batch: %s", rec.Body.String())
+	}
+}
+
+func TestScanNow_CreatesABatchAndListsIt(t *testing.T) {
+	h, root := configuredHandler(t)
+	agedFile(t, root, "report.pdf", 100)
+	agedFile(t, root, "photo.png", 50)
+
+	rec, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/scan", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if body["created"] != true {
+		t.Fatalf("expected a batch to be created: %s", rec.Body.String())
+	}
+
+	rec, body = serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/latest", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	candidates, _ := body["candidates"].([]any)
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %d: %s", len(candidates), rec.Body.String())
+	}
+	first, _ := candidates[0].(map[string]any)
+	if first["state"] != "pending" || first["decision"] != nil {
+		t.Fatalf("candidates must arrive pending and undecided: %+v", first)
+	}
+	// The destination is a label relative to the configured folder, never an
+	// absolute path.
+	destination, _ := first["destination"].(string)
+	if destination == "" || strings.HasPrefix(destination, "/") {
+		t.Fatalf("destination = %q, want a relative label", destination)
+	}
+	if strings.Contains(rec.Body.String(), root) {
+		t.Fatal("the API response must not leak the absolute folder path")
+	}
+}
+
+func TestGetBatch_LatestIsEmptyNotAnErrorWhenNothingPends(t *testing.T) {
+	h, _ := configuredHandler(t)
+	rec, body := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/latest", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if body["batch"] != nil {
+		t.Fatalf("expected no pending batch: %s", rec.Body.String())
+	}
+}
+
+func TestGetBatch_UnknownBatchIs404(t *testing.T) {
+	h, _ := configuredHandler(t)
+	rec, _ := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/nope", "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestUpdateDecisions_AcceptsIDsAndCategoriesOnly(t *testing.T) {
+	h, root := configuredHandler(t)
+	agedFile(t, root, "report.pdf", 100)
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/scan", ""); rec.Code != http.StatusOK {
+		t.Fatalf("scan failed: %s", rec.Body.String())
+	}
+	_, body := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches/latest", "")
+	candidates, _ := body["candidates"].([]any)
+	first, _ := candidates[0].(map[string]any)
+	id, _ := first["id"].(string)
+
+	payload, _ := json.Marshal(map[string]any{
+		"decisions": []map[string]string{{"candidate_id": id, "decision": "move", "category": "archives"}},
+	})
+	rec, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/decisions", string(payload))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, _ := body["candidates"].([]any)
+	got, _ := updated[0].(map[string]any)
+	if got["decision"] != "move" || got["decision_category"] != "archives" {
+		t.Fatalf("decision not recorded: %+v", got)
+	}
+
+	// The file has not moved: a decision is intent, not action.
+	if _, err := os.Stat(filepath.Join(root, "report.pdf")); err != nil {
+		t.Fatalf("recording a decision must not move the file: %v", err)
+	}
+
+	// A path-shaped category is rejected outright.
+	payload, _ = json.Marshal(map[string]any{
+		"decisions": []map[string]string{{"candidate_id": id, "decision": "move", "category": "../../etc"}},
+	})
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/decisions", string(payload)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a path-shaped category should be rejected, got %d", rec.Code)
+	}
+
+	// An unsupported operation is rejected before it reaches the service.
+	payload, _ = json.Marshal(map[string]any{
+		"decisions": []map[string]string{{"candidate_id": id, "decision": "delete"}},
+	})
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/decisions", string(payload)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("an unsupported decision should be rejected, got %d", rec.Code)
+	}
+}
+
+func TestUpdateDecisions_UnknownCandidateIs404(t *testing.T) {
+	h, _ := configuredHandler(t)
+	payload, _ := json.Marshal(map[string]any{
+		"decisions": []map[string]string{{"candidate_id": "ghost", "decision": "skip"}},
+	})
+	rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/decisions", string(payload))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// Every batch route is workspace-scoped: another user's workspace is not
+// listable, readable, scannable, or decidable.
+func TestBatchRoutes_RejectAnotherUsersWorkspace(t *testing.T) {
+	h, _ := configuredHandler(t)
+	for _, target := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/workspaces/ws-other/downloads-janitor/batches"},
+		{http.MethodGet, "/api/workspaces/ws-other/downloads-janitor/batches/latest"},
+		{http.MethodPost, "/api/workspaces/ws-other/downloads-janitor/scan"},
+		{http.MethodPost, "/api/workspaces/ws-other/downloads-janitor/test-scan"},
+		{http.MethodGet, "/api/workspaces/ws-other/downloads-janitor/categories"},
+	} {
+		rec, _ := serve(t, h, target.method, target.path, "")
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s = %d, want 404", target.method, target.path, rec.Code)
+		}
+	}
+}
+
+func TestListBatches_HasStablePaginationAndFilters(t *testing.T) {
+	h, root := configuredHandler(t)
+	agedFile(t, root, "report.pdf", 100)
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/scan", ""); rec.Code != http.StatusOK {
+		t.Fatal("scan failed")
+	}
+
+	rec, body := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches?limit=1&offset=0", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	for _, key := range []string{"batches", "total", "limit", "offset"} {
+		if _, ok := body[key]; !ok {
+			t.Fatalf("response is missing %q: %s", key, rec.Body.String())
+		}
+	}
+	if body["limit"] != float64(1) {
+		t.Fatalf("limit = %v", body["limit"])
+	}
+
+	// An out-of-range offset is an empty page, not an error.
+	rec, body = serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches?offset=999", "")
+	batches, _ := body["batches"].([]any)
+	if rec.Code != http.StatusOK || len(batches) != 0 {
+		t.Fatalf("out-of-range offset = %d with %d batches", rec.Code, len(batches))
+	}
+
+	// A state filter that matches nothing is also just empty.
+	_, body = serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/batches?state=resolved", "")
+	batches, _ = body["batches"].([]any)
+	if len(batches) != 0 {
+		t.Fatalf("expected no resolved batches, got %d", len(batches))
+	}
+}
+
+func TestCategories_ServesTheFixedAllowlist(t *testing.T) {
+	h, _ := configuredHandler(t)
+	rec, body := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/categories", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	categories, _ := body["categories"].([]any)
+	if len(categories) != len(downloadsjanitor.CategoryRegistry) {
+		t.Fatalf("categories = %d, want %d", len(categories), len(downloadsjanitor.CategoryRegistry))
+	}
+}
+
+func TestResetSkipped_AcceptsAnEmptyBody(t *testing.T) {
+	h, _ := configuredHandler(t)
+	rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/skipped/reset", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
 }

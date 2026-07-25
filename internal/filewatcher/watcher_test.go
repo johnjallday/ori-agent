@@ -484,3 +484,63 @@ func TestDefaultWatcherConfig(t *testing.T) {
 		t.Errorf("expected buffer size 100, got %d", config.EventBufferSize)
 	}
 }
+
+// TestShouldIgnoreFile_PartialDownloads covers the browser in-progress-download
+// suffixes. A file still being written must never look actionable, and the
+// check is case-insensitive because the extension comes from whatever the
+// browser wrote.
+func TestShouldIgnoreFile_PartialDownloads(t *testing.T) {
+	partial := []string{
+		"movie.mp4.crdownload",
+		"archive.zip.part",
+		"installer.dmg.partial",
+		"song.mp3.download",
+		"book.pdf.opdownload",
+		"MOVIE.MP4.CRDOWNLOAD",
+		"Archive.ZIP.Part",
+	}
+	for _, name := range partial {
+		t.Run(name, func(t *testing.T) {
+			if !IsPartialDownload(name) {
+				t.Errorf("IsPartialDownload(%s) = false, want true", name)
+			}
+			if !ShouldIgnoreFile(name) {
+				t.Errorf("ShouldIgnoreFile(%s) = false, want true", name)
+			}
+		})
+	}
+
+	// Completed files with similar-looking names stay actionable: the suffix
+	// has to be the real trailing extension.
+	complete := []string{
+		"movie.mp4",
+		"partial-report.pdf",
+		"download-guide.txt",
+		"my.part.two.mkv",
+	}
+	for _, name := range complete {
+		t.Run(name, func(t *testing.T) {
+			if IsPartialDownload(name) {
+				t.Errorf("IsPartialDownload(%s) = true, want false", name)
+			}
+			if ShouldIgnoreFile(name) {
+				t.Errorf("ShouldIgnoreFile(%s) = true, want false", name)
+			}
+		})
+	}
+}
+
+// TestShouldIgnoreFile_ExistingFiltersPreserved pins the pre-existing behavior
+// so extending the partial-download list cannot quietly change it.
+func TestShouldIgnoreFile_ExistingFiltersPreserved(t *testing.T) {
+	for _, name := range []string{".DS_Store", ".hidden", "~$document.docx", "file.tmp", "file.swp", "backup.bak", "Thumbs.db", "desktop.ini", "notes.txt~"} {
+		if !ShouldIgnoreFile(name) {
+			t.Errorf("ShouldIgnoreFile(%s) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"normal.txt", "document.pdf", "image.png"} {
+		if ShouldIgnoreFile(name) {
+			t.Errorf("ShouldIgnoreFile(%s) = true, want false", name)
+		}
+	}
+}

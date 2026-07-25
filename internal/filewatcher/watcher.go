@@ -452,6 +452,39 @@ func convertEventType(op fsnotify.Op) EventType {
 	}
 }
 
+// PartialDownloadSuffixes are the in-progress-download extensions browsers use
+// while a file is still being written. A file carrying one is not finished, so
+// nothing may act on it — it is filtered here and re-checked by any consumer
+// that enumerates files itself.
+var PartialDownloadSuffixes = []string{
+	".crdownload", // Chrome, Edge, Brave
+	".part",       // Firefox, wget, curl
+	".partial",    // Internet Explorer / legacy Edge
+	".download",   // Safari
+	".opdownload", // Opera
+}
+
+// IsPartialDownload reports whether a file name is an in-progress download.
+// Matching is case-insensitive, matching the rest of this filter.
+func IsPartialDownload(fileName string) bool {
+	lowerName := strings.ToLower(strings.TrimSpace(fileName))
+	for _, suffix := range PartialDownloadSuffixes {
+		if strings.HasSuffix(lowerName, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// ShouldIgnoreFile reports whether a file should be ignored as hidden,
+// temporary, a partial download, or a system file. It is exported so features
+// that enumerate a watched directory themselves (rather than reacting to watcher
+// events) apply exactly the same rules — a file the watcher ignores must not
+// become actionable just because a different code path found it.
+func ShouldIgnoreFile(fileName string) bool {
+	return shouldIgnoreFile(fileName)
+}
+
 // shouldIgnoreFile returns true if the file should be ignored
 func shouldIgnoreFile(fileName string) bool {
 	// Ignore hidden files (starting with .)
@@ -459,15 +492,19 @@ func shouldIgnoreFile(fileName string) bool {
 		return true
 	}
 
+	if IsPartialDownload(fileName) {
+		return true
+	}
+
 	// Ignore common temporary files
 	ignoredPatterns := []string{
-		"~$",       // Office temp files
-		".tmp",     // Temporary files
-		".swp",     // Vim swap files
-		".swo",     // Vim swap files
-		"~",        // Backup files ending with ~
-		".bak",     // Backup files
-		".partial", // Partial downloads
+		"~$",                                                           // Office temp files
+		".tmp",                                                         // Temporary files
+		".swp",                                                         // Vim swap files
+		".swo",                                                         // Vim swap files
+		"~",                                                            // Backup files ending with ~
+		".bak",                                                         // Backup files
+		".crdownload", ".part", ".partial", ".download", ".opdownload", // Partial downloads
 	}
 
 	lowerName := strings.ToLower(fileName)

@@ -13,4 +13,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor", h.GetStatus)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor/readiness", h.GetReadiness)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/setup", h.ConfirmSetup)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor/categories", h.Categories)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor/batches", h.ListBatches)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor/batches/{batchID}", h.GetBatch)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/test-scan", h.TestScan)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/scan", h.ScanNow)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/decisions", h.UpdateDecisions)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/skipped/reset", h.ResetSkipped)
 }
