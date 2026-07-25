@@ -299,8 +299,8 @@ func (b *ServerBuilder) initializeHandlers() {
 	// no network call; client credentials come from env in dev and are baked in
 	// for official builds.
 	{
-		clientID := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_ID"))
-		clientSecret := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_SECRET"))
+		// Precedence: operator env vars → official-build embedded client → none.
+		clientID, clientSecret, clientSource := connections.ResolveOAuthClient()
 		connStore := connections.NewStore(config.DefaultDataDir())
 		b.connStore = connStore
 		connFlow := connections.NewIdentityFlow(
@@ -340,7 +340,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		// Fence + bound untrusted Google Drive result content before it reaches
 		// the LLM (FR 71, 73).
 		mcp.SetToolResultTextHook(b.sanitizeDriveResultText)
-		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
+		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientSource.Configured(), "client_source": string(clientSource)})
 	}
 
 	// Initialize external agents (Claude Code, Codex)

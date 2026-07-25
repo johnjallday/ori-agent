@@ -17,6 +17,24 @@ account that isn't enrolled surfaces the product as *Provider unavailable* with 
 prerequisite link (runtime), whereas a falsey feature flag hard-disables it
 (config). Drive/Calendar each gate independently.
 
+**Official-build client injection.** The identity client resolves in the order
+**env → embedded → none** (`connections.ResolveOAuthClient`). Official releases
+bake in a verified client at build time by passing the credentials to the build
+(never committing them):
+
+```bash
+make build \
+  ORI_GOOGLE_EMBEDDED_CLIENT_ID='…apps.googleusercontent.com' \
+  ORI_GOOGLE_EMBEDDED_CLIENT_SECRET='GOCSPX-…'
+```
+
+These land in `connections.embeddedClientID/Secret` via `-ldflags -X`. A
+from-source/dev build leaves them empty (stays "unconfigured"), and a self-hosted
+operator can always override the baked-in client at runtime with the
+`ORI_GOOGLE_CONNECTION_*` env vars. The resolved **source** (`env`/`embedded`/
+`none`) is logged at startup and is safe to surface in the UI — the id/secret are
+never echoed.
+
 Calendar/Drive MCP servers use the **operator's own Web OAuth client**, entered
 during setup and stored only in the vault — never shipped in the build.
 
