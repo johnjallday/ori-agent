@@ -838,6 +838,13 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		Builtin:      true,
 		Version:      tmpl.BuiltinVersion,
 		AppliedAt:    time.Now(),
+		// Setup requirements are recorded unresolved on purpose: creation states
+		// which folder the template will ask for and what automation it wants
+		// afterwards, but selects no path, expands no "~", registers no watcher,
+		// and enables no schedule. Guided setup does all of that, only after the
+		// user confirms a folder.
+		DirectoryRequirements: tmpl.DirectoryRequirements,
+		AutomationRecipes:     tmpl.AutomationRecipes,
 	}
 	if err := h.workspaceTaskStore.Update(wsID, func(w *agentworkspace.Workspace) error {
 		w.SetTemplateProvenance(prov)

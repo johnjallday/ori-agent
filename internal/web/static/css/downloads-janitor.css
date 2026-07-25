@@ -1,0 +1,205 @@
+/* downloads-janitor.css — the Downloads Janitor panel on the workspace detail
+   page (setup card, readiness readout).
+
+   State is never carried by color alone: every readiness row also renders a
+   text mark and a status word. */
+
+.downloads-janitor-mount[hidden] {
+  display: none;
+}
+
+.dj-card {
+  margin-bottom: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.dj-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-sub {
+  font-size: 0.8rem;
+  margin: 0.15rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary, #9aa0a6);
+  white-space: nowrap;
+}
+
+.dj-badge-ready {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-badge-needs-attention {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-field {
+  margin-top: 0.9rem;
+}
+
+.dj-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-field-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dj-input {
+  flex: 1 1 18rem;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
+  color: var(--text-primary, #e8e8e8);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.85rem;
+}
+
+.dj-input:focus-visible,
+.dj-btn:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+.dj-disclosure-wrap {
+  margin-top: 0.9rem;
+}
+
+.dj-disclosure-lead {
+  font-size: 0.82rem;
+  margin: 0 0 0.4rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-disclosure {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dj-disclosure-item {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-rows {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.dj-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-row-mark {
+  flex: 0 0 auto;
+  width: 1rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.dj-row-ok .dj-row-mark {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-row-failed .dj-row-mark {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-row-label {
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-row-value {
+  overflow-wrap: anywhere;
+}
+
+.dj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.dj-btn {
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.dj-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dj-btn-primary {
+  background: var(--accent-color, #3b7dd8);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.dj-error[hidden] {
+  display: none;
+}
+
+.dj-error {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--danger-color, #c5442e);
+}
+
+@media (max-width: 640px) {
+  .dj-head {
+    flex-direction: column;
+  }
+}

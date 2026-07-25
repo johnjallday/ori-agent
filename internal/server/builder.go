@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -255,9 +256,10 @@ type ServerBuilder struct {
 	followUpService *followup.Service
 
 	// Daily Brief configuration, generation, and scheduling
-	dailyBriefService   *dailybrief.Service
-	dailyBriefHandler   *dailybriefhttp.Handler
-	dailyBriefScheduler *dailybrief.Scheduler
+	dailyBriefService       *dailybrief.Service
+	dailyBriefHandler       *dailybriefhttp.Handler
+	downloadsJanitorHandler *downloadsjanitorhttp.Handler
+	dailyBriefScheduler     *dailybrief.Scheduler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -444,6 +446,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		User:             b.userHandler,
 		PersonalHQ:       b.personalHQHandler,
 		DailyBrief:       b.dailyBriefHandler,
+		DownloadsJanitor: b.downloadsJanitorHandler,
 		CLIAgents:        b.cliAgentHandler,
 		CLIAgentRegistry: b.cliAgentRegistry,
 		WorkspaceRuns:    b.workspaceRunHandler,

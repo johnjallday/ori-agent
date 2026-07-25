@@ -1,0 +1,16 @@
+package downloadsjanitorhttp
+
+import "net/http"
+
+// Register mounts the Downloads Janitor API on mux. Every route is scoped to a
+// workspace path segment; there is no global or cross-workspace endpoint, which
+// is what keeps one workspace's folder access from being reachable through
+// another's (FR-118).
+func (h *Handler) Register(mux *http.ServeMux) {
+	if h == nil || mux == nil {
+		return
+	}
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor", h.GetStatus)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/downloads-janitor/readiness", h.GetReadiness)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/downloads-janitor/setup", h.ConfirmSetup)
+}

@@ -277,6 +277,13 @@ type Template struct {
 	// this template needs. Carried as data only, same as Tools/Agents — the
 	// workspace-creation layer resolves them against connected MCP servers.
 	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
+	// DirectoryRequirements are the local folders this template asks the user to
+	// select during guided setup. Data only: nothing is expanded, resolved, or
+	// created here — see setup_requirements.go.
+	DirectoryRequirements []DirectoryRequirement `json:"directory_requirements,omitempty"`
+	// AutomationRecipes are the watchers/daily runs to install once the matching
+	// directory requirement has been confirmed. Inert until setup completes.
+	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
 }
 
 // HasOnboarding reports whether the template still carries a legacy intake-era
@@ -313,6 +320,8 @@ type manifest struct {
 	Tools                  *ToolDefaults           `json:"tools,omitempty"`
 	Agents                 []AgentSpec             `json:"agents,omitempty"`
 	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
+	DirectoryRequirements  []DirectoryRequirement  `json:"directory_requirements,omitempty"`
+	AutomationRecipes      []AutomationRecipe      `json:"automation_recipes,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -362,6 +371,8 @@ func newTemplate(path string) Template {
 	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
 	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
+	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
+	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
 	t.Warnings = manifestWarnings(m, t.Agents)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))

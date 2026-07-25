@@ -17,6 +17,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -476,6 +478,20 @@ func (b *ServerBuilder) wireCalendarOpsSetup() {
 	if b.meetingPrepStore != nil {
 		b.calendarOpsHandler.SetMeetingPreps(b.meetingPrepStore)
 	}
+}
+
+// wireDownloadsJanitor constructs the Downloads Janitor service and handler.
+// Like wireReaperSetup/wireCalendarOpsSetup it runs in the workspace-store
+// phase (18) rather than initializeHandlers (17): the service needs the
+// composed workspace store to record the approved folder's directory reference
+// and read-only MCP binding, and the folder store to resolve where each
+// workspace's Janitor state lives on disk.
+func (b *ServerBuilder) wireDownloadsJanitor() {
+	if b.workspaceStore == nil || b.workspaceFileStore == nil {
+		return
+	}
+	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
+	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 }
 
 // wireCalendarOpsPrepTaskExecutor gives the already-constructed Calendar Ops

@@ -310,6 +310,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// store is created in this phase (Phase 18), after the handlers.
 	b.wireReaperSetup()
 	b.wireCalendarOpsSetup()
+	b.wireDownloadsJanitor()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace
 	// store, so it is wired here rather than in initializeHandlers (Phase 17).
