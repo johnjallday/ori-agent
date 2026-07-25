@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
@@ -16,6 +17,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
@@ -289,6 +292,55 @@ func (b *ServerBuilder) initializeHandlers() {
 		// (Phase 18) — same reason wireReaperSetup is deferred.
 		b.vaultStore = vaultStore
 		logger.Info("Vault system initialized", logger.Fields{})
+	}
+
+	// Google Account connection (identity connect flow). Identity-only in this
+	// group — product grants arrive later. The verifier is lazy so startup does
+	// no network call; client credentials come from env in dev and are baked in
+	// for official builds.
+	{
+		clientID := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_ID"))
+		clientSecret := strings.TrimSpace(os.Getenv("ORI_GOOGLE_CONNECTION_CLIENT_SECRET"))
+		connStore := connections.NewStore(config.DefaultDataDir())
+		b.connStore = connStore
+		connFlow := connections.NewIdentityFlow(
+			connections.OAuthConfig{ClientID: clientID, ClientSecret: clientSecret},
+			connections.NewStateStore(10*time.Minute),
+			connStore,
+			connections.NewLazyGoogleVerifier(clientID),
+		)
+		// Enabling Gmail stores its OAuth credential as a vault EmailAccount, so
+		// the native mailbox reuses it (FR 39); the same adapter also links the
+		// grant to workspaces without re-auth (FR 47, 54). Requires the vault
+		// store (Phase 17).
+		connDeps := connectionshttp.Deps{
+			Flow:     connFlow,
+			Store:    connStore,
+			Guard:    connectionshttp.NewOriginGuard(),
+			Impacts:  connectionImpactEnumerator{b: b},
+			Teardown: connectionProductTeardown{b: b},
+			Health:   connectionGrantHealth{b: b},
+			Consent:  connections.NewConsentLog(config.DefaultDataDir()),
+		}
+		if b.vaultStore != nil {
+			sink := newGmailCredentialSink(b.vaultStore)
+			connFlow.WithCredentialSink(sink)
+			connDeps.Linker = sink
+		}
+		b.connectionsHandler = connectionshttp.NewHandler(connDeps)
+		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
+		// token and attach the grant to this connection (FR 23, 40).
+		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)
+		mcp.SetGoogleMCPLoginHint(b.googleConnectionEmail)
+		// Cap Google Drive to its fail-closed read-only tool allowlist, enforced
+		// server-side at both listing and execution (FR 66, 67). Independent of
+		// whether a Google account is connected — a manually added Drive MCP
+		// server is capped too.
+		mcp.SetToolExposureHook(b.mcpToolExposureAllowed)
+		// Fence + bound untrusted Google Drive result content before it reaches
+		// the LLM (FR 71, 73).
+		mcp.SetToolResultTextHook(b.sanitizeDriveResultText)
+		logger.Info("Google connection handler initialized", logger.Fields{"configured": clientID != ""})
 	}
 
 	// Initialize external agents (Claude Code, Codex)

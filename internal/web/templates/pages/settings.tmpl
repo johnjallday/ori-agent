@@ -108,6 +108,14 @@
               </span>
               <span class="settings-nav-item-text">External Agents</span>
             </a>
+            <a href="#google-account" class="settings-nav-item" data-section="google-account">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12C22,11.26 21.93,10.54 21.8,9.84H12V13.84H17.66C17.41,15.11 16.68,16.18 15.61,16.9V19.5H18.94C20.87,17.72 22,15.09 22,12C22,11.26 21.93,10.54 21.8,9.84Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">Google Account</span>
+            </a>
             <a href="#personal-hq-email" class="settings-nav-item" data-section="personal-hq-email">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -886,6 +894,100 @@
           </section>
 
           <!-- Personal HQ Email (Google OAuth) Section -->
+          <!-- Google Account (Integrations) -->
+          <section id="google-account" class="settings-section modern-card p-4">
+            <style>
+              #google-account .gc-avatar{width:40px;height:40px;border-radius:50%;background:var(--primary-color);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:1.1rem;flex-shrink:0}
+              #google-account .gc-badge{font-size:0.75rem;padding:0.15rem 0.6rem;border-radius:999px;background:rgba(34,197,94,0.15);color:#16a34a;font-weight:600}
+              #google-account .gc-badge[data-state="needs_attention"]{background:rgba(234,179,8,0.15);color:#b45309}
+              #google-account .gc-badge[data-state="partially_connected"],#google-account .gc-badge[data-state="connecting"]{background:rgba(59,130,246,0.15);color:#2563eb}
+              #google-account .gc-products{display:flex;flex-direction:column;gap:0.5rem}
+              #google-account .gc-product-row{display:flex;align-items:center;justify-content:space-between;padding:0.6rem 0.85rem;border:1px solid var(--border-color,rgba(128,128,128,0.2));border-radius:0.5rem}
+              #google-account .gc-product-name{font-weight:500;color:var(--text-primary)}
+              #google-account .gc-pill{font-size:0.75rem;padding:0.15rem 0.6rem;border-radius:999px;background:rgba(128,128,128,0.15);color:var(--text-secondary)}
+              #google-account .gc-pill[data-health="healthy"]{background:rgba(34,197,94,0.15);color:#16a34a}
+              #google-account .gc-pill[data-health="reconnect_required"],#google-account .gc-pill[data-health="error"],#google-account .gc-pill[data-health="admin_blocked"]{background:rgba(239,68,68,0.12);color:#dc2626}
+              #google-account .gc-pill[data-health="advanced_setup_required"],#google-account .gc-pill[data-health="scope_upgrade_required"],#google-account .gc-pill[data-health="rate_limited"],#google-account .gc-pill[data-health="provider_unavailable"]{background:rgba(234,179,8,0.15);color:#b45309}
+              #google-account .gc-product-right{display:flex;align-items:center;gap:0.75rem}
+              #google-account .gc-enable-btn{padding:0.2rem 0.8rem;font-size:0.8rem}
+              #google-account .gc-error{margin-top:0.75rem;color:#dc2626;font-size:0.85rem}
+              #google-account .gc-drive-setup{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid var(--border-color,rgba(128,128,128,0.2));border-radius:0.5rem;background:rgba(128,128,128,0.04);display:flex;flex-direction:column;gap:0.55rem}
+              #google-account .gc-drive-title{font-weight:600;color:var(--text-primary)}
+              #google-account .gc-drive-note{margin:0;font-size:0.83rem;color:var(--text-secondary);line-height:1.45}
+              #google-account .gc-drive-field{display:flex;flex-direction:column;gap:0.25rem;font-size:0.82rem;color:var(--text-secondary)}
+              #google-account .gc-drive-field .modern-input{width:100%}
+              #google-account .gc-drive-actions{display:flex;gap:0.5rem;margin-top:0.25rem}
+              #google-account .gc-confirm{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid rgba(239,68,68,0.35);border-radius:0.5rem;background:rgba(239,68,68,0.05);display:flex;flex-direction:column;gap:0.55rem}
+              #google-account .gc-confirm-title{font-weight:600;color:var(--text-primary)}
+              #google-account .gc-confirm-list{margin:0;padding-left:1.1rem;font-size:0.83rem;color:var(--text-secondary)}
+              #google-account .gc-confirm-actions{display:flex;gap:0.5rem;margin-top:0.25rem}
+              #google-account .gc-disconnect-btn{padding:0.2rem 0.7rem;font-size:0.78rem}
+              #google-account .gc-advanced{font-size:0.85rem;color:var(--text-secondary)}
+              #google-account .gc-advanced summary{cursor:pointer;color:var(--text-secondary)}
+            </style>
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12C22,11.26 21.93,10.54 21.8,9.84H12V13.84H17.66C17.41,15.11 16.68,16.18 15.61,16.9V19.5H18.94C20.87,17.72 22,15.09 22,12C22,11.26 21.93,10.54 21.8,9.84Z"/></svg>
+              </span>
+              <h2 class="settings-section-title">Google Account</h2>
+              <span class="settings-section-subtitle">(Gmail, Calendar &amp; Drive)</span>
+            </div>
+            <p class="settings-section-description">
+              Connect one Google account, then enable Gmail, Calendar, and Drive individually. Your tokens stay on this device.
+            </p>
+
+            <div id="googleConnStatus" class="settings-status" role="status" aria-live="polite">
+              <div id="googleConnStatusIndicator"><span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span></div>
+              <div class="settings-status-content">
+                <div id="googleConnStatusText" class="settings-status-text">Checking Google connection…</div>
+              </div>
+            </div>
+
+            <div id="googleConnConnected" class="d-none">
+              <div class="settings-info-box mb-3">
+                <div class="d-flex align-items-center">
+                  <div id="googleConnAvatar" class="gc-avatar" aria-hidden="true">G</div>
+                  <div class="ms-3">
+                    <div id="googleConnEmail" style="color:var(--text-primary);font-weight:600;">-</div>
+                    <div id="googleConnName" style="color:var(--text-secondary);font-size:0.85rem;"></div>
+                  </div>
+                  <span id="googleConnBadge" class="gc-badge ms-auto" data-state="connected">Connected</span>
+                </div>
+              </div>
+              <div id="googleConnProducts" class="gc-products"></div>
+              <div id="googleConnDriveSetup" class="gc-drive-setup d-none" role="group" aria-label="Google Drive setup" aria-live="polite"></div>
+              <div id="googleConnConfirm" class="gc-confirm d-none" role="group" aria-label="Disconnect confirmation" aria-live="polite"></div>
+              <div class="settings-actions mt-3">
+                <button id="googleConnDisconnectBtn" type="button" class="modern-btn modern-btn-danger">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2"><path d="M19,3H5C3.89,3 3,3.89 3,5V9H5V5H19V19H5V15H3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M10.08,15.58L11.5,17L16.5,12L11.5,7L10.08,8.41L12.67,11H3V13H12.67L10.08,15.58Z"/></svg>
+                  Disconnect Google
+                </button>
+                <button id="googleConnSwitchBtn" type="button" class="modern-btn modern-btn-secondary">Switch account</button>
+              </div>
+              <details class="gc-advanced mt-2">
+                <summary>Advanced</summary>
+                <p class="gc-drive-note">
+                  Disconnecting only removes Google access from this device. To also revoke Ori's access at Google —
+                  which affects every product at once and cannot be limited to one — visit
+                  <a href="https://myaccount.google.com/connections" target="_blank" rel="noopener noreferrer">Google's third-party access controls ↗</a>.
+                </p>
+              </details>
+            </div>
+
+            <div id="googleConnDisconnected" class="d-none">
+              <div class="empty-state">
+                <svg class="empty-state-icon" width="64" height="64" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12C22,11.26 21.93,10.54 21.8,9.84H12V13.84H17.66C17.41,15.11 16.68,16.18 15.61,16.9V19.5H18.94C20.87,17.72 22,15.09 22,12C22,11.26 21.93,10.54 21.8,9.84Z"/></svg>
+                <h3 class="empty-state-title">No Google account connected</h3>
+                <p class="empty-state-description">Connect your Google account to enable Gmail, Calendar, and Drive.</p>
+                <button id="googleConnConnectBtn" type="button" class="modern-btn modern-btn-primary">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12C22,11.26 21.93,10.54 21.8,9.84H12V13.84H17.66C17.41,15.11 16.68,16.18 15.61,16.9V19.5H18.94C20.87,17.72 22,15.09 22,12Z"/></svg>
+                  Connect Google
+                </button>
+              </div>
+            </div>
+            <div id="googleConnError" class="gc-error d-none" role="alert"></div>
+          </section>
+
           <section id="personal-hq-email" class="settings-section modern-card p-4">
             <div class="settings-section-header">
               <span class="settings-section-icon">
@@ -898,11 +1000,14 @@
             </div>
 
             <p class="settings-section-description">
-              To let your Personal HQ connect Gmail, register a Google OAuth 2.0 <strong>Web application</strong>
-              client (Google Cloud Console → Credentials; enable the Gmail API), add
-              <code id="hqEmailRedirectHint">this server's <em>/api/vault/email/oauth/callback</em></code> as an
-              authorized redirect URI, then paste the client ID and secret below. Read-only Gmail access is
-              requested; nothing is sent without your explicit confirmation.
+              Personal HQ email now connects through your
+              <a href="#google-account" style="color: var(--primary-color);">Google Account</a> above — connect
+              Google and enable Gmail there, then choose <strong>Connect account</strong> on your Personal HQ (no
+              client ID or secret needed). The fields below are only for a <strong>self-hosted</strong> setup with
+              your own Google OAuth <strong>Web</strong> client: register it in Google Cloud Console (enable the
+              Gmail API), add <code id="hqEmailRedirectHint">this server's <em>/api/vault/email-oauth/callback</em></code>
+              as an authorized redirect URI, then paste the client ID and secret. Read-only Gmail is requested;
+              nothing sends without your explicit confirmation.
             </p>
 
             <div class="settings-field">
@@ -1757,7 +1862,7 @@
       if (!idInput || !saveBtn) return;
 
       if (redirectHint) {
-        redirectHint.textContent = window.location.origin + '/api/vault/email/oauth/callback';
+        redirectHint.textContent = window.location.origin + '/api/vault/email-oauth/callback';
       }
 
       function setStatus(text, isError) {
@@ -1903,6 +2008,7 @@
   <script defer src="/js/modules/location-settings.js"></script>
   <script defer src="/js/modules/device-capabilities.js"></script>
   <script defer src="/js/modules/web3-settings.js"></script>
+  <script defer src="/js/modules/google-connection.js"></script>
 </body>
 </html>
 {{end}}

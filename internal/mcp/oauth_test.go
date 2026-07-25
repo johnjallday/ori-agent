@@ -437,8 +437,8 @@ func simulateBrowserAuthorize(t *testing.T, client *http.Client, authorizeURL st
 }
 
 func TestServer_StartRemote_FullOAuthHandshakeAndReconnect(t *testing.T) {
-	allowPrivateRemoteHostsForTests = true
-	t.Cleanup(func() { allowPrivateRemoteHostsForTests = false })
+	allowPrivateRemoteHostsForTests.Store(true)
+	t.Cleanup(func() { allowPrivateRemoteHostsForTests.Store(false) })
 
 	fake := newFakeOAuthMCPServer(t)
 	t.Cleanup(fake.close)
