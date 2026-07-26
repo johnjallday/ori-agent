@@ -62,6 +62,21 @@ func (h *Handler) syncAutomation(workspaceID string) {
 	}
 }
 
+// syncAutomationAndRefresh brings the watcher in line with the new settings and
+// re-reads status, so the response describes the state after the change rather
+// than the moment before it.
+func (h *Handler) syncAutomationAndRefresh(workspaceID string, fallback downloadsjanitor.Status) downloadsjanitor.Status {
+	if h == nil || h.automation == nil {
+		return fallback
+	}
+	h.syncAutomation(workspaceID)
+	refreshed, err := h.service.Status(workspaceID)
+	if err != nil {
+		return fallback
+	}
+	return refreshed
+}
+
 // NewHandler builds the Downloads Janitor handler. A nil service makes every
 // endpoint report 503 rather than panicking, matching the other workspace
 // handlers' behavior when their storage is unavailable.
@@ -130,8 +145,12 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err, "Failed to set up Downloads Janitor")
 		return
 	}
-	// Confirmed setup is what turns the automation on for the first time.
-	h.syncAutomation(workspaceID)
+	// Confirmed setup is what turns the automation on for the first time, and
+	// readiness is re-read afterwards: the status computed before the watcher
+	// was installed would report a watcher failure that setup had in fact just
+	// fixed, which is the difference between "it worked" and "something is
+	// wrong" on the user's first ever screen.
+	status = h.syncAutomationAndRefresh(workspaceID, status)
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
 }
 
@@ -156,7 +175,7 @@ func (h *Handler) SetPaused(w http.ResponseWriter, r *http.Request) {
 	}
 	// The flag and the watcher move together: a paused workspace whose watcher
 	// kept running would be lying to the user.
-	h.syncAutomation(workspaceID)
+	status = h.syncAutomationAndRefresh(workspaceID, status)
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
 }
 

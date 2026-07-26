@@ -388,18 +388,20 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		next.SetupCompletedAt = s.clock()
 	}
 
-	saved, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		*settings = next
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		if errors.Is(err, ErrInvalidSettings) {
 			return Status{}, setupErr(CodeInvalidPath, "That folder configuration is not valid.", RepairRetry, err)
 		}
 		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's Downloads Janitor settings.", RepairRetry, err)
 	}
 
-	return Status{Settings: saved, Readiness: s.evaluateReadiness(saved)}, nil
+	// Return through Status so the response carries everything a status
+	// response does — privacy disclosure included. Building a Status literal
+	// here is how the setup reply ended up with no privacy state at all.
+	return s.Status(workspaceID)
 }
 
 func (s *Service) clock() time.Time {

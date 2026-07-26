@@ -27,12 +27,35 @@ type MCPMover struct {
 	workspaces WorkspaceStore
 	resolver   BindingMaterializer
 	caller     ToolCaller
+	starter    ToolStarter
+}
+
+// isNotRunning reports whether an error means the connector process is not up.
+func isNotRunning(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not running")
+}
+
+// SetStarter wires lazy starting of the connector.
+func (m *MCPMover) SetStarter(starter ToolStarter) {
+	if m != nil {
+		m.starter = starter
+	}
 }
 
 // BindingMaterializer instantiates a workspace MCP binding as a runtime server
 // and returns its name. *workspace.AgentRuntimeResolver satisfies it.
 type BindingMaterializer interface {
 	MaterializeRuntimeBinding(workspaceID string, binding workspace.MCPBinding) (string, error)
+}
+
+// ToolStarter starts a materialized runtime MCP server.
+//
+// A binding materialized for a workspace is registered but not started, so the
+// first call against it finds nothing running. Chat and task paths already
+// lazy-start on demand; the Janitor does the same rather than assuming someone
+// else has warmed the connector up.
+type ToolStarter interface {
+	StartServer(serverName string) error
 }
 
 // ToolCaller invokes a tool on a named runtime MCP server and reports whether
@@ -71,10 +94,17 @@ func (m *MCPMover) Move(ctx context.Context, workspaceID, sourcePath, destinatio
 		return fmt.Errorf("%w: the filesystem connector could not be started", ErrInvalidAction)
 	}
 
-	toolReportedError, err := m.caller.CallTool(ctx, runtimeName, "move_file", map[string]any{
-		"source":      sourcePath,
-		"destination": destinationPath,
-	})
+	arguments := map[string]any{"source": sourcePath, "destination": destinationPath}
+	toolReportedError, err := m.caller.CallTool(ctx, runtimeName, "move_file", arguments)
+	if err != nil && isNotRunning(err) && m.starter != nil {
+		// Lazy start, then one retry. The connector is a process that may not
+		// be up yet; that is a reason to start it, not a reason to tell the
+		// user their file could not be moved.
+		if startErr := m.starter.StartServer(runtimeName); startErr != nil {
+			return fmt.Errorf("the filesystem connector could not be started: %w", startErr)
+		}
+		toolReportedError, err = m.caller.CallTool(ctx, runtimeName, "move_file", arguments)
+	}
 	if err != nil {
 		return err
 	}

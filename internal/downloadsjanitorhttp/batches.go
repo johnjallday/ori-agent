@@ -601,7 +601,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err, "Failed to update Downloads Janitor settings")
 		return
 	}
-	h.syncAutomation(workspaceID)
+	status = h.syncAutomationAndRefresh(workspaceID, status)
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
 }
 

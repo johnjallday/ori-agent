@@ -510,11 +510,15 @@ func (b *ServerBuilder) wireDownloadsJanitorMover() {
 	// filesystem MCP: delete_file unlinks, and an unlinked file has no restore
 	// token and no way back.
 	b.downloadsJanitorService.SetTrash(downloadsjanitor.NewPlatformTrash())
-	b.downloadsJanitorService.SetMover(downloadsjanitor.NewMCPMover(
+	mover := downloadsjanitor.NewMCPMover(
 		b.workspaceStore,
 		b.runtimeResolver,
 		janitorToolCaller{registry: b.mcpRegistry},
-	))
+	)
+	// The connector is a process; it may not be running when the first approved
+	// move arrives. Lazy-start it the same way the chat path does.
+	mover.SetStarter(b.mcpRegistry)
+	b.downloadsJanitorService.SetMover(mover)
 }
 
 // janitorToolCaller adapts the MCP registry to the narrow caller the Janitor
