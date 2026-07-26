@@ -533,3 +533,52 @@ func TestAppliesTo_OnlyDownloadsJanitorWorkspaces(t *testing.T) {
 		t.Fatal("a workspace declaring the Janitor directory requirement must mount the surface")
 	}
 }
+
+// Pausing is a choice, not a fault. A workspace the user paused must not report
+// "Needs attention": a badge that fires for the user's own deliberate action
+// trains them to ignore it, and then a real permission loss goes unnoticed.
+func TestReadiness_PausingIsNotAProblem(t *testing.T) {
+	// Everything healthy except the two components a pause switches off.
+	pausedButHealthy := []ComponentCheck{
+		{Component: ComponentDirectoryAccess, Status: ComponentOK},
+		{Component: ComponentDestination, Status: ComponentOK},
+		{Component: ComponentMCPBinding, Status: ComponentOK},
+		{Component: ComponentPersistence, Status: ComponentOK},
+		{Component: ComponentWatcher, Status: ComponentPending},
+		{Component: ComponentScheduler, Status: ComponentPending},
+	}
+	if got := DeriveReadinessStateWhenPaused(true, true, pausedButHealthy); got != ReadinessReady {
+		t.Fatalf("a paused workspace is behaving as instructed, got %q", got)
+	}
+	// The same checks when the user did NOT pause mean something really is
+	// wrong: the watcher failed to register.
+	if got := DeriveReadinessStateWhenPaused(true, false, pausedButHealthy); got != ReadinessNeedsAttention {
+		t.Fatalf("an unregistered watcher nobody asked for is a problem, got %q", got)
+	}
+	// And a pause never masks a failure elsewhere.
+	broken := append([]ComponentCheck(nil), pausedButHealthy...)
+	broken[0] = ComponentCheck{Component: ComponentDirectoryAccess, Status: ComponentFailed}
+	if got := DeriveReadinessStateWhenPaused(true, true, broken); got != ReadinessNeedsAttention {
+		t.Fatalf("a pause must not mask a real failure, got %q", got)
+	}
+}
+
+// Pausing through the service keeps saying, per component, what is off and why.
+func TestSetPaused_ExplainsWhatItSwitchedOff(t *testing.T) {
+	service, _ := configuredService(t)
+	status, err := service.SetPaused("ws-1", true)
+	if err != nil {
+		t.Fatalf("SetPaused: %v", err)
+	}
+	if !status.Settings.Paused {
+		t.Fatal("it must report that it is paused")
+	}
+	for _, check := range status.Readiness.Checks {
+		if check.Component != ComponentWatcher && check.Component != ComponentScheduler {
+			continue
+		}
+		if !strings.Contains(strings.ToLower(check.Message), "paused") {
+			t.Fatalf("%s must explain itself: %+v", check.Component, check)
+		}
+	}
+}

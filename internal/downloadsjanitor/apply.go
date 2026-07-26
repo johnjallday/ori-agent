@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
+
 	"github.com/google/uuid"
 )
 
@@ -294,6 +296,15 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 			Operation: OperationMove, Result: ResultApplied, Destination: relative, Undoable: true,
 		}
 	case moveErr != nil:
+		// The user-facing message stays short and non-technical, but the reason
+		// has to go somewhere: without this, a failed move left no trace at all
+		// on the server, and diagnosing one meant reproducing it by hand.
+		logger.Warn("Downloads Janitor move failed", logger.Fields{
+			"workspace_id": settings.WorkspaceID,
+			"name":         candidate.Display(),
+			"destination":  relative,
+			"error":        moveErr.Error(),
+		})
 		summary := "Ori could not move this file."
 		action = action.MarkFailed(summary, s.clock())
 		_ = s.updateAction(settings.WorkspaceID, action, CandidateFailed)

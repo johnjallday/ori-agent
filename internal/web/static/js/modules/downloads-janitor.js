@@ -1830,6 +1830,13 @@
   async function loadBatch() {
     const id = wsId();
     if (!id) return;
+    // The rows about to be rendered need the category vocabulary: without it
+    // the picker collapses to a single dead option showing the raw category id.
+    // refresh() loads it on a page visit to an already-configured workspace,
+    // which meant it was missing for the whole session after a fresh setup —
+    // exactly the session in which the first batch gets reviewed. Loading it
+    // here ties it to the thing that needs it. It is a no-op once cached.
+    await loadCategories();
     try {
       const response = await fetch(
         '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/batches/latest'

@@ -665,7 +665,7 @@ func (s *Service) evaluateReadiness(settings JanitorSettings) Readiness {
 
 	return Readiness{
 		WorkspaceID: settings.WorkspaceID,
-		State:       DeriveReadinessState(settings.IsSetUp(), checks),
+		State:       DeriveReadinessStateWhenPaused(settings.IsSetUp(), settings.Paused, checks),
 		Checks:      checks,
 		Paused:      settings.Paused,
 		CheckedAt:   now,

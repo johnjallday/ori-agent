@@ -387,9 +387,32 @@ func SetupRequiredReadiness(workspaceID string, now time.Time) Readiness {
 // checks. It fails closed in three ways: a workspace that is not set up is
 // always SetupRequired, any failed component forces NeedsAttention, and a
 // component that is missing or still pending also forces NeedsAttention rather
-// than Ready. Group 5 completes the watcher and scheduler checkers; until then
-// this is what stops a partially wired build from claiming Ready.
+// than Ready.
+//
+// Pausing is the exception, and it is not a failure. A paused workspace has no
+// registered watcher and no scheduled catch-up by design — that is what the
+// user asked for. Counting those against readiness reported "Needs attention"
+// for a workspace behaving exactly as instructed, which is crying wolf: a user
+// who sees that badge for their own deliberate choice learns to ignore it, and
+// then misses a real permission loss. Everything the user did not switch off
+// must still be OK.
 func DeriveReadinessState(setUp bool, checks []ComponentCheck) ReadinessState {
+	return deriveReadinessState(setUp, false, checks)
+}
+
+// DeriveReadinessStateWhenPaused is DeriveReadinessState for a workspace the
+// user has paused.
+func DeriveReadinessStateWhenPaused(setUp, paused bool, checks []ComponentCheck) ReadinessState {
+	return deriveReadinessState(setUp, paused, checks)
+}
+
+// PausableComponents are the components a pause deliberately switches off.
+var PausableComponents = map[ReadinessComponent]bool{
+	ComponentWatcher:   true,
+	ComponentScheduler: true,
+}
+
+func deriveReadinessState(setUp, paused bool, checks []ComponentCheck) ReadinessState {
 	if !setUp {
 		return ReadinessSetupRequired
 	}
@@ -398,6 +421,11 @@ func DeriveReadinessState(setUp bool, checks []ComponentCheck) ReadinessState {
 		byComponent[check.Component] = check.Status
 	}
 	for _, component := range RequiredComponents {
+		if paused && PausableComponents[component] {
+			// Off because it was switched off. Still surfaced per-component,
+			// where the message says "Paused by you".
+			continue
+		}
 		if byComponent[component] != ComponentOK {
 			return ReadinessNeedsAttention
 		}

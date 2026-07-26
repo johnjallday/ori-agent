@@ -35,6 +35,19 @@ func isNotRunning(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not running")
 }
 
+// isAlreadyRunning reports a start that failed because the connector was
+// already up.
+//
+// This is not a failure. Two moves in one batch race for the same connector:
+// the first sees "not running" and starts it, the second sees "not running"
+// from the same window and then gets "server already running" back from its own
+// start attempt. Treating that as fatal failed the second file of every batch
+// while the first succeeded — a partial, silent-looking failure that only shows
+// up with more than one file, which is why single-file testing never caught it.
+func isAlreadyRunning(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "already running")
+}
+
 // SetStarter wires lazy starting of the connector.
 func (m *MCPMover) SetStarter(starter ToolStarter) {
 	if m != nil {
@@ -100,7 +113,7 @@ func (m *MCPMover) Move(ctx context.Context, workspaceID, sourcePath, destinatio
 		// Lazy start, then one retry. The connector is a process that may not
 		// be up yet; that is a reason to start it, not a reason to tell the
 		// user their file could not be moved.
-		if startErr := m.starter.StartServer(runtimeName); startErr != nil {
+		if startErr := m.starter.StartServer(runtimeName); startErr != nil && !isAlreadyRunning(startErr) {
 			return fmt.Errorf("the filesystem connector could not be started: %w", startErr)
 		}
 		toolReportedError, err = m.caller.CallTool(ctx, runtimeName, "move_file", arguments)
