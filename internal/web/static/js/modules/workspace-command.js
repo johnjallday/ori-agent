@@ -3872,7 +3872,8 @@ export class WorkspaceCommandView {
     if (page.backlogLoading && !count) {
       body = '<div class="ws-cmd-rail-empty">Loading backlog…</div>';
     } else if (page.backlogLoadFailed) {
-      body = '<div class="ws-cmd-rail-empty is-error">Couldn’t load the backlog. Try again shortly.</div>';
+      body =
+        '<div class="ws-cmd-rail-empty is-error">Couldn’t load the backlog. Try again shortly.</div>';
     } else if (count) {
       const rows = preview.map(item => {
         const task = (item && item.task) || item || {};
@@ -4330,7 +4331,10 @@ export class WorkspaceCommandView {
       }
       const editField = event.target.closest('[data-cmd-backlog-edit-field]');
       if (editField) {
-        this.updateBacklogEditField(editField.getAttribute('data-cmd-backlog-edit-field'), editField.value);
+        this.updateBacklogEditField(
+          editField.getAttribute('data-cmd-backlog-edit-field'),
+          editField.value
+        );
       }
     };
     el.addEventListener('input', captureFieldInput);
@@ -4566,7 +4570,9 @@ export class WorkspaceCommandView {
       escapeHtml(draft.referenceUrl || '') +
       '" />' +
       (this.backlogEditError
-        ? '<div class="ws-cmd-backlog-quick-error" role="alert">' + escapeHtml(this.backlogEditError) + '</div>'
+        ? '<div class="ws-cmd-backlog-quick-error" role="alert">' +
+          escapeHtml(this.backlogEditError) +
+          '</div>'
         : '') +
       '<div class="ws-cmd-backlog-edit-actions">' +
       '<button type="submit" class="ws-cmd-drawer-action"' +
@@ -4584,10 +4590,13 @@ export class WorkspaceCommandView {
   // sync.conflict/sync.warning below still surface that one exists.
   backlogSyncPanelHTML() {
     const sync = this.backlogSync();
-    const lastSynced = sync && sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Never';
+    const lastSynced =
+      sync && sync.last_synced_at ? new Date(sync.last_synced_at).toLocaleString() : 'Never';
     const warning =
       sync && sync.warning
-        ? '<div class="ws-cmd-backlog-sync-warning" role="alert">' + escapeHtml(sync.warning) + '</div>'
+        ? '<div class="ws-cmd-backlog-sync-warning" role="alert">' +
+          escapeHtml(sync.warning) +
+          '</div>'
         : '';
     return (
       '<div class="ws-cmd-backlog-sync">' +
@@ -5242,7 +5251,11 @@ export class WorkspaceCommandView {
       case 'loading':
         return { value: 'Loading…', description: 'loading calendar summary', tone: 'loading' };
       case 'error':
-        return { value: 'Unavailable', description: 'calendar summary unavailable', tone: 'degraded' };
+        return {
+          value: 'Unavailable',
+          description: 'calendar summary unavailable',
+          tone: 'degraded'
+        };
       case 'ready':
         return this.calendarOpsStationReadyState(state);
       default:
@@ -5255,7 +5268,11 @@ export class WorkspaceCommandView {
       return { value: 'Set up', description: 'Calendar Ops is not set up yet', tone: 'attention' };
     }
     if (state.state !== 'ready') {
-      return { value: 'Finish setup', description: 'calendar connector needs attention', tone: 'attention' };
+      return {
+        value: 'Finish setup',
+        description: 'calendar connector needs attention',
+        tone: 'attention'
+      };
     }
     if (state.nextMeeting && state.nextMeeting.title) {
       const conflictNote = state.conflictCount
@@ -5536,7 +5553,7 @@ export class WorkspaceCommandView {
   // render a station off-field, else the registry-order default slot. Unknown
   // or non-finite saved values fall back to the default (FR13).
   hqStationPosition(key) {
-    const registry = this.hqStationRegistry();
+    const registry = this.mapStationRegistry();
     const index = registry.findIndex(entry => entry.key === key);
     const fallback = this.hqStationDefaultPosition(index);
     const layout = (this.page && this.page.workspace && this.page.workspace.layout) || null;
@@ -5555,8 +5572,7 @@ export class WorkspaceCommandView {
   // --station-x/--station-y custom props. Only the designated HQ renders
   // these; non-HQ workspaces get an empty string (FR16).
   renderMapHQStations() {
-    if (!this.isPersonalHQ()) return '';
-    return this.hqStationRegistry()
+    return this.mapStationRegistry()
       .map(station => {
         const state = station.state() || {};
         const pos = this.hqStationPosition(station.key);
@@ -5588,9 +5604,39 @@ export class WorkspaceCommandView {
       .join('');
   }
 
-  // Dispatches a click on an HQ station button to its registry action.
+  // Stations a workspace earns from what it *is*, rather than from being the
+  // Personal HQ. A Downloads Janitor workspace awaiting setup is otherwise
+  // indistinguishable from a finished one on the map: its setup card lives in
+  // the page body, so someone working on the map surface has no way to know a
+  // folder is still needed.
+  workspaceStationRegistry() {
+    const janitor = typeof window === 'undefined' ? null : window.DownloadsJanitorPanel;
+    const state = janitor && janitor.stationState ? janitor.stationState() : null;
+    if (!state || !state.applies) return [];
+    return [
+      {
+        key: 'downloads-janitor',
+        label: 'Downloads',
+        icon: 'bi-download',
+        state: () => state,
+        action: () => janitor.focusSetup && janitor.focusSetup()
+      }
+    ];
+  }
+
+  // Every station on this workspace's map, whatever its source. Keyed lookups
+  // (position, dispatch) go through here so a workspace station behaves exactly
+  // like an HQ one without duplicating the rendering plumbing.
+  mapStationRegistry() {
+    return [
+      ...(this.isPersonalHQ() ? this.hqStationRegistry() : []),
+      ...this.workspaceStationRegistry()
+    ];
+  }
+
+  // Dispatches a click on a station button to its registry action.
   runHQStationAction(stationKey, trigger) {
-    const station = this.hqStationRegistry().find(entry => entry.key === stationKey);
+    const station = this.mapStationRegistry().find(entry => entry.key === stationKey);
     if (station && typeof station.action === 'function') station.action(trigger);
   }
 
@@ -5601,8 +5647,7 @@ export class WorkspaceCommandView {
   // delegation dispatches through runHQStationAction — the same registry
   // action() as the map surface. Non-HQ workspaces render nothing (FR16).
   renderStationsRailPanel() {
-    if (!this.isPersonalHQ()) return '';
-    const registry = this.hqStationRegistry();
+    const registry = this.mapStationRegistry();
     if (!registry.length) return '';
     const first = registry[0];
     const firstState = (first.state && first.state()) || {};
@@ -6788,7 +6833,9 @@ export class WorkspaceCommandView {
         : 'Commits now — creates an unassigned Ready quest that waits for an explicit assign, run, or schedule.') +
       '</p>';
     const placeholder =
-      intent === 'backlog' ? 'Describe the idea…' : 'Describe the quest… (assigned to the Commander)';
+      intent === 'backlog'
+        ? 'Describe the idea…'
+        : 'Describe the quest… (assigned to the Commander)';
     const primaryLabel = submitting
       ? intent === 'backlog'
         ? 'Adding…'

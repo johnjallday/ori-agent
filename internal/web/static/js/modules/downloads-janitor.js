@@ -1866,11 +1866,69 @@
     }
   }
 
+  // stationState answers, for the Map view, "does this workspace need me?".
+  // The Janitor's setup card lives in the page body; a user working on the map
+  // surface has no way to know a folder is still needed, and a workspace
+  // awaiting setup looks exactly like a finished one. This lets the map show a
+  // station without knowing anything about the Janitor's internals.
+  function stationState() {
+    if (!lastStatus || !lastStatus.applies) return { applies: false };
+    const readiness = lastStatus.readiness || {};
+    const settings = lastStatus.settings || {};
+    if (readiness.state === 'setup_required') {
+      return {
+        applies: true,
+        value: 'Choose a folder',
+        description: 'waiting for you to choose a folder to tidy',
+        tone: 'attention'
+      };
+    }
+    if (readiness.state === 'needs_attention') {
+      return {
+        applies: true,
+        value: 'Needs attention',
+        description: firstProblem(readiness) || 'the Janitor needs attention',
+        tone: 'degraded'
+      };
+    }
+    const folder = settings.root_path || '';
+    return {
+      applies: true,
+      value: settings.paused ? 'Paused' : 'Watching',
+      description: folder ? 'tidying ' + folder : 'ready',
+      tone: settings.paused ? 'idle' : 'clear'
+    };
+  }
+
+  function firstProblem(readiness) {
+    const checks = readiness.checks || [];
+    const bad = checks.find(check => check.status === 'failed' || check.status === 'degraded');
+    return bad ? bad.message : '';
+  }
+
+  // focusSetup brings the setup card into view and puts the cursor in the
+  // folder field, so a station press lands the user on the thing to do rather
+  // than merely near it.
+  function focusSetup() {
+    const mount = document.getElementById('downloadsJanitorMount');
+    if (mount && typeof mount.scrollIntoView === 'function') {
+      mount.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    const input = document.getElementById('downloadsJanitorPath');
+    if (input) {
+      input.focus?.();
+      return true;
+    }
+    return Boolean(mount);
+  }
+
   window.DownloadsJanitorPanel = {
     init,
     refresh,
     render,
     renderBatch,
+    stationState,
+    focusSetup,
     _confirmSetup: confirmSetup,
     _setBatch: (batch, candidates, cats) => {
       lastBatch = batch;
