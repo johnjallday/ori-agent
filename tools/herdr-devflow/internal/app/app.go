@@ -22,6 +22,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
@@ -157,6 +159,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.schedule(ctx, opts, commandArgs)
 	case "status":
 		return a.status(ctx, opts, commandArgs)
+	case "overview":
+		return a.overview(ctx, opts, commandArgs)
 	case "cleanup":
 		return a.cleanup(ctx, opts, commandArgs)
 	case "dispatch":
@@ -1280,6 +1284,94 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 		return 1
 	}
 	emit(snapshot)
+	return 0
+}
+
+type overviewArgs struct {
+	feature string
+	json    bool
+	noColor bool
+	watch   bool
+}
+
+func parseOverviewArgs(args []string) (overviewArgs, error) {
+	var parsed overviewArgs
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			parsed.json = true
+		case "--no-color":
+			parsed.noColor = true
+		case "--watch":
+			parsed.watch = true
+		case "--feature":
+			if index+1 >= len(args) {
+				return overviewArgs{}, fmt.Errorf("--feature requires a value")
+			}
+			index++
+			parsed.feature = args[index]
+		default:
+			return overviewArgs{}, fmt.Errorf("unknown overview option %q", args[index])
+		}
+	}
+	if parsed.feature != "" && !planning.ValidSlug(parsed.feature) {
+		return overviewArgs{}, fmt.Errorf("--feature must be a canonical feature slug")
+	}
+	return parsed, nil
+}
+
+// overview renders the shared feature-first snapshot. It is read-only: no
+// planning file, backlog entry, Git object, bridge binding, or Herdr view is
+// written by this command.
+//
+// The snapshot deliberately exits nonzero while any required source is
+// unavailable. A board that cannot see remote delivery state must not report
+// success, because a green exit code is how scripts decide nothing is wrong.
+func (a *App) overview(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseOverviewArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	if parsed.json {
+		opts.json = true
+	}
+	if parsed.watch {
+		a.writeError(fmt.Errorf("overview --watch is not available yet"), opts.json)
+		return 2
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return 1
+	}
+
+	service := overview.NewService(overview.Config{RepoRoot: runtime.paths.RepoRoot})
+	snapshot, err := service.Collect(ctx)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if parsed.feature != "" {
+		feature, found := snapshot.Feature(parsed.feature)
+		if !found {
+			a.writeError(fmt.Errorf("no feature named %q was found", parsed.feature), opts.json)
+			return 1
+		}
+		snapshot.Features = []overview.Feature{feature}
+	}
+
+	if opts.json {
+		a.writeResult(true, snapshot)
+	} else if err := overview.RenderCompact(a.stdout, snapshot, overview.RenderOptions{
+		NoColor: !a.statusColorEnabled(parsed.noColor),
+	}); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if !snapshot.Complete {
+		return 1
+	}
 	return 0
 }
 
