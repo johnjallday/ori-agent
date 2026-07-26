@@ -47,6 +47,8 @@
   // The last undo outcome, kept so the history reload that follows an undo does
   // not wipe the explanation the user needs to read.
   let historyStatusMessage = '';
+  // True while a scan the user started is in flight, so the header can say so.
+  let scanning = false;
 
   function wsId() {
     return workspaceId || (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
@@ -100,6 +102,35 @@
     const badge = el('span', 'dj-badge dj-badge-' + String(state || '').replace(/_/g, '-'));
     badge.textContent = STATE_LABELS[state] || 'Unknown';
     return badge;
+  }
+
+  // activityState answers the question the user is actually asking of a
+  // workspace header: is this thing doing anything, and does it need me?
+  //
+  // Readiness alone cannot answer it — a workspace can be perfectly configured
+  // and still have twelve files waiting, or be perfectly configured and paused.
+  // The order below is the order of urgency: a problem first, then work waiting
+  // for the user, then what Ori is doing on its own.
+  function activityState(status) {
+    const readiness = (status && status.readiness) || {};
+    const settings = (status && status.settings) || {};
+    if (readiness.state === 'setup_required') {
+      return { id: 'setup_required', label: 'Setup required' };
+    }
+    if (readiness.state === 'needs_attention') {
+      return { id: 'needs_attention', label: 'Needs attention' };
+    }
+    if (scanning) {
+      return { id: 'scanning', label: 'Scanning…' };
+    }
+    const pending = (lastBatch && lastBatch.summary && lastBatch.summary.proposed) || 0;
+    if (pending > 0) {
+      return { id: 'review_ready', label: 'Review ready' };
+    }
+    if (settings.paused) {
+      return { id: 'paused', label: 'Paused' };
+    }
+    return { id: 'watching', label: 'Watching' };
   }
 
   function disclosureList(rootLabel, filingRootName, dailyTime) {
@@ -982,7 +1013,10 @@
     stats.textContent = statsLine();
     heading.appendChild(stats);
     head.appendChild(heading);
-    head.appendChild(stateBadge(readiness.state));
+    const activity = activityState(status);
+    const badge = el('span', 'dj-badge dj-badge-' + activity.id.replace(/_/g, '-'), activity.label);
+    badge.id = 'downloadsJanitorActivity';
+    head.appendChild(badge);
     card.appendChild(head);
 
     const rows = el('ul', 'dj-rows');
@@ -1011,6 +1045,23 @@
     const scan = button('Scan now', 'dj-btn dj-btn-primary', () => void scanNow());
     scan.id = 'downloadsJanitorScan';
     actions.appendChild(scan);
+
+    // Pausing stops the unattended work only. Saying so on the control itself
+    // saves the user wondering whether pausing loses their pending review.
+    const paused = Boolean(settings.paused);
+    const pauseControl = button(
+      paused ? 'Resume watching' : 'Pause watching',
+      'dj-btn dj-btn-secondary',
+      () => void setPaused(!paused)
+    );
+    pauseControl.id = 'downloadsJanitorPause';
+    pauseControl.setAttribute(
+      'title',
+      paused
+        ? 'Start watching this folder again.'
+        : 'Stop automatic scanning. Your settings, pending review, and history are kept, and you can still scan on demand.'
+    );
+    actions.appendChild(pauseControl);
     const failing = (readiness.checks || []).filter(c => c.status === 'failed');
     if (
       failing.some(
@@ -1115,14 +1166,27 @@
   // statsLine states what is waiting and when Ori last looked — the two facts
   // that tell the user whether this workspace is doing anything.
   function statsLine() {
-    if (!lastBatch) return 'No files waiting for review.';
-    const pending = (lastBatch.summary && lastBatch.summary.proposed) || 0;
-    const when = formatWhen(lastBatch.completed_at || lastBatch.started_at);
-    const waiting =
+    const settings = (lastStatus && lastStatus.settings) || {};
+    const parts = [];
+
+    const pending = (lastBatch && lastBatch.summary && lastBatch.summary.proposed) || 0;
+    parts.push(
       pending === 0
         ? 'No files waiting for review'
-        : pending + (pending === 1 ? ' file waiting for review' : ' files waiting for review');
-    return waiting + (when ? ' · last scan ' + when : '');
+        : pending + (pending === 1 ? ' file waiting for review' : ' files waiting for review')
+    );
+
+    const when = lastBatch && formatWhen(lastBatch.completed_at || lastBatch.started_at);
+    if (when) parts.push('last scan ' + when);
+
+    // What happens next, in the user's own words: a daily time they set, or a
+    // plain statement that nothing is scheduled while paused.
+    if (settings.paused) {
+      parts.push('automatic scanning paused');
+    } else if (settings.daily_scan_local_time) {
+      parts.push('next catch-up at ' + settings.daily_scan_local_time);
+    }
+    return parts.join(' · ') + '.';
   }
 
   function refreshStats() {
@@ -1194,7 +1258,9 @@
     const id = wsId();
     if (!id || busy) return;
     busy = true;
+    scanning = true;
     showError('');
+    refreshActivity();
     const control = document.getElementById('downloadsJanitorScan');
     if (control) {
       control.disabled = true;
@@ -1220,11 +1286,58 @@
       showError(error.message || 'The scan could not run.');
     } finally {
       busy = false;
+      scanning = false;
+      refreshActivity();
       const done = document.getElementById('downloadsJanitorScan');
       if (done) {
         done.disabled = false;
         done.textContent = 'Scan now';
       }
+    }
+  }
+
+  function refreshActivity() {
+    const node = document.getElementById('downloadsJanitorActivity');
+    if (!node) return;
+    const activity = activityState(lastStatus);
+    node.textContent = activity.label;
+    node.className = 'dj-badge dj-badge-' + activity.id.replace(/_/g, '-');
+  }
+
+  // setPaused stops or resumes the unattended work. The panel repaints from the
+  // server's answer, so the badge and controls reflect what was actually saved.
+  async function setPaused(paused) {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    showError('');
+    const control = document.getElementById('downloadsJanitorPause');
+    if (control) control.disabled = true;
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/pause',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paused })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not change that setting.');
+      }
+      busy = false;
+      render(body.status);
+      await loadBatch();
+      await loadHistory();
+      return;
+    } catch (error) {
+      showError(error.message || 'Ori could not change that setting.');
+    } finally {
+      busy = false;
+      const done = document.getElementById('downloadsJanitorPause');
+      if (done) done.disabled = false;
     }
   }
 
@@ -1351,6 +1464,9 @@
       filter = '';
     },
     _selected: () => Array.from(selected),
+    _setStatus: status => {
+      lastStatus = status;
+    },
     _setHistory: actions => {
       historyActions = actions || [];
       historyLoaded = true;

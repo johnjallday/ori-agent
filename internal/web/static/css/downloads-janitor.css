@@ -606,3 +606,23 @@
   font-size: 0.8rem;
   color: var(--text-primary, #e8e8e8);
 }
+
+/* Activity states. Each is also spelled out in the badge text, so the
+   distinction never depends on colour. */
+.dj-badge-watching {
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-badge-scanning {
+  color: var(--accent-color, #3b7dd8);
+}
+
+.dj-badge-review-ready {
+  color: var(--accent-color, #3b7dd8);
+  font-weight: 700;
+}
+
+.dj-badge-paused {
+  color: var(--text-secondary, #9aa0a6);
+  font-style: italic;
+}

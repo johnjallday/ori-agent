@@ -1224,3 +1224,133 @@ test('an empty history explains what will appear there', () => {
   panel._setHistory([]);
   assert.match(text(doc), /Applied moves and Trash actions are listed here/);
 });
+
+// ------------------------------------------------------- workspace status
+
+function statusFixture(overrides = {}) {
+  return Object.assign(
+    {
+      applies: true,
+      settings: {
+        root_path: '/tmp/Inbox',
+        directory_reference_id: 'ref-1',
+        filing_root_name: 'Filed',
+        daily_scan_local_time: '09:00'
+      },
+      readiness: { state: 'ready', checks: [{ component: 'directory_access', status: 'ok' }] }
+    },
+    overrides
+  );
+}
+
+function badgeText(doc) {
+  const node = doc.getElementById('downloadsJanitorActivity');
+  return node ? node.textContent : '';
+}
+
+test('a configured, idle workspace reports that it is watching', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(badgeText(doc), 'Watching');
+  assert.match(text(doc), /No files waiting for review/);
+  assert.match(text(doc), /next catch-up at 09:00/);
+});
+
+test('files waiting outrank watching in the status', () => {
+  const doc = setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(badgeText(doc), 'Review ready');
+  assert.match(text(doc), /2 files waiting for review/);
+});
+
+test('a problem outranks everything else', () => {
+  const doc = setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(
+    statusFixture({
+      readiness: {
+        state: 'needs_attention',
+        checks: [
+          { component: 'directory_access', status: 'failed', message: 'The folder is gone.' }
+        ]
+      }
+    })
+  );
+  assert.equal(badgeText(doc), 'Needs attention');
+});
+
+test('a paused workspace says so, and says what pausing does not stop', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+
+  assert.equal(badgeText(doc), 'Paused');
+  assert.match(text(doc), /automatic scanning paused/);
+  const control = doc.getElementById('downloadsJanitorPause');
+  assert.match(control.textContent, /Resume watching/);
+  // Scanning on demand is still available while paused.
+  assert.equal(doc.getElementById('downloadsJanitorScan').disabled, false);
+});
+
+test('the pause control explains what is kept', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  const control = doc.getElementById('downloadsJanitorPause');
+  assert.match(control.textContent, /Pause watching/);
+  assert.match(control.getAttribute('title'), /settings, pending review, and history are kept/);
+});
+
+test('pausing posts the new state and repaints from the server answer', async () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/pause')) {
+      sent = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          status: statusFixture({ settings: { ...statusFixture().settings, paused: true } })
+        })
+      };
+    }
+    if (String(url).includes('/history')) return { ok: true, json: async () => ({ actions: [] }) };
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorPause').click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(sent.paused, true);
+  assert.equal(badgeText(doc), 'Paused');
+});
+
+test('the header says Scanning while a scan the user started is running', async () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+
+  let observedDuringScan = '';
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/scan')) {
+      observedDuringScan = badgeText(doc);
+      return { ok: true, json: async () => ({ success: true, created: true }) };
+    }
+    if (String(url).includes('/history')) return { ok: true, json: async () => ({ actions: [] }) };
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  doc.getElementById('downloadsJanitorScan').click();
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(observedDuringScan, 'Scanning…');
+  // And it stops saying so once the scan finishes.
+  assert.notEqual(badgeText(doc), 'Scanning…');
+});
