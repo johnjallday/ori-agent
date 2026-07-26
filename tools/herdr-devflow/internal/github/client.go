@@ -152,17 +152,56 @@ func (c *Client) ListPullRequests(ctx context.Context, base string) (Result, err
 	if err != nil {
 		return Result{}, classify(queryCtx, err)
 	}
+	// The raw body is deliberately never included in an error; it can contain
+	// anything the remote chose to send.
+	result, err := decodeList(output)
+	if err != nil {
+		return Result{}, err
+	}
+	result.Truncated = len(result.PullRequests) >= c.candidateLimit
+	return result, nil
+}
+
+// MaxTargetedLookups bounds how many per-branch queries one collection may
+// make when the bulk listing did not cover a feature.
+const MaxTargetedLookups = 10
+
+// ListPullRequestsForHead queries the pull requests for one exact head branch.
+//
+// It exists because the bulk listing is necessarily capped: a repository with
+// hundreds of merged pull requests will always have older ones fall outside a
+// single page. Rather than raising the cap forever — which just moves the
+// problem — a feature the bulk page missed gets one small, targeted query.
+func (c *Client) ListPullRequestsForHead(ctx context.Context, base, head string) (Result, error) {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
+		return Result{}, errors.New("a base and head branch are required")
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	output, err := c.run(queryCtx,
+		"pr", "list",
+		"--state", "all",
+		"--base", base,
+		"--head", head,
+		"--limit", "10",
+		"--json", jsonFields,
+	)
+	if err != nil {
+		return Result{}, classify(queryCtx, err)
+	}
+	return decodeList(output)
+}
+
+func decodeList(output []byte) (Result, error) {
 	if len(output) > MaxOutputBytes {
 		return Result{}, &Error{Kind: ErrorMalformed, Detail: "the GitHub response was larger than this tool will decode"}
 	}
-
 	var decoded []rawPullRequest
 	if err := json.Unmarshal(output, &decoded); err != nil {
-		// The raw body is deliberately not included; it can contain anything.
 		return Result{}, &Error{Kind: ErrorMalformed, Detail: "the GitHub response could not be decoded"}
 	}
-
-	result := Result{ObservedAt: time.Now(), Truncated: len(decoded) >= c.candidateLimit}
+	result := Result{ObservedAt: time.Now()}
 	for _, raw := range decoded {
 		result.PullRequests = append(result.PullRequests, raw.normalize())
 	}

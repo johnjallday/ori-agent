@@ -16,11 +16,13 @@ import (
 // fakeRemote is a deterministic RemoteCollector. It counts calls so tests can
 // assert how often the network would have been touched.
 type fakeRemote struct {
-	mu      sync.Mutex
-	calls   int
-	result  github.Result
-	err     error
-	errFrom int
+	mu       sync.Mutex
+	calls    int
+	result   github.Result
+	err      error
+	errFrom  int
+	byHead   map[string][]github.PullRequest
+	targeted []string
 }
 
 func (f *fakeRemote) ListPullRequests(context.Context, string) (github.Result, error) {
@@ -31,6 +33,22 @@ func (f *fakeRemote) ListPullRequests(context.Context, string) (github.Result, e
 		return github.Result{}, f.err
 	}
 	return f.result, nil
+}
+
+func (f *fakeRemote) ListPullRequestsForHead(_ context.Context, _, head string) (github.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.targeted = append(f.targeted, head)
+	if f.byHead == nil {
+		return github.Result{}, nil
+	}
+	return github.Result{PullRequests: f.byHead[head], ObservedAt: observed}, nil
+}
+
+func (f *fakeRemote) targetedHeads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.targeted...)
 }
 
 func (f *fakeRemote) count() int {
@@ -302,5 +320,100 @@ func TestCollectKeepsRemoteFindingsOnTheirFeature(t *testing.T) {
 	found, _ := snapshot.Feature("sample-feature")
 	if _, ok := findingFor(found.Findings, FindingChecksFailing); !ok {
 		t.Fatalf("feature findings = %v, want the failing-checks finding", found.Findings)
+	}
+}
+
+func TestCollectResolvesPullRequestsTheBulkListingMissed(t *testing.T) {
+	// The bulk page is capped, so an older delivery falls outside it. The
+	// feature must still report its pull request rather than reading "no PR".
+	remote := &fakeRemote{
+		result: github.Result{
+			ObservedAt:   observed,
+			Truncated:    true,
+			PullRequests: []github.PullRequest{pull(300, "feature/something-else", "open")},
+		},
+		byHead: map[string][]github.PullRequest{
+			"feature/sample-feature": {pull(12, "feature/sample-feature", "merged")},
+		},
+	}
+	service := newTestService(t, remote, func(config *Config) {
+		config.Now = func() time.Time { return observed }
+	})
+
+	// Give the feature delivered-looking evidence so a lookup is warranted.
+	snapshot, err := service.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	found, _ := snapshot.Feature("sample-feature")
+	if found.Backlog.State != BacklogShipped {
+		t.Skip("fixture has no backlog entry; targeted lookup is only for delivered features")
+	}
+	if found.Remote.PullRequest == nil || found.Remote.PullRequest.Number != 12 {
+		t.Fatalf("remote = %+v, want the targeted lookup to resolve #12", found.Remote)
+	}
+}
+
+func TestCollectDoesNotChaseFeaturesThatShouldHaveNoPullRequest(t *testing.T) {
+	// Work in progress legitimately has no pull request. Querying for each one
+	// would turn every board render into a burst of API calls.
+	remote := &fakeRemote{result: github.Result{ObservedAt: observed, Truncated: true}}
+	if _, err := newTestService(t, remote).Collect(context.Background()); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if heads := remote.targetedHeads(); len(heads) != 0 {
+		t.Fatalf("targeted lookups = %v, want none for features with no delivery evidence", heads)
+	}
+}
+
+func TestCollectSkipsTargetedLookupsWhenTheBulkPageWasComplete(t *testing.T) {
+	remote := &fakeRemote{result: github.Result{ObservedAt: observed, Truncated: false}}
+	if _, err := newTestService(t, remote).Collect(context.Background()); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if heads := remote.targetedHeads(); len(heads) != 0 {
+		t.Fatalf("targeted lookups = %v, want none when the listing was not truncated", heads)
+	}
+}
+
+func TestResolveMissingHeadsIsBounded(t *testing.T) {
+	remote := &fakeRemote{}
+	service := newTestService(t, remote)
+
+	// More delivered features than the lookup budget allows.
+	var features []Feature
+	for index := range github.MaxTargetedLookups + 15 {
+		row := feature("feature-"+string(rune('a'+index%26))+string(rune('a'+index/26)), withBacklog(BacklogShipped))
+		features = append(features, row)
+	}
+
+	service.resolveMissingHeads(context.Background(), features, nil)
+	if got := len(remote.targetedHeads()); got > github.MaxTargetedLookups {
+		t.Fatalf("targeted lookups = %d, want at most %d", got, github.MaxTargetedLookups)
+	}
+}
+
+func TestResolveMissingHeadsSkipsAlreadyCoveredFeatures(t *testing.T) {
+	remote := &fakeRemote{}
+	service := newTestService(t, remote)
+
+	features := []Feature{feature("covered", withBacklog(BacklogShipped))}
+	service.resolveMissingHeads(context.Background(), features,
+		[]github.PullRequest{pull(5, "feature/covered", "merged")})
+
+	if heads := remote.targetedHeads(); len(heads) != 0 {
+		t.Fatalf("targeted lookups = %v, want none for a feature the bulk page covered", heads)
+	}
+}
+
+func TestResolveMissingHeadsToleratesLookupFailures(t *testing.T) {
+	// A failed targeted lookup is best effort; it must not degrade the board.
+	remote := &fakeRemote{errFrom: 1, err: &github.Error{Kind: github.ErrorNetwork, Detail: "the GitHub query failed"}}
+	service := newTestService(t, remote)
+
+	resolved := service.resolveMissingHeads(context.Background(),
+		[]Feature{feature("missing", withBacklog(BacklogShipped))}, nil)
+	if len(resolved) != 0 {
+		t.Fatalf("resolved = %v, want nothing from a failed lookup", resolved)
 	}
 }

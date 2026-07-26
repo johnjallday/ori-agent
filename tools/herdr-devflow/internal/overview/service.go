@@ -22,6 +22,8 @@ const (
 	gitWorkers = 6
 	// gitTimeout bounds the Git inspection of one checkout.
 	gitTimeout = 15 * time.Second
+	// remoteWorkers bounds concurrent targeted GitHub lookups.
+	remoteWorkers = 4
 )
 
 // RemoteCollector performs one fresh authenticated query for the repository's
@@ -29,6 +31,10 @@ const (
 // deterministic fixture with no network and no authenticated CLI.
 type RemoteCollector interface {
 	ListPullRequests(ctx context.Context, base string) (github.Result, error)
+	// ListPullRequestsForHead resolves one exact branch the bulk listing did
+	// not cover, which is how a repository with more pull requests than one
+	// page still reports every feature's delivery.
+	ListPullRequestsForHead(ctx context.Context, base, head string) (github.Result, error)
 }
 
 // Config configures one Service. Every collector is injectable so the service
@@ -255,34 +261,95 @@ func (s *Service) collectRemote(ctx context.Context, features []Feature, now tim
 		}
 	}
 
+	pulls := result.PullRequests
+	// The bulk listing is capped, so in a repository with a long merge history
+	// an older pull request falls outside it. Rather than raising the cap
+	// forever, resolve the stragglers with one small targeted query each.
+	if result.Truncated {
+		pulls = append(pulls, s.resolveMissingHeads(ctx, features, pulls)...)
+	}
+
 	// Remote findings belong to the feature they describe, not to the
 	// repository footer: an unattributed "checks are failing" tells a reader
 	// nothing about which feature to go and look at.
-	unmatched := 0
+	var findings []Finding
+	unresolved := 0
 	for index := range features {
-		raised := MatchRemote(&features[index], result.PullRequests, s.config.Baseline, source.ObservedAt)
+		raised := MatchRemote(&features[index], pulls, s.config.Baseline, source.ObservedAt)
 		features[index].Findings = mergeFindings(features[index].Findings, raised)
-		// Only a feature the backlog already calls delivered is suspicious
-		// without a pull request. Work in progress legitimately has none, so
-		// counting those would make the cap warning permanent noise.
-		if features[index].Remote.PullRequest == nil && features[index].Backlog.State == BacklogShipped {
-			unmatched++
+		if features[index].Remote.PullRequest == nil && expectsPullRequest(features[index]) {
+			unresolved++
 		}
 	}
-
-	var findings []Finding
-	// The listing is capped, so a repository with a long merge history always
-	// truncates. That only matters if some feature actually failed to match,
-	// which is the one case where the cap could be the explanation.
-	if result.Truncated && unmatched > 0 {
+	if result.Truncated && unresolved > 0 {
 		findings = append(findings, Finding{
 			Code:     FindingGitHubUnavailable,
 			Severity: SeverityInfo,
 			Source:   SourceGitHub,
-			Message:  "The pull-request listing hit its candidate limit, so an older pull request may not have been matched.",
+			Message:  "Some delivered features could not be matched to a pull request within this tool's query limits.",
 		})
 	}
 	return source, findings
+}
+
+// expectsPullRequest reports whether a feature should have remote delivery
+// evidence. Work in progress legitimately has none, so only a feature the
+// backlog already calls delivered is suspicious without one.
+func expectsPullRequest(feature Feature) bool {
+	return feature.Backlog.State == BacklogShipped
+}
+
+// resolveMissingHeads runs one targeted query per feature the bulk listing
+// missed, bounded in both count and concurrency so a large repository cannot
+// turn one board render into a burst of API calls.
+func (s *Service) resolveMissingHeads(ctx context.Context, features []Feature, pulls []github.PullRequest) []github.PullRequest {
+	covered := map[string]struct{}{}
+	for _, pull := range pulls {
+		if slug, ok := worktree.SlugFromBranch(pull.Head); ok {
+			covered[slug] = struct{}{}
+		}
+	}
+
+	var heads []string
+	for _, feature := range features {
+		if _, found := covered[feature.Slug]; found || !expectsPullRequest(feature) {
+			continue
+		}
+		if len(heads) >= github.MaxTargetedLookups {
+			break
+		}
+		heads = append(heads, worktree.FeatureBranchPrefix+feature.Slug)
+	}
+	if len(heads) == 0 {
+		return nil
+	}
+
+	var (
+		mu       sync.Mutex
+		resolved []github.PullRequest
+		wait     sync.WaitGroup
+	)
+	gate := make(chan struct{}, remoteWorkers)
+	for _, head := range heads {
+		wait.Add(1)
+		go func(head string) {
+			defer wait.Done()
+			gate <- struct{}{}
+			defer func() { <-gate }()
+
+			// A targeted lookup is best-effort: failing to resolve one older
+			// pull request must not degrade the whole snapshot.
+			found, err := s.config.Remote.ListPullRequestsForHead(ctx, s.config.Baseline, head)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			resolved = append(resolved, found.PullRequests...)
+			mu.Unlock()
+		}(head)
+	}
+	wait.Wait()
+	return resolved
 }
 
 func githubUnavailable(detail, recovery string) Finding {
