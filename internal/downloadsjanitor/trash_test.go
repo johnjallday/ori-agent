@@ -17,6 +17,9 @@ type fakeTrash struct {
 	supported   bool
 	failMove    bool
 	failRestore bool
+	// emptyToken models Windows' Recycle Bin, which restores by original path
+	// and issues no token of its own.
+	emptyToken bool
 	// silentNoop reports success without removing anything — the failure mode
 	// that would otherwise be reported to the user as "removed".
 	silentNoop bool
@@ -46,6 +49,11 @@ func (f *fakeTrash) MoveToTrash(path string) (string, error) {
 		return "", err
 	}
 	f.items[token] = held
+	if f.emptyToken {
+		// Restore has to find it by original path instead.
+		f.items[filepath.Base(path)] = held
+		return "", nil
+	}
 	return token, nil
 }
 
@@ -55,6 +63,9 @@ func (f *fakeTrash) RestoreFromTrash(originalPath, token string) error {
 		return errors.New("the item is no longer in the Trash")
 	}
 	held, ok := f.items[token]
+	if !ok && f.emptyToken {
+		held, ok = f.items[filepath.Base(originalPath)]
+	}
 	if !ok {
 		return errors.New("unknown restore token")
 	}
@@ -421,8 +432,11 @@ func TestUndo_EmptiedTrashIsExplainedAndTheJournalSurvives(t *testing.T) {
 	}
 }
 
-// A Trash action with no restore token cannot be restored from inside Ori, and
-// says so — the file may still be recoverable from the system Trash by hand.
+// A Trash action Ori cannot locate in the Trash fails and says so — the file
+// may still be recoverable from the system Trash by hand. On macOS and Linux a
+// lost restore token is exactly that case; the refusal comes from the platform,
+// not from a service-level assumption that a token always exists (Windows
+// restores by original path and never issues one).
 func TestUndo_MissingRestoreTokenIsExplained(t *testing.T) {
 	service, _, candidates := reviewFixture(t, "ad.pdf")
 	trash := newFakeTrash(t)

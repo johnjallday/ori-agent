@@ -315,10 +315,13 @@ func (s *Service) restoreFromTrash(settings JanitorSettings, root string, action
 	if !remover.Supported() {
 		return s.finishUndo(settings.WorkspaceID, action, UndoFailed, "This system has no recoverable Trash.")
 	}
-	if strings.TrimSpace(action.TrashRestoreToken) == "" {
-		return s.finishUndo(settings.WorkspaceID, action, UndoFailed,
-			"Ori has no way to find this file in the Trash. You may still be able to restore it from your system Trash.")
-	}
+	// Deliberately no check that a restore token exists. Whether one is needed
+	// is the platform's business: macOS and Linux hand back the trashed
+	// location and cannot restore without it, but the Windows Recycle Bin
+	// exposes no stable path and always returns an empty token, restoring by
+	// original path instead. Refusing on an empty token here would make undo
+	// permanently impossible on Windows. Each platform rejects what it cannot
+	// do, and the failure below reports it in the same words.
 	originalPath := filepath.Join(root, action.SourceName)
 	if !withinRoot(root, originalPath) {
 		return s.finishUndo(settings.WorkspaceID, action, UndoFailed, "The original location is no longer inside the folder Ori manages.")
@@ -332,7 +335,8 @@ func (s *Service) restoreFromTrash(settings JanitorSettings, root string, action
 		// The commonest cause is an emptied Trash. The journal entry stays
 		// either way — the record of what happened outlives the file (FR-100).
 		return s.finishUndo(settings.WorkspaceID, action, UndoFailed,
-			"Ori could not restore this file. It may have been removed from the Trash already.")
+			"Ori could not restore this file. It may have been removed from the Trash already. "+
+				"You may still be able to restore it from your system Trash.")
 	}
 	if _, err := os.Lstat(originalPath); err != nil {
 		return s.finishUndo(settings.WorkspaceID, action, UndoFailed,
