@@ -35,6 +35,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 
 ## Doing
 - downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-24)
+- path-based-agent-binding -> PRD at tasks/prd-path-based-agent-binding.md (started 2026-07-26)
 
 ## Shipped / dropped
 - 2026-07-26 wt-herd-feature-overview -> PRD at tasks/prd-wt-herd-feature-overview.md (started 2026-07-25) - PR #267 merged to dev (2026-07-26)
