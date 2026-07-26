@@ -626,6 +626,14 @@ function wt_status {
 function wt_status_help {
   echo "Usage: wt status [--feature <slug>] [--json] [--no-color] [--watch]"
   echo "       wt status --worktrees   # the Git-only worktree table"
+  echo
+  echo "Feature-first overview of every feature in this repository, joining"
+  echo "planning artifacts, BACKLOG.md, worktrees, Git, GitHub, and Herdr."
+  echo "Read-only: it never writes planning, Git, GitHub, bridge, or Herdr state."
+  echo
+  echo "Exit codes: 0 complete, 1 incomplete (a required source such as GitHub"
+  echo "was unavailable; local facts are still printed), 2 invalid arguments."
+  echo "Run 'wt herd doctor' if wt status keeps exiting 1."
 }
 
 # The legacy Git-only table, preserved byte for byte. It makes no network call

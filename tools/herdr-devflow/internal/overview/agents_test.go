@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,17 +15,28 @@ import (
 // fakeAgents is a deterministic AgentCollector. It also records every method
 // invocation so tests can prove collection never mutates Herdr.
 type fakeAgents struct {
+	// mu guards calls: the service may collect concurrently, so the fake has
+	// to be as safe as the thing it stands in for.
+	mu    sync.Mutex
 	live  []herdr.AgentInfo
 	err   error
 	calls []string
 }
 
 func (f *fakeAgents) AgentListInfo(context.Context) ([]herdr.AgentInfo, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, "AgentListInfo")
+	f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.live, nil
+}
+
+func (f *fakeAgents) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
 }
 
 type fakeBridge struct {
@@ -316,8 +328,8 @@ func TestCollectAgentsNeverMutatesHerdr(t *testing.T) {
 	row := feature("x", withWorktree("/w/x"))
 	AttachAgents(&row, evidence)
 
-	if len(agents.calls) != 1 || agents.calls[0] != "AgentListInfo" {
-		t.Fatalf("herdr calls = %v, want exactly one read-only listing", agents.calls)
+	if agents.callCount() != 1 {
+		t.Fatalf("herdr calls = %d, want exactly one read-only listing", agents.callCount())
 	}
 }
 

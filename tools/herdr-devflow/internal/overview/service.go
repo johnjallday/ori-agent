@@ -457,10 +457,10 @@ func applyFacts(feature *Feature, facts worktree.Facts, now time.Time) {
 	git.Detail = facts.Detail
 
 	if facts.BranchAvailability == worktree.FactAvailable {
-		git.Branch = facts.Branch
+		git.Branch = planning.Sanitize(facts.Branch, 200)
 	}
 	if facts.HeadAvailability == worktree.FactAvailable {
-		git.HeadSHA = facts.Head
+		git.HeadSHA = planning.Sanitize(facts.Head, 64)
 	}
 	git.DirtyAvailability = factAvailability(facts.DirtyAvailability)
 	if git.DirtyAvailability.OK() {

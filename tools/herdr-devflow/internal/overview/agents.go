@@ -98,9 +98,9 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 		saved := state.Agents[role]
 		row := Agent{
 			Feature: feature.Slug,
-			Role:    saved.Role,
+			Role:    identityField(saved.Role),
 			Managed: true,
-			Kind:    saved.Kind,
+			Kind:    identityField(saved.Kind),
 			Saved:   savedIdentity(saved),
 			SavedAt: saved.UpdatedAt,
 			// A saved status is a record from the last bridge write, never a
@@ -243,7 +243,7 @@ func classifyBinding(saved model.RoleAgent, live []herdr.AgentInfo) bindingMatch
 			return bindingMatch{
 				health: BindingPossibleDrift, live: &matches[0],
 				detail: "native session matches, but workspace differs: saved " +
-					saved.WorkspaceID + ", live " + matches[0].WorkspaceID,
+					identityField(saved.WorkspaceID) + ", live " + identityField(matches[0].WorkspaceID),
 			}
 		case 0:
 			// Fall through to weaker evidence.
@@ -283,14 +283,15 @@ func classifyBinding(saved model.RoleAgent, live []herdr.AgentInfo) bindingMatch
 		}
 	case 0:
 		return bindingMatch{health: BindingMissing,
-			detail: "no live agent in workspace " + saved.WorkspaceID + " matches saved pane " + saved.PaneID}
+			detail: "no live agent in workspace " + identityField(saved.WorkspaceID) +
+				" matches saved pane " + identityField(saved.PaneID)}
 	default:
 		var candidates []herdr.AgentInfo
 		for _, index := range plausible {
 			candidates = append(candidates, live[index])
 		}
 		return bindingMatch{health: BindingAmbiguous, candidates: identities(candidates),
-			detail: "several live agents in workspace " + saved.WorkspaceID + " plausibly match this role"}
+			detail: "several live agents in workspace " + identityField(saved.WorkspaceID) + " plausibly match this role"}
 	}
 }
 
@@ -303,16 +304,16 @@ func explainDrift(saved model.RoleAgent, live herdr.AgentInfo) string {
 			differences = append(differences, field+": saved "+quoteOrNone(savedValue)+", live "+quoteOrNone(liveValue))
 		}
 	}
-	compare("name", saved.Name, live.Name)
-	compare("pane", saved.PaneID, live.PaneID)
-	compare("terminal", saved.TerminalID, live.TerminalID)
-	compare("kind", saved.Kind, live.Agent)
+	compare("name", identityField(saved.Name), identityField(live.Name))
+	compare("pane", identityField(saved.PaneID), identityField(live.PaneID))
+	compare("terminal", identityField(saved.TerminalID), identityField(live.TerminalID))
+	compare("kind", identityField(saved.Kind), identityField(live.Agent))
 	if saved.NativeSession.Value != "" {
 		liveSession := ""
 		if live.AgentSession != nil {
 			liveSession = live.AgentSession.Value
 		}
-		compare("session", saved.NativeSession.Value, liveSession)
+		compare("session", identityField(saved.NativeSession.Value), identityField(liveSession))
 	}
 	if len(differences) == 0 {
 		return "the saved and live identities agree on every compared field"
@@ -346,7 +347,7 @@ func discoverUnmanaged(feature *Feature, state model.FeatureState, live []herdr.
 		rows = append(rows, Agent{
 			Feature:            feature.Slug,
 			Managed:            false,
-			Kind:               candidate.Agent,
+			Kind:               identityField(candidate.Agent),
 			Live:               liveIdentity(candidate),
 			Status:             AgentStatus(normalizeStatus(candidate.AgentStatus)),
 			StatusAvailability: AvailabilityAvailable,
@@ -367,9 +368,9 @@ func featureSchedules(state model.FeatureState) []Schedule {
 	schedules := make([]Schedule, 0, len(state.Schedules))
 	for _, schedule := range state.Schedules {
 		schedules = append(schedules, Schedule{
-			ID:      schedule.ID,
-			State:   string(schedule.State),
-			Summary: "scheduled action " + schedule.ID + " (" + string(schedule.State) + ")",
+			ID:      identityField(schedule.ID),
+			State:   identityField(string(schedule.State)),
+			Summary: "scheduled action " + identityField(schedule.ID) + " (" + identityField(string(schedule.State)) + ")",
 			DueAt:   schedule.DueAt,
 		})
 	}
@@ -395,30 +396,40 @@ func sortedRoles(state model.FeatureState) []string {
 	return roles
 }
 
+// maxIdentityRunes bounds one displayed identity field.
+const maxIdentityRunes = 120
+
+// identityField sanitizes a value that reaches a terminal, a JSON payload, or a
+// Herdr board cell. Pane IDs and agent names originate in a terminal session,
+// so they are untrusted for display exactly like remote branch names are.
+func identityField(value string) string {
+	return planning.Sanitize(value, maxIdentityRunes)
+}
+
 func savedIdentity(saved model.RoleAgent) Identity {
 	return Identity{
-		Workspace: saved.WorkspaceID,
-		Pane:      saved.PaneID,
-		Terminal:  saved.TerminalID,
-		Session:   saved.NativeSession.Value,
-		Kind:      saved.Kind,
-		Source:    saved.NativeSession.Source,
+		Workspace: identityField(saved.WorkspaceID),
+		Pane:      identityField(saved.PaneID),
+		Terminal:  identityField(saved.TerminalID),
+		Session:   identityField(saved.NativeSession.Value),
+		Kind:      identityField(saved.Kind),
+		Source:    identityField(saved.NativeSession.Source),
 	}
 }
 
 func liveIdentity(live herdr.AgentInfo) Identity {
 	identity := Identity{
-		Workspace: live.WorkspaceID,
-		Pane:      live.PaneID,
-		Terminal:  live.TerminalID,
-		Kind:      live.Agent,
+		Workspace: identityField(live.WorkspaceID),
+		Pane:      identityField(live.PaneID),
+		Terminal:  identityField(live.TerminalID),
+		Kind:      identityField(live.Agent),
 	}
 	if live.AgentSession != nil {
-		identity.Session = live.AgentSession.Value
-		identity.Source = live.AgentSession.Source
+		identity.Session = identityField(live.AgentSession.Value)
+		identity.Source = identityField(live.AgentSession.Source)
 	}
 	if identity.Session == "" {
-		identity.Session = live.Name
+		identity.Session = identityField(live.Name)
 	}
 	return identity
 }

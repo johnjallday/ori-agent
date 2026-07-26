@@ -511,8 +511,8 @@ func TestCollectionIsDiagnosticOnly(t *testing.T) {
 	if bridge.writes != 0 {
 		t.Fatalf("collection wrote bridge state %d times", bridge.writes)
 	}
-	if len(spy.calls) != 1 || spy.calls[0] != "AgentListInfo" {
-		t.Fatalf("herdr calls = %v, want one read-only listing", spy.calls)
+	if spy.callCount() != 1 {
+		t.Fatalf("herdr calls = %d, want one read-only listing", spy.callCount())
 	}
 }
 

@@ -262,6 +262,7 @@ const (
 	FindingWorktreeWithoutPlan FindingCode = "worktree_without_plan"
 	FindingBacklogDrift        FindingCode = "backlog_drift"
 	FindingArchiveStale        FindingCode = "archive_stale"
+	FindingCleanupOutstanding  FindingCode = "cleanup_outstanding"
 	FindingArchiveMissing      FindingCode = "archive_missing"
 	FindingBranchBehindBase    FindingCode = "branch_behind_base"
 	FindingBaselineStale       FindingCode = "baseline_stale"

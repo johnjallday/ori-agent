@@ -3,6 +3,7 @@ package overview
 import (
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // DeriveOptions controls the parts of derivation that depend on which
@@ -97,6 +98,31 @@ func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 	return state
 }
 
+// cleanupReasons lists what still stands between a merged feature and being
+// finished, in the order a person would deal with them.
+func cleanupReasons(feature Feature, baseline string) []string {
+	var reasons []string
+	if feature.Git.WorktreePath != "" {
+		reasons = append(reasons, "the feature worktree still exists")
+	}
+	if feature.Backlog.State == BacklogDoing {
+		reasons = append(reasons, "BACKLOG.md still lists it as in progress")
+	}
+	progress := feature.Plan.Progress
+	if progress.Availability.OK() && progress.SubtasksTotal > 0 && progress.SubtasksCompleted < progress.SubtasksTotal {
+		reasons = append(reasons, strconv.Itoa(progress.SubtasksTotal-progress.SubtasksCompleted)+
+			" subtasks are unchecked in the archived plan in "+baseline)
+	}
+	return reasons
+}
+
+// delivered reports whether remote evidence shows this feature's pull request
+// merged. It is the only signal that can contradict a Doing entry.
+func delivered(feature Feature) bool {
+	pull := feature.Remote.PullRequest
+	return pull != nil && pull.Merged
+}
+
 // outstandingCleanup reports whether anything local still needs tidying after
 // a merge: the worktree or branch survives, the backlog still calls the
 // feature in progress, or the ticked plan was never archived back into dev.
@@ -173,6 +199,13 @@ func DeriveFindings(feature Feature, options DeriveOptions) []Finding {
 	case feature.Backlog.State == BacklogAbsent && hasWorktree:
 		raise(FindingBacklogDrift, SeverityInfo, SourceBacklog,
 			"A feature worktree exists with no BACKLOG.md entry.", "")
+	case feature.Backlog.State == BacklogDoing && delivered(feature):
+		// The merge happened but the backlog was never retired. This is the
+		// single most common bookkeeping gap, and only a remote query can see
+		// it: locally the entry looks like ordinary work in progress.
+		raise(FindingBacklogDrift, SeverityWarning, SourceBacklog,
+			"This feature's pull request merged, but BACKLOG.md still lists it as in progress.",
+			boundedEntry(feature.Backlog))
 	case feature.Backlog.State == BacklogDoing && !hasWorktree && feature.Plan.Copy == PlanCopyNone:
 		raise(FindingBacklogDrift, SeverityWarning, SourceBacklog,
 			"BACKLOG.md lists this feature as in progress, but no worktree or plan was found.",
@@ -185,10 +218,23 @@ func DeriveFindings(feature Feature, options DeriveOptions) []Finding {
 		raise(FindingArchiveMissing, SeverityInfo, SourcePlanning,
 			"This feature shipped but no archived planning copy remains in "+baseline+".", "")
 	}
-	// A shipped feature whose archived plan is still mostly unticked means the
-	// ticked copy never made it back from the worktree, so the archive records
-	// the plan as written rather than the work as done.
-	if !hasWorktree && feature.Phase.Phase == PhaseShipped && feature.Plan.Copy == PlanCopyDev {
+	// A merged feature is only finished once its worktree, branch, backlog
+	// entry, and archived plan agree. Naming what is outstanding matters: a
+	// row reading "Merged (cleanup)" with nothing flagged tells a reader that
+	// work remains but not what it is.
+	if feature.Phase.Phase == PhaseMergedCleanup {
+		if reasons := cleanupReasons(feature, baseline); len(reasons) > 0 {
+			raise(FindingCleanupOutstanding, SeverityInfo, SourcePlanning,
+				"This feature merged but local cleanup is outstanding.",
+				strings.Join(reasons, "; "))
+		}
+	}
+
+	// A delivered feature whose archived plan is still mostly unticked means
+	// the ticked copy never made it back from the worktree, so the archive
+	// records the plan as written rather than the work as done.
+	terminalOrCleanup := feature.Phase.Phase == PhaseShipped || feature.Phase.Phase == PhaseMergedCleanup
+	if !hasWorktree && terminalOrCleanup && feature.Plan.Copy == PlanCopyDev {
 		progress := feature.Plan.Progress
 		if progress.Availability.OK() && progress.SubtasksTotal > 0 && progress.SubtasksCompleted < progress.SubtasksTotal {
 			raise(FindingArchiveStale, SeverityInfo, SourcePlanning,

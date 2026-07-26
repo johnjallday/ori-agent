@@ -2251,6 +2251,11 @@ Usage:
   wt herd schedule show <schedule-id> [--feature NAME|--worktree PATH]
   wt herd schedule cancel <schedule-id> [--feature NAME|--worktree PATH]
                                 Inspect or cancel local one-time continuations without prompting
+  wt herd overview [--feature NAME] [--json] [--no-color] [--watch]
+                                Feature-first overview: planning, backlog, worktrees, Git,
+                                GitHub pull requests, and live Herdr agents, joined on the
+                                exact feature slug. Read-only. Exits nonzero while a
+                                required source (normally GitHub) is unavailable.
   wt herd status [--current|--feature NAME|--worktree PATH] [--watch] [--json] [--no-color]
                                 Show all managed features by default, or a filtered live status board
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view

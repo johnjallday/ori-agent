@@ -131,8 +131,8 @@ func buildFeature(slug string, sources []SourceKind, input Input) (Feature, []Fi
 		feature.Git = GitState{
 			Availability: AvailabilityUnknown,
 			WorktreePath: active.Path,
-			Branch:       active.Branch,
-			HeadSHA:      active.Head,
+			Branch:       planning.Sanitize(active.Branch, 200),
+			HeadSHA:      planning.Sanitize(active.Head, 64),
 			ObservedAt:   input.Checkouts.ObservedAt,
 		}
 		// A directory renamed away from its branch is real drift: `wt done`

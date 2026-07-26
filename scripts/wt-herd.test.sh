@@ -175,4 +175,49 @@ for invalid_args in "--bogus" "--feature" "--worktrees --json"; do
 done
 [[ ! -f "$fixture_root/invalid-calls" ]]
 
+# Restore the recording helper: the invalid-argument block above replaced it.
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/overview-calls"
+  return 0
+}
+
+# Unusual but valid paths must survive quoting: the dispatcher forwards
+# arguments as separate words and never evaluates them.
+> "$fixture_root/overview-calls"
+wt status --feature "a-b-c" > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "overview --feature a-b-c" ]]
+
+# NO_COLOR and --no-color are both honoured, and neither is swallowed.
+> "$fixture_root/overview-calls"
+NO_COLOR=1 wt status > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "overview" ]]
+> "$fixture_root/overview-calls"
+wt status --no-color --watch > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "overview --no-color --watch" ]]
+
+# The exit status distinguishes a usage error (2) from an incomplete
+# snapshot (1) from success (0). Scripts branch on these, so each is asserted
+# without letting `set -e` abort on the deliberate failures.
+function wt_status_exit_code {
+  local code=0
+  wt status "$@" > /dev/null 2>&1 || code=$?
+  print -r -- "$code"
+}
+
+function wt_herd { return 0 }
+[[ "$(wt_status_exit_code)" == "0" ]]
+
+function wt_herd { return 1 }
+[[ "$(wt_status_exit_code)" == "1" ]]
+
+[[ "$(wt_status_exit_code --bogus)" == "2" ]]
+
+# --worktrees keeps working with no helper at all: it is pure Git.
+function wt_herd {
+  print -r -- "the legacy table must not call the helper" >> "$fixture_root/legacy-calls"
+  return 0
+}
+wt status --worktrees > /dev/null
+[[ ! -f "$fixture_root/legacy-calls" ]]
+
 print -r -- "wt-herd.test.sh: ok"
