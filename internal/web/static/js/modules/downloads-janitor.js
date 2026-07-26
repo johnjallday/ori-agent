@@ -49,6 +49,11 @@
   let historyStatusMessage = '';
   // True while a scan the user started is in flight, so the header can say so.
   let scanning = false;
+  let settingsOpen = false;
+  let settingsMessage = '';
+  // Revoking asks once before acting: it is the one control that takes
+  // something away the user cannot get back with a click.
+  let revokeConfirmed = false;
 
   function wsId() {
     return workspaceId || (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
@@ -684,6 +689,317 @@
     return parts.length === 0 ? 'Apply' : parts.join(' and ');
   }
 
+  // ------------------------------------------------------------- privacy & settings
+
+  // privacyLine states what Ori reads, in the card itself rather than behind a
+  // settings link. A user should never have to go looking to find out whether
+  // their files are being read.
+  function privacyLine(status) {
+    const privacy = (status && status.privacy) || {};
+    const wrap = el('div', 'dj-privacy');
+    wrap.id = 'downloadsJanitorPrivacy';
+
+    const mark = el('span', 'dj-privacy-mark', privacy.leaves_device ? '↗' : '⌂');
+    mark.setAttribute('aria-hidden', 'true');
+    wrap.appendChild(mark);
+
+    const text = el('span', 'dj-privacy-text');
+    text.appendChild(el('span', 'dj-privacy-headline', privacy.headline || ''));
+    if (privacy.detail) text.appendChild(el('span', 'dj-privacy-detail', ' ' + privacy.detail));
+    wrap.appendChild(text);
+
+    // A configured-but-unconfirmed provider is the one state where something
+    // is pending on the user, so it gets the action rather than a note.
+    if (privacy.consent_required) {
+      wrap.appendChild(
+        button(
+          'Confirm ' + (privacy.provider || 'provider'),
+          'dj-btn dj-btn-quiet',
+          () => void grantConsent(privacy.provider)
+        )
+      );
+    }
+    return wrap;
+  }
+
+  const CONTENT_MODES = [
+    {
+      id: 'metadata_only',
+      label: 'Names and file details only',
+      help: 'Ori never opens your files. This is the default.'
+    },
+    {
+      id: 'local_model',
+      label: 'Also read a little text, on this device',
+      help: 'For files Ori cannot place, it may read the first few kilobytes of plain text documents. Nothing leaves this device.'
+    },
+    {
+      id: 'cloud_model',
+      label: 'Also read a little text, using a cloud provider',
+      help: 'Short extracts from plain text documents are sent to the provider you configure. Ori asks you to confirm before anything is sent.'
+    }
+  ];
+
+  function renderSettings() {
+    const host = document.getElementById('downloadsJanitorSettingsHost');
+    if (!host) return;
+    clear(host);
+    if (!settingsOpen) return;
+
+    const settings = (lastStatus && lastStatus.settings) || {};
+    const panel = el('section', 'dj-settings');
+    panel.setAttribute('aria-labelledby', 'downloadsJanitorSettingsTitle');
+    const title = el('h3', 'dj-settings-title', 'Settings');
+    title.id = 'downloadsJanitorSettingsTitle';
+    panel.appendChild(title);
+
+    // Daily catch-up time.
+    const timeRow = el('div', 'dj-setting');
+    const timeLabel = el('label', 'dj-label', 'Daily catch-up time');
+    timeLabel.setAttribute('for', 'downloadsJanitorDailyTime');
+    const timeInput = document.createElement('input');
+    timeInput.type = 'time';
+    timeInput.id = 'downloadsJanitorDailyTime';
+    timeInput.className = 'dj-input dj-input-time';
+    timeInput.value = settings.daily_scan_local_time || '09:00';
+    timeInput.addEventListener('change', () => {
+      void saveSettings({ daily_scan_local_time: timeInput.value });
+    });
+    timeRow.appendChild(timeLabel);
+    timeRow.appendChild(timeInput);
+    timeRow.appendChild(el('p', 'dj-setting-help', 'Shown in your local time.'));
+    panel.appendChild(timeRow);
+
+    // Content inspection, with each option's consequence spelled out.
+    const contentRow = el('fieldset', 'dj-setting dj-setting-content');
+    const legend = el('legend', 'dj-label', 'What Ori may read');
+    contentRow.appendChild(legend);
+    const currentMode = settings.content_mode || 'metadata_only';
+    CONTENT_MODES.forEach(mode => {
+      const option = el('label', 'dj-radio');
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'downloadsJanitorContentMode';
+      input.value = mode.id;
+      input.checked = currentMode === mode.id;
+      input.addEventListener('change', () => {
+        if (input.checked) void saveSettings({ content_mode: mode.id });
+      });
+      option.appendChild(input);
+      option.appendChild(el('span', 'dj-radio-label', mode.label));
+      option.appendChild(el('span', 'dj-radio-help', mode.help));
+      contentRow.appendChild(option);
+    });
+    panel.appendChild(contentRow);
+
+    // Folder actions. Relink and revoke are grouped away from the rest and
+    // labelled by what they do to the user's access, not by verb.
+    const actions = el('div', 'dj-settings-actions');
+    actions.appendChild(
+      button('Run a test scan', 'dj-btn dj-btn-secondary', () => void testScan())
+    );
+    actions.appendChild(
+      button('Reset skipped files', 'dj-btn dj-btn-secondary', () => void resetSkipped())
+    );
+    actions.appendChild(
+      button('Choose a different folder', 'dj-btn dj-btn-secondary', () => void relink())
+    );
+    actions.appendChild(
+      button(
+        'Stop using this folder',
+        'dj-btn dj-btn-secondary dj-btn-destructive',
+        () => void revoke()
+      )
+    );
+    panel.appendChild(actions);
+
+    const status = el('p', 'dj-settings-status', settingsMessage);
+    status.id = 'downloadsJanitorSettingsStatus';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    panel.appendChild(status);
+
+    host.appendChild(panel);
+  }
+
+  function setSettingsMessage(message) {
+    settingsMessage = message || '';
+    const node = document.getElementById('downloadsJanitorSettingsStatus');
+    if (node) node.textContent = settingsMessage;
+  }
+
+  async function saveSettings(patch) {
+    const id = wsId();
+    if (!id) return;
+    setSettingsMessage('Saving…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/settings',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not save that.');
+      }
+      render(body.status);
+      settingsOpen = true;
+      renderSettings();
+      setSettingsMessage('Saved.');
+      await loadBatch();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not save that.');
+    }
+  }
+
+  async function grantConsent(provider) {
+    const id = wsId();
+    if (!id) return;
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/content-consent',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not record that.');
+      }
+      render(body.status);
+    } catch (error) {
+      showError(error.message || 'Ori could not record that.');
+    }
+  }
+
+  async function testScan() {
+    const id = wsId();
+    if (!id) return;
+    setSettingsMessage('Checking…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/test-scan',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error('The test scan could not run.');
+      const report = body.report || {};
+      // A test scan is a check, and says so: it changes nothing.
+      setSettingsMessage(
+        report.eligible_count +
+          (report.eligible_count === 1 ? ' file would be proposed' : ' files would be proposed') +
+          (report.ineligible_count ? ', ' + report.ineligible_count + ' skipped' : '') +
+          '. Nothing was changed.'
+      );
+    } catch (error) {
+      setSettingsMessage(error.message || 'The test scan could not run.');
+    }
+  }
+
+  async function resetSkipped() {
+    const id = wsId();
+    if (!id) return;
+    setSettingsMessage('Resetting…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/skipped/reset',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+      );
+      if (!response.ok) throw new Error('Ori could not reset those.');
+      setSettingsMessage('Previously skipped files can be proposed again.');
+      await loadBatch();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not reset those.');
+    }
+  }
+
+  async function relink() {
+    const id = wsId();
+    if (!id) return;
+    setSettingsMessage('');
+    let picked = '';
+    try {
+      const response = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose a different folder to tidy' })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success)
+        throw new Error(result.error || 'Folder picker unavailable');
+      if (!result.selected || !result.path) return;
+      picked = result.path;
+    } catch (error) {
+      setSettingsMessage(error.message || 'Could not open the folder picker.');
+      return;
+    }
+
+    setSettingsMessage('Switching folders…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/relink',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: picked })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not change the folder.');
+      }
+      render(body.status);
+      settingsOpen = true;
+      renderSettings();
+      setSettingsMessage(
+        'Now tidying the new folder. Anything waiting for review from the old one was cleared.'
+      );
+      await loadBatch();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not change the folder.');
+    }
+  }
+
+  // revoke is destructive to access, not to files, and the confirmation says
+  // exactly that so the user is not left guessing what they are about to lose.
+  async function revoke() {
+    const id = wsId();
+    if (!id) return;
+    if (!revokeConfirmed) {
+      revokeConfirmed = true;
+      setSettingsMessage(
+        'This disconnects the folder: Ori stops watching and scanning it. Your files stay exactly where they are, ' +
+          'and your history is kept. Choose "Stop using this folder" again to confirm.'
+      );
+      return;
+    }
+    revokeConfirmed = false;
+    setSettingsMessage('Disconnecting…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/revoke',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not disconnect the folder.');
+      }
+      settingsOpen = false;
+      render(body.status);
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not disconnect the folder.');
+    }
+  }
+
   // ------------------------------------------------------------------ history
 
   const HISTORY_FILTERS = [
@@ -1081,7 +1397,24 @@
       );
     }
     actions.appendChild(button('Check again', 'dj-btn dj-btn-secondary', () => void refresh()));
+    const settingsToggle = button('Settings', 'dj-btn dj-btn-secondary', () => {
+      settingsOpen = !settingsOpen;
+      settingsMessage = '';
+      revokeConfirmed = false;
+      settingsToggle.setAttribute('aria-expanded', settingsOpen ? 'true' : 'false');
+      renderSettings();
+    });
+    settingsToggle.id = 'downloadsJanitorSettingsToggle';
+    settingsToggle.setAttribute('aria-expanded', settingsOpen ? 'true' : 'false');
+    settingsToggle.setAttribute('aria-controls', 'downloadsJanitorSettingsHost');
+    actions.appendChild(settingsToggle);
     card.appendChild(actions);
+
+    const settingsHost = el('div', 'dj-settings-host');
+    settingsHost.id = 'downloadsJanitorSettingsHost';
+    card.appendChild(settingsHost);
+
+    card.appendChild(privacyLine(status));
 
     // The review batch mounts here and repaints on its own, so recording one
     // decision does not rebuild (and re-focus) the whole card.
@@ -1104,6 +1437,7 @@
     card.appendChild(errorRegion());
     host.appendChild(card);
     renderBatch();
+    renderSettings();
   }
 
   // renderSetupPrompt re-opens the folder chooser for an already-configured
@@ -1466,6 +1800,10 @@
     _selected: () => Array.from(selected),
     _setStatus: status => {
       lastStatus = status;
+    },
+    _openSettings: () => {
+      settingsOpen = true;
+      renderSettings();
     },
     _setHistory: actions => {
       historyActions = actions || [];

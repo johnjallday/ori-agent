@@ -1354,3 +1354,154 @@ test('the header says Scanning while a scan the user started is running', async 
   // And it stops saying so once the scan finishes.
   assert.notEqual(badgeText(doc), 'Scanning…');
 });
+
+// -------------------------------------------------------- privacy & settings
+
+function privacyStatus(privacy) {
+  return statusFixture({ privacy });
+}
+
+test('the card always states what Ori reads, without opening settings', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    privacyStatus({
+      mode: 'metadata_only',
+      headline: 'Ori reads file names, types, sizes, and dates only.',
+      detail: 'No file contents are opened or read.',
+      leaves_device: false
+    })
+  );
+  const body = text(doc);
+  assert.match(body, /names, types, sizes, and dates only/);
+  assert.match(body, /No file contents are opened or read/);
+});
+
+test('a cloud provider is named, and the pending confirmation is the action', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(
+    privacyStatus({
+      mode: 'cloud_model',
+      headline: 'Ori reads file names, types, sizes, and dates, and may read a short extract.',
+      detail:
+        'Extracts are sent to SomeCloud, which is outside this device. Nothing has been sent yet.',
+      provider: 'SomeCloud',
+      leaves_device: true,
+      consent_required: true
+    })
+  );
+  const body = text(doc);
+  assert.match(body, /SomeCloud/);
+  assert.match(body, /outside this device/);
+  assert.match(body, /Nothing has been sent yet/);
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  const confirm = host.all(
+    n => n.tagName === 'BUTTON' && /Confirm SomeCloud/.test(n.textContent)
+  )[0];
+  assert.ok(confirm, 'an unconfirmed provider must offer the confirmation');
+});
+
+test('settings spell out the consequence of each content option', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel._openSettings();
+
+  const body = text(doc);
+  assert.match(body, /Names and file details only/);
+  assert.match(body, /Ori never opens your files\. This is the default/);
+  assert.match(body, /Nothing leaves this device/);
+  assert.match(body, /asks you to confirm before anything is sent/);
+});
+
+test('changing a setting patches only that field', async () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel._openSettings();
+
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/settings')) {
+      sent = { method: opts.method, body: JSON.parse(opts.body) };
+      return { ok: true, json: async () => ({ status: statusFixture() }) };
+    }
+    return { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+  };
+
+  const input = doc.getElementById('downloadsJanitorDailyTime');
+  input.value = '07:30';
+  input.dispatch('change');
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(sent.method, 'PATCH');
+  assert.deepEqual(Object.keys(sent.body), ['daily_scan_local_time']);
+  assert.equal(sent.body.daily_scan_local_time, '07:30');
+});
+
+test('a test scan reports what it would do and says nothing changed', async () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel._openSettings();
+
+  globalThis.fetch = async url =>
+    String(url).endsWith('/test-scan')
+      ? { ok: true, json: async () => ({ report: { eligible_count: 3, ineligible_count: 2 } }) }
+      : { ok: true, json: async () => ({ batch: null, candidates: [] }) };
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Run a test scan')[0].click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const status = doc.getElementById('downloadsJanitorSettingsStatus').textContent;
+  assert.match(status, /3 files would be proposed/);
+  assert.match(status, /2 skipped/);
+  assert.match(status, /Nothing was changed/);
+});
+
+// Disconnecting a folder asks once, and says exactly what is and is not lost.
+test('stopping use of a folder confirms first and explains what is kept', async () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel._openSettings();
+
+  let called = false;
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/revoke')) called = true;
+    return { ok: true, json: async () => ({ status: statusFixture() }) };
+  };
+
+  const host = doc.getElementById('downloadsJanitorMount');
+  const stop = host.all(
+    n => n.tagName === 'BUTTON' && /Stop using this folder/.test(n.textContent)
+  )[0];
+  assert.ok(stop, 'expected the disconnect control');
+
+  stop.click();
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(called, false, 'the first press must only warn');
+
+  const warning = doc.getElementById('downloadsJanitorSettingsStatus').textContent;
+  assert.match(warning, /Your files stay exactly where they are/);
+  assert.match(warning, /history is kept/);
+  assert.match(warning, /again to confirm/);
+
+  stop.click();
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(called, true, 'the second press confirms');
+});
+
+test('the settings toggle exposes its expanded state', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  const toggle = doc.getElementById('downloadsJanitorSettingsToggle');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(toggle.getAttribute('aria-controls'), 'downloadsJanitorSettingsHost');
+  toggle.click();
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+});

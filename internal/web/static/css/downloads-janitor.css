@@ -626,3 +626,98 @@
   color: var(--text-secondary, #9aa0a6);
   font-style: italic;
 }
+
+/* ------------------------------------------------------ privacy & settings */
+
+.dj-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-privacy-mark {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.dj-privacy-headline {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-settings {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-settings-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-setting {
+  margin-bottom: 0.9rem;
+  border: 0;
+  padding: 0;
+}
+
+.dj-setting-help,
+.dj-radio-help {
+  display: block;
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-input-time {
+  flex: 0 0 auto;
+  max-width: 9rem;
+  font-family: inherit;
+}
+
+.dj-radio {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.45rem;
+  align-items: start;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.dj-radio input {
+  margin-top: 0.15rem;
+}
+
+.dj-radio-label {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.82rem;
+}
+
+.dj-radio-help {
+  grid-column: 2;
+}
+
+.dj-radio input:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+.dj-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dj-settings-status {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-primary, #e8e8e8);
+}
