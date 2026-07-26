@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -143,11 +144,25 @@ func TestListPullRequestsRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestHelperProcessExitsNonZero is not a real test. It is re-executed as a
+// child process so exitError can obtain a genuine *exec.ExitError without
+// invoking a shell — this package forbids shell command strings, and that
+// prohibition applies to its own tests.
+func TestHelperProcessExitsNonZero(t *testing.T) {
+	if os.Getenv("HERDR_DEVFLOW_TEST_HELPER") != "1" {
+		t.Skip("helper process; runs only when re-executed")
+	}
+	os.Exit(1)
+}
+
 // exitError builds an *exec.ExitError carrying stderr, which is how `gh`
 // reports authentication failures.
 func exitError(t *testing.T, stderr string) error {
 	t.Helper()
-	command := exec.Command("sh", "-c", "exit 1")
+	// #nosec G204 -- os.Args[0] is this test binary and the arguments are
+	// fixed literals; no external or user input reaches the vector.
+	command := exec.Command(os.Args[0], "-test.run=TestHelperProcessExitsNonZero")
+	command.Env = append(os.Environ(), "HERDR_DEVFLOW_TEST_HELPER=1")
 	err := command.Run()
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {

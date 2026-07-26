@@ -64,6 +64,112 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 	return renderFooter(out, snapshot)
 }
 
+// RenderExpanded writes the herd view: every feature with its agent rows
+// beneath it. It is what `wt herd status` and the Herdr board print.
+//
+// It renders the same Snapshot as the compact table, so a value cannot differ
+// between the two surfaces — that equality is the point of the shared
+// snapshot, not an incidental property of it.
+func RenderExpanded(out io.Writer, snapshot Snapshot, options RenderOptions) error {
+	if len(snapshot.Features) == 0 {
+		return renderEmpty(out, snapshot)
+	}
+	write := func(format string, args ...any) error {
+		_, err := fmt.Fprintf(out, format+"\n", args...)
+		return err
+	}
+
+	managed := 0
+	for _, feature := range snapshot.Features {
+		for _, agent := range feature.Agents {
+			if agent.Managed {
+				managed++
+			}
+		}
+	}
+	if err := write("Ori Devflow overview: %d feature(s), %d managed agent(s)", len(snapshot.Features), managed); err != nil {
+		return err
+	}
+
+	inHistory := false
+	for _, feature := range snapshot.Features {
+		// Shipped and dropped work stays available but visually separate, so
+		// history never competes with what is in flight.
+		if feature.Phase.Phase.Terminal() && !inHistory {
+			inHistory = true
+			if err := write("\n--- history ---"); err != nil {
+				return err
+			}
+		}
+		if err := renderExpandedFeature(write, feature); err != nil {
+			return err
+		}
+	}
+	return renderFooter(out, snapshot)
+}
+
+func renderExpandedFeature(write func(string, ...any) error, feature Feature) error {
+	heading := "\n" + feature.Slug
+	if feature.Title != "" {
+		heading += " — " + feature.Title
+	}
+	if err := write("%s", heading); err != nil {
+		return err
+	}
+	if err := write("  phase: %s", phaseCell(feature.Phase)); err != nil {
+		return err
+	}
+	if err := write("  plan:  %s", planCell(feature.Plan)); err != nil {
+		return err
+	}
+	if next := feature.Plan.Progress.NextActionable; !next.Empty() {
+		if err := write("  next:  %s %s", next.Ordinal, truncate(next.Text, 96)); err != nil {
+			return err
+		}
+	}
+	if err := write("  git:   %s", gitCell(feature.Git)); err != nil {
+		return err
+	}
+	if feature.Git.Branch != "" {
+		if err := write("  branch: %s", feature.Git.Branch); err != nil {
+			return err
+		}
+	}
+	if err := write("  remote: %s", remoteCell(feature.Remote)); err != nil {
+		return err
+	}
+
+	for _, agent := range feature.Agents {
+		name := agent.Role
+		if !agent.Managed {
+			name = "(unmanaged)"
+		}
+		status := "unavailable"
+		if agent.StatusAvailability.OK() {
+			status = string(agent.Status)
+		}
+		if err := write("  agent %s: status %s · binding %s", name, status, agent.Binding.Label()); err != nil {
+			return err
+		}
+		if agent.BindingDetail != "" && agent.Binding != BindingExact {
+			if err := write("      %s", truncate(agent.BindingDetail, 160)); err != nil {
+				return err
+			}
+		}
+	}
+	for _, schedule := range feature.Schedules {
+		if err := write("  schedule %s: %s", schedule.ID, schedule.State); err != nil {
+			return err
+		}
+	}
+	for _, finding := range feature.Findings {
+		if err := write("  [%s] %s %s", finding.Severity.Label(), finding.Code, finding.Message); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func renderEmpty(out io.Writer, snapshot Snapshot) error {
 	if _, err := fmt.Fprintln(out, "No features were found in this repository."); err != nil {
 		return err
