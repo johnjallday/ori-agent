@@ -149,6 +149,7 @@ type Service struct {
 	mover      Mover
 	trash      TrashRemover
 	notifier   Notifier
+	provider   ClassificationProvider
 	// automation reports whether the watcher and daily schedule are actually
 	// registered. Until it is wired, those checks stay pending — which keeps a
 	// workspace out of Ready rather than overstating what is running.
@@ -170,6 +171,10 @@ type Status struct {
 	// all. The UI mounts its panel only when it is true, so the Janitor surface
 	// never appears on an unrelated workspace.
 	Applies bool `json:"applies"`
+	// Privacy states in plain language what Ori reads and where anything read
+	// goes. It travels with every status response so no surface can show the
+	// feature without showing its privacy posture.
+	Privacy PrivacyState `json:"privacy"`
 	// Suggestion describes the folder the workspace's template asked for. It is
 	// present before setup so the UI can pre-fill the picker; it is never a
 	// resolved path and never implies access.
@@ -269,6 +274,7 @@ func (s *Service) Status(workspaceID string) (Status, error) {
 		Settings:  settings,
 		Readiness: s.evaluateReadiness(settings),
 		Applies:   s.AppliesTo(workspaceID),
+		Privacy:   s.Privacy(settings),
 	}
 	if !settings.IsSetUp() {
 		status.Suggestion = s.suggestion(workspaceID, settings)

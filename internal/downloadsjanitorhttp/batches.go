@@ -563,3 +563,134 @@ func (h *Handler) respondReviewError(w http.ResponseWriter, err error, fallback 
 		h.respondError(w, err, fallback)
 	}
 }
+
+// ------------------------------------------------------------------ settings
+
+// UpdateSettings handles PATCH
+// /api/workspaces/{workspaceID}/downloads-janitor/settings. Every field is
+// optional: an absent field is left alone rather than reset, so a client that
+// sends one setting cannot silently clear another.
+func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		DailyScanLocalTime *string `json:"daily_scan_local_time"`
+		Timezone           *string `json:"timezone"`
+		ContentMode        *string `json:"content_mode"`
+		ContentProvider    *string `json:"content_provider"`
+		Paused             *bool   `json:"paused"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	update := downloadsjanitor.SettingsUpdate{
+		DailyScanLocalTime: req.DailyScanLocalTime,
+		Timezone:           req.Timezone,
+		ContentProvider:    req.ContentProvider,
+		Paused:             req.Paused,
+	}
+	if req.ContentMode != nil {
+		mode := downloadsjanitor.ContentMode(*req.ContentMode)
+		update.ContentMode = &mode
+	}
+
+	status, err := h.service.UpdateSettings(workspaceID, update)
+	if err != nil {
+		h.respondError(w, err, "Failed to update Downloads Janitor settings")
+		return
+	}
+	h.syncAutomation(workspaceID)
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
+}
+
+// GrantConsent handles POST
+// /api/workspaces/{workspaceID}/downloads-janitor/content-consent: the user's
+// explicit confirmation that file content may go to a named provider.
+//
+// The provider is named in the request as well as in settings, so a consent
+// recorded here is always consent to something the user could see.
+func (h *Handler) GrantConsent(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	status, err := h.service.GrantContentConsent(workspaceID, req.Provider)
+	if err != nil {
+		h.respondError(w, err, "Failed to record your confirmation")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
+}
+
+// Relink handles POST /api/workspaces/{workspaceID}/downloads-janitor/relink.
+func (h *Handler) Relink(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	status, err := h.service.Relink(h.lifecycle(), downloadsjanitor.RelinkRequest{
+		WorkspaceID: workspaceID, Path: req.Path,
+	})
+	if err != nil {
+		h.respondError(w, err, "Failed to change the folder")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
+}
+
+// RevokeAccess handles POST
+// /api/workspaces/{workspaceID}/downloads-janitor/revoke: disconnect the folder
+// entirely. History is kept; nothing further is scanned or acted on.
+func (h *Handler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	status, err := h.service.RevokeAccess(h.lifecycle(), workspaceID)
+	if err != nil {
+		h.respondError(w, err, "Failed to remove folder access")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
+}
+
+// ListSkipped handles GET
+// /api/workspaces/{workspaceID}/downloads-janitor/skipped.
+func (h *Handler) ListSkipped(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListSkipped(workspaceID)
+	if err != nil {
+		h.respondError(w, err, "Failed to list skipped items")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "skipped": items})
+}
+
+// lifecycle returns the automation control for settings operations that must
+// stop unattended work, or nil when automation is not wired.
+func (h *Handler) lifecycle() downloadsjanitor.WatcherLifecycle {
+	if h == nil || h.automation == nil {
+		return nil
+	}
+	if lifecycle, ok := h.automation.(downloadsjanitor.WatcherLifecycle); ok {
+		return lifecycle
+	}
+	return nil
+}

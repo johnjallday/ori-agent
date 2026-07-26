@@ -461,3 +461,147 @@ func TestResetSkipped_AcceptsAnEmptyBody(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// ------------------------------------------------------- settings & privacy
+
+func TestStatus_AlwaysStatesWhatOriReads(t *testing.T) {
+	h, _ := configuredHandler(t)
+	_, body := serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor", "")
+	status, _ := body["status"].(map[string]any)
+	privacy, _ := status["privacy"].(map[string]any)
+	if privacy == nil {
+		t.Fatalf("every status must carry the privacy state: %s", body)
+	}
+	if privacy["mode"] != "metadata_only" {
+		t.Fatalf("mode = %v, want metadata_only by default", privacy["mode"])
+	}
+	if privacy["leaves_device"] == true {
+		t.Fatal("metadata-only mode never leaves the device")
+	}
+	headline, _ := privacy["headline"].(string)
+	if !strings.Contains(headline, "names, types, sizes, and dates") {
+		t.Fatalf("headline = %q", headline)
+	}
+}
+
+func TestUpdateSettings_LeavesUnsentFieldsAlone(t *testing.T) {
+	h, _ := configuredHandler(t)
+
+	payload, _ := json.Marshal(map[string]any{"daily_scan_local_time": "07:30"})
+	rec, body := serve(t, h, http.MethodPatch, "/api/workspaces/ws-1/downloads-janitor/settings", string(payload))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	status, _ := body["status"].(map[string]any)
+	settings, _ := status["settings"].(map[string]any)
+	if settings["daily_scan_local_time"] != "07:30" {
+		t.Fatalf("time = %v", settings["daily_scan_local_time"])
+	}
+	// The folder and content mode are untouched by a schedule change.
+	if settings["root_path"] == nil || settings["content_mode"] != "metadata_only" {
+		t.Fatalf("an unrelated field changed: %+v", settings)
+	}
+
+	// A bad value is rejected and changes nothing.
+	payload, _ = json.Marshal(map[string]any{"daily_scan_local_time": "half past nine"})
+	if rec, _ := serve(t, h, http.MethodPatch, "/api/workspaces/ws-1/downloads-janitor/settings", string(payload)); rec.Code == http.StatusOK {
+		t.Fatal("an unusable time should be rejected")
+	}
+	_, body = serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor", "")
+	status, _ = body["status"].(map[string]any)
+	settings, _ = status["settings"].(map[string]any)
+	if settings["daily_scan_local_time"] != "07:30" {
+		t.Fatalf("a rejected change must not disturb the setting: %v", settings["daily_scan_local_time"])
+	}
+}
+
+func TestPause_StopsAutomaticWorkAndSaysSo(t *testing.T) {
+	h, _ := configuredHandler(t)
+	payload, _ := json.Marshal(map[string]bool{"paused": true})
+	rec, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/pause", string(payload))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	status, _ := body["status"].(map[string]any)
+	settings, _ := status["settings"].(map[string]any)
+	if settings["paused"] != true {
+		t.Fatalf("paused = %v", settings["paused"])
+	}
+	// Pausing keeps the folder configured.
+	if settings["root_path"] == nil {
+		t.Fatal("pausing must not unconfigure the workspace")
+	}
+}
+
+func TestRevoke_DisconnectsTheFolder(t *testing.T) {
+	h, _ := newTestHandler(t, map[string]string{"ws-1": userprofile.LocalUserID})
+	store := h.lookup.(*fakeStore)
+	root := inboxFixture(t)
+	payload, _ := json.Marshal(map[string]string{"path": root})
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/setup", string(payload)); rec.Code != http.StatusOK {
+		t.Fatalf("setup failed: %s", rec.Body.String())
+	}
+	rec, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/revoke", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	status, _ := body["status"].(map[string]any)
+	readiness, _ := status["readiness"].(map[string]any)
+	if readiness["state"] != "setup_required" {
+		t.Fatalf("state = %v, want setup_required", readiness["state"])
+	}
+	if len(store.workspaces["ws-1"].DirectoryReferences) != 0 {
+		t.Fatal("the folder link must be gone")
+	}
+}
+
+// Every settings route is workspace-scoped.
+func TestSettingsRoutes_RejectAnotherUsersWorkspace(t *testing.T) {
+	h, _ := configuredHandler(t)
+	payload, _ := json.Marshal(map[string]any{"paused": true})
+	for _, target := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPatch, "/api/workspaces/ws-other/downloads-janitor/settings", payload2(payload)},
+		{http.MethodPost, "/api/workspaces/ws-other/downloads-janitor/pause", payload2(payload)},
+		{http.MethodPost, "/api/workspaces/ws-other/downloads-janitor/revoke", ""},
+		{http.MethodPost, "/api/workspaces/ws-other/downloads-janitor/relink", `{"path":"/tmp"}`},
+		{http.MethodGet, "/api/workspaces/ws-other/downloads-janitor/skipped", ""},
+		{http.MethodGet, "/api/workspaces/ws-other/downloads-janitor/history", ""},
+	} {
+		rec, _ := serve(t, h, target.method, target.path, target.body)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s = %d, want 404", target.method, target.path, rec.Code)
+		}
+	}
+}
+
+func payload2(b []byte) string { return string(b) }
+
+// No response from any endpoint carries an absolute path except the configured
+// root the user chose themselves, which settings must show them.
+func TestResponses_DoNotLeakPathsBeyondTheConfiguredRoot(t *testing.T) {
+	h, root := configuredHandler(t)
+	agedFile(t, root, "report.pdf", 100)
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/scan", ""); rec.Code != http.StatusOK {
+		t.Fatal("scan failed")
+	}
+
+	for _, path := range []string{
+		"/api/workspaces/ws-1/downloads-janitor/batches",
+		"/api/workspaces/ws-1/downloads-janitor/batches/latest",
+		"/api/workspaces/ws-1/downloads-janitor/history",
+		"/api/workspaces/ws-1/downloads-janitor/skipped",
+	} {
+		rec, _ := serve(t, h, http.MethodGet, path, "")
+		if strings.Contains(rec.Body.String(), root) {
+			t.Errorf("%s leaked the folder path", path)
+		}
+		// Nor the parent directory, which would disclose the user's home layout.
+		if strings.Contains(rec.Body.String(), filepath.Dir(root)) {
+			t.Errorf("%s leaked a parent path", path)
+		}
+	}
+}

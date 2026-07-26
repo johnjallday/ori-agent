@@ -196,6 +196,21 @@ func (a *Automation) findWatcher(workspaceID string) (*TriggerRecord, error) {
 	return nil, nil
 }
 
+// PauseWatcher disables the watcher without deleting it, used while a relink is
+// in progress so nothing fires against a folder the user is leaving.
+func (a *Automation) PauseWatcher(workspaceID string) error {
+	if a == nil || a.triggers == nil {
+		return nil
+	}
+	existing, err := a.findWatcher(workspaceID)
+	if err != nil || existing == nil {
+		return err
+	}
+	existing.Enabled = false
+	_, err = a.triggers.Upsert(*existing)
+	return err
+}
+
 // RemoveWatcher deletes the workspace's watcher. Used when folder access is
 // revoked: the watcher must stop before the binding it depends on disappears
 // (FR-117).

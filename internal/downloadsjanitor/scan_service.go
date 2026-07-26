@@ -1,6 +1,7 @@
 package downloadsjanitor
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -178,12 +179,13 @@ func (s *Service) ScanNow(workspaceID string, source ScanSource) (JanitorBatch, 
 			candidate.WorkspaceID = workspaceID
 			candidate.BatchID = batch.ID
 			candidate.State = CandidatePending
-			// Classification proposes; it never decides. Decision stays empty
-			// until the user acts.
-			ClassifyMetadata(candidate).Apply(&candidate)
 			candidates = append(candidates, candidate)
 			batch.CandidateIDs = append(batch.CandidateIDs, candidate.ID)
 		}
+		// Deterministic classification for every candidate, then a model only
+		// for what it could not place — and only when the user enabled one.
+		// Classification proposes; it never decides.
+		candidates = s.classifyBatch(context.Background(), settings, candidates)
 		batch = SummarizeBatch(batch, candidates)
 
 		state.Candidates = append(state.Candidates, candidates...)
