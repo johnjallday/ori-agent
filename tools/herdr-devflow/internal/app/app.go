@@ -1355,6 +1355,8 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 			CandidateLimit: runtime.config.Status.GitHubCandidateLimit,
 		}),
 		RemoteRefreshInterval: runtime.config.GitHubRefreshInterval(),
+		Agents:                runtime.herdr,
+		Bridge:                state.New(runtime.paths.StateDir),
 	})
 	if parsed.watch {
 		return a.overviewWatch(ctx, service, runtime, parsed)

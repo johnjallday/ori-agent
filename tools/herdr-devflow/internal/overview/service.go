@@ -52,6 +52,12 @@ type Config struct {
 	// RemoteRefreshInterval is the minimum gap between remote queries while
 	// watching. One-shot collection always queries fresh regardless.
 	RemoteRefreshInterval time.Duration
+	// Agents reports what Herdr can currently see. A nil collector degrades
+	// every agent observation to unavailable without hiding anything else.
+	Agents AgentCollector
+	// Bridge loads the saved bridge records. Saved identity is only ever
+	// presented as a record, never as a live observation.
+	Bridge BridgeReader
 	// Now supplies the observation clock. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -150,14 +156,38 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 		Detail:       backlog.Detail,
 	})
 
+	// Herdr and the bridge are collected before the join so a feature known
+	// only to the bridge still gets a row.
+	agentEvidence := CollectAgents(ctx, s.config.Agents, s.config.Bridge, now)
+	snapshot.Sources = append(snapshot.Sources, Source{
+		Kind:         SourceHerdr,
+		Availability: agentEvidence.Availability,
+		ObservedAt:   now,
+		Detail:       agentEvidence.Detail,
+	})
+
 	features, findings := BuildInventory(Input{
 		DevPlanning:      devPlanning,
 		Backlog:          backlog,
 		Checkouts:        checkouts,
+		BridgeSlugs:      BridgeSlugs(agentEvidence.Bridge),
 		LookupActivePlan: activePlanLookup(now),
 		ReadPlanProgress: tasklist.ReadPlan,
 		Now:              now,
 	})
+
+	for index := range features {
+		findings = append(findings, AttachAgents(&features[index], agentEvidence)...)
+	}
+	if agentEvidence.Availability != AvailabilityAvailable {
+		snapshot.Findings = append(snapshot.Findings, Finding{
+			Code:     FindingHerdrUnavailable,
+			Severity: SeverityWarning,
+			Source:   SourceHerdr,
+			Message:  "Herdr is unavailable, so agent status and schedules could not be observed. Saved values are bridge records only.",
+			Detail:   agentEvidence.Detail,
+		})
+	}
 
 	s.inspectGit(ctx, features, now)
 	snapshot.Sources = append(snapshot.Sources, Source{

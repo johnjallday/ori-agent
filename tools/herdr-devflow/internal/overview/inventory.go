@@ -204,6 +204,7 @@ func planFrom(found planning.Feature, source PlanCopy, observedAt time.Time, rea
 		Title:                found.PRD.Title,
 		Progress:             PlanProgress{Availability: AvailabilityUnknown},
 		ObservedAt:           observedAt,
+		TaskListModTime:      found.TaskList.ModTime,
 	}
 	if read == nil || found.TaskList.Path == "" {
 		if found.TaskList.State == planning.StateAbsent {

@@ -204,7 +204,7 @@ func RenderDetail(out io.Writer, snapshot Snapshot, feature Feature, options Ren
 	if err := write("\nRemote: %s", remoteCell(feature.Remote)); err != nil {
 		return err
 	}
-	if err := write("Agents: %s", agentCell(feature)); err != nil {
+	if err := renderDetailAgents(write, feature); err != nil {
 		return err
 	}
 
@@ -364,19 +364,115 @@ func remoteCell(remote Remote) string {
 	return cell + " " + remote.PullRequest.Checks.Label()
 }
 
+// agentCell summarizes a feature's agents. Binding health is shown alongside
+// status because an "idle" agent whose identity no longer resolves is a very
+// different thing from an idle agent that does.
 func agentCell(feature Feature) string {
 	if len(feature.Agents) == 0 {
-		return placeholderUnknown
+		return "none"
 	}
-	statuses := make([]string, 0, len(feature.Agents))
+	cells := make([]string, 0, len(feature.Agents))
 	for _, agent := range feature.Agents {
-		if !agent.StatusAvailability.OK() {
-			statuses = append(statuses, "unavailable")
-			continue
+		label := agent.Role
+		if !agent.Managed {
+			label = "unmanaged"
 		}
-		statuses = append(statuses, string(agent.Status))
+		if label == "" {
+			label = "agent"
+		}
+		status := "unavailable"
+		if agent.StatusAvailability.OK() {
+			status = string(agent.Status)
+		}
+		cell := label + " " + status
+		// "missing (missing)" says the same thing twice; every other binding
+		// state adds information the status alone does not carry.
+		redundant := agent.Binding == BindingMissing && agent.Status == AgentMissing
+		if agent.Binding != BindingExact && agent.Binding != "" && !redundant {
+			cell += " (" + agent.Binding.Label() + ")"
+		}
+		cells = append(cells, cell)
 	}
-	return strings.Join(statuses, ", ")
+	return strings.Join(cells, ", ")
+}
+
+// renderDetailAgents prints each role with its saved record and live
+// observation kept visibly separate, so a bridge record can never be mistaken
+// for something that is actually running.
+func renderDetailAgents(write func(string, ...any) error, feature Feature) error {
+	if len(feature.Agents) == 0 {
+		return write("\nAgents: none")
+	}
+	if err := write("\nAgents:"); err != nil {
+		return err
+	}
+	for _, agent := range feature.Agents {
+		name := agent.Role
+		if !agent.Managed {
+			name = "(unmanaged)"
+		}
+		status := "unavailable"
+		if agent.StatusAvailability.OK() {
+			status = string(agent.Status)
+		}
+		if err := write("  %s — status %s · binding %s", name, status, agent.Binding.Label()); err != nil {
+			return err
+		}
+		if agent.Kind != "" {
+			if err := write("      kind: %s", agent.Kind); err != nil {
+				return err
+			}
+		}
+		if !agent.Saved.Empty() {
+			if err := write("      bridge record: %s", describeIdentity(agent.Saved)); err != nil {
+				return err
+			}
+		}
+		if !agent.Live.Empty() {
+			if err := write("      observed live: %s", describeIdentity(agent.Live)); err != nil {
+				return err
+			}
+		}
+		if agent.BindingDetail != "" {
+			if err := write("      %s", agent.BindingDetail); err != nil {
+				return err
+			}
+		}
+		for _, candidate := range agent.BindingCandidates {
+			if err := write("      candidate: %s", describeIdentity(candidate)); err != nil {
+				return err
+			}
+		}
+		if !agent.LastActivityAt.IsZero() {
+			if err := write("      last activity: %s", agent.LastActivityAt.Format("2006-01-02 15:04:05")); err != nil {
+				return err
+			}
+		}
+	}
+	for _, schedule := range feature.Schedules {
+		if err := write("  schedule %s — %s", schedule.ID, schedule.State); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func describeIdentity(identity Identity) string {
+	var parts []string
+	appendPart := func(label, value string) {
+		if value != "" {
+			parts = append(parts, label+" "+value)
+		}
+	}
+	appendPart("workspace", identity.Workspace)
+	appendPart("pane", identity.Pane)
+	appendPart("terminal", identity.Terminal)
+	appendPart("session", identity.Session)
+	appendPart("kind", identity.Kind)
+	if len(parts) == 0 {
+		return "(no identity fields)"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // attentionCell shows the highest-severity finding for a feature, with a count

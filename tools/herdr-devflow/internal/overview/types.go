@@ -380,6 +380,9 @@ type Plan struct {
 	Progress PlanProgress `json:"progress"`
 	// ObservedAt is when these files were read.
 	ObservedAt time.Time `json:"observed_at,omitzero"`
+	// TaskListModTime is when the authoritative task list last changed. It is
+	// what makes displayed metadata verifiable as current or stale.
+	TaskListModTime time.Time `json:"task_list_mod_time,omitzero"`
 }
 
 // BacklogState is the lifecycle section a feature appears under in BACKLOG.md.

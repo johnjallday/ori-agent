@@ -2,6 +2,7 @@ package overview
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -415,5 +418,165 @@ func TestResolveMissingHeadsToleratesLookupFailures(t *testing.T) {
 		[]Feature{feature("missing", withBacklog(BacklogShipped))}, nil)
 	if len(resolved) != 0 {
 		t.Fatalf("resolved = %v, want nothing from a failed lookup", resolved)
+	}
+}
+
+// mutationSpy implements every Herdr method the bridge can call, recording any
+// that would change state. Collection must touch none of them.
+type mutationSpy struct {
+	fakeAgents
+	mutations []string
+}
+
+func (m *mutationSpy) ReportWorkspaceMetadata(context.Context, string, string, map[string]string) error {
+	m.mutations = append(m.mutations, "ReportWorkspaceMetadata")
+	return nil
+}
+
+func (m *mutationSpy) ReportPaneMetadata(context.Context, string, string, map[string]string) error {
+	m.mutations = append(m.mutations, "ReportPaneMetadata")
+	return nil
+}
+
+func (m *mutationSpy) SetAgentView(context.Context, map[string]any) error {
+	m.mutations = append(m.mutations, "SetAgentView")
+	return nil
+}
+
+func (m *mutationSpy) ClearAgentView(context.Context, string) error {
+	m.mutations = append(m.mutations, "ClearAgentView")
+	return nil
+}
+
+func (m *mutationSpy) StartAgent(context.Context, string) error {
+	m.mutations = append(m.mutations, "StartAgent")
+	return nil
+}
+
+func (m *mutationSpy) PromptAgent(context.Context, string, string) error {
+	m.mutations = append(m.mutations, "PromptAgent")
+	return nil
+}
+
+func (m *mutationSpy) RenameAgent(context.Context, string, string) error {
+	m.mutations = append(m.mutations, "RenameAgent")
+	return nil
+}
+
+func (m *mutationSpy) FocusAgent(context.Context, string) error {
+	m.mutations = append(m.mutations, "FocusAgent")
+	return nil
+}
+
+func (m *mutationSpy) CloseAgent(context.Context, string) error {
+	m.mutations = append(m.mutations, "CloseAgent")
+	return nil
+}
+
+func (m *mutationSpy) Schedule(context.Context, string, time.Time) error {
+	m.mutations = append(m.mutations, "Schedule")
+	return nil
+}
+
+// writeSpy records any attempt to persist bridge state.
+type writeSpy struct {
+	fakeBridge
+	writes int
+}
+
+func (w *writeSpy) Save(model.BridgeState) error {
+	w.writes++
+	return nil
+}
+
+func TestCollectionIsDiagnosticOnly(t *testing.T) {
+	// The board must never start, stop, prompt, focus, rename, rebind, close,
+	// reschedule, or re-label anything it observes.
+	spy := &mutationSpy{fakeAgents: fakeAgents{live: []herdr.AgentInfo{
+		liveAgent("ws-1", "pane-1", "term-1", "ori-builder"),
+	}}}
+	bridge := &writeSpy{}
+
+	service := newTestService(t, &fakeRemote{result: github.Result{ObservedAt: observed}}, func(config *Config) {
+		config.Agents = spy
+		config.Bridge = bridge
+	})
+	if _, err := service.Collect(context.Background()); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if len(spy.mutations) != 0 {
+		t.Fatalf("collection mutated Herdr: %v", spy.mutations)
+	}
+	if bridge.writes != 0 {
+		t.Fatalf("collection wrote bridge state %d times", bridge.writes)
+	}
+	if len(spy.calls) != 1 || spy.calls[0] != "AgentListInfo" {
+		t.Fatalf("herdr calls = %v, want one read-only listing", spy.calls)
+	}
+}
+
+func TestCollectionDoesNotTouchPlanningFilesOrBacklog(t *testing.T) {
+	root, run := repoFixture(t)
+	tasksDir := filepath.Join(root, "ori-agent-dev", "tasks")
+	before := map[string]time.Time{}
+	entries, err := os.ReadDir(tasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[entry.Name()] = info.ModTime()
+	}
+
+	service := NewService(Config{
+		RepoRoot: root, Git: run,
+		Remote: &fakeRemote{result: github.Result{ObservedAt: observed}},
+		Now:    func() time.Time { return observed },
+	})
+	if _, err := service.Collect(context.Background()); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	for name, modTime := range before {
+		info, err := os.Stat(filepath.Join(tasksDir, name))
+		if err != nil {
+			t.Fatalf("planning artifact %s disappeared: %v", name, err)
+		}
+		if !info.ModTime().Equal(modTime) {
+			t.Fatalf("planning artifact %s was modified by a read-only collection", name)
+		}
+	}
+}
+
+func TestCollectSurvivesAHerdrOutageWithoutLosingOtherEvidence(t *testing.T) {
+	service := newTestService(t, &fakeRemote{result: github.Result{ObservedAt: observed}}, func(config *Config) {
+		config.Agents = &fakeAgents{err: errors.New("socket closed")}
+	})
+	snapshot, err := service.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	// Herdr being down must not cost us planning, Git, or GitHub evidence.
+	found, ok := snapshot.Feature("sample-feature")
+	if !ok {
+		t.Fatalf("features were dropped during a Herdr outage: %+v", snapshot.Features)
+	}
+	if !found.Plan.Progress.Availability.OK() {
+		t.Fatalf("plan evidence was lost: %+v", found.Plan.Progress)
+	}
+	if !found.Remote.Availability.OK() && found.Remote.Availability != AvailabilityAbsent {
+		t.Fatalf("remote evidence was lost: %+v", found.Remote)
+	}
+	source, _ := snapshot.Source(SourceHerdr)
+	if source.Availability != AvailabilityUnavailable {
+		t.Fatalf("herdr source = %+v, want unavailable", source)
+	}
+	if _, ok := findingFor(snapshot.Findings, FindingHerdrUnavailable); !ok {
+		t.Fatalf("findings = %v, want herdr_unavailable", snapshot.Findings)
 	}
 }
