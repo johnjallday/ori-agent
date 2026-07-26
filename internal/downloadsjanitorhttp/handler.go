@@ -253,6 +253,18 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 		})
 		return
 	}
+	// An unavailable folder is a recoverable, explainable state — the user
+	// unlinked it, moved it, or lost permission — not an internal fault. It gets
+	// the same actionable treatment readiness gives it, rather than a 500 that
+	// tells the user nothing they can act on.
+	if errors.Is(err, downloadsjanitor.ErrRootUnavailable) {
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, &orihttp.APIError{
+			Code:    "folder_unavailable",
+			Message: "Ori cannot reach the folder it was tidying. Reconnect it in settings to continue.",
+			Details: map[string]any{"repair": downloadsjanitor.RepairRelinkFolder},
+		})
+		return
+	}
 	if errors.Is(err, downloadsjanitor.ErrInvalidSettings) {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return

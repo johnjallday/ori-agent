@@ -582,6 +582,13 @@ func existingDirectoryRoots(ws *workspace.Workspace) []string {
 	return roots
 }
 
+// defaultReferenceX/Y match the canvas position workspace creation gives its
+// own directory reference (see sessionhttp.newWorkspaceDirectoryReference).
+const (
+	defaultReferenceX = 400
+	defaultReferenceY = 300
+)
+
 // ensureDirectoryReference returns the ID of the workspace's directory
 // reference for root, creating one only if no reference already points there.
 func ensureDirectoryReference(ws *workspace.Workspace, root string) string {
@@ -594,6 +601,11 @@ func ensureDirectoryReference(ws *workspace.Workspace, root string) string {
 	if err := ws.AddDirectoryReference(workspace.DirectoryReference{
 		Name: filepath.Base(target),
 		Path: target,
+		// The same canvas position workspace creation uses for its own
+		// reference. Left at the origin, the folder renders in the corner of
+		// the Map view instead of with the workspace's other linked folders.
+		X: defaultReferenceX,
+		Y: defaultReferenceY,
 	}); err != nil {
 		return ""
 	}

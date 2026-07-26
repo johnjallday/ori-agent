@@ -605,3 +605,43 @@ func TestResponses_DoNotLeakPathsBeyondTheConfiguredRoot(t *testing.T) {
 		}
 	}
 }
+
+// Unlinking the folder from the generic Linked Folders surface is something a
+// user can do at any time. The Janitor must explain it, not fail opaquely.
+func TestUnlinkedFolder_IsExplainedNotAnInternalError(t *testing.T) {
+	h, store := newTestHandler(t, map[string]string{"ws-1": userprofile.LocalUserID})
+	root := inboxFixture(t)
+	payload, _ := json.Marshal(map[string]string{"path": root})
+	if rec, _ := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/setup", string(payload)); rec.Code != http.StatusOK {
+		t.Fatalf("setup failed: %s", rec.Body.String())
+	}
+
+	// The user removes the linked folder from the generic directory UI.
+	store.workspaces["ws-1"].DirectoryReferences = nil
+
+	rec, body := serve(t, h, http.MethodPost, "/api/workspaces/ws-1/downloads-janitor/scan", "")
+	if rec.Code == http.StatusInternalServerError {
+		t.Fatalf("an unlinked folder is recoverable, not an internal error: %s", rec.Body.String())
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	apiErr, _ := body["error"].(map[string]any)
+	if apiErr == nil {
+		apiErr = body
+	}
+	if apiErr["code"] != "folder_unavailable" {
+		t.Fatalf("code = %v", apiErr["code"])
+	}
+	message, _ := apiErr["message"].(string)
+	if !strings.Contains(strings.ToLower(message), "reconnect") {
+		t.Fatalf("the message must tell the user what to do: %q", message)
+	}
+
+	// And readiness says the same thing, with a repair.
+	_, body = serve(t, h, http.MethodGet, "/api/workspaces/ws-1/downloads-janitor/readiness", "")
+	readiness, _ := body["readiness"].(map[string]any)
+	if readiness["state"] != "needs_attention" {
+		t.Fatalf("readiness = %v", readiness["state"])
+	}
+}
