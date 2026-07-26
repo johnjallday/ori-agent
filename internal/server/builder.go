@@ -257,11 +257,12 @@ type ServerBuilder struct {
 	followUpService *followup.Service
 
 	// Daily Brief configuration, generation, and scheduling
-	dailyBriefService       *dailybrief.Service
-	dailyBriefHandler       *dailybriefhttp.Handler
-	downloadsJanitorHandler *downloadsjanitorhttp.Handler
-	downloadsJanitorService *downloadsjanitor.Service
-	dailyBriefScheduler     *dailybrief.Scheduler
+	dailyBriefService          *dailybrief.Service
+	dailyBriefHandler          *dailybriefhttp.Handler
+	downloadsJanitorHandler    *downloadsjanitorhttp.Handler
+	downloadsJanitorService    *downloadsjanitor.Service
+	downloadsJanitorAutomation *downloadsjanitor.Automation
+	dailyBriefScheduler        *dailybrief.Scheduler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.

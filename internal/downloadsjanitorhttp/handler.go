@@ -25,11 +25,41 @@ type WorkspaceLookup interface {
 	Get(id string) (*workspace.Workspace, error)
 }
 
+// Automation is the slice of the automation service the API needs: pausing
+// must actually stop the watcher, not merely record an intention to.
+type Automation interface {
+	EnsureWatcher(workspaceID string) error
+}
+
 // Handler serves the Downloads Janitor endpoints.
 type Handler struct {
-	service  *downloadsjanitor.Service
-	lookup   WorkspaceLookup
-	provider userprofile.UserProvider
+	service    *downloadsjanitor.Service
+	lookup     WorkspaceLookup
+	provider   userprofile.UserProvider
+	automation Automation
+}
+
+// SetAutomation wires the watcher lifecycle so setup and pause/resume take
+// effect immediately.
+func (h *Handler) SetAutomation(automation Automation) {
+	if h != nil {
+		h.automation = automation
+	}
+}
+
+// syncAutomation brings the workspace's watcher in line with its settings.
+// Failures are not fatal to the request: readiness reports the watcher as not
+// running, which is visible and repairable, rather than failing a setting the
+// user did successfully change.
+func (h *Handler) syncAutomation(workspaceID string) {
+	if h == nil || h.automation == nil {
+		return
+	}
+	if err := h.automation.EnsureWatcher(workspaceID); err != nil {
+		logger.Warn("Downloads Janitor watcher could not be updated", logger.Fields{
+			"workspace_id": workspaceID, "error": err,
+		})
+	}
 }
 
 // NewHandler builds the Downloads Janitor handler. A nil service makes every
@@ -100,6 +130,33 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		h.respondError(w, err, "Failed to set up Downloads Janitor")
 		return
 	}
+	// Confirmed setup is what turns the automation on for the first time.
+	h.syncAutomation(workspaceID)
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
+}
+
+// SetPaused handles POST /api/workspaces/{workspaceID}/downloads-janitor/pause.
+// Pausing stops unattended scanning; it does not discard settings, pending
+// candidates, or history, and the user can still scan on demand.
+func (h *Handler) SetPaused(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Paused bool `json:"paused"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	status, err := h.service.SetPaused(workspaceID, req.Paused)
+	if err != nil {
+		h.respondError(w, err, "Failed to update Downloads Janitor")
+		return
+	}
+	// The flag and the watcher move together: a paused workspace whose watcher
+	// kept running would be lying to the user.
+	h.syncAutomation(workspaceID)
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "status": status})
 }
 

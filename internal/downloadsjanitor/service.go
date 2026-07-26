@@ -148,6 +148,11 @@ type Service struct {
 	scanner    *Scanner
 	mover      Mover
 	trash      TrashRemover
+	notifier   Notifier
+	// automation reports whether the watcher and daily schedule are actually
+	// registered. Until it is wired, those checks stay pending — which keeps a
+	// workspace out of Ready rather than overstating what is running.
+	automation AutomationStatus
 	now        func() time.Time
 }
 
@@ -188,6 +193,19 @@ type SetupSuggestion struct {
 // DirectoryRequirementKey is the directory key Downloads Janitor's built-in
 // template declares.
 const DirectoryRequirementKey = "downloads-root"
+
+// SetPaused pauses or resumes unattended scanning. It changes nothing else:
+// settings, pending candidates, and history all survive, so resuming picks up
+// where the user left off.
+func (s *Service) SetPaused(workspaceID string, paused bool) (Status, error) {
+	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		settings.Paused = paused
+		return nil
+	}); err != nil {
+		return Status{}, err
+	}
+	return s.Status(workspaceID)
+}
 
 // readWorkspace loads a workspace, preferring the canonical folder record so
 // callers see fields (template provenance above all) that the SQLite mirror
@@ -621,11 +639,8 @@ func (s *Service) evaluateReadiness(settings JanitorSettings) Readiness {
 		s.checkDestination(settings),
 		s.checkBinding(settings),
 		s.checkPersistence(settings),
-		// Watcher and scheduler registration are checked once the automation
-		// group installs them. Until then they report pending, which keeps the
-		// workspace out of Ready rather than overstating what is running.
-		{Component: ComponentWatcher, Status: ComponentPending, Code: CodePending, Message: "Folder watching is not running yet."},
-		{Component: ComponentScheduler, Status: ComponentPending, Code: CodePending, Message: "The daily catch-up scan is not scheduled yet."},
+		s.checkWatcher(settings),
+		s.checkScheduler(settings),
 	}
 
 	return Readiness{
@@ -771,6 +786,84 @@ func bindingToolsAreReadOnly(binding workspace.MCPBinding) bool {
 		}
 	}
 	return true
+}
+
+// AutomationStatus reports what is actually registered for a workspace. It is
+// an interface so readiness can ask the automation layer without the service
+// depending on its lifecycle.
+type AutomationStatus interface {
+	// WatcherRegistered reports whether an enabled folder watcher exists.
+	WatcherRegistered(workspaceID string) (bool, error)
+	// SchedulerRegistered reports whether the daily catch-up is being serviced.
+	SchedulerRegistered(workspaceID string) bool
+}
+
+// SetAutomationStatus wires the readiness checks for watcher and scheduler.
+func (s *Service) SetAutomationStatus(status AutomationStatus) {
+	if s != nil {
+		s.automation = status
+	}
+}
+
+// checkWatcher reports whether folder watching is actually running. A paused
+// workspace is not failing — it is doing what the user asked — so it reports
+// pending with a message that says so rather than an error.
+func (s *Service) checkWatcher(settings JanitorSettings) ComponentCheck {
+	check := ComponentCheck{Component: ComponentWatcher}
+	if settings.Paused {
+		check.Status = ComponentPending
+		check.Code = CodePending
+		check.Message = "Paused by you. Resume to start watching again."
+		return check
+	}
+	if s.automation == nil {
+		check.Status = ComponentPending
+		check.Code = CodePending
+		check.Message = "Folder watching is not running yet."
+		return check
+	}
+	registered, err := s.automation.WatcherRegistered(settings.WorkspaceID)
+	switch {
+	case err != nil:
+		check.Status = ComponentFailed
+		check.Code = CodeBindingFailed
+		check.Message = "Ori could not confirm folder watching is set up."
+		check.Repair = RepairRetry
+	case !registered:
+		check.Status = ComponentFailed
+		check.Code = CodeBindingFailed
+		check.Message = "Folder watching is not set up for this workspace."
+		check.Repair = RepairRetry
+	default:
+		check.Status = ComponentOK
+	}
+	return check
+}
+
+// checkScheduler reports whether the daily catch-up is being serviced.
+func (s *Service) checkScheduler(settings JanitorSettings) ComponentCheck {
+	check := ComponentCheck{Component: ComponentScheduler}
+	if settings.Paused {
+		check.Status = ComponentPending
+		check.Code = CodePending
+		check.Message = "Paused by you. Resume to run the daily catch-up again."
+		return check
+	}
+	if s.automation == nil {
+		check.Status = ComponentPending
+		check.Code = CodePending
+		check.Message = "The daily catch-up scan is not scheduled yet."
+		return check
+	}
+	if !s.automation.SchedulerRegistered(settings.WorkspaceID) {
+		check.Status = ComponentFailed
+		check.Code = CodeBindingFailed
+		check.Message = "The daily catch-up scan is not running."
+		check.Repair = RepairRetry
+		return check
+	}
+	check.Status = ComponentOK
+	return check
 }
 
 func (s *Service) checkPersistence(settings JanitorSettings) ComponentCheck {

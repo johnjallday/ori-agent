@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // This file holds the workspace-facing vocabulary for what a project template
@@ -158,4 +159,104 @@ func (w *Workspace) TemplateAutomationRecipeFor(directoryKey string) (Automation
 		}
 	}
 	return AutomationRecipe{}, false
+}
+
+// NextDailyOccurrence returns the next moment a daily local-time schedule
+// fires, strictly after `after`.
+//
+// It is the shared local-schedule calculation for features that run "every day
+// at HH:MM in the user's timezone" — extracted so a second feature does not
+// re-derive the DST reasoning a third time and get it subtly different.
+//
+// The properties that matter, and why they hold:
+//
+//   - Spring-forward gaps: when the configured local time does not exist on a
+//     date, Go normalizes the constructed time to a real instant on that date,
+//     so the day is not skipped.
+//   - Autumn-back folds: an ambiguous local time resolves to a single
+//     deterministic instant. Because exactly one candidate is constructed per
+//     calendar date, "at most one firing per local date" holds by
+//     construction rather than by special-casing the fold.
+//   - Timezone or time changes: this is a pure function of its arguments, with
+//     no cached "next run" — a configuration change is picked up on the next
+//     call with no migration step.
+//
+// An empty timezone means the system's local zone. An unparseable zone or time
+// is an error rather than a silent fallback: a schedule that quietly runs at
+// the wrong hour is worse than one that reports it cannot be built.
+func NextDailyOccurrence(timezone, localTime string, after time.Time) (time.Time, error) {
+	loc := time.Local
+	if name := strings.TrimSpace(timezone); name != "" {
+		resolved, err := time.LoadLocation(name)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("unknown timezone %q: %w", timezone, err)
+		}
+		loc = resolved
+	}
+	normalized, err := NormalizeLocalTimeOfDay(localTime)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("daily schedule %v", err)
+	}
+	var hour, minute int
+	if _, err := fmt.Sscanf(normalized, "%02d:%02d", &hour, &minute); err != nil {
+		return time.Time{}, fmt.Errorf("daily schedule time %q is unusable", localTime)
+	}
+
+	afterLocal := after.In(loc)
+	// Today, then tomorrow: a daily schedule always has an occurrence within
+	// the next two calendar dates.
+	for offset := range 2 {
+		day := afterLocal.AddDate(0, 0, offset)
+		candidate := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, loc)
+		if candidate.After(afterLocal) {
+			return candidate, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("could not compute the next daily occurrence")
+}
+
+// LocalOccurrenceOn returns the moment a daily local-time schedule fires on the
+// local date of t.
+//
+// This is the question a catch-up actually asks — "has today's slot passed?" —
+// as opposed to NextDailyOccurrence's "when is the next one?". Asking the
+// second question and comparing against the past is how a schedule that has not
+// come round yet looks overdue.
+//
+// DST is handled the same way: constructing the local time on a date normalizes
+// through a gap and resolves a fold deterministically, so every local date has
+// exactly one occurrence.
+func LocalOccurrenceOn(timezone, localTime string, t time.Time) (time.Time, error) {
+	loc := time.Local
+	if name := strings.TrimSpace(timezone); name != "" {
+		resolved, err := time.LoadLocation(name)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("unknown timezone %q: %w", timezone, err)
+		}
+		loc = resolved
+	}
+	normalized, err := NormalizeLocalTimeOfDay(localTime)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("daily schedule %v", err)
+	}
+	var hour, minute int
+	if _, err := fmt.Sscanf(normalized, "%02d:%02d", &hour, &minute); err != nil {
+		return time.Time{}, fmt.Errorf("daily schedule time %q is unusable", localTime)
+	}
+	local := t.In(loc)
+	return time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc), nil
+}
+
+// LocalDateKey returns a stable "YYYY-MM-DD" key for the local date of t in the
+// given timezone. It is what "at most one catch-up per local date" is counted
+// against — a date, not a 24-hour window, so a DST day of 23 or 25 hours still
+// gets exactly one run.
+func LocalDateKey(timezone string, t time.Time) string {
+	loc := time.Local
+	if name := strings.TrimSpace(timezone); name != "" {
+		if resolved, err := time.LoadLocation(name); err == nil {
+			loc = resolved
+		}
+	}
+	return t.In(loc).Format("2006-01-02")
 }
