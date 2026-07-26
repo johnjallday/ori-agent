@@ -201,7 +201,7 @@ func TestRenderCompactSaysImplementationCompleteInsteadOfANextItem(t *testing.T)
 	row.Plan.Progress.NextActionable = PlanItem{}
 
 	output := renderToString(t, baseSnapshot(row))
-	if !strings.Contains(output, "implementation complete, 4 checkpoint(s) left") {
+	if !strings.Contains(output, "delivery only (4 left)") {
 		t.Fatalf("a delivery-only feature was not called out:\n%s", output)
 	}
 	if strings.Contains(output, "next 5.1") {

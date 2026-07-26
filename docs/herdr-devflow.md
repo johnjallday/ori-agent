@@ -288,8 +288,18 @@ at all says so, because silence would look identical to a healthy, quietly
 working agent.
 
 Interactive output uses color and text labels together, and every phase,
-availability, binding, and severity also prints as full text. It honors
-NO_COLOR and --no-color. --json emits the versioned machine-readable snapshot
+availability, binding, and severity also prints as full text — stripping the
+styling yields exactly the plain rendering, so color is never the only carrier
+of meaning. Color is emitted only when stdout is a terminal, and both NO_COLOR
+and --no-color disable it entirely.
+
+| Colour | Means |
+| --- | --- |
+| green | healthy: passing checks, an exact binding, a clean tree, no findings |
+| yellow | needs attention: drift, a behind branch, pending checks, cleanup outstanding |
+| red | broken or ambiguous: failing checks, a missing or ambiguous agent, an incomplete snapshot |
+| cyan / blue / magenta | active phases (implementing, ready, review) |
+| dim | history, absences, and supporting detail | --json emits the versioned machine-readable snapshot
 instead, making it suitable for scripts.
 
 The plugin also provides a source-scoped Ori Devflow view and board, rendered
