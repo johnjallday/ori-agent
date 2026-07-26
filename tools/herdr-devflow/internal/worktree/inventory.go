@@ -37,6 +37,26 @@ var featureSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,79}$`)
 // ValidSlug reports whether value is an exact, canonical feature slug.
 func ValidSlug(value string) bool { return featureSlug.MatchString(value) }
 
+// BranchPrefixes are the branch namespaces this repository uses for work on a
+// feature. The prefix records intent — a one-line change may be `feature/` and
+// a large one `fix/` — so the slug, not the prefix, identifies the feature.
+// Matching only `feature/` would silently miss delivered work: PRs have landed
+// from `fix/` and `feat/` branches.
+var BranchPrefixes = []string{"feature/", "feat/", "fix/", "refactor/", "docs/", "test/", "chore/"}
+
+// SlugFromBranch extracts the exact feature slug from a known branch
+// namespace. It never guesses at a bare or unrecognized branch name.
+func SlugFromBranch(branch string) (string, bool) {
+	for _, prefix := range BranchPrefixes {
+		suffix, ok := strings.CutPrefix(branch, prefix)
+		if !ok || !ValidSlug(suffix) {
+			continue
+		}
+		return suffix, true
+	}
+	return "", false
+}
+
 // Runner executes a Git command and returns its standard output. Injecting it
 // keeps the inventory testable without a real repository and keeps every
 // invocation a fixed argument vector.
@@ -48,13 +68,13 @@ type Runner func(ctx context.Context, dir string, args ...string) (string, error
 type SlugOrigin string
 
 const (
-	// SlugFromBranch means the slug came from a feature/<slug> branch.
-	SlugFromBranch SlugOrigin = "branch"
-	// SlugFromPath means the slug came from the worktree basename because the
-	// branch was not in the feature namespace.
-	SlugFromPath SlugOrigin = "path"
-	// SlugUnresolved means no exact slug could be derived.
-	SlugUnresolved SlugOrigin = "unresolved"
+	// SlugOriginBranch means the slug came from a recognized work branch.
+	SlugOriginBranch SlugOrigin = "branch"
+	// SlugOriginPath means the slug came from the worktree basename because
+	// the branch was not in a recognized namespace.
+	SlugOriginPath SlugOrigin = "path"
+	// SlugOriginUnresolved means no exact slug could be derived.
+	SlugOriginUnresolved SlugOrigin = "unresolved"
 )
 
 // Checkout is one linked worktree or source checkout of the repository.
@@ -253,7 +273,7 @@ func classifyCheckout(raw record, baseline string) (Checkout, bool) {
 		Head:       raw.Head,
 		Detached:   raw.Detached || raw.Branch == "",
 		Bare:       raw.Bare,
-		SlugOrigin: SlugUnresolved,
+		SlugOrigin: SlugOriginUnresolved,
 	}
 	if entry, err := os.Stat(filepath.Join(canonical, ".git")); err == nil && entry.IsDir() {
 		checkout.Source = true
@@ -271,18 +291,18 @@ func classifyCheckout(raw record, baseline string) (Checkout, bool) {
 		return checkout, true
 	}
 
-	// A feature/<slug> branch is the strongest local claim. The directory name
-	// is only consulted when the branch is outside that namespace, and a
-	// disagreement between the two is preserved via PathSlug for the caller to
-	// report as a name mismatch.
-	if suffix, ok := strings.CutPrefix(checkout.Branch, FeatureBranchPrefix); ok && ValidSlug(suffix) {
+	// A recognized work branch is the strongest local claim. The directory
+	// name is only consulted when the branch is outside those namespaces, and
+	// a disagreement between the two is preserved via PathSlug for the caller
+	// to report as a name mismatch.
+	if suffix, ok := SlugFromBranch(checkout.Branch); ok {
 		checkout.Slug = suffix
-		checkout.SlugOrigin = SlugFromBranch
+		checkout.SlugOrigin = SlugOriginBranch
 		return checkout, true
 	}
 	if checkout.PathSlug != "" && !checkout.Source {
 		checkout.Slug = checkout.PathSlug
-		checkout.SlugOrigin = SlugFromPath
+		checkout.SlugOrigin = SlugOriginPath
 	}
 	return checkout, true
 }

@@ -107,7 +107,7 @@ func TestListCheckoutsPrefersBranchSlugAndRetainsPathSlug(t *testing.T) {
 		t.Fatalf("feature lookup = %v, ok=%v", checkouts, ok)
 	}
 	checkout := checkouts[0]
-	if checkout.SlugOrigin != SlugFromBranch {
+	if checkout.SlugOrigin != SlugOriginBranch {
 		t.Fatalf("slug origin = %q, want branch", checkout.SlugOrigin)
 	}
 	if checkout.PathSlug != "old-directory-name" {
@@ -115,17 +115,37 @@ func TestListCheckoutsPrefersBranchSlugAndRetainsPathSlug(t *testing.T) {
 	}
 }
 
+func TestListCheckoutsRecognizesEveryWorkBranchPrefix(t *testing.T) {
+	// Branch prefix records intent, not size: pull requests have landed from
+	// fix/ and feat/ branches, and missing those would hide delivered work.
+	for _, prefix := range BranchPrefixes {
+		repo := newFakeRepo(t)
+		checkout := repo.linked(t, "renamed-dir")
+
+		inventory := listFor(t, repo, porcelain(entry(checkout, "eee", prefix+"some-feature")))
+
+		checkouts, ok := inventory.Feature("some-feature")
+		if !ok || len(checkouts) != 1 {
+			t.Fatalf("prefix %q: feature lookup = %v, ok=%v", prefix, checkouts, ok)
+		}
+		if checkouts[0].SlugOrigin != SlugOriginBranch {
+			t.Fatalf("prefix %q: slug origin = %q, want branch", prefix, checkouts[0].SlugOrigin)
+		}
+	}
+}
+
 func TestListCheckoutsFallsBackToWorktreeBasename(t *testing.T) {
 	repo := newFakeRepo(t)
 	legacy := repo.linked(t, "legacy-feature")
 
-	inventory := listFor(t, repo, porcelain(entry(legacy, "eee", "fix/legacy-feature")))
+	// An unrecognized namespace leaves the directory name as the only claim.
+	inventory := listFor(t, repo, porcelain(entry(legacy, "eee", "wip/whatever")))
 
 	checkouts, ok := inventory.Feature("legacy-feature")
 	if !ok || len(checkouts) != 1 {
 		t.Fatalf("feature lookup = %v, ok=%v", checkouts, ok)
 	}
-	if checkouts[0].SlugOrigin != SlugFromPath {
+	if checkouts[0].SlugOrigin != SlugOriginPath {
 		t.Fatalf("slug origin = %q, want path", checkouts[0].SlugOrigin)
 	}
 }
@@ -176,7 +196,7 @@ func TestListCheckoutsRejectsNonSlugDirectoryNames(t *testing.T) {
 	repo := newFakeRepo(t)
 	odd := repo.linked(t, "Not A Slug")
 
-	inventory := listFor(t, repo, porcelain(entry(odd, "iii", "chore/whatever")))
+	inventory := listFor(t, repo, porcelain(entry(odd, "iii", "some-unprefixed-branch")))
 
 	if len(inventory.Features) != 0 {
 		t.Fatalf("features = %v, want none from a non-canonical directory name", inventory.Features)

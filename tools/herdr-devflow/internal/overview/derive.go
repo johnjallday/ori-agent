@@ -34,6 +34,36 @@ func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 	hasWorktree := feature.Git.WorktreePath != ""
 	prdPresent := feature.Plan.PRDAvailability == AvailabilityAvailable
 	tasksPresent := feature.Plan.TaskListAvailability == AvailabilityAvailable
+	pull := feature.Remote.PullRequest
+
+	// Remote delivery evidence outranks every local signal. A merged pull
+	// request is a fact about the repository's history; an unchecked task list
+	// or a stale Doing entry is somebody forgetting to tick a box.
+	switch {
+	case pull != nil && pull.Merged:
+		if outstandingCleanup(feature) {
+			state.Phase = PhaseMergedCleanup
+			state.Reason = "the pull request merged but local cleanup is outstanding"
+		} else {
+			state.Phase = PhaseShipped
+			state.Reason = "the pull request merged and no local cleanup is outstanding"
+		}
+		if options.RemoteAvailable {
+			state.Confirmed = true
+		}
+		return state
+	case pull != nil && pull.State == "open":
+		state.Phase = PhaseReview
+		if pull.Draft {
+			state.Reason = "a draft pull request is open against " + baseline
+		} else {
+			state.Reason = "a pull request is open against " + baseline
+		}
+		if options.RemoteAvailable {
+			state.Confirmed = true
+		}
+		return state
+	}
 
 	switch {
 	case hasWorktree:
@@ -65,6 +95,23 @@ func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 		state.Confirmed = true
 	}
 	return state
+}
+
+// outstandingCleanup reports whether anything local still needs tidying after
+// a merge: the worktree or branch survives, the backlog still calls the
+// feature in progress, or the ticked plan was never archived back into dev.
+func outstandingCleanup(feature Feature) bool {
+	if feature.Git.WorktreePath != "" {
+		return true
+	}
+	if feature.Backlog.State == BacklogDoing {
+		return true
+	}
+	progress := feature.Plan.Progress
+	if progress.Availability.OK() && progress.SubtasksTotal > 0 && progress.SubtasksCompleted < progress.SubtasksTotal {
+		return true
+	}
+	return false
 }
 
 // DeriveFindings reports the gaps and drift visible in one feature's local

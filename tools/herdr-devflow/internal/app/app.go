@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
@@ -1336,8 +1337,8 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 	if parsed.json {
 		opts.json = true
 	}
-	if parsed.watch {
-		a.writeError(fmt.Errorf("overview --watch is not available yet"), opts.json)
+	if parsed.watch && opts.json {
+		a.writeError(fmt.Errorf("overview --watch cannot be combined with --json"), opts.json)
 		return 2
 	}
 	runtime, err := a.load(opts)
@@ -1346,7 +1347,18 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 		return 1
 	}
 
-	service := overview.NewService(overview.Config{RepoRoot: runtime.paths.RepoRoot})
+	service := overview.NewService(overview.Config{
+		RepoRoot: runtime.paths.RepoRoot,
+		Remote: github.New(github.Options{
+			Dir:            runtime.paths.RepoRoot,
+			Timeout:        runtime.config.GitHubTimeout(),
+			CandidateLimit: runtime.config.Status.GitHubCandidateLimit,
+		}),
+		RemoteRefreshInterval: runtime.config.GitHubRefreshInterval(),
+	})
+	if parsed.watch {
+		return a.overviewWatch(ctx, service, runtime, parsed)
+	}
 	snapshot, err := service.Collect(ctx)
 	if err != nil {
 		a.writeError(err, opts.json)
@@ -1381,6 +1393,37 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 		}
 	}
 	if !snapshot.Complete {
+		return 1
+	}
+	return 0
+}
+
+// overviewWatch renders the board on the fast local clock. The remote query is
+// separately rate limited inside the service, so a board left open all day
+// re-reads local files often and GitHub rarely.
+func (a *App) overviewWatch(ctx context.Context, service *overview.Service, runtime runtimeContext, parsed overviewArgs) int {
+	renderOptions := overview.RenderOptions{NoColor: !a.statusColorEnabled(parsed.noColor)}
+	rendered := false
+	emit := func(snapshot overview.Snapshot) {
+		if rendered && !renderOptions.NoColor {
+			// We never enter raw or alternate-screen mode, so Ctrl-C leaves a
+			// normal terminal showing the last complete board.
+			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
+		}
+		rendered = true
+		if parsed.feature != "" {
+			feature, found := snapshot.Feature(parsed.feature)
+			if !found {
+				fmt.Fprintf(a.stdout, "no feature named %q was found\n", parsed.feature)
+				return
+			}
+			_ = overview.RenderDetail(a.stdout, snapshot, feature, renderOptions)
+			return
+		}
+		_ = overview.RenderCompact(a.stdout, snapshot, renderOptions)
+	}
+	if err := service.Watch(ctx, runtime.config.WatchPollInterval(), emit); err != nil {
+		a.writeError(err, false)
 		return 1
 	}
 	return 0
@@ -1825,6 +1868,53 @@ type diagnostic struct {
 	Recovery string `json:"recovery,omitempty"`
 }
 
+// githubDiagnostic checks the one required remote dependency of the feature
+// overview: an installed, authenticated `gh` that can read the pull-request
+// and check fields the board needs. It performs the same read-only query the
+// overview does, so a PASS here means the overview will work.
+func (a *App) githubDiagnostic(ctx context.Context, runtime runtimeContext) diagnostic {
+	if _, err := a.lookPath("gh"); err != nil {
+		return diagnostic{
+			Name: "GitHub CLI", Status: "FAIL",
+			Detail:   "the GitHub CLI (gh) is not installed or not on PATH",
+			Recovery: "install the GitHub CLI: https://cli.github.com",
+		}
+	}
+	client := github.New(github.Options{
+		Dir:            runtime.paths.RepoRoot,
+		Timeout:        runtime.config.GitHubTimeout(),
+		CandidateLimit: 1,
+	})
+	result, err := client.ListPullRequests(ctx, "dev")
+	if err != nil {
+		var remoteErr *github.Error
+		if errors.As(err, &remoteErr) {
+			return diagnostic{
+				Name: "GitHub access", Status: "FAIL",
+				Detail: remoteErr.Detail, Recovery: remoteErr.Recovery(),
+			}
+		}
+		return diagnostic{
+			Name: "GitHub access", Status: "FAIL",
+			Detail: "the GitHub query failed", Recovery: "run: gh auth status",
+		}
+	}
+	// A repository with no pull requests is healthy; the fields are only
+	// verifiable when at least one exists.
+	if len(result.PullRequests) == 0 {
+		return diagnostic{Name: "GitHub access", Status: "PASS", Detail: "authenticated; no pull requests to sample"}
+	}
+	sample := result.PullRequests[0]
+	if sample.Head == "" || sample.State == "" {
+		return diagnostic{
+			Name: "GitHub access", Status: "WARN",
+			Detail:   "the pull-request fields the overview needs were not returned",
+			Recovery: "update the GitHub CLI, then run: wt herd doctor",
+		}
+	}
+	return diagnostic{Name: "GitHub access", Status: "PASS", Detail: "authenticated; PR and check fields readable"}
+}
+
 func (a *App) doctor(ctx context.Context, opts options) int {
 	runtime, err := a.load(opts)
 	if err != nil {
@@ -1849,6 +1939,8 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 	} else {
 		diagnostics = append(diagnostics, diagnostic{Name: "state permissions", Status: "WARN", Detail: "state directory has not been created", Recovery: "wt herd setup"})
 	}
+
+	diagnostics = append(diagnostics, a.githubDiagnostic(ctx, runtime))
 
 	version, versionErr := runtime.herdr.Version(ctx)
 	if versionErr != nil {

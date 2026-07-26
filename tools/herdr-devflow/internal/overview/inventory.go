@@ -137,7 +137,7 @@ func buildFeature(slug string, sources []SourceKind, input Input) (Feature, []Fi
 		}
 		// A directory renamed away from its branch is real drift: `wt done`
 		// and the Herdr board both key off the directory name.
-		if active.SlugOrigin == worktree.SlugFromBranch && active.PathSlug != "" && active.PathSlug != slug {
+		if active.SlugOrigin == worktree.SlugOriginBranch && active.PathSlug != "" && active.PathSlug != slug {
 			findings = append(findings, Finding{
 				Code:     FindingNameMismatch,
 				Severity: SeverityWarning,

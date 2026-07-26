@@ -2,11 +2,13 @@ package overview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/tasklist"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
@@ -22,6 +24,13 @@ const (
 	gitTimeout = 15 * time.Second
 )
 
+// RemoteCollector performs one fresh authenticated query for the repository's
+// pull requests. It is an interface so the service can be exercised against a
+// deterministic fixture with no network and no authenticated CLI.
+type RemoteCollector interface {
+	ListPullRequests(ctx context.Context, base string) (github.Result, error)
+}
+
 // Config configures one Service. Every collector is injectable so the service
 // can be exercised without a real repository, Git, GitHub, or Herdr.
 type Config struct {
@@ -31,6 +40,12 @@ type Config struct {
 	Baseline string
 	// Git runs read-only Git commands. Defaults to the real Git.
 	Git worktree.Runner
+	// Remote queries GitHub. A nil collector means no remote query is even
+	// attempted, which leaves every snapshot incomplete by design.
+	Remote RemoteCollector
+	// RemoteRefreshInterval is the minimum gap between remote queries while
+	// watching. One-shot collection always queries fresh regardless.
+	RemoteRefreshInterval time.Duration
 	// Now supplies the observation clock. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -43,6 +58,7 @@ type Config struct {
 // required before a snapshot may call itself complete.
 type Service struct {
 	config Config
+	clock  *remoteClock
 }
 
 // NewService builds a Service, applying defaults for omitted collectors.
@@ -56,7 +72,11 @@ func NewService(config Config) *Service {
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	return &Service{config: config}
+	service := &Service{config: config}
+	if config.Remote != nil {
+		service.clock = newRemoteClock(config.Remote, config.RemoteRefreshInterval)
+	}
+	return service
 }
 
 // Collect gathers one complete observation. It mutates nothing: every call
@@ -66,6 +86,18 @@ func NewService(config Config) *Service {
 // unavailable Source; it never aborts the snapshot, because a partial board
 // that says what it does not know is more useful than no board at all.
 func (s *Service) Collect(ctx context.Context) (Snapshot, error) {
+	// A one-shot collection always performs a fresh query: a command a human
+	// just typed must not answer from a cached remote result.
+	return s.collect(ctx, true)
+}
+
+// collectRateLimited is the watch path: it reuses remote facts until the
+// remote clock's interval has elapsed.
+func (s *Service) collectRateLimited(ctx context.Context) (Snapshot, error) {
+	return s.collect(ctx, false)
+}
+
+func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, error) {
 	now := s.config.Now()
 	snapshot := Snapshot{
 		SchemaVersion: SchemaVersion,
@@ -127,26 +159,26 @@ func (s *Service) Collect(ctx context.Context) (Snapshot, error) {
 	})
 
 	// A fresh authenticated GitHub query is required before any snapshot may
-	// call itself complete. This slice has no GitHub collector yet, so the
-	// source is recorded as unavailable and the snapshot stays incomplete
-	// rather than presenting local guesses as settled facts.
-	snapshot.Sources = append(snapshot.Sources, Source{
-		Kind:         SourceGitHub,
-		Availability: AvailabilityUnavailable,
-		Required:     true,
-		Detail:       "remote delivery status has not been queried",
-	})
-	snapshot.Findings = append(snapshot.Findings, Finding{
-		Code:     FindingGitHubUnavailable,
-		Severity: SeverityError,
-		Source:   SourceGitHub,
-		Message:  "Remote delivery status is unavailable, so review, merge, and cleanup phases cannot be confirmed.",
-	})
+	// call itself complete: every local phase is falsifiable by an open or
+	// merged pull request, so a local-only board must not present its guesses
+	// as settled facts.
+	remote, remoteFindings := s.collectRemote(ctx, features, now, forceRemote)
+	snapshot.Sources = append(snapshot.Sources, remote)
+	snapshot.Findings = append(snapshot.Findings, remoteFindings...)
 
-	options := DeriveOptions{Baseline: s.config.Baseline, RemoteAvailable: false}
+	// Stale remote facts are still real observations, so they may confirm a
+	// phase; the snapshot separately reports itself as stale and incomplete.
+	remoteUsable := remote.Availability.OK() || remote.Availability == AvailabilityStale
+	options := DeriveOptions{Baseline: s.config.Baseline, RemoteAvailable: remoteUsable}
 	for index := range features {
+		// Phase first: several findings compare themselves against the phase
+		// that was ultimately chosen.
 		features[index].Phase = DerivePhase(features[index], options)
-		features[index].Findings = mergeFindings(findingsFor(findings, features[index].Slug), DeriveFindings(features[index], options))
+		features[index].Findings = mergeFindings(
+			features[index].Findings,
+			findingsFor(findings, features[index].Slug),
+			DeriveFindings(features[index], options),
+		)
 	}
 
 	if baselineStale(features) {
@@ -163,7 +195,119 @@ func (s *Service) Collect(ctx context.Context) (Snapshot, error) {
 	sortFindings(snapshot.Findings)
 	snapshot.Features = features
 	snapshot.Complete = requiredSourcesFresh(snapshot)
+	snapshot.Stale = anyStale(snapshot)
+	if remote.Availability.OK() || remote.Availability == AvailabilityStale {
+		snapshot.GitHubCheckedAt = remote.ObservedAt
+	}
 	return snapshot, nil
+}
+
+// anyStale reports whether any source is being reused past its refresh window.
+func anyStale(snapshot Snapshot) bool {
+	for _, source := range snapshot.Sources {
+		if source.Availability == AvailabilityStale {
+			return true
+		}
+	}
+	return false
+}
+
+// collectRemote performs the one required network call and attaches its
+// evidence to every feature. A failure degrades to an unavailable source with
+// a sanitized reason; it never aborts the snapshot, because partial local
+// facts plus an honest "remote unknown" beat no board at all.
+func (s *Service) collectRemote(ctx context.Context, features []Feature, now time.Time, force bool) (Source, []Finding) {
+	source := Source{Kind: SourceGitHub, Required: true, ObservedAt: now}
+	if s.clock == nil {
+		source.Availability = AvailabilityUnavailable
+		source.Detail = "remote delivery status was not queried"
+		return source, []Finding{githubUnavailable(source.Detail, "")}
+	}
+
+	outcome := s.clock.get(ctx, s.config.Baseline, now, force)
+	result, err := outcome.result, outcome.err
+	if err != nil && !outcome.stale {
+		source.Availability = AvailabilityUnavailable
+		detail, recovery := describeRemoteError(err)
+		source.Detail = detail
+		for index := range features {
+			// Mark each row explicitly rather than leaving remote columns
+			// looking merely empty.
+			features[index].Remote = Remote{Availability: AvailabilityUnavailable, Detail: detail, ObservedAt: now}
+		}
+		return source, []Finding{githubUnavailable(detail, recovery)}
+	}
+
+	source.Availability = AvailabilityAvailable
+	source.ObservedAt = result.ObservedAt
+	if source.ObservedAt.IsZero() {
+		source.ObservedAt = now
+	}
+	if outcome.stale {
+		// Reused remote facts stay usable but must never be presented as
+		// current: the board says so, and the snapshot is marked stale.
+		source.Availability = AvailabilityStale
+		if err != nil {
+			detail, _ := describeRemoteError(err)
+			source.Detail = "showing the last successful result; the latest query failed: " + detail
+		} else {
+			source.Detail = "showing the last successful result until the next refresh"
+		}
+	}
+
+	// Remote findings belong to the feature they describe, not to the
+	// repository footer: an unattributed "checks are failing" tells a reader
+	// nothing about which feature to go and look at.
+	unmatched := 0
+	for index := range features {
+		raised := MatchRemote(&features[index], result.PullRequests, s.config.Baseline, source.ObservedAt)
+		features[index].Findings = mergeFindings(features[index].Findings, raised)
+		// Only a feature the backlog already calls delivered is suspicious
+		// without a pull request. Work in progress legitimately has none, so
+		// counting those would make the cap warning permanent noise.
+		if features[index].Remote.PullRequest == nil && features[index].Backlog.State == BacklogShipped {
+			unmatched++
+		}
+	}
+
+	var findings []Finding
+	// The listing is capped, so a repository with a long merge history always
+	// truncates. That only matters if some feature actually failed to match,
+	// which is the one case where the cap could be the explanation.
+	if result.Truncated && unmatched > 0 {
+		findings = append(findings, Finding{
+			Code:     FindingGitHubUnavailable,
+			Severity: SeverityInfo,
+			Source:   SourceGitHub,
+			Message:  "The pull-request listing hit its candidate limit, so an older pull request may not have been matched.",
+		})
+	}
+	return source, findings
+}
+
+func githubUnavailable(detail, recovery string) Finding {
+	message := "Remote delivery status is unavailable, so review, merge, and cleanup phases cannot be confirmed."
+	if recovery != "" {
+		message += " Recovery: " + recovery + "."
+	}
+	return Finding{
+		Code:     FindingGitHubUnavailable,
+		Severity: SeverityError,
+		Source:   SourceGitHub,
+		Message:  message,
+		Detail:   detail,
+	}
+}
+
+// describeRemoteError returns a sanitized reason and its recovery command. The
+// underlying error is never rendered directly: `gh` failures routinely echo
+// tokens and request bodies.
+func describeRemoteError(err error) (detail, recovery string) {
+	var remoteErr *github.Error
+	if errors.As(err, &remoteErr) {
+		return remoteErr.Detail, remoteErr.Recovery()
+	}
+	return "the GitHub query failed", "run: gh auth status"
 }
 
 // activePlanLookup reads the planning copy inside a feature's own worktree.

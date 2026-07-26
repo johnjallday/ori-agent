@@ -46,7 +46,7 @@ func featureCheckout(slug, path string) worktree.Checkout {
 		Branch:     worktree.FeatureBranchPrefix + slug,
 		Head:       "abc123",
 		Slug:       slug,
-		SlugOrigin: worktree.SlugFromBranch,
+		SlugOrigin: worktree.SlugOriginBranch,
 		PathSlug:   slug,
 	}
 }
