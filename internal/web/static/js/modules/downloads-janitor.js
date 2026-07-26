@@ -70,6 +70,36 @@
     return node;
   }
 
+  // Filenames are untrusted input, and this is the last point before they reach
+  // a screen or a screen reader. Control characters forge line breaks and
+  // bidirectional overrides disguise an extension: "invoice<RLO>gpj.exe"
+  // renders as "invoice exe.jpg". The server sends a rendered-safe
+  // display_name for candidates (downloadsjanitor.DisplayFileName), but history
+  // and journal entries carry the on-disk name by necessity, so the same rule
+  // is applied here rather than trusting the field to have been cleaned
+  // upstream. textContent already prevents markup; this is about what the
+  // characters *look* like once rendered.
+  const BIDI_CONTROLS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+  // eslint-disable-next-line no-control-regex
+  const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+  const MAX_DISPLAY_NAME = 180;
+
+  function safeName(value, fallback) {
+    const raw = typeof value === 'string' ? value : '';
+    const cleaned = raw.replace(CONTROL_CHARS, '').replace(BIDI_CONTROLS, '').trim();
+    if (!cleaned) return fallback || '(unreadable name)';
+    return Array.from(cleaned).length > MAX_DISPLAY_NAME
+      ? Array.from(cleaned).slice(0, MAX_DISPLAY_NAME).join('') + '\u2026'
+      : cleaned;
+  }
+
+  // displayName prefers the name the server already rendered safe, and cleans
+  // whatever it is given either way.
+  function displayName(item) {
+    if (!item) return '(unreadable name)';
+    return safeName(item.display_name || item.name || item.source_name);
+  }
+
   function button(label, className, onClick) {
     const b = el('button', className, label);
     b.setAttribute('type', 'button');
@@ -291,7 +321,7 @@
   function categoryPicker(candidate) {
     const select = document.createElement('select');
     select.className = 'dj-category';
-    select.setAttribute('aria-label', 'Category for ' + candidate.name);
+    select.setAttribute('aria-label', 'Category for ' + displayName(candidate));
     const chosen = candidate.decision_category || candidate.category || '';
     const options = categories.length
       ? categories
@@ -322,7 +352,7 @@
     checkbox.type = 'checkbox';
     checkbox.className = 'dj-select';
     checkbox.checked = selected.has(candidate.id);
-    checkbox.setAttribute('aria-label', 'Select ' + candidate.name);
+    checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
     checkbox.disabled = checkbox.disabled || trashMarked.has(candidate.id);
     checkbox.addEventListener('change', () => {
@@ -334,7 +364,7 @@
     row.appendChild(selectCell);
 
     const nameCell = el('td', 'dj-cell dj-cell-name');
-    nameCell.appendChild(el('span', 'dj-name', candidate.name));
+    nameCell.appendChild(el('span', 'dj-name', displayName(candidate)));
     if (candidate.needs_review) {
       const flag = el('span', 'dj-flag', 'Needs review');
       flag.setAttribute('title', 'Ori could not place this confidently');
@@ -401,7 +431,7 @@
       trashToggle.setAttribute('aria-pressed', marked ? 'true' : 'false');
       trashToggle.setAttribute(
         'aria-label',
-        (marked ? 'Unmark' : 'Mark') + ' ' + candidate.name + ' for Trash'
+        (marked ? 'Unmark' : 'Mark') + ' ' + displayName(candidate) + ' for Trash'
       );
       actionCell.appendChild(trashToggle);
       actionCell.appendChild(
@@ -511,6 +541,10 @@
         parts.length === 0 ? 'Approve selected' : 'Approve ' + parts.join(' and ');
       approve.disabled = moves + trashes === 0;
       approve.setAttribute('aria-disabled', approve.disabled ? 'true' : 'false');
+      // Point the disabled control at the line that says why ("No files
+      // selected."), so the reason is available to a screen reader reading the
+      // button rather than only to someone who happens to look above it.
+      approve.setAttribute('aria-describedby', 'downloadsJanitorSelection');
     }
   }
 
@@ -613,7 +647,7 @@
     (previewResult.items || []).forEach(item => {
       const isTrash = item.operation === 'trash';
       const entry = el('li', 'dj-confirm-item' + (isTrash ? ' dj-confirm-trash' : ''));
-      entry.appendChild(el('span', 'dj-confirm-name', item.name));
+      entry.appendChild(el('span', 'dj-confirm-name', displayName(item)));
       entry.appendChild(el('span', 'dj-confirm-arrow', ' → '));
       entry.appendChild(
         el('span', 'dj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
@@ -643,25 +677,37 @@
     // stating the exact number of files going to Trash. Moves alone do not:
     // reserving the extra step for the destructive case is what keeps it
     // meaningful rather than something to click through (FR-70).
+    let initialFocus = confirm;
     if (trashCount > 0) {
       confirm.disabled = true;
+      // A disabled control cannot be focused, so focusing it would drop focus
+      // to the document body — on the destructive path, where losing your place
+      // matters most. Focus goes to the acknowledgement instead, which is the
+      // thing the user has to act on next anyway.
       const ack = el('label', 'dj-trash-ack');
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.id = 'downloadsJanitorTrashAck';
+      // Say why the button is unavailable rather than leaving it inert and
+      // unexplained.
+      confirm.setAttribute('aria-describedby', 'downloadsJanitorTrashAckText');
       box.addEventListener('change', () => {
         confirm.disabled = !box.checked;
+        // Ticking the box is the moment the action becomes available, so hand
+        // the user straight to it instead of making them tab back.
+        if (box.checked) confirm.focus?.();
       });
+      initialFocus = box;
       ack.appendChild(box);
-      ack.appendChild(
-        el(
-          'span',
-          'dj-trash-ack-text',
-          trashCount === 1
-            ? 'Yes, move 1 file to the Trash.'
-            : 'Yes, move ' + trashCount + ' files to the Trash.'
-        )
+      const ackText = el(
+        'span',
+        'dj-trash-ack-text',
+        trashCount === 1
+          ? 'Yes, move 1 file to the Trash.'
+          : 'Yes, move ' + trashCount + ' files to the Trash.'
       );
+      ackText.id = 'downloadsJanitorTrashAckText';
+      ack.appendChild(ackText);
       panel.appendChild(ack);
     }
     actions.appendChild(confirm);
@@ -671,11 +717,37 @@
         // recorded, so nothing the user chose is lost.
         pendingPreview = null;
         clear(host);
+        // Destroying the panel would otherwise drop focus to the body, leaving
+        // a keyboard user at the top of the document with no idea where they
+        // were. Put them back on the control that opened it.
+        restoreFocus();
       })
     );
     panel.appendChild(actions);
     host.appendChild(panel);
-    confirm.focus?.();
+    initialFocus.focus?.();
+  }
+
+  // focusReturn holds the element that opened the confirmation panel so focus
+  // can go back there when the panel closes for any reason.
+  let focusReturn = null;
+
+  function rememberFocus() {
+    const active = document.activeElement;
+    focusReturn = active && active !== document.body ? active : null;
+  }
+
+  function restoreFocus() {
+    const target = focusReturn;
+    focusReturn = null;
+    if (!target) return;
+    // The opener may have been re-rendered away; fall back to the approve
+    // button, which is the equivalent place in the rebuilt surface.
+    if (target.isConnected) {
+      target.focus?.();
+      return;
+    }
+    document.getElementById('downloadsJanitorApprove')?.focus?.();
   }
 
   // confirmLabel names both halves of a mixed batch so the button never
@@ -1015,7 +1087,7 @@
     const mark = el('span', 'dj-results-mark', RESULT_MARKS[action.result] || '!');
     mark.setAttribute('aria-hidden', 'true');
     entry.appendChild(mark);
-    entry.appendChild(el('span', 'dj-history-name', action.source_name || ''));
+    entry.appendChild(el('span', 'dj-history-name', displayName(action)));
 
     const what =
       action.operation === 'trash'
@@ -1180,8 +1252,12 @@
     clear(host);
 
     const panel = el('section', 'dj-results');
-    panel.setAttribute('role', 'status');
-    panel.setAttribute('aria-live', 'polite');
+    // Focus moves here below, so the user is taken to the outcome rather than
+    // told about it from elsewhere. A live region as well would announce the
+    // same text twice, so this is a labelled group instead of role="status".
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('tabindex', '-1');
+    panel.setAttribute('aria-labelledby', 'downloadsJanitorResultsSummary');
 
     const parts = [];
     if (result.applied)
@@ -1189,7 +1265,9 @@
     if (result.failed) parts.push(result.failed + ' could not be moved');
     if (result.stale) parts.push(result.stale + ' changed since you approved');
     if (parts.length === 0) parts.push('Nothing was moved');
-    panel.appendChild(el('p', 'dj-results-summary', parts.join(' · ') + '.'));
+    const resultsSummary = el('p', 'dj-results-summary', parts.join(' · ') + '.');
+    resultsSummary.id = 'downloadsJanitorResultsSummary';
+    panel.appendChild(resultsSummary);
 
     const list = el('ul', 'dj-results-list');
     (result.outcomes || []).forEach(outcome => {
@@ -1197,7 +1275,7 @@
       const mark = el('span', 'dj-results-mark', RESULT_MARKS[outcome.result] || '!');
       mark.setAttribute('aria-hidden', 'true');
       entry.appendChild(mark);
-      entry.appendChild(el('span', 'dj-results-name', outcome.name));
+      entry.appendChild(el('span', 'dj-results-name', displayName(outcome)));
       entry.appendChild(
         el('span', 'dj-results-state', ' — ' + (RESULT_LABELS[outcome.result] || outcome.result))
       );
@@ -1215,6 +1293,11 @@
       panel.appendChild(button('Scan again', 'dj-btn dj-btn-secondary', () => void scanNow()));
     }
     host.appendChild(panel);
+    // The button that was pressed no longer exists. Move focus to the outcome
+    // so a keyboard user lands on what happened instead of at the top of the
+    // document, and drop the saved opener — this panel is where they are now.
+    focusReturn = null;
+    panel.focus?.();
   }
 
   // startApproval asks the server for the final plan and shows it for
@@ -1224,6 +1307,7 @@
     if (!id || busy || selected.size + trashMarked.size === 0) return;
     busy = true;
     showError('');
+    rememberFocus();
     const control = document.getElementById('downloadsJanitorApprove');
     if (control) control.disabled = true;
     try {

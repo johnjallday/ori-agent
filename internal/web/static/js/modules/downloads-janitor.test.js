@@ -52,6 +52,18 @@ class FakeElement {
   dispatch(event) {
     (this._listeners[event] || []).forEach(fn => fn());
   }
+  focus() {
+    // A disabled control cannot take focus in a real browser, and the panel
+    // relies on that being true.
+    if (this.disabled) return;
+    globalThis.document.activeElement = this;
+  }
+  removeAttribute(k) {
+    delete this._attrs[k];
+  }
+  get isConnected() {
+    return this._connected !== false;
+  }
   // Depth-first collection helpers used by the assertions below.
   all(predicate, out = []) {
     if (predicate(this)) out.push(this);
@@ -64,6 +76,8 @@ class FakeDocument {
   constructor() {
     this.byId = new Map();
     this.readyState = 'complete';
+    this.body = new FakeElement('body');
+    this.activeElement = this.body;
   }
   register(id) {
     const el = new FakeElement('div');
@@ -1504,4 +1518,128 @@ test('the settings toggle exposes its expanded state', () => {
   assert.equal(toggle.getAttribute('aria-controls'), 'downloadsJanitorSettingsHost');
   toggle.click();
   assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+});
+
+// --- Accessibility ------------------------------------------------------
+//
+// These cover the parts of the review surface a keyboard or screen-reader user
+// depends on, and that no visual check would catch.
+
+test('a filename cannot smuggle control or bidi characters into the page', async () => {
+  const doc = setup();
+  const hostile = candidatesFixture();
+  // A right-to-left override disguises the real extension: this renders as
+  // "invoice exe.pdf" in any renderer that honours the character.
+  hostile[0].name = 'invoice\u202Efdp.exe';
+  hostile[0].display_name = undefined;
+  // And a newline would forge a second line of output.
+  hostile[1].name = 'payload\n(deleted 400 files).bin';
+  hostile[1].display_name = undefined;
+  renderReview(doc, batchFixture(), hostile);
+
+  const body = text(doc);
+  assert.ok(!body.includes('\u202E'), 'bidi overrides must never reach the DOM');
+  assert.ok(!body.includes('\n(deleted'), 'a filename must not forge a second line');
+  // The suspicious text itself survives, so a suspicious name still reads as one.
+  assert.match(body, /invoice/);
+  assert.match(body, /exe/);
+});
+
+test('the accessible name of a row control is the safe name, not the raw one', async () => {
+  const doc = setup();
+  const hostile = candidatesFixture();
+  hostile[0].name = 'invoice\u202Efdp.exe';
+  hostile[0].display_name = undefined;
+  renderReview(doc, batchFixture(), hostile);
+
+  const labels = doc
+    .getElementById('downloadsJanitorMount')
+    .all(node => (node.getAttribute('aria-label') || '').startsWith('Select '))
+    .map(node => node.getAttribute('aria-label'));
+  assert.ok(labels.length > 0, 'expected labelled selection controls');
+  labels.forEach(label => {
+    assert.ok(
+      !label.includes('\u202E'),
+      'a screen reader must not be handed a bidi override: ' + label
+    );
+  });
+});
+
+test('the server display_name is preferred over the raw name', async () => {
+  const doc = setup();
+  const candidates = candidatesFixture();
+  candidates[0].name = 'raw-on-disk-name.pdf';
+  candidates[0].display_name = 'rendered-safe-name.pdf';
+  renderReview(doc, batchFixture(), candidates);
+  assert.match(text(doc), /rendered-safe-name\.pdf/);
+});
+
+test('focus goes to the acknowledgement, not the disabled button, on a removal', async () => {
+  const doc = setup();
+  renderReview(doc);
+  trashToggleFor(doc, 'payload.bin').click();
+  globalThis.fetch = async url =>
+    String(url).endsWith('/preview')
+      ? {
+          ok: true,
+          json: async () => ({
+            preview: {
+              batch_id: 'batch-1',
+              token: 'tok-abc',
+              move_count: 0,
+              trash_count: 1,
+              items: [{ candidate_id: 'c2', name: 'payload.bin', operation: 'trash' }]
+            }
+          })
+        }
+      : {
+          ok: true,
+          json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+        };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const ack = doc.getElementById('downloadsJanitorTrashAck');
+  const confirm = doc.getElementById('downloadsJanitorConfirmApply');
+  assert.equal(confirm.disabled, true);
+  assert.equal(
+    doc.activeElement,
+    ack,
+    'focusing the disabled confirm button would drop focus to the body'
+  );
+  // The button says why it is unavailable rather than being inert and silent.
+  assert.equal(confirm.getAttribute('aria-describedby'), 'downloadsJanitorTrashAckText');
+
+  // Acknowledging hands the user straight to the action it unlocks.
+  ack.checked = true;
+  ack.dispatch('change');
+  assert.equal(confirm.disabled, false);
+  assert.equal(doc.activeElement, confirm);
+});
+
+test('cancelling the confirmation returns focus to the control that opened it', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+  globalThis.fetch = async url =>
+    String(url).endsWith('/preview')
+      ? { ok: true, json: async () => ({ preview: { ...PREVIEW, trash_count: 0 } }) }
+      : {
+          ok: true,
+          json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+        };
+
+  const approve = doc.getElementById('downloadsJanitorApprove');
+  approve.focus();
+  approve.click();
+  await new Promise(r => setTimeout(r, 0));
+
+  const cancel = doc
+    .getElementById('downloadsJanitorMount')
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Cancel')[0];
+  assert.ok(cancel, 'expected a cancel control');
+  cancel.click();
+
+  assert.notEqual(doc.activeElement, doc.body, 'cancelling must not strand focus on the body');
 });
