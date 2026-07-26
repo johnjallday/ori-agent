@@ -159,6 +159,100 @@ The local dispatch service is intentionally macOS-only in v1. The helper still
 builds on Linux and Windows, but scheduling commands report that unsupported
 platform clearly instead of installing cron, systemd, or Windows scheduling.
 
+## Feature overview
+
+~~~bash
+wt status                          # compact, feature-first overview
+wt status --feature <slug>         # one feature in detail
+wt status --json                   # the complete normalized snapshot
+wt status --watch                  # live board
+wt status --worktrees              # the legacy Git-only worktree table
+~~~
+
+`wt status` answers "what features exist in this repository, and where is each
+one" rather than listing Git worktrees. One row per feature, joined on the
+exact slug across every source.
+
+### Where the answers come from
+
+| Source | Contributes |
+| --- | --- |
+| planning | `prd-<slug>.md` and `tasks-<slug>.md` — exact filenames only |
+| backlog | `BACKLOG.md` Doing / Shipped / dropped entries (never the Ideas section) |
+| worktree | linked checkouts, resolved through the Git common directory |
+| git | branch, HEAD, dirty state, ahead/behind versus `dev`, stale baseline |
+| github | pull request, base, draft/open/closed/merged, required-check rollup |
+| bridge | the saved role records the bridge once bound |
+| herdr | live agents, observed status, schedules |
+
+The authoritative planning copy is the one inside the feature's own worktree
+while that worktree exists, and the archived copy in `dev` after `wt done`.
+
+### Phases
+
+Phase precedence is by evidence strength, not recency. A merged pull request is
+a fact about the repository's history; an unticked task list is somebody
+forgetting a checkbox.
+
+| Phase | Means |
+| --- | --- |
+| `planning` | planning artifacts are incomplete and no worktree exists |
+| `ready` | a PRD and task list exist but no worktree does |
+| `implementing` | a feature worktree exists on disk |
+| `review` | an exact open or draft pull request targets `dev` |
+| `merged_cleanup` | merged, but a worktree, `Doing` entry, or unticked archive remains |
+| `shipped` | merged and tidy, or recorded shipped in `BACKLOG.md` |
+| `dropped` | `BACKLOG.md` records the feature as dropped |
+| `unknown` | no evidence was strong enough to place it |
+
+A phase is only marked confirmed when a fresh GitHub query succeeded. Without
+one, every phase renders as `(unconfirmed)` — a local-only board cannot tell
+"still implementing" from "merged an hour ago".
+
+### GitHub is required
+
+Every complete snapshot needs one fresh authenticated `gh` query. When `gh` is
+missing, unauthenticated, timing out, or unreachable, the overview:
+
+- renders every local fact it did observe,
+- marks each phase unconfirmed and each remote column `unavailable`,
+- prints a prominent `github_unavailable` finding with its recovery command,
+- and **exits nonzero**.
+
+That last point is deliberate: a green exit code is how scripts decide nothing
+is wrong. Run `wt herd doctor` to check `gh` installation and authentication.
+
+Branch prefix records intent, not size, so `feature/`, `feat/`, `fix/`,
+`refactor/`, `docs/`, `test/`, and `chore/` branches are all matched — on the
+exact slug after the prefix. A pull request whose head branch does not match a
+feature's slug exactly is never attributed to it.
+
+### Findings
+
+Findings are diagnostic. Nothing is repaired, healed, or cleared automatically,
+and a later collector never removes a finding raised earlier.
+
+| Severity | Meaning |
+| --- | --- |
+| `error` | something is ambiguous or broken; the overview refuses to guess |
+| `warning` | real drift worth acting on |
+| `info` | a gap that is expected at this stage, or bookkeeping lag |
+
+Common codes: `prd_missing`, `task_list_missing`, `plan_malformed`,
+`worktree_without_plan`, `name_mismatch`, `backlog_drift`, `archive_stale`,
+`archive_missing`, `branch_behind_base`, `worktree_dirty`, `identity_ambiguous`,
+`github_unavailable`, `pr_ambiguous`, `pr_unexpected_base`, `pr_closed_unmerged`,
+`checks_failing`, `agent_missing`, `agent_ambiguous`, `agent_possible_drift`,
+`agent_unmanaged`, `no_agent`, `schedule_failed`, `metadata_stale`,
+`herdr_unavailable`.
+
+### Watch cadence and staleness
+
+`--watch` re-reads local evidence on the fast poll interval and queries GitHub
+no more often than `status.github_refresh_interval` (default 60s, floor 30s).
+After a successful query, a later failure reuses the last good result, labels
+it `stale`, and keeps retrying — the board degrades rather than blanking.
+
 ## Status board and automation
 
 ~~~bash
@@ -168,20 +262,63 @@ wt herd status --json
 wt herd status --clear-view
 ~~~
 
-The normal board shows all managed features. Each row includes feature/branch,
-role, generated agent name, kind, Herdr semantic state, task progress, next
-incomplete task, Git state, activity information, and the next continuation.
+`wt herd status` renders the same snapshot as `wt status`, expanded: each
+feature followed by its agent rows. Because both surfaces render one snapshot,
+they cannot disagree about progress, divergence, pull requests, or agents.
+
+Every agent row separates what the bridge saved from what Herdr currently
+reports, and grades the mapping between them:
+
+| Binding | Means |
+| --- | --- |
+| `exact` | the saved identity resolves to exactly one live agent |
+| `possible drift` | one plausible agent matches partially; the detail names each diverging field |
+| `ambiguous` | several agents plausibly match; none is chosen |
+| `missing` | no live agent matches the saved record |
+| `unavailable` | Herdr could not be consulted |
+
 Herdr's idle, working, blocked, done, and unknown states remain authoritative;
-task progress is supplemental.
+task progress is supplemental and is never written back as an agent status. A
+saved status is a bridge record, never a live observation — during a Herdr
+outage saved values stay visible but observed status reads `unavailable`.
 
-Interactive output uses color and text labels together. It honors NO_COLOR and
---no-color. --json emits the versioned machine-readable snapshot instead,
-making it suitable for scripts. --watch prefers Herdr events and falls back to
-bounded polling, marking a disconnected live view as stale.
+Live agents running in a feature's workspace without a bridge role appear as
+`unmanaged`; they are surfaced, never adopted. A feature worktree with no agent
+at all says so, because silence would look identical to a healthy, quietly
+working agent.
 
-The plugin also provides a source-scoped Ori Devflow view and board. Clear it
-with wt herd status --clear-view; doing so never changes unrelated user views
-or metadata.
+Interactive output uses color and text labels together, and every phase,
+availability, binding, and severity also prints as full text — stripping the
+styling yields exactly the plain rendering, so color is never the only carrier
+of meaning. Color is emitted only when stdout is a terminal, and both NO_COLOR
+and --no-color disable it entirely.
+
+| Colour | Means |
+| --- | --- |
+| green | healthy: passing checks, an exact binding, a clean tree, no findings |
+| yellow | needs attention: drift, a behind branch, pending checks, cleanup outstanding |
+| red | broken or ambiguous: failing checks, a missing or ambiguous agent, an incomplete snapshot |
+| cyan / blue / magenta | active phases (implementing, ready, review) |
+| dim | history, absences, and supporting detail | --json emits the versioned machine-readable snapshot
+instead, making it suitable for scripts.
+
+The plugin also provides a source-scoped Ori Devflow view and board, rendered
+from the same snapshot. Clear it with wt herd status --clear-view; doing so
+never changes unrelated user views or metadata. Display metadata is refreshed
+only after collection, never as part of it, and is never identity or
+semantic-status authority.
+
+### JSON contract
+
+`--json` emits schema version 2 (`overview.Snapshot`). It carries the
+generation and GitHub-check timestamps, repository and baseline identity,
+overall completeness and staleness, one entry per feature, per-source
+availability, and every finding.
+
+Absent, unknown, unavailable, stale, and a real zero are encoded distinctly and
+must not be collapsed by a consumer. An unparsed plan reports its availability
+and no counts; it never reports `0/0`, which would read as "no work done".
+Consumers must tolerate additive fields within a schema version.
 
 ## Guarded cleanup
 
@@ -209,6 +346,25 @@ settled state as permission to remove the worktree.
 wt done <feature> --herdr-override is a recovery tool only for unavailable or
 failed workspace-close checks. It cannot override known active agents or
 unresolved schedules, and it records an orphan-risk audit event.
+
+### Testing setup against an isolated home
+
+`--home` (or `HERDR_DEVFLOW_HOME`) redirects the helper's runtime root, so a
+test run keeps its binary, plugin, state, and logs inside the temporary tree:
+
+~~~bash
+SETUP_HOME=$(mktemp -d)
+wt herd setup --home "$SETUP_HOME"
+~~~
+
+**One thing `--home` does not sandbox:** on macOS, setup also registers the
+scheduler LaunchAgent at `~/Library/LaunchAgents/com.ori.herdr-devflow.plist`,
+and that path is not affected by the override. A setup run against a temporary
+home rewrites the real LaunchAgent to point at the temporary helper, which
+breaks scheduled continuations once the temporary directory is removed.
+
+Re-run `wt herd setup` without `--home` afterwards to point it back at the
+stable helper.
 
 ## Local state, logs, recovery, and removal
 

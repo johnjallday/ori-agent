@@ -11,7 +11,8 @@
 #   wt done [name] [--herdr-override] # Archive tasks back to dev, then remove worktree+branch
 #   wt rm [name]            # Remove worktree and its branch
 #   wt ls                   # List worktrees
-#   wt status               # Show ahead/behind/merged vs dev for all worktrees
+#   wt status               # Feature-first overview of every feature in the repo
+#   wt status --worktrees   # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
 #   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
 #   wt backlog [sub]        # BACKLOG.md: list (default) | add <idea> | sync  (scoped commit+push to dev)
@@ -558,6 +559,109 @@ function wt {
     return $?
   fi
   wt_dispatch "$@"
+}
+
+# wt status is a thin dispatcher. The feature-first overview is produced by the
+# Go helper, which owns every collector; this shell only validates and forwards
+# arguments. The pre-existing Git-only table stays available, unchanged, behind
+# --worktrees for scripts and habits that depend on its exact columns.
+function wt_status {
+  local -a forward
+  local arg feature=""
+  local worktrees=0
+
+  while (( $# > 0 )); do
+    arg="$1"
+    case "$arg" in
+    --worktrees)
+      worktrees=1
+      ;;
+    --json | --no-color | --watch)
+      forward+=("$arg")
+      ;;
+    --feature)
+      if (( $# < 2 )); then
+        echo "wt status: --feature requires a feature slug"
+        return 2
+      fi
+      shift
+      feature="$1"
+      forward+=(--feature "$feature")
+      ;;
+    --feature=*)
+      feature="${arg#--feature=}"
+      if [[ -z "$feature" ]]; then
+        echo "wt status: --feature requires a feature slug"
+        return 2
+      fi
+      forward+=(--feature "$feature")
+      ;;
+    -h | --help)
+      wt_status_help
+      return 0
+      ;;
+    *)
+      echo "wt status: unknown option $arg"
+      wt_status_help
+      return 2
+      ;;
+    esac
+    shift
+  done
+
+  if (( worktrees )); then
+    if (( ${#forward[@]} > 0 )); then
+      echo "wt status: --worktrees cannot be combined with ${forward[1]}"
+      return 2
+    fi
+    wt_status_worktrees
+    return $?
+  fi
+
+  # Arguments are passed as separate words, never through eval, so a slug
+  # containing shell metacharacters cannot be executed.
+  wt_herd overview "${forward[@]}"
+}
+
+function wt_status_help {
+  echo "Usage: wt status [--feature <slug>] [--json] [--no-color] [--watch]"
+  echo "       wt status --worktrees   # the Git-only worktree table"
+  echo
+  echo "Feature-first overview of every feature in this repository, joining"
+  echo "planning artifacts, BACKLOG.md, worktrees, Git, GitHub, and Herdr."
+  echo "Read-only: it never writes planning, Git, GitHub, bridge, or Herdr state."
+  echo
+  echo "Exit codes: 0 complete, 1 incomplete (a required source such as GitHub"
+  echo "was unavailable; local facts are still printed), 2 invalid arguments."
+  echo "Run 'wt herd doctor' if wt status keeps exiting 1."
+}
+
+# The legacy Git-only table, preserved byte for byte. It makes no network call
+# beyond the merged-PR set it already loaded, and it reports Git facts only.
+function wt_status_worktrees {
+  wt_color_init
+  wt_load_merged_set
+  wt_load_worktrees
+  if [[ ${#WT_PATHS[@]} -eq 0 ]]; then
+    echo "No worktrees found"
+    return 1
+  fi
+  wt_compute_widths
+  wt_render_header "  "
+  local i wt_path branch ahead behind label
+  local -a info
+  for i in {1..${#WT_PATHS[@]}}; do
+    wt_path="${WT_PATHS[$i]}"
+    branch="${WT_BRANCHES[$i]}"
+    ahead="0"; behind="0"; label="[detached]"
+    if [[ -n "$branch" ]]; then
+      info=("${(@s/ /)$(wt_branch_status "$branch")}")
+      ahead="${info[1]}"; behind="${info[2]}"; label="${info[3]}"
+    fi
+    wt_render_row "  " "${wt_path:t}" "$branch" "$ahead" "$behind" "$label"
+  done
+  echo
+  echo "Compared against: ${WT_C_CYAN}$BASE_BRANCH${WT_C_RESET}"
 }
 
 function wt_herd {
@@ -1109,29 +1213,8 @@ function wt_dispatch {
     fi
     ;;
   status)
-    wt_color_init
-    wt_load_merged_set
-    wt_load_worktrees
-    if [[ ${#WT_PATHS[@]} -eq 0 ]]; then
-      echo "No worktrees found"
-      return 1
-    fi
-    wt_compute_widths
-    wt_render_header "  "
-    local i wt_path branch ahead behind label
-    local -a info
-    for i in {1..${#WT_PATHS[@]}}; do
-      wt_path="${WT_PATHS[$i]}"
-      branch="${WT_BRANCHES[$i]}"
-      ahead="0"; behind="0"; label="[detached]"
-      if [[ -n "$branch" ]]; then
-        info=("${(@s/ /)$(wt_branch_status "$branch")}")
-        ahead="${info[1]}"; behind="${info[2]}"; label="${info[3]}"
-      fi
-      wt_render_row "  " "${wt_path:t}" "$branch" "$ahead" "$behind" "$label"
-    done
-    echo
-    echo "Compared against: ${WT_C_CYAN}$BASE_BRANCH${WT_C_RESET}"
+    shift
+    wt_status "$@"
     ;;
   merge)
     local name="$2"
@@ -1316,7 +1399,8 @@ function wt_dispatch {
     echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
     echo "  wt rm [name]     - Remove worktree and branch (interactive if no name)"
     echo "  wt ls            - List worktrees"
-    echo "  wt status        - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
+    echo "  wt status        - Feature-first overview (--feature/--json/--no-color/--watch)"
+    echo "  wt status --worktrees - Show ahead/behind/merged vs $BASE_BRANCH for all worktrees"
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"

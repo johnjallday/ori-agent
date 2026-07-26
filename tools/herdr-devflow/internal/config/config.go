@@ -63,6 +63,14 @@ type MetadataConfig struct {
 
 type StatusConfig struct {
 	WatchPollInterval string `toml:"watch_poll_interval"`
+	// GitHubTimeout bounds one `gh` invocation.
+	GitHubTimeout string `toml:"github_timeout"`
+	// GitHubRefreshInterval is the minimum gap between remote queries while
+	// watching. Local and Herdr polling stays fast; only the network call is
+	// rate limited, so a board left open cannot storm the GitHub API.
+	GitHubRefreshInterval string `toml:"github_refresh_interval"`
+	// GitHubCandidateLimit bounds how many pull requests are requested.
+	GitHubCandidateLimit int `toml:"github_candidate_limit"`
 }
 
 func Default() Config {
@@ -84,7 +92,12 @@ func Default() Config {
 		Bootstrap: BootstrapConfig{Template: "primary-v1", TimeoutSeconds: 30},
 		Scheduler: SchedulerConfig{RetryWindow: "15m"},
 		Metadata:  MetadataConfig{Enabled: true},
-		Status:    StatusConfig{WatchPollInterval: "2s"},
+		Status: StatusConfig{
+			WatchPollInterval:     "2s",
+			GitHubTimeout:         "20s",
+			GitHubRefreshInterval: "60s",
+			GitHubCandidateLimit:  100,
+		},
 	}
 }
 
@@ -156,6 +169,18 @@ func (c Config) Validate() error {
 	if interval, err := time.ParseDuration(c.Status.WatchPollInterval); err != nil || interval <= 0 {
 		return fmt.Errorf("status.watch_poll_interval must be a positive Go duration")
 	}
+	if timeout, err := time.ParseDuration(c.Status.GitHubTimeout); err != nil || timeout < time.Second || timeout > 2*time.Minute {
+		return fmt.Errorf("status.github_timeout must be a Go duration between 1s and 2m")
+	}
+	// A floor of 30s is deliberate. The remote clock exists to keep a watched
+	// board from hammering the API; letting it be configured to 1s would
+	// defeat the only protection the tool has.
+	if interval, err := time.ParseDuration(c.Status.GitHubRefreshInterval); err != nil || interval < MinGitHubRefreshInterval {
+		return fmt.Errorf("status.github_refresh_interval must be a Go duration of at least %s", MinGitHubRefreshInterval)
+	}
+	if c.Status.GitHubCandidateLimit < 1 || c.Status.GitHubCandidateLimit > 500 {
+		return fmt.Errorf("status.github_candidate_limit must be between 1 and 500")
+	}
 	return nil
 }
 
@@ -190,6 +215,25 @@ func (c Config) RetryWindow() time.Duration {
 
 func (c Config) WatchPollInterval() time.Duration {
 	duration, _ := time.ParseDuration(c.Status.WatchPollInterval)
+	return duration
+}
+
+// MinGitHubRefreshInterval is the shortest gap allowed between remote queries
+// while watching.
+const MinGitHubRefreshInterval = 30 * time.Second
+
+// GitHubTimeout is the effective bound on one `gh` invocation.
+func (c Config) GitHubTimeout() time.Duration {
+	duration, _ := time.ParseDuration(c.Status.GitHubTimeout)
+	return duration
+}
+
+// GitHubRefreshInterval is the effective minimum gap between remote queries.
+func (c Config) GitHubRefreshInterval() time.Duration {
+	duration, _ := time.ParseDuration(c.Status.GitHubRefreshInterval)
+	if duration < MinGitHubRefreshInterval {
+		return MinGitHubRefreshInterval
+	}
 	return duration
 }
 

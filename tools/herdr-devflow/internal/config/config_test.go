@@ -106,3 +106,53 @@ func TestParseVersion(t *testing.T) {
 		t.Fatal("ParseVersion accepted a command banner")
 	}
 }
+
+func TestDefaultsBoundTheGitHubQuery(t *testing.T) {
+	defaults := Default()
+	if defaults.GitHubTimeout() <= 0 {
+		t.Fatalf("github timeout = %v, want a positive default", defaults.GitHubTimeout())
+	}
+	if defaults.GitHubRefreshInterval() < MinGitHubRefreshInterval {
+		t.Fatalf("refresh interval = %v, want at least %v", defaults.GitHubRefreshInterval(), MinGitHubRefreshInterval)
+	}
+	if defaults.Status.GitHubCandidateLimit <= 0 {
+		t.Fatalf("candidate limit = %d, want a positive default", defaults.Status.GitHubCandidateLimit)
+	}
+	if err := defaults.Validate(); err != nil {
+		t.Fatalf("the built-in defaults do not validate: %v", err)
+	}
+}
+
+func TestValidateRejectsUnsafeGitHubSettings(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"timeout is not a duration", func(c *Config) { c.Status.GitHubTimeout = "soon" }},
+		{"timeout is too small", func(c *Config) { c.Status.GitHubTimeout = "100ms" }},
+		{"timeout is too large", func(c *Config) { c.Status.GitHubTimeout = "10m" }},
+		{"refresh below the floor", func(c *Config) { c.Status.GitHubRefreshInterval = "1s" }},
+		{"refresh is not a duration", func(c *Config) { c.Status.GitHubRefreshInterval = "often" }},
+		{"candidate limit of zero", func(c *Config) { c.Status.GitHubCandidateLimit = 0 }},
+		{"candidate limit too large", func(c *Config) { c.Status.GitHubCandidateLimit = 5000 }},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			config := Default()
+			testCase.mutate(&config)
+			if err := config.Validate(); err == nil {
+				t.Fatal("an unsafe GitHub setting was accepted")
+			}
+		})
+	}
+}
+
+func TestGitHubRefreshIntervalIsClampedNotTrusted(t *testing.T) {
+	// Validation rejects a sub-floor interval, but a config that reaches the
+	// accessor another way must still not be able to hammer the API.
+	config := Default()
+	config.Status.GitHubRefreshInterval = "1s"
+	if got := config.GitHubRefreshInterval(); got < MinGitHubRefreshInterval {
+		t.Fatalf("interval = %v, want it clamped to %v", got, MinGitHubRefreshInterval)
+	}
+}

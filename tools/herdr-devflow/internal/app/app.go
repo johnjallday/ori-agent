@@ -20,8 +20,11 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
@@ -157,6 +160,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.schedule(ctx, opts, commandArgs)
 	case "status":
 		return a.status(ctx, opts, commandArgs)
+	case "overview":
+		return a.overview(ctx, opts, commandArgs)
 	case "cleanup":
 		return a.cleanup(ctx, opts, commandArgs)
 	case "dispatch":
@@ -1233,53 +1238,229 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 		a.writeResult(opts.json, map[string]any{"status": "disabled", "message": "Ori Herdr Devflow is disabled; no status view was changed."})
 		return 0
 	}
-	service := a.statusService(runtime)
+	// Clearing the source-scoped Herdr view is a write, so it stays on the
+	// metadata service rather than the read-only overview collector.
+	metadata := a.statusService(runtime)
 	if parsed.clearView {
-		if err := service.ClearManagedView(ctx); err != nil {
+		if err := metadata.ClearManagedView(ctx); err != nil {
 			a.writeError(err, opts.json)
 			return 1
 		}
 		a.writeResult(opts.json, map[string]any{"status": "view_cleared", "message": "Cleared the source-scoped Ori Devflow Herdr view."})
 		return 0
 	}
-	filter := status.Options{FeatureName: parsed.context.feature, Worktree: parsed.context.worktree}
-	if parsed.current {
-		filter.Worktree = runtime.paths.RepoRoot
+
+	// `wt herd status` renders the same snapshot as `wt status`, expanded.
+	// Building a second inventory here is exactly how the two views used to
+	// disagree about progress, divergence, and agent state.
+	featureSlug := parsed.context.feature
+	if parsed.current || parsed.context.worktree != "" {
+		target := parsed.context.worktree
+		if parsed.current {
+			target = runtime.paths.RepoRoot
+		}
+		if resolved, ok := featureSlugForWorktree(target); ok {
+			featureSlug = resolved
+		}
 	}
 
-	firstSnapshot := true
-	wasStale := false
-	rendered := false
-	emit := func(snapshot status.Snapshot) {
-		// Reconnects and a fresh command are the two points where Herdr's
-		// display-only metadata may need rebuilding. These calls never report
-		// semantic agent lifecycle state.
-		if firstSnapshot || (wasStale && !snapshot.Stale) {
-			a.rehydrateStatus(ctx, runtime, service, snapshot)
-		}
-		firstSnapshot = false
-		wasStale = snapshot.Stale
-		if parsed.watch && rendered && !opts.json && a.statusColorEnabled(parsed.noColor) {
-			// We never enter raw or alternate-screen mode, so Ctrl-C leaves a
-			// normal terminal with the most recent complete board visible.
-			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
-		}
-		a.writeStatusSnapshot(opts.json, parsed.noColor, snapshot)
-		rendered = true
-	}
+	service := a.overviewService(runtime)
 	if parsed.watch {
-		if err := service.Watch(ctx, filter, emit); err != nil {
-			a.writeError(err, opts.json)
-			return 1
-		}
-		return 0
+		return a.overviewWatch(ctx, service, runtime, overviewArgs{
+			feature: featureSlug, noColor: parsed.noColor, watch: true,
+		}, true)
 	}
-	snapshot, err := service.Snapshot(ctx, filter)
+
+	snapshot, err := service.Collect(ctx)
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
-	emit(snapshot)
+	// Herdr's display-only metadata is refreshed after collection, never as
+	// part of it, and it never reports semantic agent lifecycle state.
+	a.refreshDisplayMetadata(ctx, runtime, metadata)
+
+	if err := a.renderOverview(snapshot, true, featureSlug, opts.json, parsed.noColor); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if !snapshot.Complete {
+		return 1
+	}
+	return 0
+}
+
+// featureSlugForWorktree resolves --current and --worktree onto a feature slug
+// so every selector narrows the shared snapshot the same way.
+func featureSlugForWorktree(path string) (string, bool) {
+	if strings.TrimSpace(path) == "" {
+		return "", false
+	}
+	base := strings.ToLower(filepath.Base(filepath.Clean(path)))
+	if planning.ValidSlug(base) {
+		return base, true
+	}
+	return "", false
+}
+
+// refreshDisplayMetadata republishes Herdr's source-scoped display metadata.
+// It is deliberately separate from collection: a read-only board must not
+// write, and display metadata is never identity or semantic-status authority.
+func (a *App) refreshDisplayMetadata(ctx context.Context, runtime runtimeContext, metadata *status.Service) {
+	if !runtime.config.Metadata.Enabled {
+		return
+	}
+	snapshot, err := metadata.Snapshot(ctx, status.Options{})
+	if err != nil {
+		return
+	}
+	a.rehydrateStatus(ctx, runtime, metadata, snapshot)
+}
+
+type overviewArgs struct {
+	feature string
+	json    bool
+	noColor bool
+	watch   bool
+}
+
+func parseOverviewArgs(args []string) (overviewArgs, error) {
+	var parsed overviewArgs
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			parsed.json = true
+		case "--no-color":
+			parsed.noColor = true
+		case "--watch":
+			parsed.watch = true
+		case "--feature":
+			if index+1 >= len(args) {
+				return overviewArgs{}, fmt.Errorf("--feature requires a value")
+			}
+			index++
+			parsed.feature = args[index]
+		default:
+			return overviewArgs{}, fmt.Errorf("unknown overview option %q", args[index])
+		}
+	}
+	if parsed.feature != "" && !planning.ValidSlug(parsed.feature) {
+		return overviewArgs{}, fmt.Errorf("--feature must be a canonical feature slug")
+	}
+	return parsed, nil
+}
+
+// overview renders the shared feature-first snapshot. It is read-only: no
+// planning file, backlog entry, Git object, bridge binding, or Herdr view is
+// written by this command.
+//
+// The snapshot deliberately exits nonzero while any required source is
+// unavailable. A board that cannot see remote delivery state must not report
+// success, because a green exit code is how scripts decide nothing is wrong.
+func (a *App) overview(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseOverviewArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	if parsed.json {
+		opts.json = true
+	}
+	if parsed.watch && opts.json {
+		a.writeError(fmt.Errorf("overview --watch cannot be combined with --json"), opts.json)
+		return 2
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return 1
+	}
+
+	service := a.overviewService(runtime)
+	if parsed.watch {
+		return a.overviewWatch(ctx, service, runtime, parsed, false)
+	}
+	snapshot, err := service.Collect(ctx)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if err := a.renderOverview(snapshot, false, parsed.feature, opts.json, parsed.noColor); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if !snapshot.Complete {
+		return 1
+	}
+	return 0
+}
+
+// overviewService builds the one collector every surface renders. Compact
+// `wt status`, expanded `wt herd status`, `--json`, and the Herdr board all go
+// through this, which is what makes their values equal by construction rather
+// than by careful duplication.
+func (a *App) overviewService(runtime runtimeContext) *overview.Service {
+	return overview.NewService(overview.Config{
+		RepoRoot: runtime.paths.RepoRoot,
+		Remote: github.New(github.Options{
+			Dir:            runtime.paths.RepoRoot,
+			Timeout:        runtime.config.GitHubTimeout(),
+			CandidateLimit: runtime.config.Status.GitHubCandidateLimit,
+		}),
+		RemoteRefreshInterval: runtime.config.GitHubRefreshInterval(),
+		Agents:                runtime.herdr,
+		Bridge:                state.New(runtime.paths.StateDir),
+	})
+}
+
+// renderOverview writes one snapshot to the selected surface. Filtering to a
+// feature narrows the human view to its detail report; JSON always emits the
+// complete normalized snapshot, filtered to the requested feature.
+func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, featureSlug string, jsonOutput, noColor bool) error {
+	options := overview.RenderOptions{NoColor: !a.statusColorEnabled(noColor)}
+	if featureSlug != "" {
+		found, ok := snapshot.Feature(featureSlug)
+		if !ok {
+			return fmt.Errorf("no feature named %q was found", featureSlug)
+		}
+		snapshot.Features = []overview.Feature{found}
+		if jsonOutput {
+			a.writeResult(true, snapshot)
+			return nil
+		}
+		return overview.RenderDetail(a.stdout, snapshot, found, options)
+	}
+	if jsonOutput {
+		a.writeResult(true, snapshot)
+		return nil
+	}
+	if expanded {
+		return overview.RenderExpanded(a.stdout, snapshot, options)
+	}
+	return overview.RenderCompact(a.stdout, snapshot, options)
+}
+
+// overviewWatch renders the board on the fast local clock. The remote query is
+// separately rate limited inside the service, so a board left open all day
+// re-reads local files often and GitHub rarely.
+func (a *App) overviewWatch(ctx context.Context, service *overview.Service, runtime runtimeContext, parsed overviewArgs, expanded bool) int {
+	colorEnabled := a.statusColorEnabled(parsed.noColor)
+	rendered := false
+	emit := func(snapshot overview.Snapshot) {
+		if rendered && colorEnabled {
+			// We never enter raw or alternate-screen mode, so Ctrl-C leaves a
+			// normal terminal showing the last complete board.
+			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
+		}
+		rendered = true
+		if err := a.renderOverview(snapshot, expanded, parsed.feature, false, parsed.noColor); err != nil {
+			fmt.Fprintln(a.stdout, err.Error())
+		}
+	}
+	if err := service.Watch(ctx, runtime.config.WatchPollInterval(), emit); err != nil {
+		a.writeError(err, false)
+		return 1
+	}
 	return 0
 }
 
@@ -1722,6 +1903,53 @@ type diagnostic struct {
 	Recovery string `json:"recovery,omitempty"`
 }
 
+// githubDiagnostic checks the one required remote dependency of the feature
+// overview: an installed, authenticated `gh` that can read the pull-request
+// and check fields the board needs. It performs the same read-only query the
+// overview does, so a PASS here means the overview will work.
+func (a *App) githubDiagnostic(ctx context.Context, runtime runtimeContext) diagnostic {
+	if _, err := a.lookPath("gh"); err != nil {
+		return diagnostic{
+			Name: "GitHub CLI", Status: "FAIL",
+			Detail:   "the GitHub CLI (gh) is not installed or not on PATH",
+			Recovery: "install the GitHub CLI: https://cli.github.com",
+		}
+	}
+	client := github.New(github.Options{
+		Dir:            runtime.paths.RepoRoot,
+		Timeout:        runtime.config.GitHubTimeout(),
+		CandidateLimit: 1,
+	})
+	result, err := client.ListPullRequests(ctx, "dev")
+	if err != nil {
+		var remoteErr *github.Error
+		if errors.As(err, &remoteErr) {
+			return diagnostic{
+				Name: "GitHub access", Status: "FAIL",
+				Detail: remoteErr.Detail, Recovery: remoteErr.Recovery(),
+			}
+		}
+		return diagnostic{
+			Name: "GitHub access", Status: "FAIL",
+			Detail: "the GitHub query failed", Recovery: "run: gh auth status",
+		}
+	}
+	// A repository with no pull requests is healthy; the fields are only
+	// verifiable when at least one exists.
+	if len(result.PullRequests) == 0 {
+		return diagnostic{Name: "GitHub access", Status: "PASS", Detail: "authenticated; no pull requests to sample"}
+	}
+	sample := result.PullRequests[0]
+	if sample.Head == "" || sample.State == "" {
+		return diagnostic{
+			Name: "GitHub access", Status: "WARN",
+			Detail:   "the pull-request fields the overview needs were not returned",
+			Recovery: "update the GitHub CLI, then run: wt herd doctor",
+		}
+	}
+	return diagnostic{Name: "GitHub access", Status: "PASS", Detail: "authenticated; PR and check fields readable"}
+}
+
 func (a *App) doctor(ctx context.Context, opts options) int {
 	runtime, err := a.load(opts)
 	if err != nil {
@@ -1746,6 +1974,8 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 	} else {
 		diagnostics = append(diagnostics, diagnostic{Name: "state permissions", Status: "WARN", Detail: "state directory has not been created", Recovery: "wt herd setup"})
 	}
+
+	diagnostics = append(diagnostics, a.githubDiagnostic(ctx, runtime))
 
 	version, versionErr := runtime.herdr.Version(ctx)
 	if versionErr != nil {
@@ -1876,32 +2106,113 @@ func (a *App) pluginRefresh(ctx context.Context, opts options) int {
 	return 0
 }
 
+// pluginBoard renders the Herdr board from the shared overview snapshot.
+//
+// The board deliberately does not build its own inventory: constructing a
+// second one is precisely how the board and the CLI used to disagree about
+// progress, divergence, and agent state. Herdr's display metadata is still
+// applied afterwards, and only ever as a separate write.
 func (a *App) pluginBoard(ctx context.Context, opts options) int {
-	service, client, err := a.pluginStatusService(opts)
+	metadata, client, err := a.pluginStatusService(opts)
 	if err != nil {
 		a.writeError(&model.StageError{Stage: "plugin board", Code: model.ErrStateCorrupt, Message: "could not open the user-local Ori Devflow status state", Recovery: "run wt herd setup from an Ori Git worktree", Cause: err}, opts.json)
 		return 1
 	}
+
+	service, buildErr := a.pluginOverviewService(opts, client)
+	if buildErr != nil {
+		// Without a resolvable repository the board cannot collect anything,
+		// but the legacy view is still better than a blank pane.
+		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: %v\n", buildErr)
+		return a.pluginLegacyBoard(ctx, opts, metadata, client)
+	}
+
 	firstSnapshot := true
 	wasStale := false
 	rendered := false
-	emit := func(snapshot status.Snapshot) {
+	emit := func(snapshot overview.Snapshot) {
+		// Reconnects and the first render are the two points where display
+		// metadata may need rebuilding.
 		if firstSnapshot || (wasStale && !snapshot.Stale) {
-			a.rehydratePluginStatus(ctx, service, client, snapshot)
+			a.rehydratePluginStatusFromState(ctx, metadata, client)
 		}
 		firstSnapshot = false
 		wasStale = snapshot.Stale
 		if rendered && !opts.json && a.statusColorEnabled(false) {
 			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
 		}
-		a.writeStatusSnapshot(opts.json, false, snapshot)
 		rendered = true
+		if err := a.renderOverview(snapshot, true, "", opts.json, false); err != nil {
+			fmt.Fprintln(a.stderr, err.Error())
+		}
+	}
+	if err := service.Watch(ctx, 2*time.Second, emit); err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	return 0
+}
+
+// pluginLegacyBoard is the fallback for a plugin invocation that cannot resolve
+// a repository checkout, which is the one case the shared collector cannot
+// serve.
+func (a *App) pluginLegacyBoard(ctx context.Context, opts options, service *status.Service, client *herdr.Client) int {
+	emit := func(snapshot status.Snapshot) {
+		a.rehydratePluginStatus(ctx, service, client, snapshot)
+		a.writeStatusSnapshot(opts.json, false, snapshot)
 	}
 	if err := service.Watch(ctx, status.Options{}, emit); err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
 	return 0
+}
+
+// pluginOverviewService resolves a repository from the bridge's saved feature
+// paths. The plugin is launched by Herdr, not from a checkout, so it has no
+// working directory to infer one from.
+func (a *App) pluginOverviewService(opts options, client *herdr.Client) (*overview.Service, error) {
+	store, err := a.dispatcherStore(opts)
+	if err != nil {
+		return nil, fmt.Errorf("could not open local bridge state: %w", err)
+	}
+	saved, err := store.Load()
+	if err != nil {
+		return nil, fmt.Errorf("could not read local bridge state: %w", err)
+	}
+	repoRoot := ""
+	for _, feature := range saved.Features {
+		if feature.Feature.Path == "" {
+			continue
+		}
+		if root, findErr := worktree.FindRepoRoot(feature.Feature.Path); findErr == nil {
+			repoRoot = root
+			break
+		}
+	}
+	if repoRoot == "" {
+		return nil, fmt.Errorf("no repository checkout could be resolved from saved bridge state")
+	}
+	return overview.NewService(overview.Config{
+		RepoRoot: repoRoot,
+		Remote: github.New(github.Options{
+			Dir:     repoRoot,
+			Timeout: github.DefaultTimeout,
+		}),
+		RemoteRefreshInterval: config.MinGitHubRefreshInterval,
+		Agents:                client,
+		Bridge:                store,
+	}), nil
+}
+
+// rehydratePluginStatusFromState republishes display metadata using the legacy
+// status service, which owns every Herdr write.
+func (a *App) rehydratePluginStatusFromState(ctx context.Context, service *status.Service, client *herdr.Client) {
+	snapshot, err := service.Snapshot(ctx, status.Options{})
+	if err != nil {
+		return
+	}
+	a.rehydratePluginStatus(ctx, service, client, snapshot)
 }
 
 func (a *App) rehydratePluginStatus(ctx context.Context, service *status.Service, client *herdr.Client, snapshot status.Snapshot) {
@@ -1940,6 +2251,11 @@ Usage:
   wt herd schedule show <schedule-id> [--feature NAME|--worktree PATH]
   wt herd schedule cancel <schedule-id> [--feature NAME|--worktree PATH]
                                 Inspect or cancel local one-time continuations without prompting
+  wt herd overview [--feature NAME] [--json] [--no-color] [--watch]
+                                Feature-first overview: planning, backlog, worktrees, Git,
+                                GitHub pull requests, and live Herdr agents, joined on the
+                                exact feature slug. Read-only. Exits nonzero while a
+                                required source (normally GitHub) is unavailable.
   wt herd status [--current|--feature NAME|--worktree PATH] [--watch] [--json] [--no-color]
                                 Show all managed features by default, or a filtered live status board
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view

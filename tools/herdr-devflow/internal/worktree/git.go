@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -172,4 +173,162 @@ func sourceCheckoutPath(output, target string) (string, error) {
 		return "", fmt.Errorf("could not resolve exactly one repository source checkout for the linked worktree")
 	}
 	return candidates[0], nil
+}
+
+// FactAvailability records whether one Git fact could be established. Facts
+// degrade independently: a failed divergence count must never discard a
+// successfully read branch name.
+type FactAvailability string
+
+const (
+	// FactAvailable means the fact was read successfully.
+	FactAvailable FactAvailability = "available"
+	// FactUnavailable means the Git command failed or was not attempted.
+	FactUnavailable FactAvailability = "unavailable"
+)
+
+// Facts is the local Git evidence for one feature checkout. Every field is
+// read-only; no method in this file mutates Git state.
+type Facts struct {
+	// Path is the canonical worktree root that was inspected.
+	Path string
+	// Branch is the checked-out branch without refs/heads/.
+	Branch string
+	// Head is the resolved commit of the branch tip.
+	Head string
+	// Dirty reports uncommitted changes in the worktree.
+	Dirty bool
+	// Ahead and Behind count commits relative to the local baseline branch.
+	Ahead  int
+	Behind int
+	// BaselineStale reports that the local baseline lags its remote, which
+	// makes Ahead/Behind less meaningful than they look.
+	BaselineStale bool
+
+	// Availability per fact family.
+	BranchAvailability        FactAvailability
+	HeadAvailability          FactAvailability
+	DirtyAvailability         FactAvailability
+	DivergenceAvailability    FactAvailability
+	BaselineStaleAvailability FactAvailability
+
+	// Detail is a sanitized, aggregated reason for any degraded fact. It never
+	// carries raw Git output.
+	Detail string
+}
+
+const maxStatusBytes = 256 * 1024
+
+// InspectFacts gathers local Git evidence for one checkout using fixed
+// argument vectors. Individual failures are recorded rather than returned, so
+// a partially degraded Git never blanks a feature row.
+func InspectFacts(ctx context.Context, run Runner, path, baseline string) Facts {
+	if run == nil {
+		run = GitRunner
+	}
+	if strings.TrimSpace(baseline) == "" {
+		baseline = "dev"
+	}
+	facts := Facts{
+		Path:                      path,
+		BranchAvailability:        FactUnavailable,
+		HeadAvailability:          FactUnavailable,
+		DirtyAvailability:         FactUnavailable,
+		DivergenceAvailability:    FactUnavailable,
+		BaselineStaleAvailability: FactUnavailable,
+	}
+	canonical, err := canonicalPath(path)
+	if err != nil {
+		facts.Detail = "worktree path could not be resolved"
+		return facts
+	}
+	facts.Path = canonical
+
+	var degraded []string
+	note := func(reason string) { degraded = append(degraded, reason) }
+
+	if branch, err := run(ctx, canonical, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+		if branch != "" && branch != "HEAD" {
+			facts.Branch = branch
+			facts.BranchAvailability = FactAvailable
+		} else {
+			note("checkout is detached")
+		}
+	} else {
+		note("branch could not be read")
+	}
+
+	if head, err := run(ctx, canonical, "rev-parse", "HEAD"); err == nil && head != "" {
+		facts.Head = head
+		facts.HeadAvailability = FactAvailable
+	} else {
+		note("HEAD could not be resolved")
+	}
+
+	if status, err := run(ctx, canonical, "status", "--porcelain"); err == nil {
+		if len(status) > maxStatusBytes {
+			status = status[:maxStatusBytes]
+		}
+		facts.Dirty = strings.TrimSpace(status) != ""
+		facts.DirtyAvailability = FactAvailable
+	} else {
+		note("working tree state could not be read")
+	}
+
+	// rev-list --left-right --count <baseline>...HEAD prints "<behind> <ahead>":
+	// commits reachable only from the baseline, then only from HEAD.
+	if counts, err := run(ctx, canonical, "rev-list", "--left-right", "--count", baseline+"...HEAD"); err == nil {
+		if behind, ahead, ok := parseCounts(counts); ok {
+			facts.Behind, facts.Ahead = behind, ahead
+			facts.DivergenceAvailability = FactAvailable
+		} else {
+			note("divergence counts could not be parsed")
+		}
+	} else {
+		note("divergence versus " + baseline + " could not be computed")
+	}
+
+	// A local baseline that lags its remote makes the counts above understate
+	// how far behind the feature really is. This never fetches.
+	if counts, err := run(ctx, canonical, "rev-list", "--count", baseline+".."+"origin/"+baseline); err == nil {
+		if lag, ok := parseCount(counts); ok {
+			facts.BaselineStale = lag > 0
+			facts.BaselineStaleAvailability = FactAvailable
+		} else {
+			note("baseline lag could not be parsed")
+		}
+	} else {
+		note("local " + baseline + " could not be compared with its remote")
+	}
+
+	facts.Detail = strings.Join(degraded, "; ")
+	return facts
+}
+
+func parseCounts(value string) (left, right int, ok bool) {
+	fields := strings.Fields(value)
+	if len(fields) != 2 {
+		return 0, 0, false
+	}
+	left, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, 0, false
+	}
+	right, err = strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, 0, false
+	}
+	return left, right, true
+}
+
+func parseCount(value string) (int, bool) {
+	fields := strings.Fields(value)
+	if len(fields) != 1 {
+		return 0, false
+	}
+	count, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, false
+	}
+	return count, true
 }
