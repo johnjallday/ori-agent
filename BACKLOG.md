@@ -37,6 +37,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-24)
 
 ## Shipped / dropped
+- 2026-07-26 wt-herd-feature-overview - PR #267 merged to dev (2026-07-26)
 - 2026-07-26 wt-herd-feature-overview -> PRD at tasks/prd-wt-herd-feature-overview.md (started 2026-07-25) - PR #267 merged to dev (2026-07-26)
 - 2026-07-26 workspace-backlog -> PRD at tasks/prd-workspace-backlog.md (started 2026-07-22) - PR #254 merged to dev (2026-07-23)
 - 2026-07-26 calendar-ops-mcp -> PRD at tasks/prd-calendar-ops-mcp.md (started 2026-07-20) - PR #248 merged to dev (2026-07-22)
