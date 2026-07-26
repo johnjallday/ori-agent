@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/tasklist"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -30,6 +31,10 @@ type Input struct {
 	// feature's own worktree. It is injected so the join stays testable and so
 	// no arbitrary path is ever read. Nil disables active-copy selection.
 	LookupActivePlan func(worktreePath, slug string) (planning.Feature, error)
+	// ReadPlanProgress parses one task list into hierarchical progress. It is
+	// injected for the same reasons. Nil leaves progress unknown rather than
+	// reporting a plan as having no work done.
+	ReadPlanProgress func(taskListPath string) tasklist.Plan
 	// Now is the observation time stamped onto derived evidence.
 	Now time.Time
 }
@@ -174,11 +179,11 @@ func selectPlan(slug string, active *worktree.Checkout, input Input) Plan {
 	if active != nil && input.LookupActivePlan != nil {
 		found, err := input.LookupActivePlan(active.Path, slug)
 		if err == nil && (found.PRD.Exists() || found.TaskList.Exists()) {
-			return planFrom(found, PlanCopyActive, input.Now)
+			return planFrom(found, PlanCopyActive, input.Now, input.ReadPlanProgress)
 		}
 	}
 	if devFeature, ok := input.DevPlanning.Feature(slug); ok {
-		return planFrom(devFeature, PlanCopyDev, input.DevPlanning.ObservedAt)
+		return planFrom(devFeature, PlanCopyDev, input.DevPlanning.ObservedAt, input.ReadPlanProgress)
 	}
 	return Plan{
 		Copy:                 PlanCopyNone,
@@ -189,8 +194,8 @@ func selectPlan(slug string, active *worktree.Checkout, input Input) Plan {
 	}
 }
 
-func planFrom(found planning.Feature, source PlanCopy, observedAt time.Time) Plan {
-	return Plan{
+func planFrom(found planning.Feature, source PlanCopy, observedAt time.Time, read func(string) tasklist.Plan) Plan {
+	plan := Plan{
 		Copy:                 source,
 		PRDPath:              found.PRD.Path,
 		TaskListPath:         found.TaskList.Path,
@@ -199,6 +204,70 @@ func planFrom(found planning.Feature, source PlanCopy, observedAt time.Time) Pla
 		Title:                found.PRD.Title,
 		Progress:             PlanProgress{Availability: AvailabilityUnknown},
 		ObservedAt:           observedAt,
+	}
+	if read == nil || found.TaskList.Path == "" {
+		if found.TaskList.State == planning.StateAbsent {
+			plan.Progress.Availability = AvailabilityAbsent
+		}
+		return plan
+	}
+	plan.Progress = progressFrom(read(found.TaskList.Path))
+	return plan
+}
+
+// progressFrom maps the parser's result onto the read model. The mapping keeps
+// "malformed" and "unavailable" distinct from a real zero, so a plan that
+// could not be understood never renders as no work done.
+func progressFrom(parsed tasklist.Plan) PlanProgress {
+	progress := PlanProgress{
+		Availability:                 planProgressAvailability(parsed.State),
+		MilestonesTotal:              parsed.MilestonesTotal,
+		MilestonesCompleted:          parsed.MilestonesCompleted,
+		SubtasksTotal:                parsed.SubtasksTotal,
+		SubtasksCompleted:            parsed.SubtasksCompleted,
+		ActiveMilestone:              planItem(parsed.ActiveMilestone),
+		NextActionable:               planItem(parsed.NextActionable),
+		ImplementationComplete:       parsed.ImplementationComplete,
+		DeliveryCheckpointsRemaining: parsed.DeliveryCheckpointsRemaining,
+		ParseIssue:                   parsed.ParseIssue,
+	}
+	for _, checkpoint := range parsed.DeliveryCheckpoints {
+		progress.DeliveryCheckpoints = append(progress.DeliveryCheckpoints, planItem(checkpoint))
+	}
+	if !progress.Availability.OK() {
+		// Counts from an unparsed plan are meaningless; drop them rather than
+		// let a renderer present them as fact.
+		progress.MilestonesTotal, progress.MilestonesCompleted = 0, 0
+		progress.SubtasksTotal, progress.SubtasksCompleted = 0, 0
+	}
+	return progress
+}
+
+func planProgressAvailability(state tasklist.PlanState) Availability {
+	switch state {
+	case tasklist.PlanAvailable:
+		return AvailabilityAvailable
+	case tasklist.PlanAbsent:
+		return AvailabilityAbsent
+	case tasklist.PlanMalformed:
+		return AvailabilityMalformed
+	case tasklist.PlanUnavailable:
+		return AvailabilityUnavailable
+	default:
+		return AvailabilityUnknown
+	}
+}
+
+func planItem(item tasklist.Item) PlanItem {
+	if item.Empty() {
+		return PlanItem{}
+	}
+	return PlanItem{
+		Ordinal:    item.Ordinal,
+		Text:       item.Text,
+		Completed:  item.Completed,
+		Checkpoint: item.Checkpoint,
+		Line:       item.Line,
 	}
 }
 

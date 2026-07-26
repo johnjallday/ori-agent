@@ -322,6 +322,9 @@ type PlanProgress struct {
 	// DeliveryCheckpoints are the remaining validation, demo, commit, PR,
 	// merge, and `wt done` items, reported separately from implementation.
 	DeliveryCheckpoints []PlanItem `json:"delivery_checkpoints,omitempty"`
+	// DeliveryCheckpointsRemaining counts every outstanding checkpoint, so a
+	// capped list never understates the delivery work left.
+	DeliveryCheckpointsRemaining int `json:"delivery_checkpoints_remaining"`
 	// ImplementationComplete is true when every non-checkpoint subtask is
 	// checked, so remaining work is delivery only.
 	ImplementationComplete bool `json:"implementation_complete"`

@@ -149,10 +149,172 @@ func progressCell(progress PlanProgress) string {
 	if progress.SubtasksTotal > 0 {
 		cell += " · " + strconv.Itoa(progress.SubtasksCompleted) + "/" + strconv.Itoa(progress.SubtasksTotal) + " subtasks"
 	}
-	if progress.NextActionable.Ordinal != "" {
+	switch {
+	case progress.ImplementationComplete && progress.DeliveryCheckpointsRemaining > 0:
+		// Saying "next 7.4" here would imply implementation work remains when
+		// only delivery steps do.
+		cell += " · implementation complete, " + strconv.Itoa(progress.DeliveryCheckpointsRemaining) + " checkpoint(s) left"
+	case progress.NextActionable.Ordinal != "":
 		cell += " · next " + progress.NextActionable.Ordinal
 	}
 	return cell
+}
+
+// RenderDetail writes the expanded view for one feature: provenance, planning
+// paths, the full active milestone and next action, delivery checkpoints, Git
+// evidence, and every finding. It is what `wt status --feature <slug>` prints.
+func RenderDetail(out io.Writer, snapshot Snapshot, feature Feature, options RenderOptions) error {
+	write := func(format string, args ...any) error {
+		_, err := fmt.Fprintf(out, format+"\n", args...)
+		return err
+	}
+
+	title := feature.Slug
+	if feature.Title != "" {
+		title += " — " + feature.Title
+	}
+	if err := write("%s", title); err != nil {
+		return err
+	}
+	if err := write("Phase: %s", phaseCell(feature.Phase)); err != nil {
+		return err
+	}
+	if feature.Phase.Reason != "" {
+		if err := write("  Reason: %s", feature.Phase.Reason); err != nil {
+			return err
+		}
+	}
+	if len(feature.Sources) > 0 {
+		kinds := make([]string, 0, len(feature.Sources))
+		for _, kind := range feature.Sources {
+			kinds = append(kinds, string(kind))
+		}
+		if err := write("  Evidence: %s", strings.Join(kinds, ", ")); err != nil {
+			return err
+		}
+	}
+
+	if err := renderDetailPlan(write, feature.Plan); err != nil {
+		return err
+	}
+	if err := renderDetailGit(write, feature.Git); err != nil {
+		return err
+	}
+
+	if err := write("\nRemote: %s", remoteCell(feature.Remote)); err != nil {
+		return err
+	}
+	if err := write("Agents: %s", agentCell(feature)); err != nil {
+		return err
+	}
+
+	if len(feature.Findings) == 0 {
+		if err := write("\nFindings: none"); err != nil {
+			return err
+		}
+	} else if err := write("\nFindings:"); err != nil {
+		return err
+	}
+	for _, finding := range feature.Findings {
+		if err := write("  [%s] %s %s", finding.Severity.Label(), finding.Code, finding.Message); err != nil {
+			return err
+		}
+		if finding.Detail != "" {
+			if err := write("      %s", finding.Detail); err != nil {
+				return err
+			}
+		}
+	}
+	return renderFooter(out, snapshot)
+}
+
+func renderDetailPlan(write func(string, ...any) error, plan Plan) error {
+	if err := write("\nPlan: %s", planCell(plan)); err != nil {
+		return err
+	}
+	if plan.Copy != PlanCopyNone {
+		if err := write("  Authoritative copy: %s", plan.Copy); err != nil {
+			return err
+		}
+	}
+	if plan.PRDPath != "" {
+		if err := write("  PRD: %s", plan.PRDPath); err != nil {
+			return err
+		}
+	}
+	if plan.TaskListPath != "" {
+		if err := write("  Task list: %s", plan.TaskListPath); err != nil {
+			return err
+		}
+	}
+	progress := plan.Progress
+	if progress.ParseIssue != "" {
+		if err := write("  Parse issue: %s", progress.ParseIssue); err != nil {
+			return err
+		}
+	}
+	if !progress.Availability.OK() {
+		return nil
+	}
+	if !progress.ActiveMilestone.Empty() {
+		if err := write("  Active milestone: %s %s", progress.ActiveMilestone.Ordinal, progress.ActiveMilestone.Text); err != nil {
+			return err
+		}
+	}
+	switch {
+	case !progress.NextActionable.Empty():
+		if err := write("  Next: %s %s", progress.NextActionable.Ordinal, progress.NextActionable.Text); err != nil {
+			return err
+		}
+	case progress.ImplementationComplete:
+		if err := write("  Next: implementation is complete; only delivery checkpoints remain"); err != nil {
+			return err
+		}
+	}
+	if len(progress.DeliveryCheckpoints) > 0 {
+		if err := write("  Delivery checkpoints in %s (%d remaining across the whole plan):",
+			progress.ActiveMilestone.Ordinal, progress.DeliveryCheckpointsRemaining); err != nil {
+			return err
+		}
+		for _, checkpoint := range progress.DeliveryCheckpoints {
+			if err := write("    %s %s", checkpoint.Ordinal, checkpoint.Text); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func renderDetailGit(write func(string, ...any) error, git GitState) error {
+	if err := write("\nGit: %s", gitCell(git)); err != nil {
+		return err
+	}
+	if git.WorktreePath != "" {
+		if err := write("  Worktree: %s", git.WorktreePath); err != nil {
+			return err
+		}
+	}
+	if git.Branch != "" {
+		if err := write("  Branch: %s", git.Branch); err != nil {
+			return err
+		}
+	}
+	if git.HeadSHA != "" {
+		if err := write("  HEAD: %s", truncate(git.HeadSHA, 12)); err != nil {
+			return err
+		}
+	}
+	if git.BaselineStale {
+		if err := write("  Note: the local baseline is behind its remote, so these counts understate divergence"); err != nil {
+			return err
+		}
+	}
+	if git.Detail != "" {
+		if err := write("  Degraded: %s", git.Detail); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func gitCell(git GitState) string {

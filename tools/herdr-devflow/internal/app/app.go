@@ -1352,22 +1352,33 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	renderOptions := overview.RenderOptions{NoColor: !a.statusColorEnabled(parsed.noColor)}
+	var detail *overview.Feature
 	if parsed.feature != "" {
 		feature, found := snapshot.Feature(parsed.feature)
 		if !found {
 			a.writeError(fmt.Errorf("no feature named %q was found", parsed.feature), opts.json)
 			return 1
 		}
+		// JSON always emits the complete normalized snapshot filtered to the
+		// requested feature; the human view expands into the detail report.
 		snapshot.Features = []overview.Feature{feature}
+		detail = &feature
 	}
 
-	if opts.json {
+	switch {
+	case opts.json:
 		a.writeResult(true, snapshot)
-	} else if err := overview.RenderCompact(a.stdout, snapshot, overview.RenderOptions{
-		NoColor: !a.statusColorEnabled(parsed.noColor),
-	}); err != nil {
-		a.writeError(err, opts.json)
-		return 1
+	case detail != nil:
+		if err := overview.RenderDetail(a.stdout, snapshot, *detail, renderOptions); err != nil {
+			a.writeError(err, opts.json)
+			return 1
+		}
+	default:
+		if err := overview.RenderCompact(a.stdout, snapshot, renderOptions); err != nil {
+			a.writeError(err, opts.json)
+			return 1
+		}
 	}
 	if !snapshot.Complete {
 		return 1

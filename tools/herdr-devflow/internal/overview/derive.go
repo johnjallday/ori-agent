@@ -138,6 +138,18 @@ func DeriveFindings(feature Feature, options DeriveOptions) []Finding {
 		raise(FindingArchiveMissing, SeverityInfo, SourcePlanning,
 			"This feature shipped but no archived planning copy remains in "+baseline+".", "")
 	}
+	// A shipped feature whose archived plan is still mostly unticked means the
+	// ticked copy never made it back from the worktree, so the archive records
+	// the plan as written rather than the work as done.
+	if !hasWorktree && feature.Phase.Phase == PhaseShipped && feature.Plan.Copy == PlanCopyDev {
+		progress := feature.Plan.Progress
+		if progress.Availability.OK() && progress.SubtasksTotal > 0 && progress.SubtasksCompleted < progress.SubtasksTotal {
+			raise(FindingArchiveStale, SeverityInfo, SourcePlanning,
+				"This feature shipped but its archived task list still shows unchecked work.",
+				strconv.Itoa(progress.SubtasksTotal-progress.SubtasksCompleted)+" of "+
+					strconv.Itoa(progress.SubtasksTotal)+" subtasks are unchecked in the archived copy.")
+		}
+	}
 
 	// Local Git evidence.
 	if feature.Git.Availability == AvailabilityUnavailable {

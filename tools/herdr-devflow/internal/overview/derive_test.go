@@ -1,6 +1,9 @@
 package overview
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func localOptions() DeriveOptions { return DeriveOptions{Baseline: "dev"} }
 
@@ -300,5 +303,76 @@ func TestSortFeaturesIsDeterministicOnTies(t *testing.T) {
 	SortFeatures(features)
 	if features[0].Slug != "aaa" || features[1].Slug != "bbb" {
 		t.Fatalf("order = %q,%q, want slug order on ties", features[0].Slug, features[1].Slug)
+	}
+}
+
+func withProgress(mutate func(*PlanProgress)) func(*Feature) {
+	return func(f *Feature) {
+		f.Plan.Copy = PlanCopyDev
+		f.Plan.PRDAvailability = AvailabilityAvailable
+		f.Plan.TaskListAvailability = AvailabilityAvailable
+		f.Plan.Progress = PlanProgress{Availability: AvailabilityAvailable}
+		mutate(&f.Plan.Progress)
+	}
+}
+
+func TestDeriveFindingsStaleArchivedPlan(t *testing.T) {
+	// `wt done` archives the ticked copy back into dev. A shipped feature whose
+	// archived plan is still untouched means that never happened.
+	shipped := feature("workspace-backlog", withBacklog(BacklogShipped),
+		withProgress(func(progress *PlanProgress) {
+			progress.MilestonesTotal, progress.MilestonesCompleted = 7, 0
+			progress.SubtasksTotal, progress.SubtasksCompleted = 136, 0
+		}))
+	shipped.Phase = DerivePhase(shipped, localOptions())
+
+	finding, ok := findingFor(DeriveFindings(shipped, localOptions()), FindingArchiveStale)
+	if !ok {
+		t.Fatal("a shipped feature with an unticked archive raised no finding")
+	}
+	if finding.Severity != SeverityInfo {
+		t.Fatalf("severity = %q, want info", finding.Severity)
+	}
+	if !strings.Contains(finding.Detail, "136") {
+		t.Fatalf("detail = %q, want the outstanding count stated", finding.Detail)
+	}
+}
+
+func TestDeriveFindingsNoStaleArchiveForACompletedPlan(t *testing.T) {
+	shipped := feature("herdr-devflow-bridge", withBacklog(BacklogShipped),
+		withProgress(func(progress *PlanProgress) {
+			progress.MilestonesTotal, progress.MilestonesCompleted = 7, 7
+			progress.SubtasksTotal, progress.SubtasksCompleted = 103, 103
+		}))
+	shipped.Phase = DerivePhase(shipped, localOptions())
+
+	if _, ok := findingFor(DeriveFindings(shipped, localOptions()), FindingArchiveStale); ok {
+		t.Fatal("a fully ticked archive was reported as stale")
+	}
+}
+
+func TestDeriveFindingsNoStaleArchiveWhileStillImplementing(t *testing.T) {
+	// An in-progress feature's plan is supposed to have unchecked work.
+	building := feature("in-flight", withWorktree("/w/in-flight"), withBacklog(BacklogDoing),
+		withProgress(func(progress *PlanProgress) {
+			progress.SubtasksTotal, progress.SubtasksCompleted = 100, 12
+		}))
+	building.Phase = DerivePhase(building, localOptions())
+
+	if _, ok := findingFor(DeriveFindings(building, localOptions()), FindingArchiveStale); ok {
+		t.Fatal("work in progress was reported as a stale archive")
+	}
+}
+
+func TestDeriveFindingsNoStaleArchiveFromAnUnparsedPlan(t *testing.T) {
+	shipped := feature("opaque-archive", withBacklog(BacklogShipped),
+		withProgress(func(progress *PlanProgress) {
+			progress.Availability = AvailabilityMalformed
+			progress.SubtasksTotal = 0
+		}))
+	shipped.Phase = DerivePhase(shipped, localOptions())
+
+	if _, ok := findingFor(DeriveFindings(shipped, localOptions()), FindingArchiveStale); ok {
+		t.Fatal("an unparsed archive was reported as stale")
 	}
 }

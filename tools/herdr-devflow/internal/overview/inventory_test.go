@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/tasklist"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -257,5 +258,124 @@ func TestBuildInventoryLeavesGitAvailabilityUnknownUntilInspected(t *testing.T) 
 	}
 	if features[0].Git.Branch != "feature/pending" {
 		t.Fatalf("branch = %q, want the listed branch", features[0].Git.Branch)
+	}
+}
+
+func planWith(state tasklist.PlanState, mutate ...func(*tasklist.Plan)) tasklist.Plan {
+	parsed := tasklist.Plan{State: state}
+	for _, apply := range mutate {
+		apply(&parsed)
+	}
+	return parsed
+}
+
+func TestBuildInventoryAttachesHierarchicalProgress(t *testing.T) {
+	input := Input{
+		DevPlanning: devSet(map[string]planning.Feature{"measured": devFeature("measured", "PRD: Measured")}),
+		ReadPlanProgress: func(path string) tasklist.Plan {
+			if path != "/dev/tasks/tasks-measured.md" {
+				t.Fatalf("progress read from unexpected path %q", path)
+			}
+			return planWith(tasklist.PlanAvailable, func(p *tasklist.Plan) {
+				p.MilestonesTotal, p.MilestonesCompleted = 7, 4
+				p.SubtasksTotal, p.SubtasksCompleted = 118, 66
+				p.ActiveMilestone = tasklist.Item{Ordinal: "5.0", Text: "Fifth group"}
+				p.NextActionable = tasklist.Item{Ordinal: "5.1", Text: "Next step"}
+				p.DeliveryCheckpointsRemaining = 3
+				p.DeliveryCheckpoints = []tasklist.Item{{Ordinal: "5.9", Text: "Commit: feat", Checkpoint: true}}
+			})
+		},
+		Now: observed,
+	}
+
+	features, _ := BuildInventory(input)
+	progress := features[0].Plan.Progress
+	if !progress.Availability.OK() {
+		t.Fatalf("availability = %q, want available", progress.Availability)
+	}
+	if progress.MilestonesCompleted != 4 || progress.MilestonesTotal != 7 {
+		t.Fatalf("milestones = %d/%d, want 4/7", progress.MilestonesCompleted, progress.MilestonesTotal)
+	}
+	if progress.SubtasksCompleted != 66 || progress.SubtasksTotal != 118 {
+		t.Fatalf("subtasks = %d/%d, want 66/118", progress.SubtasksCompleted, progress.SubtasksTotal)
+	}
+	if progress.NextActionable.Ordinal != "5.1" {
+		t.Fatalf("next = %q, want 5.1", progress.NextActionable.Ordinal)
+	}
+	if progress.DeliveryCheckpointsRemaining != 3 || len(progress.DeliveryCheckpoints) != 1 {
+		t.Fatalf("checkpoints = %d listed / %d remaining", len(progress.DeliveryCheckpoints), progress.DeliveryCheckpointsRemaining)
+	}
+}
+
+func TestBuildInventoryDropsCountsFromAnUnparsedPlan(t *testing.T) {
+	for _, state := range []tasklist.PlanState{tasklist.PlanMalformed, tasklist.PlanUnavailable} {
+		input := Input{
+			DevPlanning: devSet(map[string]planning.Feature{"broken": devFeature("broken", "PRD: Broken")}),
+			ReadPlanProgress: func(string) tasklist.Plan {
+				return planWith(state, func(p *tasklist.Plan) {
+					// A parser that bailed out may still carry partial counts.
+					p.MilestonesTotal, p.SubtasksTotal = 3, 9
+					p.ParseIssue = "no numbered checklist items were found"
+				})
+			},
+			Now: observed,
+		}
+		features, _ := BuildInventory(input)
+		progress := features[0].Plan.Progress
+		if progress.Availability.OK() {
+			t.Fatalf("state %q was reported as available progress", state)
+		}
+		if progress.MilestonesTotal != 0 || progress.SubtasksTotal != 0 {
+			t.Fatalf("state %q kept counts %d/%d; an unparsed plan must not present numbers",
+				state, progress.MilestonesTotal, progress.SubtasksTotal)
+		}
+		if progress.ParseIssue == "" {
+			t.Fatalf("state %q carried no explanation", state)
+		}
+	}
+}
+
+func TestBuildInventoryReadsProgressFromTheAuthoritativeCopy(t *testing.T) {
+	var readPaths []string
+	input := Input{
+		DevPlanning: devSet(map[string]planning.Feature{"live": devFeature("live", "PRD: Dev")}),
+		Checkouts:   checkoutInventory(featureCheckout("live", "/repo/worktrees/live")),
+		LookupActivePlan: func(path, slug string) (planning.Feature, error) {
+			return planning.Feature{
+				Slug:     slug,
+				PRD:      planning.Artifact{Path: path + "/tasks/prd-live.md", State: planning.StateAvailable, Title: "PRD: Active"},
+				TaskList: planning.Artifact{Path: path + "/tasks/tasks-live.md", State: planning.StateAvailable},
+			}, nil
+		},
+		ReadPlanProgress: func(path string) tasklist.Plan {
+			readPaths = append(readPaths, path)
+			return planWith(tasklist.PlanAvailable, func(p *tasklist.Plan) { p.MilestonesTotal = 1 })
+		},
+		Now: observed,
+	}
+
+	BuildInventory(input)
+	if len(readPaths) != 1 || readPaths[0] != "/repo/worktrees/live/tasks/tasks-live.md" {
+		t.Fatalf("progress read from %v, want only the active worktree copy", readPaths)
+	}
+}
+
+func TestBuildInventoryLeavesProgressAbsentWithNoTaskList(t *testing.T) {
+	input := Input{
+		DevPlanning: devSet(map[string]planning.Feature{"prd-only": {
+			Slug:     "prd-only",
+			PRD:      planning.Artifact{Path: "/dev/tasks/prd-prd-only.md", State: planning.StateAvailable},
+			TaskList: planning.Artifact{State: planning.StateAbsent},
+		}}),
+		ReadPlanProgress: func(string) tasklist.Plan {
+			t.Fatal("the parser ran for a feature with no task list")
+			return tasklist.Plan{}
+		},
+		Now: observed,
+	}
+
+	features, _ := BuildInventory(input)
+	if got := features[0].Plan.Progress.Availability; got != AvailabilityAbsent {
+		t.Fatalf("availability = %q, want absent", got)
 	}
 }

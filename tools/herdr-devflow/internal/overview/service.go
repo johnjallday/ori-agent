@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/tasklist"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -116,6 +117,7 @@ func (s *Service) Collect(ctx context.Context) (Snapshot, error) {
 		Backlog:          backlog,
 		Checkouts:        checkouts,
 		LookupActivePlan: activePlanLookup(now),
+		ReadPlanProgress: tasklist.ReadPlan,
 		Now:              now,
 	})
 
