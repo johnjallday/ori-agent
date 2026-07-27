@@ -4758,29 +4758,27 @@
       }
     });
 
-    if (window.bootstrap && window.bootstrap.Modal) {
-      elements.modal.addEventListener('show.bs.modal', function () {
-        setLauncherActive(true);
-        if (!state.hasHydrated) {
-          hydrateModal();
-          return;
-        }
-        refreshVault();
-      });
+    elements.modal.addEventListener('show.bs.modal', function () {
+      setLauncherActive(true);
+      if (!state.hasHydrated) {
+        hydrateModal();
+        return;
+      }
+      refreshVault();
+    });
 
-      elements.modal.addEventListener('hidden.bs.modal', function () {
-        setLauncherActive(false);
-        closeEntryDialog({ restoreFocus: false });
-        closeImportDialog({ restoreFocus: false });
-        closeExportDialog({ restoreFocus: false });
-        closeCreateDialog({ restoreFocus: false });
-        closeUnlockDialog();
-      });
+    elements.modal.addEventListener('hidden.bs.modal', function () {
+      setLauncherActive(false);
+      closeEntryDialog({ restoreFocus: false });
+      closeImportDialog({ restoreFocus: false });
+      closeExportDialog({ restoreFocus: false });
+      closeCreateDialog({ restoreFocus: false });
+      closeUnlockDialog();
+    });
 
-      elements.modal.addEventListener('shown.bs.modal', function () {
-        focusPrimaryControl();
-      });
-    }
+    elements.modal.addEventListener('shown.bs.modal', function () {
+      focusPrimaryControl();
+    });
   }
 
   async function init() {
