@@ -464,6 +464,10 @@ func sortedRoles(state model.FeatureState) []string {
 // maxIdentityRunes bounds one displayed identity field.
 const maxIdentityRunes = 120
 
+// maxIdentityPathRunes bounds a displayed filesystem path, which is
+// legitimately longer than a short identity field like a pane ID or name.
+const maxIdentityPathRunes = 200
+
 // identityField sanitizes a value that reaches a terminal, a JSON payload, or a
 // Herdr board cell. Pane IDs and agent names originate in a terminal session,
 // so they are untrusted for display exactly like remote branch names are.

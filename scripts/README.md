@@ -139,6 +139,14 @@ selection, one-time continuations, guarded cleanup, and recovery. Claude is the
 configured default; use wt start <feature> --kind codex for a one-feature
 override without changing that default.
 
+The bridge resolves a feature's agents by canonical worktree path, not a saved
+workspace ID, so closing/reopening a workspace or opening a pane by hand on
+the same worktree is recognised with no bridge command in between. `wt done`
+now blocks only on a live `working`/`blocked` agent in the path — a stale
+saved record with nothing running no longer needs `--herdr-override`. See
+"Path is identity, IDs are hints" in
+[docs/herdr-devflow.md](../docs/herdr-devflow.md) for the full model.
+
 Run make test-herdr-devflow for focused helper, shell, and wt tests. It also
 runs make test-herdr-devflow-cross, which cross-compiles the local helper for
 macOS, Linux, and Windows; only macOS registers and executes the LaunchAgent

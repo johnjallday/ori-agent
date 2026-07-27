@@ -167,7 +167,7 @@ func buildFeature(slug string, sources []SourceKind, input Input) (Feature, []Fi
 	if active != nil {
 		feature.Git = GitState{
 			Availability: AvailabilityUnknown,
-			WorktreePath: active.Path,
+			WorktreePath: planning.Sanitize(active.Path, maxIdentityPathRunes),
 			Branch:       planning.Sanitize(active.Branch, 200),
 			HeadSHA:      planning.Sanitize(active.Head, 64),
 			ObservedAt:   input.Checkouts.ObservedAt,
