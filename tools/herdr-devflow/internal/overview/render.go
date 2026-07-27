@@ -24,6 +24,9 @@ const (
 	// the whole table past a normal terminal. The full text stays available in
 	// the detail and expanded views.
 	maxPlanColumn = 60
+	// maxAgentColumn bounds the agent column. Beyond it the cell degrades to a
+	// count plus the weakest binding rather than dropping an agent silently.
+	maxAgentColumn = 48
 )
 
 // RenderCompact writes the feature-first overview table: one row per feature,
@@ -167,6 +170,11 @@ func renderExpandedFeature(write func(string, ...any) error, colors palette, fea
 		return err
 	}
 
+	if len(feature.Agents) == 0 && feature.Occupancy > 0 {
+		if err := write("  agents: none running (%d pane(s) open in the worktree)", feature.Occupancy); err != nil {
+			return err
+		}
+	}
 	for _, agent := range feature.Agents {
 		name := agent.Role
 		if !agent.Managed {
@@ -509,31 +517,64 @@ func remoteCell(remote Remote) string {
 // different thing from an idle agent that does.
 func agentCell(feature Feature) string {
 	if len(feature.Agents) == 0 {
+		if feature.Occupancy > 0 {
+			// A pane is sitting in the worktree with no agent running. That is
+			// occupancy, not an agent, and it matters for cleanup.
+			return "no agent (" + strconv.Itoa(feature.Occupancy) + " pane)"
+		}
 		return "none"
 	}
+
 	cells := make([]string, 0, len(feature.Agents))
 	for _, agent := range feature.Agents {
-		label := agent.Role
-		if !agent.Managed {
-			label = "unmanaged"
-		}
-		if label == "" {
-			label = "agent"
-		}
-		status := "unavailable"
-		if agent.StatusAvailability.OK() {
-			status = string(agent.Status)
-		}
-		cell := label + " " + status
-		// "missing (missing)" says the same thing twice; every other binding
-		// state adds information the status alone does not carry.
-		redundant := agent.Binding == BindingMissing && agent.Status == AgentMissing
-		if agent.Binding != BindingExact && agent.Binding != "" && !redundant {
-			cell += " (" + agent.Binding.Label() + ")"
-		}
-		cells = append(cells, cell)
+		cells = append(cells, agentSummary(agent))
 	}
-	return strings.Join(cells, ", ")
+	full := strings.Join(cells, ", ")
+	if width(full) <= maxAgentColumn {
+		return full
+	}
+	// Too many to spell out. Report the count and the weakest binding present,
+	// so a drifted agent among healthy ones is never hidden by truncation.
+	return strconv.Itoa(len(feature.Agents)) + " agents (" + weakestBinding(feature).Label() + ")"
+}
+
+// agentSummary renders one agent as "<role> <status>[ (<binding>)]".
+func agentSummary(agent Agent) string {
+	label := agent.Role
+	if !agent.Managed {
+		label = "unmanaged"
+	}
+	if label == "" {
+		label = "agent"
+	}
+	status := "unavailable"
+	if agent.StatusAvailability.OK() {
+		status = string(agent.Status)
+	}
+	cell := label + " " + status
+	// "missing (missing)" says the same thing twice; every other binding state
+	// adds information the status alone does not carry.
+	redundant := agent.Binding == BindingMissing && agent.Status == AgentMissing
+	if agent.Binding != BindingExact && agent.Binding != "" && !redundant {
+		cell += " (" + agent.Binding.Label() + ")"
+	}
+	return cell
+}
+
+// weakestBinding returns the least healthy binding among a feature's agents.
+// One drifted role among healthy ones is the thing worth surfacing.
+func weakestBinding(feature Feature) BindingHealth {
+	worst := BindingExact
+	rank := map[BindingHealth]int{
+		BindingExact: 0, BindingUnavailable: 1, BindingPossibleDrift: 2,
+		BindingMissing: 3, BindingAmbiguous: 4,
+	}
+	for _, agent := range feature.Agents {
+		if rank[agent.Binding] > rank[worst] {
+			worst = agent.Binding
+		}
+	}
+	return worst
 }
 
 // renderDetailAgents prints each role with its saved record and live
@@ -541,6 +582,9 @@ func agentCell(feature Feature) string {
 // for something that is actually running.
 func renderDetailAgents(write func(string, ...any) error, colors palette, feature Feature) error {
 	if len(feature.Agents) == 0 {
+		if feature.Occupancy > 0 {
+			return write("\nAgents: none running, %d pane(s) open in the worktree", feature.Occupancy)
+		}
 		return write("\nAgents: none")
 	}
 	if err := write("\nAgents:"); err != nil {
@@ -571,6 +615,11 @@ func renderDetailAgents(write func(string, ...any) error, colors palette, featur
 		}
 		if !agent.Live.Empty() {
 			if err := write("      observed live: %s", describeIdentity(agent.Live)); err != nil {
+				return err
+			}
+		}
+		if agent.MatchedPath != "" {
+			if err := write("      matched worktree: %s", agent.MatchedPath); err != nil {
 				return err
 			}
 		}

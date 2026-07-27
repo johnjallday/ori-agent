@@ -274,3 +274,93 @@ func TestRenderDetailExplainsAnUnparsedPlan(t *testing.T) {
 		t.Fatalf("an unparsed plan rendered as zero progress:\n%s", output)
 	}
 }
+
+func agentRow(role, status string, binding BindingHealth, managed bool) Agent {
+	return Agent{
+		Role: role, Managed: managed, Kind: "claude",
+		Status: AgentStatus(status), StatusAvailability: AvailabilityAvailable,
+		Binding: binding,
+	}
+}
+
+func TestAgentCellListsSeveralAgents(t *testing.T) {
+	row := feature("busy", withWorktree("/w/busy"))
+	row.Agents = []Agent{
+		agentRow("builder", "idle", BindingExact, true),
+		agentRow("", "working", BindingMissing, false),
+	}
+	row.Occupancy = 2
+
+	cell := agentCell(row)
+	for _, want := range []string{"builder idle", "unmanaged working"} {
+		if !strings.Contains(cell, want) {
+			t.Fatalf("cell = %q, want it to contain %q", cell, want)
+		}
+	}
+}
+
+func TestAgentCellDegradesToACountRatherThanDroppingAnAgent(t *testing.T) {
+	// Truncating the list could hide the one drifted agent among healthy ones,
+	// so an over-long cell reports the count and the weakest binding instead.
+	row := feature("crowded", withWorktree("/w/crowded"))
+	row.Agents = []Agent{
+		agentRow("builder", "working", BindingExact, true),
+		agentRow("reviewer", "idle", BindingExact, true),
+		agentRow("tester", "idle", BindingPossibleDrift, true),
+		agentRow("watcher", "blocked", BindingExact, true),
+	}
+
+	cell := agentCell(row)
+	if width(cell) > maxAgentColumn {
+		t.Fatalf("cell = %q exceeds the column bound", cell)
+	}
+	if !strings.Contains(cell, "4 agents") {
+		t.Fatalf("cell = %q, want the agent count stated", cell)
+	}
+	if !strings.Contains(cell, "possible drift") {
+		t.Fatalf("cell = %q, want the weakest binding surfaced, not hidden by truncation", cell)
+	}
+}
+
+func TestAgentCellDistinguishesOccupiedFromEmpty(t *testing.T) {
+	occupied := feature("occupied", withWorktree("/w/occupied"))
+	occupied.Occupancy = 1
+	if got := agentCell(occupied); !strings.Contains(got, "no agent") {
+		t.Fatalf("cell = %q, want an occupied-but-agentless worktree stated", got)
+	}
+
+	empty := feature("empty", withWorktree("/w/empty"))
+	if got := agentCell(empty); got != "none" {
+		t.Fatalf("cell = %q, want none", got)
+	}
+}
+
+func TestExpandedViewStatesOccupancyWithoutAgents(t *testing.T) {
+	row := feature("occupied", withWorktree("/w/occupied"))
+	row.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true}
+	row.Occupancy = 2
+
+	var out strings.Builder
+	if err := RenderExpanded(&out, baseSnapshot(row), RenderOptions{NoColor: true}); err != nil {
+		t.Fatalf("RenderExpanded: %v", err)
+	}
+	if !strings.Contains(out.String(), "2 pane(s) open") {
+		t.Fatalf("expanded view hid the occupancy:\n%s", out.String())
+	}
+}
+
+func TestDetailViewNamesTheMatchedWorktree(t *testing.T) {
+	row := feature("traced", withWorktree("/w/traced"))
+	row.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true}
+	agent := agentRow("builder", "idle", BindingExact, true)
+	agent.MatchedPath = "/w/traced"
+	row.Agents = []Agent{agent}
+
+	var out strings.Builder
+	if err := RenderDetail(&out, baseSnapshot(row), row, RenderOptions{NoColor: true}); err != nil {
+		t.Fatalf("RenderDetail: %v", err)
+	}
+	if !strings.Contains(out.String(), "matched worktree: /w/traced") {
+		t.Fatalf("detail view did not show the attribution evidence:\n%s", out.String())
+	}
+}

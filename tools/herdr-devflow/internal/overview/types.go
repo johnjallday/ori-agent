@@ -574,6 +574,9 @@ type Agent struct {
 	Schedules []Schedule `json:"schedules,omitempty"`
 	// LastActivityAt is Herdr's authoritative event/activity timestamp.
 	LastActivityAt time.Time `json:"last_activity_at,omitzero"`
+	// MatchedPath is the canonical worktree this agent's working directory
+	// resolved into. It is the evidence for the attribution.
+	MatchedPath string `json:"matched_path,omitempty"`
 }
 
 // Feature is one row of the feature-first overview: the union of planning,
@@ -591,7 +594,12 @@ type Feature struct {
 	Git     GitState `json:"git"`
 	Remote  Remote   `json:"remote"`
 	// Agents are the managed roles and unmanaged live agents for this feature.
+	// A feature has zero or more; it is never collapsed to a single agent.
 	Agents []Agent `json:"agents,omitempty"`
+	// Occupancy counts panes resolving into this feature's worktree, including
+	// panes running no agent. A worktree can be occupied without an agent, and
+	// that distinction decides whether cleanup is safe.
+	Occupancy int `json:"occupancy"`
 	// Schedules are feature-level schedules not attributable to one role.
 	Schedules []Schedule `json:"schedules,omitempty"`
 	// Findings are this feature's gaps and drift, most severe first.

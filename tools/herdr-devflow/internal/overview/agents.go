@@ -134,6 +134,7 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 		row.BindingCandidates = match.candidates
 		if match.live != nil {
 			row.Live = liveIdentity(*match.live)
+			row.MatchedPath = identityField(agentWorktree(*match.live, evidence.Workspaces))
 			row.Status = AgentStatus(normalizeStatus(match.live.AgentStatus))
 			row.StatusAvailability = AvailabilityAvailable
 			claimed[match.live.PaneID] = struct{}{}
@@ -159,6 +160,9 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 	}
 
 	if !unavailable {
+		// Count every pane in the worktree, agent-bearing or not: occupancy is
+		// a different question from "which agents are running".
+		feature.Occupancy = len(agentsInWorktree(feature.Git.WorktreePath, evidence))
 		unmanaged := discoverUnmanaged(feature, evidence, claimed)
 		feature.Agents = append(feature.Agents, unmanaged...)
 		for _, row := range unmanaged {
@@ -413,6 +417,7 @@ func discoverUnmanaged(feature *Feature, evidence AgentEvidence, claimed map[str
 			StatusAvailability: AvailabilityAvailable,
 			Binding:            BindingMissing,
 			BindingDetail:      "this agent has no bridge role for " + identityField(feature.Git.WorktreePath),
+			MatchedPath:        identityField(feature.Git.WorktreePath),
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Live.Pane < rows[j].Live.Pane })

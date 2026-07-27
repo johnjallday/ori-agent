@@ -559,3 +559,74 @@ func TestAttachAgentsReportsAStaleBindingPath(t *testing.T) {
 		t.Fatalf("detail = %q, want the recorded path named", finding.Detail)
 	}
 }
+
+func TestAttachAgentsListsEveryAgentInTheWorktree(t *testing.T) {
+	// A builder and a test-watcher on one feature is a normal setup, not an
+	// anomaly: both must appear with independent statuses.
+	builder := liveAgent("wA", "wA:p1", "term-1", "ori-builder")
+	builder.Cwd = "/w/busy"
+	watcher := liveAgent("wA", "wA:p2", "term-2", "watcher")
+	watcher.Cwd = "/w/busy"
+	watcher.AgentStatus = model.AgentWorking
+
+	bridge := bridgeWith("busy", map[string]model.RoleAgent{
+		"builder": savedRole("builder", "wA", "wA:p1", "term-1", "ori-builder"),
+	})
+	evidence := CollectAgents(context.Background(), &fakeAgents{live: []herdr.AgentInfo{builder, watcher}}, bridge, observed)
+
+	row := feature("busy", withWorktree("/w/busy"))
+	AttachAgents(&row, evidence)
+
+	if len(row.Agents) != 2 {
+		t.Fatalf("agents = %d, want the managed builder and the unmanaged watcher", len(row.Agents))
+	}
+	statuses := map[string]AgentStatus{}
+	for _, agent := range row.Agents {
+		key := agent.Role
+		if key == "" {
+			key = "unmanaged"
+		}
+		statuses[key] = agent.Status
+	}
+	if statuses["builder"] != AgentIdle || statuses["unmanaged"] != AgentWorking {
+		t.Fatalf("statuses = %v, want independent per-agent statuses", statuses)
+	}
+	if row.Occupancy != 2 {
+		t.Fatalf("occupancy = %d, want 2", row.Occupancy)
+	}
+}
+
+func TestAttachAgentsCountsAgentlessPanesAsOccupancy(t *testing.T) {
+	// A pane with no agent is occupancy, not an agent row. The distinction
+	// decides whether a worktree is safe to remove.
+	empty := liveAgent("wA", "wA:p2", "term-2", "")
+	empty.Agent = ""
+	empty.Cwd = "/w/quiet"
+
+	evidence := CollectAgents(context.Background(), &fakeAgents{live: []herdr.AgentInfo{empty}}, &fakeBridge{}, observed)
+	row := feature("quiet", withWorktree("/w/quiet"))
+	AttachAgents(&row, evidence)
+
+	if len(row.Agents) != 0 {
+		t.Fatalf("agents = %+v, want none — an agentless pane is not an agent", row.Agents)
+	}
+	if row.Occupancy != 1 {
+		t.Fatalf("occupancy = %d, want the agentless pane counted", row.Occupancy)
+	}
+}
+
+func TestAttachAgentsRecordsTheMatchedWorktree(t *testing.T) {
+	agent := liveAgent("wA", "wA:p1", "term-1", "solo")
+	agent.Cwd = "/w/traced/internal/overview"
+
+	evidence := CollectAgents(context.Background(), &fakeAgents{live: []herdr.AgentInfo{agent}}, &fakeBridge{}, observed)
+	row := feature("traced", withWorktree("/w/traced"))
+	AttachAgents(&row, evidence)
+
+	if len(row.Agents) != 1 {
+		t.Fatalf("agents = %d, want the agent in a subdirectory matched", len(row.Agents))
+	}
+	if row.Agents[0].MatchedPath == "" {
+		t.Fatal("the attribution recorded no evidence of which worktree matched")
+	}
+}
