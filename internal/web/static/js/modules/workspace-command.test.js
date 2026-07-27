@@ -3132,7 +3132,10 @@ test('Calendar Ops station exposes not-set-up, needs-setup, clear, attention, an
   assert.equal(state.description, 'no events today');
   assert.equal(state.tone, 'clear');
 
-  hq._calendarOpsPortal.nextMeeting = { title: 'Design Review', start_time: '2026-07-20T14:30:00Z' };
+  hq._calendarOpsPortal.nextMeeting = {
+    title: 'Design Review',
+    start_time: '2026-07-20T14:30:00Z'
+  };
   hq._calendarOpsPortal.conflictCount = 1;
   state = hq.hqCalendarOpsStationState();
   assert.equal(state.value, 'Design Review');
@@ -3709,6 +3712,82 @@ test('the rail click delegation dispatches HQ station rows through the registry 
     });
 
     assert.deepEqual(opened, ['opened']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// A Downloads Janitor workspace awaiting setup used to look identical to a
+// finished one on the map: the setup card lives in the page body, so a user
+// working on the map surface had no way to know a folder was still needed.
+function janitorCommandView(stationState) {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    selectedAgentKey: '',
+    activeMapWindow: '',
+    mapInventorySection: '',
+    activeSystemTab: 'memory',
+    page: {
+      workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] },
+      tasks: [],
+      buildAgentGroups: () => []
+    }
+  });
+  globalThis.window = { DownloadsJanitorPanel: { stationState: () => stationState } };
+  return commandView;
+}
+
+test('a Downloads Janitor workspace awaiting setup says so on the map', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const commandView = janitorCommandView({
+      applies: true,
+      value: 'Choose a folder',
+      description: 'waiting for you to choose a folder to tidy',
+      tone: 'attention'
+    });
+    const html = commandView.renderOperationsMap();
+    assert.match(html, /data-cmd-hq-station="downloads-janitor"/);
+    assert.match(html, /Choose a folder/);
+    // The state is carried non-visually too, not only as a colour tone.
+    assert.match(html, /waiting for you to choose a folder to tidy/);
+    // It is not the HQ, and must not be styled as one.
+    assert.doesNotMatch(html, /ws-cmd-map-shell is-hq/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a workspace with no Janitor gets no station, as before', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const commandView = janitorCommandView({ applies: false });
+    const html = commandView.renderOperationsMap();
+    assert.doesNotMatch(html, /ws-cmd-map-hq-station/);
+    assert.doesNotMatch(html, /downloads-janitor/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('pressing the Downloads station takes the user to the setup card', () => {
+  const originalWindow = globalThis.window;
+  try {
+    let focused = 0;
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
+    });
+    globalThis.window = {
+      DownloadsJanitorPanel: {
+        stationState: () => ({ applies: true, value: 'Choose a folder' }),
+        focusSetup: () => {
+          focused += 1;
+        }
+      }
+    };
+    commandView.runHQStationAction('downloads-janitor', null);
+    assert.equal(focused, 1, 'the station must lead somewhere, not just report state');
   } finally {
     globalThis.window = originalWindow;
   }

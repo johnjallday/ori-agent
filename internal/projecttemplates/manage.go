@@ -260,6 +260,8 @@ type ManifestEdit struct {
 	StarterTasks           *[]StarterTask
 	ProjectEntry           *ProjectEntryEdit
 	CapabilityRequirements *[]CapabilityRequirement
+	DirectoryRequirements  *[]DirectoryRequirement
+	AutomationRecipes      *[]AutomationRecipe
 }
 
 // UpdateManifest writes display metadata into a library template's
@@ -337,6 +339,40 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 				raw["capability_requirements"] = reqs
 			} else {
 				delete(raw, "capability_requirements")
+			}
+		}
+		// Directory requirements and automation recipes are validated together:
+		// a recipe must name a directory the template still declares after this
+		// save, so editing either side re-checks the pair. Validation sees the
+		// raw edit first (normalization would silently drop bad entries).
+		effectiveDirs := tpl.DirectoryRequirements
+		if edit.DirectoryRequirements != nil {
+			if err := validateDirectoryRequirements(*edit.DirectoryRequirements); err != nil {
+				return Template{}, err
+			}
+			effectiveDirs = normalizeDirectoryRequirements(*edit.DirectoryRequirements)
+		}
+		effectiveRecipes := tpl.AutomationRecipes
+		if edit.AutomationRecipes != nil {
+			effectiveRecipes = *edit.AutomationRecipes
+		}
+		if edit.DirectoryRequirements != nil || edit.AutomationRecipes != nil {
+			if err := validateAutomationRecipes(effectiveRecipes, effectiveDirs); err != nil {
+				return Template{}, err
+			}
+		}
+		if edit.DirectoryRequirements != nil {
+			if len(effectiveDirs) > 0 {
+				raw["directory_requirements"] = effectiveDirs
+			} else {
+				delete(raw, "directory_requirements")
+			}
+		}
+		if edit.AutomationRecipes != nil {
+			if recipes := normalizeAutomationRecipes(effectiveRecipes, effectiveDirs); len(recipes) > 0 {
+				raw["automation_recipes"] = recipes
+			} else {
+				delete(raw, "automation_recipes")
 			}
 		}
 		if edit.ProjectEntry != nil && edit.ProjectEntry.Set {

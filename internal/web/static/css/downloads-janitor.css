@@ -1,0 +1,723 @@
+/* downloads-janitor.css — the Downloads Janitor panel on the workspace detail
+   page (setup card, readiness readout).
+
+   State is never carried by color alone: every readiness row also renders a
+   text mark and a status word. */
+
+.downloads-janitor-mount[hidden] {
+  display: none;
+}
+
+.dj-card {
+  margin-bottom: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.dj-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-sub {
+  font-size: 0.8rem;
+  margin: 0.15rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary, #9aa0a6);
+  white-space: nowrap;
+}
+
+.dj-badge-ready {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-badge-needs-attention {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-field {
+  margin-top: 0.9rem;
+}
+
+.dj-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-field-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dj-input {
+  flex: 1 1 18rem;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
+  color: var(--text-primary, #e8e8e8);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.85rem;
+}
+
+.dj-input:focus-visible,
+.dj-btn:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+.dj-disclosure-wrap {
+  margin-top: 0.9rem;
+}
+
+.dj-disclosure-lead {
+  font-size: 0.82rem;
+  margin: 0 0 0.4rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-disclosure {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.dj-disclosure-item {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-rows {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.dj-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-row-mark {
+  flex: 0 0 auto;
+  width: 1rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.dj-row-ok .dj-row-mark {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-row-failed .dj-row-mark {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-row-label {
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-row-value {
+  overflow-wrap: anywhere;
+}
+
+.dj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.dj-btn {
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.dj-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dj-btn-primary {
+  background: var(--accent-color, #3b7dd8);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.dj-error[hidden] {
+  display: none;
+}
+
+.dj-error {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--danger-color, #c5442e);
+}
+
+@media (max-width: 640px) {
+  .dj-head {
+    flex-direction: column;
+  }
+}
+
+/* ------------------------------------------------------------------ review */
+
+.dj-stats {
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-batch {
+  margin-top: 1rem;
+}
+
+.dj-batch-summary {
+  font-size: 0.82rem;
+  margin: 0 0 0.6rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.6rem;
+}
+
+.dj-filter {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.dj-filter-active {
+  color: var(--text-primary, #e8e8e8);
+  border-color: var(--accent-color, #3b7dd8);
+  font-weight: 600;
+}
+
+.dj-filter:focus-visible,
+.dj-select:focus-visible,
+.dj-category:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+/* A hundred-file batch has to stay usable: the table scrolls inside its own
+   container rather than pushing the page sideways. */
+.dj-table-scroll {
+  overflow-x: auto;
+  max-height: 28rem;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+}
+
+.dj-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.dj-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-secondary, #1c1c1e);
+  color: var(--text-secondary, #9aa0a6);
+  font-weight: 600;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-cell {
+  padding: 0.4rem 0.6rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.05));
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-cell-name {
+  color: var(--text-primary, #e8e8e8);
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
+.dj-name {
+  font-weight: 500;
+}
+
+.dj-flag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-cell-size,
+.dj-cell-modified {
+  white-space: nowrap;
+}
+
+.dj-category {
+  max-width: 11rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.78rem;
+}
+
+.dj-destination {
+  display: block;
+  margin-top: 0.15rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 0.72rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-cell-reason {
+  max-width: 18rem;
+  overflow-wrap: anywhere;
+}
+
+.dj-confidence {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+}
+
+.dj-confidence-low {
+  color: var(--warning-color, #b26a00);
+  font-weight: 600;
+}
+
+.dj-state {
+  white-space: nowrap;
+}
+
+/* Low-confidence and changed rows are marked by text as well as tint, so the
+   distinction survives without colour. */
+.dj-row-state-stale,
+.dj-row-state-failed {
+  background: color-mix(in srgb, var(--warning-color, #b26a00) 8%, transparent);
+}
+
+.dj-row-state-skipped {
+  opacity: 0.65;
+}
+
+.dj-state-reason {
+  display: block;
+  font-size: 0.72rem;
+}
+
+.dj-btn-quiet {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.dj-muted {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-selection {
+  margin: 0.6rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-empty {
+  padding: 0.75rem 0;
+}
+
+.dj-empty-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-empty-copy {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dj-btn,
+  .dj-filter {
+    transition: none;
+  }
+}
+
+/* --------------------------------------------------- confirmation & results */
+
+.dj-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.dj-footer .dj-selection {
+  margin: 0;
+}
+
+.dj-confirm {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--accent-color, #3b7dd8);
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+}
+
+.dj-confirm-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-confirm-lead {
+  margin: 0.2rem 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-confirm-list,
+.dj-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.dj-confirm-item,
+.dj-results-item {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-confirm-name,
+.dj-results-name {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-confirm-destination {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
+/* A forced rename is called out in words: the user is told the file will not
+   land under the name they expected, and why. */
+.dj-confirm-renamed {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-results {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+}
+
+.dj-results-summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-results-mark {
+  display: inline-block;
+  width: 1rem;
+  font-weight: 700;
+}
+
+.dj-results-applied .dj-results-mark {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-results-failed .dj-results-mark,
+.dj-results-stale .dj-results-mark {
+  color: var(--warning-color, #b26a00);
+}
+
+.dj-results-destination {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
+.dj-results-message {
+  display: block;
+  padding-left: 1rem;
+}
+
+/* Destructive styling: a removal never looks like a move. The class is applied
+   alongside text that states the consequence, so the distinction never rests on
+   colour alone. */
+.dj-btn-destructive {
+  border-color: var(--danger-color, #c5442e);
+  color: var(--danger-color, #c5442e);
+  font-weight: 600;
+}
+
+.dj-btn-primary.dj-btn-destructive {
+  background: var(--danger-color, #c5442e);
+  border-color: transparent;
+  color: #fff;
+}
+
+.dj-confirm-trash .dj-confirm-destination {
+  color: var(--danger-color, #c5442e);
+}
+
+.dj-trash-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-primary, #e8e8e8);
+  cursor: pointer;
+}
+
+.dj-trash-ack input:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- history */
+
+.dj-history {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-history-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.dj-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.dj-history-name {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-history-undone {
+  color: var(--success-color, #2e7d32);
+}
+
+.dj-history-message {
+  flex-basis: 100%;
+  padding-left: 1rem;
+}
+
+.dj-history-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+/* Activity states. Each is also spelled out in the badge text, so the
+   distinction never depends on colour. */
+.dj-badge-watching {
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-badge-scanning {
+  color: var(--accent-color, #3b7dd8);
+}
+
+.dj-badge-review-ready {
+  color: var(--accent-color, #3b7dd8);
+  font-weight: 700;
+}
+
+.dj-badge-paused {
+  color: var(--text-secondary, #9aa0a6);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------ privacy & settings */
+
+.dj-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-privacy-mark {
+  flex: 0 0 auto;
+  font-weight: 700;
+}
+
+.dj-privacy-headline {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-settings {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.dj-settings-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-setting {
+  margin-bottom: 0.9rem;
+  border: 0;
+  padding: 0;
+}
+
+.dj-setting-help,
+.dj-radio-help {
+  display: block;
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.dj-input-time {
+  flex: 0 0 auto;
+  max-width: 9rem;
+  font-family: inherit;
+}
+
+.dj-radio {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.45rem;
+  align-items: start;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.dj-radio input {
+  margin-top: 0.15rem;
+}
+
+.dj-radio-label {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.82rem;
+}
+
+.dj-radio-help {
+  grid-column: 2;
+}
+
+.dj-radio input:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+.dj-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dj-settings-status {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-primary, #e8e8e8);
+}

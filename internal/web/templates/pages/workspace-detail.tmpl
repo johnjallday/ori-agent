@@ -33,6 +33,11 @@
           .workspace-email-connect-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }
           .workspace-email-connect-sub { font-size: 0.8rem; margin: 0.15rem 0 0; color: var(--text-secondary, #9aa0a6); }
         </style>
+        <!-- Downloads Janitor panel. Populated by downloads-janitor.js, which
+             mounts it only when the server reports this workspace is a
+             Downloads Janitor workspace. Placed beside the follow-up mount so
+             a workspace still awaiting setup says so above the fold. -->
+        <div id="downloadsJanitorMount" class="downloads-janitor-mount" hidden></div>
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
         <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
         <!-- Workspace Detail View -->
@@ -8785,6 +8790,7 @@
   <script defer src="/js/modules/reaper-plugin-install.js"></script>
   <script defer src="/js/modules/reaper-setup-card.js"></script>
   <script defer src="/js/modules/reaper-readiness-panel.js"></script>
+  <script defer src="/js/modules/downloads-janitor.js"></script>
   <script defer src="/js/modules/calendar-ops-setup.js"></script>
   <script defer src="/js/modules/calendar-console.js"></script>
   <script defer src="/js/modules/sessions.js"></script>

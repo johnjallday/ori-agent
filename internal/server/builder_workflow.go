@@ -310,6 +310,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// store is created in this phase (Phase 18), after the handlers.
 	b.wireReaperSetup()
 	b.wireCalendarOpsSetup()
+	b.wireDownloadsJanitor()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace
 	// store, so it is wired here rather than in initializeHandlers (Phase 17).
@@ -375,6 +376,8 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
+	// The Janitor's mover needs the runtime resolver, which only exists here.
+	b.wireDownloadsJanitorMover()
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.calendarOpsHandler != nil {
@@ -638,6 +641,9 @@ func (b *ServerBuilder) initializeTriggerService(opportunityStore workspace.Oppo
 	}
 	b.triggerService = svc
 	b.triggerHandler = triggerhttp.NewHandler(svc)
+	// The Janitor's watcher and daily catch-up need the trigger service, so
+	// they are wired here rather than at handler-construction time.
+	b.wireDownloadsJanitorAutomation()
 	// Note: b.server.Handlers is rebuilt after this phase, so the handler is
 	// attached to the facade in finalizeHandlers (alongside ActionCenter),
 	// not here.

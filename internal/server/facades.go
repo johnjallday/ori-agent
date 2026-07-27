@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
@@ -149,6 +150,7 @@ type HandlerFacade struct {
 	ActionCenter     *actioncenterhttp.Handler
 	Triggers         *triggerhttp.Handler
 	WorkspaceMemory  *memoryhttp.Handler
+	DownloadsJanitor *downloadsjanitorhttp.Handler
 	User             *userhttp.Handler
 	PersonalHQ       *personalhqhttp.Handler
 	DailyBrief       *dailybriefhttp.Handler

@@ -21,6 +21,15 @@ type TemplateProvenance struct {
 	Version int `json:"version,omitempty"`
 	// AppliedAt records when the template was applied to the workspace.
 	AppliedAt time.Time `json:"applied_at,omitempty"`
+	// DirectoryRequirements are the local folders the template asked the user to
+	// choose. They are carried unresolved: creation records what the template
+	// requested, and guided setup — not this record — resolves, validates, and
+	// stores the user's confirmed selection.
+	DirectoryRequirements []DirectoryRequirement `json:"directory_requirements,omitempty"`
+	// AutomationRecipes are the watchers/daily runs the template asked Ori to
+	// install once the matching directory is confirmed. Recording one installs
+	// nothing: no watcher is registered and no schedule is enabled here.
+	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
 }
 
 // GetTemplateProvenance returns a copy of the workspace's template provenance, if
@@ -32,6 +41,8 @@ func (w *Workspace) GetTemplateProvenance() *TemplateProvenance {
 		return nil
 	}
 	cp := *w.TemplateProvenance
+	cp.DirectoryRequirements = cloneDirectoryRequirements(w.TemplateProvenance.DirectoryRequirements)
+	cp.AutomationRecipes = cloneAutomationRecipes(w.TemplateProvenance.AutomationRecipes)
 	return &cp
 }
 
@@ -46,6 +57,8 @@ func (w *Workspace) SetTemplateProvenance(p *TemplateProvenance) {
 	}
 	cp := *p
 	cp.TemplateID = strings.TrimSpace(cp.TemplateID)
+	cp.DirectoryRequirements = cloneDirectoryRequirements(p.DirectoryRequirements)
+	cp.AutomationRecipes = cloneAutomationRecipes(p.AutomationRecipes)
 	if cp.AppliedAt.IsZero() {
 		cp.AppliedAt = time.Now()
 	}

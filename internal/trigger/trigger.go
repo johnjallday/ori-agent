@@ -32,6 +32,15 @@ const (
 	// ActionTaskPrompt creates a workspace task from a stored prompt and
 	// queues it for the task executor.
 	ActionTaskPrompt ActionKind = "task_prompt"
+	// ActionDomainScan hands the coalesced fire to a registered in-process
+	// handler instead of starting a mission or creating a task.
+	//
+	// It exists because some features want "something changed in this folder,
+	// go look" rather than "ask an agent about it". Downloads Janitor is the
+	// first: a hundred new files must produce one scan, not a hundred tasks and
+	// not a hundred prompts. The handler receives the workspace and a summary
+	// of the fire — never the filenames as instructions.
+	ActionDomainScan ActionKind = "domain_scan"
 )
 
 // Action describes what happens when the trigger fires.
@@ -41,6 +50,10 @@ type Action struct {
 	Agent    string `json:"agent,omitempty"`
 	Prompt   string `json:"prompt,omitempty"`
 	Priority int    `json:"priority,omitempty"`
+	// Domain names the registered handler for ActionDomainScan (e.g.
+	// "downloads_janitor"). It is a key into a server-side registry, never
+	// anything the fire itself can choose.
+	Domain string `json:"domain,omitempty"`
 }
 
 // WebhookConfig is the source config for TypeWebhook.
@@ -207,8 +220,12 @@ func (t *Trigger) Validate() error {
 		if strings.TrimSpace(t.Action.Agent) == "" {
 			return fmt.Errorf("task_prompt action requires a target agent")
 		}
+	case ActionDomainScan:
+		if strings.TrimSpace(t.Action.Domain) == "" {
+			return fmt.Errorf("domain_scan action requires a domain")
+		}
 	default:
-		return fmt.Errorf("unknown action kind %q (want %q or %q)", t.Action.Kind, ActionMissionRun, ActionTaskPrompt)
+		return fmt.Errorf("unknown action kind %q (want %q, %q, or %q)", t.Action.Kind, ActionMissionRun, ActionTaskPrompt, ActionDomainScan)
 	}
 
 	switch t.Type {

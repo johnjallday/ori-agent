@@ -20,6 +20,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitor"
+	"github.com/johnjallday/ori-agent/internal/downloadsjanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/evolution"
 	"github.com/johnjallday/ori-agent/internal/evolutionhttp"
 	"github.com/johnjallday/ori-agent/internal/externalagents"
@@ -530,6 +532,63 @@ func (b *ServerBuilder) wireCalendarOpsSetup() {
 	if b.meetingPrepStore != nil {
 		b.calendarOpsHandler.SetMeetingPreps(b.meetingPrepStore)
 	}
+}
+
+// wireDownloadsJanitor constructs the Downloads Janitor service and handler.
+// Like wireReaperSetup/wireCalendarOpsSetup it runs in the workspace-store
+// phase (18) rather than initializeHandlers (17): the service needs the
+// composed workspace store to record the approved folder's directory reference
+// and read-only MCP binding, and the folder store to resolve where each
+// workspace's Janitor state lives on disk.
+func (b *ServerBuilder) wireDownloadsJanitor() {
+	if b.workspaceStore == nil || b.workspaceFileStore == nil {
+		return
+	}
+	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
+	b.downloadsJanitorService = service
+	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+}
+
+// wireDownloadsJanitorMover gives the Janitor its execution mechanism: the
+// workspace's own root-scoped filesystem MCP binding.
+//
+// Split from wireDownloadsJanitor because the runtime resolver is built later
+// in the same phase. Until this runs the service has no mover, and an apply
+// fails loudly rather than pretending — which is the right failure: a Janitor
+// that cannot move files must say so, not silently report success.
+func (b *ServerBuilder) wireDownloadsJanitorMover() {
+	if b.downloadsJanitorService == nil || b.runtimeResolver == nil || b.mcpRegistry == nil {
+		return
+	}
+	// The Trash mechanism is Ori's own recoverable-Trash abstraction, never
+	// filesystem MCP: delete_file unlinks, and an unlinked file has no restore
+	// token and no way back.
+	b.downloadsJanitorService.SetTrash(downloadsjanitor.NewPlatformTrash())
+	mover := downloadsjanitor.NewMCPMover(
+		b.workspaceStore,
+		b.runtimeResolver,
+		janitorToolCaller{registry: b.mcpRegistry},
+	)
+	// The connector is a process; it may not be running when the first approved
+	// move arrives. Lazy-start it the same way the chat path does.
+	mover.SetStarter(b.mcpRegistry)
+	b.downloadsJanitorService.SetMover(mover)
+}
+
+// janitorToolCaller adapts the MCP registry to the narrow caller the Janitor
+// needs: whether the tool reported an error, not what it returned. What
+// actually happened to the file is decided against the filesystem.
+type janitorToolCaller struct{ registry *mcp.Registry }
+
+func (c janitorToolCaller) CallTool(ctx context.Context, serverName, toolName string, arguments map[string]any) (bool, error) {
+	result, err := c.registry.CallTool(ctx, serverName, toolName, arguments)
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return true, nil
+	}
+	return result.IsError, nil
 }
 
 // wireCalendarOpsPrepTaskExecutor gives the already-constructed Calendar Ops

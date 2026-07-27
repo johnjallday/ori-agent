@@ -303,6 +303,19 @@ func collectWorkspaceDirectoryRoots(ws *Workspace) []string {
 	return roots
 }
 
+// MaterializeRuntimeBinding materializes one workspace MCP binding as a runtime
+// server and returns its name, so a caller can invoke a tool on exactly that
+// binding.
+//
+// It is exported for features that call an MCP tool themselves rather than
+// through an agent — Downloads Janitor issues its own move_file after its own
+// validation, precisely so the agent never holds a mutation tool. The binding's
+// scoping (its roots, and its AllowedTools) is the binding's own; this only
+// instantiates it.
+func (r *AgentRuntimeResolver) MaterializeRuntimeBinding(workspaceID string, binding MCPBinding) (string, error) {
+	return r.materializeRuntimeBinding(workspaceID, binding)
+}
+
 func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, binding MCPBinding) (string, error) {
 	templateName := strings.TrimSpace(binding.ServerName)
 	if templateName == "" {

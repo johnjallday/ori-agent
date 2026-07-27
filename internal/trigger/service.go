@@ -84,6 +84,16 @@ func (s *Service) Close() {
 	s.coalescer.Close()
 }
 
+// RegisterDomainScanHandler routes ActionDomainScan fires for a domain to an
+// in-process handler. Registration happens at wiring time: a trigger names a
+// domain, it never supplies behavior.
+func (s *Service) RegisterDomainScanHandler(domain string, handler DomainScanHandler) {
+	if s == nil || s.dispatcher == nil {
+		return
+	}
+	s.dispatcher.RegisterDomainScanHandler(domain, handler)
+}
+
 // List returns a workspace's triggers.
 func (s *Service) List(workspaceID string) []Trigger { return s.store.List(workspaceID) }
 

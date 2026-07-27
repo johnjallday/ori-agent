@@ -41,6 +41,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerWorkspaceRunRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
+	registerDownloadsJanitorRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
 	registerPluginRoutes(mux, s)
@@ -884,6 +885,15 @@ func registerWorkspaceMemoryRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.UpdateEntry)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/memory/entries/{index}", s.Handlers.WorkspaceMemory.DeleteEntry)
 	}
+}
+
+// registerDownloadsJanitorRoutes registers the workspace-scoped Downloads
+// Janitor setup/readiness endpoints.
+func registerDownloadsJanitorRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Downloads Janitor Endpoints
+	// =============================================================================
+	s.Handlers.DownloadsJanitor.Register(mux)
 }
 
 // registerExternalAgentRoutes registers external agent (Claude Code / Codex) endpoints.

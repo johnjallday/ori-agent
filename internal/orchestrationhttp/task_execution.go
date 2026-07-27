@@ -1045,7 +1045,21 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	if err := ws.UpdateTask(*task); err != nil {
 		return fmt.Errorf("failed to update blocked task: %w", err)
 	}
-	if err := th.workspaceStore.Save(ws); err != nil {
+	// Persist through a re-read under the workspace lock rather than saving the
+	// snapshot this goroutine captured when the task started.
+	//
+	// Task execution is asynchronous and long-lived: by the time a task blocks,
+	// the workspace on disk may have gained bindings, directory references, or
+	// settings the snapshot never had. Writing the whole stale snapshot back
+	// silently erased them. Observed via Downloads Janitor, whose template
+	// seeds starter tasks that auto-start on first open: a task blocking during
+	// an apply wiped the folder grant mid-batch, so the first file moved and
+	// every later one failed with "Ori could not move this file".
+	//
+	// Only the task changed here, so only the task is written.
+	if err := workspace.CanonicalUpdate(th.workspaceStore, ws.ID, func(fresh *workspace.Workspace) error {
+		return fresh.UpdateTask(*task)
+	}); err != nil {
 		return fmt.Errorf("failed to save blocked task: %w", err)
 	}
 
@@ -1072,7 +1086,9 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 		if len(task.ExecutionTrace) > 0 {
 			if err := ws.UpdateTask(*task); err != nil {
 				logger.Error("Failed to persist blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
-			} else if err := th.workspaceStore.Save(ws); err != nil {
+			} else if err := workspace.CanonicalUpdate(th.workspaceStore, ws.ID, func(fresh *workspace.Workspace) error {
+				return fresh.UpdateTask(*task)
+			}); err != nil {
 				logger.Error("Failed to save blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,9 @@ const (
 // the trigger's history and surfaces failures as Action Center findings
 // (PRD #22–24).
 type Dispatcher struct {
+	mu          sync.RWMutex
+	domainScans map[string]DomainScanHandler
+
 	store          *Store
 	workspaceStore workspace.Store
 	mission        MissionRunner              // nil when no bridge is wired (some test paths)
@@ -79,6 +83,10 @@ func (d *Dispatcher) Dispatch(t Trigger, fire PendingFire) {
 		if err != nil {
 			rec.Error = err.Error()
 		}
+	case ActionDomainScan:
+		if err := d.fireDomainScan(t, fire, evCtx); err != nil {
+			rec.Error = err.Error()
+		}
 	default:
 		rec.Error = fmt.Sprintf("unknown action kind %q", t.Action.Kind)
 	}
@@ -100,6 +108,47 @@ func (d *Dispatcher) Dispatch(t Trigger, fire PendingFire) {
 			"run_id": rec.RunID, "task_id": rec.TaskID, "events": rec.EventCount,
 		})
 	}
+}
+
+// DomainScanHandler is an in-process handler for ActionDomainScan. It is given
+// the workspace, the fire, and a summary — never raw filenames to act on.
+//
+// Returning an error records a failed fire, which surfaces as a single
+// deduplicated Action Center finding rather than one per event.
+type DomainScanHandler interface {
+	HandleDomainScan(workspaceID, fireID string, eventCount int, summary string) error
+}
+
+// RegisterDomainScanHandler registers the handler for a domain key. Handlers
+// are server-side and fixed at wiring time: a trigger names a domain, it does
+// not supply behavior.
+func (d *Dispatcher) RegisterDomainScanHandler(domain string, handler DomainScanHandler) {
+	if d == nil || handler == nil || strings.TrimSpace(domain) == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.domainScans == nil {
+		d.domainScans = map[string]DomainScanHandler{}
+	}
+	d.domainScans[strings.TrimSpace(domain)] = handler
+}
+
+// fireDomainScan hands one coalesced fire to its registered handler. However
+// many file events the fire represents, the handler is called exactly once —
+// that is the whole point of the action kind.
+func (d *Dispatcher) fireDomainScan(t Trigger, fire PendingFire, evCtx *workspace.TriggerEventContext) error {
+	d.mu.RLock()
+	handler := d.domainScans[strings.TrimSpace(t.Action.Domain)]
+	d.mu.RUnlock()
+	if handler == nil {
+		return fmt.Errorf("no handler registered for domain %q", t.Action.Domain)
+	}
+	summary := ""
+	if evCtx != nil {
+		summary = evCtx.Summary
+	}
+	return handler.HandleDomainScan(t.WorkspaceID, fire.FireID, fire.EventCount(), summary)
 }
 
 // fireMissionRun starts the workspace mission with the event injected,
