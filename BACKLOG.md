@@ -36,6 +36,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 ## Doing
 
 ## Shipped / dropped
+- 2026-07-27 vault-modal-loading - PR #271 merged to dev (2026-07-27)
 - 2026-07-27 path-based-agent-binding -> PRD at tasks/prd-path-based-agent-binding.md (started 2026-07-26) - PR #270 merged to dev (2026-07-27)
 - 2026-07-27 downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-24) - PR #268 merged to dev (2026-07-27)
 - 2026-07-26 wt-herd-feature-overview -> PRD at tasks/prd-wt-herd-feature-overview.md (started 2026-07-25) - PR #267 merged to dev (2026-07-26)
