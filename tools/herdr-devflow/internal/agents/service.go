@@ -24,7 +24,13 @@ var featurePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$`)
 var actionableTaskPattern = regexp.MustCompile(`^\d+\.[1-9]\d*\s+`)
 
 type Herdr interface {
-	OpenExistingWorktree(context.Context, string, string) (herdr.WorktreeOpenResult, error)
+	// FocusedWorkspace and TabCreateInfo place a feature. Note the deliberate
+	// absence of OpenExistingWorktree: that call mints a workspace per feature,
+	// which is exactly the sprawl tab-backed handoff exists to end.
+	FocusedWorkspace(context.Context) (herdr.WorkspaceInfo, error)
+	TabCreateInfo(context.Context, string, string, string) (herdr.TabCreateResult, error)
+	TabGetInfo(context.Context, string) (herdr.TabInfo, error)
+	PaneGetInfo(context.Context, string) (herdr.PaneInfo, error)
 	PaneProcessInfo(context.Context, string) (herdr.PaneProcessInfo, error)
 	PaneSplitInfo(context.Context, string, string, string) (herdr.PaneInfo, error)
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
@@ -79,12 +85,35 @@ type HandoffRequest struct {
 }
 
 type HandoffResult struct {
-	Feature         model.Feature   `json:"feature"`
-	WorkspaceID     string          `json:"workspace_id"`
+	Feature        model.Feature `json:"feature"`
+	WorkspaceID    string        `json:"workspace_id"`
+	WorkspaceLabel string        `json:"workspace_label,omitempty"`
+	TabID          string        `json:"tab_id"`
+	// TabReused is true when a retry re-entered the feature's existing tab.
+	// Tab creation is not idempotent the way `worktree open` was, so this
+	// distinguishes "resumed" from "placed" in diagnostics.
+	TabReused       bool            `json:"tab_reused,omitempty"`
 	RootPaneID      string          `json:"root_pane_id"`
 	Primary         model.RoleAgent `json:"primary"`
 	PromptDelivered bool            `json:"prompt_delivered"`
 	PromptSkipped   bool            `json:"prompt_skipped"`
+	// Warnings are non-fatal observations the shell prints. Placing a feature
+	// into a workspace bound to another repository is allowed but surprising
+	// enough to say out loud.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// featurePlacement is where a feature's primary agent lives in Herdr: one tab
+// inside a workspace shared with other features, plus that tab's root pane. It
+// carries the same three identities the workspace-open result used to, so the
+// validation below stays independent of how the placement was obtained.
+type featurePlacement struct {
+	WorkspaceID    string
+	WorkspaceLabel string
+	TabID          string
+	RootPane       herdr.PaneInfo
+	Reused         bool
+	Warnings       []string
 }
 
 func (s *Service) Handoff(ctx context.Context, request HandoffRequest) (HandoffResult, error) {
@@ -182,29 +211,24 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		return HandoffResult{}, &model.StageError{Stage: "record handoff", Code: model.ErrStateCorrupt, Message: "could not persist the feature handoff record before contacting Herdr", Recovery: "check the local bridge state directory, then run wt herd retry", Cause: err}
 	}
 
-	if gitWorktree.SourcePath == "" {
-		return HandoffResult{}, &model.StageError{Stage: "resolve source checkout", Code: model.ErrWorktreeInvalid, Message: "could not resolve the repository source checkout required by Herdr", Recovery: "wt herd doctor"}
-	}
-	opened, err := s.Client.OpenExistingWorktree(ctx, gitWorktree.SourcePath, feature.Path)
+	placement, err := s.resolvePlacement(ctx, featureState, feature, primaryRole, primaryKind, gitWorktree.SourcePath)
 	if err != nil {
-		return HandoffResult{}, wrapHerdrError("open existing worktree", err, "wt herd retry")
+		return HandoffResult{}, err
 	}
-	if opened.Worktree.Path != "" && !samePath(opened.Worktree.Path, feature.Path) {
-		return HandoffResult{}, &model.StageError{Stage: "open existing worktree", Code: model.ErrWorktreeInvalid, Message: "Herdr opened a different worktree path", Recovery: "wt herd doctor"}
-	}
-	if opened.RootPane.WorkspaceID != "" && opened.RootPane.WorkspaceID != opened.Workspace.WorkspaceID {
-		return HandoffResult{}, &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr returned a root pane from a different workspace", Recovery: "wt herd retry"}
-	}
-	if err := s.validateRootPane(opened.RootPane, feature.Path); err != nil {
+	// The worktree-open response used to assert the opened path itself. A tab
+	// is told where to start rather than asked, so the pane's own cwd is now
+	// the evidence — and it is checked before any agent is launched into it.
+	if err := s.validateRootPane(placement.RootPane, feature.Path); err != nil {
 		return HandoffResult{}, err
 	}
 
 	featureState = state.Features[featureKey]
-	featureState.WorkspaceID = opened.Workspace.WorkspaceID
+	featureState.WorkspaceID = placement.WorkspaceID
+	featureState.TabID = placement.TabID
 	if !featureState.Handoff.BootstrapPrompted {
-		featureState.Handoff.Stage = model.HandoffWorkspaceOpened
+		featureState.Handoff.Stage = model.HandoffTabCreated
 	}
-	featureState.Handoff.RootPaneID = opened.RootPane.PaneID
+	featureState.Handoff.RootPaneID = placement.RootPane.PaneID
 	featureState.Handoff.UpdatedAt = s.now()
 	featureState.UpdatedAt = s.now()
 	state.Features[featureKey] = featureState
@@ -221,7 +245,7 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		"path":       feature.Path,
 	}
 	if metadataEnabledFor(featureState) {
-		if _, err := s.Client.ReportWorkspaceMetadata(ctx, opened.Workspace.WorkspaceID, s.Config.Bridge.SourceID, metadata); err != nil {
+		if _, err := s.Client.ReportWorkspaceMetadata(ctx, placement.WorkspaceID, s.Config.Bridge.SourceID, metadata); err != nil {
 			return HandoffResult{}, wrapHerdrError("report workspace metadata", err, "wt herd retry")
 		}
 	}
@@ -232,7 +256,7 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	if err != nil {
 		return HandoffResult{}, &model.StageError{Stage: "primary agent name", Code: model.ErrConfigInvalid, Message: "could not create a safe primary agent name", Recovery: "check the feature and role names", Cause: err}
 	}
-	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, opened, name, primaryRole, primaryKind)
+	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, placement, name, primaryRole, primaryKind)
 	if err != nil {
 		return HandoffResult{}, err
 	}
@@ -248,10 +272,14 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	}
 
 	result := HandoffResult{
-		Feature:     feature,
-		WorkspaceID: opened.Workspace.WorkspaceID,
-		RootPaneID:  opened.RootPane.PaneID,
-		Primary:     primary,
+		Feature:        feature,
+		WorkspaceID:    placement.WorkspaceID,
+		WorkspaceLabel: placement.WorkspaceLabel,
+		TabID:          placement.TabID,
+		TabReused:      placement.Reused,
+		RootPaneID:     placement.RootPane.PaneID,
+		Primary:        primary,
+		Warnings:       placement.Warnings,
 	}
 	if featureState.Handoff.BootstrapPrompted && !request.Resend {
 		result.PromptSkipped = true
@@ -278,7 +306,152 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	return result, nil
 }
 
-func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, featureKey string, featureState model.FeatureState, opened herdr.WorktreeOpenResult, expectedName, role, kind string) (model.RoleAgent, bool, error) {
+// resolvePlacement returns the tab this feature occupies, creating one only
+// when the feature does not already have a live tab. `worktree open` was
+// idempotent — reopening an open worktree returned the same workspace — but
+// `tab create` is not, so a bare `wt herd retry` that always created would
+// leave a dead tab behind on every attempt.
+func (s *Service) resolvePlacement(ctx context.Context, featureState model.FeatureState, feature model.Feature, role, kind, sourceCheckout string) (featurePlacement, error) {
+	if featureState.TabID != "" && featureState.Handoff.RootPaneID != "" {
+		placement, err := s.rehydratePlacement(ctx, featureState, feature)
+		switch {
+		case err == nil:
+			return placement, nil
+		case isMissingTarget(err):
+			// The user closed the tab by hand. That is a recoverable state, not
+			// a failure: fall through and place the feature again.
+		default:
+			return featurePlacement{}, err
+		}
+	}
+
+	// An agent already running for this feature owns a pane, and that pane's tab
+	// is the feature's placement. Resolving it before creating anything is what
+	// keeps a retry — or a legacy workspace-backed feature with no recorded tab —
+	// from stranding an empty tab beside the agent it was about to adopt.
+	if placement, found, err := s.placementFromLiveAgent(ctx, featureState, feature, role, kind); err != nil {
+		return featurePlacement{}, err
+	} else if found {
+		return placement, nil
+	}
+
+	workspace, err := s.Client.FocusedWorkspace(ctx)
+	if err != nil {
+		return featurePlacement{}, wrapHerdrError("resolve focused workspace", err, "focus a Herdr workspace, then run wt herd retry")
+	}
+	created, err := s.Client.TabCreateInfo(ctx, workspace.WorkspaceID, feature.Path, feature.Name)
+	if err != nil {
+		return featurePlacement{}, wrapHerdrError("create feature tab", err, "wt herd retry")
+	}
+	if created.RootPane.WorkspaceID != "" && created.RootPane.WorkspaceID != workspace.WorkspaceID {
+		return featurePlacement{}, &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr returned a root pane from a different workspace", Recovery: "wt herd retry"}
+	}
+	return featurePlacement{
+		WorkspaceID:    workspace.WorkspaceID,
+		WorkspaceLabel: workspace.Label,
+		TabID:          created.Tab.TabID,
+		RootPane:       created.RootPane,
+		Warnings:       foreignRepositoryWarning(workspace, sourceCheckout),
+	}, nil
+}
+
+// placementFromLiveAgent derives the placement from an agent that is already
+// running for this feature, so adoption keeps working when no tab is recorded.
+// A saved agent is authoritative: if state names one and Herdr cannot resolve
+// it, that is reported rather than papered over with a fresh tab, because the
+// user needs to rebind it and a new tab would not help.
+func (s *Service) placementFromLiveAgent(ctx context.Context, featureState model.FeatureState, feature model.Feature, role, kind string) (featurePlacement, bool, error) {
+	if saved, ok := featureState.Agents[role]; ok && saved.Name != "" {
+		live, err := s.Client.AgentGetInfo(ctx, saved.Name)
+		if err != nil {
+			return featurePlacement{}, false, wrapHerdrError("resolve saved primary agent", err, "wt herd rebind "+role+" --target <live-target>")
+		}
+		placement, err := s.placementFromAgent(live, feature)
+		return placement, err == nil, err
+	}
+	adopted, found, err := s.findAgentInWorktree(ctx, feature.Path, kind)
+	if err != nil || !found {
+		// An ambiguous or unreachable agent list is not a reason to refuse a
+		// placement; ensurePrimary re-runs the same lookup and reports it there.
+		return featurePlacement{}, false, nil
+	}
+	placement, err := s.placementFromAgent(adopted, feature)
+	if err != nil {
+		return featurePlacement{}, false, err
+	}
+	return placement, true, nil
+}
+
+func (s *Service) placementFromAgent(live herdr.AgentInfo, feature model.Feature) (featurePlacement, error) {
+	pane := herdr.PaneInfo(live)
+	if err := s.validateRootPane(pane, feature.Path); err != nil {
+		return featurePlacement{}, err
+	}
+	return featurePlacement{
+		WorkspaceID: live.WorkspaceID,
+		TabID:       live.TabID,
+		RootPane:    pane,
+		Reused:      true,
+	}, nil
+}
+
+// rehydratePlacement re-enters the tab recorded in local state. `tab get`
+// returns no panes, so the pane is fetched separately and re-checked against
+// the recorded tab: a pane id can be reused after a tab is closed, and adopting
+// a stranger's pane would aim the agent at someone else's terminal.
+func (s *Service) rehydratePlacement(ctx context.Context, featureState model.FeatureState, feature model.Feature) (featurePlacement, error) {
+	tab, err := s.Client.TabGetInfo(ctx, featureState.TabID)
+	if err != nil {
+		return featurePlacement{}, err
+	}
+	pane, err := s.Client.PaneGetInfo(ctx, featureState.Handoff.RootPaneID)
+	if err != nil {
+		return featurePlacement{}, err
+	}
+	if pane.TabID != "" && pane.TabID != tab.TabID {
+		return featurePlacement{}, &model.StageError{Stage: "resolve root pane", Code: model.ErrAgentMissing, Message: "the recorded feature pane now belongs to a different tab", Recovery: "wt herd retry"}
+	}
+	if err := s.validateRootPane(pane, feature.Path); err != nil {
+		return featurePlacement{}, err
+	}
+	workspaceID := tab.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = featureState.WorkspaceID
+	}
+	return featurePlacement{
+		WorkspaceID: workspaceID,
+		TabID:       tab.TabID,
+		RootPane:    pane,
+		Reused:      true,
+	}, nil
+}
+
+// foreignRepositoryWarning reports, without refusing, that the focused
+// workspace belongs to another checkout. Refusing would strand the worktree for
+// a placement that still works; staying silent would let a feature land in a
+// workspace the user does not associate with this repository.
+func foreignRepositoryWarning(workspace herdr.WorkspaceInfo, sourceCheckout string) []string {
+	if sourceCheckout == "" || workspace.Worktree == nil || workspace.Worktree.RepoRoot == "" {
+		return nil
+	}
+	if samePath(workspace.Worktree.RepoRoot, sourceCheckout) {
+		return nil
+	}
+	label := workspace.Label
+	if label == "" {
+		label = workspace.WorkspaceID
+	}
+	return []string{"the focused workspace " + label + " is bound to " + workspace.Worktree.RepoName + "; this feature's tab was added there anyway"}
+}
+
+// isMissingTarget distinguishes "the recorded Herdr object is gone" from every
+// other failure. Only the former may be repaired by placing the feature again.
+func isMissingTarget(err error) bool {
+	var stage *model.StageError
+	return errors.As(err, &stage) && stage.Code == model.ErrAgentMissing
+}
+
+func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, featureKey string, featureState model.FeatureState, placement featurePlacement, expectedName, role, kind string) (model.RoleAgent, bool, error) {
 	if saved, ok := featureState.Agents[role]; ok {
 		if saved.Name != expectedName {
 			return model.RoleAgent{}, true, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "saved primary agent name does not match this feature's identity", Recovery: "wt herd rebind " + role + " --target <live-target>"}
@@ -287,7 +460,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		if err != nil {
 			return model.RoleAgent{}, true, wrapHerdrError("resolve saved primary agent", err, "wt herd rebind "+role+" --target <live-target>")
 		}
-		primary, err := s.validateLivePrimary(live, opened, expectedName, role, kind)
+		primary, err := s.validateLivePrimary(live, placement, expectedName, role, kind)
 		if err != nil {
 			return model.RoleAgent{}, true, err
 		}
@@ -318,7 +491,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		if live.Name != expectedName {
 			continue
 		}
-		primary, err := s.validateLivePrimary(live, opened, expectedName, role, kind)
+		primary, err := s.validateLivePrimary(live, placement, expectedName, role, kind)
 		if err != nil {
 			return model.RoleAgent{}, false, err
 		}
@@ -361,11 +534,11 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 
 	// A saved or already-live primary owns this pane and may legitimately be a
 	// foreground coding-agent process. Only a new launch needs an idle shell.
-	if err := s.validateRootShell(ctx, opened.RootPane, featureState.Feature.Path); err != nil {
+	if err := s.validateRootShell(ctx, placement.RootPane, featureState.Feature.Path, !placement.Reused); err != nil {
 		return model.RoleAgent{}, false, err
 	}
 
-	started, err := s.Client.AgentStartInfo(ctx, expectedName, kind, opened.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
+	started, err := s.Client.AgentStartInfo(ctx, expectedName, kind, placement.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
 	if err != nil {
 		return model.RoleAgent{}, false, wrapHerdrError("start primary agent", err, "wt herd retry")
 	}
@@ -373,7 +546,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 	if err != nil {
 		return model.RoleAgent{}, false, err
 	}
-	primary, err := s.validateLivePrimary(ready, opened, expectedName, role, kind)
+	primary, err := s.validateLivePrimary(ready, placement, expectedName, role, kind)
 	if err != nil {
 		return model.RoleAgent{}, false, err
 	}
@@ -391,26 +564,69 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 	return primary, false, nil
 }
 
-func (s *Service) validateRootShell(ctx context.Context, pane herdr.PaneInfo, worktreePath string) error {
+// A pane that has existed for a while is judged immediately: a foreground
+// process there is someone else's work, and launching a second agent on top of
+// it is exactly what this guard prevents. A pane created moments ago is
+// different — `tab create` answers as soon as the pane exists, and for a beat
+// the starting shell reports itself as a foreground process with no settled
+// shell identity. Refusing there would fail a perfectly good handoff, so a pane
+// we just created gets a bounded chance to settle before the same strict check
+// decides.
+const (
+	rootShellSettleAttempts = 20
+	rootShellSettleInterval = 250 * time.Millisecond
+)
+
+func (s *Service) validateRootShell(ctx context.Context, pane herdr.PaneInfo, worktreePath string, allowSettle bool) error {
 	if err := s.validateRootPane(pane, worktreePath); err != nil {
 		return err
 	}
-	process, err := s.Client.PaneProcessInfo(ctx, pane.PaneID)
-	if err != nil {
-		return wrapHerdrError("inspect root pane", err, "wt herd retry")
+	attempts := 1
+	if allowSettle {
+		attempts = rootShellSettleAttempts
+	}
+	var lastErr error
+	for attempt := range attempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "waiting for the new tab's shell was canceled", Recovery: "wt herd retry", Cause: ctx.Err()}
+			case <-time.After(rootShellSettleInterval):
+			}
+		}
+		settling, err := s.rootShellIdle(ctx, pane, worktreePath)
+		if err == nil {
+			return nil
+		}
+		if !settling {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
+}
+
+// rootShellIdle reports whether the failure it returns is one a starting shell
+// produces transiently, so only those are worth waiting out.
+func (s *Service) rootShellIdle(ctx context.Context, pane herdr.PaneInfo, worktreePath string) (settling bool, err error) {
+	process, processErr := s.Client.PaneProcessInfo(ctx, pane.PaneID)
+	if processErr != nil {
+		return false, wrapHerdrError("inspect root pane", processErr, "wt herd retry")
 	}
 	if process.PaneID != pane.PaneID || process.ShellPID == nil {
-		return &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr root pane has no interactive shell identity", Recovery: "wt herd retry"}
+		return true, &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr root pane has no interactive shell identity", Recovery: "wt herd retry"}
 	}
 	for _, foreground := range process.ForegroundProcesses {
 		if foreground.PID != *process.ShellPID {
-			return &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr root pane is busy with a non-shell foreground process", Recovery: "wait for the shell, then run wt herd retry"}
+			return true, &model.StageError{Stage: "resolve root pane", Code: model.ErrHerdrUnavailable, Message: "Herdr root pane is busy with a non-shell foreground process", Recovery: "wait for the shell, then run wt herd retry"}
 		}
+		// A cwd mismatch is a real mismatch, not a startup artifact: the tab was
+		// told where to start, so waiting cannot turn this into the right pane.
 		if foreground.Cwd != "" && !samePath(foreground.Cwd, worktreePath) {
-			return &model.StageError{Stage: "resolve root pane", Code: model.ErrWorktreeInvalid, Message: "Herdr root shell is not in the feature worktree", Recovery: "wt herd retry"}
+			return false, &model.StageError{Stage: "resolve root pane", Code: model.ErrWorktreeInvalid, Message: "Herdr root shell is not in the feature worktree", Recovery: "wt herd retry"}
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // validateRootPane checks the stable, structured identity Herdr returned for
@@ -452,11 +668,11 @@ func (s *Service) waitForReady(ctx context.Context, name string, started herdr.A
 	}
 }
 
-func (s *Service) validateLivePrimary(live herdr.AgentInfo, opened herdr.WorktreeOpenResult, expectedName, role, kind string) (model.RoleAgent, error) {
+func (s *Service) validateLivePrimary(live herdr.AgentInfo, placement featurePlacement, expectedName, role, kind string) (model.RoleAgent, error) {
 	if live.Name != expectedName {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "Herdr returned a different agent than the managed primary", Recovery: "wt herd status"}
 	}
-	if live.WorkspaceID != opened.Workspace.WorkspaceID || live.PaneID != opened.RootPane.PaneID || live.TerminalID == "" {
+	if live.WorkspaceID != placement.WorkspaceID || live.PaneID != placement.RootPane.PaneID || live.TerminalID == "" {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "the named primary agent belongs to a different Herdr workspace or pane", Recovery: "wt herd rebind " + role + " --target <live-target>"}
 	}
 	if live.Agent != "" && live.Agent != kind {

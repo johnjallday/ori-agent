@@ -843,17 +843,26 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		handoffOutcome = "prompt-skipped"
 	}
 	a.recordAudit(runtime, audit.Event{Operation: "handoff", Feature: result.Feature.Name, Role: result.Primary.Role, Stage: "bootstrap", Outcome: handoffOutcome})
-	a.writeResult(opts.json, map[string]any{
+	payload := map[string]any{
 		"status":           "ready",
 		"feature":          result.Feature.Name,
 		"worktree":         result.Feature.Path,
 		"workspace_id":     result.WorkspaceID,
+		"tab_id":           result.TabID,
+		"tab_reused":       result.TabReused,
 		"primary_agent":    result.Primary.Name,
 		"primary_role":     result.Primary.Role,
 		"primary_kind":     result.Primary.Kind,
 		"prompt_delivered": result.PromptDelivered,
 		"prompt_skipped":   result.PromptSkipped,
-	})
+	}
+	if result.WorkspaceLabel != "" {
+		payload["workspace_label"] = result.WorkspaceLabel
+	}
+	if len(result.Warnings) > 0 {
+		payload["warnings"] = result.Warnings
+	}
+	a.writeResult(opts.json, payload)
 	return 0
 }
 
@@ -2285,6 +2294,15 @@ func (a *App) writeResult(asJSON bool, value any) {
 		}
 		if message, ok := pretty["message"].(string); ok {
 			fmt.Fprintln(a.stdout, message)
+		}
+		// Warnings accompany a successful result, so they have no error path to
+		// travel on and would otherwise be visible only under --json.
+		if warnings, ok := pretty["warnings"].([]any); ok {
+			for _, warning := range warnings {
+				if text, ok := warning.(string); ok {
+					fmt.Fprintf(a.stdout, "Warning: %s\n", text)
+				}
+			}
 		}
 		if helper, ok := pretty["helper"].(string); ok {
 			fmt.Fprintf(a.stdout, "Stable helper: %s\n", helper)

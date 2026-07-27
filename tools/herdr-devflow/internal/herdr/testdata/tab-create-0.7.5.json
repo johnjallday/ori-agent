@@ -1,0 +1,26 @@
+{
+  "id": "cli:tab:create",
+  "result": {
+    "type": "tab_created",
+    "tab": {
+      "tab_id": "w1:t2",
+      "workspace_id": "w1",
+      "label": "ori-feature",
+      "number": 2,
+      "pane_count": 1,
+      "focused": false,
+      "agent_status": "unknown"
+    },
+    "root_pane": {
+      "pane_id": "w1:p2",
+      "terminal_id": "term-recorded-2",
+      "workspace_id": "w1",
+      "tab_id": "w1:t2",
+      "cwd": "/tmp/ori-feature",
+      "foreground_cwd": "/tmp/ori-feature",
+      "agent_status": "unknown",
+      "focused": false,
+      "revision": 0
+    }
+  }
+}

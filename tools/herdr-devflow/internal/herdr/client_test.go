@@ -396,3 +396,101 @@ func TestWorkspaceListInfoDecodesWorktreeBinding(t *testing.T) {
 		t.Fatalf("an unbound workspace decoded a binding: %+v", workspaces[1].Worktree)
 	}
 }
+
+func TestTabCallsDecodeRecordedResponsesAndValidateIdentity(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"tab create --workspace w1 --cwd /tmp/ori-feature --label ori-feature --no-focus": {Stdout: fixture(t, "tab-create-0.7.5.json")},
+		"tab list --workspace w1": {Stdout: fixture(t, "tab-list-0.7.5.json")},
+		"tab get w1:t2":           {Stdout: []byte(`{"result":{"type":"tab_info","tab":{"tab_id":"w1:t2","workspace_id":"w1","label":"ori-feature","number":2,"pane_count":1,"agent_status":"working"}}}`)},
+		"tab close w1:t2":         {Stdout: []byte(`{"result":{"type":"ok"}}`)},
+	}}
+	client := New("fake-herdr", "", runner)
+
+	created, err := client.TabCreateInfo(context.Background(), "w1", "/tmp/ori-feature", "ori-feature")
+	if err != nil {
+		t.Fatalf("TabCreateInfo() error = %v", err)
+	}
+	if created.Tab.TabID != "w1:t2" || created.Tab.Label != "ori-feature" {
+		t.Fatalf("created tab = %#v", created.Tab)
+	}
+	// The root pane is the only pane identity any tab call returns, so it must
+	// survive decoding complete enough for validateRootPane to accept it.
+	if created.RootPane.PaneID != "w1:p2" || created.RootPane.TerminalID != "term-recorded-2" || created.RootPane.Cwd != "/tmp/ori-feature" {
+		t.Fatalf("created root pane = %#v", created.RootPane)
+	}
+
+	tabs, err := client.TabListInfo(context.Background(), "w1")
+	if err != nil || len(tabs) != 2 || tabs[1].TabID != "w1:t2" {
+		t.Fatalf("TabListInfo() = %#v, %v", tabs, err)
+	}
+
+	tab, err := client.TabGetInfo(context.Background(), "w1:t2")
+	if err != nil || tab.TabID != "w1:t2" || tab.AgentStatus != model.AgentWorking {
+		t.Fatalf("TabGetInfo() = %#v, %v", tab, err)
+	}
+
+	closed, err := client.TabClose(context.Background(), "w1:t2")
+	if err != nil || !strings.Contains(string(closed), `"ok"`) {
+		t.Fatalf("TabClose() = %s, %v", closed, err)
+	}
+}
+
+func TestTabCreateRejectsMisplacedOrIncompleteResponses(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"no root pane":       `{"result":{"type":"tab_created","tab":{"tab_id":"w1:t2","workspace_id":"w1"}}}`,
+		"wrong workspace":    `{"result":{"type":"tab_created","tab":{"tab_id":"w9:t1","workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1","tab_id":"w9:t1"}}}`,
+		"pane from othertab": `{"result":{"type":"tab_created","tab":{"tab_id":"w1:t2","workspace_id":"w1"},"root_pane":{"pane_id":"w1:p1","tab_id":"w1:t1"}}}`,
+		"unexpected type":    `{"result":{"type":"workspace_created","tab":{"tab_id":"w1:t2","workspace_id":"w1"},"root_pane":{"pane_id":"w1:p2","tab_id":"w1:t2"}}}`,
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runner := &fakeRunner{responses: map[string]CommandResult{
+				"tab create --workspace w1 --cwd /tmp/ori-feature --label ori-feature --no-focus": {Stdout: []byte(payload)},
+			}}
+			_, err := New("fake-herdr", "", runner).TabCreateInfo(context.Background(), "w1", "/tmp/ori-feature", "ori-feature")
+			var stage *model.StageError
+			if !errors.As(err, &stage) || stage.Code != model.ErrHerdrUnavailable {
+				t.Fatalf("TabCreateInfo() error = %#v, want a rejected placement", err)
+			}
+		})
+	}
+}
+
+func TestFocusedWorkspaceResolvesTheSessionTargetOrReportsNoFocus(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"workspace list": {Stdout: fixture(t, "workspace-list-0.7.5.json")},
+	}}
+	client := New("fake-herdr", "", runner)
+
+	workspaces, err := client.WorkspaceListInfo(context.Background())
+	if err != nil || len(workspaces) != 2 {
+		t.Fatalf("WorkspaceListInfo() = %#v, %v", workspaces, err)
+	}
+	// The live API has always returned these; the struct simply dropped them.
+	if !workspaces[0].Focused || workspaces[0].ActiveTabID != "w1:t1" {
+		t.Fatalf("focus fields did not decode: %#v", workspaces[0])
+	}
+	if workspaces[1].Focused {
+		t.Fatalf("unfocused workspace decoded as focused: %#v", workspaces[1])
+	}
+
+	focused, err := client.FocusedWorkspace(context.Background())
+	if err != nil || focused.WorkspaceID != "w1" {
+		t.Fatalf("FocusedWorkspace() = %#v, %v", focused, err)
+	}
+
+	// No focused workspace is a distinct, recoverable condition: the handoff
+	// degrades on it rather than falling back to minting a workspace.
+	unfocused := &fakeRunner{responses: map[string]CommandResult{
+		"workspace list": {Stdout: []byte(`{"result":{"type":"workspace_list","workspaces":[{"workspace_id":"w1","focused":false}]}}`)},
+	}}
+	_, err = New("fake-herdr", "", unfocused).FocusedWorkspace(context.Background())
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrNoFocusedWorkspace {
+		t.Fatalf("FocusedWorkspace() with no focus = %#v, want ErrNoFocusedWorkspace", err)
+	}
+}

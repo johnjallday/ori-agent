@@ -184,7 +184,13 @@ var RequiredSchemaMethods = []string{
 	"session.snapshot",
 	"worktree.open",
 	"workspace.close",
+	"workspace.list",
+	"tab.create",
+	"tab.close",
+	"tab.list",
+	"tab.get",
 	"pane.split",
+	"pane.get",
 	"pane.process_info",
 	"workspace.report_metadata",
 	"pane.report_metadata",
@@ -294,6 +300,13 @@ type WorkspaceInfo struct {
 	WorkspaceID string `json:"workspace_id"`
 	Cwd         string `json:"cwd"`
 	Label       string `json:"label"`
+	// Focused is Herdr's statement about which workspace the user is currently
+	// looking at. Exactly one workspace reports it in a healthy session, and it
+	// is how a feature handoff decides where to place its tab.
+	Focused bool `json:"focused"`
+	// ActiveTabID is the workspace's currently selected tab. It is recorded for
+	// diagnostics; a feature's own tab is always the one it created.
+	ActiveTabID string `json:"active_tab_id"`
 	// Worktree is Herdr's own record of which checkout this workspace was
 	// opened against. It is absent for workspaces created by hand and then
 	// navigated into, which is precisely why it cannot be the only signal.
@@ -314,6 +327,23 @@ type WorktreeBinding struct {
 type TabInfo struct {
 	TabID       string `json:"tab_id"`
 	WorkspaceID string `json:"workspace_id"`
+	Label       string `json:"label"`
+	// Number, PaneCount, AgentStatus and Focused are reported by `tab list`,
+	// `tab get`, and `tab create`; `worktree open` returns only the identity
+	// pair, so every field beyond TabID/WorkspaceID must be treated as optional.
+	Number      int               `json:"number"`
+	PaneCount   int               `json:"pane_count"`
+	Focused     bool              `json:"focused"`
+	AgentStatus model.AgentStatus `json:"agent_status"`
+}
+
+// TabCreateResult is the only tab response that carries a pane. `tab get`
+// reports tab identity alone, so the pane a feature's agent will occupy has to
+// be captured here and persisted; it cannot be re-derived from the tab later.
+type TabCreateResult struct {
+	Type     string   `json:"type"`
+	Tab      TabInfo  `json:"tab"`
+	RootPane PaneInfo `json:"root_pane"`
 }
 
 type PaneInfo struct {
@@ -475,6 +505,121 @@ func (c *Client) WorkspaceClose(ctx context.Context, workspaceID string) (json.R
 	return c.CLIJSON(ctx, "workspace", "close", workspaceID)
 }
 
+// TabCreate adds a tab to an existing workspace. This is the placement call for
+// a feature handoff: unlike `worktree open` it never mints a workspace, so N
+// features land as N tabs inside the one workspace the user is already in.
+func (c *Client) TabCreate(ctx context.Context, workspaceID, cwd, label string) (json.RawMessage, error) {
+	args := []string{"tab", "create", "--workspace", workspaceID, "--cwd", cwd}
+	if label != "" {
+		args = append(args, "--label", label)
+	}
+	args = append(args, "--no-focus")
+	return c.CLIJSON(ctx, args...)
+}
+
+// TabCreateInfo validates the created tab and its root pane the way
+// OpenExistingWorktree validates a workspace, so a partial response can never
+// be mistaken for a usable placement.
+func (c *Client) TabCreateInfo(ctx context.Context, workspaceID, cwd, label string) (TabCreateResult, error) {
+	raw, err := c.TabCreate(ctx, workspaceID, cwd, label)
+	if err != nil {
+		return TabCreateResult{}, err
+	}
+	var result TabCreateResult
+	if err := decodeResult("tab create", raw, &result); err != nil {
+		return TabCreateResult{}, err
+	}
+	if result.Type != "tab_created" || result.Tab.TabID == "" || result.RootPane.PaneID == "" {
+		return TabCreateResult{}, &model.StageError{Stage: "tab create", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return the new tab and its root pane", Recovery: "wt herd retry"}
+	}
+	if workspaceID != "" && result.Tab.WorkspaceID != "" && result.Tab.WorkspaceID != workspaceID {
+		return TabCreateResult{}, &model.StageError{Stage: "tab create", Code: model.ErrHerdrUnavailable, Message: "Herdr created the tab in a different workspace", Recovery: "wt herd retry"}
+	}
+	if result.RootPane.TabID != "" && result.RootPane.TabID != result.Tab.TabID {
+		return TabCreateResult{}, &model.StageError{Stage: "tab create", Code: model.ErrHerdrUnavailable, Message: "Herdr returned a root pane from a different tab", Recovery: "wt herd retry"}
+	}
+	return result, nil
+}
+
+// TabClose closes one tab. It is deliberately the narrowest teardown the
+// adapter offers: closing a workspace can cascade to every checkout bound to
+// it, while closing a tab cannot reach its siblings.
+func (c *Client) TabClose(ctx context.Context, tabID string) (json.RawMessage, error) {
+	if c.SocketPath != "" {
+		return c.CallSocket(ctx, "tab.close", map[string]any{"tab_id": tabID})
+	}
+	return c.CLIJSON(ctx, "tab", "close", tabID)
+}
+
+func (c *Client) TabList(ctx context.Context, workspaceID string) (json.RawMessage, error) {
+	args := []string{"tab", "list"}
+	if workspaceID != "" {
+		args = append(args, "--workspace", workspaceID)
+	}
+	return c.CLIJSON(ctx, args...)
+}
+
+// TabListInfo returns every open tab, optionally scoped to one workspace. It is
+// read-only and is how cleanup confirms a tab still exists before closing it.
+func (c *Client) TabListInfo(ctx context.Context, workspaceID string) ([]TabInfo, error) {
+	raw, err := c.TabList(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Tabs []TabInfo `json:"tabs"`
+	}
+	if err := decodeResult("tab list", raw, &response); err != nil {
+		return nil, err
+	}
+	return response.Tabs, nil
+}
+
+func (c *Client) TabGet(ctx context.Context, tabID string) (json.RawMessage, error) {
+	return c.CLIJSON(ctx, "tab", "get", tabID)
+}
+
+// TabGetInfo reports tab identity only. Herdr does not return the tab's panes
+// here, which is why the root pane is captured at creation time instead.
+func (c *Client) TabGetInfo(ctx context.Context, tabID string) (TabInfo, error) {
+	raw, err := c.TabGet(ctx, tabID)
+	if err != nil {
+		return TabInfo{}, err
+	}
+	var response struct {
+		Tab TabInfo `json:"tab"`
+	}
+	if err := decodeResult("tab get", raw, &response); err != nil {
+		return TabInfo{}, err
+	}
+	if response.Tab.TabID == "" {
+		return TabInfo{}, &model.StageError{Stage: "tab get", Code: model.ErrAgentMissing, Message: "Herdr returned no tab identity", Recovery: "wt herd status"}
+	}
+	return response.Tab, nil
+}
+
+// FocusedWorkspace resolves the workspace the user is currently looking at.
+// When no workspace claims focus the caller must degrade rather than invent a
+// placement: silently falling back to `worktree open` would mint exactly the
+// per-feature workspace this bridge no longer creates.
+func (c *Client) FocusedWorkspace(ctx context.Context) (WorkspaceInfo, error) {
+	workspaces, err := c.WorkspaceListInfo(ctx)
+	if err != nil {
+		return WorkspaceInfo{}, err
+	}
+	for _, workspace := range workspaces {
+		if workspace.Focused && workspace.WorkspaceID != "" {
+			return workspace, nil
+		}
+	}
+	return WorkspaceInfo{}, &model.StageError{
+		Stage:    "resolve focused workspace",
+		Code:     model.ErrNoFocusedWorkspace,
+		Message:  "no Herdr workspace reports focus, so there is nowhere to place the feature tab",
+		Recovery: "focus a Herdr workspace, then run wt herd retry",
+	}
+}
+
 func (c *Client) PaneSplit(ctx context.Context, paneID, direction, cwd string) (json.RawMessage, error) {
 	return c.CLIJSON(ctx, "pane", "split", paneID, "--direction", direction, "--cwd", cwd, "--no-focus")
 }
@@ -492,6 +637,30 @@ func (c *Client) PaneSplitInfo(ctx context.Context, paneID, direction, cwd strin
 	}
 	if response.Pane.PaneID == "" || response.Pane.TerminalID == "" {
 		return PaneInfo{}, &model.StageError{Stage: "pane split", Code: model.ErrHerdrUnavailable, Message: "Herdr did not return the new shell pane", Recovery: "wt herd retry"}
+	}
+	return response.Pane, nil
+}
+
+func (c *Client) PaneGet(ctx context.Context, paneID string) (json.RawMessage, error) {
+	return c.CLIJSON(ctx, "pane", "get", paneID)
+}
+
+// PaneGetInfo rehydrates a pane recorded in local state. A retry needs it
+// because `tab get` returns no panes: without it a recorded tab could only be
+// re-entered by creating another one beside it.
+func (c *Client) PaneGetInfo(ctx context.Context, paneID string) (PaneInfo, error) {
+	raw, err := c.PaneGet(ctx, paneID)
+	if err != nil {
+		return PaneInfo{}, err
+	}
+	var response struct {
+		Pane PaneInfo `json:"pane"`
+	}
+	if err := decodeResult("pane get", raw, &response); err != nil {
+		return PaneInfo{}, err
+	}
+	if response.Pane.PaneID == "" {
+		return PaneInfo{}, &model.StageError{Stage: "pane get", Code: model.ErrAgentMissing, Message: "Herdr returned no pane identity", Recovery: "wt herd retry"}
 	}
 	return response.Pane, nil
 }
@@ -861,6 +1030,11 @@ func apiError(code, message string) error {
 	case "not_found", "agent_not_found", "agent_pane_not_found":
 		stageCode = model.ErrAgentMissing
 		recovery = "wt herd status && wt herd rebind <role> --target <live-target>"
+	case "tab_not_found", "pane_not_found", "workspace_not_found":
+		// A recorded placement the user closed by hand. It is missing rather
+		// than broken, so retry can rebuild it instead of demanding a rebind.
+		stageCode = model.ErrAgentMissing
+		recovery = "wt herd retry"
 	case "plugin_not_found", "plugin_disabled", "plugin_invalid":
 		stageCode = model.ErrPluginUnavailable
 		recovery = "wt herd setup"

@@ -1,0 +1,35 @@
+{
+  "id": "cli:workspace:list",
+  "result": {
+    "type": "workspace_list",
+    "workspaces": [
+      {
+        "workspace_id": "w1",
+        "label": "ori-agent-dev",
+        "active_tab_id": "w1:t1",
+        "focused": true,
+        "number": 1,
+        "pane_count": 2,
+        "tab_count": 2,
+        "agent_status": "idle",
+        "worktree": {
+          "checkout_path": "/tmp/ori-source",
+          "is_linked_worktree": false,
+          "repo_key": "/tmp/ori-source/.git",
+          "repo_name": "ori-agent",
+          "repo_root": "/tmp/ori-source"
+        }
+      },
+      {
+        "workspace_id": "w2",
+        "label": "scratch",
+        "active_tab_id": "w2:t1",
+        "focused": false,
+        "number": 2,
+        "pane_count": 1,
+        "tab_count": 1,
+        "agent_status": "unknown"
+      }
+    ]
+  }
+}

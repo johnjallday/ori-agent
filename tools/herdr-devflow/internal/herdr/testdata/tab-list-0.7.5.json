@@ -1,0 +1,26 @@
+{
+  "id": "cli:tab:list",
+  "result": {
+    "type": "tab_list",
+    "tabs": [
+      {
+        "tab_id": "w1:t1",
+        "workspace_id": "w1",
+        "label": "1",
+        "number": 1,
+        "pane_count": 1,
+        "focused": true,
+        "agent_status": "idle"
+      },
+      {
+        "tab_id": "w1:t2",
+        "workspace_id": "w1",
+        "label": "ori-feature",
+        "number": 2,
+        "pane_count": 1,
+        "focused": false,
+        "agent_status": "working"
+      }
+    ]
+  }
+}
