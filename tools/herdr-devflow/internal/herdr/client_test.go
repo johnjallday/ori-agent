@@ -355,3 +355,44 @@ func TestAgentReadReturnsTerminalTextWithoutJSONParsing(t *testing.T) {
 		t.Fatalf("AgentReadText() = %q, %v", text, err)
 	}
 }
+
+func TestWorkspaceListInfoDecodesWorktreeBinding(t *testing.T) {
+	payload := `{"result":{"type":"workspace_list","workspaces":[
+		{"workspace_id":"wE","label":"downloads-janitor","worktree":{
+			"checkout_path":"/repo/worktrees/downloads-janitor",
+			"is_linked_worktree":true,
+			"repo_key":"/repo/ori-agent/.git",
+			"repo_name":"ori-agent",
+			"repo_root":"/repo/ori-agent"}},
+		{"workspace_id":"wF","label":"ori"}
+	]}}`
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"workspace list": {Stdout: []byte(payload)},
+	}, errors: map[string]error{}}
+	client := New("fake-herdr", "", runner)
+
+	workspaces, err := client.WorkspaceListInfo(context.Background())
+	if err != nil {
+		t.Fatalf("WorkspaceListInfo: %v", err)
+	}
+	if len(workspaces) != 2 {
+		t.Fatalf("decoded %d workspaces, want 2", len(workspaces))
+	}
+
+	bound := workspaces[0]
+	if bound.Worktree == nil {
+		t.Fatal("a workspace with a worktree binding decoded as unbound")
+	}
+	if bound.Worktree.CheckoutPath != "/repo/worktrees/downloads-janitor" {
+		t.Fatalf("checkout path = %q", bound.Worktree.CheckoutPath)
+	}
+	if !bound.Worktree.IsLinkedWorktree || bound.Worktree.RepoRoot != "/repo/ori-agent" {
+		t.Fatalf("worktree binding = %+v", bound.Worktree)
+	}
+
+	// A workspace created by hand carries no binding at all. That absence is
+	// the signal, not an error — it is why pane cwd is the primary evidence.
+	if workspaces[1].Worktree != nil {
+		t.Fatalf("an unbound workspace decoded a binding: %+v", workspaces[1].Worktree)
+	}
+}

@@ -17,10 +17,11 @@ import (
 type fakeAgents struct {
 	// mu guards calls: the service may collect concurrently, so the fake has
 	// to be as safe as the thing it stands in for.
-	mu    sync.Mutex
-	live  []herdr.AgentInfo
-	err   error
-	calls []string
+	mu         sync.Mutex
+	live       []herdr.AgentInfo
+	workspaces []herdr.WorkspaceInfo
+	err        error
+	calls      []string
 }
 
 func (f *fakeAgents) AgentListInfo(context.Context) ([]herdr.AgentInfo, error) {
@@ -31,6 +32,16 @@ func (f *fakeAgents) AgentListInfo(context.Context) ([]herdr.AgentInfo, error) {
 		return nil, f.err
 	}
 	return f.live, nil
+}
+
+func (f *fakeAgents) WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "WorkspaceListInfo")
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.workspaces, nil
 }
 
 func (f *fakeAgents) callCount() int {
@@ -58,6 +69,9 @@ func liveAgent(workspace, pane, terminal, name string, mutate ...func(*herdr.Age
 		Name:        name,
 		Agent:       "claude",
 		AgentStatus: model.AgentIdle,
+		// Agents are resolved by working directory, so a fixture without one
+		// would be invisible for the same reason a hand-made workspace was.
+		Cwd: "/w/x",
 	}
 	for _, apply := range mutate {
 		apply(&agent)
@@ -92,6 +106,13 @@ func bridgeWith(slug string, agents map[string]model.RoleAgent, mutate ...func(*
 
 func attach(t *testing.T, slug string, agents *fakeAgents, bridge *fakeBridge) (Feature, []Finding) {
 	t.Helper()
+	// Point every fixture agent at this feature's worktree unless the test
+	// deliberately placed it elsewhere.
+	for index := range agents.live {
+		if agents.live[index].Cwd == "/w/x" {
+			agents.live[index].Cwd = "/w/" + slug
+		}
+	}
 	evidence := CollectAgents(context.Background(), agents, bridge, observed)
 	row := feature(slug, withWorktree("/w/"+slug))
 	findings := AttachAgents(&row, evidence)
@@ -204,9 +225,9 @@ func TestAttachAgentsTrulyMissingAgent(t *testing.T) {
 		"builder": savedRole("builder", "ws-1", "pane-1", "term-1", "gone"),
 	})
 
-	row, findings := attach(t, "x", &fakeAgents{live: []herdr.AgentInfo{
-		liveAgent("ws-other", "pane-5", "term-5", "elsewhere"),
-	}}, bridge)
+	elsewhere := liveAgent("ws-other", "pane-5", "term-5", "elsewhere")
+	elsewhere.Cwd = "/w/some-other-feature"
+	row, findings := attach(t, "x", &fakeAgents{live: []herdr.AgentInfo{elsewhere}}, bridge)
 	agent := row.Agents[0]
 	if agent.Binding != BindingMissing || agent.Status != AgentMissing {
 		t.Fatalf("agent = %+v, want a missing binding and status", agent)
@@ -328,8 +349,10 @@ func TestCollectAgentsNeverMutatesHerdr(t *testing.T) {
 	row := feature("x", withWorktree("/w/x"))
 	AttachAgents(&row, evidence)
 
-	if agents.callCount() != 1 {
-		t.Fatalf("herdr calls = %d, want exactly one read-only listing", agents.callCount())
+	// Two read-only listings per collection — agents and workspaces — and
+	// nothing else. The count is bounded and per-collection, never per agent.
+	if agents.callCount() != 2 {
+		t.Fatalf("herdr calls = %d, want the two read-only listings", agents.callCount())
 	}
 }
 
@@ -416,5 +439,123 @@ func TestMetadataStalenessRespectsAnOptOut(t *testing.T) {
 	row.Plan.TaskListModTime = observed.Add(time.Hour)
 	if _, ok := findingFor(AttachAgents(&row, evidence), FindingMetadataStale); ok {
 		t.Fatal("a feature that opted out of metadata was reported stale")
+	}
+}
+
+// TestAttachAgentsFindsAgentInAnUnboundWorkspace is the case that motivated
+// this change. On 2026-07-26 a Claude agent worked for hours in a feature's
+// worktree from a workspace nobody had bound, and the bridge could not see it
+// because discovery was scoped to the saved workspace ID.
+func TestAttachAgentsFindsAgentInAnUnboundWorkspace(t *testing.T) {
+	hidden := liveAgent("wF", "wF:p1", "term-1", "hand-opened")
+	hidden.Cwd = "/w/wt-herd-feature-overview"
+
+	// The bridge's saved record points at a workspace that no longer exists.
+	bridge := bridgeWith("wt-herd-feature-overview", map[string]model.RoleAgent{
+		"builder": savedRole("builder", "wK", "wK:p1", "term-gone", "ori-builder"),
+	})
+	evidence := CollectAgents(context.Background(), &fakeAgents{live: []herdr.AgentInfo{hidden}}, bridge, observed)
+
+	row := feature("wt-herd-feature-overview", withWorktree("/w/wt-herd-feature-overview"))
+	findings := AttachAgents(&row, evidence)
+
+	var unmanaged *Agent
+	for index := range row.Agents {
+		if !row.Agents[index].Managed {
+			unmanaged = &row.Agents[index]
+		}
+	}
+	if unmanaged == nil {
+		t.Fatalf("the agent in the unbound workspace stayed invisible: %+v", row.Agents)
+	}
+	if unmanaged.Live.Workspace != "wF" {
+		t.Fatalf("live workspace = %q, want wF", unmanaged.Live.Workspace)
+	}
+	if _, ok := findingFor(findings, FindingAgentUnmanaged); !ok {
+		t.Fatalf("findings = %v, want agent_unmanaged", findings)
+	}
+	// It must be reported, never claimed.
+	if unmanaged.Role != "" || unmanaged.Managed {
+		t.Fatalf("a discovered agent was adopted: %+v", unmanaged)
+	}
+}
+
+func TestAttachAgentsIgnoresAgentsInSiblingWorktrees(t *testing.T) {
+	// The prefix-collision case, end to end.
+	sibling := liveAgent("wZ", "wZ:p1", "term-9", "other")
+	sibling.Cwd = "/w/feature-abc"
+
+	evidence := CollectAgents(context.Background(), &fakeAgents{live: []herdr.AgentInfo{sibling}}, &fakeBridge{}, observed)
+	row := feature("feature-a", withWorktree("/w/feature-a"))
+	AttachAgents(&row, evidence)
+
+	if len(row.Agents) != 0 {
+		t.Fatalf("an agent in a sibling worktree was attributed: %+v", row.Agents)
+	}
+}
+
+func TestAttachAgentsFallsBackToTheWorkspaceBinding(t *testing.T) {
+	// A pane with no usable cwd still resolves through its workspace's
+	// recorded checkout path.
+	agent := liveAgent("wE", "wE:p1", "term-1", "builder")
+	agent.Cwd = ""
+	agent.ForegroundCwd = ""
+
+	evidence := CollectAgents(context.Background(), &fakeAgents{
+		live: []herdr.AgentInfo{agent},
+		workspaces: []herdr.WorkspaceInfo{{
+			WorkspaceID: "wE",
+			Worktree:    &herdr.WorktreeBinding{CheckoutPath: "/w/bound", IsLinkedWorktree: true},
+		}},
+	}, &fakeBridge{}, observed)
+
+	row := feature("bound", withWorktree("/w/bound"))
+	AttachAgents(&row, evidence)
+	if len(row.Agents) != 1 {
+		t.Fatalf("the workspace-binding fallback did not resolve: %+v", row.Agents)
+	}
+}
+
+func TestAttachAgentsNeverResolvesThroughWorkspaceLabels(t *testing.T) {
+	// Labels are user-editable and observed to drift: two workspaces have been
+	// seen sharing one label while pointing at different checkouts.
+	mislabelled := liveAgent("wJ", "wJ:p1", "term-1", "codex")
+	mislabelled.Cwd = "/w/somewhere-else"
+
+	evidence := CollectAgents(context.Background(), &fakeAgents{
+		live: []herdr.AgentInfo{mislabelled},
+		workspaces: []herdr.WorkspaceInfo{{
+			WorkspaceID: "wJ",
+			Label:       "target-feature", // matches the slug exactly
+		}},
+	}, &fakeBridge{}, observed)
+
+	row := feature("target-feature", withWorktree("/w/target-feature"))
+	AttachAgents(&row, evidence)
+	if len(row.Agents) != 0 {
+		t.Fatalf("an agent was matched by workspace label: %+v", row.Agents)
+	}
+}
+
+func TestAttachAgentsReportsAStaleBindingPath(t *testing.T) {
+	// The wt-herd-feature-overview case after its worktree was removed: the
+	// bridge still holds a binding for a directory that no longer exists.
+	bridge := bridgeWith("gone", map[string]model.RoleAgent{}, func(state *model.FeatureState) {
+		state.Feature.Path = "/w/gone"
+	})
+	evidence := CollectAgents(context.Background(), &fakeAgents{}, bridge, observed)
+
+	row := feature("gone") // no worktree
+	findings := AttachAgents(&row, evidence)
+
+	finding, ok := findingFor(findings, FindingBindingPathStale)
+	if !ok {
+		t.Fatalf("findings = %v, want binding_path_stale", findings)
+	}
+	if finding.Severity != SeverityInfo {
+		t.Fatalf("severity = %q, want info — a stale path is drift, not an error", finding.Severity)
+	}
+	if !strings.Contains(finding.Detail, "/w/gone") {
+		t.Fatalf("detail = %q, want the recorded path named", finding.Detail)
 	}
 }

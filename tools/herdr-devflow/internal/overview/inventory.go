@@ -92,7 +92,44 @@ func BuildInventory(input Input) ([]Feature, []Finding) {
 		features = append(features, feature)
 		findings = append(findings, raised...)
 	}
+	findings = append(findings, pathCollisions(features)...)
 	return features, findings
+}
+
+// pathCollisions reports two features resolving to one canonical worktree.
+// Agents are bound by path, so a collision would attribute one agent's work to
+// both features; reporting beats guessing which is meant.
+func pathCollisions(features []Feature) []Finding {
+	byPath := map[string][]string{}
+	for _, feature := range features {
+		if feature.Git.WorktreePath == "" {
+			continue
+		}
+		byPath[feature.Git.WorktreePath] = append(byPath[feature.Git.WorktreePath], feature.Slug)
+	}
+	var findings []Finding
+	paths := make([]string, 0, len(byPath))
+	for path, slugs := range byPath {
+		if len(slugs) > 1 {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		slugs := byPath[path]
+		sort.Strings(slugs)
+		for _, slug := range slugs {
+			findings = append(findings, Finding{
+				Code:     FindingWorktreePathCollision,
+				Severity: SeverityError,
+				Feature:  slug,
+				Source:   SourceWorktree,
+				Message:  "More than one feature resolves to the same worktree path; agents cannot be attributed.",
+				Detail:   "Path " + path + " is claimed by " + joinBounded(slugs) + ".",
+			})
+		}
+	}
+	return findings
 }
 
 func sourceList(set map[SourceKind]struct{}) []SourceKind {
