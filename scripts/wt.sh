@@ -714,7 +714,7 @@ function wt_done_herdr_guard {
     cleanup_status=$?
   fi
   if (( cleanup_status == 20 )); then
-    echo "Refusing wt done: managed Herdr work is still active. Resolve the listed agents or schedules, then retry."
+    echo "Refusing wt done: Herdr work is still active in this worktree. Resolve the listed agents or schedules, then retry."
     return 1
   fi
 

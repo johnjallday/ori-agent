@@ -208,3 +208,90 @@ func TestExpandedSurfaceCountsManagedAgents(t *testing.T) {
 		t.Fatalf("expanded surface did not state the feature count:\n%s", expanded)
 	}
 }
+
+// multiAgentSnapshot has one feature running two agents with different
+// statuses and binding health — the case a single-agent model would flatten.
+func multiAgentSnapshot(t *testing.T) Snapshot {
+	t.Helper()
+	row := feature("busy-feature", withWorktree("/w/busy-feature"),
+		withPlan(AvailabilityAvailable, AvailabilityAvailable))
+	row.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true}
+	row.Occupancy = 3
+	row.Agents = []Agent{
+		{
+			Feature: "busy-feature", Role: "builder", Managed: true, Kind: "claude",
+			Status: AgentWorking, StatusAvailability: AvailabilityAvailable,
+			Binding: BindingExact, MatchedPath: "/w/busy-feature",
+		},
+		{
+			Feature: "busy-feature", Managed: false, Kind: "codex",
+			Status: AgentIdle, StatusAvailability: AvailabilityAvailable,
+			Binding: BindingMissing, MatchedPath: "/w/busy-feature",
+			BindingDetail: "this agent has no bridge role for /w/busy-feature",
+		},
+	}
+	snapshot := baseSnapshot(row)
+	snapshot.Sources = []Source{{Kind: SourceGitHub, Availability: AvailabilityAvailable, Required: true}}
+	return snapshot
+}
+
+func TestEverySurfaceReportsBothAgentsIndependently(t *testing.T) {
+	snapshot := multiAgentSnapshot(t)
+	row, _ := snapshot.Feature("busy-feature")
+
+	var compact, expanded, detail strings.Builder
+	if err := RenderCompact(&compact, snapshot, RenderOptions{NoColor: true}); err != nil {
+		t.Fatalf("RenderCompact: %v", err)
+	}
+	if err := RenderExpanded(&expanded, snapshot, RenderOptions{NoColor: true}); err != nil {
+		t.Fatalf("RenderExpanded: %v", err)
+	}
+	if err := RenderDetail(&detail, snapshot, row, RenderOptions{NoColor: true}); err != nil {
+		t.Fatalf("RenderDetail: %v", err)
+	}
+
+	// Both statuses must survive on every surface: a working builder beside an
+	// idle unmanaged agent is two facts, not one.
+	for name, output := range map[string]string{
+		"compact": compact.String(), "expanded": expanded.String(), "detail": detail.String(),
+	} {
+		if !strings.Contains(output, "working") {
+			t.Fatalf("%s surface lost the working agent:\n%s", name, output)
+		}
+		if !strings.Contains(output, "idle") {
+			t.Fatalf("%s surface lost the idle agent:\n%s", name, output)
+		}
+	}
+
+	// The expanded and detail views name both roles explicitly.
+	for name, output := range map[string]string{"expanded": expanded.String(), "detail": detail.String()} {
+		if !strings.Contains(output, "builder") || !strings.Contains(output, "unmanaged") {
+			t.Fatalf("%s surface collapsed the two agents:\n%s", name, output)
+		}
+	}
+}
+
+func TestJSONCarriesEveryAgentAndOccupancy(t *testing.T) {
+	encoded, err := json.Marshal(multiAgentSnapshot(t))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded Snapshot
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	row, _ := decoded.Feature("busy-feature")
+
+	if len(row.Agents) != 2 {
+		t.Fatalf("JSON agents = %d, want both", len(row.Agents))
+	}
+	if row.Occupancy != 3 {
+		t.Fatalf("JSON occupancy = %d, want 3", row.Occupancy)
+	}
+	if row.Agents[0].Status != AgentWorking || row.Agents[1].Status != AgentIdle {
+		t.Fatalf("JSON collapsed the per-agent statuses: %+v", row.Agents)
+	}
+	if row.Agents[0].MatchedPath == "" {
+		t.Fatalf("JSON dropped the attribution evidence: %+v", row.Agents[0])
+	}
+}

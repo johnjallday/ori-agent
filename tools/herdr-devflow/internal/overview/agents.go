@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
 // BridgeReader loads the bridge's saved records. Saved identity is a record of
@@ -21,6 +22,9 @@ type BridgeReader interface {
 // results only: no terminal text, no prompt content, no screen scraping.
 type AgentCollector interface {
 	AgentListInfo(ctx context.Context) ([]herdr.AgentInfo, error)
+	// WorkspaceListInfo supplies each workspace's worktree binding, used as a
+	// fallback when a pane reports no usable working directory.
+	WorkspaceListInfo(ctx context.Context) ([]herdr.WorkspaceInfo, error)
 }
 
 // AgentEvidence is one collection of live and saved agent facts.
@@ -31,6 +35,8 @@ type AgentEvidence struct {
 	Detail string
 	// Live are the panes Herdr currently reports.
 	Live []herdr.AgentInfo
+	// Workspaces are the open workspaces and their worktree bindings.
+	Workspaces []herdr.WorkspaceInfo
 	// Bridge is the saved bridge state.
 	Bridge model.BridgeState
 	// ObservedAt is when Herdr was consulted.
@@ -59,6 +65,11 @@ func CollectAgents(ctx context.Context, agents AgentCollector, bridge BridgeRead
 		return evidence
 	}
 	evidence.Live = live
+	// The workspace listing is a fallback for panes with no usable cwd. Its
+	// failure degrades that fallback only; live agent status is still good.
+	if workspaces, err := agents.WorkspaceListInfo(ctx); err == nil {
+		evidence.Workspaces = workspaces
+	}
 	return evidence
 }
 
@@ -123,6 +134,7 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 		row.BindingCandidates = match.candidates
 		if match.live != nil {
 			row.Live = liveIdentity(*match.live)
+			row.MatchedPath = identityField(agentWorktree(*match.live, evidence.Workspaces))
 			row.Status = AgentStatus(normalizeStatus(match.live.AgentStatus))
 			row.StatusAvailability = AvailabilityAvailable
 			claimed[match.live.PaneID] = struct{}{}
@@ -148,11 +160,14 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 	}
 
 	if !unavailable {
-		unmanaged := discoverUnmanaged(feature, state, evidence.Live, claimed)
+		// Count every pane in the worktree, agent-bearing or not: occupancy is
+		// a different question from "which agents are running".
+		feature.Occupancy = len(agentsInWorktree(feature.Git.WorktreePath, evidence))
+		unmanaged := discoverUnmanaged(feature, evidence, claimed)
 		feature.Agents = append(feature.Agents, unmanaged...)
 		for _, row := range unmanaged {
 			raise(FindingAgentUnmanaged, SeverityInfo, "",
-				"A live agent is running in this feature's workspace with no bridge role.",
+				"A live agent is running in this feature's worktree with no bridge role.",
 				"Agent "+row.Live.Session+" in workspace "+row.Live.Workspace+".")
 		}
 	}
@@ -166,6 +181,14 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 		}
 		raise(FindingNoAgent, SeverityInfo, "",
 			"This feature has a worktree but no agent is running for it.", detail)
+	}
+
+	// A saved record pointing at a worktree that no longer exists is drift to
+	// report, never an error and never a blocker on its own.
+	if hasRecord && state.Feature.Path != "" && feature.Git.WorktreePath == "" {
+		raise(FindingBindingPathStale, SeverityInfo, "",
+			"The bridge has a saved binding for a worktree that no longer exists.",
+			"Recorded path "+identityField(state.Feature.Path)+".")
 	}
 
 	if finding, ok := metadataStaleness(feature, state, hasRecord); ok {
@@ -328,20 +351,61 @@ func quoteOrNone(value string) string {
 	return `"` + value + `"`
 }
 
-// discoverUnmanaged finds live agents in this feature's workspace that no
-// saved role claimed. They are surfaced, never adopted: the bridge cannot know
-// whether a pane a human opened is meant to be managed.
-func discoverUnmanaged(feature *Feature, state model.FeatureState, live []herdr.AgentInfo, claimed map[string]struct{}) []Agent {
-	workspace := state.WorkspaceID
-	if workspace == "" {
-		return nil
+// agentWorktree reports the canonical worktree a live agent is working in.
+//
+// Pane cwd is the primary evidence because it describes where work is actually
+// happening. The workspace's recorded binding is only a fallback: a workspace
+// created by hand and then navigated into carries no binding at all, which is
+// exactly how a working agent became invisible to the bridge.
+func agentWorktree(agent herdr.AgentInfo, workspaces []herdr.WorkspaceInfo) string {
+	if agent.Cwd != "" {
+		return agent.Cwd
 	}
-	var rows []Agent
-	for _, candidate := range live {
-		if candidate.WorkspaceID != workspace {
+	if agent.ForegroundCwd != "" {
+		return agent.ForegroundCwd
+	}
+	for _, workspace := range workspaces {
+		if workspace.WorkspaceID != agent.WorkspaceID {
 			continue
 		}
+		if workspace.Worktree != nil && workspace.Worktree.CheckoutPath != "" {
+			return workspace.Worktree.CheckoutPath
+		}
+		return workspace.Cwd
+	}
+	return ""
+}
+
+// agentsInWorktree returns every live agent whose working directory resolves
+// inside the feature's worktree.
+//
+// Matching is by path, never by workspace label: labels are user-editable and
+// observed to drift — two workspaces have been seen sharing one label while
+// pointing at different checkouts.
+func agentsInWorktree(worktreePath string, evidence AgentEvidence) []herdr.AgentInfo {
+	if worktreePath == "" {
+		return nil
+	}
+	var matched []herdr.AgentInfo
+	for _, agent := range evidence.Live {
+		if worktree.Contains(worktreePath, agentWorktree(agent, evidence.Workspaces)) {
+			matched = append(matched, agent)
+		}
+	}
+	return matched
+}
+
+// discoverUnmanaged finds live agents in this feature's worktree that no saved
+// role claimed. They are surfaced, never adopted: the bridge cannot know
+// whether a pane a human opened is meant to be managed.
+func discoverUnmanaged(feature *Feature, evidence AgentEvidence, claimed map[string]struct{}) []Agent {
+	var rows []Agent
+	for _, candidate := range agentsInWorktree(feature.Git.WorktreePath, evidence) {
 		if _, taken := claimed[candidate.PaneID]; taken {
+			continue
+		}
+		// A pane with no agent running counts as occupancy, not as an agent.
+		if candidate.Agent == "" {
 			continue
 		}
 		rows = append(rows, Agent{
@@ -352,7 +416,8 @@ func discoverUnmanaged(feature *Feature, state model.FeatureState, live []herdr.
 			Status:             AgentStatus(normalizeStatus(candidate.AgentStatus)),
 			StatusAvailability: AvailabilityAvailable,
 			Binding:            BindingMissing,
-			BindingDetail:      "this agent has no bridge role",
+			BindingDetail:      "this agent has no bridge role for " + identityField(feature.Git.WorktreePath),
+			MatchedPath:        identityField(feature.Git.WorktreePath),
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Live.Pane < rows[j].Live.Pane })
@@ -398,6 +463,10 @@ func sortedRoles(state model.FeatureState) []string {
 
 // maxIdentityRunes bounds one displayed identity field.
 const maxIdentityRunes = 120
+
+// maxIdentityPathRunes bounds a displayed filesystem path, which is
+// legitimately longer than a short identity field like a pane ID or name.
+const maxIdentityPathRunes = 200
 
 // identityField sanitizes a value that reaches a terminal, a JSON payload, or a
 // Herdr board cell. Pane IDs and agent names originate in a terminal session,

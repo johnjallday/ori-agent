@@ -159,29 +159,16 @@ func (p palette) agents(feature Feature) string {
 	if len(feature.Agents) == 0 {
 		return p.paint(text, ansiDim)
 	}
-	worst := BindingExact
-	for _, agent := range feature.Agents {
-		switch agent.Binding {
-		case BindingAmbiguous, BindingMissing:
-			worst = BindingAmbiguous
-		case BindingPossibleDrift, BindingUnavailable:
-			if worst == BindingExact {
-				worst = BindingPossibleDrift
-			}
-		}
-	}
-	switch worst {
-	case BindingAmbiguous:
+	switch weakestBinding(feature) {
+	case BindingAmbiguous, BindingMissing:
 		return p.paint(text, ansiRed)
-	case BindingPossibleDrift:
+	case BindingPossibleDrift, BindingUnavailable:
 		return p.paint(text, ansiYellow)
 	default:
 		return p.paint(text, ansiGreen)
 	}
 }
 
-// plan styles the compact plan cell. The text is bounded here rather than in
-// planCell so the detail and expanded views keep the full wording.
 func (p palette) plan(plan Plan) string {
 	return p.planText(planCell(plan), plan)
 }

@@ -255,33 +255,35 @@ func (s Severity) Label() string {
 type FindingCode string
 
 const (
-	FindingPRDMissing          FindingCode = "prd_missing"
-	FindingTaskListMissing     FindingCode = "task_list_missing"
-	FindingPlanMalformed       FindingCode = "plan_malformed"
-	FindingNameMismatch        FindingCode = "name_mismatch"
-	FindingWorktreeWithoutPlan FindingCode = "worktree_without_plan"
-	FindingBacklogDrift        FindingCode = "backlog_drift"
-	FindingArchiveStale        FindingCode = "archive_stale"
-	FindingCleanupOutstanding  FindingCode = "cleanup_outstanding"
-	FindingArchiveMissing      FindingCode = "archive_missing"
-	FindingBranchBehindBase    FindingCode = "branch_behind_base"
-	FindingBaselineStale       FindingCode = "baseline_stale"
-	FindingWorktreeDirty       FindingCode = "worktree_dirty"
-	FindingIdentityAmbiguous   FindingCode = "identity_ambiguous"
-	FindingGitUnavailable      FindingCode = "git_unavailable"
-	FindingGitHubUnavailable   FindingCode = "github_unavailable"
-	FindingPRAmbiguous         FindingCode = "pr_ambiguous"
-	FindingPRUnexpectedBase    FindingCode = "pr_unexpected_base"
-	FindingPRClosedUnmerged    FindingCode = "pr_closed_unmerged"
-	FindingChecksFailing       FindingCode = "checks_failing"
-	FindingAgentMissing        FindingCode = "agent_missing"
-	FindingAgentAmbiguous      FindingCode = "agent_ambiguous"
-	FindingAgentDrift          FindingCode = "agent_possible_drift"
-	FindingAgentUnmanaged      FindingCode = "agent_unmanaged"
-	FindingNoAgent             FindingCode = "no_agent"
-	FindingScheduleFailed      FindingCode = "schedule_failed"
-	FindingMetadataStale       FindingCode = "metadata_stale"
-	FindingHerdrUnavailable    FindingCode = "herdr_unavailable"
+	FindingPRDMissing            FindingCode = "prd_missing"
+	FindingTaskListMissing       FindingCode = "task_list_missing"
+	FindingPlanMalformed         FindingCode = "plan_malformed"
+	FindingNameMismatch          FindingCode = "name_mismatch"
+	FindingWorktreeWithoutPlan   FindingCode = "worktree_without_plan"
+	FindingBacklogDrift          FindingCode = "backlog_drift"
+	FindingArchiveStale          FindingCode = "archive_stale"
+	FindingCleanupOutstanding    FindingCode = "cleanup_outstanding"
+	FindingBindingPathStale      FindingCode = "binding_path_stale"
+	FindingWorktreePathCollision FindingCode = "worktree_path_collision"
+	FindingArchiveMissing        FindingCode = "archive_missing"
+	FindingBranchBehindBase      FindingCode = "branch_behind_base"
+	FindingBaselineStale         FindingCode = "baseline_stale"
+	FindingWorktreeDirty         FindingCode = "worktree_dirty"
+	FindingIdentityAmbiguous     FindingCode = "identity_ambiguous"
+	FindingGitUnavailable        FindingCode = "git_unavailable"
+	FindingGitHubUnavailable     FindingCode = "github_unavailable"
+	FindingPRAmbiguous           FindingCode = "pr_ambiguous"
+	FindingPRUnexpectedBase      FindingCode = "pr_unexpected_base"
+	FindingPRClosedUnmerged      FindingCode = "pr_closed_unmerged"
+	FindingChecksFailing         FindingCode = "checks_failing"
+	FindingAgentMissing          FindingCode = "agent_missing"
+	FindingAgentAmbiguous        FindingCode = "agent_ambiguous"
+	FindingAgentDrift            FindingCode = "agent_possible_drift"
+	FindingAgentUnmanaged        FindingCode = "agent_unmanaged"
+	FindingNoAgent               FindingCode = "no_agent"
+	FindingScheduleFailed        FindingCode = "schedule_failed"
+	FindingMetadataStale         FindingCode = "metadata_stale"
+	FindingHerdrUnavailable      FindingCode = "herdr_unavailable"
 )
 
 // Finding is one observed gap or drift. Findings are reported, never repaired,
@@ -572,6 +574,9 @@ type Agent struct {
 	Schedules []Schedule `json:"schedules,omitempty"`
 	// LastActivityAt is Herdr's authoritative event/activity timestamp.
 	LastActivityAt time.Time `json:"last_activity_at,omitzero"`
+	// MatchedPath is the canonical worktree this agent's working directory
+	// resolved into. It is the evidence for the attribution.
+	MatchedPath string `json:"matched_path,omitempty"`
 }
 
 // Feature is one row of the feature-first overview: the union of planning,
@@ -589,7 +594,12 @@ type Feature struct {
 	Git     GitState `json:"git"`
 	Remote  Remote   `json:"remote"`
 	// Agents are the managed roles and unmanaged live agents for this feature.
+	// A feature has zero or more; it is never collapsed to a single agent.
 	Agents []Agent `json:"agents,omitempty"`
+	// Occupancy counts panes resolving into this feature's worktree, including
+	// panes running no agent. A worktree can be occupied without an agent, and
+	// that distinction decides whether cleanup is safe.
+	Occupancy int `json:"occupancy"`
 	// Schedules are feature-level schedules not attributable to one role.
 	Schedules []Schedule `json:"schedules,omitempty"`
 	// Findings are this feature's gaps and drift, most severe first.

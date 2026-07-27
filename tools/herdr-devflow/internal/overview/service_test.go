@@ -511,8 +511,86 @@ func TestCollectionIsDiagnosticOnly(t *testing.T) {
 	if bridge.writes != 0 {
 		t.Fatalf("collection wrote bridge state %d times", bridge.writes)
 	}
-	if spy.callCount() != 1 {
-		t.Fatalf("herdr calls = %d, want one read-only listing", spy.callCount())
+	if spy.callCount() != 2 {
+		t.Fatalf("herdr calls = %d, want the two read-only listings", spy.callCount())
+	}
+}
+
+// TestPathDiscoveredUnmanagedAgentNeverMutatesOrIsAdopted extends the
+// diagnostic-only guarantee to the exact case this feature exists for: a live
+// agent sitting in a feature's worktree with no bridge record anywhere (the
+// 2026-07-26 workspace-wF case), attributed to the feature purely by path.
+// Discovery must report it without ever touching Herdr or writing bridge
+// state.
+func TestPathDiscoveredUnmanagedAgentNeverMutatesOrIsAdopted(t *testing.T) {
+	root := t.TempDir()
+	dev := filepath.Join(root, "ori-agent-dev")
+	if err := os.MkdirAll(filepath.Join(dev, "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dev, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, contents string) {
+		if err := os.WriteFile(filepath.Join(dev, "tasks", name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("prd-scratch.md", "# PRD: Scratch\n")
+	write("tasks-scratch.md", "- [ ] 1.0 Live\n  - [ ] 1.1 Next\n")
+
+	checkout := filepath.Join(root, "scratch")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".git"), []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listing := "worktree " + dev + "\nHEAD aaa\nbranch refs/heads/dev\n\n" +
+		"worktree " + checkout + "\nHEAD bbb\nbranch refs/heads/feature/scratch\n"
+	run := func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
+			return listing, nil
+		}
+		return "", nil
+	}
+	remote := &fakeRemote{result: github.Result{ObservedAt: observed}}
+
+	spy := &mutationSpy{fakeAgents: fakeAgents{live: []herdr.AgentInfo{
+		liveAgent("ws-unbound", "pane-1", "term-1", "codex-scratch", func(a *herdr.AgentInfo) {
+			a.Cwd = checkout
+			a.Agent = "codex"
+			a.AgentStatus = model.AgentWorking
+		}),
+	}}}
+	bridge := &writeSpy{} // no saved record anywhere, for this feature or any other
+
+	service := NewService(Config{
+		RepoRoot: root, Git: run, Remote: remote, Agents: spy, Bridge: bridge,
+		Now: func() time.Time { return observed },
+	})
+	snapshot, err := service.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	row, ok := snapshot.Feature("scratch")
+	if !ok {
+		t.Fatalf("the feature was dropped entirely: %+v", snapshot.Features)
+	}
+	if len(row.Agents) != 1 || row.Agents[0].Managed {
+		t.Fatalf("agents = %+v, want exactly one unmanaged path-discovered agent", row.Agents)
+	}
+	if row.Agents[0].Kind != "codex" {
+		t.Fatalf("kind = %q, want codex", row.Agents[0].Kind)
+	}
+
+	if len(spy.mutations) != 0 {
+		t.Fatalf("path discovery mutated Herdr: %v", spy.mutations)
+	}
+	if bridge.writes != 0 {
+		t.Fatalf("path discovery wrote bridge state %d times", bridge.writes)
 	}
 }
 

@@ -137,8 +137,10 @@ func TestCollectHealthyRepositoryWithinBudget(t *testing.T) {
 	if remote.count() != 1 {
 		t.Fatalf("remote queries = %d, want exactly one repository-wide call", remote.count())
 	}
-	if agents.callCount() != 1 {
-		t.Fatalf("herdr calls = %d, want exactly one listing", agents.callCount())
+	// Two fixed listings per collection regardless of feature count: the
+	// budget exists to catch per-feature fan-out, which this is not.
+	if agents.callCount() != 2 {
+		t.Fatalf("herdr calls = %d, want exactly two listings for any feature count", agents.callCount())
 	}
 }
 

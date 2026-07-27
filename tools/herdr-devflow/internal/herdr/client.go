@@ -294,6 +294,21 @@ type WorkspaceInfo struct {
 	WorkspaceID string `json:"workspace_id"`
 	Cwd         string `json:"cwd"`
 	Label       string `json:"label"`
+	// Worktree is Herdr's own record of which checkout this workspace was
+	// opened against. It is absent for workspaces created by hand and then
+	// navigated into, which is precisely why it cannot be the only signal.
+	Worktree *WorktreeBinding `json:"worktree,omitempty"`
+}
+
+// WorktreeBinding is Herdr's authoritative statement about which repository
+// and checkout a workspace belongs to. Labels are user-editable and observed to
+// drift, so they are never used for identity.
+type WorktreeBinding struct {
+	CheckoutPath     string `json:"checkout_path"`
+	IsLinkedWorktree bool   `json:"is_linked_worktree"`
+	RepoKey          string `json:"repo_key"`
+	RepoName         string `json:"repo_name"`
+	RepoRoot         string `json:"repo_root"`
 }
 
 type TabInfo struct {
@@ -538,6 +553,23 @@ func (c *Client) AgentListInfo(ctx context.Context) ([]AgentInfo, error) {
 		return nil, err
 	}
 	return response.Agents, nil
+}
+
+// WorkspaceListInfo returns every open workspace with its worktree binding.
+// It is read-only and is the fallback used when a pane reports no usable
+// working directory.
+func (c *Client) WorkspaceListInfo(ctx context.Context) ([]WorkspaceInfo, error) {
+	raw, err := c.CLIJSON(ctx, "workspace", "list")
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Workspaces []WorkspaceInfo `json:"workspaces"`
+	}
+	if err := decodeResult("workspace list", raw, &response); err != nil {
+		return nil, err
+	}
+	return response.Workspaces, nil
 }
 
 func (c *Client) AgentStart(ctx context.Context, name, kind, paneID string, timeout time.Duration) (json.RawMessage, error) {

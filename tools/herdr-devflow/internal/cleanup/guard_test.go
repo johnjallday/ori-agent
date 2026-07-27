@@ -21,6 +21,7 @@ func (s fakeStore) Load() (model.BridgeState, error) { return s.state, s.err }
 
 type fakeClient struct {
 	agents     []herdr.AgentInfo
+	workspaces []herdr.WorkspaceInfo
 	listErr    error
 	closeErr   error
 	closeCalls []string
@@ -28,6 +29,10 @@ type fakeClient struct {
 
 func (c *fakeClient) AgentListInfo(context.Context) ([]herdr.AgentInfo, error) {
 	return c.agents, c.listErr
+}
+
+func (c *fakeClient) WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error) {
+	return c.workspaces, c.listErr
 }
 
 func (c *fakeClient) WorkspaceClose(_ context.Context, workspaceID string) (json.RawMessage, error) {
@@ -71,7 +76,10 @@ func TestPreflightDecisionTable(t *testing.T) {
 		{name: "working agent blocks cleanup", state: baseState(), client: fakeClient{agents: []herdr.AgentInfo{live(model.AgentWorking)}}, want: OutcomeBlocked},
 		{name: "blocked agent blocks cleanup", state: baseState(), client: fakeClient{agents: []herdr.AgentInfo{live(model.AgentBlocked)}}, want: OutcomeBlocked},
 		{name: "unknown agent needs override", state: baseState(), client: fakeClient{agents: []herdr.AgentInfo{live(model.AgentUnknown)}}, want: OutcomeUnavailable},
-		{name: "missing agent needs override", state: baseState(), client: fakeClient{agents: nil}, want: OutcomeUnavailable},
+		// A saved record naming an agent Herdr can no longer see used to force
+		// an override. Nothing is running to orphan, so a workspace closed
+		// days ago must not make a worktree permanently un-removable.
+		{name: "missing agent no longer blocks cleanup", state: baseState(), client: fakeClient{agents: nil}, want: OutcomeReady, wantClose: 1},
 		{name: "live list outage needs override", state: baseState(), client: fakeClient{listErr: errors.New("server unavailable")}, want: OutcomeUnavailable},
 		{name: "live list outage can be explicitly overridden", state: baseState(), client: fakeClient{listErr: errors.New("server unavailable")}, override: true, want: OutcomeOverridden},
 		{name: "workspace close failure needs override", state: baseState(), client: fakeClient{agents: []herdr.AgentInfo{live(model.AgentIdle)}, closeErr: errors.New("close unavailable")}, want: OutcomeCloseFailed, wantClose: 1},
@@ -215,4 +223,153 @@ func withSchedule(state model.BridgeState, schedule model.Schedule) model.Bridge
 	feature.Schedules[schedule.ID] = schedule
 	state.Features["repo-1:bridge"] = feature
 	return state
+}
+
+// TestPreflightReproducesTheStaleRecordCase is the 2026-07-26 incident: the
+// bridge's saved builder pointed at a workspace that had been closed, nothing
+// was running in the worktree, and cleanup demanded HERDR-OVERRIDE anyway.
+func TestPreflightReproducesTheStaleRecordCase(t *testing.T) {
+	feature := model.Feature{RepositoryID: "repo-1", Name: "bridge", Branch: "feature/bridge", Path: "/tmp/ori/bridge"}
+	stale := model.RoleAgent{
+		Role: "builder", Name: "ori-bridge-builder", Kind: "claude",
+		WorkspaceID: "wK", PaneID: "wK:p1", TerminalID: "term-gone",
+	}
+	state := model.NewBridgeState()
+	state.Features["repo-1:bridge"] = model.FeatureState{
+		Feature: feature, WorkspaceID: "wK",
+		Agents: map[string]model.RoleAgent{"builder": stale},
+	}
+
+	// Herdr is healthy and reports agents — just none in this worktree.
+	elsewhere := herdr.AgentInfo{
+		Name: "someone-else", Agent: "claude", AgentStatus: model.AgentWorking,
+		WorkspaceID: "wE", PaneID: "wE:p1", Cwd: "/tmp/ori/other-feature",
+	}
+	client := &fakeClient{agents: []herdr.AgentInfo{elsewhere}}
+	service := Service{
+		Store:        fakeStore{state: state},
+		Client:       client,
+		Inspector:    fakeInspector{linked: worktree.GitWorktree{Path: feature.Path, Branch: feature.Branch, CommonDir: "/tmp/ori/.git"}},
+		RepositoryID: feature.RepositoryID,
+		GitCommonDir: "/tmp/ori/.git",
+	}
+
+	got := service.Preflight(context.Background(), Request{WorktreePath: feature.Path})
+	if got.Outcome != OutcomeReady {
+		t.Fatalf("outcome = %q, want ready — nothing is running in this worktree (%#v)", got.Outcome, got)
+	}
+	if len(client.closeCalls) != 1 {
+		t.Fatalf("workspace close calls = %v, want the workspace closed", client.closeCalls)
+	}
+}
+
+// TestPreflightBlocksOnAnAgentNoSavedRecordKnows covers the other half: an
+// agent a human started in the worktree is just as real as one the bridge did.
+func TestPreflightBlocksOnAnAgentNoSavedRecordKnows(t *testing.T) {
+	feature := model.Feature{RepositoryID: "repo-1", Name: "bridge", Branch: "feature/bridge", Path: "/tmp/ori/bridge"}
+	state := model.NewBridgeState()
+	state.Features["repo-1:bridge"] = model.FeatureState{
+		Feature: feature, WorkspaceID: "wK",
+		Agents: map[string]model.RoleAgent{"builder": {
+			Role: "builder", Name: "gone", WorkspaceID: "wK", PaneID: "wK:p1",
+		}},
+	}
+
+	handOpened := herdr.AgentInfo{
+		Name: "hand-opened", Agent: "claude", AgentStatus: model.AgentWorking,
+		WorkspaceID: "wZ", PaneID: "wZ:p1", Cwd: "/tmp/ori/bridge/internal",
+	}
+	client := &fakeClient{agents: []herdr.AgentInfo{handOpened}}
+	service := Service{
+		Store:        fakeStore{state: state},
+		Client:       client,
+		Inspector:    fakeInspector{linked: worktree.GitWorktree{Path: feature.Path, Branch: feature.Branch, CommonDir: "/tmp/ori/.git"}},
+		RepositoryID: feature.RepositoryID,
+		GitCommonDir: "/tmp/ori/.git",
+	}
+
+	got := service.Preflight(context.Background(), Request{WorktreePath: feature.Path})
+	if got.Outcome != OutcomeBlocked {
+		t.Fatalf("outcome = %q, want blocked — an agent is working in this worktree (%#v)", got.Outcome, got)
+	}
+	if len(client.closeCalls) != 0 {
+		t.Fatalf("a blocked cleanup closed the workspace: %v", client.closeCalls)
+	}
+	// The message must be actionable: what, doing what, where.
+	for _, want := range []string{"claude", "working", "wZ:p1", "/tmp/ori/bridge/internal"} {
+		if !strings.Contains(got.Detail, want) {
+			t.Fatalf("detail = %q, want it to name %q", got.Detail, want)
+		}
+	}
+}
+
+func TestPreflightIdleUnmanagedAgentDoesNotBlock(t *testing.T) {
+	feature := model.Feature{RepositoryID: "repo-1", Name: "bridge", Branch: "feature/bridge", Path: "/tmp/ori/bridge"}
+	state := model.NewBridgeState()
+	state.Features["repo-1:bridge"] = model.FeatureState{Feature: feature, WorkspaceID: "w1"}
+
+	idle := herdr.AgentInfo{
+		Name: "hand-opened", Agent: "claude", AgentStatus: model.AgentIdle,
+		WorkspaceID: "wZ", PaneID: "wZ:p1", Cwd: "/tmp/ori/bridge",
+	}
+	client := &fakeClient{agents: []herdr.AgentInfo{idle}}
+	service := Service{
+		Store:        fakeStore{state: state},
+		Client:       client,
+		Inspector:    fakeInspector{linked: worktree.GitWorktree{Path: feature.Path, Branch: feature.Branch, CommonDir: "/tmp/ori/.git"}},
+		RepositoryID: feature.RepositoryID,
+		GitCommonDir: "/tmp/ori/.git",
+	}
+
+	if got := service.Preflight(context.Background(), Request{WorktreePath: feature.Path}); got.Outcome != OutcomeReady {
+		t.Fatalf("outcome = %q, want ready — an idle agent is settled (%#v)", got.Outcome, got)
+	}
+}
+
+func TestPreflightHerdrOutageStillFailsClosed(t *testing.T) {
+	// Occupancy cannot be established, so the override remains required. Only
+	// stale records stopped blocking, never unverifiable state.
+	feature := model.Feature{RepositoryID: "repo-1", Name: "bridge", Branch: "feature/bridge", Path: "/tmp/ori/bridge"}
+	state := model.NewBridgeState()
+	state.Features["repo-1:bridge"] = model.FeatureState{
+		Feature: feature, WorkspaceID: "w1",
+		Agents: map[string]model.RoleAgent{"builder": {Role: "builder", Name: "b", WorkspaceID: "w1", PaneID: "w1:p1"}},
+	}
+	client := &fakeClient{listErr: errors.New("herdr socket closed")}
+	service := Service{
+		Store:        fakeStore{state: state},
+		Client:       client,
+		Inspector:    fakeInspector{linked: worktree.GitWorktree{Path: feature.Path, Branch: feature.Branch, CommonDir: "/tmp/ori/.git"}},
+		RepositoryID: feature.RepositoryID,
+		GitCommonDir: "/tmp/ori/.git",
+	}
+
+	if got := service.Preflight(context.Background(), Request{WorktreePath: feature.Path}); got.Outcome != OutcomeUnavailable {
+		t.Fatalf("outcome = %q, want unavailable when Herdr cannot be reached (%#v)", got.Outcome, got)
+	}
+}
+
+func TestPreflightIgnoresAgentsInSiblingWorktrees(t *testing.T) {
+	feature := model.Feature{RepositoryID: "repo-1", Name: "feature-a", Branch: "feature/feature-a", Path: "/tmp/ori/feature-a"}
+	state := model.NewBridgeState()
+	state.Features["repo-1:feature-a"] = model.FeatureState{Feature: feature, WorkspaceID: "w1"}
+
+	// Prefix collision: a working agent in feature-abc must not block
+	// feature-a's cleanup.
+	sibling := herdr.AgentInfo{
+		Name: "other", Agent: "claude", AgentStatus: model.AgentWorking,
+		WorkspaceID: "wZ", PaneID: "wZ:p1", Cwd: "/tmp/ori/feature-abc",
+	}
+	client := &fakeClient{agents: []herdr.AgentInfo{sibling}}
+	service := Service{
+		Store:        fakeStore{state: state},
+		Client:       client,
+		Inspector:    fakeInspector{linked: worktree.GitWorktree{Path: feature.Path, Branch: feature.Branch, CommonDir: "/tmp/ori/.git"}},
+		RepositoryID: feature.RepositoryID,
+		GitCommonDir: "/tmp/ori/.git",
+	}
+
+	if got := service.Preflight(context.Background(), Request{WorktreePath: feature.Path}); got.Outcome != OutcomeReady {
+		t.Fatalf("outcome = %q, want ready — the working agent is in a sibling worktree (%#v)", got.Outcome, got)
+	}
 }

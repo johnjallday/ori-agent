@@ -226,6 +226,82 @@ func TestRemoteErrorsNeverCarrySecretsIntoAnySurface(t *testing.T) {
 	}
 }
 
+// TestWorktreePathStaysBounded covers a displayed value the other sanitize
+// fixtures do not: the worktree directory path itself. A control character in
+// a checkout path is already rejected earlier, by canonicalPath's own
+// validation (see worktree/context.go), so a directory name can never reach
+// this field carrying one. Length is a different property with no such
+// upstream guarantee — a deeply nested checkout is entirely legal on the
+// filesystem — so this checks the read model, terminal, and JSON bound it like
+// every other displayed value.
+func TestWorktreePathStaysBounded(t *testing.T) {
+	root := t.TempDir()
+	dev := filepath.Join(root, "ori-agent-dev")
+	if err := os.MkdirAll(filepath.Join(dev, "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dev, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, contents string) {
+		if err := os.WriteFile(filepath.Join(dev, "tasks", name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("prd-long-path.md", "# PRD: Long Path\n")
+	write("tasks-long-path.md", "- [ ] 1.0 Live\n  - [ ] 1.1 Next\n")
+
+	// A legal but excessively long directory name, well past NAME_MAX-safe on
+	// every platform this runs on, pushing the whole checkout path over 200
+	// runes without touching any control character.
+	checkout := filepath.Join(root, strings.Repeat("a", 220))
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".git"), []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listing := "worktree " + dev + "\nHEAD aaa\nbranch refs/heads/dev\n\n" +
+		"worktree " + checkout + "\nHEAD bbb\nbranch refs/heads/feature/long-path\n"
+	run := func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
+			return listing, nil
+		}
+		return "", nil
+	}
+	remote := &fakeRemote{result: github.Result{ObservedAt: observed}}
+
+	service := NewService(Config{
+		RepoRoot: root, Git: run, Remote: remote,
+		Now: func() time.Time { return observed },
+	})
+	snapshot, err := service.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	row, ok := snapshot.Feature("long-path")
+	if !ok {
+		t.Fatalf("the long-path feature was dropped entirely: %+v", snapshot.Features)
+	}
+	if runes := []rune(row.Git.WorktreePath); len(runes) > 201 {
+		t.Fatalf("worktree path length = %d, want bounded (the checkout path was %d runes)", len(runes), len([]rune(checkout)))
+	}
+
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded Snapshot
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	decodedRow, _ := decoded.Feature("long-path")
+	if runes := []rune(decodedRow.Git.WorktreePath); len(runes) > 201 {
+		t.Fatalf("worktree_path JSON field length = %d, want bounded", len(runes))
+	}
+}
+
 func TestSanitizedValuesStayBounded(t *testing.T) {
 	snapshot, err := hostileRepo(t).Collect(context.Background())
 	if err != nil {

@@ -2,6 +2,7 @@ package overview
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -377,5 +378,46 @@ func TestBuildInventoryLeavesProgressAbsentWithNoTaskList(t *testing.T) {
 	features, _ := BuildInventory(input)
 	if got := features[0].Plan.Progress.Availability; got != AvailabilityAbsent {
 		t.Fatalf("availability = %q, want absent", got)
+	}
+}
+
+func TestBuildInventoryReportsWorktreePathCollisions(t *testing.T) {
+	// Two features resolving to one directory would attribute one agent's work
+	// to both, so the collision is reported rather than silently resolved.
+	first := featureCheckout("alpha", "/repo/worktrees/shared")
+	second := featureCheckout("beta", "/repo/worktrees/shared")
+	input := Input{Checkouts: checkoutInventory(first, second), Now: observed}
+
+	_, findings := BuildInventory(input)
+	var collisions []Finding
+	for _, finding := range findings {
+		if finding.Code == FindingWorktreePathCollision {
+			collisions = append(collisions, finding)
+		}
+	}
+	if len(collisions) != 2 {
+		t.Fatalf("collisions = %d, want one per affected feature", len(collisions))
+	}
+	for _, finding := range collisions {
+		if finding.Severity != SeverityError {
+			t.Fatalf("severity = %q, want error", finding.Severity)
+		}
+		if !strings.Contains(finding.Detail, "/repo/worktrees/shared") {
+			t.Fatalf("detail = %q, want the colliding path named", finding.Detail)
+		}
+	}
+}
+
+func TestBuildInventoryNoCollisionForDistinctPaths(t *testing.T) {
+	input := Input{Checkouts: checkoutInventory(
+		featureCheckout("alpha", "/repo/worktrees/alpha"),
+		featureCheckout("beta", "/repo/worktrees/beta"),
+	), Now: observed}
+
+	_, findings := BuildInventory(input)
+	for _, finding := range findings {
+		if finding.Code == FindingWorktreePathCollision {
+			t.Fatalf("distinct worktrees reported a collision: %+v", finding)
+		}
 	}
 }

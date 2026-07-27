@@ -87,7 +87,7 @@ fi
 [[ "$(<"$dev_root/BACKLOG.md")" == "$before_backlog" ]]
 [[ -f "$target_root/tasks/tasks-bridge.md" ]]
 [[ ! -e "$fixture_root/git-calls" ]]
-rg -q "managed Herdr work is still active" "$fixture_root/done-output"
+rg -q "Herdr work is still active in this worktree" "$fixture_root/done-output"
 
 # A disconnected/unknown Herdr result also fails closed in this non-interactive
 # fixture, even when a caller supplied the explicit override flag.

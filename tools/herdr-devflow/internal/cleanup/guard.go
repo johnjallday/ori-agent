@@ -47,6 +47,9 @@ type LockingStore interface {
 // use. In particular, no Herdr worktree create/remove method is available.
 type Herdr interface {
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
+	// WorkspaceListInfo supplies worktree bindings, used only as a fallback
+	// for panes that report no working directory of their own.
+	WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error)
 	WorkspaceClose(context.Context, string) (json.RawMessage, error)
 }
 
@@ -204,10 +207,41 @@ func (s *Service) preflight(ctx context.Context, request Request) Result {
 			return result
 		case model.AgentIdle, model.AgentDone:
 			// Safe to continue checking the other associated agents.
+		case model.AgentMissing:
+			// The saved record names an agent Herdr can no longer see. There
+			// is nothing running to orphan, so this no longer blocks: a
+			// workspace closed days ago must not make a worktree permanently
+			// un-removable. The stale record is reported, not obeyed.
 		default:
+			// An unrecognised state is not evidence of safety.
 			result.Detail = "one or more associated agents could not be matched to a safe live Herdr state"
 			return s.unavailable(request, result)
 		}
+	}
+
+	// Saved records only describe agents the bridge started. An agent a human
+	// opened in this worktree is just as real, and removing the directory from
+	// under it would be just as destructive — so occupancy is checked by path
+	// as well.
+	var workspaces []herdr.WorkspaceInfo
+	workspaceCtx, cancel := s.herdrContext(ctx)
+	if listed, listErr := s.Client.WorkspaceListInfo(workspaceCtx); listErr == nil {
+		workspaces = listed
+	}
+	cancel()
+
+	if active := activeOccupants(occupantsInWorktree(linked.Path, liveAgents, workspaces)); len(active) > 0 {
+		result.Outcome = OutcomeBlocked
+		result.Detail = "work is still in flight in this worktree — " + describeOccupants(active)
+		return result
+	}
+
+	// A workspace that no longer exists needs no closing, and failing to close
+	// it must not preserve the worktree: there is nothing left to orphan.
+	if !workspaceExists(featureState.WorkspaceID, workspaces) {
+		result.Outcome = OutcomeReady
+		result.Detail = "associated agents are settled, schedules are resolved, and the recorded Herdr workspace no longer exists"
+		return result
 	}
 
 	closeCtx, cancel := s.herdrContext(ctx)
@@ -222,6 +256,26 @@ func (s *Service) preflight(ctx context.Context, request Request) Result {
 	result.WorkspaceClosed = true
 	result.Detail = "associated agents are settled, schedules are resolved, and the Herdr workspace is closed"
 	return result
+}
+
+// workspaceExists reports whether Herdr still knows the recorded workspace.
+//
+// An empty listing is treated as "unknown" rather than "gone": the listing is a
+// best-effort fallback, and assuming absence from a failed query would skip a
+// close that should have happened.
+func workspaceExists(workspaceID string, workspaces []herdr.WorkspaceInfo) bool {
+	if workspaceID == "" {
+		return false
+	}
+	if len(workspaces) == 0 {
+		return true
+	}
+	for _, workspace := range workspaces {
+		if workspace.WorkspaceID == workspaceID {
+			return true
+		}
+	}
+	return false
 }
 
 // herdrContext bounds only live Herdr calls. Git provenance and local state
