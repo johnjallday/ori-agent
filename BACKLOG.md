@@ -34,9 +34,9 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-22 wt.sh create new worktree below dev
 
 ## Doing
-- path-based-agent-binding -> PRD at tasks/prd-path-based-agent-binding.md (started 2026-07-26)
 
 ## Shipped / dropped
+- 2026-07-27 path-based-agent-binding -> PRD at tasks/prd-path-based-agent-binding.md (started 2026-07-26) - PR #270 merged to dev (2026-07-27)
 - 2026-07-27 downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-24) - PR #268 merged to dev (2026-07-27)
 - 2026-07-26 wt-herd-feature-overview -> PRD at tasks/prd-wt-herd-feature-overview.md (started 2026-07-25) - PR #267 merged to dev (2026-07-26)
 - 2026-07-26 workspace-backlog -> PRD at tasks/prd-workspace-backlog.md (started 2026-07-22) - PR #254 merged to dev (2026-07-23)
