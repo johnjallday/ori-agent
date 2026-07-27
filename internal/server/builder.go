@@ -15,6 +15,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
 	"github.com/johnjallday/ori-agent/internal/client"
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/connections"
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/devicehttp"
@@ -196,9 +198,11 @@ type ServerBuilder struct {
 	sessionFilesHandler *fileshttp.Handler
 
 	// Review system
-	reviewHandler    *reviewhttp.Handler
-	evolutionHandler *evolutionhttp.Handler
-	vaultHandler     *vaulthttp.Handler
+	reviewHandler      *reviewhttp.Handler
+	evolutionHandler   *evolutionhttp.Handler
+	vaultHandler       *vaulthttp.Handler
+	connectionsHandler *connectionshttp.Handler
+	connStore          *connections.Store
 
 	// External agents (Claude Code, Codex)
 	externalAgentsCache   *externalagents.Cache
@@ -444,6 +448,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Review:           b.reviewHandler,
 		Evolution:        b.evolutionHandler,
 		Vault:            b.vaultHandler,
+		Connections:      b.connectionsHandler,
 		ExternalAgents:   b.externalAgentsHandler,
 		Skills:           b.skillsHandler,
 		User:             b.userHandler,

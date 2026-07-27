@@ -21,9 +21,19 @@ MONOREPO_ROOT?=$(abspath $(CURDIR)/..)
 VERSION?=$(shell cat VERSION 2>/dev/null || echo "dev")
 GIT_COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+# Official builds bake in a verified Google identity OAuth client so Connect
+# works with no per-operator setup. Provide these ONLY at release time via the
+# environment (never commit them); they are empty for from-source/dev builds,
+# which stay "unconfigured" until an operator sets the ORI_GOOGLE_CONNECTION_*
+# env vars. Self-hosters can always override the embedded client via those env
+# vars at runtime.
+ORI_GOOGLE_EMBEDDED_CLIENT_ID?=
+ORI_GOOGLE_EMBEDDED_CLIENT_SECRET?=
 LDFLAGS=-X 'github.com/johnjallday/ori-agent/internal/version.Version=$(VERSION)' \
         -X 'github.com/johnjallday/ori-agent/internal/version.GitCommit=$(GIT_COMMIT)' \
-        -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate=$(BUILD_DATE)'
+        -X 'github.com/johnjallday/ori-agent/internal/version.BuildDate=$(BUILD_DATE)' \
+        -X 'github.com/johnjallday/ori-agent/internal/connections.embeddedClientID=$(ORI_GOOGLE_EMBEDDED_CLIENT_ID)' \
+        -X 'github.com/johnjallday/ori-agent/internal/connections.embeddedClientSecret=$(ORI_GOOGLE_EMBEDDED_CLIENT_SECRET)'
 
 # Colors for output
 RED=\033[0;31m

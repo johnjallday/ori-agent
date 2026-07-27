@@ -164,6 +164,22 @@
       })
     );
 
+    // FR 58: when a global Google account is connected, use it — the browser
+    // account chooser is pre-selected (login_hint) and the grant binds to that
+    // identity. The OAuth client below is still your own self-hosted Web client.
+    const accountNote = el('div', { style: 'margin-top:6px;font-size:13px;color:var(--primary-color);' });
+    container.appendChild(accountNote);
+    fetch('/api/connections/google/status', { headers: { Accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((conn) => {
+        if (conn && conn.subject && conn.email) {
+          accountNote.textContent =
+            'Using your connected Google account: ' + conn.email +
+            '. The OAuth client below is your own Google Cloud Web client (one-time, self-hosted).';
+        }
+      })
+      .catch(() => {});
+
     const clientIdInput = el('input', {
       className: 'form-control',
       attrs: { type: 'text', placeholder: 'OAuth client id', autocomplete: 'off' },

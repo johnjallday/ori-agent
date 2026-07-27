@@ -18,8 +18,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
-	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -641,24 +641,48 @@ func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testi
 		LookupEnv: func(string) (string, bool) { return "", false },
 		Runner:    continuationRunner{},
 	})
+	// `wt herd status` renders the shared overview snapshot. Without a reachable
+	// GitHub the snapshot is incomplete by design, so the command exits 1 while
+	// still emitting every local fact it did observe.
 	args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
-	if exit := application.Run(context.Background(), args); exit != 0 {
-		t.Fatalf("status exit=%d stderr=%s", exit, stderr.String())
+	if exit := application.Run(context.Background(), args); exit != 1 {
+		t.Fatalf("status exit=%d, want 1 for an incomplete snapshot; stderr=%s", exit, stderr.String())
 	}
-	var snapshot status.Snapshot
+	var snapshot overview.Snapshot
 	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
 		t.Fatalf("status JSON = %q: %v", output.String(), err)
 	}
-	if snapshot.Version != 1 || snapshot.Stale || len(snapshot.Rows) != 1 || snapshot.Rows[0].ObservedStatus != model.AgentIdle || snapshot.Rows[0].Task.Total != 1 || snapshot.Rows[0].Task.Next != "1.1 Continue implementation" {
-		t.Fatalf("status snapshot = %#v", snapshot)
+	if snapshot.SchemaVersion != overview.SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", snapshot.SchemaVersion, overview.SchemaVersion)
+	}
+	if snapshot.Complete {
+		t.Fatal("a snapshot without a fresh GitHub query called itself complete")
+	}
+	row, ok := snapshot.Feature("bridge")
+	if !ok {
+		t.Fatalf("status snapshot carried no bridge feature: %#v", snapshot.Features)
+	}
+	if row.Plan.Progress.NextActionable.Text != "Continue implementation" {
+		t.Fatalf("next actionable = %#v", row.Plan.Progress.NextActionable)
+	}
+	if len(row.Agents) != 1 || row.Agents[0].Role != "builder" {
+		t.Fatalf("agent rows = %#v, want the saved builder", row.Agents)
+	}
+	if row.Agents[0].Status != overview.AgentIdle {
+		t.Fatalf("observed status = %q, want idle", row.Agents[0].Status)
 	}
 
 	output.Reset()
-	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--no-color"}); exit != 0 {
-		t.Fatalf("human status exit=%d stderr=%s", exit, stderr.String())
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--no-color"}); exit != 1 {
+		t.Fatalf("human status exit=%d, want 1; stderr=%s", exit, stderr.String())
 	}
-	if strings.ContainsRune(output.String(), '\x1b') || !strings.Contains(output.String(), "NEXT INCOMPLETE") || !strings.Contains(output.String(), "idle") {
-		t.Fatalf("human status = %q", output.String())
+	if strings.ContainsRune(output.String(), '\x1b') {
+		t.Fatalf("no-color output contained escape sequences: %q", output.String())
+	}
+	for _, want := range []string{"bridge", "builder", "idle", "INCOMPLETE"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("human status = %q, want it to contain %q", output.String(), want)
+		}
 	}
 
 	output.Reset()

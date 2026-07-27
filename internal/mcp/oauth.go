@@ -379,7 +379,24 @@ func (s *Server) buildOAuthHandler(ctx context.Context, httpClient *http.Client)
 // ctx (bounded by resolveMCPOAuthTimeout) is done.
 func (s *Server) oauthFetcher(userID, redirectURL string) auth.AuthorizationCodeFetcher {
 	return func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-		state, err := stateFromAuthorizeURL(args.URL)
+		authorizeURL := args.URL
+		// Google Workspace MCP servers authorize against accounts.google.com, so
+		// also request the OIDC identity scopes: the token response then carries
+		// an ID token Ori verifies to bind the grant to an account subject (FR 23).
+		if isGoogleMCPEndpoint(s.config.URL) {
+			if injected, injErr := injectGoogleIdentityScopes(authorizeURL); injErr == nil {
+				authorizeURL = injected
+			}
+			// Pre-select the connected Google account so its subject matches the
+			// active identity (FR 58 "use active Google account").
+			if hint := googleMCPLoginHint; hint != nil {
+				if hinted, hErr := injectGoogleLoginHint(authorizeURL, hint()); hErr == nil {
+					authorizeURL = hinted
+				}
+			}
+		}
+
+		state, err := stateFromAuthorizeURL(authorizeURL)
 		if err != nil {
 			return nil, err
 		}
@@ -390,7 +407,7 @@ func (s *Server) oauthFetcher(userID, redirectURL string) auth.AuthorizationCode
 			RedirectURL: redirectURL,
 		})
 
-		s.setAuthorizeURL(args.URL)
+		s.setAuthorizeURL(authorizeURL)
 		s.setStatus(StatusAuthRequired)
 
 		select {
@@ -469,6 +486,20 @@ func (h *persistingOAuthHandler) Authorize(ctx context.Context, req *http.Reques
 	token, err := inner.Token()
 	if err != nil {
 		return fmt.Errorf("mcp oauth: fetch token after authorize: %w", err)
+	}
+
+	// A Google MCP token carries an ID token (openid scope injected upstream);
+	// surface it so the connection layer can verify the account subject and bind
+	// the grant (FR 23). Best-effort: a missing/invalid ID token never blocks the
+	// product-scoped grant itself.
+	if hook := googleMCPIdentityHook; hook != nil && isGoogleMCPEndpoint(h.mcpEndpoint) {
+		if rawID, _ := token.Extra("id_token").(string); strings.TrimSpace(rawID) != "" {
+			clientID := ""
+			if h.clientCreds != nil {
+				clientID = h.clientCreds.ClientID
+			}
+			hook(h.serverName, h.mcpEndpoint, rawID, clientID)
+		}
 	}
 
 	h.mu.Lock()

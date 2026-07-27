@@ -129,30 +129,37 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     modal.classList.remove('is-open');
   }
 
-  function connectEmail() {
-    const popup = window.open('/api/vault/email/oauth/start?provider=gmail', 'ori-hq-email', 'width=520,height=680');
-    if (!popup) {
-      toast('Allow pop-ups to connect your email.', 'danger');
+  // Re-pointed to the shared Google Account connection (FR 46/53): no separate
+  // OAuth popup and no user-supplied Web client. If Gmail is enabled on the
+  // global Google connection, reuse it to give this workspace its own account
+  // with no re-authorization; otherwise send the user to set up Google first.
+  async function connectEmail() {
+    if (!scope) return;
+    let conn;
+    try {
+      conn = await fetchJSON('/api/connections/google/status');
+    } catch (_) {
+      toast('Could not check your Google connection.', 'danger');
       return;
     }
-    const onMessage = async (event) => {
-      const data = event && event.data;
-      if (!data || data.type !== 'ori:vault-email-oauth') return;
-      window.removeEventListener('message', onMessage);
-      if (!data.success || !data.account || !data.account.id) {
-        toast(data && data.error ? data.error : 'Could not connect your email.', 'danger');
-        return;
-      }
-      if (!scope) return;
-      try {
-        await postJSON(scope.linkUrl, { account_id: data.account.id });
-        toast('Email connected to ' + scope.connectedTarget + '.', 'success');
-        renderBody();
-      } catch (_) {
-        toast('Connected the account but could not link it to ' + scope.connectedTarget + '.', 'danger');
-      }
-    };
-    window.addEventListener('message', onMessage);
+    const gmail = conn && Array.isArray(conn.grants) ? conn.grants.find((g) => g.product === 'gmail') : null;
+    if (!(conn && conn.subject && gmail && gmail.health === 'healthy')) {
+      toast('Connect Google and enable Gmail in Settings → Google Account first.', 'danger');
+      window.open('/settings#google-account', '_blank');
+      return;
+    }
+    try {
+      const linked = await postJSON(
+        '/api/connections/google/gmail/link?workspace_id=' + encodeURIComponent(currentWorkspaceId()),
+        {}
+      );
+      if (!linked || !linked.account_id) throw new Error('no account');
+      await postJSON(scope.linkUrl, { account_id: linked.account_id });
+      toast('Email connected to ' + scope.connectedTarget + '.', 'success');
+      renderBody();
+    } catch (_) {
+      toast('Could not connect email via your Google account.', 'danger');
+    }
   }
 
   async function renderBody() {

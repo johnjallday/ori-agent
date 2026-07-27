@@ -93,6 +93,31 @@ wt cd <name>           # navigate to a worktree
 ```
 Source it (don't execute) so `cd` affects your current shell.
 
+### `wt status` — feature overview
+
+```bash
+wt status                      # compact, feature-first overview
+wt status --feature <slug>     # one feature in detail
+wt status --json               # complete normalized snapshot (schema v2)
+wt status --watch              # live board
+wt status --no-color           # plain text; NO_COLOR is honored too
+wt status --worktrees          # the legacy Git-only worktree table
+```
+
+`wt status` answers "what features exist, and where is each one" — joining
+planning artifacts, `BACKLOG.md`, feature worktrees, local Git, GitHub pull
+requests, and live Herdr agents on the exact feature slug. It is read-only: it
+never writes planning files, Git, GitHub, bridge, or Herdr state.
+
+Exit codes: `0` complete, `1` incomplete (a required source, normally GitHub,
+was unavailable — the board still prints every local fact it observed), `2`
+invalid arguments.
+
+A complete snapshot requires one fresh authenticated `gh` query. Run
+`wt herd doctor` if `wt status` keeps exiting 1. The full reference — phases,
+finding codes, watch cadence, JSON contract — is in
+[docs/herdr-devflow.md](../docs/herdr-devflow.md).
+
 ### Herdr devflow bridge
 
 The opt-in repository-owned bridge lives in tools/herdr-devflow/ and is exposed
