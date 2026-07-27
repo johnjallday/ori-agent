@@ -52,7 +52,47 @@ consent. You're authenticated (tokens stored on-device in the vault). Then
 **Enable Gmail** on the card; Personal HQ / Email Ops link that account with one
 click, no re-auth.
 
+## 7. The credential vault step
+**Enable Gmail** resolves the vault that will hold the credential *before* it
+opens Google, so a vault problem can never strand you after you've already
+consented. Depending on your setup the card asks for exactly one thing first:
+
+| Vault state | What the card does |
+| --- | --- |
+| One vault, unlocked | Selects it silently and remembers the choice |
+| One vault, locked | Asks you to unlock it, then continues automatically |
+| No vaults | Offers inline vault creation, then continues automatically |
+| Several vaults, none chosen | Asks you to choose once, then remembers |
+| Remembered vault missing | Offers repair: pick another vault or create one |
+
+Cancelling any of these leaves Gmail disabled and never opens Google. After a
+process restart, a password-protected vault is locked again — enabling or
+relinking Gmail then asks for an unlock rather than failing.
+
+## Troubleshooting
+
+**"ORI_GOOGLE_CONNECTION_CLIENT_ID looks like an email address."**
+The client ID is *not* your Google account address. Copy the value ending in
+`.apps.googleusercontent.com` from Credentials → your OAuth client. Ori checks
+the shape at startup and refuses to begin a flow it knows will fail; the secret
+is never logged or returned.
+
+**"Google sign-in isn't configured in this build yet."**
+Neither env var is set and this build has no embedded client. See step 5.
+
+**"Access blocked" at Google.** Your account is not on the consent screen's test
+user list (step 3).
+
+**Signed in, but Gmail is still disabled.** The result page says which local step
+failed — a locked vault or a missing vault selection. Fix it from the link on
+that page; you will not have to sign in with Google again.
+
 ## Notes
+- These two env vars — `ORI_GOOGLE_CONNECTION_CLIENT_ID` and
+  `ORI_GOOGLE_CONNECTION_CLIENT_SECRET` — are the **only** supported way to
+  configure Gmail access. The former in-app *Personal HQ Email* OAuth settings
+  (`/api/settings/email-oauth`) have been removed; existing vault email accounts
+  are preserved and migrated from the Google Account card.
 - This is the **identity/Gmail** client (Desktop). **Calendar/Drive** additionally
   need Developer-Preview enrollment plus your own **Web** OAuth client entered in
   their setup panels — a separate, per-instance client (a temporary Preview

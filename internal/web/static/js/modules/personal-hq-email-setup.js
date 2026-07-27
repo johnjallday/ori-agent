@@ -207,7 +207,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     action.textContent = view.actionLabel;
     action.addEventListener('click', async () => {
       if (view.action === 'settings') {
-        window.location.href = '/settings#personal-hq-email';
+        window.location.href = '/settings#google-account';
         return;
       }
       if (view.action === 'disconnect') {

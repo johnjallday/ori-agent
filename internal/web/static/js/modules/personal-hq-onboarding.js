@@ -726,7 +726,7 @@ export function followUpView(f) {
     btn.textContent = view.actionLabel;
     btn.addEventListener('click', async () => {
       if (view.action === 'settings') {
-        window.location.href = '/settings#personal-hq-email';
+        window.location.href = '/settings#google-account';
         return;
       }
       if (view.action === 'disconnect') {

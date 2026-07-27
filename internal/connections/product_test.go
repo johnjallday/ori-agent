@@ -3,6 +3,7 @@ package connections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -58,7 +59,7 @@ func TestEnableGmail_Success(t *testing.T) {
 	flow.WithCredentialSink(sink)
 	seedIdentity(t, store, "sub-1", "jane@x.com")
 
-	begin, err := flow.BeginEnableGmail(BeginConnectParams{RedirectURL: testRedirect})
+	begin, err := flow.BeginEnableGmail(context.Background(), BeginConnectParams{RedirectURL: testRedirect})
 	if err != nil {
 		t.Fatalf("BeginEnableGmail: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestEnableGmail_ScopeDeselectedRequiresUpgrade(t *testing.T) {
 	flow.WithCredentialSink(&fakeSink{})
 	seedIdentity(t, store, "sub-1", "")
 
-	begin, _ := flow.BeginEnableGmail(BeginConnectParams{RedirectURL: testRedirect})
+	begin, _ := flow.BeginEnableGmail(context.Background(), BeginConnectParams{RedirectURL: testRedirect})
 	conn, err := flow.CompleteEnableGmail(context.Background(), CompleteConnectParams{State: begin.State, Code: "c"})
 	if err != nil {
 		t.Fatalf("CompleteEnableGmail: %v", err)
@@ -99,7 +100,7 @@ func TestEnableGmail_NoIdentity(t *testing.T) {
 	srv := gmailTokenServer(t, "")
 	flow, _ := newTestFlow(t, srv.URL, fakeVerifier{id: Identity{Subject: "sub-1"}})
 	flow.WithCredentialSink(&fakeSink{})
-	if _, err := flow.BeginEnableGmail(BeginConnectParams{RedirectURL: testRedirect}); err != ErrNoActiveIdentity {
+	if _, err := flow.BeginEnableGmail(context.Background(), BeginConnectParams{RedirectURL: testRedirect}); err != ErrNoActiveIdentity {
 		t.Fatalf("want ErrNoActiveIdentity, got %v", err)
 	}
 }
@@ -108,7 +109,7 @@ func TestEnableGmail_NoSink(t *testing.T) {
 	srv := gmailTokenServer(t, "")
 	flow, store := newTestFlow(t, srv.URL, fakeVerifier{id: Identity{Subject: "sub-1"}})
 	seedIdentity(t, store, "sub-1", "")
-	if _, err := flow.BeginEnableGmail(BeginConnectParams{RedirectURL: testRedirect}); err != ErrNoCredentialSink {
+	if _, err := flow.BeginEnableGmail(context.Background(), BeginConnectParams{RedirectURL: testRedirect}); err != ErrNoCredentialSink {
 		t.Fatalf("want ErrNoCredentialSink, got %v", err)
 	}
 }
@@ -119,9 +120,15 @@ func TestEnableGmail_DifferentSubjectRejected(t *testing.T) {
 	flow.WithCredentialSink(&fakeSink{})
 	seedIdentity(t, store, "sub-1", "")
 
-	begin, _ := flow.BeginEnableGmail(BeginConnectParams{RedirectURL: testRedirect})
-	if _, err := flow.CompleteEnableGmail(context.Background(), CompleteConnectParams{State: begin.State, Code: "c"}); err != ErrDifferentAccountActive {
+	begin, _ := flow.BeginEnableGmail(context.Background(), BeginConnectParams{RedirectURL: testRedirect})
+	_, err := flow.CompleteEnableGmail(context.Background(), CompleteConnectParams{State: begin.State, Code: "c"})
+	if !errors.Is(err, ErrDifferentAccountActive) {
 		t.Fatalf("want ErrDifferentAccountActive, got %v", err)
+	}
+	// The sign-in itself succeeded — it was simply the wrong account (FR 15, 16).
+	cb := ClassifyCallback(err)
+	if cb.Category != CategoryAccountMismatch || !cb.SignedIn {
+		t.Fatalf("classified = %+v, want account_mismatch with SignedIn", cb)
 	}
 }
 
@@ -130,7 +137,7 @@ func TestBeginEnableGmail_AuthorizeURL(t *testing.T) {
 	flow.WithCredentialSink(&fakeSink{})
 	seedIdentity(t, store, "sub-1", "jane@x.com")
 
-	res, err := flow.BeginEnableGmail(BeginConnectParams{RedirectURL: testRedirect})
+	res, err := flow.BeginEnableGmail(context.Background(), BeginConnectParams{RedirectURL: testRedirect})
 	if err != nil {
 		t.Fatalf("BeginEnableGmail: %v", err)
 	}
@@ -149,7 +156,7 @@ func TestBeginEnableGmailSend_AuthorizeURL(t *testing.T) {
 	flow.WithCredentialSink(&fakeSink{})
 	seedIdentity(t, store, "sub-1", "jane@x.com")
 
-	res, err := flow.BeginEnableGmailSend(BeginConnectParams{RedirectURL: testRedirect})
+	res, err := flow.BeginEnableGmailSend(context.Background(), BeginConnectParams{RedirectURL: testRedirect})
 	if err != nil {
 		t.Fatalf("BeginEnableGmailSend: %v", err)
 	}
@@ -173,7 +180,7 @@ func TestEnableGmail_ReAuthUpdatesInPlace(t *testing.T) {
 		},
 	})
 
-	begin, _ := flow.BeginEnableGmailSend(BeginConnectParams{RedirectURL: testRedirect})
+	begin, _ := flow.BeginEnableGmailSend(context.Background(), BeginConnectParams{RedirectURL: testRedirect})
 	conn, err := flow.CompleteEnableGmail(context.Background(), CompleteConnectParams{State: begin.State, Code: "c"})
 	if err != nil {
 		t.Fatalf("CompleteEnableGmail: %v", err)

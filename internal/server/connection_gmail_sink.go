@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/connections"
@@ -39,7 +40,7 @@ func (s *gmailCredentialSink) SaveGmailCredential(ctx context.Context, cred conn
 			update.RefreshToken = &rt
 		}
 		if _, err := s.store.UpdateEmailAccount(ctx, ref, update); err != nil {
-			return "", err
+			return "", classifyVaultWriteError(err)
 		}
 		return ref, nil
 	}
@@ -61,9 +62,30 @@ func (s *gmailCredentialSink) SaveGmailCredential(ctx context.Context, cred conn
 		},
 	})
 	if err != nil {
-		return "", err
+		return "", classifyVaultWriteError(err)
 	}
 	return account.ID, nil
+}
+
+// classifyVaultWriteError translates a vault write failure into the connection
+// domain's sentinels, so a vault that locked (or vanished) between preflight and
+// the callback still reaches the user as unlock-and-retry or choose-a-vault
+// rather than a generic "we couldn't save it" (FR 13-15).
+func classifyVaultWriteError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, vault.ErrVaultLocked),
+		errors.Is(err, vault.ErrVaultKeyUnavailable),
+		errors.Is(err, vault.ErrVaultPasswordRequired):
+		return fmt.Errorf("%w: %w", connections.ErrVaultLockedWrite, err)
+	case errors.Is(err, vault.ErrVaultNotFound),
+		errors.Is(err, vault.ErrVaultFileMissing),
+		errors.Is(err, vault.ErrVaultRequired):
+		return fmt.Errorf("%w: %w", connections.ErrVaultMissingWrite, err)
+	default:
+		return err
+	}
 }
 
 // LinkGmailToWorkspace reuses the global Gmail grant's identity to give a

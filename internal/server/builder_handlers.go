@@ -273,17 +273,10 @@ func (b *ServerBuilder) initializeHandlers() {
 		if b.mcpHandler != nil {
 			b.mcpHandler.SetVaultOAuthStore(vaultStore)
 		}
-		// Let in-app Settings supply the Google email OAuth client credentials,
-		// taking precedence over ORI_EMAIL_GOOGLE_* env vars, so a self-hosted
-		// user can enable Personal HQ email without editing the environment.
-		if b.configManager != nil {
-			vaulthttp.EmailOAuthCredentialOverride = func(provider vault.EmailProvider) (string, string) {
-				if provider == vault.EmailProviderGmail {
-					return b.configManager.GetEmailGoogleOAuth()
-				}
-				return "", ""
-			}
-		}
+		// The legacy in-app Personal HQ email OAuth settings are gone: Google
+		// Account is now the only supported Gmail connection path, configured with
+		// ORI_GOOGLE_CONNECTION_CLIENT_ID/_SECRET (FR 61, 62). Nothing overrides
+		// the vault's per-provider OAuth client any more.
 		b.settingsHandler.SetVaultRootUpdater(vaultStore.SetManagedVaultRoot)
 		if b.workspaceHandler != nil {
 			b.workspaceHandler.SetEmailAccountStore(vaultStore)
@@ -302,11 +295,20 @@ func (b *ServerBuilder) initializeHandlers() {
 	// for official builds.
 	{
 		// Precedence: operator env vars → official-build embedded client → none.
-		clientID, clientSecret, clientSource := connections.ResolveOAuthClient()
+		clientID, clientSecret, clientSource, clientVerdict := connections.ResolveOAuthClientChecked()
+		// A self-hosted operator who pasted the wrong value (classically their own
+		// Google address) learns at startup rather than mid-browser-flow (FR 63-65).
+		// The verdict carries no secret, and the secret is never logged.
+		if clientSource.Configured() && !clientVerdict.OK() {
+			logger.Warn("Google connection OAuth client is not usable", logger.Fields{
+				"problem":  string(clientVerdict.Problem),
+				"guidance": clientVerdict.Message(),
+			})
+		}
 		connStore := connections.NewStore(config.DefaultDataDir())
 		b.connStore = connStore
 		connFlow := connections.NewIdentityFlow(
-			connections.OAuthConfig{ClientID: clientID, ClientSecret: clientSecret},
+			connections.OAuthConfig{ClientID: clientID, ClientSecret: clientSecret, Verdict: clientVerdict},
 			connections.NewStateStore(10*time.Minute),
 			connStore,
 			connections.NewLazyGoogleVerifier(clientID),
@@ -328,6 +330,13 @@ func (b *ServerBuilder) initializeHandlers() {
 		if b.vaultStore != nil {
 			sink := newGmailCredentialSink(b.vaultStore)
 			connFlow.WithCredentialSink(sink)
+			// Resolve + verify the destination vault BEFORE opening Google, and
+			// re-verify it at callback time, so a locked or missing vault becomes an
+			// explicit unlock/choose prompt instead of a failure after authorization
+			// (FR 1, 3-9, 12-14).
+			catalog := newConnectionVaultCatalog(b.vaultStore)
+			connFlow.WithVaultCatalog(catalog)
+			connDeps.Vaults = catalog
 			connDeps.Linker = sink
 			connDeps.Migrator = sink
 		}
