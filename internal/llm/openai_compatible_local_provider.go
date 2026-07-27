@@ -65,6 +65,8 @@ func newOpenAICompatibleLocalProvider(name, defaultBaseURL string, config Provid
 		option.WithHeader("authorization", ""),
 		option.WithHeader("OpenAI-Organization", ""),
 		option.WithHeader("OpenAI-Project", ""),
+		// Ori owns the retry budget; see NewOpenAIProvider.
+		option.WithMaxRetries(0),
 	}
 
 	fallbackModels := make([]string, 0, 1)
@@ -286,7 +288,7 @@ func (p *OpenAICompatibleLocalProvider) Chat(ctx context.Context, req ChatReques
 
 	completion, err := p.client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("%s api error: %w", p.name, err)
+		return nil, classifyOpenAIError(p.name, err)
 	}
 
 	if len(completion.Choices) == 0 {

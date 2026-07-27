@@ -513,6 +513,26 @@ function isAssistOtherOption(option) {
     normalized.endsWith(' other');
 }
 
+/**
+ * Normalizes the structured repair the server attaches to a repair-gated block.
+ *
+ * A block with a repair is one that retrying cannot fix — a missing connection,
+ * an exhausted provider quota, a bad API key. The view shows the repair and
+ * suppresses Retry, because offering an action guaranteed to fail again is
+ * worse than offering none.
+ *
+ * @returns {{code:string,label:string,url:string}|null}
+ */
+function normalizeBlockedRepair(raw) {
+  const label = String(raw?.label || '').trim();
+  if (!label) return null;
+  return {
+    code: String(raw?.code || '').trim(),
+    label,
+    url: String(raw?.url || '').trim()
+  };
+}
+
 function buildAssistSelectState(workflowStep, selectedFieldValues = {}) {
   const optionValues = {};
   const customValues = {};
@@ -2308,6 +2328,10 @@ export class WorkspaceTaskPage {
       suggestedActions: Array.isArray(humanLoop?.suggested_actions)
         ? humanLoop.suggested_actions.map((action) => String(action || '').trim()).filter(Boolean)
         : [],
+      // A structured repair marks this block as repair-gated: the failure cannot
+      // be fixed by running the task again, so the view offers the repair and
+      // withholds Retry until the precondition is healthy (FR 56; Design).
+      repair: normalizeBlockedRepair(humanLoop?.repair),
       workflowStep,
       selectedChoiceId: '',
       selectedChoiceLabel: '',

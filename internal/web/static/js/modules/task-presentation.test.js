@@ -293,3 +293,66 @@ test('an ordinary failed task still offers Retry', () => {
   assert.equal(pres.primaryAction.id, 'retry');
   assert.equal(pres.repair, null);
 });
+
+// --- Provider-failure presentation (Group 4) ---------------------------------
+
+test('a quota failure offers provider settings and never a retry', () => {
+  const quotaBlocked = {
+    id: 'task-q',
+    status: 'waiting_for_choice',
+    to: 'Researcher',
+    context: {
+      human_loop: {
+        state: 'waiting_for_choice',
+        reason_code: 'provider_quota_exhausted',
+        reason:
+          "Your AI provider reports the account is out of quota or credit. Check the provider's billing settings; retrying won't help until that's resolved.",
+        suggested_actions: ['Open AI provider settings (/settings#api-keys)'],
+        repair: { code: 'configure_provider', label: 'Open AI provider settings', url: '/settings#api-keys' }
+      }
+    }
+  };
+
+  const pres = resolveTaskPresentation(quotaBlocked);
+  assert.equal(pres.primaryAction.id, 'repair');
+  assert.equal(pres.primaryAction.label, 'Open AI provider settings');
+  assert.equal(pres.primaryAction.url, '/settings#api-keys');
+  assert.deepEqual(pres.secondaryActions, [], 'no retry beside a quota failure');
+
+  // The message must point at the provider's billing, not at Gmail or a vault.
+  const message = pres.repair.message.toLowerCase();
+  assert.ok(message.includes('quota') || message.includes('credit'));
+  ['gmail', 'vault', 'email'].forEach(wrong => {
+    assert.ok(!message.includes(wrong), `quota message must not mention ${wrong}`);
+  });
+});
+
+test('provider failures that a user can fix all surface their own repair', () => {
+  const codes = [
+    { reason_code: 'provider_configuration_required', label: 'Open AI provider settings' },
+    { reason_code: 'model_unavailable', label: 'Open AI provider settings' }
+  ];
+  codes.forEach(({ reason_code, label }) => {
+    const pres = resolveTaskPresentation({
+      id: 'task-' + reason_code,
+      status: 'failed',
+      to: 'Researcher',
+      context: { human_loop: { reason_code, reason: 'x', repair: { code: 'configure_provider', label, url: '/settings#api-keys' } } }
+    });
+    assert.equal(pres.primaryAction.id, 'repair', reason_code);
+    assert.equal(pres.primaryAction.label, label, reason_code);
+  });
+});
+
+test('a failure with no fixable cause keeps the ordinary Retry action', () => {
+  // retry_exhausted has no repair: a transient failure that persisted is worth
+  // trying again, so Retry stays the primary action.
+  const pres = resolveTaskPresentation({
+    id: 'task-t',
+    status: 'failed',
+    to: 'Researcher',
+    context: { human_loop: { reason_code: 'retry_exhausted', reason: 'kept failing' } }
+  });
+  assert.equal(pres.primaryAction.id, 'retry');
+  assert.equal(pres.repair, null);
+});
