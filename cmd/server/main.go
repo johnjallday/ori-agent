@@ -27,6 +27,10 @@ import (
 )
 
 func main() {
+	// Load .env from the working directory (if present) before anything reads
+	// os.Getenv, so local secrets don't need to be exported in the shell.
+	environ.LoadDotEnv(".")
+
 	// Expand PATH to include common development tool locations
 	// This ensures tools like codex, go, node are available when launched from macOS app bundle
 	environ.ExpandPath()
