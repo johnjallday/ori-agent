@@ -283,12 +283,6 @@ func ManagedViewParams(source string) map[string]any {
 	return map[string]any{
 		"source": source,
 		"label":  "Ori Devflow",
-		"filter": map[string]any{
-			"op": "eq",
-			// #nosec G101 -- token is the public Herdr metadata field required to filter bridge-owned agents, not a credential.
-			"field": map[string]any{"token": "ori_devflow"},
-			"value": "managed",
-		},
 		"sort": []map[string]any{
 			{"field": "attention", "order": "desc"},
 			{"field": "state_change_seq", "order": "desc"},
@@ -539,7 +533,6 @@ func scheduleActivityTime(schedule model.Schedule) time.Time {
 
 func workspaceTokens(feature FeatureSnapshot) map[string]string {
 	tokens := map[string]string{
-		"ori_devflow":   "managed",
 		"repository":    safeToken(feature.Feature.RepositoryID),
 		"feature":       safeToken(feature.Feature.Name),
 		"branch":        safeToken(feature.Feature.Branch),

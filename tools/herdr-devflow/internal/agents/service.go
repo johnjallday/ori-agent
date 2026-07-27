@@ -215,11 +215,10 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	// Metadata is display-only and source-scoped. It never changes Herdr's
 	// semantic agent lifecycle authority.
 	metadata := map[string]string{
-		"repository":  feature.RepositoryID,
-		"feature":     feature.Name,
-		"branch":      feature.Branch,
-		"path":        feature.Path,
-		"ori_devflow": "managed",
+		"repository": feature.RepositoryID,
+		"feature":    feature.Name,
+		"branch":     feature.Branch,
+		"path":       feature.Path,
 	}
 	if metadataEnabledFor(featureState) {
 		if _, err := s.Client.ReportWorkspaceMetadata(ctx, opened.Workspace.WorkspaceID, s.Config.Bridge.SourceID, metadata); err != nil {

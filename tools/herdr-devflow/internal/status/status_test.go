@@ -164,14 +164,13 @@ func TestMetadataAndViewStaySourceScoped(t *testing.T) {
 	if len(client.workspaceCalls) != 2 || len(client.paneCalls) != 2 {
 		t.Fatalf("metadata calls workspaces=%#v panes=%#v", client.workspaceCalls, client.paneCalls)
 	}
-	if client.paneCalls[0].tokens["ori_devflow"] != "managed" || client.paneCalls[0].tokens["next_task"] == "" || client.paneCalls[0].source != "ori.devflow" {
+	if client.paneCalls[0].tokens["next_task"] == "" || client.paneCalls[0].source != "ori.devflow" {
 		t.Fatalf("pane metadata = %#v", client.paneCalls[0])
 	}
 	if err := service.ApplyManagedView(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	filter := client.viewParams["filter"].(map[string]any)
-	if client.viewParams["source"] != "plugin:ori.devflow" || filter["field"].(map[string]any)["token"] != "ori_devflow" || filter["value"] != "managed" {
+	if client.viewParams["source"] != "plugin:ori.devflow" || client.viewParams["filter"] != nil {
 		t.Fatalf("view params = %#v", client.viewParams)
 	}
 	if err := service.ClearManagedView(context.Background()); err != nil || client.clearedSource != "plugin:ori.devflow" {

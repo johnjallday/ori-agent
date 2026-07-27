@@ -219,19 +219,12 @@ action for a future release, not something a status query does implicitly.
 When two live agents both plausibly match one saved role, the bridge raises
 `agent_ambiguous` and chooses neither, rather than guessing.
 
-### Why the Ori Devflow view stays narrower than `wt status`
+### The Ori Devflow view shows every agent, same as `wt status`
 
-Because unmanaged agents are deliberately never tagged with the source-scoped
-Ori Devflow metadata (display metadata is written only for agents with a saved
-bridge record), the "Ori Devflow" view and board inside Herdr itself continue
-to show only bridge-managed agents. If three agents are running in a
-repository and the bridge only started one, the Ori Devflow view will still
-show one. **This is a filtered view, not a smaller repository** — do not read
-it as "nothing else is running."
-
-`wt status` and `wt herd status` are the complete picture: every agent whose
-path resolves into a feature's worktree, managed or not. Use those, or clear
-the source-scoped view (`wt herd status --clear-view`), to see everything.
+The "Ori Devflow" view registered inside Herdr carries no filter — it is not
+scoped to bridge-managed agents. It shows the same population as `wt status`
+and `wt herd status`: every agent Herdr reports, managed or unmanaged. There
+is no separate `ori_devflow` metadata token gating which agents appear in it.
 
 ## Feature overview
 
@@ -382,7 +375,7 @@ and --no-color disable it entirely.
 | dim | history, absences, and supporting detail | --json emits the versioned machine-readable snapshot
 instead, making it suitable for scripts.
 
-The plugin also provides a source-scoped Ori Devflow view and board, rendered
+The plugin also provides an unfiltered Ori Devflow view and board, rendered
 from the same snapshot. Clear it with wt herd status --clear-view; doing so
 never changes unrelated user views or metadata. Display metadata is refreshed
 only after collection, never as part of it, and is never identity or
