@@ -339,6 +339,27 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		return primary, true, nil
 	}
 
+	// An agent may already be working in this worktree under a different name —
+	// a workspace reopened, or a pane a human started. Adopting it is both
+	// safer and more useful than launching a second agent beside it, or than
+	// failing because the root pane is busy running exactly the agent we were
+	// about to duplicate.
+	if adopted, found, adoptErr := s.findAgentInWorktree(ctx, featureState.Feature.Path, kind); adoptErr == nil && found {
+		primary := roleAgentFrom(adopted, role, kind, s.now())
+		featureState.Agents[role] = primary
+		if !featureState.Handoff.BootstrapPrompted {
+			featureState.Handoff.Stage = model.HandoffReady
+		}
+		featureState.Handoff.PrimaryAgentName = primary.Name
+		featureState.Handoff.UpdatedAt = s.now()
+		featureState.UpdatedAt = s.now()
+		state.Features[featureKey] = featureState
+		if err := s.Store.Save(*state); err != nil {
+			return model.RoleAgent{}, false, stateSaveError(err)
+		}
+		return primary, true, nil
+	}
+
 	// A saved or already-live primary owns this pane and may legitimately be a
 	// foreground coding-agent process. Only a new launch needs an idle shell.
 	if err := s.validateRootShell(ctx, opened.RootPane, featureState.Feature.Path); err != nil {

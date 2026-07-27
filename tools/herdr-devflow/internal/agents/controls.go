@@ -606,6 +606,58 @@ func (s *Service) resolveTarget(ctx context.Context, resolved *resolvedFeature, 
 	return s.roleAgentFromLive(live, resolved, role, kind)
 }
 
+// findInFeatureWorktree locates a live agent working in this feature's
+// worktree when the saved identity no longer resolves.
+//
+// It is deliberately conservative: exactly one candidate of the expected kind
+// is a recovery, several is an ambiguity the operator must settle, and none is
+// simply nothing to recover. It never adopts an agent for a feature whose
+// worktree path the bridge does not know.
+func (s *Service) findInFeatureWorktree(ctx context.Context, resolved *resolvedFeature, kind string) (herdr.AgentInfo, bool, error) {
+	return s.findAgentInWorktree(ctx, resolved.feature.Feature.Path, kind)
+}
+
+// findAgentInWorktree locates a single live agent working in a worktree.
+func (s *Service) findAgentInWorktree(ctx context.Context, worktreePath, kind string) (herdr.AgentInfo, bool, error) {
+	if strings.TrimSpace(worktreePath) == "" {
+		return herdr.AgentInfo{}, false, nil
+	}
+	liveAgents, err := s.Client.AgentListInfo(ctx)
+	if err != nil {
+		return herdr.AgentInfo{}, false, wrapHerdrError("list agents in the feature worktree", err, "wt herd status")
+	}
+
+	var candidates []herdr.AgentInfo
+	for _, candidate := range liveAgents {
+		if candidate.Agent == "" || candidate.Name == "" {
+			continue
+		}
+		if kind != "" && !strings.EqualFold(candidate.Agent, kind) {
+			continue
+		}
+		cwd := candidate.Cwd
+		if cwd == "" {
+			cwd = candidate.ForegroundCwd
+		}
+		if worktree.Contains(worktreePath, cwd) {
+			candidates = append(candidates, candidate)
+		}
+	}
+
+	switch len(candidates) {
+	case 0:
+		return herdr.AgentInfo{}, false, nil
+	case 1:
+		return candidates[0], true, nil
+	default:
+		return herdr.AgentInfo{}, false, &model.StageError{
+			Stage: "resolve saved role agent", Code: model.ErrAgentAmbiguous,
+			Message:  "several live agents are running in this feature worktree",
+			Recovery: "wt herd status, then wt herd rebind <role> --target <live-target>",
+		}
+	}
+}
+
 func (s *Service) resolveSavedRole(ctx context.Context, resolved *resolvedFeature, role string) (model.RoleAgent, error) {
 	if err := validateRole(role); err != nil {
 		return model.RoleAgent{}, err
@@ -627,7 +679,27 @@ func (s *Service) resolveSavedRole(ctx context.Context, resolved *resolvedFeatur
 			return model.RoleAgent{}, wrapHerdrError("resolve saved role agent", err, "wt herd rebind "+role+" --target <live-target>")
 		}
 		if err != nil {
-			return model.RoleAgent{}, &model.StageError{Stage: "resolve saved role agent", Code: model.ErrAgentMissing, Message: "the saved role agent is no longer live", Recovery: "wt herd rebind " + role + " --target <live-target>; do not start a replacement automatically"}
+			// The saved name is gone, but the feature's worktree may still
+			// have exactly one live agent of the right kind — a workspace that
+			// was closed and reopened, or a pane opened by hand. The saved
+			// name is a hint; the directory is the fact. Falling back here is
+			// what stops `wt herd retry` dead-ending on a stale record while a
+			// perfectly healthy agent sits in the right worktree.
+			recovered, found, recoverErr := s.findInFeatureWorktree(ctx, resolved, saved.Kind)
+			if recoverErr != nil {
+				return model.RoleAgent{}, recoverErr
+			}
+			if !found {
+				return model.RoleAgent{}, &model.StageError{Stage: "resolve saved role agent", Code: model.ErrAgentMissing, Message: "the saved role agent is no longer live and no agent is running in the feature worktree", Recovery: "wt herd add " + role + " --feature " + resolved.feature.Feature.Name + ", or wt herd rebind " + role + " --target <live-target>"}
+			}
+			// Recovered by path. The saved pane, name, and workspace all
+			// deliberately differ from the live ones — that divergence is the
+			// condition being recovered from — so both the saved-identity
+			// equality check below and the feature-workspace check inside
+			// roleAgentFromLive would reject exactly the case this fallback
+			// exists to handle. Membership was established by the worktree
+			// path, which is the stronger evidence.
+			return roleAgentFrom(recovered, role, saved.Kind, s.now()), nil
 		}
 	}
 	if err := s.validateLiveForFeature(live, resolved, saved.Kind); err != nil {
@@ -685,6 +757,13 @@ func (s *Service) roleAgentFromLive(live herdr.AgentInfo, resolved *resolvedFeat
 	if live.Name == "" {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve role agent", Code: model.ErrAgentMissing, Message: "the selected live agent has no stable Herdr name", Recovery: "wt herd rebind " + role + " --target " + live.PaneID}
 	}
+	return roleAgentFrom(live, role, kind, s.now()), nil
+}
+
+// roleAgentFrom records a live agent as a role binding. It performs no
+// validation: callers establish feature membership first, either through the
+// saved workspace identity or through the worktree path.
+func roleAgentFrom(live herdr.AgentInfo, role, kind string, now time.Time) model.RoleAgent {
 	agent := model.RoleAgent{
 		Role:        role,
 		Name:        live.Name,
@@ -694,12 +773,12 @@ func (s *Service) roleAgentFromLive(live herdr.AgentInfo, resolved *resolvedFeat
 		PaneID:      live.PaneID,
 		TerminalID:  live.TerminalID,
 		Status:      live.AgentStatus,
-		UpdatedAt:   s.now(),
+		UpdatedAt:   now,
 	}
 	if live.AgentSession != nil {
 		agent.NativeSession = *live.AgentSession
 	}
-	return agent, nil
+	return agent
 }
 
 func (s *Service) validateLiveForFeature(live herdr.AgentInfo, resolved *resolvedFeature, kind string) error {

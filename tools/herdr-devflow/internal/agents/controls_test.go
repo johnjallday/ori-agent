@@ -2,7 +2,9 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -267,5 +269,225 @@ func assertCallsInOrder(t *testing.T, calls []string, expected ...string) {
 			t.Fatalf("fake Herdr calls did not contain %q after prior operations: %#v", want, calls)
 		}
 		position++
+	}
+}
+
+// TestSavedRoleRecoversFromTheFeatureWorktree covers the 2026-07-26 dead end:
+// the saved agent name no longer resolved, a healthy agent was running in the
+// feature's worktree, and both `wt herd retry` and `wt herd handoff` refused
+// with agent_missing rather than using it.
+func TestSavedRoleRecoversFromTheFeatureWorktree(t *testing.T) {
+	t.Parallel()
+	service, client, store, path := seededFeature(t)
+
+	saved := savedBuilder(t, store)
+	// The workspace was closed: the saved name resolves to nothing.
+	delete(client.byName, saved.Name)
+
+	// A replacement agent is running in the same worktree under a new pane.
+	replacement := herdr.AgentInfo{
+		Name: "hand-started", Agent: saved.Kind, AgentStatus: model.AgentIdle,
+		WorkspaceID: "wNEW", PaneID: "wNEW:p1", TerminalID: "term-new",
+		Cwd: path, InteractiveReady: true,
+	}
+	client.byName[replacement.Name] = replacement
+	client.agents = append(client.agents, replacement)
+
+	promptsBefore := client.promptCalls
+	if _, err := service.Prompt(context.Background(), PromptRequest{
+		Context: ContextRequest{WorktreePath: path}, Role: "builder", Text: "continue",
+	}); err != nil {
+		t.Fatalf("Prompt() = %v, want recovery through the feature worktree", err)
+	}
+	if client.promptCalls != promptsBefore+1 {
+		t.Fatalf("prompt calls = %d, want the recovered agent prompted", client.promptCalls)
+	}
+}
+
+func TestSavedRoleDoesNotRecoverFromAnotherWorktree(t *testing.T) {
+	t.Parallel()
+	service, client, store, path := seededFeature(t)
+
+	saved := savedBuilder(t, store)
+	delete(client.byName, saved.Name)
+
+	// An agent in a different worktree must never be adopted for this feature.
+	elsewhere := herdr.AgentInfo{
+		Name: "someone-else", Agent: saved.Kind, AgentStatus: model.AgentIdle,
+		WorkspaceID: "wOTHER", PaneID: "wOTHER:p1", TerminalID: "term-other",
+		Cwd: filepath.Join(t.TempDir(), "different-feature"), InteractiveReady: true,
+	}
+	client.byName[elsewhere.Name] = elsewhere
+	client.agents = append(client.agents, elsewhere)
+
+	_, err := service.Prompt(context.Background(), PromptRequest{
+		Context: ContextRequest{WorktreePath: path}, Role: "builder", Text: "must not send",
+	})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrAgentMissing {
+		t.Fatalf("Prompt() = %v, want agent_missing — no agent runs in this worktree", err)
+	}
+}
+
+func TestSavedRoleRefusesToGuessBetweenSeveralWorktreeAgents(t *testing.T) {
+	t.Parallel()
+	service, client, store, path := seededFeature(t)
+
+	saved := savedBuilder(t, store)
+	delete(client.byName, saved.Name)
+
+	for index, name := range []string{"first", "second"} {
+		candidate := herdr.AgentInfo{
+			Name: name, Agent: saved.Kind, AgentStatus: model.AgentIdle,
+			WorkspaceID: "wNEW", PaneID: fmt.Sprintf("wNEW:p%d", index+1),
+			TerminalID: fmt.Sprintf("term-%d", index+1), Cwd: path, InteractiveReady: true,
+		}
+		client.byName[name] = candidate
+		client.agents = append(client.agents, candidate)
+	}
+
+	_, err := service.Prompt(context.Background(), PromptRequest{
+		Context: ContextRequest{WorktreePath: path}, Role: "builder", Text: "must not send",
+	})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrAgentAmbiguous {
+		t.Fatalf("Prompt() = %v, want agent_ambiguous — the operator must settle this", err)
+	}
+}
+
+// savedBuilder returns the seeded builder role from the store.
+func savedBuilder(t *testing.T, store *memoryStore) model.RoleAgent {
+	t.Helper()
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	for _, feature := range state.Features {
+		if saved, ok := feature.Agents["builder"]; ok {
+			return saved
+		}
+	}
+	t.Fatal("no builder role was seeded")
+	return model.RoleAgent{}
+}
+
+// TestExistingSavedRecordsResolveWithoutMigration writes a record in the
+// current on-disk format and proves it still resolves — no migration step, no
+// re-run of wt start.
+func TestExistingSavedRecordsResolveWithoutMigration(t *testing.T) {
+	t.Parallel()
+	service, client, store, path := seededFeature(t)
+
+	// Reload exactly what the bridge wrote, as an older build would have.
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var reloaded model.BridgeState
+	if err := json.Unmarshal(encoded, &reloaded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := store.Save(reloaded); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// The saved agent is still live and unchanged: the ordinary path must not
+	// have regressed while the fallback was added.
+	promptsBefore := client.promptCalls
+	if _, err := service.Prompt(context.Background(), PromptRequest{
+		Context: ContextRequest{WorktreePath: path}, Role: "builder", Text: "still works",
+	}); err != nil {
+		t.Fatalf("Prompt() on an unmigrated record = %v", err)
+	}
+	if client.promptCalls != promptsBefore+1 {
+		t.Fatal("the saved-identity path stopped working")
+	}
+}
+
+// TestWorkspaceReopenIsRecognisedWithoutABridgeCommand covers closing a
+// workspace and opening a fresh pane in the same worktree: the feature must be
+// recognised again with no rebind, retry, or wt start in between.
+func TestWorkspaceReopenIsRecognisedWithoutABridgeCommand(t *testing.T) {
+	t.Parallel()
+	service, client, store, path := seededFeature(t)
+
+	saved := savedBuilder(t, store)
+	// Close the workspace: every saved identity field becomes unresolvable.
+	delete(client.byName, saved.Name)
+
+	// Reopen: a new workspace, new pane, new terminal — same worktree.
+	reopened := herdr.AgentInfo{
+		Name: "reopened-agent", Agent: saved.Kind, AgentStatus: model.AgentIdle,
+		WorkspaceID: "wREOPEN", PaneID: "wREOPEN:p1", TerminalID: "term-reopen",
+		Cwd: path, InteractiveReady: true,
+	}
+	client.byName[reopened.Name] = reopened
+	client.agents = append(client.agents, reopened)
+
+	// No bridge command is run between the close and this call.
+	if _, err := service.Prompt(context.Background(), PromptRequest{
+		Context: ContextRequest{WorktreePath: path}, Role: "builder", Text: "recognised",
+	}); err != nil {
+		t.Fatalf("Prompt() after a workspace reopen = %v, want recognition by worktree path", err)
+	}
+}
+
+// TestHandoffAdoptsAnAgentAlreadyInTheWorktree covers the wt start failure
+// seen on 2026-07-26: an agent was already running in the worktree, and the
+// handoff failed with "root pane is busy with a non-shell foreground process"
+// rather than using it.
+func TestHandoffAdoptsAnAgentAlreadyInTheWorktree(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "adopted")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	service.RepositoryID = "repo-adopt"
+
+	// Someone already started an agent in this worktree, under a name the
+	// bridge would never have chosen.
+	existing := herdr.AgentInfo{
+		Name: "hand-started", Agent: "claude", AgentStatus: model.AgentIdle,
+		WorkspaceID: "wHAND", PaneID: "wHAND:p1", TerminalID: "term-hand",
+		Cwd: path, InteractiveReady: true,
+	}
+	client.byName[existing.Name] = existing
+	client.agents = append(client.agents, existing)
+
+	startsBefore := client.startCalls
+	result, err := service.Handoff(context.Background(), HandoffRequest{
+		FeatureName: "adopted", WorktreePath: path, Branch: "feature/adopted",
+	})
+	if err != nil {
+		t.Fatalf("Handoff() = %v, want adoption of the existing agent", err)
+	}
+	if client.startCalls != startsBefore {
+		t.Fatalf("a second agent was launched beside the existing one: starts=%d", client.startCalls)
+	}
+	if result.Primary.Name != existing.Name {
+		t.Fatalf("adopted agent = %q, want the one already in the worktree (%q)", result.Primary.Name, existing.Name)
+	}
+}
+
+func TestHandoffStillLaunchesWhenTheWorktreeIsEmpty(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "empty")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	service.RepositoryID = "repo-empty"
+
+	startsBefore := client.startCalls
+	if _, err := service.Handoff(context.Background(), HandoffRequest{
+		FeatureName: "empty", WorktreePath: path, Branch: "feature/empty",
+	}); err != nil {
+		t.Fatalf("Handoff() = %v", err)
+	}
+	if client.startCalls != startsBefore+1 {
+		t.Fatalf("start calls = %d, want one launch when nothing is running", client.startCalls)
 	}
 }
