@@ -35,6 +35,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 
 ## Doing
 - google-account-email-ops-stabilization -> PRD at tasks/prd-google-account-email-ops-stabilization.md (started 2026-07-27)
+- downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-27)
 
 ## Shipped / dropped
 - 2026-07-27 vault-modal-loading - PR #271 merged to dev (2026-07-27)
