@@ -363,6 +363,14 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { servers: [] });
       return;
     }
+    // The Downloads Janitor panel mounts on every workspace page and asks
+    // whether it applies before it can know that it does not. The README
+    // fixture workspace is not a Janitor workspace, so it answers no and the
+    // panel stays hidden — which is what these screenshots should show.
+    if (/^\/api\/workspaces\/[^/]+\/downloads-janitor$/.test(url.pathname)) {
+      await json(route, { status: { applies: false } });
+      return;
+    }
     if (url.pathname === '/api/skills') {
       await json(route, { skills: [] });
       return;

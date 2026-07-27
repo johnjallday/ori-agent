@@ -249,7 +249,21 @@ func TestConfirmMoves_RefusesASourceThatChangedAfterApproval(t *testing.T) {
 }
 
 // A file swapped for a different one with the same name, size, and timestamp is
-// caught by the platform file identity.
+// caught by the platform file identity — where the platform gives the
+// replacement a different identity.
+//
+// It does not always. Deleting and recreating a file frees its inode, and Linux
+// filesystems commonly hand that same inode straight back to the next file. The
+// replacement then matches on name, size, modification time AND inode, and is
+// indistinguishable from the original by anything the fingerprint records.
+// Detecting it would require reading the file's contents, which metadata-only
+// mode exists to not do.
+//
+// The accepted consequence is bounded: the wrong file gets filed into a
+// category folder inside the same root. Nothing is executed, read, or removed,
+// and the move is undoable from history like any other. So this skips rather
+// than failing where the platform recycles the identity, instead of asserting a
+// guarantee the design does not make.
 func TestConfirmMoves_RefusesAReplacedSource(t *testing.T) {
 	service, root, candidates := reviewFixture(t, "report.pdf")
 	mover := &realMover{}
@@ -284,6 +298,10 @@ func TestConfirmMoves_RefusesAReplacedSource(t *testing.T) {
 	}
 	if after.FileID == "" {
 		t.Skip("platform exposes no file identity, so a same-size same-time swap is undetectable")
+	}
+	if after.FileID == candidates[0].Fingerprint.FileID {
+		t.Skipf("the filesystem reused the identity %q for the replacement, so nothing "+
+			"recorded in the fingerprint distinguishes it from the original", after.FileID)
 	}
 
 	result, err := service.ConfirmMoves(context.Background(), ConfirmRequest{
