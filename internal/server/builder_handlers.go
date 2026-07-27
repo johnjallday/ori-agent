@@ -638,8 +638,20 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 	// workspace, with disconnect cache invalidation. The same service backs both
 	// the HQ-scoped endpoints (designated HQ) and the workspace-scoped endpoints
 	// (Email Ops and other owned workspaces).
+	// Deterministic email readiness: setup state and task preconditions come from
+	// the actual connection/vault/binding state, never from an agent's report of
+	// what it thinks it set up (FR 32, 33).
+	var vaultCatalog connections.VaultCatalog
+	if b.vaultStore != nil {
+		vaultCatalog = newConnectionVaultCatalog(b.vaultStore)
+	}
+	readiness := newEmailReadinessEvaluator(b.connStore, vaultCatalog, b.workspaceStore, b.vaultStore)
+	// The orchestration task handler that consumes this is built later
+	// (Phase 21), so stash it rather than wiring a handler that is still nil.
+	b.emailReadiness = readiness
 	if b.personalHQHandler != nil && b.personalHQService != nil {
 		linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
+		linker.readiness = readiness
 		b.personalHQHandler.SetMailboxLinker(linker)
 		b.personalHQHandler.SetWorkspaceMailboxLinker(linker)
 	}

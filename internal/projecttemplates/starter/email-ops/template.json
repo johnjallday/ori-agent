@@ -4,7 +4,7 @@
   "icon": "📬",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 1,
+  "builtin_version": 2,
   "tags": [
     "email",
     "personal"
@@ -17,7 +17,10 @@
     },
     {
       "description": "Triage today's inbox",
-      "details": "Scan the connected inbox and surface what needs the user: threads waiting on their reply, anything time-sensitive, and concrete follow-ups (what they owe and what they are waiting on). Summarize rather than dumping full messages, and offer to draft replies for the ones that need them. Never send anything — every reply is a proposal the user confirms."
+      "details": "Scan the connected inbox and surface what needs the user: threads waiting on their reply, anything time-sensitive, and concrete follow-ups (what they owe and what they are waiting on). Summarize rather than dumping full messages, and offer to draft replies for the ones that need them. Never send anything — every reply is a proposal the user confirms.",
+      "requires": [
+        "email"
+      ]
     }
   ],
   "agents": [

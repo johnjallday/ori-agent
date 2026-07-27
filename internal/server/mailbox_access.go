@@ -81,6 +81,12 @@ func (a *mailboxAccess) AuthorizedAccount(ctx context.Context, workspaceID, agen
 	if err != nil || acc == nil {
 		return mailbox.Account{}, mailbox.ErrDisconnected
 	}
+	// FR 42: the binding must be HEALTHY, not merely present. An account whose
+	// tokens are gone would otherwise fail deep inside the provider with an error
+	// the agent reads as a transient mail problem.
+	if !acc.CredentialsStatus.HasAccessToken && !acc.CredentialsStatus.HasRefreshToken {
+		return mailbox.Account{}, mailbox.ErrExpired
+	}
 	return mailbox.Account{
 		ID:           acc.ID,
 		Provider:     string(acc.Provider),

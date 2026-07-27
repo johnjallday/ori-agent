@@ -11,7 +11,7 @@
 // pure view-model helpers are imported from personal-hq-onboarding.js so the
 // state logic has one source of truth.
 
-import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
+import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
 
 (function () {
   if (typeof document === 'undefined') return;
@@ -165,10 +165,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
   async function renderBody() {
     if (!body || !scope) return;
     body.textContent = 'Loading…';
-    const [statusResp, oauth] = await Promise.all([
-      fetchJSON(scope.statusUrl),
-      fetchJSON('/api/settings/email-oauth')
-    ]);
+    const statusResp = await fetchJSON(scope.statusUrl);
     const status = statusResp && statusResp.status ? statusResp.status : null;
     if (window.OriHQEmailSetup) {
       window.OriHQEmailSetup.connected = !!(status && status.connected);
@@ -179,7 +176,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     if (scope && !scope.isHQ) {
       renderWorkspaceConnectCTA(!!(status && status.connected));
     }
-    const view = emailStatusView(status, oauth ? !!oauth.configured : true);
+    // Setup state comes from the server's deterministic readiness verdict — the
+    // account connection, grant health, vault availability, and this
+    // workspace's binding — not from anything an agent claimed it did (FR 32).
+    const view = emailSetupView(status);
 
     body.innerHTML = '';
 
@@ -205,9 +205,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     action.type = 'button';
     action.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
     action.textContent = view.actionLabel;
+    action.setAttribute('aria-label', view.actionLabel);
     action.addEventListener('click', async () => {
       if (view.action === 'settings') {
-        window.location.href = '/settings#google-account';
+        window.location.href = view.actionUrl || '/settings#google-account';
         return;
       }
       if (view.action === 'disconnect') {

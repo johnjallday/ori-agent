@@ -62,6 +62,12 @@ type StarterTask struct {
 	// extras, and load-time normalization keeps only the first flag from a
 	// hand-edited manifest.
 	Setup bool `json:"setup,omitempty"`
+	// Requires lists abstract capability keys (the same vocabulary as
+	// CapabilityRequirement — "email", never "gmail") that must be connected
+	// and healthy before this task may execute. A task needing a mailbox
+	// declares it here so execution stops with an actionable repair instead of
+	// spending a model call on work it cannot do. Empty means no precondition.
+	Requires []string `json:"requires,omitempty"`
 }
 
 // ErrInvalidStarterTasks reports a starter-task edit that violates the setup
@@ -413,7 +419,12 @@ func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 		}
 		setup := task.Setup && !haveSetup
 		haveSetup = haveSetup || setup
-		out = append(out, StarterTask{Description: desc, Details: strings.TrimSpace(task.Details), Setup: setup})
+		out = append(out, StarterTask{
+			Description: desc,
+			Details:     strings.TrimSpace(task.Details),
+			Setup:       setup,
+			Requires:    normalizeOperationNames(task.Requires),
+		})
 	}
 	if len(out) == 0 {
 		return nil

@@ -121,19 +121,24 @@ type ServerBuilder struct {
 	server *Server
 
 	// Internal fields populated during initialization
-	clientFactory            *client.Factory
-	llmFactory               *llm.Factory
-	st                       store.Store
-	agentStorePath           string
-	configManager            *config.Manager
-	privateServicesClient    privateservices.Client
-	templateRenderer         *web.TemplateRenderer
-	updateMgr                *updatemanager.Manager
-	workspaceStore           workspace.Store
-	workspaceFileStore       *workspace.FileStore
-	workspaceAllowlist       *workspace.Allowlist
-	runtimeResolver          *workspace.AgentRuntimeResolver
-	taskHandler              *workspace.LLMTaskHandler
+	clientFactory         *client.Factory
+	llmFactory            *llm.Factory
+	st                    store.Store
+	agentStorePath        string
+	configManager         *config.Manager
+	privateServicesClient privateservices.Client
+	templateRenderer      *web.TemplateRenderer
+	updateMgr             *updatemanager.Manager
+	workspaceStore        workspace.Store
+	workspaceFileStore    *workspace.FileStore
+	workspaceAllowlist    *workspace.Allowlist
+	runtimeResolver       *workspace.AgentRuntimeResolver
+	taskHandler           *workspace.LLMTaskHandler
+	// emailReadiness evaluates the deterministic mailbox-connection state. It is
+	// built in Phase 18 (needs the workspace + vault stores) but consumed in
+	// Phase 21 by the orchestration task handler, so it is stashed here rather
+	// than captured at wiring time.
+	emailReadiness           *emailReadinessEvaluator
 	orchestrationTaskHandler *workspace.LLMTaskHandler
 	runBackedTaskHandler     workspace.TaskHandler
 	taskExecutor             *workspace.TaskExecutor

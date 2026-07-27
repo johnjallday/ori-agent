@@ -29,8 +29,11 @@ func TestEmailOpsStarterTemplate(t *testing.T) {
 	if !tpl.Builtin {
 		t.Fatal("email-ops must be a built-in template")
 	}
-	if tpl.BuiltinVersion < 1 {
-		t.Fatalf("email-ops builtin_version = %d, want at least 1", tpl.BuiltinVersion)
+	// builtin_version gates the on-disk manifest refresh: an existing install
+	// keeps its old copy unless the shipped version is higher. Bumping it is how
+	// a blueprint change actually reaches users (see refreshBuiltinManifest).
+	if tpl.BuiltinVersion < 2 {
+		t.Fatalf("email-ops builtin_version = %d, want at least 2 so existing installs refresh the manifest", tpl.BuiltinVersion)
 	}
 	if tpl.Name != "Email Ops" {
 		t.Fatalf("display name = %q, want %q", tpl.Name, "Email Ops")
@@ -93,5 +96,71 @@ func TestEmailOpsStarterTemplate(t *testing.T) {
 
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("email-ops should load without warnings, got %v", tpl.Warnings)
+	}
+}
+
+// The Email Ops blueprint must stay provider-neutral: Gmail is the only
+// operational adapter in this release, but the template names no provider, so
+// adding Microsoft 365 or IMAP later needs no second blueprint (FR 32, 83).
+func TestEmailOpsStarterTemplate_ProviderNeutral(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	tpl, err := projecttemplates.FindLibraryTemplate(libDir, "email-ops")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(email-ops): %v", err)
+	}
+
+	// Everything the user reads, in one haystack.
+	var prose []string
+	prose = append(prose, tpl.Name, tpl.Description, tpl.Tagline)
+	for _, a := range tpl.Agents {
+		prose = append(prose, a.Name, a.SystemPrompt)
+	}
+	for _, st := range tpl.StarterTasks {
+		prose = append(prose, st.Description, st.Details)
+	}
+	prose = append(prose, tpl.Tags...)
+	haystack := strings.ToLower(strings.Join(prose, "\n"))
+
+	for _, provider := range []string{"gmail", "google", "outlook", "microsoft", "imap", "smtp", "fastmail", "proton"} {
+		if strings.Contains(haystack, provider) {
+			t.Errorf("Email Ops blueprint names the provider %q; it must stay provider-neutral", provider)
+		}
+	}
+}
+
+// The mail-dependent starter task declares the abstract capability it needs, so
+// execution can stop with an actionable repair instead of spending a model call
+// on an inbox it cannot read (FR 34). The setup task must NOT declare it — that
+// task exists precisely to establish the connection.
+func TestEmailOpsStarterTemplate_TriageRequiresEmailCapability(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	tpl, err := projecttemplates.FindLibraryTemplate(libDir, "email-ops")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(email-ops): %v", err)
+	}
+
+	for _, st := range tpl.StarterTasks {
+		requires := strings.Join(st.Requires, ",")
+		if st.Setup {
+			if requires != "" {
+				t.Errorf("the setup task must not require the connection it creates, got %q", requires)
+			}
+			continue
+		}
+		if requires != "email" {
+			t.Errorf("mail-dependent task %q requires %q, want \"email\"", st.Description, requires)
+		}
+		// Provider-neutral by construction.
+		for _, key := range st.Requires {
+			if strings.Contains(strings.ToLower(key), "gmail") {
+				t.Errorf("capability key %q names a provider", key)
+			}
+		}
 	}
 }

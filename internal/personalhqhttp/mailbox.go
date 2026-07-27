@@ -17,6 +17,28 @@ type MailboxStatus struct {
 	// Health mirrors mailbox.Health: healthy | disconnected | expired |
 	// scope_upgrade. Empty when not connected.
 	Health string `json:"health,omitempty"`
+	// Setup is the server-computed readiness verdict: whether mail work can run
+	// right now and, if not, the exact repair. It is derived from the account
+	// connection, grant health, vault availability, and this workspace's binding
+	// — never from an agent's account of what it set up. Nil when the build
+	// cannot evaluate it.
+	Setup *MailboxSetupState `json:"setup,omitempty"`
+}
+
+// MailboxSetupState is the deterministic connection-readiness verdict for a
+// workspace's mailbox. Every field is safe for the browser: stable codes and
+// display copy, no credentials, vault names, or message content.
+type MailboxSetupState struct {
+	// Ready is true only when mail work can actually run right now.
+	Ready bool `json:"ready"`
+	// Reason is the stable code for the first unmet condition. Empty when ready.
+	Reason string `json:"reason,omitempty"`
+	// Message explains the state in one sentence.
+	Message string `json:"message,omitempty"`
+	// Action / ActionLabel / ActionURL describe the single concrete repair.
+	Action      string `json:"action,omitempty"`
+	ActionLabel string `json:"action_label,omitempty"`
+	ActionURL   string `json:"action_url,omitempty"`
 }
 
 // MailboxLinker performs the Personal HQ email connect/disconnect operations

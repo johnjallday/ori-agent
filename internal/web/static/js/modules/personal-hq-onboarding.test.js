@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   upgradeView,
   emailStatusView,
+  emailSetupView,
   chipStateLabel,
   replyProposalView,
   followUpView,
@@ -196,4 +197,107 @@ test('journalPromptView: degrades safely with no proposal', () => {
   const view = journalPromptView(null);
   assert.equal(view.draft, '');
   assert.equal(view.degraded, false);
+});
+
+// --- Deterministic setup state ----------------------------------------------
+//
+// emailSetupView renders a verdict the SERVER computed from the account
+// connection, grant health, vault availability, and the workspace binding.
+// The point is that setup state is a fact, not an inference from what a setup
+// agent claimed it accomplished.
+
+test('emailSetupView: a ready verdict shows the connected account', () => {
+  const view = emailSetupView({
+    connected: true,
+    email_address: 'me@example.com',
+    setup: { ready: true }
+  });
+  assert.equal(view.state, 'connected');
+  assert.equal(view.chipState, 'equipped');
+  assert.equal(view.detail, 'me@example.com');
+  assert.equal(view.action, 'disconnect');
+});
+
+test('emailSetupView: each blocked reason names its own repair, not a generic one', () => {
+  const cases = [
+    {
+      setup: {
+        ready: false,
+        reason: 'connection_required',
+        message: 'Connect your Google account before this workspace can read email.',
+        action: 'connect_google',
+        action_label: 'Connect Google',
+        action_url: '/settings#google-account'
+      },
+      wantAction: 'settings',
+      wantLabel: 'Connect Google'
+    },
+    {
+      setup: {
+        ready: false,
+        reason: 'capability_not_enabled',
+        message: 'Enable Gmail on your Google account.',
+        action: 'enable_gmail',
+        action_label: 'Enable Gmail',
+        action_url: '/settings#google-account'
+      },
+      wantAction: 'settings',
+      wantLabel: 'Enable Gmail'
+    },
+    {
+      setup: {
+        ready: false,
+        reason: 'vault_repair_required',
+        message: 'Unlock the vault holding your email credentials.',
+        action: 'repair_vault',
+        action_label: 'Unlock vault',
+        action_url: '/settings?gc_action=unlock#google-account'
+      },
+      wantAction: 'settings',
+      wantLabel: 'Unlock vault'
+    },
+    {
+      // The one repair that happens right here rather than on another page.
+      setup: {
+        ready: false,
+        reason: 'not_linked_to_workspace',
+        message: 'Connect your email account to this workspace.',
+        action: 'link_account',
+        action_label: 'Connect email'
+      },
+      wantAction: 'connect',
+      wantLabel: 'Connect email'
+    }
+  ];
+
+  cases.forEach(({ setup, wantAction, wantLabel }) => {
+    const view = emailSetupView({ connected: false, setup });
+    assert.equal(view.action, wantAction, `action for ${setup.reason}`);
+    assert.equal(view.actionLabel, wantLabel, `label for ${setup.reason}`);
+    assert.equal(view.detail, setup.message, `message for ${setup.reason}`);
+    assert.equal(view.reason, setup.reason);
+    if (setup.action_url) assert.equal(view.actionUrl, setup.action_url);
+  });
+});
+
+test('emailSetupView: a reconnect-required verdict reads as needing repair', () => {
+  const view = emailSetupView({
+    connected: false,
+    setup: {
+      ready: false,
+      reason: 'reconnect_required',
+      message: 'The linked email account needs to be reconnected.',
+      action: 'reconnect_gmail',
+      action_label: 'Reconnect Gmail',
+      action_url: '/settings#google-account'
+    }
+  });
+  assert.equal(view.chipState, 'repair');
+  assert.equal(view.actionLabel, 'Reconnect Gmail');
+});
+
+test('emailSetupView: a status with no verdict falls back to the connection-only view', () => {
+  const view = emailSetupView({ connected: true, email_address: 'me@example.com' });
+  assert.equal(view.state, 'connected');
+  assert.equal(view.detail, 'me@example.com');
 });

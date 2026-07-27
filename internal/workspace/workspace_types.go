@@ -357,6 +357,13 @@ type Task struct {
 	// (e.g. an Action Center opportunity ID). Display-only metadata.
 	SourceType string `json:"source_type,omitempty"`
 	SourceID   string `json:"source_id,omitempty"`
+	// RequiredCapabilities lists the abstract capability keys (see
+	// task_capability.go) that must be connected and healthy before this task
+	// may execute — e.g. "email" for an inbox-triage task. Provider-neutral by
+	// construction: the key never names Gmail, Outlook, or any specific
+	// connector. Empty (the default, and every task created before this field
+	// existed) means the task has no connection precondition.
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 	// AwaitingExecutionIntent marks a Ready-or-later task that has not yet
 	// received an explicit assignment, schedule, or run action (PRD FR11).
 	// It is set true only by Backlog promotion and direct unassigned-Ready

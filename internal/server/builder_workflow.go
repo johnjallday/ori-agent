@@ -481,6 +481,13 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 	b.orchestrationHandler = handler
 
+	// Stop a task whose declared connection preconditions are unmet before its
+	// run starts (FR 34, 35). The evaluator was built in Phase 18; the task
+	// sub-handler only exists now.
+	if b.emailReadiness != nil {
+		handler.SetTaskCapabilityGate(b.emailReadiness)
+	}
+
 	// Template-setup first-open auto-start runs seeded tasks through the same
 	// execution path as the manual execute endpoint.
 	if b.sessionHandler != nil {

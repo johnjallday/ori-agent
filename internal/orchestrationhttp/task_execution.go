@@ -793,6 +793,20 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		return "", fmt.Errorf("task %s has no assigned agent", task.Description)
 	}
 
+	// Connection preconditions come first: a task that needs a mailbox cannot be
+	// helped by running it, so block with the exact repair rather than spending a
+	// model call to discover the same thing (FR 34, 35).
+	if th.capabilityGate != nil && len(task.RequiredCapabilities) > 0 {
+		if blocked := th.capabilityGate.CheckTaskCapabilities(ws.ID, task.RequiredCapabilities); blocked != nil {
+			if err := th.markTaskBlocked(ws, task, blocked, manual, map[string]any{
+				"precondition": "capability",
+			}); err != nil {
+				return "", err
+			}
+			return "", blocked
+		}
+	}
+
 	if len(task.InputTaskIDs) > 0 {
 		logger.Info("Task has input tasks, checking if they need execution first", logger.Fields{"task_id": task.ID, "input_count": len(task.InputTaskIDs)})
 		if err := th.executeInputTasksIfNeeded(ws, task); err != nil {
@@ -1143,6 +1157,11 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 		}
 		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
 			humanLoop["agent_response"] = raw
+		}
+		// A structured repair marks the block as repair-gated: the UI offers this
+		// action instead of a Retry that would just reproduce the same block.
+		if blockedErr.Repair != nil && strings.TrimSpace(blockedErr.Repair.Label) != "" {
+			humanLoop["repair"] = blockedErr.Repair
 		}
 		if workflowStep := workspace.PrepareTaskBlockedWorkflowStep(blockedErr.WorkflowStep, blockedErrReasonCode(blockedErr)); workflowStep != nil && (len(workflowStep.Choices) > 0 || len(workflowStep.Fields) > 0) {
 			humanLoop["workflow_step"] = workflowStep

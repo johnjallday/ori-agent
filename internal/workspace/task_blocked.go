@@ -46,6 +46,19 @@ type TaskBlockedWorkflowStep struct {
 	FreeTextAllowed bool                `json:"free_text_allowed,omitempty"`
 }
 
+// TaskRepairAction is the single concrete thing a user does to unblock a task.
+// It is structured rather than a sentence inside SuggestedActions so the UI can
+// render a real link and, critically, gate the Retry action on it: retrying
+// before the repair happens simply reproduces the same block.
+type TaskRepairAction struct {
+	// Code is the stable machine code for the action (e.g. "connect_google").
+	Code string `json:"code,omitempty"`
+	// Label is the button text.
+	Label string `json:"label,omitempty"`
+	// URL is where the repair happens, when it lives on another page.
+	URL string `json:"url,omitempty"`
+}
+
 type TaskBlockedError struct {
 	ReasonCode       string
 	Reason           string
@@ -53,6 +66,10 @@ type TaskBlockedError struct {
 	SuggestedActions []string
 	RawResponse      string
 	WorkflowStep     *TaskBlockedWorkflowStep
+	// Repair, when set, is the exact action that will unblock this task. Blocks
+	// that carry one are repair-gated: the UI offers the repair, not a retry
+	// that cannot yet succeed.
+	Repair *TaskRepairAction
 }
 
 // PrepareTaskBlockedWorkflowStep returns a copy of step with common recovery
