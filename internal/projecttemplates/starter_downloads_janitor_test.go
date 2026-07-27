@@ -168,19 +168,25 @@ func TestDownloadsJanitorStarterTemplate_CuratorPromptSafety(t *testing.T) {
 }
 
 // TestDownloadsJanitorStarterTemplate_StarterTasks pins the ordered starter
-// experience: one first-open setup task, then one initial-backlog review task
-// (FR-4).
+// experience: a setup task, then an initial-backlog review task (FR-4).
+//
+// Neither is flagged `setup: true`, so neither auto-starts on first open. The
+// Janitor's setup card *is* the guided setup — it states what access it wants,
+// pre-fills the suggested folder, and needs one press. Auto-starting an agent
+// to narrate it put the platform's autonomy-gate confirmation modal directly
+// over the card the user has to act on, so the first thing a new workspace did
+// was block its own setup behind a dialog about something else. The tasks stay
+// seeded and visible; the user starts them if they want them.
 func TestDownloadsJanitorStarterTemplate_StarterTasks(t *testing.T) {
 	tpl := loadDownloadsJanitorTemplate(t)
 
 	if len(tpl.StarterTasks) != 2 {
 		t.Fatalf("expected 2 starter tasks (setup + backlog review), got %d: %+v", len(tpl.StarterTasks), tpl.StarterTasks)
 	}
-	if !tpl.StarterTasks[0].Setup {
-		t.Fatalf("the first starter task must be the setup task: %+v", tpl.StarterTasks[0])
-	}
-	if tpl.StarterTasks[1].Setup {
-		t.Fatalf("only the first starter task may be the setup task: %+v", tpl.StarterTasks[1])
+	for i, task := range tpl.StarterTasks {
+		if task.Setup {
+			t.Fatalf("starter task %d must not auto-start on first open: it would cover the setup card with a confirmation modal: %+v", i, task)
+		}
 	}
 
 	setup := strings.ToLower(tpl.StarterTasks[0].Details)

@@ -62,9 +62,25 @@ function fixtureFolder(label: string, files: Record<string, string>): string {
   return root;
 }
 
-async function createJanitorWorkspace(request: APIRequestContext, name: string): Promise<string> {
+/**
+ * Creates a Downloads Janitor workspace.
+ *
+ * Workspaces are created the way the product creates them, agents included.
+ * Nothing auto-starts on first open, so no task-confirmation modal lands over
+ * the surface under test.
+ */
+async function createJanitorWorkspace(
+  request: APIRequestContext,
+  name: string,
+  withTemplateAgents = true
+): Promise<string> {
   const res = await request.post('/api/workspaces', {
-    data: { name, description: '', template_id: TEMPLATE_ID, create_template_agents: true }
+    data: {
+      name,
+      description: '',
+      template_id: TEMPLATE_ID,
+      create_template_agents: withTemplateAgents
+    }
   });
   expect(res.ok(), await res.text()).toBeTruthy();
   const body = await res.json();
@@ -88,6 +104,24 @@ async function scan(page: Page) {
 
 function rowFor(page: Page, name: string) {
   return page.locator('.dj-row-item').filter({ hasText: name });
+}
+
+/**
+ * Presses the confirmation's apply button.
+ *
+ * Waits for the panel's own content first. The confirm button is created and
+ * appended in the same tick as the panel, so a click issued the instant the
+ * selector resolves can race the render — a real user cannot click that fast,
+ * but a test can, and the result is a silent no-op indistinguishable from a
+ * broken button. Asserting on the panel's text pins it down before clicking.
+ */
+async function confirmApply(page: Page) {
+  const panel = page.locator('.dj-confirm');
+  await expect(panel).toBeVisible({ timeout: 15000 });
+  await expect(panel).toContainText('Confirm these moves');
+  await expect(page.locator('#downloadsJanitorConfirmApply')).toBeEnabled();
+  await page.locator('#downloadsJanitorConfirmApply').click();
+  await expect(page.locator('.dj-results')).toBeVisible({ timeout: 30000 });
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -238,8 +272,7 @@ test.describe('Downloads Janitor', () => {
     await expect(confirm).toContainText('Filed/Images');
     expect(existsSync(join(root, 'report.pdf')), 'nothing moves at approval').toBeTruthy();
 
-    await page.locator('#downloadsJanitorConfirmApply').click();
-    await expect(page.locator('.dj-results')).toBeVisible({ timeout: 15000 });
+    await confirmApply(page);
 
     expect(existsSync(join(root, 'Filed', 'Documents', 'report.pdf'))).toBeTruthy();
     expect(existsSync(join(root, 'Filed', 'Images', 'photo.png'))).toBeTruthy();
@@ -262,8 +295,7 @@ test.describe('Downloads Janitor', () => {
     await expect(page.locator('.dj-confirm')).toContainText('invoice (2).pdf');
     await expect(page.locator('.dj-confirm')).toContainText('already there');
 
-    await page.locator('#downloadsJanitorConfirmApply').click();
-    await expect(page.locator('.dj-results')).toBeVisible({ timeout: 15000 });
+    await confirmApply(page);
 
     expect(existsSync(join(root, 'Filed', 'Documents', 'invoice (2).pdf'))).toBeTruthy();
     // The original is untouched — that is the whole point.
@@ -311,8 +343,7 @@ test.describe('Downloads Janitor', () => {
     await scan(page);
     await rowFor(page, 'contract.pdf').locator('.dj-select').check();
     await page.locator('#downloadsJanitorApprove').click();
-    await page.locator('#downloadsJanitorConfirmApply').click();
-    await expect(page.locator('.dj-results')).toBeVisible({ timeout: 15000 });
+    await confirmApply(page);
     expect(existsSync(join(root, 'Filed', 'Documents', 'contract.pdf'))).toBeTruthy();
 
     const entry = page.locator('.dj-history-item').filter({ hasText: 'contract.pdf' }).first();
@@ -363,8 +394,7 @@ test.describe('Downloads Janitor', () => {
     await scan(page);
     await rowFor(page, 'keep.pdf').locator('.dj-select').check();
     await page.locator('#downloadsJanitorApprove').click();
-    await page.locator('#downloadsJanitorConfirmApply').click();
-    await expect(page.locator('.dj-results')).toBeVisible({ timeout: 15000 });
+    await confirmApply(page);
 
     const revoked = await request.post(`/api/workspaces/${id}/downloads-janitor/revoke`);
     expect(revoked.ok()).toBeTruthy();

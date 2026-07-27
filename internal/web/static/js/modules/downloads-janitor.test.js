@@ -1692,3 +1692,78 @@ test('an explicit workspace id still wins over the URL', async () => {
   assert.ok(!requested.some(url => url.includes('ws-from-url')));
   assert.ok(doc);
 });
+
+// The confirm button appears as soon as the approval comes back. If the panel
+// is still "busy" at that moment, pressing it does nothing at all — no request,
+// no error, no feedback. A user who clicks promptly must not be ignored.
+test('the confirm button works the instant it appears', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+
+  const requested = [];
+  globalThis.fetch = async url => {
+    requested.push(String(url));
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: { ...PREVIEW, trash_count: 0 } }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      return { ok: true, json: async () => ({ result: { outcomes: [], applied: 1, failed: 0 } }) };
+    }
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  // Press it immediately, with no intervening turns.
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.ok(
+    requested.some(url => url.endsWith('/apply')),
+    'pressing confirm must send the apply, not be swallowed: ' + JSON.stringify(requested)
+  );
+});
+
+// The confirmation panel lives outside the batch container, so a batch reload
+// leaves it on screen. If the reload also discards the approval behind it, the
+// confirm button stays visible and enabled but does nothing at all.
+test('a batch reload does not invalidate a confirmation already on screen', async () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._select('c1');
+
+  const requested = [];
+  globalThis.fetch = async url => {
+    requested.push(String(url));
+    if (String(url).endsWith('/preview')) {
+      return { ok: true, json: async () => ({ preview: { ...PREVIEW, trash_count: 0 } }) };
+    }
+    if (String(url).endsWith('/apply')) {
+      return { ok: true, json: async () => ({ result: { outcomes: [], applied: 1, failed: 0 } }) };
+    }
+    return {
+      ok: true,
+      json: async () => ({ batch: batchFixture(), candidates: candidatesFixture() })
+    };
+  };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(doc.getElementById('downloadsJanitorConfirmApply'), 'expected a confirmation');
+
+  // A reload of the same batch lands while the confirmation is up — exactly
+  // what an in-flight loadBatch from the preceding scan does.
+  await panel._reloadBatch();
+
+  doc.getElementById('downloadsJanitorConfirmApply').click();
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(
+    requested.some(url => url.endsWith('/apply')),
+    'the approval must survive a reload of the same batch: ' + JSON.stringify(requested)
+  );
+});

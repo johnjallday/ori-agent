@@ -630,7 +630,12 @@
   // renderConfirmation shows the final, server-derived plan: the exact
   // destination each file will get, including any rename forced by a name
   // already in use. This is the last thing the user sees before anything moves.
-  function renderConfirmation(previewResult) {
+  // approval is { preview, decisions } — the same object held in
+  // pendingPreview. It is passed through rather than re-read from module state
+  // when the button is pressed, so nothing that happens between rendering the
+  // confirmation and the user clicking it can quietly empty the button.
+  function renderConfirmation(approval) {
+    const previewResult = (approval && approval.preview) || {};
     const host = document.getElementById('downloadsJanitorConfirmHost');
     if (!host) return;
     clear(host);
@@ -692,7 +697,7 @@
     const confirm = button(
       confirmLabel(previewResult),
       'dj-btn dj-btn-primary' + (trashCount > 0 ? ' dj-btn-destructive' : ''),
-      () => void applyApproval(previewResult)
+      () => void applyApproval(approval)
     );
     confirm.id = 'downloadsJanitorConfirmApply';
     // A batch containing any removal needs a second, explicit acknowledgement
@@ -1358,7 +1363,14 @@
         throw new Error((apiError && apiError.message) || 'Ori could not prepare these moves.');
       }
       pendingPreview = { preview: body.preview, decisions };
-      renderConfirmation(body.preview || {});
+      // Release the busy flag BEFORE the confirmation goes on screen. Rendering
+      // it first left a window in which the confirm button was visible and
+      // enabled while applyApproval still saw busy === true and returned
+      // silently: a user who clicked promptly got nothing at all, with no error
+      // and no request. The approval request is finished by this point, so
+      // there is nothing left to be busy with.
+      busy = false;
+      renderConfirmation(pendingPreview);
     } catch (error) {
       showError(error.message || 'Ori could not prepare these moves.');
     } finally {
@@ -1368,9 +1380,13 @@
   }
 
   // applyApproval spends the approval and reports the per-item outcome.
-  async function applyApproval() {
+  async function applyApproval(approval) {
     const id = wsId();
-    if (!id || busy || !pendingPreview) return;
+    // Prefer the approval this button was built with. Falling back to module
+    // state keeps older call sites working, but the button the user pressed is
+    // the authority on what they approved.
+    const active = approval && approval.preview ? approval : pendingPreview;
+    if (!id || busy || !active) return;
     busy = true;
     showError('');
     const control = document.getElementById('downloadsJanitorConfirmApply');
@@ -1385,9 +1401,9 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            batch_id: pendingPreview.preview.batch_id,
-            approval_token: pendingPreview.preview.token,
-            decisions: pendingPreview.decisions
+            batch_id: active.preview.batch_id,
+            approval_token: active.preview.token,
+            decisions: active.decisions
           })
         }
       );
@@ -1849,10 +1865,29 @@
       lastBatch = null;
       lastCandidates = [];
     }
-    selected = new Set();
-    trashMarked = new Set();
-    pendingPreview = null;
-    renderBatch();
+    // A confirmation already on screen must survive a batch reload that did not
+    // change the batch.
+    //
+    // The confirmation panel lives in its own host, outside the batch
+    // container, so a repaint leaves it standing. Clearing pendingPreview
+    // unconditionally therefore left the confirm button visible and enabled
+    // while the approval behind it was gone: pressing it did nothing, sent
+    // nothing, and said nothing. A loadBatch() still in flight when the
+    // approval returned — from the scan that produced the batch — was enough
+    // to trigger it, which made it intermittent and load-dependent.
+    //
+    // Only discard the approval when it no longer describes what is on screen.
+    const approvalStillApplies =
+      pendingPreview &&
+      lastBatch &&
+      pendingPreview.preview &&
+      pendingPreview.preview.batch_id === lastBatch.id;
+    if (!approvalStillApplies) {
+      selected = new Set();
+      trashMarked = new Set();
+      pendingPreview = null;
+      renderBatch();
+    }
     refreshStats();
   }
 
@@ -1969,6 +2004,7 @@
       filter = '';
     },
     _selected: () => Array.from(selected),
+    _reloadBatch: () => loadBatch(),
     // Clears the remembered workspace so a test can exercise a cold load, the
     // state a real page visit starts from.
     _forgetWorkspace: () => {
