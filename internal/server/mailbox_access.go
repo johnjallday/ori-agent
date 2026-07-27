@@ -101,11 +101,15 @@ func isInboxAgent(name string) bool {
 	return strings.EqualFold(name, "Inbox")
 }
 
-// emailBindingFor returns the workspace's first enabled email MCP binding that
-// names an account and permits read/search, or false.
+// emailBindingFor returns the workspace's first enabled native email binding
+// that names an account and permits read/search, or false.
+//
+// Classification comes from the shared workspace classifier — the same one the
+// runtime resolver uses to EXCLUDE these bindings from MCP materialization — so
+// the two can never disagree about which bindings are native mail (FR 26, 31).
 func emailBindingFor(ws *workspace.Workspace) (workspace.MCPBinding, bool) {
 	for _, b := range ws.MCPBindings {
-		if !b.Enabled || !isEmailServerName(b.ServerName) {
+		if !b.Enabled || !b.IsNativeEmail() {
 			continue
 		}
 		if stringFromConfig(b.Config, "account_id") == "" {
@@ -168,15 +172,6 @@ func agentInstanceByName(ws *workspace.Workspace, name string) (workspace.AgentI
 		}
 	}
 	return workspace.AgentInstance{}, false
-}
-
-func isEmailServerName(serverName string) bool {
-	switch strings.ToLower(strings.TrimSpace(serverName)) {
-	case "email", "gmail", "microsoft-mail", "microsoft", "outlook-mail", "imap-smtp", "imap_smtp":
-		return true
-	default:
-		return false
-	}
 }
 
 func stringFromConfig(cfg map[string]any, key string) string {

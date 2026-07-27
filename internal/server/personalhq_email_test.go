@@ -75,7 +75,7 @@ func TestPersonalHQMailboxLinkStatusUnlink(t *testing.T) {
 	ws, _ = wstore.Get("hq-1")
 	emailBindings := 0
 	for _, b := range ws.MCPBindings {
-		if isEmailServerName(b.ServerName) {
+		if workspace.IsNativeEmailServerName(b.ServerName) {
 			emailBindings++
 		}
 	}

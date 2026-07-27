@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -348,5 +349,79 @@ func TestWorkspaceStoreAdapter_StationPositionsRoundTrip(t *testing.T) {
 	}
 	if got := roundTripped.Layout.StationPositions["email"]; got.X != 0.92 || got.Y != 0.15 {
 		t.Fatalf("expected station position to round-trip, got %#v", got)
+	}
+}
+
+// A binding's runtime kind must survive session persistence: a mailbox binding
+// that lost its `native_email` marker on save would be re-classified as an MCP
+// server on the next load, which is the failure this field exists to prevent.
+// Legacy records with no field must keep decoding unchanged (FR 23; Rollout 1).
+func TestWorkspaceStoreAdapter_RuntimeKindRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	now := time.Now().UTC().Round(time.Second)
+
+	input := &workspace.Workspace{
+		ID:        "workspace-1",
+		Name:      "Email Ops",
+		CreatedAt: now,
+		UpdatedAt: now,
+		MCPBindings: []workspace.MCPBinding{
+			{
+				ID:          "binding-mail",
+				ServerName:  "gmail",
+				Enabled:     true,
+				RuntimeKind: workspace.RuntimeKindNativeEmail,
+				Config:      map[string]any{"account_id": "acct-1"},
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+			{
+				ID:         "binding-fs",
+				ServerName: "filesystem",
+				Enabled:    true,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if !strings.Contains(string(sessionWS.MCPBindingsJSON), `"runtime_kind":"native_email"`) {
+		t.Fatalf("serialized bindings lost runtime_kind: %s", sessionWS.MCPBindingsJSON)
+	}
+
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if len(roundTripped.MCPBindings) != 2 {
+		t.Fatalf("expected 2 round-tripped bindings, got %d", len(roundTripped.MCPBindings))
+	}
+	mail := roundTripped.MCPBindings[0]
+	if mail.RuntimeKind != workspace.RuntimeKindNativeEmail || !mail.IsNativeEmail() {
+		t.Fatalf("mail binding = %+v, want native_email", mail)
+	}
+	if fs := roundTripped.MCPBindings[1]; fs.RuntimeKind != "" || !fs.IsRuntimeMCP() {
+		t.Fatalf("filesystem binding = %+v, want an unset kind classified as mcp", fs)
+	}
+}
+
+// Records written before the field existed decode without it and still classify
+// correctly from their server name.
+func TestWorkspaceStoreAdapter_LegacyBindingWithoutRuntimeKind(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	sessionWS := &Workspace{
+		ID:              "workspace-1",
+		Name:            "Email Ops",
+		MCPBindingsJSON: json.RawMessage(`[{"id":"legacy","server_name":"gmail","enabled":true}]`),
+	}
+
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if len(roundTripped.MCPBindings) != 1 {
+		t.Fatalf("expected 1 binding, got %d", len(roundTripped.MCPBindings))
+	}
+	binding := roundTripped.MCPBindings[0]
+	if binding.RuntimeKind != "" {
+		t.Fatalf("legacy record gained runtime_kind %q", binding.RuntimeKind)
+	}
+	if !binding.IsNativeEmail() {
+		t.Fatal("a legacy gmail binding must still classify as native email")
 	}
 }

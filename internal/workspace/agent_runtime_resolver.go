@@ -207,6 +207,15 @@ func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance 
 		if serverName == "" {
 			continue
 		}
+		// Native capability bindings (email) have no MCP server template. They must
+		// be excluded here — before template lookup, before MCP override
+		// bookkeeping, and before tool-allowlist bookkeeping — because a `gmail`
+		// binding is authorization for Ori's own mailbox tools, not a server to
+		// launch (FR 24, 25). The binding stays in workspace state, where the
+		// mailbox access gate reads it (FR 26).
+		if !binding.IsRuntimeMCP() {
+			continue
+		}
 		overriddenServerNames = append(overriddenServerNames, serverName)
 		if !binding.Enabled {
 			continue
@@ -320,6 +329,18 @@ func (r *AgentRuntimeResolver) materializeRuntimeBinding(workspaceID string, bin
 	templateName := strings.TrimSpace(binding.ServerName)
 	if templateName == "" {
 		return "", fmt.Errorf("binding %s has no server name", binding.ID)
+	}
+
+	// Fail-closed guard for direct callers (MaterializeRuntimeBinding is exported).
+	// Reaching a template lookup with a native — or unclassifiable — binding is a
+	// programming error, and answering it by registering a stand-in server would
+	// be worse than failing (FR 24, 28).
+	kind, err := binding.EffectiveRuntimeKind()
+	if err != nil {
+		return "", fmt.Errorf("classify binding %s: %w", binding.ID, err)
+	}
+	if kind != RuntimeKindMCP {
+		return "", fmt.Errorf("binding %s is a %s capability and has no MCP server to materialize", binding.ID, kind)
 	}
 
 	template, err := r.mcpConfigManager.GetServer(templateName)

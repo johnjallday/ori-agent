@@ -763,12 +763,19 @@ type StoreNode struct {
 // MCPBinding represents a concrete MCP binding owned by the workspace.
 // ServerName maps to the globally configured MCP server template/definition.
 type MCPBinding struct {
-	ID         string         `json:"id"`
-	ServerName string         `json:"server_name"`
-	Alias      string         `json:"alias,omitempty"`
-	Enabled    bool           `json:"enabled"`
-	Scope      map[string]any `json:"scope,omitempty"`
-	Config     map[string]any `json:"config,omitempty"`
+	ID         string `json:"id"`
+	ServerName string `json:"server_name"`
+	Alias      string `json:"alias,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	// RuntimeKind is how this binding is realized: an MCP server template
+	// ("mcp") or one of Ori's native capabilities ("native_email"). It is
+	// consulted BEFORE any MCP template lookup, which is what keeps a native
+	// mailbox binding from being mistaken for a missing MCP server. Empty on
+	// every binding authored before this field existed; see
+	// EffectiveRuntimeKind for the backward-compatible classification.
+	RuntimeKind BindingRuntimeKind `json:"runtime_kind,omitempty"`
+	Scope       map[string]any     `json:"scope,omitempty"`
+	Config      map[string]any     `json:"config,omitempty"`
 	// DefaultSideEffect classifies the binding's tools when no per-tool override
 	// applies. Empty means unclassified; mission runs must not invoke this
 	// binding until the user classifies it (one-time prompt on mission enable).

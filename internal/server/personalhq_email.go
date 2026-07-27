@@ -127,7 +127,11 @@ func (l *mailboxLinkerService) linkMailboxToWorkspace(ctx context.Context, ws *w
 	if err := ws.UpsertMCPBinding(workspace.MCPBinding{
 		ID:         bindingID,
 		ServerName: "gmail",
-		Enabled:    true,
+		// Mark the binding native so the runtime never looks for an MCP template
+		// named "gmail" (FR 29). Relinking rewrites it, which is also how a legacy
+		// binding written before this field existed gets upgraded in place.
+		RuntimeKind: workspace.RuntimeKindNativeEmail,
+		Enabled:     true,
 		Config: map[string]any{
 			"account_id":      acc.ID,
 			"allowed_actions": []any{"read", "search"},
