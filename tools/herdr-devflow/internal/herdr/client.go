@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -1043,7 +1044,13 @@ func apiError(code, message string) error {
 }
 
 func (c *Client) commandError(stage string, result CommandResult, err error) error {
-	if errors.Is(err, exec.ErrNotFound) {
+	// Two different misses mean the same thing to the user. A bare command name
+	// that is not on PATH fails LookPath with exec.ErrNotFound, while an
+	// explicitly configured path that does not exist fails at exec with ENOENT.
+	// Only the first was recognised, so a stale HERDR_BIN_PATH reported "Herdr
+	// is unavailable — check the server" when the truthful advice is "install
+	// Herdr, or fix the path".
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 		return &model.StageError{Stage: stage, Code: model.ErrHerdrMissing, Message: "Herdr executable was not found", Recovery: "install Herdr, then run wt herd setup", Cause: err}
 	}
 	if errors.Is(err, os.ErrPermission) {

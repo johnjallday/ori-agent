@@ -3,6 +3,15 @@
 # worktree or contacting a running Herdr server.
 set -euo pipefail
 
+# This suite is non-interactive by definition, and one of the behaviours it
+# asserts — wt done failing closed when Herdr state cannot be verified — branches
+# on whether stdin is a terminal. Leaving stdin as the caller gave it made the
+# run depend on how it was invoked: from a terminal it is a TTY, and under a
+# background runner it can be an open pipe that never delivers, which blocks the
+# suite instead of failing it. Pin stdin closed so the assertions mean the same
+# thing everywhere.
+exec < /dev/null
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/ori-wt-herd.XXXXXX")"
 trap 'rm -rf -- "$fixture_root"' EXIT
@@ -45,6 +54,56 @@ wt start bridge >/dev/null
 > "$fixture_root/herd-calls"
 wt start bridge --kind codex >/dev/null
 [[ "$(<"$fixture_root/herd-calls")" == "handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex" ]]
+
+# FR-32: a Herdr failure is non-fatal. The worktree and its planning documents
+# are what the user actually asked for, so wt start still exits 0, still leaves
+# them in place, and prints a reason plus the command that resumes only the
+# missing Herdr half.
+> "$fixture_root/herd-calls"
+degraded_status=0
+wt start bridge > "$fixture_root/degraded-output" 2>&1 || degraded_status=$?
+[[ "$degraded_status" == "0" ]]
+[[ -f "$target_root/tasks/prd-bridge.md" ]]
+[[ -f "$target_root/tasks/tasks-bridge.md" ]]
+rg -q "planning documents are ready and unchanged" "$fixture_root/degraded-output"
+rg -q "wt herd retry --feature 'bridge' --worktree '$target_root' --branch 'feature/bridge'" "$fixture_root/degraded-output"
+rg -q "wt herd doctor" "$fixture_root/degraded-output"
+
+# FR-38: the same guarantee against the real bridge boundary rather than the
+# stub above. Pointing HERDR_BIN_PATH at a binary that does not exist is the
+# hermetic form of "Herdr is not installed": the helper must classify it as
+# herdr_missing, exit 1, and touch nothing in the checkout.
+missing_status=0
+HERDR_DEVFLOW_USE_SOURCE=1 \
+HERDR_BIN_PATH="$fixture_root/no-such-herdr-binary" \
+HERDR_DEVFLOW_HOME="$fixture_root/runtime" \
+  bash "$repo_root/scripts/herdr-devflow.sh" handoff \
+    --feature bridge --worktree "$target_root" --branch feature/bridge \
+    > "$fixture_root/missing-output" 2>&1 || missing_status=$?
+[[ "$missing_status" == "1" ]]
+rg -q "herdr_missing" "$fixture_root/missing-output"
+[[ -f "$target_root/tasks/prd-bridge.md" ]]
+
+# FR-35: the durable kill switch is not an error. With [bridge] enabled = false
+# the helper reports status: disabled and exits 0, so a wt start on a machine
+# that has opted out reads as success rather than a broken handoff.
+mkdir -p "$fixture_root/disabled-repo/.herdr"
+cat > "$fixture_root/disabled-repo/.herdr/devflow.toml" <<'TOML'
+[bridge]
+schema_version = 1
+enabled = false
+min_herdr_version = "0.7.5"
+source_id = "ori.devflow"
+TOML
+disabled_status=0
+HERDR_DEVFLOW_USE_SOURCE=1 \
+HERDR_BIN_PATH="$fixture_root/no-such-herdr-binary" \
+HERDR_DEVFLOW_HOME="$fixture_root/runtime" \
+  bash "$repo_root/scripts/herdr-devflow.sh" --repo-root "$fixture_root/disabled-repo" handoff \
+    --feature bridge --worktree "$target_root" --branch feature/bridge \
+    > "$fixture_root/disabled-output" 2>&1 || disabled_status=$?
+[[ "$disabled_status" == "0" ]]
+rg -q "disabled" "$fixture_root/disabled-output"
 
 # A blocked Herdr cleanup guard must stop wt done before it mutates the
 # backlog, archives tasks, checks dirty state, or asks Git to remove anything.
@@ -219,5 +278,44 @@ function wt_herd {
 }
 wt status --worktrees > /dev/null
 [[ ! -f "$fixture_root/legacy-calls" ]]
+
+# FR-36: the Git-and-GitHub half of wt must stay Herdr-free. Adding tabs and
+# routing wt new through the shared flow must not quietly make Herdr a
+# prerequisite for reading, navigating, or shipping.
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/herdr-free-calls"
+  return 0
+}
+wt ls > /dev/null
+wt help > /dev/null
+[[ ! -f "$fixture_root/herdr-free-calls" ]]
+
+# The remaining Herdr-free commands mutate Git or GitHub, so they are asserted
+# structurally instead of by running them: no dispatcher branch below may
+# mention the bridge helper at all.
+function wt_case_branch_body {
+  awk -v want="  $1)" '
+    $0 == want { inside = 1; next }
+    inside && $0 == "    ;;" { inside = 0 }
+    inside { print }
+  ' "$repo_root/scripts/wt.sh"
+}
+for herdr_free_command in pr merge demo backlog cd ls; do
+  body="$(wt_case_branch_body "$herdr_free_command")"
+  if [[ -z "$body" ]]; then
+    print -r -- "could not read the '$herdr_free_command' dispatcher branch" >&2
+    exit 1
+  fi
+  if print -r -- "$body" | rg -q "wt_herd"; then
+    print -r -- "wt $herdr_free_command reaches for the Herdr bridge; it must stay Herdr-free" >&2
+    exit 1
+  fi
+done
+
+# --no-herdr is the supported per-invocation escape hatch (FR-33), so it has to
+# be discoverable from wt help rather than only from the source.
+wt help > "$fixture_root/help-output" 2>&1
+rg -q -- "--no-herdr" "$fixture_root/help-output"
+rg -q "bare Git worktree" "$fixture_root/help-output"
 
 print -r -- "wt-herd.test.sh: ok"

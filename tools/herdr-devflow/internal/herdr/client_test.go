@@ -5,12 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -492,5 +495,31 @@ func TestFocusedWorkspaceResolvesTheSessionTargetOrReportsNoFocus(t *testing.T) 
 	var stage *model.StageError
 	if !errors.As(err, &stage) || stage.Code != model.ErrNoFocusedWorkspace {
 		t.Fatalf("FocusedWorkspace() with no focus = %#v, want ErrNoFocusedWorkspace", err)
+	}
+}
+
+// Herdr not being installed and HERDR_BIN_PATH pointing somewhere stale are the
+// same problem to the user, but they surface as two different exec errors: a
+// bare name misses in LookPath, an absolute path misses at exec with ENOENT.
+// Both must read as "install or fix the path", not "check the Herdr server".
+func TestMissingHerdrBinaryIsClassifiedForBothLookupAndPathMisses(t *testing.T) {
+	t.Parallel()
+	cases := map[string]error{
+		"not on PATH":         exec.ErrNotFound,
+		"configured but gone": &fs.PathError{Op: "fork/exec", Path: "/nowhere/herdr", Err: syscall.ENOENT},
+	}
+	for name, cause := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runner := &fakeRunner{errors: map[string]error{"--version": cause}}
+			_, err := New("/nowhere/herdr", "", runner).Version(context.Background())
+			var stage *model.StageError
+			if !errors.As(err, &stage) || stage.Code != model.ErrHerdrMissing {
+				t.Fatalf("Version() error = %#v, want ErrHerdrMissing", err)
+			}
+			if stage.Recovery == "" {
+				t.Fatal("a missing-binary failure must carry a recovery command")
+			}
+		})
 	}
 }

@@ -681,6 +681,42 @@ function wt_herd {
   bash "$helper" "$@"
 }
 
+# The single Herdr degradation contract, shared by every command that hands a
+# worktree to Herdr.
+#
+# Herdr is a third-party binary on its own release channel, so it stays an
+# optional session layer over a Git-and-GitHub core. Every Herdr-side failure
+# lands here: binary missing, daemon down, version or API schema too old, no
+# focused workspace to place the tab in, tab create refused, the tab's pane
+# unusable, agent start or bootstrap prompt timed out, socket permission denied.
+#
+# All of them are non-fatal by construction. The worktree and its planning
+# documents already exist before this runs and are never rolled back; the helper
+# has already printed the stage, code, message, and its own recovery command on
+# stderr; this adds the line that re-runs only the missing Herdr half.
+#
+# Always returns 0. A Herdr problem must never make wt start or wt new look like
+# it failed, because the thing the user actually asked for — a worktree they can
+# work in — is sitting there ready.
+function wt_herd_handoff {
+  local feature="$1" target="$2" branch="$3" primary_kind="${4:-}"
+  local -a handoff_args
+  handoff_args=(handoff --feature "$feature" --worktree "$target" --branch "$branch")
+  if [[ -n "$primary_kind" ]]; then
+    handoff_args+=(--kind "$primary_kind")
+  fi
+  echo "Handing the existing worktree to Herdr..."
+  if wt_herd "${handoff_args[@]}"; then
+    return 0
+  fi
+  echo
+  echo "Herdr handoff did not finish. The Git worktree and its planning documents are ready and unchanged."
+  echo "  Retry the Herdr half: wt herd retry --feature '$feature' --worktree '$target' --branch '$branch'"
+  echo "  Diagnose:             wt herd doctor"
+  echo "  Continue without it:  cd '$target'"
+  return 0
+}
+
 # Run the cleanup preflight from the target worktree itself. Older worktrees
 # without the optional bridge remain fully compatible with wt done; only a
 # worktree carrying both its checked-in bridge config and helper is guarded.
@@ -885,19 +921,10 @@ function wt_dispatch {
 
     # Git provisioning remains successful even when Herdr isn't installed,
     # unavailable, or needs recovery. Handoff happens only after the real
-    # worktree and its planning artifacts exist; it never rolls them back.
+    # worktree and its planning artifacts exist; see wt_herd_handoff for the
+    # degradation contract every Herdr failure funnels into.
     if (( ! no_herdr )); then
-      echo "Handing the existing worktree to Herdr..."
-      local -a handoff_args
-      handoff_args=(handoff --feature "$feature" --worktree "$target" --branch "$branch")
-      if [[ -n "$primary_kind" ]]; then
-        handoff_args+=(--kind "$primary_kind")
-      fi
-      if ! wt_herd "${handoff_args[@]}"; then
-        echo "Herdr handoff did not finish, but the Git worktree is ready."
-        echo "  Retry: wt herd retry --feature '$feature' --worktree '$target' --branch '$branch'"
-        echo "  Diagnose: wt herd doctor"
-      fi
+      wt_herd_handoff "$feature" "$target" "$branch" "$primary_kind"
     else
       echo "Skipping Herdr handoff (--no-herdr)."
     fi
@@ -1395,6 +1422,9 @@ function wt_dispatch {
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
     echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
+    echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
+    echo "                     Herdr is optional throughout; if it is missing or unhealthy the"
+    echo "                     worktree is still created and 'wt herd retry' resumes the rest."
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
     echo "  wt rm [name]     - Remove worktree and branch (interactive if no name)"

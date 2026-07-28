@@ -506,6 +506,23 @@ func TestHandoffFailsAtEachHerdrStageWithoutReplacingTheCheckout(t *testing.T) {
 			stage: "resolve focused workspace",
 		},
 		{
+			name: "no workspace holds focus",
+			configure: func(client *fakeHerdr, _ *Service) {
+				for index := range client.workspaces {
+					client.workspaces[index].Focused = false
+				}
+			},
+			stage: "resolve focused workspace",
+		},
+		{
+			name: "tab pane never settles",
+			configure: func(client *fakeHerdr, service *Service) {
+				service.Config.Bootstrap.TimeoutSeconds = 1
+				client.settleAfter = rootShellSettleAttempts + 1
+			},
+			stage: "resolve root pane",
+		},
+		{
 			name: "create feature tab",
 			configure: func(client *fakeHerdr, _ *Service) {
 				client.fail["tab_create"] = errors.New("socket unavailable")
@@ -571,6 +588,13 @@ func TestHandoffFailsAtEachHerdrStageWithoutReplacingTheCheckout(t *testing.T) {
 			var stage *model.StageError
 			if !errors.As(err, &stage) || stage.Stage != test.stage {
 				t.Fatalf("Handoff() error = %#v, want stage %q", err, test.stage)
+			}
+			// The degradation contract (FR-32): every Herdr-side failure is a
+			// classified StageError carrying a command the user can act on.
+			// Without both, the shell can only say "something went wrong" while
+			// holding a worktree that is actually ready to use.
+			if stage.Code == "" || stage.Message == "" || stage.Recovery == "" {
+				t.Fatalf("failure at %q is not actionable: code=%q message=%q recovery=%q", test.stage, stage.Code, stage.Message, stage.Recovery)
 			}
 			if client.startCalls != test.starts || client.promptCalls != test.prompts {
 				t.Fatalf("calls after %s: starts=%d prompts=%d, want %d/%d", test.name, client.startCalls, client.promptCalls, test.starts, test.prompts)
