@@ -581,7 +581,21 @@
       }
     }
     hideError() {
-      if (this.el.error) this.el.error.classList.add("d-none");
+      if (this.el.error) {
+        this.el.error.removeAttribute("data-tone");
+        this.el.error.classList.add("d-none");
+      }
+    }
+    /**
+     * Shows an informational outcome that is neither success nor failure — e.g.
+     * a migration Ori safely skipped. Reusing showError would mislabel a correct
+     * outcome as a fault, so this renders in a neutral tone.
+     */
+    showNotice(msg) {
+      if (!this.el.error) return;
+      this.el.error.textContent = msg;
+      this.el.error.setAttribute("data-tone", "notice");
+      this.el.error.classList.remove("d-none");
     }
 
     // --- Drive Advanced setup -------------------------------------------------
@@ -952,6 +966,15 @@
           return;
         }
         if (!res.ok) throw new Error("migrate failed");
+        if (data.status === "skipped") {
+          // Not a failure: Ori kept a record it couldn't prove was redundant.
+          // Say so plainly — silently reporting success would be a lie, and
+          // reporting an error would suggest something broke.
+          this.showNotice(
+            data.message ||
+              "Ori couldn't confirm this account is a duplicate, so it was left in place. Nothing was deleted.",
+          );
+        }
         await this.refresh();
       } catch (e) {
         this.showError("Couldn't migrate the account. Please try again.");

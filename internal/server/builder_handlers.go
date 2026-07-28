@@ -329,6 +329,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		}
 		if b.vaultStore != nil {
 			sink := newGmailCredentialSink(b.vaultStore)
+			b.gmailSink = sink
 			connFlow.WithCredentialSink(sink)
 			// Resolve + verify the destination vault BEFORE opening Google, and
 			// re-verify it at callback time, so a locked or missing vault becomes an
@@ -631,6 +632,13 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 	gmailProvider := mailbox.NewGmailProvider(mailboxvault.NewResolver(b.vaultStore))
 	cachedProvider := mailbox.NewCachingProvider(gmailProvider)
 	b.mailboxAccess = newMailboxAccess(b.workspaceStore, b.vaultStore, cachedProvider)
+	// Credential teardown and consolidation invalidate cached reads through this.
+	b.mailboxInvalidator = cachedProvider
+	// The Gmail credential sink was built in Phase 17 without a workspace store;
+	// proven consolidation needs one, so it is attached here.
+	if b.gmailSink != nil {
+		b.gmailSink.lifecycle = newCredentialLifecycle(b.vaultStore, b.workspaceStore, cachedProvider)
+	}
 	if b.chatHandler != nil {
 		b.chatHandler.SetMailboxAccess(b.mailboxAccess)
 	}

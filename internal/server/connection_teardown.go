@@ -6,6 +6,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // connectionProductTeardown removes a Google product's local footprint on
@@ -80,20 +81,78 @@ func (t connectionProductTeardown) unlinkMCPBinding(serverName, workspaceID stri
 	return t.b.workspaceStore.Save(ws)
 }
 
+// unlinkGmailAccount removes one workspace's use of Gmail (FR 73, 74).
+//
+// Two rules keep this from disconnecting anything else. First, it removes the
+// workspace's own native email binding — the reference — BEFORE considering any
+// deletion, so nothing is ever left pointing at a removed credential. Second, a
+// credential is deleted only when it is a workspace-only legacy copy AND a full
+// reverse scan proves nothing else references it. The connection's
+// authoritative credential is never deleted by a workspace unlink: other
+// workspaces, and the account itself, still need it.
 func (t connectionProductTeardown) unlinkGmailAccount(ctx context.Context, workspaceID string) error {
 	if t.b.vaultStore == nil {
 		return nil
 	}
-	accounts, err := t.b.vaultStore.ListEmailAccounts(ctx, "", workspaceID)
-	if err != nil {
-		return err
-	}
-	for _, a := range accounts {
-		if a.Source == googleConnectionEmailSource {
-			if delErr := t.b.vaultStore.DeleteEmailAccount(ctx, a.ID); delErr != nil {
-				return delErr
+
+	// Step 1: drop the binding and remember what it referenced.
+	referenced := ""
+	if t.b.workspaceStore != nil {
+		if err := workspace.CanonicalUpdate(t.b.workspaceStore, workspaceID, func(ws *workspace.Workspace) error {
+			for _, binding := range ws.GetMCPBindings() {
+				if !binding.IsNativeEmail() {
+					continue
+				}
+				if accountID := stringFromConfig(binding.Config, "account_id"); accountID != "" {
+					referenced = accountID
+				}
+				if err := ws.DeleteMCPBinding(binding.ID); err != nil {
+					return err
+				}
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
+
+	// Step 2: delete the credential only if it was this workspace's own copy and
+	// nothing else points at it.
+	lifecycle := t.b.credentialLifecycle()
+	if lifecycle == nil || referenced == "" {
+		return nil
+	}
+	grantRef := t.b.activeGmailCredentialRef()
+	if _, err := lifecycle.deleteWorkspaceCredentialIfUnreferenced(ctx, referenced, grantRef); err != nil {
+		return err
+	}
 	return nil
+}
+
+// credentialLifecycle builds the reference-scanning consolidator on demand. It
+// reads b.vaultStore / b.workspaceStore lazily because, like the rest of this
+// adapter, it is constructed before those phases run.
+func (b *ServerBuilder) credentialLifecycle() *credentialLifecycle {
+	if b == nil || b.vaultStore == nil || b.workspaceStore == nil {
+		return nil
+	}
+	return newCredentialLifecycle(b.vaultStore, b.workspaceStore, b.mailboxInvalidator)
+}
+
+// activeGmailCredentialRef returns the connection's authoritative Gmail
+// credential reference, or empty when Gmail is not enabled. Every deletion
+// decision consults it so the authoritative record is never a candidate.
+func (b *ServerBuilder) activeGmailCredentialRef() string {
+	if b == nil || b.connStore == nil {
+		return ""
+	}
+	conn, err := b.connStore.Load()
+	if err != nil || conn == nil {
+		return ""
+	}
+	grant, ok := conn.Grant(connections.ProductGmail)
+	if !ok || grant == nil {
+		return ""
+	}
+	return grant.CredentialRef
 }

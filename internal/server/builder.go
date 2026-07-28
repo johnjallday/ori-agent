@@ -138,7 +138,14 @@ type ServerBuilder struct {
 	// built in Phase 18 (needs the workspace + vault stores) but consumed in
 	// Phase 21 by the orchestration task handler, so it is stashed here rather
 	// than captured at wiring time.
-	emailReadiness           *emailReadinessEvaluator
+	emailReadiness *emailReadinessEvaluator
+	// mailboxInvalidator drops cached mailbox reads for an account whose
+	// credential changed or was removed, so a disconnect takes effect
+	// immediately rather than at the next cache expiry (FR 75).
+	mailboxInvalidator accountInvalidator
+	// gmailSink is the connection's credential sink, stashed so the credential
+	// lifecycle can be attached once the workspace store exists (Phase 18).
+	gmailSink                *gmailCredentialSink
 	orchestrationTaskHandler *workspace.LLMTaskHandler
 	runBackedTaskHandler     workspace.TaskHandler
 	taskExecutor             *workspace.TaskExecutor

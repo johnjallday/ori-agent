@@ -49,6 +49,9 @@ function makeElement(tag = 'div') {
     setAttribute(k, v) {
       this.attributes[k] = v;
     },
+    removeAttribute(k) {
+      delete this.attributes[k];
+    },
     getAttribute(k) {
       return this.attributes[k];
     },
