@@ -35,10 +35,10 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 ## Doing
 - google-account-email-ops-stabilization -> PRD at tasks/prd-google-account-email-ops-stabilization.md (started 2026-07-27)
 - downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-27)
-- wt-guided-tab-start -> PRD at tasks/prd-wt-guided-tab-start.md (started 2026-07-27)
 - 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small (started 2026-07-28)
 
 ## Shipped / dropped
+- 2026-07-28 wt-guided-tab-start -> PRD at tasks/prd-wt-guided-tab-start.md (started 2026-07-27) - PR #273 merged to dev (2026-07-28)
 - 2026-07-27 vault-modal-loading - PR #271 merged to dev (2026-07-27)
 - 2026-07-27 path-based-agent-binding -> PRD at tasks/prd-path-based-agent-binding.md (started 2026-07-26) - PR #270 merged to dev (2026-07-27)
 - 2026-07-27 downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-24) - PR #268 merged to dev (2026-07-27)
