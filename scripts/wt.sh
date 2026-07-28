@@ -696,7 +696,7 @@ function wt_herd {
 function wt_plan_reset {
   typeset -g WT_PLAN_FEATURE="" WT_PLAN_BRANCH="" WT_PLAN_TARGET=""
   typeset -g WT_PLAN_DEV="" WT_PLAN_PRD="" WT_PLAN_TASKS="" WT_PLAN_TASKS_STATE="none"
-  typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1
+  typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1 WT_PLAN_PROMPT=1
   typeset -g WT_PLAN_BACKLOG=0 WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
 }
 
@@ -759,11 +759,21 @@ function wt_plan_render {
   case "$WT_PLAN_TASKS_STATE" in
     present)  printf '  %-14s %s\n' "Task list" "$WT_PLAN_TASKS" ;;
     generate) printf '  %-14s %s\n' "Task list" "${WT_C_CYAN}will be created as the agent's first task${WT_C_RESET}" ;;
-    *)        printf '  %-14s %s\n' "Task list" "${WT_C_DIM}none — the agent works from the PRD alone${WT_C_RESET}" ;;
+    *)
+      if [[ -n "$WT_PLAN_PRD" ]]; then
+        printf '  %-14s %s\n' "Task list" "${WT_C_DIM}none — the agent works from the PRD alone${WT_C_RESET}"
+      else
+        printf '  %-14s %s\n' "Task list" "${WT_C_DIM}none (ad-hoc)${WT_C_RESET}"
+      fi
+      ;;
   esac
 
   if (( WT_PLAN_START_AGENT )); then
-    printf '  %-14s %s\n' "Agent" "$WT_PLAN_KIND_DISPLAY ${WT_C_DIM}(started in a new tab, given the bootstrap prompt)${WT_C_RESET}"
+    if (( WT_PLAN_PROMPT )); then
+      printf '  %-14s %s\n' "Agent" "$WT_PLAN_KIND_DISPLAY ${WT_C_DIM}(started in a new tab, given the bootstrap prompt)${WT_C_RESET}"
+    else
+      printf '  %-14s %s\n' "Agent" "$WT_PLAN_KIND_DISPLAY ${WT_C_DIM}(started in a new tab; no prompt — nothing to point it at)${WT_C_RESET}"
+    fi
     case "$WT_PLAN_WORKSPACE_STATE" in
       ready)    printf '  %-14s %s\n' "Herdr tab" "in workspace ${WT_C_CYAN}${WT_PLAN_WORKSPACE}${WT_C_RESET} ${WT_C_DIM}(whichever is focused when this runs)${WT_C_RESET}" ;;
       disabled) printf '  %-14s %s\n' "Herdr tab" "${WT_C_DIM}bridge disabled — worktree only${WT_C_RESET}" ;;
@@ -835,7 +845,7 @@ function wt_start_execute {
   fi
 
   if (( WT_PLAN_START_AGENT )); then
-    wt_herd_handoff "$WT_PLAN_FEATURE" "$WT_PLAN_TARGET" "$WT_PLAN_BRANCH" "$WT_PLAN_KIND"
+    wt_herd_handoff "$WT_PLAN_FEATURE" "$WT_PLAN_TARGET" "$WT_PLAN_BRANCH" "$WT_PLAN_KIND" "$WT_PLAN_PROMPT"
   else
     echo "Skipping Herdr handoff (--no-herdr)."
   fi
@@ -888,11 +898,14 @@ TASKS
 # it failed, because the thing the user actually asked for — a worktree they can
 # work in — is sitting there ready.
 function wt_herd_handoff {
-  local feature="$1" target="$2" branch="$3" primary_kind="${4:-}"
+  local feature="$1" target="$2" branch="$3" primary_kind="${4:-}" prompt="${5:-1}"
   local -a handoff_args
   handoff_args=(handoff --feature "$feature" --worktree "$target" --branch "$branch")
   if [[ -n "$primary_kind" ]]; then
     handoff_args+=(--kind "$primary_kind")
+  fi
+  if (( ! prompt )); then
+    handoff_args+=(--no-prompt)
   fi
   echo "Handing the existing worktree to Herdr..."
   if wt_herd "${handoff_args[@]}"; then
@@ -1178,18 +1191,113 @@ function wt_dispatch {
     wt_herd "$@"
     ;;
   new)
-    local name="$2"
+    # Ad-hoc creation, through the same four phases as wt start. The only
+    # differences are the ones FR-23 allows: no planning documents are copied,
+    # no BACKLOG.md entry is made, and the agent is started without a bootstrap
+    # prompt because there is no PRD or checklist to point it at.
+    wt_color_init
+    wt_plan_reset
+
+    local name="" no_herdr=0 primary_kind="" assume_yes=0 new_arg new_index
+    local -a new_args
+    new_args=("${@:2}")
+    new_index=1
+    while (( new_index <= ${#new_args[@]} )); do
+      new_arg="${new_args[$new_index]}"
+      case "$new_arg" in
+        --no-herdr)
+          no_herdr=1
+          ;;
+        --yes|-y)
+          assume_yes=1
+          ;;
+        --kind)
+          new_index=$(( new_index + 1 ))
+          if (( new_index > ${#new_args[@]} )) || [[ "${new_args[$new_index]}" == --* ]]; then
+            echo "wt new --kind requires a Herdr agent kind"
+            echo "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+            return 1
+          fi
+          if [[ -n "$primary_kind" ]]; then
+            echo "wt new accepts --kind only once"
+            return 1
+          fi
+          primary_kind="${new_args[$new_index]}"
+          ;;
+        --*)
+          echo "Unknown wt new option: $new_arg"
+          echo "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+          return 1
+          ;;
+        *)
+          if [[ -n "$name" ]]; then
+            echo "wt new accepts one name (got: $name and $new_arg)"
+            return 1
+          fi
+          name="$new_arg"
+          ;;
+      esac
+      new_index=$(( new_index + 1 ))
+    done
+
     if [[ -z "$name" ]]; then
       echo "Usage: wt new <name>            (branch feature/<name>)"
       echo "       wt new <type>/<name>     (e.g. fix/foo -> branch fix/foo)"
       echo "For PRD-driven work, prefer: wt start"
       return 1
     fi
-    wt_parse_name "$name"
-    if ! wt_provision_worktree "$WT_BRANCH_NAME" "$WT_DIR_NAME"; then
+    if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
+      echo "wt new --kind cannot be combined with --no-herdr"
       return 1
     fi
-    echo "Clean worktree ready (no tasks copied). For PRD-driven work use 'wt start'."
+
+    wt_parse_name "$name"
+    # The bridge requires a feature name matching ^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$
+    # (agents/service.go). Rejecting here means an unusable name costs nothing;
+    # letting it through would create the branch and worktree first and only
+    # then fail at handoff, leaving a worktree the bridge cannot ever adopt.
+    if [[ ! "$WT_DIR_NAME" =~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$' ]]; then
+      echo "Invalid name: ${WT_C_YELLOW}$WT_DIR_NAME${WT_C_RESET}"
+      echo "Use letters, digits, dot, underscore, or dash, starting with a letter or digit (max 81 characters)."
+      return 1
+    fi
+    # The branch is checked separately because a <type>/<name> form can produce a
+    # usable feature slug from an unusable ref — `a//b` yields the slug `b`. Git
+    # is the authority on what a branch may be called, so ask it rather than
+    # reimplementing the rule.
+    if ! git check-ref-format --branch "$WT_BRANCH_NAME" >/dev/null 2>&1; then
+      echo "Invalid branch name: ${WT_C_YELLOW}$WT_BRANCH_NAME${WT_C_RESET}"
+      echo "Git will not accept it as a ref. Try 'wt new <type>/<name>', e.g. fix/thing."
+      return 1
+    fi
+
+    WT_PLAN_FEATURE="$WT_DIR_NAME"
+    WT_PLAN_BRANCH="$WT_BRANCH_NAME"
+    WT_PLAN_TARGET="$(wt_new_worktree_dir)/$WT_DIR_NAME"
+    WT_PLAN_DEV="$(wt_get_dev_worktree)"
+    WT_PLAN_PRD=""
+    WT_PLAN_TASKS_STATE="none"
+    WT_PLAN_COPY_DOCS=0
+    WT_PLAN_BACKLOG=0
+    # Resolved during group 5 (PRD open question 4): no bootstrap prompt. There
+    # is no PRD and no checklist, so any prompt would either name documents that
+    # do not exist or say nothing the agent cannot already see.
+    WT_PLAN_PROMPT=0
+
+    if (( no_herdr )); then
+      WT_PLAN_START_AGENT=0
+    else
+      WT_PLAN_START_AGENT=1
+      WT_PLAN_KIND="$primary_kind"
+      WT_PLAN_KIND_DISPLAY="${primary_kind:-$(wt_plan_default_kind)}"
+      wt_plan_resolve_workspace
+    fi
+
+    wt_plan_render
+    if ! wt_plan_confirm "$assume_yes"; then
+      return 0
+    fi
+    wt_start_execute
     ;;
   pr)
     # Push the current (or named) worktree's branch and open a PR against dev.
@@ -1662,7 +1770,8 @@ function wt_dispatch {
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
     echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
-    echo "  wt new <name>    - Create a clean worktree (feature/<name>, or <type>/<name>)"
+    echo "  wt new <name> [--kind KIND] [--no-herdr] [--yes] - Ad-hoc worktree (feature/<name>, or <type>/<name>)"
+    echo "                     Same guided flow as wt start, minus planning docs and backlog."
     echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
     echo "                     Herdr is optional throughout; if it is missing or unhealthy the"
     echo "                     worktree is still created and 'wt herd retry' resumes the rest."

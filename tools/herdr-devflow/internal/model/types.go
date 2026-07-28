@@ -183,7 +183,12 @@ type HandoffState struct {
 	PrimaryKind       string       `json:"primary_kind,omitempty"`
 	PrimaryAgentName  string       `json:"primary_agent_name,omitempty"`
 	BootstrapPrompted bool         `json:"bootstrap_prompted,omitempty"`
-	UpdatedAt         time.Time    `json:"updated_at,omitempty"`
+	// SkipBootstrapPrompt marks a feature that has no PRD and no checklist to
+	// be pointed at. The decision is persisted rather than passed per call so a
+	// later `wt herd retry` cannot deliver a prompt describing planning
+	// documents that were never going to exist.
+	SkipBootstrapPrompt bool      `json:"skip_bootstrap_prompt,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at,omitempty"`
 }
 
 type HandoffStage string

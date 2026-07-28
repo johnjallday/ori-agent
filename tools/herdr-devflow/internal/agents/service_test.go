@@ -1028,3 +1028,46 @@ func TestHandoffWaitsOutAStartingShellButRefusesABusyExistingPane(t *testing.T) 
 		t.Fatalf("an agent was launched into a busy pane")
 	}
 }
+
+// FR-26 and PRD open question 4: an ad-hoc feature has no PRD and no checklist,
+// so it gets an agent but no bootstrap prompt — there is nothing truthful for
+// one to point at. The decision is persisted, because a later retry knows
+// nothing about how the feature was created and would otherwise send a prompt
+// naming planning documents that were never going to exist.
+func TestAdHocHandoffStartsAnAgentWithoutABootstrapPrompt(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	request := HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", SkipPrompt: true}
+
+	first, err := service.Handoff(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Handoff() error = %v", err)
+	}
+	if client.startCalls != 1 {
+		t.Fatalf("ad-hoc handoff started %d agents, want 1", client.startCalls)
+	}
+	if client.promptCalls != 0 || first.PromptDelivered || !first.PromptSkipped {
+		t.Fatalf("ad-hoc handoff prompted: prompts=%d result=%#v", client.promptCalls, first)
+	}
+	if first.TabID == "" {
+		t.Fatalf("ad-hoc handoff got no tab: %#v", first)
+	}
+
+	stored, _ := store.Load()
+	if !stored.Features["repo-123456:bridge"].Handoff.SkipBootstrapPrompt {
+		t.Fatalf("the no-prompt decision was not persisted: %#v", stored.Features["repo-123456:bridge"].Handoff)
+	}
+
+	// A retry carries no SkipPrompt of its own; the recorded decision is what
+	// keeps it quiet. --resend must not talk it round either.
+	retried, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", Resend: true})
+	if err != nil {
+		t.Fatalf("retry Handoff() error = %v", err)
+	}
+	if client.promptCalls != 0 || !retried.PromptSkipped {
+		t.Fatalf("retry prompted an ad-hoc feature: prompts=%d result=%#v", client.promptCalls, retried)
+	}
+}

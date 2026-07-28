@@ -84,6 +84,10 @@ type HandoffRequest struct {
 	Branch       string
 	PrimaryKind  string
 	Resend       bool
+	// SkipPrompt starts the agent without the bootstrap prompt, for ad-hoc
+	// features that have no PRD or task list to be sent to. It is recorded on
+	// the feature so retries inherit it.
+	SkipPrompt bool
 }
 
 type HandoffResult struct {
@@ -207,6 +211,13 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 			featureState.Handoff.PrimaryKind = primaryKind
 		}
 	}
+	// Set after the stage initialisation above, which replaces the whole
+	// HandoffState for a feature being recorded for the first time and would
+	// otherwise discard this. Recorded once and never cleared: a feature that
+	// started without planning documents does not acquire them by being retried.
+	if request.SkipPrompt {
+		featureState.Handoff.SkipBootstrapPrompt = true
+	}
 	featureState.UpdatedAt = s.now()
 	state.Features[featureKey] = featureState
 	if err := s.Store.Save(state); err != nil {
@@ -290,6 +301,15 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		Warnings:       placement.Warnings,
 	}
 	if featureState.Handoff.BootstrapPrompted && !request.Resend {
+		result.PromptSkipped = true
+		return result, nil
+	}
+	// An ad-hoc feature has no PRD and no checklist, so there is nothing
+	// truthful for a bootstrap prompt to point at. The agent is started and
+	// left to its user rather than sent a message about documents that do not
+	// exist. --resend does not override this: resending nothing is still
+	// nothing.
+	if featureState.Handoff.SkipBootstrapPrompt {
 		result.PromptSkipped = true
 		return result, nil
 	}

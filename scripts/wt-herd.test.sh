@@ -223,6 +223,59 @@ rg -q "will be created as the agent's first task" "$fixture_root/generate-output
 rg -q "replace this file with a real task" "$target_root/tasks/tasks-planless.md"
 rg -q "^- \[ \] 1\.1 " "$target_root/tasks/tasks-planless.md"
 
+# FR-22/23: wt new runs the same flow. The only differences allowed are the
+# planning documents, the backlog entry, and the bootstrap prompt.
+rm -f "$fixture_root/decline-mutations"
+wt new adhoc --yes > "$fixture_root/new-output" 2>&1
+rg -q "PRD .*none \(ad-hoc\)" "$fixture_root/new-output"
+rg -q "no prompt" "$fixture_root/new-output"
+rg -q "^handoff --feature adhoc --worktree $target_root --branch feature/adhoc --no-prompt$" "$fixture_root/decline-mutations"
+
+# FR-25: ad-hoc work is not backlog work. No Doing entry, no commit, no push.
+if rg -q "backlog|push" "$fixture_root/decline-mutations"; then
+  print -r -- "wt new touched BACKLOG.md: $(<"$fixture_root/decline-mutations")" >&2
+  exit 1
+fi
+# And no planning documents are invented for it.
+[[ ! -f "$target_root/tasks/prd-adhoc.md" ]]
+[[ ! -f "$target_root/tasks/tasks-adhoc.md" ]]
+
+# FR-24: <type>/<name> still yields that branch, with the directory and feature
+# taken from the last segment.
+rm -f "$fixture_root/decline-mutations"
+wt new fix/adhoc --yes > "$fixture_root/prefix-output" 2>&1
+rg -q "Branch .*fix/adhoc" "$fixture_root/prefix-output"
+rg -q "^handoff --feature adhoc --worktree $target_root --branch fix/adhoc --no-prompt$" "$fixture_root/decline-mutations"
+
+# FR-34: --no-herdr covers ad-hoc starts too, and still produces the worktree.
+rm -f "$fixture_root/decline-mutations"
+wt new adhoc --no-herdr --yes > /dev/null 2>&1
+rg -q "provision" "$fixture_root/decline-mutations"
+if rg -q "handoff" "$fixture_root/decline-mutations"; then
+  print -r -- "wt new --no-herdr still handed off to Herdr" >&2
+  exit 1
+fi
+rm -f "$fixture_root/decline-mutations"
+if wt new adhoc --kind codex --no-herdr > /dev/null 2>&1; then
+  print -r -- "wt new accepted --kind together with --no-herdr" >&2
+  exit 1
+fi
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
+# FR-19 applies to wt new as well: declining creates nothing.
+wt new adhoc <<< "n" > /dev/null 2>&1
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
+# A name the bridge could never adopt is rejected before the branch exists,
+# rather than after a worktree has been created that handoff will always refuse.
+for bad_name in "bad name" "-leading-dash" "has/slash/but//empty"; do
+  if wt new "$bad_name" > /dev/null 2>&1; then
+    print -r -- "wt new accepted an invalid feature name: $bad_name" >&2
+    exit 1
+  fi
+done
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
 # Restore the suite's non-interactive stance and stubs for the sections below.
 unfunction wt_plan_is_interactive
 function wt_provision_worktree {

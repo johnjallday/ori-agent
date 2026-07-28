@@ -182,6 +182,7 @@ type handoffArgs struct {
 	branch   string
 	kind     string
 	resend   bool
+	noPrompt bool
 }
 
 type controlContextArgs struct {
@@ -528,6 +529,12 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 			}
 			parsed.resend = true
 			args = args[1:]
+		case "--no-prompt":
+			if retry {
+				return handoffArgs{}, fmt.Errorf("--no-prompt is only available with handoff; retry uses the recorded decision")
+			}
+			parsed.noPrompt = true
+			args = args[1:]
 		default:
 			return handoffArgs{}, fmt.Errorf("unknown handoff option %q", args[0])
 		}
@@ -537,6 +544,9 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	}
 	if parsed.kind != "" && !config.IsSupportedAgentKind(parsed.kind) {
 		return handoffArgs{}, fmt.Errorf("--kind %q is not supported by Herdr", parsed.kind)
+	}
+	if parsed.resend && parsed.noPrompt {
+		return handoffArgs{}, fmt.Errorf("--resend and --no-prompt cannot be combined")
 	}
 	return parsed, nil
 }
@@ -834,6 +844,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		Branch:       parsed.branch,
 		PrimaryKind:  parsed.kind,
 		Resend:       parsed.resend,
+		SkipPrompt:   parsed.noPrompt,
 	})
 	if err != nil {
 		a.writeError(err, opts.json)
@@ -2298,8 +2309,11 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
-  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND]
-                                Open an existing Git worktree and launch its primary agent
+  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--no-prompt]
+                                Add a tab for an existing Git worktree in the focused workspace
+                                and launch its primary agent there. --no-prompt starts the agent
+                                without the bootstrap prompt, for ad-hoc work that has no PRD or
+                                task list to point at; the choice is recorded for later retries.
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
                                 Resume the recorded primary kind; --resend repeats a confirmed prompt
   wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
