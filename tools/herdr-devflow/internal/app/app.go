@@ -162,6 +162,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.status(ctx, opts, commandArgs)
 	case "overview":
 		return a.overview(ctx, opts, commandArgs)
+	case "target":
+		return a.handoffTarget(ctx, opts)
 	case "cleanup":
 		return a.cleanup(ctx, opts, commandArgs)
 	case "dispatch":
@@ -864,6 +866,60 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 	}
 	a.writeResult(opts.json, payload)
 	return 0
+}
+
+// handoffTarget reports where the next handoff would put a feature's tab. The
+// guided start flow shows it in the confirmation summary, so it is read-only
+// and always exits 0: not being able to name the workspace is worth a word in
+// the summary, never a failed command.
+//
+// Human output is one tab-separated line rather than the usual result block,
+// because its only consumer is a shell that has to split it.
+func (a *App) handoffTarget(ctx context.Context, opts options) int {
+	report := func(status, workspaceID, label, detail string) int {
+		if opts.json {
+			payload := map[string]any{"status": status}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			if label != "" {
+				payload["workspace_label"] = label
+			}
+			if detail != "" {
+				payload["detail"] = detail
+			}
+			a.writeResult(true, payload)
+			return 0
+		}
+		fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", status, workspaceID, label)
+		return 0
+	}
+
+	runtime, err := a.load(opts)
+	if err != nil {
+		return report("unavailable", "", "", "the bridge configuration could not be read")
+	}
+	if !runtime.config.Bridge.Enabled {
+		return report("disabled", "", "", "Ori Herdr Devflow is disabled by configuration")
+	}
+	// Compatibility is deliberately not verified here. A version or schema
+	// mismatch is the handoff's problem to report; refusing to name the target
+	// would only make the summary less informative before the user has decided
+	// anything.
+	workspace, err := runtime.herdr.FocusedWorkspace(ctx)
+	if err != nil {
+		var stageErr *model.StageError
+		detail := "Herdr could not be reached"
+		if errors.As(err, &stageErr) {
+			detail = stageErr.Message
+		}
+		return report("unavailable", "", "", detail)
+	}
+	label := workspace.Label
+	if label == "" {
+		label = workspace.WorkspaceID
+	}
+	return report("ready", workspace.WorkspaceID, label, "")
 }
 
 func (a *App) loadAgentControl(ctx context.Context, opts options) (*agents.Service, runtimeContext, int) {
@@ -2268,6 +2324,9 @@ Usage:
   wt herd status [--current|--feature NAME|--worktree PATH] [--watch] [--json] [--no-color]
                                 Show all managed features by default, or a filtered live status board
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
+  wt herd target [--json]       Name the workspace a new feature's tab would be added to.
+                                Read-only and always exits 0; reports disabled or
+                                unavailable instead of failing.
   wt herd dispatch              Run due local schedules (used by the macOS LaunchAgent)
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 

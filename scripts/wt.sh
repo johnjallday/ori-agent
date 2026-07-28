@@ -681,6 +681,195 @@ function wt_herd {
   bash "$helper" "$@"
 }
 
+# --- Guided start flow -------------------------------------------------------
+#
+# wt start runs in four phases: resolve → plan → confirm → execute. The split is
+# the point of the feature. Everything up to and including the confirmation
+# summary is pure reading, so declining costs exactly nothing: no branch, no
+# worktree, no npm install, no BACKLOG.md commit, no Herdr call happens until
+# wt_start_execute runs. Previously all of it happened before you saw any of it.
+#
+# The plan is a record of decisions, deliberately separate from the code that
+# applies it, so the summary cannot drift from what actually runs — and so the
+# shell tests can assert individual fields.
+
+function wt_plan_reset {
+  typeset -g WT_PLAN_FEATURE="" WT_PLAN_BRANCH="" WT_PLAN_TARGET=""
+  typeset -g WT_PLAN_DEV="" WT_PLAN_PRD="" WT_PLAN_TASKS="" WT_PLAN_TASKS_STATE="none"
+  typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1
+  typeset -g WT_PLAN_BACKLOG=0 WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
+}
+
+# The configured primary kind, so the summary names what will actually start.
+# WT_PLAN_KIND stays empty unless the user picked one: passing no --kind lets the
+# helper use its own recorded default, which matters on a retry where the kind is
+# already saved in state.
+function wt_plan_default_kind {
+  local config root kind=""
+  # `|| true` matters: wt.sh is sourced, and a caller running under `set -e`
+  # (the shell test suite does) would otherwise abort here whenever this runs
+  # outside a Git checkout.
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  config="$root/.herdr/devflow.toml"
+  if [[ -f "$config" ]]; then
+    kind="$(sed -n '/^\[primary\]/,/^\[roles\]/{ s/^[[:space:]]*kind[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; }' "$config" | head -1)"
+  fi
+  print -r -- "${kind:-claude}"
+}
+
+# Interactivity is decided by the terminal, not by whether a feature was named.
+# Naming one only skips the PRD picker; it must not silently skip the gate that
+# shows what is about to happen. Without a terminal every prompt is bypassed, so
+# CI and headless runs can never block on stdin.
+function wt_plan_is_interactive {
+  [[ -t 0 && -t 1 ]]
+}
+
+# Ask Herdr where a tab would go. Read-only, best effort, and never fatal: the
+# helper always exits 0 here, and a summary is not worth failing a command over.
+# Note the answer is a hint — Herdr's focus is sampled when the handoff actually
+# runs, and it can move between now and then.
+function wt_plan_resolve_workspace {
+  typeset -g WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE="unavailable"
+  local line
+  if ! line="$(wt_herd target 2>/dev/null)"; then
+    return 0
+  fi
+  local -a fields
+  fields=("${(@s:	:)line}")
+  WT_PLAN_WORKSPACE_STATE="${fields[1]:-unavailable}"
+  WT_PLAN_WORKSPACE="${fields[3]:-}"
+  return 0
+}
+
+function wt_plan_render {
+  local marker="${WT_C_YELLOW}!${WT_C_RESET}"
+  echo
+  echo "${WT_C_BOLD}Plan${WT_C_RESET}"
+  printf '  %-14s %s\n' "Feature" "$WT_PLAN_FEATURE"
+  printf '  %-14s %s  %s\n' "Branch" "$WT_PLAN_BRANCH" "$marker ${WT_C_DIM}new branch${WT_C_RESET}"
+  printf '  %-14s %s  %s\n' "Worktree" "$WT_PLAN_TARGET" "$marker ${WT_C_DIM}new worktree + npm install${WT_C_RESET}"
+
+  if [[ -n "$WT_PLAN_PRD" ]]; then
+    printf '  %-14s %s\n' "PRD" "$WT_PLAN_PRD"
+  else
+    printf '  %-14s %s\n' "PRD" "${WT_C_DIM}none (ad-hoc)${WT_C_RESET}"
+  fi
+
+  case "$WT_PLAN_TASKS_STATE" in
+    present)  printf '  %-14s %s\n' "Task list" "$WT_PLAN_TASKS" ;;
+    generate) printf '  %-14s %s\n' "Task list" "${WT_C_CYAN}will be created as the agent's first task${WT_C_RESET}" ;;
+    *)        printf '  %-14s %s\n' "Task list" "${WT_C_DIM}none — the agent works from the PRD alone${WT_C_RESET}" ;;
+  esac
+
+  if (( WT_PLAN_START_AGENT )); then
+    printf '  %-14s %s\n' "Agent" "$WT_PLAN_KIND_DISPLAY ${WT_C_DIM}(started in a new tab, given the bootstrap prompt)${WT_C_RESET}"
+    case "$WT_PLAN_WORKSPACE_STATE" in
+      ready)    printf '  %-14s %s\n' "Herdr tab" "in workspace ${WT_C_CYAN}${WT_PLAN_WORKSPACE}${WT_C_RESET} ${WT_C_DIM}(whichever is focused when this runs)${WT_C_RESET}" ;;
+      disabled) printf '  %-14s %s\n' "Herdr tab" "${WT_C_DIM}bridge disabled — worktree only${WT_C_RESET}" ;;
+      *)        printf '  %-14s %s\n' "Herdr tab" "${WT_C_DIM}Herdr unreachable — worktree only, retry later${WT_C_RESET}" ;;
+    esac
+  else
+    printf '  %-14s %s\n' "Agent" "${WT_C_DIM}none (--no-herdr)${WT_C_RESET}"
+  fi
+
+  if (( WT_PLAN_BACKLOG )); then
+    printf '  %-14s %s  %s\n' "Backlog" "promote to ## Doing in $WT_PLAN_DEV/BACKLOG.md" "$marker ${WT_C_DIM}commits and pushes${WT_C_RESET}"
+  fi
+
+  echo
+  echo "  ${WT_C_YELLOW}!${WT_C_RESET} ${WT_C_DIM}marks steps that are not undone by declining later.${WT_C_RESET}"
+}
+
+# The gate. Returns non-zero to mean "do nothing", which is the safe direction:
+# a caller that ignores the status still has not mutated anything yet.
+function wt_plan_confirm {
+  local assume_yes="${1:-0}"
+  if (( assume_yes )); then
+    return 0
+  fi
+  if ! wt_plan_is_interactive; then
+    echo
+    echo "${WT_C_DIM}Non-interactive: proceeding without confirmation.${WT_C_RESET}"
+    return 0
+  fi
+  local reply
+  echo
+  if ! read -r "reply?Proceed? [y/N] "; then
+    echo
+    return 1
+  fi
+  case "$reply" in
+    y|Y|yes|YES) return 0 ;;
+    *) echo "Nothing was changed."; return 1 ;;
+  esac
+}
+
+# Everything that mutates lives here, and nothing above it does. Ordered so the
+# irreversible Git step happens first and the optional layers stack on top: a
+# failure in the backlog or Herdr half leaves a worktree you can still work in.
+function wt_start_execute {
+  if ! wt_provision_worktree "$WT_PLAN_BRANCH" "$WT_PLAN_FEATURE"; then
+    return 1
+  fi
+  WT_PLAN_TARGET="$WT_PROVISIONED_TARGET"
+
+  if (( WT_PLAN_COPY_DOCS )) && [[ -n "$WT_PLAN_PRD" ]]; then
+    echo "Copying PRD and task list into new worktree..."
+    mkdir -p "$WT_PLAN_TARGET/tasks"
+    cp "$WT_PLAN_PRD" "$WT_PLAN_TARGET/tasks/"
+    if [[ "$WT_PLAN_TASKS_STATE" == "present" && -n "$WT_PLAN_TASKS" ]]; then
+      cp "$WT_PLAN_TASKS" "$WT_PLAN_TARGET/tasks/"
+    elif [[ "$WT_PLAN_TASKS_STATE" == "generate" ]]; then
+      wt_write_starter_tasklist "$WT_PLAN_TARGET/tasks/tasks-$WT_PLAN_FEATURE.md" "$WT_PLAN_FEATURE"
+    fi
+  fi
+
+  # Backlog bookkeeping: record this feature under ## Doing (keyed by the PRD
+  # slug) and push, so wt done can retire it on merge. Non-fatal - never blocks
+  # starting the feature. Commits land on the dev worktree's tracked
+  # BACKLOG.md, not this new feature worktree.
+  if (( WT_PLAN_BACKLOG )) && [[ -f "$WT_PLAN_DEV/BACKLOG.md" ]]; then
+    wt_backlog_ensure_doing "$WT_PLAN_DEV/BACKLOG.md" "$WT_PLAN_FEATURE" \
+      && wt_backlog_commit_push "$WT_PLAN_DEV" "docs(backlog): promote $WT_PLAN_FEATURE to Doing"
+  fi
+
+  if (( WT_PLAN_START_AGENT )); then
+    wt_herd_handoff "$WT_PLAN_FEATURE" "$WT_PLAN_TARGET" "$WT_PLAN_BRANCH" "$WT_PLAN_KIND"
+  else
+    echo "Skipping Herdr handoff (--no-herdr)."
+  fi
+
+  cd "$WT_PLAN_TARGET"
+  echo "Changed to: $WT_PLAN_TARGET"
+  return 0
+}
+
+# A placeholder checklist is more useful than none: the bootstrap prompt reads
+# the first unchecked item, so this turns "there is no task list" into the
+# agent's actual first instruction instead of a note that scrolls past.
+function wt_write_starter_tasklist {
+  # Not named `path`: in zsh that is the special array tied to PATH, so a
+  # `local path=...` here silently empties PATH for the whole function and every
+  # command in it fails with "command not found".
+  local list_path="$1" feature="$2"
+  mkdir -p "${list_path:h}"
+  cat > "$list_path" <<TASKS
+# Tasks: $feature
+
+Source PRD: \`tasks/prd-$feature.md\`
+
+This checklist is a placeholder created by \`wt start\`. It is not a real plan.
+
+## Tasks
+
+- [ ] 1.1 Read \`tasks/prd-$feature.md\` and replace this file with a real task
+      list: parent tasks with sub-tasks, each parent group ending in a commit,
+      the final group ending in a PR. Do not start implementing until it exists.
+TASKS
+  echo "Wrote a starter task list: $list_path"
+}
+
 # The single Herdr degradation contract, shared by every command that hands a
 # worktree to Herdr.
 #
@@ -792,9 +981,12 @@ function wt_dispatch {
     wt_repl
     ;;
   start)
-    # PRD-driven creation: pick a prd-*.md from the dev worktree's tasks/ folder
-    # and fan it (plus its matching tasks- list) out into a dedicated worktree.
+    # PRD-driven creation, in four phases: resolve → plan → confirm → execute.
+    # Only wt_start_execute mutates anything, so declining below leaves Git,
+    # BACKLOG.md, and Herdr exactly as they were.
     wt_color_init
+    wt_plan_reset
+
     local dev_path tasks_dir
     dev_path="$(wt_get_dev_worktree)"
     if [[ -z "$dev_path" ]]; then
@@ -802,6 +994,7 @@ function wt_dispatch {
       return 1
     fi
     tasks_dir="$dev_path/tasks"
+    WT_PLAN_DEV="$dev_path"
 
     # The (N) glob qualifier below needs BARE_GLOB_QUAL, which is a zsh default
     # but is off when this file is sourced from an `emulate sh`-style shell (e.g.
@@ -815,13 +1008,8 @@ function wt_dispatch {
     for f in "$tasks_dir"/prd-*.md(N); do
       prd_files+=("${f:t}")
     done
-    if [[ ${#prd_files[@]} -eq 0 ]]; then
-      echo "No PRDs found in $tasks_dir (expected prd-*.md)."
-      echo "Create a PRD there first, then re-run 'wt start'."
-      return 1
-    fi
 
-    local chosen="" no_herdr=0 primary_kind="" start_arg start_index
+    local chosen="" no_herdr=0 primary_kind="" assume_yes=0 start_arg start_index
     local -a start_args
     start_args=("${@:2}")
     start_index=1
@@ -831,11 +1019,14 @@ function wt_dispatch {
         --no-herdr)
           no_herdr=1
           ;;
+        --yes|-y)
+          assume_yes=1
+          ;;
         --kind)
           start_index=$(( start_index + 1 ))
           if (( start_index > ${#start_args[@]} )) || [[ "${start_args[$start_index]}" == --* ]]; then
             echo "wt start --kind requires a Herdr agent kind"
-            echo "Usage: wt start [feature] [--kind KIND] [--no-herdr]"
+            echo "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
             return 1
           fi
           if [[ -n "$primary_kind" ]]; then
@@ -846,7 +1037,7 @@ function wt_dispatch {
           ;;
         --*)
           echo "Unknown wt start option: $start_arg"
-          echo "Usage: wt start [feature] [--kind KIND] [--no-herdr]"
+          echo "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
           return 1
           ;;
         *)
@@ -863,18 +1054,42 @@ function wt_dispatch {
       echo "wt start --kind cannot be combined with --no-herdr"
       return 1
     fi
+
+    # FR-13: bare `wt start` is the stepwise guided flow. Naming a feature is the
+    # quick path — it still shows the summary and still asks before mutating, but
+    # it does not walk through choices the caller has already made.
+    local guided=0
+    if [[ -z "$chosen" ]] && wt_plan_is_interactive; then
+      guided=1
+    fi
+
     if [[ -z "$chosen" ]]; then
+      if [[ ${#prd_files[@]} -eq 0 ]]; then
+        echo "No PRDs found in $tasks_dir (expected prd-*.md)."
+        echo "Create a PRD there first, then re-run 'wt start'."
+        echo "For work that does not need one: wt new <name>"
+        return 1
+      fi
+      if ! wt_plan_is_interactive; then
+        echo "wt start needs a PRD name when there is no terminal to choose from."
+        echo "Usage: wt start <feature> [--kind KIND] [--no-herdr]"
+        return 1
+      fi
       echo "Select a PRD to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
       local i
       for i in {1..${#prd_files[@]}}; do
         local feat="${prd_files[$i]#prd-}"; feat="${feat%.md}"
-        local has_tasks="  (no task list yet)"
+        local has_tasks="  ${WT_C_DIM}(no task list yet)${WT_C_RESET}"
         [[ -f "$tasks_dir/tasks-$feat.md" ]] && has_tasks=""
         echo "  $i) ${prd_files[$i]}${has_tasks}"
       done
       echo "  q) Quit"
       echo
-      read "choice?Choice: "
+      local choice
+      if ! read -r "choice?Choice: "; then
+        echo
+        return 0
+      fi
       if [[ "$choice" == "q" || -z "$choice" ]]; then
         return 0
       fi
@@ -893,44 +1108,70 @@ function wt_dispatch {
       fi
     fi
 
-    local feature="${chosen#prd-}"; feature="${feature%.md}"
-    local branch="feature/$feature"
+    WT_PLAN_FEATURE="${chosen#prd-}"; WT_PLAN_FEATURE="${WT_PLAN_FEATURE%.md}"
+    WT_PLAN_BRANCH="feature/$WT_PLAN_FEATURE"
+    WT_PLAN_TARGET="$(wt_new_worktree_dir)/$WT_PLAN_FEATURE"
+    WT_PLAN_PRD="$tasks_dir/$chosen"
+    WT_PLAN_BACKLOG=1
+    WT_PLAN_COPY_DOCS=1
 
-    if ! wt_provision_worktree "$branch" "$feature"; then
-      return 1
-    fi
-    local target="$WT_PROVISIONED_TARGET"
-
-    echo "Copying PRD and task list into new worktree..."
-    mkdir -p "$target/tasks"
-    cp "$tasks_dir/$chosen" "$target/tasks/"
-    if [[ -f "$tasks_dir/tasks-$feature.md" ]]; then
-      cp "$tasks_dir/tasks-$feature.md" "$target/tasks/"
+    if [[ -f "$tasks_dir/tasks-$WT_PLAN_FEATURE.md" ]]; then
+      WT_PLAN_TASKS="$tasks_dir/tasks-$WT_PLAN_FEATURE.md"
+      WT_PLAN_TASKS_STATE="present"
+    elif wt_plan_is_interactive; then
+      # Previously this printed a note and carried on, so a feature could get
+      # all the way to a running agent before anyone noticed it had no plan.
+      echo
+      echo "${WT_C_YELLOW}No task list for $WT_PLAN_FEATURE.${WT_C_RESET} tasks-$WT_PLAN_FEATURE.md does not exist in $tasks_dir."
+      echo "  g) Create a starter checklist whose first task is to write the real one"
+      echo "  c) Continue without one; the agent works from the PRD alone"
+      echo "  q) Cancel so you can generate it properly first"
+      local tasks_choice
+      if ! read -r "tasks_choice?Choice [g/c/q]: "; then
+        echo
+        return 0
+      fi
+      case "$tasks_choice" in
+        g|G|"") WT_PLAN_TASKS_STATE="generate" ;;
+        c|C)    WT_PLAN_TASKS_STATE="none" ;;
+        *)      echo "Nothing was changed."; return 0 ;;
+      esac
     else
-      echo "Note: no tasks-$feature.md yet - generate the task list in this worktree."
+      WT_PLAN_TASKS_STATE="none"
     fi
 
-    # Backlog bookkeeping: record this feature under ## Doing (keyed by the PRD
-    # slug) and push, so wt done can retire it on merge. Non-fatal - never
-    # blocks starting the feature. Commits land on the dev worktree's tracked
-    # BACKLOG.md, not this new feature worktree.
-    if [[ -f "$dev_path/BACKLOG.md" ]]; then
-      wt_backlog_ensure_doing "$dev_path/BACKLOG.md" "$feature" \
-        && wt_backlog_commit_push "$dev_path" "docs(backlog): promote $feature to Doing"
-    fi
-
-    # Git provisioning remains successful even when Herdr isn't installed,
-    # unavailable, or needs recovery. Handoff happens only after the real
-    # worktree and its planning artifacts exist; see wt_herd_handoff for the
-    # degradation contract every Herdr failure funnels into.
-    if (( ! no_herdr )); then
-      wt_herd_handoff "$feature" "$target" "$branch" "$primary_kind"
+    if (( no_herdr )); then
+      WT_PLAN_START_AGENT=0
     else
-      echo "Skipping Herdr handoff (--no-herdr)."
+      WT_PLAN_START_AGENT=1
+      WT_PLAN_KIND="$primary_kind"
+      WT_PLAN_KIND_DISPLAY="${primary_kind:-$(wt_plan_default_kind)}"
+      wt_plan_resolve_workspace
+      # The agent step defaults to the configured primary kind with
+      # start-and-prompt pre-selected, so accepting every default reproduces
+      # exactly what wt start did before this flow existed.
+      if (( guided )) && (( ! assume_yes )) && [[ -z "$primary_kind" ]]; then
+        local agent_choice
+        echo
+        echo "Agent: ${WT_C_CYAN}${WT_PLAN_KIND_DISPLAY}${WT_C_RESET} started in a new tab and given the bootstrap prompt."
+        echo "  Enter) accept    n) no agent, worktree only    <kind>) use a different agent kind"
+        if ! read -r "agent_choice?Choice: "; then
+          echo
+          return 0
+        fi
+        case "$agent_choice" in
+          "")     ;;
+          n|N)    WT_PLAN_START_AGENT=0 ;;
+          *)      WT_PLAN_KIND="$agent_choice"; WT_PLAN_KIND_DISPLAY="$agent_choice" ;;
+        esac
+      fi
     fi
 
-    cd "$target"
-    echo "Changed to: $target"
+    wt_plan_render
+    if ! wt_plan_confirm "$assume_yes"; then
+      return 0
+    fi
+    wt_start_execute
     ;;
   herd)
     shift

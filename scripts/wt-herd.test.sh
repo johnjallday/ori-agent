@@ -17,7 +17,7 @@ fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/ori-wt-herd.XXXXXX")"
 trap 'rm -rf -- "$fixture_root"' EXIT
 
 dev_root="$fixture_root/dev"
-target_root="$fixture_root/feature"
+target_root="$fixture_root/bridge"
 mkdir -p "$dev_root/tasks" "$target_root"
 print -r -- "# bridge" > "$dev_root/tasks/prd-bridge.md"
 print -r -- "## Tasks" > "$dev_root/tasks/tasks-bridge.md"
@@ -26,6 +26,14 @@ source "$repo_root/scripts/wt.sh"
 
 function wt_get_dev_worktree {
   print -r -- "$dev_root"
+}
+
+# Stubbed together: the plan phase predicts the worktree path from
+# wt_new_worktree_dir and the execute phase takes it from wt_provision_worktree.
+# They use the same formula in real life, so the fixture must agree too or the
+# summary would appear to describe a different path than the one created.
+function wt_new_worktree_dir {
+  print -r -- "$fixture_root"
 }
 
 function wt_provision_worktree {
@@ -46,14 +54,25 @@ wt start bridge --no-herdr >/dev/null
 
 # A failed handoff is non-blocking: Git provisioning remains successful and
 # the handoff command receives the exact feature/path/branch identity.
+#
+# The read-only `target` call precedes it — that is what supplies the workspace
+# name in the confirmation summary — so the handoff line is matched rather than
+# the whole transcript.
 wt start bridge >/dev/null
-[[ "$(<"$fixture_root/herd-calls")" == "handoff --feature bridge --worktree $target_root --branch feature/bridge" ]]
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge$" "$fixture_root/herd-calls"
 
 # An optional per-feature kind override is forwarded to the initial handoff;
 # omitting it above leaves the configured Claude default unchanged.
 > "$fixture_root/herd-calls"
 wt start bridge --kind codex >/dev/null
-[[ "$(<"$fixture_root/herd-calls")" == "handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex" ]]
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex$" "$fixture_root/herd-calls"
+
+# Only the summary's read-only lookup may precede a mutation. Anything else
+# would mean the flow contacted Herdr before the user agreed to anything.
+if rg -qv "^(target|handoff )" "$fixture_root/herd-calls"; then
+  print -r -- "unexpected Herdr calls during start: $(<"$fixture_root/herd-calls")" >&2
+  exit 1
+fi
 
 # FR-32: a Herdr failure is non-fatal. The worktree and its planning documents
 # are what the user actually asked for, so wt start still exits 0, still leaves
@@ -104,6 +123,119 @@ HERDR_DEVFLOW_HOME="$fixture_root/runtime" \
     > "$fixture_root/disabled-output" 2>&1 || disabled_status=$?
 [[ "$disabled_status" == "0" ]]
 rg -q "disabled" "$fixture_root/disabled-output"
+
+# FR-18: the confirmation summary must name everything that is about to happen,
+# so nothing lands that the user did not see first.
+> "$fixture_root/herd-calls"
+wt start bridge > "$fixture_root/plan-output" 2>&1
+rg -q "Feature .*bridge" "$fixture_root/plan-output"
+rg -q "Branch .*feature/bridge" "$fixture_root/plan-output"
+rg -q "Worktree .*$target_root" "$fixture_root/plan-output"
+rg -q "PRD .*prd-bridge.md" "$fixture_root/plan-output"
+rg -q "Task list .*tasks-bridge.md" "$fixture_root/plan-output"
+rg -q "Agent .*claude" "$fixture_root/plan-output"
+rg -q "Herdr tab" "$fixture_root/plan-output"
+# Irreversible steps are marked, not buried in prose.
+rg -q "new branch" "$fixture_root/plan-output"
+rg -q "not undone by declining later" "$fixture_root/plan-output"
+
+# FR-19/FR-20 are one mechanism seen from two sides: the flow only prompts when
+# there is a terminal, and declining mutates nothing at all. The suite has no
+# terminal, so interactivity is forced and stdin supplied per command.
+function wt_plan_is_interactive { return 0 }
+
+function wt_provision_worktree {
+  print -r -- "provision" >> "$fixture_root/decline-mutations"
+  typeset -g WT_PROVISIONED_TARGET="$target_root"
+  return 0
+}
+function wt_backlog_ensure_doing { print -r -- "backlog" >> "$fixture_root/decline-mutations"; return 0 }
+function wt_backlog_commit_push { print -r -- "push" >> "$fixture_root/decline-mutations"; return 0 }
+
+# `target` is the summary's read-only lookup and runs before the gate by design,
+# so it is answered rather than recorded. Everything else is a mutation and any
+# occurrence of one before a yes is a failure.
+function wt_herd {
+  if [[ "$1" == "target" ]]; then
+    print -r -- "ready\tw1\tdemo-workspace"
+    return 0
+  fi
+  print -r -- "$*" >> "$fixture_root/decline-mutations"
+  return 0
+}
+
+# Declining at the gate: not one Git, backlog, or Herdr call may be recorded.
+wt start bridge <<< "n" > "$fixture_root/declined-output" 2>&1
+rg -q "Nothing was changed" "$fixture_root/declined-output"
+if [[ -f "$fixture_root/decline-mutations" ]]; then
+  print -r -- "declining the confirmation still mutated: $(<"$fixture_root/decline-mutations")" >&2
+  exit 1
+fi
+
+# Answering anything other than yes is a decline, including an empty line.
+wt start bridge <<< "" > /dev/null 2>&1
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
+# Accepting runs the whole plan, and the Herdr handoff receives the exact
+# feature/path/branch identity the summary showed.
+wt start bridge <<< "y" > "$fixture_root/accepted-output" 2>&1
+rg -q "provision" "$fixture_root/decline-mutations"
+rg -q "handoff --feature bridge --worktree $target_root --branch feature/bridge" "$fixture_root/decline-mutations"
+
+# --yes is the escape hatch for someone who already knows: no prompt, same plan.
+rm -f "$fixture_root/decline-mutations"
+wt start bridge --yes > "$fixture_root/yes-output" 2>&1
+rg -q "provision" "$fixture_root/decline-mutations"
+rg -q "Feature .*bridge" "$fixture_root/yes-output"
+
+# FR-21: the existing flags keep working through the new flow, including their
+# mutual exclusion, which is still rejected before anything is planned.
+rm -f "$fixture_root/decline-mutations"
+wt start bridge --no-herdr --yes > /dev/null 2>&1
+rg -q "provision" "$fixture_root/decline-mutations"
+if rg -q "handoff" "$fixture_root/decline-mutations"; then
+  print -r -- "--no-herdr still handed off to Herdr" >&2
+  exit 1
+fi
+rm -f "$fixture_root/decline-mutations"
+wt start bridge --kind codex --yes > /dev/null 2>&1
+rg -q "handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex" "$fixture_root/decline-mutations"
+rm -f "$fixture_root/decline-mutations"
+if wt start bridge --kind codex --no-herdr > /dev/null 2>&1; then
+  print -r -- "wt start accepted --kind together with --no-herdr" >&2
+  exit 1
+fi
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
+# FR-15: a PRD with no task list becomes a decision instead of a note that
+# scrolls past. Cancelling there is also a decline: nothing may be mutated.
+print -r -- "# planless" > "$dev_root/tasks/prd-planless.md"
+rm -f "$fixture_root/decline-mutations"
+wt start planless <<< "q" > "$fixture_root/planless-output" 2>&1
+rg -q "No task list for planless" "$fixture_root/planless-output"
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
+# Choosing to generate one writes a starter checklist whose first task is to
+# replace it, so the agent's bootstrap prompt has something real to read.
+printf 'g\ny\n' | wt start planless > "$fixture_root/generate-output" 2>&1
+rg -q "will be created as the agent's first task" "$fixture_root/generate-output"
+[[ -f "$target_root/tasks/tasks-planless.md" ]]
+rg -q "replace this file with a real task" "$target_root/tasks/tasks-planless.md"
+rg -q "^- \[ \] 1\.1 " "$target_root/tasks/tasks-planless.md"
+
+# Restore the suite's non-interactive stance and stubs for the sections below.
+unfunction wt_plan_is_interactive
+function wt_provision_worktree {
+  typeset -g WT_PROVISIONED_TARGET="$target_root"
+  return 0
+}
+function wt_backlog_ensure_doing { return 1 }
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/herd-calls"
+  return 1
+}
+rm -f "$target_root/tasks/tasks-planless.md" "$fixture_root/decline-mutations"
+print -r -- "## Tasks" > "$dev_root/tasks/tasks-bridge.md"
 
 # A blocked Herdr cleanup guard must stop wt done before it mutates the
 # backlog, archives tasks, checks dirty state, or asks Git to remove anything.
