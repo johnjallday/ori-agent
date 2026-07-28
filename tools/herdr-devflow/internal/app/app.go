@@ -1696,14 +1696,10 @@ func (a *App) rehydrateStatus(ctx context.Context, runtime runtimeContext, servi
 			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: status metadata was not refreshed: %v\n", err)
 		}
 	}
-	// Agent views use the socket API. A normal shell status command may have
-	// no socket context, while the installed plugin does; avoid presenting the
-	// absence of that optional context as a status-board failure.
-	if runtime.herdr.SocketPath != "" {
-		if err := service.ApplyManagedView(ctx); err != nil {
-			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: managed Herdr view was not refreshed: %v\n", err)
-		}
-	}
+	// The managed Herdr agent view is no longer auto-applied here: it used to
+	// silently filter Herdr's Agents panel down to devflow-tracked panes on
+	// every status/setup/plugin refresh. `wt herd status --clear-view` still
+	// clears a view left over from before this change or applied manually.
 }
 
 // refreshStatusDisplay is best-effort after a command changes managed local
@@ -2170,7 +2166,7 @@ func (a *App) pluginStatusService(opts options) (*status.Service, *herdr.Client,
 }
 
 func (a *App) pluginRefresh(ctx context.Context, opts options) int {
-	service, client, err := a.pluginStatusService(opts)
+	service, _, err := a.pluginStatusService(opts)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: could not open local status state: %v\n", err)
 		return 0
@@ -2180,7 +2176,7 @@ func (a *App) pluginRefresh(ctx context.Context, opts options) int {
 		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: could not refresh status: %v\n", err)
 		return 0
 	}
-	a.rehydratePluginStatus(ctx, service, client, snapshot)
+	a.rehydratePluginStatus(ctx, service, snapshot)
 	a.writeResult(opts.json, map[string]any{"status": "ready", "managed_agents": len(snapshot.Rows), "stale": snapshot.Stale})
 	return 0
 }
@@ -2203,7 +2199,7 @@ func (a *App) pluginBoard(ctx context.Context, opts options) int {
 		// Without a resolvable repository the board cannot collect anything,
 		// but the legacy view is still better than a blank pane.
 		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: %v\n", buildErr)
-		return a.pluginLegacyBoard(ctx, opts, metadata, client)
+		return a.pluginLegacyBoard(ctx, opts, metadata)
 	}
 
 	firstSnapshot := true
@@ -2213,7 +2209,7 @@ func (a *App) pluginBoard(ctx context.Context, opts options) int {
 		// Reconnects and the first render are the two points where display
 		// metadata may need rebuilding.
 		if firstSnapshot || (wasStale && !snapshot.Stale) {
-			a.rehydratePluginStatusFromState(ctx, metadata, client)
+			a.rehydratePluginStatusFromState(ctx, metadata)
 		}
 		firstSnapshot = false
 		wasStale = snapshot.Stale
@@ -2235,9 +2231,9 @@ func (a *App) pluginBoard(ctx context.Context, opts options) int {
 // pluginLegacyBoard is the fallback for a plugin invocation that cannot resolve
 // a repository checkout, which is the one case the shared collector cannot
 // serve.
-func (a *App) pluginLegacyBoard(ctx context.Context, opts options, service *status.Service, client *herdr.Client) int {
+func (a *App) pluginLegacyBoard(ctx context.Context, opts options, service *status.Service) int {
 	emit := func(snapshot status.Snapshot) {
-		a.rehydratePluginStatus(ctx, service, client, snapshot)
+		a.rehydratePluginStatus(ctx, service, snapshot)
 		a.writeStatusSnapshot(opts.json, false, snapshot)
 	}
 	if err := service.Watch(ctx, status.Options{}, emit); err != nil {
@@ -2286,24 +2282,20 @@ func (a *App) pluginOverviewService(opts options, client *herdr.Client) (*overvi
 
 // rehydratePluginStatusFromState republishes display metadata using the legacy
 // status service, which owns every Herdr write.
-func (a *App) rehydratePluginStatusFromState(ctx context.Context, service *status.Service, client *herdr.Client) {
+func (a *App) rehydratePluginStatusFromState(ctx context.Context, service *status.Service) {
 	snapshot, err := service.Snapshot(ctx, status.Options{})
 	if err != nil {
 		return
 	}
-	a.rehydratePluginStatus(ctx, service, client, snapshot)
+	a.rehydratePluginStatus(ctx, service, snapshot)
 }
 
-func (a *App) rehydratePluginStatus(ctx context.Context, service *status.Service, client *herdr.Client, snapshot status.Snapshot) {
+func (a *App) rehydratePluginStatus(ctx context.Context, service *status.Service, snapshot status.Snapshot) {
 	if err := service.RehydrateMetadata(ctx, snapshot); err != nil {
 		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: status metadata was not refreshed: %v\n", err)
 	}
-	if client.SocketPath == "" {
-		return
-	}
-	if err := service.ApplyManagedView(ctx); err != nil {
-		fmt.Fprintf(a.stderr, "Ori Herdr Devflow plugin warning: managed Herdr view was not refreshed: %v\n", err)
-	}
+	// The managed Herdr agent view is no longer auto-applied here; see
+	// rehydrateStatus for why.
 }
 
 func (a *App) writeHelp() {
