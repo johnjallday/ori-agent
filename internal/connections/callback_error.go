@@ -56,6 +56,8 @@ const (
 	// CategoryVaultUnavailable: the vault store itself could not be consulted.
 	CategoryVaultUnavailable CallbackCategory = "vault_unavailable"
 	// CategoryCredentialPersistFailed: the credential could not be written.
+	// #nosec G101 -- an error-category machine code, not a credential. The whole
+	// point of this type is to describe failures WITHOUT carrying secret material.
 	CategoryCredentialPersistFailed CallbackCategory = "credential_persist_failed"
 	// CategoryConnectionPersistFailed: the credential was stored but the grant
 	// could not be recorded on the connection.
