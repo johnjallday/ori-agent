@@ -19,7 +19,6 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-18 #dogfood PRD-drafting workflow/orchestration template writing tasks/prd-<feature>.md (stage 4)
 - 2026-07-19 Spin off email station → dedicated Mail workspace; HQ station becomes portal (mailbox runtime already workspace-scoped, OAuth vault is global; cheapest before first OAuth) #large
 - 2026-07-19 Specialized-workspace starter templates as capability "installs" — hub-and-spoke: HQ aggregates via snapshots, stations link out; Mail spin-off pilots the pattern
-- 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small
 - 2026-07-19 "First Mission" tutorial workspace as quest-log pull invite (pre-lived-in, disposable) — likely superseded by specialized templates teaching through real use
 - 2026-07-19 Template: Meeting Notes digester — file-watch a transcripts folder → summaries as notes, action items as tasks #small
 - 2026-07-19 Template: Repo Watcher — GitHub MCP; PR/issue digest + weekly changelog mission #dogfood #small
@@ -37,6 +36,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - google-account-email-ops-stabilization -> PRD at tasks/prd-google-account-email-ops-stabilization.md (started 2026-07-27)
 - downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-27)
 - wt-guided-tab-start -> PRD at tasks/prd-wt-guided-tab-start.md (started 2026-07-27)
+- 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small (started 2026-07-28)
 
 ## Shipped / dropped
 - 2026-07-27 vault-modal-loading - PR #271 merged to dev (2026-07-27)
