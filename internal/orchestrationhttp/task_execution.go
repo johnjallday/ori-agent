@@ -1046,8 +1046,15 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	}
 
 	now := time.Now()
-	if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
-		return fmt.Errorf("cannot mark task waiting for choice: %w", err)
+	// Re-blocking an already-blocked task is a legitimate outcome: the user
+	// retried before the precondition was actually repaired. The status machine
+	// rejects waiting_for_choice → waiting_for_choice, so skip the transition and
+	// go straight to refreshing the reason — otherwise the task would keep
+	// showing the STALE block while the real one went unrecorded.
+	if task.Status != workspace.TaskStatusWaitingForChoice {
+		if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
+			return fmt.Errorf("cannot mark task waiting for choice: %w", err)
+		}
 	}
 	task.CompletedAt = nil
 	task.Error = ""
