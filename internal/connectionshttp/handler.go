@@ -13,12 +13,17 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// WorkspaceLinker gives a workspace its own Gmail account by reusing the global
-// grant's identity — no Google re-authorization (FR 47, 54). Implemented by a
+// WorkspaceLinker points a workspace at the connection's authoritative Gmail
+// credential — no Google re-authorization (FR 47, 54, 68-70). Implemented by a
 // vault-backed adapter; nil disables workspace linking.
 type WorkspaceLinker interface {
 	LinkGmailToWorkspace(ctx context.Context, credentialRef, vaultID, workspaceID string) (accountID string, err error)
 }
+
+// ErrCredentialMissing means the connection's grant references a vault
+// credential that no longer exists. Implementations return an error matching
+// this so the endpoint can offer a reconnect instead of failing opaquely.
+var ErrCredentialMissing = errors.New("connectionshttp: the referenced Gmail credential no longer exists")
 
 // Handler serves the Google Account connection endpoints. Mutating and
 // metadata-reading routes are wrapped by the OriginGuard (FR 34); the OAuth
@@ -319,6 +324,21 @@ func (h *Handler) gmailLink(w http.ResponseWriter, r *http.Request) {
 	}
 	accountID, err := h.linker.LinkGmailToWorkspace(r.Context(), g.CredentialRef, conn.VaultID, workspaceID)
 	if err != nil {
+		// A grant can reference a credential the vault no longer holds — a vault
+		// recreated, a data directory moved, a partial teardown. That is a
+		// reconnect, not a server fault, and reporting it as a 500 left the user
+		// with a dead button and an opaque console error.
+		if errors.Is(err, ErrCredentialMissing) {
+			logger.Warn("gmail link: grant references a missing credential", logger.Fields{
+				"workspace_id": workspaceID,
+			})
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":   "credential_missing",
+				"message": "Your Gmail credential is no longer in the vault. Re-enable Gmail on your Google account to reconnect it.",
+				"action":  "enable_gmail",
+			})
+			return
+		}
 		http.Error(w, "failed to link Gmail to the workspace", http.StatusInternalServerError)
 		return
 	}

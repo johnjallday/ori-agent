@@ -113,10 +113,13 @@ func (s *gmailCredentialSink) LinkGmailToWorkspace(ctx context.Context, credenti
 	// a broken reference surfaces here rather than at first mailbox read.
 	account, err := s.store.GetEmailAccount(ctx, ref)
 	if err != nil {
+		if errors.Is(err, vault.ErrRecordNotFound) {
+			return "", connectionshttp.ErrCredentialMissing
+		}
 		return "", err
 	}
 	if account == nil {
-		return "", errors.New("connections: the Gmail credential referenced by this connection no longer exists")
+		return "", connectionshttp.ErrCredentialMissing
 	}
 	return account.ID, nil
 }

@@ -95,7 +95,16 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
       body: payload ? JSON.stringify(payload) : undefined
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data && (data.error || data.message)) || 'Request failed');
+    if (!res.ok) {
+      // Keep the server's machine code and status on the error so callers can
+      // tell an actionable conflict (e.g. a credential that no longer exists)
+      // from a genuine fault, instead of collapsing both into one message.
+      const err = new Error((data && (data.message || data.error)) || 'Request failed');
+      err.code = (data && data.error) || '';
+      err.status = res.status;
+      err.action = (data && data.action) || '';
+      throw err;
+    }
     return data;
   }
 
@@ -157,7 +166,17 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
       await postJSON(scope.linkUrl, { account_id: linked.account_id });
       toast('Email connected to ' + scope.connectedTarget + '.', 'success');
       renderBody();
-    } catch (_) {
+    } catch (err) {
+      // The grant can reference a credential the vault no longer holds — after a
+      // vault is recreated, or a data directory moves. That is a reconnect, not
+      // a fault, and saying so is the difference between a dead button and a
+      // next step.
+      if (err && err.code === 'credential_missing') {
+        toast(err.message || 'Your Gmail credential is no longer in the vault. Re-enable Gmail to reconnect it.', 'danger');
+        window.open('/settings#google-account', '_blank');
+        renderBody();
+        return;
+      }
       toast('Could not connect email via your Google account.', 'danger');
     }
   }
