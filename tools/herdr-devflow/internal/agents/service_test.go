@@ -61,7 +61,12 @@ func (f fakeInspector) Inspect(_ context.Context, _, _, _ string) (worktree.GitW
 }
 
 type fakeHerdr struct {
+	// opened seeds the canonical workspace, tab, and root-pane identities the
+	// tests assert against. Nothing calls worktree open any more; the first
+	// created tab reuses these identities so pane-level assertions stay stable.
 	opened           herdr.WorktreeOpenResult
+	workspaces       []herdr.WorkspaceInfo
+	tabs             map[string]herdr.TabInfo
 	process          herdr.PaneProcessInfo
 	panes            map[string]herdr.PaneInfo
 	processByPane    map[string]herdr.PaneProcessInfo
@@ -75,6 +80,7 @@ type fakeHerdr struct {
 	getCalls         int
 	promptCalls      int
 	metadataCalls    int
+	tabCreateCalls   int
 	startedReady     bool
 	startResult      *herdr.AgentInfo
 	promptResult     *herdr.AgentInfo
@@ -82,21 +88,98 @@ type fakeHerdr struct {
 	focusTarget      string
 	lastPromptTarget string
 	lastPromptText   string
-	lastOpenSource   string
-	lastOpenPath     string
-	calls            []string
-	fail             map[string]error
+	lastTabWorkspace string
+	lastTabCwd       string
+	lastTabLabel     string
+	// settleAfter models a freshly created tab whose shell reports a foreground
+	// process for the first N process-info polls, the way a real starting shell
+	// does before it settles.
+	settleAfter int
+	settlePolls map[string]int
+	// paneTokens records the last display tokens reported to each pane, which
+	// is where per-feature metadata lives now that a workspace holds many.
+	paneTokens map[string]map[string]string
+	calls      []string
+	fail       map[string]error
 }
 
-func (f *fakeHerdr) OpenExistingWorktree(_ context.Context, source, path string) (herdr.WorktreeOpenResult, error) {
-	f.lastOpenSource = source
-	f.lastOpenPath = path
-	f.record("worktree.open")
-	return f.opened, f.fail["open"]
+func (f *fakeHerdr) FocusedWorkspace(_ context.Context) (herdr.WorkspaceInfo, error) {
+	f.record("workspace.list")
+	if err := f.fail["focused"]; err != nil {
+		return herdr.WorkspaceInfo{}, err
+	}
+	for _, workspace := range f.workspaces {
+		if workspace.Focused {
+			return workspace, nil
+		}
+	}
+	return herdr.WorkspaceInfo{}, &model.StageError{Stage: "resolve focused workspace", Code: model.ErrNoFocusedWorkspace, Message: "no Herdr workspace reports focus", Recovery: "focus a Herdr workspace, then run wt herd retry"}
+}
+
+func (f *fakeHerdr) TabCreateInfo(_ context.Context, workspaceID, cwd, label string) (herdr.TabCreateResult, error) {
+	f.record("tab.create:" + workspaceID)
+	if err := f.fail["tab_create"]; err != nil {
+		return herdr.TabCreateResult{}, err
+	}
+	f.tabCreateCalls++
+	f.lastTabWorkspace, f.lastTabCwd, f.lastTabLabel = workspaceID, cwd, label
+	pane := f.opened.RootPane
+	if f.tabCreateCalls > 1 {
+		pane.PaneID = workspaceID + ":p" + strconv.Itoa(f.tabCreateCalls)
+		pane.TerminalID = "term-tab-" + strconv.Itoa(f.tabCreateCalls)
+	}
+	tabID := workspaceID + ":t" + strconv.Itoa(f.tabCreateCalls)
+	pane.WorkspaceID, pane.TabID = workspaceID, tabID
+	pane.Cwd, pane.ForegroundCwd = cwd, cwd
+	pane.Name, pane.Agent = "", ""
+	pane.AgentStatus = model.AgentUnknown
+	tab := herdr.TabInfo{TabID: tabID, WorkspaceID: workspaceID, Label: label, Number: f.tabCreateCalls, PaneCount: 1}
+	f.tabs[tabID] = tab
+	f.panes[pane.PaneID] = pane
+	f.processByPane[pane.PaneID] = herdr.PaneProcessInfo{
+		PaneID:              pane.PaneID,
+		ShellPID:            int64ptr(int64(100 + f.tabCreateCalls)),
+		ForegroundProcesses: []herdr.ForegroundProcess{{PID: int64(100 + f.tabCreateCalls), Name: "zsh", Cwd: cwd}},
+	}
+	return herdr.TabCreateResult{Type: "tab_created", Tab: tab, RootPane: pane}, nil
+}
+
+func (f *fakeHerdr) TabGetInfo(_ context.Context, tabID string) (herdr.TabInfo, error) {
+	f.record("tab.get:" + tabID)
+	if err := f.fail["tab_get"]; err != nil {
+		return herdr.TabInfo{}, err
+	}
+	tab, ok := f.tabs[tabID]
+	if !ok {
+		return herdr.TabInfo{}, &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "tab not found", Recovery: "wt herd retry"}
+	}
+	return tab, nil
+}
+
+func (f *fakeHerdr) PaneGetInfo(_ context.Context, paneID string) (herdr.PaneInfo, error) {
+	f.record("pane.get:" + paneID)
+	if err := f.fail["pane_get"]; err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	pane, ok := f.panes[paneID]
+	if !ok {
+		return herdr.PaneInfo{}, &model.StageError{Stage: "Herdr API", Code: model.ErrAgentMissing, Message: "pane not found", Recovery: "wt herd retry"}
+	}
+	return pane, nil
 }
 
 func (f *fakeHerdr) PaneProcessInfo(_ context.Context, paneID string) (herdr.PaneProcessInfo, error) {
 	f.record("pane.process-info:" + paneID)
+	if f.settleAfter > 0 {
+		f.settlePolls[paneID]++
+		if f.settlePolls[paneID] <= f.settleAfter {
+			return herdr.PaneProcessInfo{
+				PaneID:              paneID,
+				ShellPID:            int64ptr(7000),
+				ForegroundProcesses: []herdr.ForegroundProcess{{PID: 7001, Name: "zsh", Cwd: f.lastTabCwd}},
+			}, nil
+		}
+	}
 	if paneID == f.process.PaneID {
 		return f.process, f.fail["process"]
 	}
@@ -264,15 +347,13 @@ func (f *fakeHerdr) AgentPromptInfo(_ context.Context, target, text string, _ ti
 	return f.byName[target], nil
 }
 
-func (f *fakeHerdr) ReportWorkspaceMetadata(_ context.Context, _, _ string, _ map[string]string) (json.RawMessage, error) {
-	f.record("workspace.report-metadata")
+func (f *fakeHerdr) ReportPaneMetadata(_ context.Context, paneID, _ string, tokens map[string]string) (json.RawMessage, error) {
+	f.record("pane.report-metadata:" + paneID)
 	f.metadataCalls++
-	return json.RawMessage(`{"type":"workspace_metadata"}`), f.fail["workspace_metadata"]
-}
-
-func (f *fakeHerdr) ReportPaneMetadata(_ context.Context, _, _ string, _ map[string]string) (json.RawMessage, error) {
-	f.record("pane.report-metadata")
-	f.metadataCalls++
+	if f.paneTokens == nil {
+		f.paneTokens = make(map[string]map[string]string)
+	}
+	f.paneTokens[paneID] = tokens
 	return json.RawMessage(`{"type":"pane_metadata"}`), f.fail["pane_metadata"]
 }
 
@@ -304,8 +385,12 @@ func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) 
 	if !first.PromptDelivered || client.metadataCalls != 2 {
 		t.Fatalf("first handoff delivery/metadata = %#v, %d", first, client.metadataCalls)
 	}
-	if client.lastOpenSource != "/tmp/source-checkout" || client.lastOpenPath != path {
-		t.Fatalf("handoff source/path = %q / %q", client.lastOpenSource, client.lastOpenPath)
+	// The feature landed as a tab in the focused workspace, labeled with its slug.
+	if client.tabCreateCalls != 1 || client.lastTabWorkspace != "w1" || client.lastTabCwd != path || client.lastTabLabel != "bridge" {
+		t.Fatalf("tab create = %d calls, workspace %q, cwd %q, label %q", client.tabCreateCalls, client.lastTabWorkspace, client.lastTabCwd, client.lastTabLabel)
+	}
+	if first.TabID != "w1:t1" || first.WorkspaceID != "w1" {
+		t.Fatalf("handoff placement = workspace %q tab %q", first.WorkspaceID, first.TabID)
 	}
 	second, err := service.Handoff(context.Background(), request)
 	if err != nil {
@@ -415,11 +500,35 @@ func TestHandoffFailsAtEachHerdrStageWithoutReplacingTheCheckout(t *testing.T) {
 		prompts   int
 	}{
 		{
-			name: "open existing worktree",
+			name: "resolve focused workspace",
 			configure: func(client *fakeHerdr, _ *Service) {
-				client.fail["open"] = errors.New("socket unavailable")
+				client.fail["focused"] = errors.New("socket unavailable")
 			},
-			stage: "open existing worktree",
+			stage: "resolve focused workspace",
+		},
+		{
+			name: "no workspace holds focus",
+			configure: func(client *fakeHerdr, _ *Service) {
+				for index := range client.workspaces {
+					client.workspaces[index].Focused = false
+				}
+			},
+			stage: "resolve focused workspace",
+		},
+		{
+			name: "tab pane never settles",
+			configure: func(client *fakeHerdr, service *Service) {
+				service.Config.Bootstrap.TimeoutSeconds = 1
+				client.settleAfter = rootShellSettleAttempts + 1
+			},
+			stage: "resolve root pane",
+		},
+		{
+			name: "create feature tab",
+			configure: func(client *fakeHerdr, _ *Service) {
+				client.fail["tab_create"] = errors.New("socket unavailable")
+			},
+			stage: "create feature tab",
 		},
 		{
 			name: "root pane process lookup",
@@ -480,6 +589,13 @@ func TestHandoffFailsAtEachHerdrStageWithoutReplacingTheCheckout(t *testing.T) {
 			var stage *model.StageError
 			if !errors.As(err, &stage) || stage.Stage != test.stage {
 				t.Fatalf("Handoff() error = %#v, want stage %q", err, test.stage)
+			}
+			// The degradation contract (FR-32): every Herdr-side failure is a
+			// classified StageError carrying a command the user can act on.
+			// Without both, the shell can only say "something went wrong" while
+			// holding a worktree that is actually ready to use.
+			if stage.Code == "" || stage.Message == "" || stage.Recovery == "" {
+				t.Fatalf("failure at %q is not actionable: code=%q message=%q recovery=%q", test.stage, stage.Code, stage.Message, stage.Recovery)
 			}
 			if client.startCalls != test.starts || client.promptCalls != test.prompts {
 				t.Fatalf("calls after %s: starts=%d prompts=%d, want %d/%d", test.name, client.startCalls, client.promptCalls, test.starts, test.prompts)
@@ -647,8 +763,14 @@ func newFakeHerdr(path string) *fakeHerdr {
 			RootPane:  root,
 			Worktree:  herdr.WorktreeInfo{Path: path, Branch: "feature/bridge"},
 		},
-		process: herdr.PaneProcessInfo{PaneID: "w1:p1", ShellPID: int64ptr(42), ForegroundProcesses: []herdr.ForegroundProcess{{PID: 42, Name: "zsh", Cwd: path}}},
-		panes:   map[string]herdr.PaneInfo{"w1:p1": root},
+		workspaces: []herdr.WorkspaceInfo{
+			{WorkspaceID: "w1", Label: "ori-agent-dev", Focused: true, ActiveTabID: "w1:t1"},
+			{WorkspaceID: "w2", Label: "elsewhere"},
+		},
+		tabs:        make(map[string]herdr.TabInfo),
+		settlePolls: make(map[string]int),
+		process:     herdr.PaneProcessInfo{PaneID: "w1:p1", ShellPID: int64ptr(42), ForegroundProcesses: []herdr.ForegroundProcess{{PID: 42, Name: "zsh", Cwd: path}}},
+		panes:       map[string]herdr.PaneInfo{"w1:p1": root},
 		processByPane: map[string]herdr.PaneProcessInfo{
 			"w1:p1": {PaneID: "w1:p1", ShellPID: int64ptr(42), ForegroundProcesses: []herdr.ForegroundProcess{{PID: 42, Name: "zsh", Cwd: path}}},
 		},
@@ -659,3 +781,293 @@ func newFakeHerdr(path string) *fakeHerdr {
 }
 
 func int64ptr(value int64) *int64 { return &value }
+
+// The point of the feature: features are tabs inside the workspace the user is
+// already in. Nothing in the handoff path may reach for a workspace-creating
+// call, because that is what produced one top-level workspace per branch.
+func TestHandoffPlacesEachFeatureAsATabInTheFocusedWorkspace(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	first := filepath.Join(root, "alpha")
+	second := filepath.Join(root, "beta")
+
+	client := newFakeHerdr(first)
+	store := newMemoryStore()
+
+	alpha := newService(client, store, first)
+	if _, err := alpha.Handoff(context.Background(), HandoffRequest{FeatureName: "alpha", WorktreePath: first, Branch: "feature/bridge"}); err != nil {
+		t.Fatalf("first Handoff() error = %v", err)
+	}
+
+	beta := newService(client, store, second)
+	beta.Inspector = fakeInspector{worktree: worktree.GitWorktree{Path: second, Branch: "feature/bridge", CommonDir: "/tmp/common.git", SourcePath: "/tmp/source-checkout"}}
+	betaResult, err := beta.Handoff(context.Background(), HandoffRequest{FeatureName: "beta", WorktreePath: second, Branch: "feature/bridge"})
+	if err != nil {
+		t.Fatalf("second Handoff() error = %v", err)
+	}
+
+	if client.tabCreateCalls != 2 {
+		t.Fatalf("tab creates = %d, want one per feature", client.tabCreateCalls)
+	}
+	if betaResult.WorkspaceID != "w1" || betaResult.TabID != "w1:t2" {
+		t.Fatalf("second feature placement = workspace %q tab %q, want a second tab in w1", betaResult.WorkspaceID, betaResult.TabID)
+	}
+	// Two features, two tabs, two distinct panes — one shared workspace.
+	state, _ := store.Load()
+	alphaState, betaState := state.Features["repo-123456:alpha"], state.Features["repo-123456:beta"]
+	if alphaState.WorkspaceID != betaState.WorkspaceID {
+		t.Fatalf("features landed in different workspaces: %q vs %q", alphaState.WorkspaceID, betaState.WorkspaceID)
+	}
+	if alphaState.TabID == betaState.TabID || alphaState.TabID == "" || betaState.TabID == "" {
+		t.Fatalf("features share or lack a tab: %q vs %q", alphaState.TabID, betaState.TabID)
+	}
+	if alphaState.Handoff.RootPaneID == betaState.Handoff.RootPaneID {
+		t.Fatalf("features share pane %q", alphaState.Handoff.RootPaneID)
+	}
+	for _, call := range client.calls {
+		if strings.HasPrefix(call, "worktree.") || strings.HasPrefix(call, "workspace.create") {
+			t.Fatalf("handoff reached a workspace-creating API: %v", client.calls)
+		}
+	}
+}
+
+// A retry must re-enter the recorded tab. `worktree open` was idempotent;
+// `tab create` is not, so without this a second `wt herd retry` would pile up
+// an abandoned tab per attempt.
+func TestHandoffRetryReusesTheRecordedTabInsteadOfCreatingAnother(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	request := HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"}
+	if _, err := service.Handoff(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := service.Handoff(context.Background(), request)
+	if err != nil {
+		t.Fatalf("retry Handoff() error = %v", err)
+	}
+	if client.tabCreateCalls != 1 {
+		t.Fatalf("retry created %d tabs, want the original reused", client.tabCreateCalls)
+	}
+	if !retried.TabReused || retried.TabID != "w1:t1" {
+		t.Fatalf("retry placement = %#v, want the recorded tab reused", retried)
+	}
+}
+
+// If the user closes the feature's tab by hand, retry must rebuild it rather
+// than failing on a stale identity.
+func TestHandoffRecreatesTheTabWhenTheRecordedOneIsGone(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	request := HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"}
+	if _, err := service.Handoff(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+
+	// Close the tab and forget the agent, the way a user closing a tab does.
+	delete(client.tabs, "w1:t1")
+	delete(client.panes, "w1:p1")
+	client.agents = nil
+	client.byName = make(map[string]herdr.AgentInfo)
+	state, _ := store.Load()
+	feature := state.Features["repo-123456:bridge"]
+	feature.Agents = make(map[string]model.RoleAgent)
+	feature.Handoff.PrimaryAgentName = ""
+	state.Features["repo-123456:bridge"] = feature
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := service.Handoff(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Handoff() after the tab was closed = %v", err)
+	}
+	if client.tabCreateCalls != 2 || recovered.TabID != "w1:t2" {
+		t.Fatalf("recovery = %d creates, tab %q; want a fresh tab", client.tabCreateCalls, recovered.TabID)
+	}
+	after, _ := store.Load()
+	if after.Features["repo-123456:bridge"].TabID != "w1:t2" {
+		t.Fatalf("state kept the closed tab: %#v", after.Features["repo-123456:bridge"])
+	}
+}
+
+// Adoption predates tabs and must survive them. An agent already working in the
+// worktree supplies its own placement, so no tab is created beside it.
+func TestHandoffAdoptsAnExistingWorktreeAgentWithoutCreatingATab(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	adopted := client.opened.RootPane
+	adopted.PaneID = "w1:p9"
+	adopted.TerminalID = "term-adopted"
+	adopted.TabID = "w1:t9"
+	adopted.Name = "human-started-claude"
+	adopted.Agent = "claude"
+	adopted.InteractiveReady = true
+	adopted.AgentStatus = model.AgentIdle
+	client.agents = []herdr.AgentInfo{adopted}
+	client.byName[adopted.Name] = adopted
+	client.panes[adopted.PaneID] = adopted
+
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	result, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
+	if err != nil {
+		t.Fatalf("Handoff() error = %v", err)
+	}
+	if client.tabCreateCalls != 0 {
+		t.Fatalf("adoption created %d tabs beside the agent it adopted", client.tabCreateCalls)
+	}
+	if client.startCalls != 0 || result.Primary.Name != adopted.Name {
+		t.Fatalf("adoption = %d starts, primary %q", client.startCalls, result.Primary.Name)
+	}
+	if result.TabID != "w1:t9" || result.RootPaneID != "w1:p9" {
+		t.Fatalf("adopted placement = tab %q pane %q", result.TabID, result.RootPaneID)
+	}
+}
+
+// FR-3: with no focused workspace the handoff reports a distinct, recoverable
+// condition. It must never quietly fall back to minting a workspace.
+func TestHandoffReportsNoFocusedWorkspaceWithoutCreatingOne(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	for index := range client.workspaces {
+		client.workspaces[index].Focused = false
+	}
+	service := newService(client, newMemoryStore(), path)
+	_, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrNoFocusedWorkspace {
+		t.Fatalf("Handoff() with no focus = %#v, want ErrNoFocusedWorkspace", err)
+	}
+	if client.tabCreateCalls != 0 || client.startCalls != 0 {
+		t.Fatalf("unfocused handoff still mutated Herdr: tabs=%d starts=%d", client.tabCreateCalls, client.startCalls)
+	}
+}
+
+// PRD open question 3: a focused workspace bound to another repository is a
+// warning, not a refusal — refusing would strand the worktree over a placement
+// that still works.
+func TestHandoffWarnsWhenTheFocusedWorkspaceBelongsToAnotherRepository(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	client.workspaces[0].Worktree = &herdr.WorktreeBinding{RepoRoot: "/tmp/some-other-repo", RepoName: "other-project"}
+	service := newService(client, newMemoryStore(), path)
+	result, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
+	if err != nil {
+		t.Fatalf("Handoff() error = %v", err)
+	}
+	if client.tabCreateCalls != 1 {
+		t.Fatalf("cross-repository placement was refused: %d tab creates", client.tabCreateCalls)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "other-project") {
+		t.Fatalf("warnings = %#v, want one naming the foreign repository", result.Warnings)
+	}
+}
+
+// `tab create` returns as soon as the pane exists, so a brand-new tab's shell
+// can still look busy for a beat. That transient must not fail the handoff —
+// but the same guard must still refuse instantly for a pane we did not create,
+// which is where a second agent would land on top of a working one.
+func TestHandoffWaitsOutAStartingShellButRefusesABusyExistingPane(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+
+	settling := newFakeHerdr(path)
+	settling.settleAfter = 3
+	service := newService(settling, newMemoryStore(), path)
+	if _, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"}); err != nil {
+		t.Fatalf("Handoff() failed on a shell that was merely starting: %v", err)
+	}
+	if settling.startCalls != 1 {
+		t.Fatalf("settling handoff starts = %d, want 1", settling.startCalls)
+	}
+
+	// The same symptom on a pane the handoff adopted rather than created is a
+	// genuinely busy pane, and is refused without waiting.
+	busy := newFakeHerdr(path)
+	name, err := ScopedAgentName("repo-123456", "bridge", "builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	occupied := busy.opened.RootPane
+	occupied.TabID = "w1:t7"
+	busy.tabs["w1:t7"] = herdr.TabInfo{TabID: "w1:t7", WorkspaceID: "w1"}
+	busy.panes["w1:p1"] = occupied
+	busy.processByPane["w1:p1"] = herdr.PaneProcessInfo{
+		PaneID:              "w1:p1",
+		ShellPID:            int64ptr(42),
+		ForegroundProcesses: []herdr.ForegroundProcess{{PID: 99, Name: "vim", Cwd: path}},
+	}
+	busy.process = busy.processByPane["w1:p1"]
+
+	store := newMemoryStore()
+	seeded := model.NewBridgeState()
+	seeded.Features["repo-123456:bridge"] = model.FeatureState{
+		Feature: model.Feature{RepositoryID: "repo-123456", Name: "bridge", Branch: "feature/bridge", Path: path},
+		TabID:   "w1:t7",
+		Handoff: model.HandoffState{Stage: model.HandoffTabCreated, RootPaneID: "w1:p1", PrimaryRole: "builder", PrimaryKind: "claude", PrimaryAgentName: name},
+	}
+	if err := store.Save(seeded); err != nil {
+		t.Fatal(err)
+	}
+	busyService := newService(busy, store, path)
+	_, err = busyService.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Stage != "resolve root pane" {
+		t.Fatalf("Handoff() into a busy adopted pane = %#v, want a refusal", err)
+	}
+	if busy.startCalls != 0 {
+		t.Fatalf("an agent was launched into a busy pane")
+	}
+}
+
+// FR-26 and PRD open question 4: an ad-hoc feature has no PRD and no checklist,
+// so it gets an agent but no bootstrap prompt — there is nothing truthful for
+// one to point at. The decision is persisted, because a later retry knows
+// nothing about how the feature was created and would otherwise send a prompt
+// naming planning documents that were never going to exist.
+func TestAdHocHandoffStartsAnAgentWithoutABootstrapPrompt(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	request := HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", SkipPrompt: true}
+
+	first, err := service.Handoff(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Handoff() error = %v", err)
+	}
+	if client.startCalls != 1 {
+		t.Fatalf("ad-hoc handoff started %d agents, want 1", client.startCalls)
+	}
+	if client.promptCalls != 0 || first.PromptDelivered || !first.PromptSkipped {
+		t.Fatalf("ad-hoc handoff prompted: prompts=%d result=%#v", client.promptCalls, first)
+	}
+	if first.TabID == "" {
+		t.Fatalf("ad-hoc handoff got no tab: %#v", first)
+	}
+
+	stored, _ := store.Load()
+	if !stored.Features["repo-123456:bridge"].Handoff.SkipBootstrapPrompt {
+		t.Fatalf("the no-prompt decision was not persisted: %#v", stored.Features["repo-123456:bridge"].Handoff)
+	}
+
+	// A retry carries no SkipPrompt of its own; the recorded decision is what
+	// keeps it quiet. --resend must not talk it round either.
+	retried, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", Resend: true})
+	if err != nil {
+		t.Fatalf("retry Handoff() error = %v", err)
+	}
+	if client.promptCalls != 0 || !retried.PromptSkipped {
+		t.Fatalf("retry prompted an ad-hoc feature: prompts=%d result=%#v", client.promptCalls, retried)
+	}
+}

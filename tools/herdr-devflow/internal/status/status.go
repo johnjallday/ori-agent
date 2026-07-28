@@ -83,8 +83,13 @@ type Snapshot struct {
 }
 
 type FeatureSnapshot struct {
-	Feature         model.Feature     `json:"feature"`
-	WorkspaceID     string            `json:"workspace_id"`
+	Feature     model.Feature `json:"feature"`
+	WorkspaceID string        `json:"workspace_id"`
+	// TabID and RootPaneID identify the feature's own tab. A workspace now
+	// hosts many features, so the pane — not the workspace — is the narrowest
+	// surface that still belongs to exactly one feature.
+	TabID           string            `json:"tab_id,omitempty"`
+	RootPaneID      string            `json:"-"`
 	SourceID        string            `json:"-"`
 	MetadataEnabled bool              `json:"-"`
 	Task            tasklist.Progress `json:"task"`
@@ -147,7 +152,7 @@ func (s *Service) Snapshot(ctx context.Context, options Options) (Snapshot, erro
 		progress := tasklist.Read(filepath.Join(featureState.Feature.Path, "tasks", "tasks-"+featureState.Feature.Name+".md"))
 		gitState := s.gitState(ctx, featureState.Feature.Path)
 		nextSchedule := nextSchedule(featureState.Schedules)
-		featureSnapshot := FeatureSnapshot{Feature: featureState.Feature, WorkspaceID: featureState.WorkspaceID, SourceID: featureState.SourceID, MetadataEnabled: metadataEnabled(featureState), Task: progress, Git: gitState, NextSchedule: nextSchedule}
+		featureSnapshot := FeatureSnapshot{Feature: featureState.Feature, WorkspaceID: featureState.WorkspaceID, TabID: featureState.TabID, RootPaneID: featureState.Handoff.RootPaneID, SourceID: featureState.SourceID, MetadataEnabled: metadataEnabled(featureState), Task: progress, Git: gitState, NextSchedule: nextSchedule}
 		snapshot.Features = append(snapshot.Features, featureSnapshot)
 
 		roles := make([]string, 0, len(featureState.Agents))
@@ -213,7 +218,15 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 	if s.Client == nil {
 		return stageError("status metadata", model.ErrHerdrUnavailable, "the Herdr client is unavailable", "wt herd doctor", nil)
 	}
-	featureByWorkspace := make(map[string]FeatureSnapshot, len(snapshot.Features))
+	// Rows must find their own feature. Keying features by workspace was safe
+	// only while a workspace held exactly one feature; with several features
+	// sharing one, a workspace-keyed lookup collapses to whichever was seen
+	// last and every other row would be labelled with a stranger's branch.
+	featureByName := make(map[string]FeatureSnapshot, len(snapshot.Features))
+	for _, feature := range snapshot.Features {
+		featureByName[feature.Feature.Name] = feature
+	}
+
 	liveWorkspaces := make(map[string]bool)
 	missingWorkspaces := make(map[string]bool)
 	for _, row := range snapshot.Rows {
@@ -226,27 +239,48 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 			missingWorkspaces[row.WorkspaceID] = true
 		}
 	}
+
 	for _, feature := range snapshot.Features {
-		featureByWorkspace[feature.WorkspaceID] = feature
-		if feature.WorkspaceID == "" || !feature.MetadataEnabled {
+		if !feature.MetadataEnabled {
 			continue
 		}
-		// A successful cleanup closes the workspace before Git removes the
-		// worktree. Keep its saved state visible as missing, but do not attempt
-		// to rehydrate display metadata into that already-closed workspace.
-		if missingWorkspaces[feature.WorkspaceID] && !liveWorkspaces[feature.WorkspaceID] {
+		// A successful cleanup closes the feature's tab (or, for a legacy
+		// record, its workspace) before Git removes the worktree. Keep the saved
+		// state visible as missing, but do not push display metadata into a
+		// surface that is already gone.
+		if feature.WorkspaceID != "" && missingWorkspaces[feature.WorkspaceID] && !liveWorkspaces[feature.WorkspaceID] {
 			continue
 		}
-		if _, err := s.Client.ReportWorkspaceMetadata(ctx, feature.WorkspaceID, s.metadataSource(feature), workspaceTokens(feature)); err != nil {
+		if feature.TabID != "" {
+			// Tab-backed: the feature's own pane carries its tokens, so they
+			// survive a workspace shared with other features and remain visible
+			// even when no agent is running in the tab.
+			if feature.RootPaneID == "" {
+				continue
+			}
+			if _, err := s.Client.ReportPaneMetadata(ctx, feature.RootPaneID, s.metadataSource(feature), featureTokens(feature)); err != nil {
+				return wrapHerdr("report feature status metadata", err)
+			}
+			continue
+		}
+		// Legacy workspace-backed record: that workspace still belongs to this
+		// one feature, so the workspace remains the honest place for its tokens.
+		// Nothing writes new records in this shape, so this drains as those
+		// features are retired.
+		if feature.WorkspaceID == "" {
+			continue
+		}
+		if _, err := s.Client.ReportWorkspaceMetadata(ctx, feature.WorkspaceID, s.metadataSource(feature), featureTokens(feature)); err != nil {
 			return wrapHerdr("report workspace status metadata", err)
 		}
 	}
+
 	for _, row := range snapshot.Rows {
 		if row.Live == nil || row.Live.PaneID == "" {
 			continue
 		}
-		feature := featureByWorkspace[row.WorkspaceID]
-		if !feature.MetadataEnabled {
+		feature, ok := featureByName[row.Feature]
+		if !ok || !feature.MetadataEnabled {
 			continue
 		}
 		if _, err := s.Client.ReportPaneMetadata(ctx, row.Live.PaneID, s.metadataSource(feature), paneTokens(feature, row)); err != nil {
@@ -531,7 +565,10 @@ func scheduleActivityTime(schedule model.Schedule) time.Time {
 	return schedule.DueAt
 }
 
-func workspaceTokens(feature FeatureSnapshot) map[string]string {
+// featureTokens are the display values that describe one feature. They are
+// reported at pane scope for tab-backed features and at workspace scope only
+// for legacy records whose workspace still holds a single feature.
+func featureTokens(feature FeatureSnapshot) map[string]string {
 	tokens := map[string]string{
 		"repository":    safeToken(feature.Feature.RepositoryID),
 		"feature":       safeToken(feature.Feature.Name),
@@ -547,7 +584,7 @@ func workspaceTokens(feature FeatureSnapshot) map[string]string {
 }
 
 func paneTokens(feature FeatureSnapshot, row AgentRow) map[string]string {
-	tokens := workspaceTokens(feature)
+	tokens := featureTokens(feature)
 	tokens["role"] = safeToken(row.Role)
 	tokens["agent_kind"] = safeToken(row.Kind)
 	tokens["agent_status"] = safeToken(string(row.ObservedStatus))

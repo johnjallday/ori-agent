@@ -21,6 +21,7 @@ const (
 	ErrPluginUnavailable    ErrorCode = "plugin_unavailable"
 	ErrAgentUnavailable     ErrorCode = "agent_executable_unavailable"
 	ErrWorktreeInvalid      ErrorCode = "worktree_invalid"
+	ErrNoFocusedWorkspace   ErrorCode = "no_focused_workspace"
 	ErrAgentMissing         ErrorCode = "agent_missing"
 	ErrAgentAmbiguous       ErrorCode = "agent_ambiguous"
 	ErrScheduleInvalid      ErrorCode = "schedule_invalid"
@@ -157,8 +158,13 @@ type BridgeState struct {
 }
 
 type FeatureState struct {
-	Feature         Feature              `json:"feature"`
-	WorkspaceID     string               `json:"workspace_id,omitempty"`
+	Feature     Feature `json:"feature"`
+	WorkspaceID string  `json:"workspace_id,omitempty"`
+	// TabID is the feature's own tab inside a shared workspace. It is absent on
+	// records written before tab-backed handoff, and that absence is meaningful:
+	// cleanup treats such a feature as workspace-backed and refuses to close
+	// anything on its behalf rather than closing the whole workspace.
+	TabID           string               `json:"tab_id,omitempty"`
 	SourceID        string               `json:"source_id,omitempty"`
 	MetadataEnabled *bool                `json:"metadata_enabled,omitempty"`
 	Agents          map[string]RoleAgent `json:"agents,omitempty"`
@@ -177,13 +183,23 @@ type HandoffState struct {
 	PrimaryKind       string       `json:"primary_kind,omitempty"`
 	PrimaryAgentName  string       `json:"primary_agent_name,omitempty"`
 	BootstrapPrompted bool         `json:"bootstrap_prompted,omitempty"`
-	UpdatedAt         time.Time    `json:"updated_at,omitempty"`
+	// SkipBootstrapPrompt marks a feature that has no PRD and no checklist to
+	// be pointed at. The decision is persisted rather than passed per call so a
+	// later `wt herd retry` cannot deliver a prompt describing planning
+	// documents that were never going to exist.
+	SkipBootstrapPrompt bool      `json:"skip_bootstrap_prompt,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at,omitempty"`
 }
 
 type HandoffStage string
 
 const (
-	HandoffRecorded        HandoffStage = "recorded"
+	HandoffRecorded HandoffStage = "recorded"
+	// HandoffTabCreated is the placement stage for tab-backed features.
+	HandoffTabCreated HandoffStage = "tab_created"
+	// HandoffWorkspaceOpened is the pre-tab placement stage. Nothing writes it
+	// any more, but records persisted by earlier versions still carry it and
+	// must keep loading and rendering without error.
 	HandoffWorkspaceOpened HandoffStage = "workspace_opened"
 	HandoffPrimaryStarted  HandoffStage = "primary_started"
 	HandoffReady           HandoffStage = "ready"

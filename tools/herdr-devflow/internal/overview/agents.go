@@ -183,6 +183,18 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 			"This feature has a worktree but no agent is running for it.", detail)
 	}
 
+	// A handoff that degraded leaves the worktree and the bridge record but no
+	// Herdr placement at all. That is deliberately non-fatal, and the reason was
+	// printed at the time — but a warning in a scrolled-away terminal is not a
+	// state you can look up later. Surface it where the feature is inspected,
+	// with the command that finishes the job.
+	if hasRecord && feature.Git.WorktreePath != "" && !unavailable &&
+		state.WorkspaceID == "" && state.TabID == "" {
+		raise(FindingHandoffIncomplete, SeverityWarning, "",
+			"This feature has a worktree but was never placed in Herdr, so it has no tab and no agent.",
+			"Run wt herd retry --feature "+identityField(feature.Slug)+" to finish the Herdr half.")
+	}
+
 	// A saved record pointing at a worktree that no longer exists is drift to
 	// report, never an error and never a blocker on its own.
 	if hasRecord && state.Feature.Path != "" && feature.Git.WorktreePath == "" {
@@ -367,6 +379,14 @@ func agentWorktree(agent herdr.AgentInfo, workspaces []herdr.WorkspaceInfo) stri
 	for _, workspace := range workspaces {
 		if workspace.WorkspaceID != agent.WorkspaceID {
 			continue
+		}
+		// The workspace binding is only evidence about this agent while the
+		// workspace still describes one checkout. A workspace hosting a tab per
+		// feature is bound to whichever worktree opened it, so trusting it here
+		// would confidently attribute an agent to a sibling feature's branch —
+		// worse than admitting the pane reported no directory.
+		if workspace.TabCount > 1 {
+			return ""
 		}
 		if workspace.Worktree != nil && workspace.Worktree.CheckoutPath != "" {
 			return workspace.Worktree.CheckoutPath

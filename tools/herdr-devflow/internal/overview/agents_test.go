@@ -630,3 +630,73 @@ func TestAttachAgentsRecordsTheMatchedWorktree(t *testing.T) {
 		t.Fatal("the attribution recorded no evidence of which worktree matched")
 	}
 }
+
+// A workspace that hosts one tab still identifies that tab's checkout, so the
+// binding remains a useful fallback for a pane with no cwd. A workspace hosting
+// a tab per feature identifies none of them: it keeps the binding of whichever
+// worktree opened it, and using that would attribute an agent to a sibling
+// feature's branch. Reporting nothing is the honest answer there.
+func TestWorkspaceBindingFallbackOnlyAppliesToSingleTabWorkspaces(t *testing.T) {
+	agent := herdr.AgentInfo{Name: "ori-agent", WorkspaceID: "w1"}
+	single := []herdr.WorkspaceInfo{{
+		WorkspaceID: "w1", TabCount: 1,
+		Worktree: &herdr.WorktreeBinding{CheckoutPath: "/repo/worktrees/alpha"},
+	}}
+	if got := agentWorktree(agent, single); got != "/repo/worktrees/alpha" {
+		t.Fatalf("single-tab workspace fallback = %q, want the bound checkout", got)
+	}
+
+	shared := []herdr.WorkspaceInfo{{
+		WorkspaceID: "w1", TabCount: 3,
+		Worktree: &herdr.WorktreeBinding{CheckoutPath: "/repo/worktrees/alpha"},
+	}}
+	if got := agentWorktree(agent, shared); got != "" {
+		t.Fatalf("shared workspace fallback = %q, want no guess", got)
+	}
+
+	// A pane that does report a directory is unaffected either way: its own cwd
+	// is first-hand evidence and always wins.
+	located := agent
+	located.Cwd = "/repo/worktrees/beta"
+	if got := agentWorktree(located, shared); got != "/repo/worktrees/beta" {
+		t.Fatalf("pane cwd = %q, want it to win over the workspace binding", got)
+	}
+}
+
+// A handoff that degraded is non-fatal by design, and its reason is printed at
+// the time — but a warning in a terminal that has scrolled away is not a state
+// anyone can look up later. A worktree with a bridge record and no Herdr
+// placement must be visible where the feature is inspected, carrying the
+// command that finishes the job.
+func TestDegradedHandoffIsVisibleInTheOverview(t *testing.T) {
+	bridge := model.NewBridgeState()
+	bridge.Features["repo:degraded"] = model.FeatureState{
+		Feature: model.Feature{RepositoryID: "repo", Name: "degraded", Branch: "feature/degraded", Path: "/repo/worktrees/degraded"},
+		// No WorkspaceID and no TabID: Herdr was never reached.
+	}
+	feature := Feature{Slug: "degraded", Git: GitState{WorktreePath: "/repo/worktrees/degraded"}}
+	evidence := AgentEvidence{Availability: AvailabilityAvailable, Bridge: bridge}
+
+	findings := AttachAgents(&feature, evidence)
+	found, ok := findingFor(findings, FindingHandoffIncomplete)
+	if !ok {
+		t.Fatalf("findings = %v, want handoff_incomplete", findings)
+	}
+	if found.Severity != SeverityWarning {
+		t.Fatalf("severity = %q, want warning: the feature has no agent and nobody was told twice", found.Severity)
+	}
+	if !strings.Contains(found.Detail, "wt herd retry") {
+		t.Fatalf("detail = %q, want the command that finishes the handoff", found.Detail)
+	}
+
+	// A feature that did get placed must not raise it, or the finding would be
+	// noise on every healthy row.
+	bridge.Features["repo:placed"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: "repo", Name: "placed", Path: "/repo/worktrees/placed"},
+		WorkspaceID: "w1", TabID: "w1:t2",
+	}
+	placed := Feature{Slug: "placed", Git: GitState{WorktreePath: "/repo/worktrees/placed"}}
+	if _, ok := findingFor(AttachAgents(&placed, AgentEvidence{Availability: AvailabilityAvailable, Bridge: bridge}), FindingHandoffIncomplete); ok {
+		t.Fatal("a placed feature raised handoff_incomplete")
+	}
+}

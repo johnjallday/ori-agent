@@ -4,8 +4,12 @@ The Ori–Herdr Devflow Bridge connects Ori's Git-worktree lifecycle to an
 existing local Herdr installation. It establishes one narrow mapping:
 
 ~~~text
-Ori feature Git worktree → Herdr workspace → primary agent + explicit role agents
+Ori feature Git worktree → tab in the focused Herdr workspace → primary agent + explicit role agents
 ~~~
+
+A feature is a **tab**, not a workspace. Several features live side by side in
+the workspace you are already working in, and cleanup closes only the feature's
+own tab.
 
 Ori remains the authority for Git worktrees, branches, pull requests, archival,
 and removal. Herdr remains the authority for terminal panes and attached coding
@@ -48,15 +52,23 @@ wt start experimental-codex-flow --kind codex
 
 The handoff opens the existing checkout, finds an interactive pane, starts the
 configured primary agent, and sends a bootstrap prompt that points it to
-AGENTS.md, the PRD, and the task list. For a linked Git worktree, Herdr 0.7.5
-requires the repository's normal source checkout as parent context. The bridge
-resolves that checkout from Git and uses Herdr's existing-worktree open
-operation with both paths. Herdr may create or reuse its source/worktree
-workspace mapping, but it never creates, switches, or removes a Git worktree.
+AGENTS.md, the PRD, and the task list.
 
-If a newly opened root pane is still running startup work, the handoff records
-its workspace and stops before launching an agent. The completed Git worktree
-is still preserved; wait for the shell and run the printed retry command:
+The handoff resolves the **currently focused** Herdr workspace and creates the
+feature's tab inside it, labelled with the feature slug. It never opens a
+worktree as a workspace of its own, and it never creates, switches, or removes a
+Git worktree. Focus is sampled when the handoff runs, so the tab lands wherever
+you are at that moment.
+
+Unlike opening a worktree, creating a tab is not idempotent, so a retry
+rehydrates the tab already recorded for the feature — or adopts the tab of an
+agent already running in the worktree — rather than adding another one beside
+it.
+
+A brand-new tab's shell needs a moment before it is usable; the handoff waits
+for it to settle rather than mistaking a starting shell for a busy pane. If it
+never settles, the completed Git worktree is still preserved; wait for the shell
+and run the printed retry command:
 
 ~~~bash
 wt herd retry --feature herdr-devflow-bridge --worktree /absolute/path/to/herdr-devflow-bridge
@@ -73,6 +85,11 @@ Use wt start <feature> --no-herdr for a one-run opt-out. A successful retry
 completes only missing stages. It does not create a second workspace or primary
 agent, and it does not resend an already confirmed bootstrap prompt unless
 --resend is supplied.
+
+An ad-hoc feature created with `wt new` has no PRD and no task list, so it gets
+a tab and an agent but **no bootstrap prompt** — there is nothing truthful to
+point one at. That decision is recorded on the feature, so retries and
+`--resend` do not talk it round.
 
 If an agent is already running in the worktree — someone opened a pane by
 hand, or a previous handoff's workspace was closed and reopened — the handoff
@@ -427,13 +444,21 @@ the real work running unrecognised in a different workspace) complete cleanly
 once the real work finished, with no override.
 
 When every agent in the path is idle or done and no unresolved schedule
-remains, the guard closes the matching Herdr workspace and then lets the
-existing Ori Git cleanup proceed. It never calls Herdr worktree create/remove.
-A recorded workspace that no longer exists needs no closing and does not block
-cleanup either — the guard treats "can't confirm the workspace still exists"
-(an empty listing, a failed query) as unknown rather than gone, so a Herdr
-hiccup can never be misread as permission to skip a close that should have
-happened.
+remains, the guard closes **the feature's own Herdr tab** and then lets the
+existing Ori Git cleanup proceed. It never calls Herdr worktree create/remove,
+and it can no longer close a workspace at all: that call is not in the interface
+cleanup is given. Closing a workspace is structurally able to take siblings with
+it — on 2026-07-26 closing one bound to a repository's main checkout cascaded and
+destroyed three workspaces — while closing a tab cannot reach beyond itself.
+
+A feature recorded **before** tab-scoped handoff has a workspace and no tab. Its
+workspace is left open and named in the result for you to close by hand; the Git
+half still proceeds, so an old record can never make a worktree un-removable.
+
+A recorded tab that no longer exists needs no closing and does not block cleanup
+either — the guard treats "can't confirm it still exists" (an empty listing, a
+failed query) as unknown rather than gone, so a Herdr hiccup can never be misread
+as permission to skip a close that should have happened.
 
 The safety check uses an immediate local socket snapshot when Herdr supplies
 one. Without that socket, a slow CLI state query is bounded; it fails closed
@@ -441,7 +466,7 @@ instead of waiting through live agent activity and then treating the later
 settled state as permission to remove the worktree.
 
 wt done <feature> --herdr-override is a recovery tool only for unavailable or
-failed workspace-close checks. It cannot override known active agents or
+failed tab-close checks. It cannot override known active agents or
 unresolved schedules, and it records an orphan-risk audit event.
 
 ### Testing setup against an isolated home

@@ -162,6 +162,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.status(ctx, opts, commandArgs)
 	case "overview":
 		return a.overview(ctx, opts, commandArgs)
+	case "target":
+		return a.handoffTarget(ctx, opts)
 	case "cleanup":
 		return a.cleanup(ctx, opts, commandArgs)
 	case "dispatch":
@@ -180,6 +182,7 @@ type handoffArgs struct {
 	branch   string
 	kind     string
 	resend   bool
+	noPrompt bool
 }
 
 type controlContextArgs struct {
@@ -526,6 +529,12 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 			}
 			parsed.resend = true
 			args = args[1:]
+		case "--no-prompt":
+			if retry {
+				return handoffArgs{}, fmt.Errorf("--no-prompt is only available with handoff; retry uses the recorded decision")
+			}
+			parsed.noPrompt = true
+			args = args[1:]
 		default:
 			return handoffArgs{}, fmt.Errorf("unknown handoff option %q", args[0])
 		}
@@ -535,6 +544,9 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	}
 	if parsed.kind != "" && !config.IsSupportedAgentKind(parsed.kind) {
 		return handoffArgs{}, fmt.Errorf("--kind %q is not supported by Herdr", parsed.kind)
+	}
+	if parsed.resend && parsed.noPrompt {
+		return handoffArgs{}, fmt.Errorf("--resend and --no-prompt cannot be combined")
 	}
 	return parsed, nil
 }
@@ -832,6 +844,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		Branch:       parsed.branch,
 		PrimaryKind:  parsed.kind,
 		Resend:       parsed.resend,
+		SkipPrompt:   parsed.noPrompt,
 	})
 	if err != nil {
 		a.writeError(err, opts.json)
@@ -843,18 +856,81 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		handoffOutcome = "prompt-skipped"
 	}
 	a.recordAudit(runtime, audit.Event{Operation: "handoff", Feature: result.Feature.Name, Role: result.Primary.Role, Stage: "bootstrap", Outcome: handoffOutcome})
-	a.writeResult(opts.json, map[string]any{
+	payload := map[string]any{
 		"status":           "ready",
 		"feature":          result.Feature.Name,
 		"worktree":         result.Feature.Path,
 		"workspace_id":     result.WorkspaceID,
+		"tab_id":           result.TabID,
+		"tab_reused":       result.TabReused,
 		"primary_agent":    result.Primary.Name,
 		"primary_role":     result.Primary.Role,
 		"primary_kind":     result.Primary.Kind,
 		"prompt_delivered": result.PromptDelivered,
 		"prompt_skipped":   result.PromptSkipped,
-	})
+	}
+	if result.WorkspaceLabel != "" {
+		payload["workspace_label"] = result.WorkspaceLabel
+	}
+	if len(result.Warnings) > 0 {
+		payload["warnings"] = result.Warnings
+	}
+	a.writeResult(opts.json, payload)
 	return 0
+}
+
+// handoffTarget reports where the next handoff would put a feature's tab. The
+// guided start flow shows it in the confirmation summary, so it is read-only
+// and always exits 0: not being able to name the workspace is worth a word in
+// the summary, never a failed command.
+//
+// Human output is one tab-separated line rather than the usual result block,
+// because its only consumer is a shell that has to split it.
+func (a *App) handoffTarget(ctx context.Context, opts options) int {
+	report := func(status, workspaceID, label, detail string) int {
+		if opts.json {
+			payload := map[string]any{"status": status}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			if label != "" {
+				payload["workspace_label"] = label
+			}
+			if detail != "" {
+				payload["detail"] = detail
+			}
+			a.writeResult(true, payload)
+			return 0
+		}
+		fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", status, workspaceID, label)
+		return 0
+	}
+
+	runtime, err := a.load(opts)
+	if err != nil {
+		return report("unavailable", "", "", "the bridge configuration could not be read")
+	}
+	if !runtime.config.Bridge.Enabled {
+		return report("disabled", "", "", "Ori Herdr Devflow is disabled by configuration")
+	}
+	// Compatibility is deliberately not verified here. A version or schema
+	// mismatch is the handoff's problem to report; refusing to name the target
+	// would only make the summary less informative before the user has decided
+	// anything.
+	workspace, err := runtime.herdr.FocusedWorkspace(ctx)
+	if err != nil {
+		var stageErr *model.StageError
+		detail := "Herdr could not be reached"
+		if errors.As(err, &stageErr) {
+			detail = stageErr.Message
+		}
+		return report("unavailable", "", "", detail)
+	}
+	label := workspace.Label
+	if label == "" {
+		label = workspace.WorkspaceID
+	}
+	return report("ready", workspace.WorkspaceID, label, "")
 }
 
 func (a *App) loadAgentControl(ctx context.Context, opts options) (*agents.Service, runtimeContext, int) {
@@ -1576,6 +1652,9 @@ func (a *App) writeCleanupResult(asJSON bool, result cleanup.Result) {
 	if result.WorkspaceID != "" {
 		fmt.Fprintf(a.stdout, "  Herdr workspace: %s\n", result.WorkspaceID)
 	}
+	if result.TabID != "" {
+		fmt.Fprintf(a.stdout, "  Herdr tab: %s\n", result.TabID)
+	}
 	if result.Detail != "" {
 		fmt.Fprintf(a.stdout, "  Detail: %s\n", result.Detail)
 	}
@@ -2233,8 +2312,11 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
-  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND]
-                                Open an existing Git worktree and launch its primary agent
+  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--no-prompt]
+                                Add a tab for an existing Git worktree in the focused workspace
+                                and launch its primary agent there. --no-prompt starts the agent
+                                without the bootstrap prompt, for ad-hoc work that has no PRD or
+                                task list to point at; the choice is recorded for later retries.
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
                                 Resume the recorded primary kind; --resend repeats a confirmed prompt
   wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
@@ -2259,6 +2341,9 @@ Usage:
   wt herd status [--current|--feature NAME|--worktree PATH] [--watch] [--json] [--no-color]
                                 Show all managed features by default, or a filtered live status board
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
+  wt herd target [--json]       Name the workspace a new feature's tab would be added to.
+                                Read-only and always exits 0; reports disabled or
+                                unavailable instead of failing.
   wt herd dispatch              Run due local schedules (used by the macOS LaunchAgent)
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 
@@ -2285,6 +2370,15 @@ func (a *App) writeResult(asJSON bool, value any) {
 		}
 		if message, ok := pretty["message"].(string); ok {
 			fmt.Fprintln(a.stdout, message)
+		}
+		// Warnings accompany a successful result, so they have no error path to
+		// travel on and would otherwise be visible only under --json.
+		if warnings, ok := pretty["warnings"].([]any); ok {
+			for _, warning := range warnings {
+				if text, ok := warning.(string); ok {
+					fmt.Fprintf(a.stdout, "Warning: %s\n", text)
+				}
+			}
 		}
 		if helper, ok := pretty["helper"].(string); ok {
 			fmt.Fprintf(a.stdout, "Stable helper: %s\n", helper)

@@ -43,14 +43,19 @@ type LockingStore interface {
 	Lock(context.Context) (func(), error)
 }
 
-// Herdr deliberately exposes only the two operations cleanup is permitted to
-// use. In particular, no Herdr worktree create/remove method is available.
+// Herdr deliberately exposes only the operations cleanup is permitted to use.
+// In particular there is no worktree create/remove method, and — since this
+// change — no WorkspaceClose either. Closing a workspace is structurally
+// capable of taking siblings with it: on 2026-07-26 closing one bound to a
+// repository's main checkout cascaded and destroyed three workspaces. Closing a
+// tab cannot reach beyond itself, so it is the only teardown offered here.
 type Herdr interface {
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
 	// WorkspaceListInfo supplies worktree bindings, used only as a fallback
 	// for panes that report no working directory of their own.
 	WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error)
-	WorkspaceClose(context.Context, string) (json.RawMessage, error)
+	TabListInfo(context.Context, string) ([]herdr.TabInfo, error)
+	TabClose(context.Context, string) (json.RawMessage, error)
 }
 
 type Inspector interface {
@@ -87,7 +92,12 @@ type Result struct {
 	Schedules       []Schedule    `json:"schedules,omitempty"`
 	Detail          string        `json:"detail,omitempty"`
 	WorkspaceClosed bool          `json:"workspace_closed"`
-	Overridden      bool          `json:"overridden"`
+	// TabID and TabClosed describe the narrow teardown that replaced closing a
+	// workspace. WorkspaceClosed is retained in the payload and is now always
+	// false; consumers that branched on it keep parsing.
+	TabID      string `json:"tab_id,omitempty"`
+	TabClosed  bool   `json:"tab_closed"`
+	Overridden bool   `json:"overridden"`
 }
 
 type Agent struct {
@@ -236,26 +246,69 @@ func (s *Service) preflight(ctx context.Context, request Request) Result {
 		return result
 	}
 
-	// A workspace that no longer exists needs no closing, and failing to close
-	// it must not preserve the worktree: there is nothing left to orphan.
-	if !workspaceExists(featureState.WorkspaceID, workspaces) {
+	// Legacy workspace-backed feature: recorded before tabs existed, so there
+	// is no tab of its own to close and the workspace may well be shared with
+	// work this feature knows nothing about. Closing it is exactly the cascade
+	// this change exists to prevent, so the worktree is released and the user is
+	// told which workspace is theirs to close by hand.
+	if featureState.TabID == "" {
 		result.Outcome = OutcomeReady
-		result.Detail = "associated agents are settled, schedules are resolved, and the recorded Herdr workspace no longer exists"
+		switch {
+		case featureState.WorkspaceID == "":
+			// A handoff that degraded before Herdr was reached: the worktree
+			// exists and the record was written, but nothing was ever placed.
+			result.Detail = "associated agents are settled and schedules are resolved; this feature was never placed in Herdr, so there is nothing to close"
+		case workspaceExists(featureState.WorkspaceID, workspaces):
+			result.Detail = "associated agents are settled and schedules are resolved; this feature predates tab-scoped cleanup, so Herdr workspace " + featureState.WorkspaceID + " was left open — close it yourself once you are done with it"
+		default:
+			result.Detail = "associated agents are settled, schedules are resolved, and the recorded Herdr workspace no longer exists"
+		}
+		return result
+	}
+
+	result.TabID = featureState.TabID
+
+	// A tab that no longer exists needs no closing, and failing to close it must
+	// not preserve the worktree: there is nothing left to orphan.
+	if !tabExists(ctx, s, featureState) {
+		result.Outcome = OutcomeReady
+		result.Detail = "associated agents are settled, schedules are resolved, and the recorded Herdr tab no longer exists"
 		return result
 	}
 
 	closeCtx, cancel := s.herdrContext(ctx)
-	_, err = s.Client.WorkspaceClose(closeCtx, featureState.WorkspaceID)
+	_, err = s.Client.TabClose(closeCtx, featureState.TabID)
 	cancel()
 	if err != nil {
 		result.Outcome = OutcomeCloseFailed
-		result.Detail = "Herdr workspace close did not complete; the Git worktree remains preserved"
+		result.Detail = "Herdr tab close did not complete; the Git worktree remains preserved"
 		return s.closeFailed(request, result)
 	}
 	result.Outcome = OutcomeReady
-	result.WorkspaceClosed = true
-	result.Detail = "associated agents are settled, schedules are resolved, and the Herdr workspace is closed"
+	result.TabClosed = true
+	result.Detail = "associated agents are settled, schedules are resolved, and the feature's Herdr tab is closed"
 	return result
+}
+
+// tabExists reports whether Herdr still knows the recorded tab. Like
+// workspaceExists it treats an unreadable listing as "still there", because
+// assuming absence from a failed query would skip a close that should happen.
+func tabExists(ctx context.Context, s *Service, featureState model.FeatureState) bool {
+	if featureState.TabID == "" {
+		return false
+	}
+	listCtx, cancel := s.herdrContext(ctx)
+	tabs, err := s.Client.TabListInfo(listCtx, "")
+	cancel()
+	if err != nil || len(tabs) == 0 {
+		return true
+	}
+	for _, tab := range tabs {
+		if tab.TabID == featureState.TabID {
+			return true
+		}
+	}
+	return false
 }
 
 // workspaceExists reports whether Herdr still knows the recorded workspace.
