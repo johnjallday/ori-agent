@@ -662,3 +662,41 @@ func TestWorkspaceBindingFallbackOnlyAppliesToSingleTabWorkspaces(t *testing.T) 
 		t.Fatalf("pane cwd = %q, want it to win over the workspace binding", got)
 	}
 }
+
+// A handoff that degraded is non-fatal by design, and its reason is printed at
+// the time — but a warning in a terminal that has scrolled away is not a state
+// anyone can look up later. A worktree with a bridge record and no Herdr
+// placement must be visible where the feature is inspected, carrying the
+// command that finishes the job.
+func TestDegradedHandoffIsVisibleInTheOverview(t *testing.T) {
+	bridge := model.NewBridgeState()
+	bridge.Features["repo:degraded"] = model.FeatureState{
+		Feature: model.Feature{RepositoryID: "repo", Name: "degraded", Branch: "feature/degraded", Path: "/repo/worktrees/degraded"},
+		// No WorkspaceID and no TabID: Herdr was never reached.
+	}
+	feature := Feature{Slug: "degraded", Git: GitState{WorktreePath: "/repo/worktrees/degraded"}}
+	evidence := AgentEvidence{Availability: AvailabilityAvailable, Bridge: bridge}
+
+	findings := AttachAgents(&feature, evidence)
+	found, ok := findingFor(findings, FindingHandoffIncomplete)
+	if !ok {
+		t.Fatalf("findings = %v, want handoff_incomplete", findings)
+	}
+	if found.Severity != SeverityWarning {
+		t.Fatalf("severity = %q, want warning: the feature has no agent and nobody was told twice", found.Severity)
+	}
+	if !strings.Contains(found.Detail, "wt herd retry") {
+		t.Fatalf("detail = %q, want the command that finishes the handoff", found.Detail)
+	}
+
+	// A feature that did get placed must not raise it, or the finding would be
+	// noise on every healthy row.
+	bridge.Features["repo:placed"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: "repo", Name: "placed", Path: "/repo/worktrees/placed"},
+		WorkspaceID: "w1", TabID: "w1:t2",
+	}
+	placed := Feature{Slug: "placed", Git: GitState{WorktreePath: "/repo/worktrees/placed"}}
+	if _, ok := findingFor(AttachAgents(&placed, AgentEvidence{Availability: AvailabilityAvailable, Bridge: bridge}), FindingHandoffIncomplete); ok {
+		t.Fatal("a placed feature raised handoff_incomplete")
+	}
+}

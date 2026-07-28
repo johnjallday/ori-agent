@@ -1652,6 +1652,9 @@ func (a *App) writeCleanupResult(asJSON bool, result cleanup.Result) {
 	if result.WorkspaceID != "" {
 		fmt.Fprintf(a.stdout, "  Herdr workspace: %s\n", result.WorkspaceID)
 	}
+	if result.TabID != "" {
+		fmt.Fprintf(a.stdout, "  Herdr tab: %s\n", result.TabID)
+	}
 	if result.Detail != "" {
 		fmt.Fprintf(a.stdout, "  Detail: %s\n", result.Detail)
 	}

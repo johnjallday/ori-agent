@@ -281,6 +281,7 @@ const (
 	FindingAgentDrift            FindingCode = "agent_possible_drift"
 	FindingAgentUnmanaged        FindingCode = "agent_unmanaged"
 	FindingNoAgent               FindingCode = "no_agent"
+	FindingHandoffIncomplete     FindingCode = "handoff_incomplete"
 	FindingScheduleFailed        FindingCode = "schedule_failed"
 	FindingMetadataStale         FindingCode = "metadata_stale"
 	FindingHerdrUnavailable      FindingCode = "herdr_unavailable"

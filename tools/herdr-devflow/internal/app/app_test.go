@@ -326,11 +326,15 @@ func (r *cleanupRunner) Run(ctx context.Context, command herdr.Command) (herdr.C
 			return herdr.CommandResult{}, ctx.Err()
 		}
 		return herdr.CommandResult{Stdout: []byte(fmt.Sprintf(`{"result":{"agents":[{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":%q,"workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}}]}}`, r.status))}, nil
-	case "workspace close w1":
+	case "workspace list":
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"workspaces":[{"workspace_id":"w1","label":"shared","tab_count":2}]}}`)}, nil
+	case "tab list":
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"tabs":[{"tab_id":"w1:t1","workspace_id":"w1"},{"tab_id":"w1:t2","workspace_id":"w1"}]}}`)}, nil
+	case "tab close w1:t2":
 		if r.closeErr != nil {
 			return herdr.CommandResult{}, r.closeErr
 		}
-		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"workspace_closed"}}`)}, r.closeErr
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"ok"}}`)}, r.closeErr
 	default:
 		return herdr.CommandResult{}, fmt.Errorf("unexpected cleanup Herdr command: %s", key)
 	}
@@ -353,6 +357,7 @@ func TestCleanupFailsClosedWhenLiveAgentLookupExceedsDeadline(t *testing.T) {
 	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
 		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
 		WorkspaceID: "w1",
+		TabID:       "w1:t2",
 		Agents:      map[string]model.RoleAgent{"builder": agent},
 		Schedules:   map[string]model.Schedule{},
 	}
@@ -373,7 +378,7 @@ func TestCleanupFailsClosedWhenLiveAgentLookupExceedsDeadline(t *testing.T) {
 	}
 }
 
-func TestCleanupPreflightClosesOnlySettledWorkspaceAndBlocksActiveAgents(t *testing.T) {
+func TestCleanupPreflightClosesOnlySettledFeatureTabAndBlocksActiveAgents(t *testing.T) {
 	_, feature := createLinkedFeatureWorktree(t)
 	home := filepath.Join(t.TempDir(), "runtime")
 	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
@@ -391,6 +396,7 @@ func TestCleanupPreflightClosesOnlySettledWorkspaceAndBlocksActiveAgents(t *test
 	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
 		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
 		WorkspaceID: "w1",
+		TabID:       "w1:t2",
 		Agents:      map[string]model.RoleAgent{"builder": agent},
 		Schedules:   map[string]model.Schedule{},
 	}
@@ -407,9 +413,9 @@ func TestCleanupPreflightClosesOnlySettledWorkspaceAndBlocksActiveAgents(t *test
 		wantClose bool
 		wantAudit bool
 	}{
-		{name: "idle closes only the workspace", status: model.AgentIdle, wantExit: 0, wantClose: true},
+		{name: "idle closes only the feature tab", status: model.AgentIdle, wantExit: 0, wantClose: true},
 		{name: "working blocks before close", status: model.AgentWorking, wantExit: cleanup.ExitBlocked},
-		{name: "explicit override records orphan-risk audit without session data", status: model.AgentIdle, closeErr: errors.New("workspace close unavailable"), override: true, wantExit: 0, wantClose: true, wantAudit: true},
+		{name: "explicit override records orphan-risk audit without session data", status: model.AgentIdle, closeErr: errors.New("tab close unavailable"), override: true, wantExit: 0, wantClose: true, wantAudit: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &cleanupRunner{status: test.status, closeErr: test.closeErr}
@@ -423,9 +429,15 @@ func TestCleanupPreflightClosesOnlySettledWorkspaceAndBlocksActiveAgents(t *test
 			if exit != test.wantExit {
 				t.Fatalf("cleanup exit = %d, want %d; stdout=%s stderr=%s", exit, test.wantExit, output.String(), stderr.String())
 			}
-			closed := containsHerdrCommandFromStrings(runner.calls, "workspace close w1")
+			closed := containsHerdrCommandFromStrings(runner.calls, "tab close w1:t2")
 			if closed != test.wantClose {
-				t.Fatalf("workspace close=%v, want %v; calls=%#v", closed, test.wantClose, runner.calls)
+				t.Fatalf("tab close=%v, want %v; calls=%#v", closed, test.wantClose, runner.calls)
+			}
+			// The call that could cascade must not appear at all.
+			for _, call := range runner.calls {
+				if strings.HasPrefix(call, "workspace close") {
+					t.Fatalf("cleanup closed a Herdr workspace: %#v", runner.calls)
+				}
 			}
 			for _, call := range runner.calls {
 				if strings.HasPrefix(call, "worktree ") {

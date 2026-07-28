@@ -124,6 +124,20 @@ HERDR_DEVFLOW_HOME="$fixture_root/runtime" \
 [[ "$disabled_status" == "0" ]]
 rg -q "disabled" "$fixture_root/disabled-output"
 
+# Local secrets are gitignored, so a fresh worktree has no .env and anything
+# needing a key fails in a way that looks like a config bug. The real
+# wt_provision_worktree copies the dev worktree's; here we check the summary
+# tells the user it will, and only when there is one to copy.
+> "$fixture_root/herd-calls"
+wt start bridge > "$fixture_root/no-env-output" 2>&1
+if rg -q "\.env copied" "$fixture_root/no-env-output"; then
+  print -r -- "the plan promised to copy a .env that does not exist" >&2
+  exit 1
+fi
+print -r -- "SECRET=x" > "$dev_root/.env"
+wt start bridge > "$fixture_root/env-output" 2>&1
+rg -q "\.env copied" "$fixture_root/env-output"
+
 # FR-18: the confirmation summary must name everything that is about to happen,
 # so nothing lands that the user did not see first.
 > "$fixture_root/herd-calls"

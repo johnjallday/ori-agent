@@ -326,6 +326,21 @@ JSON
     (cd "$target" && bash scripts/build-folder-picker.sh)
   fi
 
+  # Local secrets live in a gitignored .env, which the server auto-loads on
+  # start. Being gitignored, it is per-worktree: a fresh one has none, and
+  # anything needing a key fails in a way that looks like a config bug rather
+  # than a missing file. Copy the dev worktree's, preserving its permissions,
+  # and never overwrite one that is already there.
+  local env_source
+  env_source="$(wt_get_dev_worktree 2>/dev/null || true)"
+  if [[ -n "$env_source" && -f "$env_source/.env" && ! -e "$target/.env" ]]; then
+    if cp -p "$env_source/.env" "$target/.env"; then
+      echo "Copied .env from $env_source (untracked local secrets)."
+    else
+      echo "Warning: could not copy .env from $env_source; set secrets in $target/.env by hand."
+    fi
+  fi
+
   # Install npm dependencies. node_modules is gitignored and not shared
   # between worktrees, so a fresh worktree starts without it and tooling
   # like eslint/prettier/playwright won't run until this completes.
@@ -748,7 +763,11 @@ function wt_plan_render {
   echo "${WT_C_BOLD}Plan${WT_C_RESET}"
   printf '  %-14s %s\n' "Feature" "$WT_PLAN_FEATURE"
   printf '  %-14s %s  %s\n' "Branch" "$WT_PLAN_BRANCH" "$marker ${WT_C_DIM}new branch${WT_C_RESET}"
-  printf '  %-14s %s  %s\n' "Worktree" "$WT_PLAN_TARGET" "$marker ${WT_C_DIM}new worktree + npm install${WT_C_RESET}"
+  local setup_note="new worktree + npm install"
+  if [[ -n "$WT_PLAN_DEV" && -f "$WT_PLAN_DEV/.env" ]]; then
+    setup_note="$setup_note, .env copied"
+  fi
+  printf '  %-14s %s  %s\n' "Worktree" "$WT_PLAN_TARGET" "$marker ${WT_C_DIM}${setup_note}${WT_C_RESET}"
 
   if [[ -n "$WT_PLAN_PRD" ]]; then
     printf '  %-14s %s\n' "PRD" "$WT_PLAN_PRD"
@@ -941,9 +960,14 @@ function wt_herd_cleanup_preflight {
 
 # Guard the destructive half of wt done. A known active agent or unresolved
 # schedule is never overridden. Unknown/unreachable Herdr state and a failed
-# workspace close may proceed only from an interactive terminal after a
-# dedicated acknowledgement (or the explicit flag), separate from the later
-# dirty-worktree prompt.
+# tab close may proceed only from an interactive terminal after a dedicated
+# acknowledgement (or the explicit flag), separate from the later dirty-worktree
+# prompt.
+#
+# Cleanup closes the feature's own tab and nothing else. A feature recorded
+# before tab-scoped handoff has no tab, so its workspace is left open and named
+# for the user to close by hand — closing it automatically is what cascaded on
+# 2026-07-26.
 function wt_done_herdr_guard {
   local target_path="$1" requested_override="${2:-0}" cleanup_status
   if wt_herd_cleanup_preflight "$target_path" 0; then
@@ -965,7 +989,7 @@ function wt_done_herdr_guard {
   if [[ "$requested_override" == "1" ]]; then
     echo "WARNING: --herdr-override was supplied after an unverified Herdr cleanup check."
   else
-    echo "WARNING: Herdr state could not be verified or its workspace could not be closed."
+    echo "WARNING: Herdr state could not be verified or the feature's tab could not be closed."
     local acknowledgement
     read "acknowledgement?Type HERDR-OVERRIDE to continue and accept orphan-risk: "
     if [[ "$acknowledgement" != "HERDR-OVERRIDE" ]]; then
@@ -975,7 +999,7 @@ function wt_done_herdr_guard {
   fi
 
   if wt_herd_cleanup_preflight "$target_path" 1; then
-    echo "WARNING: continuing wt done with explicit Herdr-safety override; the removed Git worktree may remain open in Herdr."
+    echo "WARNING: continuing wt done with explicit Herdr-safety override; the removed Git worktree may remain open in a Herdr tab."
     return 0
   else
     cleanup_status=$?
@@ -1777,6 +1801,9 @@ function wt_dispatch {
     echo "                     worktree is still created and 'wt herd retry' resumes the rest."
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
+    echo "                     Closes the feature's Herdr tab only; the workspace and its"
+    echo "                     sibling tabs survive. Features created before tab-scoped"
+    echo "                     cleanup have their workspace left open for you to close."
     echo "  wt rm [name]     - Remove worktree and branch (interactive if no name)"
     echo "  wt ls            - List worktrees"
     echo "  wt status        - Feature-first overview (--feature/--json/--no-color/--watch)"

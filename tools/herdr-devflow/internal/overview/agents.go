@@ -183,6 +183,18 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 			"This feature has a worktree but no agent is running for it.", detail)
 	}
 
+	// A handoff that degraded leaves the worktree and the bridge record but no
+	// Herdr placement at all. That is deliberately non-fatal, and the reason was
+	// printed at the time — but a warning in a scrolled-away terminal is not a
+	// state you can look up later. Surface it where the feature is inspected,
+	// with the command that finishes the job.
+	if hasRecord && feature.Git.WorktreePath != "" && !unavailable &&
+		state.WorkspaceID == "" && state.TabID == "" {
+		raise(FindingHandoffIncomplete, SeverityWarning, "",
+			"This feature has a worktree but was never placed in Herdr, so it has no tab and no agent.",
+			"Run wt herd retry --feature "+identityField(feature.Slug)+" to finish the Herdr half.")
+	}
+
 	// A saved record pointing at a worktree that no longer exists is drift to
 	// report, never an error and never a blocker on its own.
 	if hasRecord && state.Feature.Path != "" && feature.Git.WorktreePath == "" {
