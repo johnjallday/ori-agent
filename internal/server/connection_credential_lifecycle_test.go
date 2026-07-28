@@ -80,17 +80,22 @@ func workspaceBoundTo(t *testing.T, store workspace.Store, workspaceID, accountI
 	}
 }
 
+// boundAccountID returns the account the workspace's native email binding
+// references, or "" when it has none. It finds the binding by CLASSIFICATION
+// rather than by id, because the linker generates ids — matching a fixed id
+// would silently report "unbound" for a real link.
 func boundAccountID(t *testing.T, store workspace.Store, workspaceID string) string {
 	t.Helper()
 	ws, err := store.Get(workspaceID)
 	if err != nil || ws == nil {
 		t.Fatalf("get workspace %s: %v", workspaceID, err)
 	}
-	binding, ok := ws.GetMCPBinding("b-mail")
-	if !ok {
-		return ""
+	for _, binding := range ws.GetMCPBindings() {
+		if binding.IsNativeEmail() {
+			return stringFromConfig(binding.Config, "account_id")
+		}
 	}
-	return stringFromConfig(binding.Config, "account_id")
+	return ""
 }
 
 // --- The proof itself --------------------------------------------------------
