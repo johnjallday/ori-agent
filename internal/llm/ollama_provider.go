@@ -448,7 +448,10 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		}
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("ollama API error (status %d): %s", status, body)
+		// A local server still produces classifiable failures: an overloaded or
+		// restarting Ollama is retryable, a missing model is not.
+		return nil, ClassifyProviderError(p.Name(),
+			fmt.Errorf("ollama API error (status %d): %s", status, body), status, "")
 	}
 
 	// Convert to common format

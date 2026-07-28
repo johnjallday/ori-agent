@@ -11,7 +11,7 @@
 // pure view-model helpers are imported from personal-hq-onboarding.js so the
 // state logic has one source of truth.
 
-import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
+import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
 
 (function () {
   if (typeof document === 'undefined') return;
@@ -95,7 +95,16 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
       body: payload ? JSON.stringify(payload) : undefined
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data && (data.error || data.message)) || 'Request failed');
+    if (!res.ok) {
+      // Keep the server's machine code and status on the error so callers can
+      // tell an actionable conflict (e.g. a credential that no longer exists)
+      // from a genuine fault, instead of collapsing both into one message.
+      const err = new Error((data && (data.message || data.error)) || 'Request failed');
+      err.code = (data && data.error) || '';
+      err.status = res.status;
+      err.action = (data && data.action) || '';
+      throw err;
+    }
     return data;
   }
 
@@ -157,7 +166,17 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
       await postJSON(scope.linkUrl, { account_id: linked.account_id });
       toast('Email connected to ' + scope.connectedTarget + '.', 'success');
       renderBody();
-    } catch (_) {
+    } catch (err) {
+      // The grant can reference a credential the vault no longer holds — after a
+      // vault is recreated, or a data directory moves. That is a reconnect, not
+      // a fault, and saying so is the difference between a dead button and a
+      // next step.
+      if (err && err.code === 'credential_missing') {
+        toast(err.message || 'Your Gmail credential is no longer in the vault. Re-enable Gmail to reconnect it.', 'danger');
+        window.open('/settings#google-account', '_blank');
+        renderBody();
+        return;
+      }
       toast('Could not connect email via your Google account.', 'danger');
     }
   }
@@ -165,10 +184,7 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
   async function renderBody() {
     if (!body || !scope) return;
     body.textContent = 'Loading…';
-    const [statusResp, oauth] = await Promise.all([
-      fetchJSON(scope.statusUrl),
-      fetchJSON('/api/settings/email-oauth')
-    ]);
+    const statusResp = await fetchJSON(scope.statusUrl);
     const status = statusResp && statusResp.status ? statusResp.status : null;
     if (window.OriHQEmailSetup) {
       window.OriHQEmailSetup.connected = !!(status && status.connected);
@@ -179,7 +195,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     if (scope && !scope.isHQ) {
       renderWorkspaceConnectCTA(!!(status && status.connected));
     }
-    const view = emailStatusView(status, oauth ? !!oauth.configured : true);
+    // Setup state comes from the server's deterministic readiness verdict — the
+    // account connection, grant health, vault availability, and this
+    // workspace's binding — not from anything an agent claimed it did (FR 32).
+    const view = emailSetupView(status);
 
     body.innerHTML = '';
 
@@ -205,9 +224,10 @@ import { emailStatusView, chipStateLabel } from './personal-hq-onboarding.js';
     action.type = 'button';
     action.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
     action.textContent = view.actionLabel;
+    action.setAttribute('aria-label', view.actionLabel);
     action.addEventListener('click', async () => {
       if (view.action === 'settings') {
-        window.location.href = '/settings#personal-hq-email';
+        window.location.href = view.actionUrl || '/settings#google-account';
         return;
       }
       if (view.action === 'disconnect') {

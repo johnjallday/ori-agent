@@ -141,7 +141,9 @@ func (p *GeminiProvider) StreamChat(ctx context.Context, req ChatRequest) (Strea
 		if readErr != nil {
 			return nil, fmt.Errorf("gemini API error (status %d): failed to read error body: %w", resp.StatusCode, readErr)
 		}
-		return nil, fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, ClassifyProviderError("gemini",
+			fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, strings.TrimSpace(string(body))),
+			resp.StatusCode, "")
 	}
 
 	return &geminiStreamReader{
@@ -277,7 +279,9 @@ func (p *GeminiProvider) doRequest(ctx context.Context, endpoint string, body *g
 		if readErr != nil {
 			return nil, fmt.Errorf("gemini API error (status %d): failed to read error body: %w", resp.StatusCode, readErr)
 		}
-		return nil, fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, strings.TrimSpace(string(errBody)))
+		return nil, ClassifyProviderError("gemini",
+			fmt.Errorf("gemini API error (status %d): %s", resp.StatusCode, strings.TrimSpace(string(errBody))),
+			resp.StatusCode, "")
 	}
 
 	var response geminiGenerateContentResponse

@@ -25,6 +25,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		ServerName         string                `json:"server_name"`
 		Alias              string                `json:"alias,omitempty"`
 		Enabled            *bool                 `json:"enabled,omitempty"`
+		RuntimeKind        BindingRuntimeKind    `json:"runtime_kind,omitempty"`
 		Scope              map[string]any        `json:"scope,omitempty"`
 		Config             map[string]any        `json:"config,omitempty"`
 		DefaultSideEffect  SideEffect            `json:"default_side_effect,omitempty"`
@@ -37,6 +38,10 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.ServerName) == "" {
 		orihttp.BadRequest(w, "server_name is required")
+		return
+	}
+	if err := validateRuntimeKind(req.RuntimeKind); err != nil {
+		orihttp.BadRequest(w, err.Error())
 		return
 	}
 	if req.DefaultSideEffect != "" && !isValidSideEffect(req.DefaultSideEffect) {
@@ -75,6 +80,7 @@ func (h *HTTPHandler) CreateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		ServerName:         req.ServerName,
 		Alias:              req.Alias,
 		Enabled:            enabled,
+		RuntimeKind:        req.RuntimeKind,
 		Scope:              req.Scope,
 		Config:             req.Config,
 		DefaultSideEffect:  req.DefaultSideEffect,
@@ -184,6 +190,7 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 		ServerName         *string                `json:"server_name,omitempty"`
 		Alias              *string                `json:"alias,omitempty"`
 		Enabled            *bool                  `json:"enabled,omitempty"`
+		RuntimeKind        *BindingRuntimeKind    `json:"runtime_kind,omitempty"`
 		Scope              map[string]any         `json:"scope,omitempty"`
 		Config             map[string]any         `json:"config,omitempty"`
 		DefaultSideEffect  *SideEffect            `json:"default_side_effect,omitempty"`
@@ -204,6 +211,12 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 				orihttp.BadRequest(w, fmt.Sprintf("invalid tool_overrides[%q]: %q", tool, se))
 				return
 			}
+		}
+	}
+	if req.RuntimeKind != nil {
+		if err := validateRuntimeKind(*req.RuntimeKind); err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
 		}
 	}
 
@@ -227,6 +240,9 @@ func (h *HTTPHandler) UpdateMCPBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Enabled != nil {
 		binding.Enabled = *req.Enabled
+	}
+	if req.RuntimeKind != nil {
+		binding.RuntimeKind = *req.RuntimeKind
 	}
 	if req.Scope != nil {
 		binding.Scope = req.Scope

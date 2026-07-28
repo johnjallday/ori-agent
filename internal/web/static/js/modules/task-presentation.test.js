@@ -9,7 +9,9 @@ import {
   resolveTaskCounts,
   sortTasksForDrawer,
   taskShortId,
-  taskLatestActivityAt
+  taskLatestActivityAt,
+  taskBlockedRepair,
+  isRepairGatedTask
 } from './task-presentation.js';
 
 // ---- Fixtures for every presentation state (FR143) ----
@@ -216,4 +218,141 @@ test('countCategories always include ALL', () => {
   [unassigned, ready, running, completed, cancelled, unknown].forEach(t => {
     assert.ok(resolveTaskPresentation(t).countCategories.includes(FILTER.ALL));
   });
+});
+
+// --- Repair-gated blocks -----------------------------------------------------
+//
+// A task stopped on a missing connection cannot be helped by retrying: the
+// retry reproduces the block and costs another model call. The server attaches
+// the one action that fixes it, and the UI must offer that instead of Retry.
+
+const blockedOnConnection = {
+  id: 'task-mail',
+  status: 'waiting_for_choice',
+  to: 'Inbox',
+  context: {
+    human_loop: {
+      state: 'waiting_for_choice',
+      reason_code: 'connection_required',
+      reason: 'Connect your Google account before this workspace can read email.',
+      repair: {
+        code: 'connect_google',
+        label: 'Connect Google',
+        url: '/settings#google-account'
+      }
+    }
+  }
+};
+
+test('taskBlockedRepair surfaces the exact repair with its reason', () => {
+  const repair = taskBlockedRepair(blockedOnConnection);
+  assert.equal(repair.code, 'connect_google');
+  assert.equal(repair.label, 'Connect Google');
+  assert.equal(repair.url, '/settings#google-account');
+  assert.equal(repair.reason, 'connection_required');
+  assert.match(repair.message, /Connect your Google account/);
+  assert.equal(isRepairGatedTask(blockedOnConnection), true);
+});
+
+test('taskBlockedRepair is null for ordinary tasks and malformed repairs', () => {
+  assert.equal(taskBlockedRepair(null), null);
+  assert.equal(taskBlockedRepair({ status: 'pending' }), null);
+  assert.equal(taskBlockedRepair({ context: { human_loop: { state: 'waiting_for_choice' } } }), null);
+  // A repair with no label is not actionable, so it is not a repair.
+  assert.equal(
+    taskBlockedRepair({ context: { human_loop: { repair: { code: 'x', label: '  ' } } } }),
+    null
+  );
+  assert.equal(isRepairGatedTask({ status: 'failed' }), false);
+});
+
+test('a repair-gated task offers the repair as its primary action, never Retry', () => {
+  const pres = resolveTaskPresentation(blockedOnConnection);
+  assert.equal(pres.primaryAction.id, 'repair');
+  assert.equal(pres.primaryAction.label, 'Connect Google');
+  assert.equal(pres.primaryAction.url, '/settings#google-account');
+  // Retry would reproduce the same block, so it must not be offered at all.
+  assert.deepEqual(pres.secondaryActions, []);
+  assert.equal(pres.repair.code, 'connect_google');
+});
+
+test('repair gating applies to a failed task too, not just waiting_for_choice', () => {
+  const failed = {
+    id: 'task-mail-2',
+    status: 'failed',
+    to: 'Inbox',
+    context: { human_loop: { repair: { code: 'enable_gmail', label: 'Enable Gmail', url: '/settings#google-account' } } }
+  };
+  const pres = resolveTaskPresentation(failed);
+  assert.equal(pres.primaryAction.id, 'repair');
+  assert.notEqual(pres.primaryAction.id, 'retry');
+});
+
+test('an ordinary failed task still offers Retry', () => {
+  const pres = resolveTaskPresentation({ id: 'task-x', status: 'failed', to: 'Coder' });
+  assert.equal(pres.primaryAction.id, 'retry');
+  assert.equal(pres.repair, null);
+});
+
+// --- Provider-failure presentation (Group 4) ---------------------------------
+
+test('a quota failure offers provider settings and never a retry', () => {
+  const quotaBlocked = {
+    id: 'task-q',
+    status: 'waiting_for_choice',
+    to: 'Researcher',
+    context: {
+      human_loop: {
+        state: 'waiting_for_choice',
+        reason_code: 'provider_quota_exhausted',
+        reason:
+          "Your AI provider reports the account is out of quota or credit. Check the provider's billing settings; retrying won't help until that's resolved.",
+        suggested_actions: ['Open AI provider settings (/settings#api-keys)'],
+        repair: { code: 'configure_provider', label: 'Open AI provider settings', url: '/settings#api-keys' }
+      }
+    }
+  };
+
+  const pres = resolveTaskPresentation(quotaBlocked);
+  assert.equal(pres.primaryAction.id, 'repair');
+  assert.equal(pres.primaryAction.label, 'Open AI provider settings');
+  assert.equal(pres.primaryAction.url, '/settings#api-keys');
+  assert.deepEqual(pres.secondaryActions, [], 'no retry beside a quota failure');
+
+  // The message must point at the provider's billing, not at Gmail or a vault.
+  const message = pres.repair.message.toLowerCase();
+  assert.ok(message.includes('quota') || message.includes('credit'));
+  ['gmail', 'vault', 'email'].forEach(wrong => {
+    assert.ok(!message.includes(wrong), `quota message must not mention ${wrong}`);
+  });
+});
+
+test('provider failures that a user can fix all surface their own repair', () => {
+  const codes = [
+    { reason_code: 'provider_configuration_required', label: 'Open AI provider settings' },
+    { reason_code: 'model_unavailable', label: 'Open AI provider settings' }
+  ];
+  codes.forEach(({ reason_code, label }) => {
+    const pres = resolveTaskPresentation({
+      id: 'task-' + reason_code,
+      status: 'failed',
+      to: 'Researcher',
+      context: { human_loop: { reason_code, reason: 'x', repair: { code: 'configure_provider', label, url: '/settings#api-keys' } } }
+    });
+    assert.equal(pres.primaryAction.id, 'repair', reason_code);
+    assert.equal(pres.primaryAction.label, label, reason_code);
+  });
+});
+
+test('a failure with no fixable cause keeps the ordinary Retry action', () => {
+  // retry_exhausted has no repair: a transient failure that persisted is worth
+  // trying again, so Retry stays the primary action.
+  const pres = resolveTaskPresentation({
+    id: 'task-t',
+    status: 'failed',
+    to: 'Researcher',
+    context: { human_loop: { reason_code: 'retry_exhausted', reason: 'kept failing' } }
+  });
+  assert.equal(pres.primaryAction.id, 'retry');
+  assert.equal(pres.repair, null);
 });

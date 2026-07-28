@@ -283,7 +283,6 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/settings/available-models", s.Handlers.Settings.AvailableModelsHandler)
 	mux.HandleFunc("/api/settings/system-paths", s.Handlers.Settings.SystemPathsHandler)
 	mux.HandleFunc("/api/settings/external-agents", s.Handlers.Settings.ExternalAgentsSettingsHandler)
-	mux.HandleFunc("/api/settings/email-oauth", s.Handlers.Settings.EmailOAuthSettingsHandler)
 	mux.HandleFunc("/api/settings/speech", s.Handlers.Settings.SpeechSettingsHandler)
 	mux.HandleFunc("/api/settings/utility", s.Handlers.Settings.UtilitySettingsHandler)
 	mux.HandleFunc("/api/settings/mac-wake", s.Handlers.Settings.MacWakeSettingsHandler)

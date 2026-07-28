@@ -12,6 +12,7 @@ import (
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -793,6 +794,20 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		return "", fmt.Errorf("task %s has no assigned agent", task.Description)
 	}
 
+	// Connection preconditions come first: a task that needs a mailbox cannot be
+	// helped by running it, so block with the exact repair rather than spending a
+	// model call to discover the same thing (FR 34, 35).
+	if th.capabilityGate != nil && len(task.RequiredCapabilities) > 0 {
+		if blocked := th.capabilityGate.CheckTaskCapabilities(ws.ID, task.RequiredCapabilities); blocked != nil {
+			if err := th.markTaskBlocked(ws, task, blocked, manual, map[string]any{
+				"precondition": "capability",
+			}); err != nil {
+				return "", err
+			}
+			return "", blocked
+		}
+	}
+
 	if len(task.InputTaskIDs) > 0 {
 		logger.Info("Task has input tasks, checking if they need execution first", logger.Fields{"task_id": task.ID, "input_count": len(task.InputTaskIDs)})
 		if err := th.executeInputTasksIfNeeded(ws, task); err != nil {
@@ -840,6 +855,9 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		event := workspace.NewTaskEvent(workspace.EventTaskStarted, ws.ID, task.ID, task.To, map[string]any{
 			"description": task.Description,
 			"manual":      manual,
+			// Distinguish work Ori chose to repeat from work the user asked for
+			// again, so history reads honestly (FR 60).
+			"origin": attemptOrigin(1, manual),
 		})
 		th.eventBus.Publish(event)
 	}
@@ -1028,8 +1046,15 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	}
 
 	now := time.Now()
-	if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
-		return fmt.Errorf("cannot mark task waiting for choice: %w", err)
+	// Re-blocking an already-blocked task is a legitimate outcome: the user
+	// retried before the precondition was actually repaired. The status machine
+	// rejects waiting_for_choice → waiting_for_choice, so skip the transition and
+	// go straight to refreshing the reason — otherwise the task would keep
+	// showing the STALE block while the real one went unrecorded.
+	if task.Status != workspace.TaskStatusWaitingForChoice {
+		if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
+			return fmt.Errorf("cannot mark task waiting for choice: %w", err)
+		}
 	}
 	task.CompletedAt = nil
 	task.Error = ""
@@ -1143,6 +1168,11 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 		}
 		if raw := strings.TrimSpace(blockedErr.RawResponse); raw != "" {
 			humanLoop["agent_response"] = raw
+		}
+		// A structured repair marks the block as repair-gated: the UI offers this
+		// action instead of a Retry that would just reproduce the same block.
+		if blockedErr.Repair != nil && strings.TrimSpace(blockedErr.Repair.Label) != "" {
+			humanLoop["repair"] = blockedErr.Repair
 		}
 		if workflowStep := workspace.PrepareTaskBlockedWorkflowStep(blockedErr.WorkflowStep, blockedErrReasonCode(blockedErr)); workflowStep != nil && (len(workflowStep.Choices) > 0 || len(workflowStep.Fields) > 0) {
 			humanLoop["workflow_step"] = workflowStep
@@ -1262,6 +1292,7 @@ func buildUserAssistMessage(message string, selectedChoice *workspace.TaskBlocke
 
 func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace.Workspace, persistedTask *workspace.Task, taskForExecution workspace.Task, manual bool) (string, error) {
 	maxAttempts := resolveTaskExecutionAttempts(persistedTask)
+	retryPolicy := llm.DefaultRetryPolicy()
 	baseContext := cloneTaskContext(taskForExecution.Context)
 	attemptHistory := make([]map[string]any, 0, maxAttempts)
 
@@ -1285,6 +1316,7 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 				"attempt":      attempt,
 				"max_attempts": maxAttempts,
 				"manual":       manual,
+				"origin":       attemptOriginAutomatic,
 			}))
 		}
 
@@ -1312,28 +1344,37 @@ func (th *TaskHandler) executeTaskIteratively(ctx context.Context, ws *workspace
 				return "", blockedErr
 			}
 
+			// Classify before deciding anything. A deterministic failure gets no
+			// automatic retry however much budget remains, and an attempt that
+			// already mutated something is never replayed automatically (FR 46-55).
+			evidence := th.collectTaskExecutionEvidence(ws.ID, persistedTask.ID, attemptStartedAt, attemptCompletedAt)
+			verdict := decideRetry(retryPolicy, execErr, attempt, remainingDeadline(ctx), evidence)
+			logRetryDecision(persistedTask.ID, attempt, attemptOrigin(attempt, manual), verdict)
+
 			attemptHistory = append(attemptHistory, map[string]any{
 				"attempt":    attempt,
+				"origin":     attemptOrigin(attempt, manual),
 				"outcome":    "error",
+				"category":   string(verdict.Category),
 				"summary":    summarizeExecutionText(execErr.Error()),
 				"created_at": time.Now().UTC().Format(time.RFC3339),
 			})
-			if attempt < maxAttempts {
+
+			if verdict.Retry && attempt < maxAttempts {
+				if !waitBeforeRetry(ctx, verdict.Delay) {
+					return "", context.Canceled
+				}
 				continue
 			}
 
-			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, "retry_exhausted")
+			recordIterationHistory(persistedTask, maxAttempts, attemptHistory, verdict.ReasonCode)
 			return "", &workspace.TaskBlockedError{
-				ReasonCode: "retry_exhausted",
-				Reason:     fmt.Sprintf("Task failed after %d attempts", maxAttempts),
-				Question:   "I could not complete this task autonomously. Should I retry, switch agents, or continue with your guidance?",
-				SuggestedActions: []string{
-					"continue_with_instruction",
-					"retry",
-					"switch_agent_retry",
-					"mark_failed",
-				},
-				RawResponse: execErr.Error(),
+				ReasonCode:       verdict.ReasonCode,
+				Reason:           verdict.Reason,
+				Question:         verdict.Reason,
+				SuggestedActions: retrySuggestedActions(verdict),
+				Repair:           verdict.Action,
+				RawResponse:      execErr.Error(),
 			}
 		}
 
@@ -1666,6 +1707,16 @@ func summarizeExecutionText(value string) string {
 type taskExecutionEvidence struct {
 	SuccessfulToolNames               []string
 	SuccessfulFilesystemReadToolNames []string
+	// Attempts records EVERY observed tool call — successful or not — with its
+	// replay-relevant side-effect classification. Unlike the two lists above,
+	// which answer "did the agent verify its claim?", this answers "is it safe to
+	// simply run this again?" (FR 55).
+	Attempts []workspace.ToolAttempt
+}
+
+// replaySafety is the verdict on whether this attempt may be repeated.
+func (e taskExecutionEvidence) replaySafety() workspace.ReplaySafety {
+	return workspace.TaskAttemptEvidence{Attempts: e.Attempts}.EvaluateReplaySafety()
 }
 
 func (th *TaskHandler) collectTaskExecutionEvidence(workspaceID, taskID string, startedAt, completedAt time.Time) taskExecutionEvidence {
@@ -1689,12 +1740,32 @@ func (th *TaskHandler) collectTaskExecutionEvidence(workspaceID, taskID string, 
 	evidence := taskExecutionEvidence{
 		SuccessfulToolNames:               make([]string, 0, len(events)),
 		SuccessfulFilesystemReadToolNames: make([]string, 0, len(events)),
+		Attempts:                          make([]workspace.ToolAttempt, 0, len(events)),
 	}
 
 	seenTools := make(map[string]struct{}, len(events))
 	seenFilesystemTools := make(map[string]struct{}, len(events))
+	seenAttempts := make(map[string]int, len(events))
 	for _, event := range events {
-		if !eventDataBool(event.Data, "success") {
+		succeeded := eventDataBool(event.Data, "success")
+		// Record the attempt BEFORE the success filter: a mutating call that
+		// failed partway through is exactly the ambiguous case replay safety has
+		// to see. Recording only successes would make it invisible.
+		if attemptName := strings.ToLower(strings.TrimSpace(eventDataString(event.Data, "tool_name"))); attemptName != "" {
+			if idx, seen := seenAttempts[attemptName]; seen {
+				// One completion is enough to mark the tool as having completed.
+				evidence.Attempts[idx].Completed = evidence.Attempts[idx].Completed || succeeded
+			} else {
+				seenAttempts[attemptName] = len(evidence.Attempts)
+				evidence.Attempts = append(evidence.Attempts, workspace.ToolAttempt{
+					Name:      attemptName,
+					Class:     workspace.ClassifyToolSideEffect(attemptName, toolSideEffectFromEvent(event)),
+					Completed: succeeded,
+				})
+			}
+		}
+
+		if !succeeded {
 			continue
 		}
 
@@ -1716,7 +1787,17 @@ func (th *TaskHandler) collectTaskExecutionEvidence(workspaceID, taskID string, 
 
 	sort.Strings(evidence.SuccessfulToolNames)
 	sort.Strings(evidence.SuccessfulFilesystemReadToolNames)
+	sort.Slice(evidence.Attempts, func(i, j int) bool {
+		return evidence.Attempts[i].Name < evidence.Attempts[j].Name
+	})
 	return evidence
+}
+
+// toolSideEffectFromEvent reads the side-effect classification the tool runtime
+// published on the event, when it published one. An event without it falls back
+// to name-based classification, which fails closed on anything unrecognized.
+func toolSideEffectFromEvent(event workspace.Event) workspace.SideEffect {
+	return workspace.SideEffect(strings.ToLower(strings.TrimSpace(eventDataString(event.Data, "side_effect"))))
 }
 
 func eventDataString(data map[string]any, key string) string {

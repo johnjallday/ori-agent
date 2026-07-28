@@ -149,6 +149,38 @@ export function taskHumanLoopState(task) {
   return lc(task && task.context && task.context.human_loop && task.context.human_loop.state);
 }
 
+/**
+ * The structured repair for a repair-gated block, or null.
+ *
+ * A task blocked on a missing connection cannot be helped by retrying — the
+ * retry reproduces the block and costs another model call. When the server
+ * attaches a repair action, that action is what the UI must offer; Retry only
+ * becomes the primary action once the precondition is actually fixed.
+ *
+ * @returns {{code:string,label:string,url:string,reason:string,message:string}|null}
+ */
+export function taskBlockedRepair(task) {
+  const loop = task && task.context && task.context.human_loop;
+  const repair = loop && loop.repair;
+  if (!repair || !String(repair.label || '').trim()) return null;
+  return {
+    code: String(repair.code || '').trim(),
+    label: String(repair.label).trim(),
+    url: String(repair.url || '').trim(),
+    reason: String(loop.reason_code || '').trim(),
+    message: String(loop.reason || loop.question || '').trim()
+  };
+}
+
+/**
+ * True when a task is blocked on something a retry cannot fix. Callers use it
+ * to disable or hide Retry rather than offering an action that is guaranteed to
+ * fail again.
+ */
+export function isRepairGatedTask(task) {
+  return taskBlockedRepair(task) !== null;
+}
+
 /** Assignee display string, mirroring the existing `to || agent_name || assigned_to` order. */
 export function taskAssignee(task) {
   if (!task) return '';
@@ -276,6 +308,27 @@ export function resolveTaskPresentation(task, opts) {
   let primaryAction = meta.primaryAction ? { ...meta.primaryAction } : null;
   const secondaryActions = [];
 
+  // A repair-gated block outranks every other action: the task is stopped on a
+  // missing connection, so the only useful button is the one that fixes it.
+  // Retry is deliberately NOT offered here — it would reproduce the same block.
+  const repair = taskBlockedRepair(task);
+  if (repair) {
+    return {
+      state,
+      label: meta.label,
+      tone: meta.tone,
+      rawState,
+      isUnknown: state === PRESENTATION_STATE.UNKNOWN,
+      countCategories: [FILTER.ALL, ...meta.counts],
+      sortPriority: meta.sortPriority,
+      primaryAction: { id: 'repair', label: repair.label, url: repair.url, code: repair.code },
+      secondaryActions: [],
+      repair,
+      assignee: taskAssignee(task),
+      latestActivityAt: taskLatestActivityAt(task)
+    };
+  }
+
   if (state === PRESENTATION_STATE.FAILED || state === PRESENTATION_STATE.TIMED_OUT) {
     if (retrySupported(task, options)) {
       primaryAction = { id: 'retry', label: 'Inspect & Retry' };
@@ -302,6 +355,7 @@ export function resolveTaskPresentation(task, opts) {
     sortPriority: meta.sortPriority,
     primaryAction,
     secondaryActions,
+    repair: null,
     assignee: taskAssignee(task),
     latestActivityAt: taskLatestActivityAt(task)
   };

@@ -55,8 +55,19 @@ type TaskHandler struct {
 	communicator   *agentcomm.Communicator
 	taskHandler    workspace.TaskHandler
 	eventBus       *workspace.EventBus
+	// capabilityGate checks a task's declared connection preconditions before a
+	// run starts. Nil disables the check, which is the pre-feature behavior.
+	capabilityGate workspace.TaskCapabilityGate
 	runningMu      sync.Mutex
 	runningCancels map[string]context.CancelFunc
+}
+
+// SetCapabilityGate wires the connection-precondition check used before task
+// execution (see workspace.TaskCapabilityGate).
+func (th *TaskHandler) SetCapabilityGate(gate workspace.TaskCapabilityGate) {
+	if th != nil {
+		th.capabilityGate = gate
+	}
 }
 
 // NewTaskHandler creates a new task handler

@@ -52,7 +52,12 @@ func newAccessFixture(t *testing.T, ws *workspace.Workspace) *mailboxAccess {
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("save workspace: %v", err)
 	}
-	accounts := fakeAccounts{acc: &vault.EmailAccount{ID: "acct-1", Provider: vault.EmailProviderGmail, EmailAddress: "me@example.com"}}
+	accounts := fakeAccounts{acc: &vault.EmailAccount{
+		ID: "acct-1", Provider: vault.EmailProviderGmail, EmailAddress: "me@example.com",
+		// A usable credential: the gate requires a HEALTHY binding, not merely a
+		// present one (FR 42), so an account with no tokens reads as expired.
+		CredentialsStatus: vault.EmailAccountSecretState{HasRefreshToken: true},
+	}}
 	return newMailboxAccess(store, accounts, stubMailProvider{})
 }
 

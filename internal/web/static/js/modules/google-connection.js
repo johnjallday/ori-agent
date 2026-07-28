@@ -33,6 +33,15 @@
     admin_blocked: "Blocked",
     error: "Error",
   };
+  // Headings for the credential-vault step that must complete before Gmail
+  // authorization can start. Each names the action, so the panel never reads as
+  // a dead end.
+  const VAULT_ACTION_TITLES = {
+    create: "Create a vault first",
+    choose: "Choose a vault",
+    unlock: "Unlock your vault",
+    repair: "That vault is unavailable",
+  };
   const STATE_LABELS = {
     connected: "Connected",
     partially_connected: "Partially connected",
@@ -64,6 +73,7 @@
         avatar: id("googleConnAvatar"),
         badge: id("googleConnBadge"),
         products: id("googleConnProducts"),
+        vault: id("googleConnVault"),
         migrate: id("googleConnMigrate"),
         driveSetup: id("googleConnDriveSetup"),
         confirm: id("googleConnConfirm"),
@@ -110,11 +120,15 @@
         if (drive && drive.enabled) this.hideDriveSetup();
         // Offer to migrate any legacy per-workspace Gmail setup (non-blocking).
         this.refreshMigratable();
+        // A callback that failed on a local vault step sends the user back here
+        // with the exact repair to offer, so they resume instead of rediscovering.
+        this.applyCallbackRepairHint();
       } else {
         this.el.connected.classList.add("d-none");
         this.el.disconnected.classList.remove("d-none");
         this.hideDriveSetup();
         this.hideMigrate();
+        this.cancelVaultAction();
       }
     }
 
@@ -191,26 +205,350 @@
       return btn;
     }
 
-    async enableGmail(btn, scope) {
+    /**
+     * Starts Gmail enablement. The server resolves the credential vault BEFORE
+     * handing back an authorize URL, so a locked/missing/ambiguous vault comes
+     * back as a 409 vault_action_required instead of failing after the user has
+     * already authorized at Google. `vaultId` carries the user's answer when we
+     * re-enter after a create/choose/unlock step.
+     */
+    async enableGmail(btn, scope, vaultId) {
       this.hideError();
       if (btn) btn.disabled = true;
       try {
-        const url =
-          scope === "send"
-            ? "/api/connections/google/gmail/enable?scope=send"
-            : "/api/connections/google/gmail/enable";
+        const params = new URLSearchParams();
+        if (scope === "send") params.set("scope", "send");
+        if (vaultId) params.set("vault_id", vaultId);
+        const query = params.toString();
+        const url = "/api/connections/google/gmail/enable" + (query ? "?" + query : "");
         const res = await fetch(url, { method: "POST", headers: { Accept: "application/json" } });
         const data = await res.json().catch(() => ({}));
+        if (res.status === 409 && data.error === "vault_action_required") {
+          // Remember the intent so the user never has to restate it (FR 10).
+          this.pendingEnable = { scope: scope || null };
+          this.showVaultAction(data);
+          return;
+        }
         if ((res.status === 409 || res.status === 503) && data.message) {
           this.showError(data.message);
           return;
         }
         if (!res.ok || !data.authorize_url) throw new Error("enable failed");
+        this.hideVaultAction();
         window.location.assign(data.authorize_url);
       } catch (e) {
         this.showError("Couldn't start Gmail access. Please try again.");
       } finally {
         if (btn) btn.disabled = false;
+      }
+    }
+
+    // --- Credential vault: create / choose / unlock / repair -------------------
+
+    /**
+     * Reads the repair hint the OAuth callback result page appended
+     * (?gc_action=unlock&gc_vault=…) and re-opens that step directly. The hint is
+     * consumed once so a later reload doesn't resurrect a stale prompt.
+     */
+    applyCallbackRepairHint() {
+      let params;
+      try {
+        params = new URLSearchParams(window.location.search);
+      } catch (e) {
+        return;
+      }
+      const action = params.get("gc_action");
+      if (!action || this.repairHintApplied) return;
+      this.repairHintApplied = true;
+
+      const vaultId = params.get("gc_vault") || "";
+      // The Google half already succeeded; only the local vault step is left.
+      this.pendingEnable = { scope: null };
+      if (action === "unlock" && vaultId) {
+        this.showVaultAction({
+          action: "unlock",
+          message: "You're signed in with Google. Unlock the vault to finish enabling Gmail.",
+          vault_id: vaultId,
+        });
+      } else {
+        this.startVaultRepair();
+      }
+
+      params.delete("gc_action");
+      params.delete("gc_vault");
+      const query = params.toString();
+      window.history.replaceState(
+        {},
+        "",
+        window.location.pathname + (query ? "?" + query : "") + window.location.hash,
+      );
+    }
+
+    /**
+     * Asks the server which vault step is needed. This is a read-only preflight:
+     * it starts no OAuth flow and records no choice, so re-opening the prompt
+     * after a failed callback never re-contacts Google.
+     */
+    async startVaultRepair() {
+      try {
+        const res = await fetch("/api/connections/google/vault", { headers: { Accept: "application/json" } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || data.action === "ready") {
+          // The vault recovered on its own — offer the retry, don't take it.
+          this.showVaultAction({
+            action: "repair",
+            message: "Your vault is available again. Select it to finish enabling Gmail.",
+            vaults: data && data.vault_id ? [{ id: data.vault_id, name: data.vault_name || data.vault_id }] : [],
+          });
+          return;
+        }
+        this.showVaultAction(data);
+      } catch (e) {
+        this.showError("Couldn't check your credential vault. Please try again.");
+      }
+    }
+
+    /**
+     * Resumes the remembered enable action with a now-usable vault. Cancelling
+     * instead simply drops the intent — Gmail stays disabled and Google is never
+     * opened (FR 11).
+     */
+    resumePendingEnable(vaultId) {
+      const pending = this.pendingEnable || {};
+      this.hideVaultAction();
+      this.enableGmail(null, pending.scope, vaultId);
+    }
+
+    cancelVaultAction() {
+      this.pendingEnable = null;
+      this.hideVaultAction();
+    }
+
+    hideVaultAction() {
+      if (this.el.vault) {
+        this.el.vault.innerHTML = "";
+        this.el.vault.classList.add("d-none");
+      }
+    }
+
+    /** Renders the one step that unblocks authorization. */
+    showVaultAction(data) {
+      const host = this.el.vault;
+      if (!host) {
+        this.showError(data.message || "Ori needs a vault to store your Google credentials.");
+        return;
+      }
+      host.innerHTML = "";
+      host.classList.remove("d-none");
+
+      const title = document.createElement("div");
+      title.className = "gc-vault-title";
+      title.textContent = VAULT_ACTION_TITLES[data.action] || "Credential vault";
+      host.appendChild(title);
+
+      const note = document.createElement("p");
+      note.className = "gc-vault-note";
+      note.textContent = data.message || "";
+      host.appendChild(note);
+
+      if (data.action === "unlock") this.renderVaultUnlock(host, data);
+      else if (data.action === "create") this.renderVaultCreate(host);
+      else this.renderVaultChoose(host, data);
+
+      const first = host.querySelector("input, button");
+      if (first) first.focus();
+    }
+
+    /** Unlock the recorded vault, then resume (FR 8, 10). */
+    renderVaultUnlock(host, data) {
+      const field = this.vaultField(
+        host,
+        data.vault_name ? "Password for " + data.vault_name : "Vault password",
+        "password",
+      );
+      const error = this.vaultError(host);
+      const actions = document.createElement("div");
+      actions.className = "gc-vault-actions";
+
+      const unlock = this.vaultButton("Unlock and continue", "modern-btn-primary", async () => {
+        error.textContent = "";
+        const res = await this.postJSON("/api/vault/unlock", {
+          vault_id: data.vault_id,
+          vault_password: field.value,
+        });
+        if (!res.ok) {
+          error.textContent = res.message || "Couldn't unlock that vault. Check the password and try again.";
+          field.focus();
+          return;
+        }
+        this.resumePendingEnable(data.vault_id);
+      });
+      field.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          unlock.click();
+        }
+      });
+
+      actions.appendChild(unlock);
+      actions.appendChild(this.vaultButton("Cancel", "modern-btn-secondary", () => this.cancelVaultAction()));
+      host.appendChild(actions);
+    }
+
+    /** Inline vault creation, then resume (FR 5, 10). */
+    renderVaultCreate(host) {
+      const name = this.vaultField(host, "Vault name", "text");
+      name.value = "Personal";
+      const password = this.vaultField(host, "Vault password", "password");
+      const error = this.vaultError(host);
+      const actions = document.createElement("div");
+      actions.className = "gc-vault-actions";
+
+      actions.appendChild(
+        this.vaultButton("Create vault and continue", "modern-btn-primary", async () => {
+          error.textContent = "";
+          if (!name.value.trim() || !password.value) {
+            error.textContent = "Enter a name and password for the new vault.";
+            return;
+          }
+          const res = await this.postJSON("/api/vault/vaults", {
+            name: name.value.trim(),
+            vault_password: password.value,
+          });
+          const created = (res.data && (res.data.vault || (res.data.data && res.data.data.vault))) || null;
+          if (!res.ok || !created || !created.id) {
+            error.textContent = res.message || "Couldn't create that vault. Please try again.";
+            return;
+          }
+          this.resumePendingEnable(created.id);
+        }),
+      );
+      actions.appendChild(this.vaultButton("Cancel", "modern-btn-secondary", () => this.cancelVaultAction()));
+      host.appendChild(actions);
+    }
+
+    /**
+     * Choose among existing vaults (FR 6) — also the repair path when the
+     * remembered vault is gone (FR 9). A locked choice routes through unlock
+     * rather than failing later.
+     */
+    renderVaultChoose(host, data) {
+      const options = data.vaults || [];
+      const error = this.vaultError(host);
+      const group = document.createElement("div");
+      group.className = "gc-vault-options";
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-label", "Choose a vault for Google credentials");
+
+      options.forEach((v, i) => {
+        const label = document.createElement("label");
+        label.className = "gc-vault-option";
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "gcVaultChoice";
+        radio.value = v.id;
+        if (i === 0) radio.checked = true;
+        label.appendChild(radio);
+        const text = document.createElement("span");
+        text.textContent = v.name || v.id;
+        label.appendChild(text);
+        if (v.locked) {
+          const pill = document.createElement("span");
+          pill.className = "gc-vault-locked";
+          pill.textContent = "Locked";
+          label.appendChild(pill);
+        }
+        group.appendChild(label);
+      });
+      host.appendChild(group);
+
+      const actions = document.createElement("div");
+      actions.className = "gc-vault-actions";
+      if (options.length) {
+        actions.appendChild(
+          this.vaultButton("Use this vault", "modern-btn-primary", () => {
+            error.textContent = "";
+            const picked = group.querySelector("input:checked");
+            if (!picked) {
+              error.textContent = "Select a vault to continue.";
+              return;
+            }
+            const chosen = options.find((v) => v.id === picked.value);
+            if (chosen && chosen.locked) {
+              // Unlock first; the server would otherwise refuse at the same point.
+              this.showVaultAction({
+                action: "unlock",
+                message: "Unlock " + (chosen.name || "this vault") + " to continue enabling Gmail.",
+                vault_id: chosen.id,
+                vault_name: chosen.name,
+              });
+              return;
+            }
+            this.resumePendingEnable(picked.value);
+          }),
+        );
+      }
+      actions.appendChild(
+        this.vaultButton("Create a new vault", "modern-btn-secondary", () => {
+          this.showVaultAction({
+            action: "create",
+            message: "Create a vault to store your Google credentials, then Ori will continue enabling Gmail.",
+          });
+        }),
+      );
+      actions.appendChild(this.vaultButton("Cancel", "modern-btn-secondary", () => this.cancelVaultAction()));
+      host.appendChild(actions);
+    }
+
+    vaultField(host, labelText, type) {
+      const wrap = document.createElement("label");
+      wrap.className = "gc-vault-field";
+      const span = document.createElement("span");
+      span.textContent = labelText;
+      const input = document.createElement("input");
+      input.type = type;
+      input.className = "modern-input";
+      wrap.appendChild(span);
+      wrap.appendChild(input);
+      host.appendChild(wrap);
+      return input;
+    }
+
+    vaultError(host) {
+      const p = document.createElement("p");
+      p.className = "gc-vault-error";
+      p.setAttribute("role", "alert");
+      host.appendChild(p);
+      return p;
+    }
+
+    vaultButton(label, variant, onClick) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "modern-btn " + variant;
+      btn.textContent = label;
+      btn.setAttribute("aria-label", label);
+      btn.addEventListener("click", onClick);
+      return btn;
+    }
+
+    /** POSTs JSON and normalizes the vault API's success/error envelope. */
+    async postJSON(url, body) {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        return {
+          ok: res.ok,
+          data,
+          message: data.error || data.message || (data.data && data.data.message) || "",
+        };
+      } catch (e) {
+        return { ok: false, data: {}, message: "" };
       }
     }
 
@@ -243,7 +581,21 @@
       }
     }
     hideError() {
-      if (this.el.error) this.el.error.classList.add("d-none");
+      if (this.el.error) {
+        this.el.error.removeAttribute("data-tone");
+        this.el.error.classList.add("d-none");
+      }
+    }
+    /**
+     * Shows an informational outcome that is neither success nor failure — e.g.
+     * a migration Ori safely skipped. Reusing showError would mislabel a correct
+     * outcome as a fault, so this renders in a neutral tone.
+     */
+    showNotice(msg) {
+      if (!this.el.error) return;
+      this.el.error.textContent = msg;
+      this.el.error.setAttribute("data-tone", "notice");
+      this.el.error.classList.remove("d-none");
     }
 
     // --- Drive Advanced setup -------------------------------------------------
@@ -614,6 +966,15 @@
           return;
         }
         if (!res.ok) throw new Error("migrate failed");
+        if (data.status === "skipped") {
+          // Not a failure: Ori kept a record it couldn't prove was redundant.
+          // Say so plainly — silently reporting success would be a lie, and
+          // reporting an error would suggest something broke.
+          this.showNotice(
+            data.message ||
+              "Ori couldn't confirm this account is a duplicate, so it was left in place. Nothing was deleted.",
+          );
+        }
         await this.refresh();
       } catch (e) {
         this.showError("Couldn't migrate the account. Please try again.");

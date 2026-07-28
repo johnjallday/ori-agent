@@ -53,6 +53,10 @@ func NewOpenAIProvider(config ProviderConfig) *OpenAIProvider {
 		client = openai.NewClient(
 			option.WithAPIKey(config.APIKey),
 			option.WithHTTPClient(httpClient),
+			// Ori owns the retry budget (see llm.RetryPolicy). Leaving the SDK's
+			// default retries on would silently multiply every task-level attempt,
+			// so a 3-attempt task could issue 9 requests against an exhausted quota.
+			option.WithMaxRetries(0),
 		)
 	}
 
@@ -137,7 +141,9 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	// Make API call
 	completion, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("openai api error: %w", err)
+		// Classify at the boundary, where the structured status and error code
+		// still exist. The task layer must never re-derive this from message text.
+		return nil, classifyOpenAIError("openai", err)
 	}
 
 	// Check for empty response (can happen with invalid models)
@@ -277,7 +283,7 @@ func (p *OpenAIProvider) ChatWithStructuredOutput(ctx context.Context, req Struc
 	// Make API call
 	completion, err := client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("openai api error: %w", err)
+		return nil, classifyOpenAIError("openai", err)
 	}
 
 	if len(completion.Choices) == 0 {
@@ -441,5 +447,6 @@ func (p *OpenAIProvider) UpdateClient(apiKey string) {
 	p.client = openai.NewClient(
 		option.WithAPIKey(apiKey),
 		option.WithHTTPClient(p.httpClient),
+		option.WithMaxRetries(0), // Ori owns the retry budget; see NewOpenAIProvider.
 	)
 }

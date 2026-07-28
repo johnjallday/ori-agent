@@ -89,6 +89,9 @@ func (c *HandlerConfig) Validate() error {
 
 // Handler manages orchestration-related HTTP endpoints
 type Handler struct {
+	// taskCapabilityGate is remembered here so it survives being set before the
+	// task sub-handler is constructed (the server wires it across build phases).
+	taskCapabilityGate  workspace.TaskCapabilityGate
 	agentStore          store.Store
 	workspaceStore      workspace.Store
 	sessionStore        SessionStore
@@ -190,6 +193,7 @@ func (h *Handler) initializeSubHandlers() {
 
 	if h.taskHandler != nil {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
+		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
 	}
 }
 
@@ -284,10 +288,24 @@ func (h *Handler) initializeStreamingHandlerLegacy() {
 	}
 }
 
+// SetTaskCapabilityGate wires the connection-precondition check consulted before
+// a task executes. Safe to call before or after the task sub-handler exists: the
+// gate is remembered either way.
+func (h *Handler) SetTaskCapabilityGate(gate workspace.TaskCapabilityGate) {
+	if h == nil {
+		return
+	}
+	h.taskCapabilityGate = gate
+	if h.taskHandlerSub != nil {
+		h.taskHandlerSub.SetCapabilityGate(gate)
+	}
+}
+
 // initializeTaskHandlerLegacy initializes the task handler if all dependencies are available (legacy)
 func (h *Handler) initializeTaskHandlerLegacy() {
 	if h.eventBus != nil && h.taskHandler != nil && h.taskHandlerSub == nil {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
+		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
 	}
 }
 

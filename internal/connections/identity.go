@@ -53,10 +53,36 @@ type OAuthConfig struct {
 	ClientSecret string
 	AuthURL      string // defaults to Google's endpoint when empty (overridable in tests)
 	TokenURL     string
+	// Verdict is the validation result for ClientID as the operator configured it
+	// (FR 63-65). Its zero value means "not checked" and is treated as usable, so
+	// callers that build a config directly are unaffected.
+	Verdict ClientVerdict
 }
 
 // IsConfigured reports whether a client id is present.
 func (c OAuthConfig) IsConfigured() bool { return strings.TrimSpace(c.ClientID) != "" }
+
+// ClientConfigError means the configured OAuth client cannot work — a defect
+// detectable before any browser flow starts, unlike "not configured at all".
+type ClientConfigError struct {
+	Verdict ClientVerdict
+}
+
+func (e *ClientConfigError) Error() string {
+	return "connections: google oauth client is misconfigured: " + string(e.Verdict.Problem)
+}
+
+// Is lets existing not-configured handling still catch this, while callers that
+// want the specific guidance use errors.As.
+func (e *ClientConfigError) Is(target error) bool { return target == ErrOAuthNotConfigured }
+
+// checkClient rejects a configured-but-unusable client up front.
+func (c OAuthConfig) checkClient() error {
+	if c.Verdict.OK() {
+		return nil
+	}
+	return &ClientConfigError{Verdict: c.Verdict}
+}
 
 // tokenURL returns the effective token endpoint (Google's default when unset).
 func (c OAuthConfig) tokenURL() string {
@@ -98,6 +124,7 @@ type IdentityFlow struct {
 	store    *Store
 	verifier IDVerifier
 	sink     CredentialSink
+	vaults   VaultCatalog
 	newID    func() string
 	now      func() time.Time
 }
@@ -119,6 +146,10 @@ type BeginConnectParams struct {
 	LocalUserID string
 	RedirectURL string // the loopback callback Ori will receive on
 	ReturnTo    string // where the UI should return afterward
+	// VaultID is the user's explicit vault choice for a product credential,
+	// supplied when resuming after a choose/create/repair prompt (FR 6, 9). Empty
+	// means "use whatever the connection already remembers".
+	VaultID string
 }
 
 // BeginConnectResult carries the authorize URL the frontend opens in the system
@@ -126,6 +157,9 @@ type BeginConnectParams struct {
 type BeginConnectResult struct {
 	AuthorizeURL string
 	State        string
+	// CorrelationID is the safe-to-log handle for this authorization; the matching
+	// callback failure reports the same value (FR 20).
+	CorrelationID string
 }
 
 // BeginConnect generates PKCE material and a state/nonce, records the pending
@@ -134,6 +168,9 @@ type BeginConnectResult struct {
 func (f *IdentityFlow) BeginConnect(p BeginConnectParams) (BeginConnectResult, error) {
 	if !f.config.IsConfigured() {
 		return BeginConnectResult{}, ErrOAuthNotConfigured
+	}
+	if err := f.config.checkClient(); err != nil {
+		return BeginConnectResult{}, err
 	}
 	codeVerifier := oauth2.GenerateVerifier()
 	pending, err := f.states.Begin(BeginParams{
@@ -153,7 +190,7 @@ func (f *IdentityFlow) BeginConnect(p BeginConnectParams) (BeginConnectResult, e
 		oauth2.SetAuthURLParam("nonce", pending.Nonce),
 		oauth2.SetAuthURLParam("prompt", "select_account"),
 	)
-	return BeginConnectResult{AuthorizeURL: authorizeURL, State: pending.State}, nil
+	return BeginConnectResult{AuthorizeURL: authorizeURL, State: pending.State, CorrelationID: pending.CorrelationID}, nil
 }
 
 // CompleteConnectParams are the callback inputs.

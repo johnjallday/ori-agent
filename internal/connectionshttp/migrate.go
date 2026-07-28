@@ -25,12 +25,20 @@ type Migrator interface {
 	// ListLegacyGmailAccounts returns Gmail accounts NOT sourced from the shared
 	// connection (id/email/workspace only).
 	ListLegacyGmailAccounts(ctx context.Context) ([]LegacyAccount, error)
-	// MigrateAccount re-links the legacy account's workspace to the unified
-	// connection (no re-auth, reusing the connection's Gmail credential) and
-	// removes the legacy record. It requires the account's email to match the
-	// connected account, else connections.ErrAccountMismatch.
+	// MigrateAccount re-points the legacy account's workspaces at the unified
+	// connection's credential (no re-auth) and removes the legacy record — but
+	// only when it can PROVE the record is a redundant copy. It requires the
+	// account's email to match the connected account, else
+	// connections.ErrAccountMismatch, and returns ErrNotProven when the record
+	// was deliberately preserved.
 	MigrateAccount(ctx context.Context, accountID, connectedEmail, credentialRef, vaultID string) error
 }
+
+// ErrNotProven means a legacy record could not be proven to be a redundant copy
+// and was therefore left in place. Implementations return an error matching this
+// so the endpoint can report "safely skipped" rather than a failure — preserving
+// a credential is the correct outcome, not a fault.
+var ErrNotProven = errors.New("connectionshttp: account could not be proven to be a duplicate")
 
 // migratable serves GET /api/connections/google/migratable — legacy Gmail
 // accounts eligible to move onto the connected account (FR 88/89). Empty unless a
@@ -82,11 +90,19 @@ func (h *Handler) migrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.migrator.MigrateAccount(r.Context(), accountID, conn.Email, g.CredentialRef, conn.VaultID); err != nil {
-		if errors.Is(err, connections.ErrAccountMismatch) {
+		switch {
+		case errors.Is(err, connections.ErrAccountMismatch):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "account_mismatch", "message": "That account belongs to a different Google account, so it can't be migrated."})
-			return
+		case errors.Is(err, ErrNotProven):
+			// Not a failure: Ori could not prove the record is redundant, so it
+			// kept it. Deleting an in-use credential is the outcome worth avoiding.
+			writeJSON(w, http.StatusOK, map[string]string{
+				"status":  "skipped",
+				"message": "Ori couldn't confirm this account is a duplicate of your connected account, so it was left in place. Nothing was deleted.",
+			})
+		default:
+			http.Error(w, "failed to migrate the account", http.StatusInternalServerError)
 		}
-		http.Error(w, "failed to migrate the account", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "migrated"})

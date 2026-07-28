@@ -36,6 +36,10 @@ type mailboxLinkerService struct {
 	workspaces  workspace.Store
 	accounts    emailAccountResolver
 	invalidator accountInvalidator
+	// readiness computes the deterministic setup state reported alongside every
+	// status, so the UI never has to infer setup from an agent's narration
+	// (FR 32). Nil omits the setup block.
+	readiness *emailReadinessEvaluator
 }
 
 func newMailboxLinkerService(hq *personalhq.Service, workspaces workspace.Store, accounts emailAccountResolver, invalidator accountInvalidator) *mailboxLinkerService {
@@ -89,20 +93,39 @@ func (l *mailboxLinkerService) ownedWorkspace(_ context.Context, userID, workspa
 func (l *mailboxLinkerService) mailboxStatusForWorkspace(ctx context.Context, ws *workspace.Workspace) (personalhqhttp.MailboxStatus, error) {
 	binding, ok := emailBindingFor(ws)
 	if !ok {
-		return personalhqhttp.MailboxStatus{Connected: false}, nil
+		return l.withSetup(ctx, ws, personalhqhttp.MailboxStatus{Connected: false}), nil
 	}
 	accountID := stringFromConfig(binding.Config, "account_id")
 	acc, err := l.accounts.GetEmailAccount(ctx, accountID)
 	if err != nil || acc == nil {
 		// Binding exists but the account is gone → surface as needing repair.
-		return personalhqhttp.MailboxStatus{Connected: false, AccountID: accountID, Health: "disconnected"}, nil
+		return l.withSetup(ctx, ws, personalhqhttp.MailboxStatus{Connected: false, AccountID: accountID, Health: "disconnected"}), nil
 	}
-	return personalhqhttp.MailboxStatus{
+	return l.withSetup(ctx, ws, personalhqhttp.MailboxStatus{
 		Connected:    true,
 		AccountID:    acc.ID,
 		EmailAddress: acc.EmailAddress,
 		Health:       accountHealth(acc.CredentialsStatus),
-	}, nil
+	}), nil
+}
+
+// withSetup attaches the deterministic readiness verdict to a status. Because
+// every link/unlink call returns a freshly-computed status, the setup state the
+// UI shows is always current the moment an operation completes (FR 36).
+func (l *mailboxLinkerService) withSetup(ctx context.Context, ws *workspace.Workspace, status personalhqhttp.MailboxStatus) personalhqhttp.MailboxStatus {
+	if l == nil || l.readiness == nil || ws == nil {
+		return status
+	}
+	readiness := l.readiness.Evaluate(ctx, ws.ID)
+	status.Setup = &personalhqhttp.MailboxSetupState{
+		Ready:       readiness.Ready,
+		Reason:      readiness.Reason,
+		Message:     readiness.Message,
+		Action:      readiness.Action,
+		ActionLabel: readiness.ActionLabel,
+		ActionURL:   readiness.ActionURL,
+	}
+	return status
 }
 
 // linkMailboxToWorkspace attaches an already OAuth-connected account to ws by
@@ -127,7 +150,11 @@ func (l *mailboxLinkerService) linkMailboxToWorkspace(ctx context.Context, ws *w
 	if err := ws.UpsertMCPBinding(workspace.MCPBinding{
 		ID:         bindingID,
 		ServerName: "gmail",
-		Enabled:    true,
+		// Mark the binding native so the runtime never looks for an MCP template
+		// named "gmail" (FR 29). Relinking rewrites it, which is also how a legacy
+		// binding written before this field existed gets upgraded in place.
+		RuntimeKind: workspace.RuntimeKindNativeEmail,
+		Enabled:     true,
 		Config: map[string]any{
 			"account_id":      acc.ID,
 			"allowed_actions": []any{"read", "search"},

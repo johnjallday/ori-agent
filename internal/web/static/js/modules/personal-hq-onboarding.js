@@ -52,6 +52,51 @@ export function upgradeView(plan) {
 //   - repair:    a binding exists but the account is gone/expired — Reconnect.
 //   - disconnected: OAuth is configured but no account connected — Connect.
 // oauthConfigured defaults to true (backward compatible) unless explicitly false.
+/**
+ * emailSetupView renders the server's deterministic readiness verdict
+ * (status.setup) into the loadout-chip view-model.
+ *
+ * The distinction from emailStatusView matters: this reads a state the SERVER
+ * computed from the account connection, grant health, vault availability, and
+ * the workspace binding. Setup state is never inferred from whether a setup
+ * agent said it succeeded, and the repair it names is the exact first unmet
+ * condition rather than a generic "set it up in Settings" (FR 32, 35).
+ *
+ * A status with no `setup` block (older server, or a build that cannot
+ * evaluate) falls back to the connection-only view so nothing regresses.
+ */
+export function emailSetupView(status) {
+  const setup = status && status.setup;
+  if (!setup) return emailStatusView(status, true);
+
+  if (setup.ready) {
+    return {
+      state: 'connected',
+      chip: 'Email',
+      chipState: 'equipped',
+      heading: 'Email connected',
+      detail: status.email_address || '',
+      action: 'disconnect',
+      actionLabel: 'Disconnect'
+    };
+  }
+
+  // Everything the user can fix on the Google Account card routes there;
+  // linking this workspace to an already-healthy account happens right here.
+  const linkable = setup.action === 'link_account';
+  return {
+    state: linkable ? 'disconnected' : 'setup',
+    chip: 'Email',
+    chipState: setup.reason === 'reconnect_required' ? 'repair' : 'empty',
+    heading: setup.action_label || 'Set up email',
+    detail: setup.message || '',
+    reason: setup.reason || '',
+    action: linkable ? 'connect' : 'settings',
+    actionLabel: setup.action_label || 'Set up email',
+    actionUrl: setup.action_url || ''
+  };
+}
+
 export function emailStatusView(status, oauthConfigured) {
   const configured = oauthConfigured !== false;
   if (status && status.connected) {
@@ -676,19 +721,6 @@ export function followUpView(f) {
     window.addEventListener('message', onMessage);
   }
 
-  async function fetchOAuthConfigured() {
-    try {
-      const res = await fetch('/api/settings/email-oauth', {
-        headers: { Accept: 'application/json' }
-      });
-      if (!res.ok) return true; // assume configured; the connect flow will surface a real error
-      const data = await res.json();
-      return !!data.configured;
-    } catch (_) {
-      return true;
-    }
-  }
-
   // renderEmail renders the Email inventory chip — a first-class HQ loadout item
   // with its own state and setup routing. The chip's action routes correctly:
   // 'settings' (server has no OAuth client) opens Settings, 'connect' opens the
@@ -726,7 +758,7 @@ export function followUpView(f) {
     btn.textContent = view.actionLabel;
     btn.addEventListener('click', async () => {
       if (view.action === 'settings') {
-        window.location.href = '/settings#personal-hq-email';
+        window.location.href = '/settings#google-account';
         return;
       }
       if (view.action === 'disconnect') {
@@ -762,11 +794,8 @@ export function followUpView(f) {
       mount.hidden = true;
       return;
     }
-    const [emailStatus, oauthConfigured] = await Promise.all([
-      fetchEmailStatus().catch(() => null),
-      fetchOAuthConfigured()
-    ]);
-    renderEmail(mount, emailStatusView(emailStatus, oauthConfigured));
+    const emailStatus = await fetchEmailStatus().catch(() => null);
+    renderEmail(mount, emailSetupView(emailStatus));
   }
 
   async function fetchProposals() {

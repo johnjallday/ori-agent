@@ -116,14 +116,6 @@
               </span>
               <span class="settings-nav-item-text">Google Account</span>
             </a>
-            <a href="#personal-hq-email" class="settings-nav-item" data-section="personal-hq-email">
-              <span class="settings-nav-item-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6A2,2 0 0,0 20,4M20,8L12,13L4,8V6L12,11L20,6V8Z"/>
-                </svg>
-              </span>
-              <span class="settings-nav-item-text">Personal HQ Email</span>
-            </a>
             <a href="#mcp-servers" class="settings-nav-item" data-section="mcp-servers">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -911,6 +903,8 @@
               #google-account .gc-product-right{display:flex;align-items:center;gap:0.75rem}
               #google-account .gc-enable-btn{padding:0.2rem 0.8rem;font-size:0.8rem}
               #google-account .gc-error{margin-top:0.75rem;color:#dc2626;font-size:0.85rem}
+              /* A safely-skipped outcome is informational, not a fault. */
+              #google-account .gc-error[data-tone="notice"]{color:var(--text-secondary)}
               #google-account .gc-drive-setup{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid var(--border-color,rgba(128,128,128,0.2));border-radius:0.5rem;background:rgba(128,128,128,0.04);display:flex;flex-direction:column;gap:0.55rem}
               #google-account .gc-drive-title{font-weight:600;color:var(--text-primary)}
               #google-account .gc-drive-note{margin:0;font-size:0.83rem;color:var(--text-secondary);line-height:1.45}
@@ -927,6 +921,17 @@
               #google-account .gc-migrate{margin-top:0.6rem;padding:0.8rem 1rem;border:1px solid rgba(59,130,246,0.35);border-radius:0.5rem;background:rgba(59,130,246,0.06);display:flex;flex-direction:column;gap:0.5rem}
               #google-account .gc-migrate-title{font-weight:600;color:var(--text-primary)}
               #google-account .gc-migrate-row{display:flex;align-items:center;justify-content:space-between;gap:0.75rem;font-size:0.85rem;color:var(--text-secondary)}
+              #google-account .gc-vault{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid rgba(245,158,11,0.4);border-radius:0.5rem;background:rgba(245,158,11,0.07);display:flex;flex-direction:column;gap:0.55rem}
+              #google-account .gc-vault-title{font-weight:600;color:var(--text-primary)}
+              #google-account .gc-vault-note{margin:0;font-size:0.83rem;color:var(--text-secondary);line-height:1.45}
+              #google-account .gc-vault-field{display:flex;flex-direction:column;gap:0.25rem;font-size:0.82rem;color:var(--text-secondary)}
+              #google-account .gc-vault-field .modern-input{width:100%}
+              #google-account .gc-vault-options{display:flex;flex-direction:column;gap:0.35rem;margin:0}
+              #google-account .gc-vault-option{display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;color:var(--text-primary);cursor:pointer}
+              #google-account .gc-vault-option input{margin:0}
+              #google-account .gc-vault-locked{font-size:0.72rem;color:#b45309;border:1px solid rgba(180,83,9,0.4);border-radius:0.25rem;padding:0 0.35rem}
+              #google-account .gc-vault-actions{display:flex;gap:0.5rem;margin-top:0.25rem;flex-wrap:wrap}
+              #google-account .gc-vault-error{margin:0;font-size:0.82rem;color:#dc2626}
             </style>
             <div class="settings-section-header">
               <span class="settings-section-icon">
@@ -958,6 +963,7 @@
                 </div>
               </div>
               <div id="googleConnProducts" class="gc-products"></div>
+              <div id="googleConnVault" class="gc-vault d-none" role="group" aria-label="Credential vault setup" aria-live="polite"></div>
               <div id="googleConnMigrate" class="gc-migrate d-none" role="group" aria-label="Migrate existing email" aria-live="polite"></div>
               <div id="googleConnDriveSetup" class="gc-drive-setup d-none" role="group" aria-label="Google Drive setup" aria-live="polite"></div>
               <div id="googleConnConfirm" class="gc-confirm d-none" role="group" aria-label="Disconnect confirmation" aria-live="polite"></div>
@@ -990,44 +996,6 @@
               </div>
             </div>
             <div id="googleConnError" class="gc-error d-none" role="alert"></div>
-          </section>
-
-          <section id="personal-hq-email" class="settings-section modern-card p-4">
-            <div class="settings-section-header">
-              <span class="settings-section-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6A2,2 0 0,0 20,4M20,8L12,13L4,8V6L12,11L20,6V8Z"/>
-                </svg>
-              </span>
-              <h2 class="settings-section-title">Personal HQ Email</h2>
-              <span class="settings-section-subtitle">(Google OAuth)</span>
-            </div>
-
-            <p class="settings-section-description">
-              Personal HQ email now connects through your
-              <a href="#google-account" style="color: var(--primary-color);">Google Account</a> above — connect
-              Google and enable Gmail there, then choose <strong>Connect account</strong> on your Personal HQ (no
-              client ID or secret needed). The fields below are only for a <strong>self-hosted</strong> setup with
-              your own Google OAuth <strong>Web</strong> client: register it in Google Cloud Console (enable the
-              Gmail API), add <code id="hqEmailRedirectHint">this server's <em>/api/vault/email-oauth/callback</em></code>
-              as an authorized redirect URI, then paste the client ID and secret. Read-only Gmail is requested;
-              nothing sends without your explicit confirmation.
-            </p>
-
-            <div class="settings-field">
-              <label class="settings-label" for="hqEmailClientId">Client ID</label>
-              <input type="text" id="hqEmailClientId" class="form-control settings-input"
-                     placeholder="…apps.googleusercontent.com" autocomplete="off" spellcheck="false">
-            </div>
-            <div class="settings-field">
-              <label class="settings-label" for="hqEmailClientSecret">Client Secret</label>
-              <input type="password" id="hqEmailClientSecret" class="form-control settings-input"
-                     placeholder="Enter to set or replace" autocomplete="off" spellcheck="false">
-            </div>
-            <div class="d-flex align-items-center gap-2 mt-2">
-              <button type="button" id="hqEmailSaveBtn" class="modern-btn modern-btn-primary modern-btn-sm">Save credentials</button>
-              <span id="hqEmailStatus" class="settings-field-hint" role="status" aria-live="polite"></span>
-            </div>
           </section>
 
           <!-- MCP Servers Section -->
@@ -1856,65 +1824,6 @@
   <script defer src="/js/modules/toast.js"></script>
   {{template "theme-init.tmpl" .}}
   <script>
-    // Personal HQ Email (Google OAuth) credentials
-    (function() {
-      const idInput = document.getElementById('hqEmailClientId');
-      const secretInput = document.getElementById('hqEmailClientSecret');
-      const saveBtn = document.getElementById('hqEmailSaveBtn');
-      const statusEl = document.getElementById('hqEmailStatus');
-      const redirectHint = document.getElementById('hqEmailRedirectHint');
-      if (!idInput || !saveBtn) return;
-
-      if (redirectHint) {
-        redirectHint.textContent = window.location.origin + '/api/vault/email-oauth/callback';
-      }
-
-      function setStatus(text, isError) {
-        if (!statusEl) return;
-        statusEl.textContent = text;
-        statusEl.style.color = isError ? 'var(--danger-color, #d33)' : 'var(--text-secondary)';
-      }
-
-      async function load() {
-        try {
-          const res = await fetch('/api/settings/email-oauth', { headers: { Accept: 'application/json' } });
-          if (!res.ok) return;
-          const data = await res.json();
-          if (data.client_id) idInput.value = data.client_id;
-          if (data.has_client_secret) secretInput.placeholder = 'Saved — enter to replace';
-          setStatus(data.configured ? 'Configured — the Connect Email button is enabled.' : 'Not configured yet.', false);
-        } catch (_) { /* ignore */ }
-      }
-
-      saveBtn.addEventListener('click', async () => {
-        const clientId = idInput.value.trim();
-        const clientSecret = secretInput.value.trim();
-        if (!clientId || !clientSecret) {
-          setStatus('Enter both the client ID and client secret.', true);
-          return;
-        }
-        saveBtn.disabled = true;
-        try {
-          const res = await fetch('/api/settings/email-oauth', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ client_id: clientId, client_secret: clientSecret })
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error((data && (data.error || data.message)) || 'Save failed');
-          secretInput.value = '';
-          secretInput.placeholder = 'Saved — enter to replace';
-          setStatus('Saved — the Connect Email button is now enabled.', false);
-        } catch (e) {
-          setStatus(e && e.message ? e.message : 'Could not save.', true);
-        } finally {
-          saveBtn.disabled = false;
-        }
-      });
-
-      load();
-    })();
-
     // External Agents Settings
     (function() {
       const claudeToggle = document.getElementById('claudeAgentsToggle');

@@ -50,6 +50,8 @@ func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 		client = anthropic.NewClient(
 			option.WithHTTPClient(httpClient),
 			option.WithAPIKey(config.APIKey),
+			// One shared retry budget, owned by Ori — see the OpenAI provider.
+			option.WithMaxRetries(0),
 		)
 	}
 
@@ -139,7 +141,7 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	client, _ := p.snapshot()
 	message, err := client.Messages.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("claude api error: %w", err)
+		return nil, classifyAnthropicError("anthropic", err)
 	}
 
 	// Convert response
@@ -314,6 +316,7 @@ func (p *ClaudeProvider) UpdateClient(apiKey string) {
 	client := anthropic.NewClient(
 		option.WithHTTPClient(httpClient),
 		option.WithAPIKey(apiKey),
+		option.WithMaxRetries(0), // Ori owns the retry budget; see NewClaudeProvider.
 	)
 	p.mu.Lock()
 	defer p.mu.Unlock()

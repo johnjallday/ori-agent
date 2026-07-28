@@ -13,12 +13,17 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
-// WorkspaceLinker gives a workspace its own Gmail account by reusing the global
-// grant's identity — no Google re-authorization (FR 47, 54). Implemented by a
+// WorkspaceLinker points a workspace at the connection's authoritative Gmail
+// credential — no Google re-authorization (FR 47, 54, 68-70). Implemented by a
 // vault-backed adapter; nil disables workspace linking.
 type WorkspaceLinker interface {
 	LinkGmailToWorkspace(ctx context.Context, credentialRef, vaultID, workspaceID string) (accountID string, err error)
 }
+
+// ErrCredentialMissing means the connection's grant references a vault
+// credential that no longer exists. Implementations return an error matching
+// this so the endpoint can offer a reconnect instead of failing opaquely.
+var ErrCredentialMissing = errors.New("connectionshttp: the referenced Gmail credential no longer exists")
 
 // Handler serves the Google Account connection endpoints. Mutating and
 // metadata-reading routes are wrapped by the OriginGuard (FR 34); the OAuth
@@ -28,6 +33,7 @@ type Handler struct {
 	flow           *connections.IdentityFlow
 	store          *connections.Store
 	guard          *OriginGuard
+	vaults         connections.VaultCatalog
 	linker         WorkspaceLinker
 	impacts        ImpactEnumerator
 	teardown       ProductTeardown
@@ -42,9 +48,12 @@ type Handler struct {
 
 // Deps are the Handler's collaborators.
 type Deps struct {
-	Flow   *connections.IdentityFlow
-	Store  *connections.Store
-	Guard  *OriginGuard
+	Flow  *connections.IdentityFlow
+	Store *connections.Store
+	Guard *OriginGuard
+	// Vaults answers read-only "which vault step is needed?" queries for the
+	// connection card. Nil disables the preflight endpoint.
+	Vaults connections.VaultCatalog
 	Linker WorkspaceLinker
 	// Impacts enumerates which workspaces use each product grant, for the
 	// disconnect impact preview (FR 77). Nil degrades to an empty preview.
@@ -78,6 +87,7 @@ func NewHandler(d Deps) *Handler {
 		flow:             d.Flow,
 		store:            d.Store,
 		guard:            d.Guard,
+		vaults:           d.Vaults,
 		linker:           d.Linker,
 		impacts:          d.Impacts,
 		teardown:         d.Teardown,
@@ -120,6 +130,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/google/migrate", h.guard.Wrap(http.HandlerFunc(h.migrate)))
 	mux.Handle("/api/connections/google/product/disconnect", h.guard.Wrap(http.HandlerFunc(h.productDisconnect)))
 	mux.Handle("/api/connections/google/product/unlink", h.guard.Wrap(http.HandlerFunc(h.productUnlink)))
+	mux.Handle("/api/connections/google/vault", h.guard.Wrap(http.HandlerFunc(h.vaultPreflight)))
 	mux.Handle("/api/connections/google/gmail/enable", h.guard.Wrap(http.HandlerFunc(h.gmailEnable)))
 	mux.Handle("/api/connections/google/gmail/link", h.guard.Wrap(http.HandlerFunc(h.gmailLink)))
 	mux.HandleFunc("/api/connections/google/callback", h.callback)
@@ -136,14 +147,24 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		ReturnTo:    strings.TrimSpace(r.URL.Query().Get("return_to")),
 	})
 	if err != nil {
-		if errors.Is(err, connections.ErrOAuthNotConfigured) {
+		var misconfigured *connections.ClientConfigError
+		switch {
+		case errors.As(err, &misconfigured):
+			// A configured-but-wrong client: name the exact fix (FR 63-65). The
+			// message never echoes the configured id or secret.
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":   "client_invalid",
+				"problem": string(misconfigured.Verdict.Problem),
+				"message": misconfigured.Verdict.Message(),
+			})
+		case errors.Is(err, connections.ErrOAuthNotConfigured):
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error":   "not_configured",
 				"message": "Google sign-in isn't configured in this build yet.",
 			})
-			return
+		default:
+			http.Error(w, "failed to start connection", http.StatusInternalServerError)
 		}
-		http.Error(w, "failed to start connection", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": res.AuthorizeURL})
@@ -157,10 +178,19 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		OAuthError: q.Get("error"),
 	})
 	if err != nil {
-		h.renderResult(w, false, "", userMessageFor(err))
+		failure := connections.ClassifyCallback(err)
+		// Safe diagnostics only: stage, category, and the correlation id shared with
+		// the begin-authorization log line. Never the code, token, or state (FR 19, 20).
+		logger.Warn("google connection callback failed", logger.Fields{
+			"stage":          string(failure.Stage),
+			"category":       string(failure.Category),
+			"signed_in":      failure.SignedIn,
+			"correlation_id": failure.CorrelationID,
+		})
+		h.renderFailure(w, failure)
 		return
 	}
-	h.renderResult(w, true, conn.Email, "")
+	h.renderResult(w, conn.Email)
 }
 
 func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
@@ -221,16 +251,31 @@ func (h *Handler) gmailEnable(w http.ResponseWriter, r *http.Request) {
 		LocalUserID: h.resolveLocalUser(r),
 		RedirectURL: h.buildRedirectURL(r),
 		ReturnTo:    strings.TrimSpace(r.URL.Query().Get("return_to")),
+		// An explicit choice supplied when the caller resumes after a
+		// choose/create/repair prompt (FR 6, 9, 10).
+		VaultID: strings.TrimSpace(r.URL.Query().Get("vault_id")),
 	}
 	var res connections.BeginConnectResult
 	var err error
 	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("scope")), "send") {
-		res, err = h.flow.BeginEnableGmailSend(params) // explicit send upgrade (FR 44)
+		res, err = h.flow.BeginEnableGmailSend(r.Context(), params) // explicit send upgrade (FR 44)
 	} else {
-		res, err = h.flow.BeginEnableGmail(params)
+		res, err = h.flow.BeginEnableGmail(r.Context(), params)
 	}
 	if err != nil {
+		var preflight *connections.VaultPreflightError
+		var misconfigured *connections.ClientConfigError
 		switch {
+		case errors.As(err, &misconfigured):
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":   "client_invalid",
+				"problem": string(misconfigured.Verdict.Problem),
+				"message": misconfigured.Verdict.Message(),
+			})
+		case errors.As(err, &preflight):
+			// The vault needs user action first. Nothing has been sent to Google, so
+			// Gmail stays disabled until the user completes (or cancels) the repair.
+			writeJSON(w, http.StatusConflict, vaultActionPayload(preflight.Preflight))
 		case errors.Is(err, connections.ErrOAuthNotConfigured):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "not_configured", "message": "Google sign-in isn't configured in this build yet."})
 		case errors.Is(err, connections.ErrNoActiveIdentity):
@@ -242,6 +287,12 @@ func (h *Handler) gmailEnable(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Pairs with the callback log line via correlation_id. No URL, state, or
+	// client secret is logged — the authorize URL carries the client id (FR 19, 20).
+	logger.Info("google connection: gmail authorization started", logger.Fields{
+		"stage":          string(connections.StageAuthorization),
+		"correlation_id": res.CorrelationID,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": res.AuthorizeURL})
 }
 
@@ -273,6 +324,21 @@ func (h *Handler) gmailLink(w http.ResponseWriter, r *http.Request) {
 	}
 	accountID, err := h.linker.LinkGmailToWorkspace(r.Context(), g.CredentialRef, conn.VaultID, workspaceID)
 	if err != nil {
+		// A grant can reference a credential the vault no longer holds — a vault
+		// recreated, a data directory moved, a partial teardown. That is a
+		// reconnect, not a server fault, and reporting it as a 500 left the user
+		// with a dead button and an opaque console error.
+		if errors.Is(err, ErrCredentialMissing) {
+			logger.Warn("gmail link: grant references a missing credential", logger.Fields{
+				"workspace_id": workspaceID,
+			})
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":   "credential_missing",
+				"message": "Your Gmail credential is no longer in the vault. Re-enable Gmail on your Google account to reconnect it.",
+				"action":  "enable_gmail",
+			})
+			return
+		}
 		http.Error(w, "failed to link Gmail to the workspace", http.StatusInternalServerError)
 		return
 	}
@@ -292,45 +358,65 @@ func connGmailGrant(conn *connections.Connection) (*connections.ProductGrant, bo
 	return g, true
 }
 
-// userMessageFor maps a flow error to a safe, specific user-facing message. It
-// never includes tokens, codes, or provider internals (FR 83, 84).
-func userMessageFor(err error) string {
-	switch {
-	case errors.Is(err, connections.ErrExpiredFlow):
-		return "This sign-in link expired or was already used. Please try connecting again."
-	case errors.Is(err, connections.ErrAuthorizationDenied):
-		return "Sign-in was canceled."
-	case errors.Is(err, connections.ErrDifferentAccountActive):
-		return "A different Google account is already connected. Disconnect it first, then try again."
-	case errors.Is(err, connections.ErrNonceMismatch), errors.Is(err, connections.ErrIDTokenInvalid):
-		return "We couldn't verify the Google sign-in. Please try again."
-	case errors.Is(err, connections.ErrNoIDToken):
-		return "Google didn't return an identity for this sign-in. Please try again."
-	default:
-		return "We couldn't complete the Google sign-in. Please try again."
+// renderResult writes the success page. It exposes no authorization code or
+// token, and returns the user to Settings → Google Account so the card can
+// refresh its product rows without reconnecting the base identity (FR 18).
+func (h *Handler) renderResult(w http.ResponseWriter, email string) {
+	body := "You're connected. Returning you to Ori…"
+	if email != "" {
+		body = "Connected as " + html.EscapeString(email) + ". Returning you to Ori…"
 	}
+	writeResultPage(w, http.StatusOK, resultPage{
+		Title:       "Google connected",
+		Body:        body,
+		ActionLabel: "Return to Ori",
+		ActionURL:   settingsAnchor,
+		// Land back on the card automatically; the manual link covers the case
+		// where the redirect is blocked.
+		RedirectAfterSeconds: 2,
+	})
 }
 
-// renderResult writes a minimal, self-contained result page. It exposes no
-// authorization code or token and links the user back to the connection card.
-func (h *Handler) renderResult(w http.ResponseWriter, ok bool, email, message string) {
+// renderFailure writes the category-specific failure page: what happened,
+// whether the Google half succeeded, and the exact repair action (FR 13-16).
+func (h *Handler) renderFailure(w http.ResponseWriter, failure *connections.CallbackError) {
+	c := copyFor(failure)
+	writeResultPage(w, http.StatusBadRequest, resultPage{
+		Title:       c.Title,
+		Body:        html.EscapeString(c.Body),
+		ActionLabel: c.ActionLabel,
+		ActionURL:   returnURL(failure, c.Action),
+	})
+}
+
+// resultPage is the callback result page's content. Body is pre-escaped by the
+// caller because the success page embeds an escaped email address.
+type resultPage struct {
+	Title                string
+	Body                 string
+	ActionLabel          string
+	ActionURL            string
+	RedirectAfterSeconds int
+}
+
+// writeResultPage renders a minimal, self-contained page. Everything
+// interpolated is either a constant or already escaped.
+func writeResultPage(w http.ResponseWriter, status int, page resultPage) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	status := http.StatusOK
-	title, body := "Google connected", "You can close this tab and return to Ori."
-	if ok && email != "" {
-		body = "Connected as " + html.EscapeString(email) + ". You can close this tab and return to Ori."
-	}
-	if !ok {
-		status = http.StatusBadRequest
-		title, body = "Sign-in not completed", html.EscapeString(message)
+	refresh := ""
+	if page.RedirectAfterSeconds > 0 {
+		refresh = fmt.Sprintf(`<meta http-equiv="refresh" content="%d;url=%s">`,
+			page.RedirectAfterSeconds, html.EscapeString(page.ActionURL))
 	}
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>%s</title>`+
-		`<meta name="viewport" content="width=device-width, initial-scale=1">`+
+		`<meta name="viewport" content="width=device-width, initial-scale=1">%s`+
 		`<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1.5rem;text-align:center}`+
 		`h1{font-size:1.3rem}a{color:#2563eb}</style></head><body>`+
-		`<h1>%s</h1><p>%s</p><p><a href="/settings#google-account">Return to Ori</a></p></body></html>`,
-		html.EscapeString(title), html.EscapeString(title), body)
+		`<h1>%s</h1><p>%s</p><p><a href="%s">%s</a></p></body></html>`,
+		html.EscapeString(page.Title), refresh,
+		html.EscapeString(page.Title), page.Body,
+		html.EscapeString(page.ActionURL), html.EscapeString(page.ActionLabel))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

@@ -27,7 +27,11 @@ type PendingAuth struct {
 	// per-flow secret that must be remembered between the authorize request and
 	// the token exchange; it never leaves the server.
 	CodeVerifier string
-	CreatedAt    time.Time
+	// CorrelationID is a short, non-secret diagnostic handle shared by the begin
+	// and callback log lines for one authorization (FR 20). Unlike State it is
+	// safe to log, because it grants nothing and is not the replay key.
+	CorrelationID string
+	CreatedAt     time.Time
 }
 
 // BeginParams are the caller-supplied inputs to start an authorization; the
@@ -81,6 +85,10 @@ func (s *StateStore) Begin(p BeginParams) (PendingAuth, error) {
 	if err != nil {
 		return PendingAuth{}, fmt.Errorf("generate nonce: %w", err)
 	}
+	correlationID, err := s.randomToken()
+	if err != nil {
+		return PendingAuth{}, fmt.Errorf("generate correlation id: %w", err)
+	}
 	pa := PendingAuth{
 		State:         state,
 		Nonce:         nonce,
@@ -90,6 +98,8 @@ func (s *StateStore) Begin(p BeginParams) (PendingAuth, error) {
 		ReturnTo:      p.ReturnTo,
 		CallbackURI:   p.CallbackURI,
 		CodeVerifier:  p.CodeVerifier,
+		// Short enough to read in a log, long enough not to collide in a session.
+		CorrelationID: correlationID[:12],
 		CreatedAt:     s.now(),
 	}
 
