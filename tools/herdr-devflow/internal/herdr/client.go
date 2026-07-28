@@ -308,6 +308,10 @@ type WorkspaceInfo struct {
 	// ActiveTabID is the workspace's currently selected tab. It is recorded for
 	// diagnostics; a feature's own tab is always the one it created.
 	ActiveTabID string `json:"active_tab_id"`
+	// TabCount says whether this workspace still describes a single checkout.
+	// Once it holds several feature tabs, the workspace-level Worktree binding
+	// below stops identifying any one of them.
+	TabCount int `json:"tab_count"`
 	// Worktree is Herdr's own record of which checkout this workspace was
 	// opened against. It is absent for workspaces created by hand and then
 	// navigated into, which is precisely why it cannot be the only signal.

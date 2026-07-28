@@ -630,3 +630,35 @@ func TestAttachAgentsRecordsTheMatchedWorktree(t *testing.T) {
 		t.Fatal("the attribution recorded no evidence of which worktree matched")
 	}
 }
+
+// A workspace that hosts one tab still identifies that tab's checkout, so the
+// binding remains a useful fallback for a pane with no cwd. A workspace hosting
+// a tab per feature identifies none of them: it keeps the binding of whichever
+// worktree opened it, and using that would attribute an agent to a sibling
+// feature's branch. Reporting nothing is the honest answer there.
+func TestWorkspaceBindingFallbackOnlyAppliesToSingleTabWorkspaces(t *testing.T) {
+	agent := herdr.AgentInfo{Name: "ori-agent", WorkspaceID: "w1"}
+	single := []herdr.WorkspaceInfo{{
+		WorkspaceID: "w1", TabCount: 1,
+		Worktree: &herdr.WorktreeBinding{CheckoutPath: "/repo/worktrees/alpha"},
+	}}
+	if got := agentWorktree(agent, single); got != "/repo/worktrees/alpha" {
+		t.Fatalf("single-tab workspace fallback = %q, want the bound checkout", got)
+	}
+
+	shared := []herdr.WorkspaceInfo{{
+		WorkspaceID: "w1", TabCount: 3,
+		Worktree: &herdr.WorktreeBinding{CheckoutPath: "/repo/worktrees/alpha"},
+	}}
+	if got := agentWorktree(agent, shared); got != "" {
+		t.Fatalf("shared workspace fallback = %q, want no guess", got)
+	}
+
+	// A pane that does report a directory is unaffected either way: its own cwd
+	// is first-hand evidence and always wins.
+	located := agent
+	located.Cwd = "/repo/worktrees/beta"
+	if got := agentWorktree(located, shared); got != "/repo/worktrees/beta" {
+		t.Fatalf("pane cwd = %q, want it to win over the workspace binding", got)
+	}
+}

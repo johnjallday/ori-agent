@@ -96,8 +96,11 @@ type fakeHerdr struct {
 	// does before it settles.
 	settleAfter int
 	settlePolls map[string]int
-	calls       []string
-	fail        map[string]error
+	// paneTokens records the last display tokens reported to each pane, which
+	// is where per-feature metadata lives now that a workspace holds many.
+	paneTokens map[string]map[string]string
+	calls      []string
+	fail       map[string]error
 }
 
 func (f *fakeHerdr) FocusedWorkspace(_ context.Context) (herdr.WorkspaceInfo, error) {
@@ -344,15 +347,13 @@ func (f *fakeHerdr) AgentPromptInfo(_ context.Context, target, text string, _ ti
 	return f.byName[target], nil
 }
 
-func (f *fakeHerdr) ReportWorkspaceMetadata(_ context.Context, _, _ string, _ map[string]string) (json.RawMessage, error) {
-	f.record("workspace.report-metadata")
+func (f *fakeHerdr) ReportPaneMetadata(_ context.Context, paneID, _ string, tokens map[string]string) (json.RawMessage, error) {
+	f.record("pane.report-metadata:" + paneID)
 	f.metadataCalls++
-	return json.RawMessage(`{"type":"workspace_metadata"}`), f.fail["workspace_metadata"]
-}
-
-func (f *fakeHerdr) ReportPaneMetadata(_ context.Context, _, _ string, _ map[string]string) (json.RawMessage, error) {
-	f.record("pane.report-metadata")
-	f.metadataCalls++
+	if f.paneTokens == nil {
+		f.paneTokens = make(map[string]map[string]string)
+	}
+	f.paneTokens[paneID] = tokens
 	return json.RawMessage(`{"type":"pane_metadata"}`), f.fail["pane_metadata"]
 }
 

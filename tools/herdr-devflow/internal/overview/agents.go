@@ -368,6 +368,14 @@ func agentWorktree(agent herdr.AgentInfo, workspaces []herdr.WorkspaceInfo) stri
 		if workspace.WorkspaceID != agent.WorkspaceID {
 			continue
 		}
+		// The workspace binding is only evidence about this agent while the
+		// workspace still describes one checkout. A workspace hosting a tab per
+		// feature is bound to whichever worktree opened it, so trusting it here
+		// would confidently attribute an agent to a sibling feature's branch —
+		// worse than admitting the pane reported no directory.
+		if workspace.TabCount > 1 {
+			return ""
+		}
 		if workspace.Worktree != nil && workspace.Worktree.CheckoutPath != "" {
 			return workspace.Worktree.CheckoutPath
 		}

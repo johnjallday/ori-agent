@@ -40,7 +40,9 @@ type Herdr interface {
 	AgentRenameInfo(context.Context, string, string) (herdr.AgentInfo, error)
 	FocusAgent(context.Context, string) error
 	AgentReadText(context.Context, string, int) (string, error)
-	ReportWorkspaceMetadata(context.Context, string, string, map[string]string) (json.RawMessage, error)
+	// Only pane metadata is written here. A workspace hosts a tab per feature,
+	// so workspace-scoped display tokens can no longer describe one feature;
+	// status keeps the workspace call for legacy single-feature records.
 	ReportPaneMetadata(context.Context, string, string, map[string]string) (json.RawMessage, error)
 }
 
@@ -238,6 +240,12 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 
 	// Metadata is display-only and source-scoped. It never changes Herdr's
 	// semantic agent lifecycle authority.
+	//
+	// It is reported to the feature's own pane, not to the workspace. A
+	// workspace now holds a tab per feature, so writing these at workspace
+	// scope would mean each handoff overwrote the previous feature's branch and
+	// path with its own — the last one to start would be the only one labelled
+	// correctly.
 	metadata := map[string]string{
 		"repository": feature.RepositoryID,
 		"feature":    feature.Name,
@@ -245,8 +253,8 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		"path":       feature.Path,
 	}
 	if metadataEnabledFor(featureState) {
-		if _, err := s.Client.ReportWorkspaceMetadata(ctx, placement.WorkspaceID, s.Config.Bridge.SourceID, metadata); err != nil {
-			return HandoffResult{}, wrapHerdrError("report workspace metadata", err, "wt herd retry")
+		if _, err := s.Client.ReportPaneMetadata(ctx, placement.RootPane.PaneID, s.Config.Bridge.SourceID, metadata); err != nil {
+			return HandoffResult{}, wrapHerdrError("report feature metadata", err, "wt herd retry")
 		}
 	}
 

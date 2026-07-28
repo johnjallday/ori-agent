@@ -236,8 +236,8 @@ func TestMetadataSkipsAClosedWorkspaceWhoseSavedAgentsAreMissing(t *testing.T) {
 			{Feature: model.Feature{Name: "live"}, WorkspaceID: "w2", MetadataEnabled: true},
 		},
 		Rows: []AgentRow{
-			{WorkspaceID: "w1", Missing: true},
-			{WorkspaceID: "w2", Live: &live},
+			{Feature: "closed", WorkspaceID: "w1", Missing: true},
+			{Feature: "live", WorkspaceID: "w2", Live: &live},
 		},
 	}
 	if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
@@ -248,8 +248,8 @@ func TestMetadataSkipsAClosedWorkspaceWhoseSavedAgentsAreMissing(t *testing.T) {
 	}
 }
 
-func TestWorkspaceTokensClearAResolvedContinuation(t *testing.T) {
-	tokens := workspaceTokens(FeatureSnapshot{Feature: model.Feature{RepositoryID: "repo", Name: "bridge", Branch: "feature/bridge"}, Task: tasklist.Progress{Exists: true, Total: 1, Completed: 1, Next: "All checklist items are marked complete"}})
+func TestFeatureTokensClearAResolvedContinuation(t *testing.T) {
+	tokens := featureTokens(FeatureSnapshot{Feature: model.Feature{RepositoryID: "repo", Name: "bridge", Branch: "feature/bridge"}, Task: tasklist.Progress{Exists: true, Total: 1, Completed: 1, Next: "All checklist items are marked complete"}})
 	if value, found := tokens["next_schedule"]; !found || value != "" {
 		t.Fatalf("resolved next_schedule token = %q, present=%v", value, found)
 	}
@@ -392,4 +392,80 @@ func fixtureState(t *testing.T, now time.Time) (model.BridgeState, []herdr.Agent
 		{Name: alphaAgent.Name, Agent: "claude", WorkspaceID: "w1", PaneID: "w1:p9", TerminalID: "term-9", AgentStatus: model.AgentWorking, AgentSession: &alphaNative},
 		{Name: betaAgent.Name, Agent: "codex", WorkspaceID: "w2", PaneID: "w2:p1", TerminalID: "term-2", AgentStatus: model.AgentBlocked, AgentSession: &betaNative},
 	}, paths
+}
+
+// The collision this group exists to prevent. Two features sharing one
+// workspace each keep their own branch and task tokens, because those are
+// reported to the feature's own pane. Keying anything by workspace here would
+// collapse both features onto whichever was processed last.
+func TestMetadataKeepsTwoFeaturesInOneWorkspaceDistinct(t *testing.T) {
+	client := &fakeHerdr{}
+	alphaAgent := herdr.AgentInfo{PaneID: "w1:p1"}
+	betaAgent := herdr.AgentInfo{PaneID: "w1:p2"}
+	service := &Service{Client: client, SourceID: "ori.devflow"}
+	snapshot := Snapshot{
+		Features: []FeatureSnapshot{
+			{
+				Feature:     model.Feature{RepositoryID: "repo", Name: "alpha", Branch: "feature/alpha"},
+				WorkspaceID: "w1", TabID: "w1:t1", RootPaneID: "w1:p1", MetadataEnabled: true,
+				Task: tasklist.Progress{Exists: true, Total: 4, Completed: 1, Next: "1.2 alpha next"},
+			},
+			{
+				Feature:     model.Feature{RepositoryID: "repo", Name: "beta", Branch: "feature/beta"},
+				WorkspaceID: "w1", TabID: "w1:t2", RootPaneID: "w1:p2", MetadataEnabled: true,
+				Task: tasklist.Progress{Exists: true, Total: 9, Completed: 8, Next: "3.1 beta next"},
+			},
+		},
+		Rows: []AgentRow{
+			{Feature: "alpha", Role: "builder", WorkspaceID: "w1", Live: &alphaAgent},
+			{Feature: "beta", Role: "builder", WorkspaceID: "w1", Live: &betaAgent},
+		},
+	}
+	if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing per-feature may be written at workspace scope: one workspace
+	// cannot describe two branches.
+	if len(client.workspaceCalls) != 0 {
+		t.Fatalf("tab-backed features wrote workspace metadata: %#v", client.workspaceCalls)
+	}
+
+	byPane := make(map[string]map[string]string)
+	for _, call := range client.paneCalls {
+		byPane[call.id] = call.tokens
+	}
+	if byPane["w1:p1"]["branch"] != "feature/alpha" || byPane["w1:p1"]["feature"] != "alpha" {
+		t.Fatalf("alpha pane tokens = %#v", byPane["w1:p1"])
+	}
+	if byPane["w1:p2"]["branch"] != "feature/beta" || byPane["w1:p2"]["feature"] != "beta" {
+		t.Fatalf("beta pane tokens = %#v", byPane["w1:p2"])
+	}
+	if byPane["w1:p1"]["next_task"] == byPane["w1:p2"]["next_task"] {
+		t.Fatalf("both features reported the same next task: %q", byPane["w1:p1"]["next_task"])
+	}
+}
+
+// A tab-backed feature whose agent is not running still labels its own tab.
+// The workspace used to carry those tokens; if the pane did not, a feature
+// would go blank the moment its agent exited.
+func TestTabBackedFeatureLabelsItsPaneWithNoLiveAgent(t *testing.T) {
+	client := &fakeHerdr{}
+	service := &Service{Client: client, SourceID: "ori.devflow"}
+	snapshot := Snapshot{
+		Features: []FeatureSnapshot{{
+			Feature:     model.Feature{RepositoryID: "repo", Name: "alpha", Branch: "feature/alpha"},
+			WorkspaceID: "w1", TabID: "w1:t1", RootPaneID: "w1:p1", MetadataEnabled: true,
+		}},
+		Rows: []AgentRow{{Feature: "alpha", Role: "builder", WorkspaceID: "w1"}},
+	}
+	if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.paneCalls) != 1 || client.paneCalls[0].id != "w1:p1" {
+		t.Fatalf("pane calls = %#v, want the feature's own pane labelled", client.paneCalls)
+	}
+	if client.paneCalls[0].tokens["feature"] != "alpha" {
+		t.Fatalf("tokens = %#v", client.paneCalls[0].tokens)
+	}
 }
