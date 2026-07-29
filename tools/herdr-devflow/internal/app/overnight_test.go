@@ -286,3 +286,48 @@ func firstRunField(t *testing.T, listed, field string) string {
 	value, _ := payload.Runs[0][field].(string)
 	return value
 }
+
+// TestDispatchAdvancesOvernightRunsWithoutASecondDaemon proves the existing
+// LaunchAgent dispatcher is what drives a run. A run with its own daemon would
+// mean two processes each believing they owned the queue and the system wake.
+func TestDispatchAdvancesOvernightRunsWithoutASecondDaemon(t *testing.T) {
+	fixture := newOvernightFixture(t)
+	if exit, _, stderr := fixture.run(t, "y\n", "start", "--agent", "bridge"); exit != 0 {
+		t.Fatalf("start exit = %d; %s", exit, stderr)
+	}
+
+	var output, stderr bytes.Buffer
+	dispatcher := New(Dependencies{
+		Stdout:    &output,
+		Stderr:    &stderr,
+		Getwd:     func() (string, error) { return fixture.primary, nil },
+		LookupEnv: func(string) (string, bool) { return "", false },
+		Runner:    primaryCheckoutRunner{primary: fixture.primary, feature: fixture.feature},
+	})
+	exit := dispatcher.Run(context.Background(), []string{
+		"--home", fixture.home, "--herdr-bin", "fake-herdr", "--json", "dispatch",
+	})
+	if exit != 0 {
+		t.Fatalf("dispatch exit = %d; stderr=%s", exit, stderr.String())
+	}
+
+	var payload struct {
+		Overnight []struct {
+			ID     string `json:"id"`
+			State  string `json:"state"`
+			Active string `json:"active"`
+		} `json:"overnight"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatalf("dispatch JSON = %q: %v", output.String(), err)
+	}
+	if len(payload.Overnight) != 1 {
+		t.Fatalf("overnight = %+v, want the scheduled run advanced by the dispatcher", payload.Overnight)
+	}
+	// The fixture's agent list reports no native session for the bridge agent,
+	// so the supervisor cannot bind it and stops it safely rather than
+	// prompting whatever is in that pane.
+	if payload.Overnight[0].State == "scheduled" {
+		t.Fatalf("the dispatcher did not advance the run: %+v", payload.Overnight[0])
+	}
+}

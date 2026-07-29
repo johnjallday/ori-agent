@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overnight"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
@@ -1829,6 +1830,11 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	// The same detached dispatcher advances Overnight Runs. Giving runs their
+	// own daemon would mean two processes each believing they owned the queue
+	// and the system wake; there is one dispatcher, and it does both jobs.
+	supervised := a.dispatchOvernight(ctx, opts, store)
+
 	views := make([]map[string]any, 0, len(results))
 	for _, result := range results {
 		runtimeRoot, rootErr := a.runtimeRootFor(opts)
@@ -1844,13 +1850,57 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		views = append(views, scheduleView(result.Feature, result.Schedule))
 	}
 	if opts.json {
-		a.writeResult(true, map[string]any{"status": "ok", "processed": len(views), "schedules": views})
-	} else if len(views) > 0 {
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow dispatcher: processed %d schedule(s)\n", len(views))
+		a.writeResult(true, map[string]any{
+			"status": "ok", "processed": len(views), "schedules": views, "overnight": supervised,
+		})
+	} else if len(views) > 0 || len(supervised) > 0 {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow dispatcher: processed %d schedule(s), %d Overnight Run(s)\n",
+			len(views), len(supervised))
 	} else {
 		fmt.Fprintln(a.stdout, "Ori Herdr Devflow dispatcher: no due schedules")
 	}
 	return 0
+}
+
+// dispatchOvernight advances every non-terminal Overnight Run by one step.
+//
+// It is best-effort and never fails the dispatcher: a run that cannot be
+// advanced right now is a run that stays where it is, and a scheduler outage
+// must not also stop one-time continuations from being delivered.
+func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.Store) []map[string]any {
+	runtimeRoot, err := a.runtimeRootFor(opts)
+	if err != nil {
+		return nil
+	}
+	service := &overnight.Service{Store: store}
+	runs, err := service.List("")
+	if err != nil {
+		return nil
+	}
+	client := a.newHerdrClient(opts, a.withOverrides(opts))
+	supervisor := &overnight.Supervisor{
+		Store:  store,
+		Agents: client,
+		Prompt: client,
+		Usage:  claudeusage.NewAdapter(filepath.Join(runtimeRoot, "usage")),
+	}
+
+	advanced := make([]map[string]any, 0)
+	for _, run := range runs {
+		if run.State.Terminal() {
+			continue
+		}
+		updated, err := supervisor.Tick(ctx, run.ID)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: Overnight Run %s was not advanced\n", run.ID)
+			continue
+		}
+		a.recordAuditAt(filepath.Join(runtimeRoot, "logs"), auditOvernightEvent(updated, "dispatch"))
+		advanced = append(advanced, map[string]any{
+			"id": updated.ID, "state": string(updated.State), "active": updated.ActiveParticipant,
+		})
+	}
+	return advanced
 }
 
 func scheduleView(feature model.Feature, record model.Schedule) map[string]any {

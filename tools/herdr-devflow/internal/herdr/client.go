@@ -352,15 +352,20 @@ type TabCreateResult struct {
 }
 
 type PaneInfo struct {
-	PaneID           string               `json:"pane_id"`
-	TerminalID       string               `json:"terminal_id"`
-	WorkspaceID      string               `json:"workspace_id"`
-	TabID            string               `json:"tab_id"`
-	Cwd              string               `json:"cwd"`
-	ForegroundCwd    string               `json:"foreground_cwd"`
-	Agent            string               `json:"agent"`
-	Name             string               `json:"name"`
-	AgentStatus      model.AgentStatus    `json:"agent_status"`
+	PaneID        string            `json:"pane_id"`
+	TerminalID    string            `json:"terminal_id"`
+	WorkspaceID   string            `json:"workspace_id"`
+	TabID         string            `json:"tab_id"`
+	Cwd           string            `json:"cwd"`
+	ForegroundCwd string            `json:"foreground_cwd"`
+	Agent         string            `json:"agent"`
+	Name          string            `json:"name"`
+	AgentStatus   model.AgentStatus `json:"agent_status"`
+	// Revision and StateChangeSeq are Herdr's own monotonic counters. They are
+	// how a caller proves an agent actually transitioned rather than assuming
+	// it did because time passed.
+	Revision         uint64               `json:"revision"`
+	StateChangeSeq   uint64               `json:"state_change_seq"`
 	InteractiveReady bool                 `json:"interactive_ready"`
 	LaunchPending    bool                 `json:"launch_pending"`
 	AgentSession     *model.NativeSession `json:"agent_session"`
