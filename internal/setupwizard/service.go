@@ -113,6 +113,8 @@ type StepStatus struct {
 	ErrorCategory string `json:"error_category,omitempty"`
 	// Options are the choices the step offers, if any.
 	Options []StepOption `json:"options,omitempty"`
+	// SelectedOption is the choice recorded for this step, when one was made.
+	SelectedOption string `json:"selected_option,omitempty"`
 	// CompletedAt is when the step first passed or was skipped.
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// Directory/Capability/Plugin echo the requirement the step references, so
@@ -231,11 +233,17 @@ func (s *Service) Confirm(ctx context.Context, workspaceID, stepID string, actio
 		// decision only the user can make.
 		return s.refresh(ctx, workspaceID, func(t *transition, progress *workspace.SetupWizardProgress) error {
 			t.acknowledged = step.ID
+			t.chosenOption = strings.TrimSpace(action.Option)
 			return nil
 		})
 	}
 
+	progress := ws.GetSetupWizardProgress()
 	req := resolved.request(workspaceID, step)
+	req.Selections = recordedSelections(progress)
+	if recorded, ok := progress.Step(step.ID); ok {
+		req.SelectedOption = recorded.SelectedOption
+	}
 	before, evalErr := adapter.Evaluate(ctx, req)
 	alreadySatisfied := evalErr == nil && before.Ready && optionAlreadySelected(before, action.Option)
 	if !alreadySatisfied {
@@ -245,6 +253,7 @@ func (s *Service) Confirm(ctx context.Context, workspaceID, stepID string, actio
 	}
 	return s.refresh(ctx, workspaceID, func(t *transition, progress *workspace.SetupWizardProgress) error {
 		t.acknowledged = step.ID
+		t.chosenOption = strings.TrimSpace(action.Option)
 		return nil
 	})
 }
@@ -274,6 +283,9 @@ type transition struct {
 	// matters only for steps with no adapter, where the user's decision is the
 	// only fact there is to record.
 	acknowledged string
+	// chosenOption is the option the user picked on the acknowledged step, when
+	// it offered a choice. Recorded because a choice outlives the click.
+	chosenOption string
 }
 
 // mutator applies a caller's intent to the progress record before the derived
@@ -327,11 +339,6 @@ func (s *Service) refresh(ctx context.Context, workspaceID string, mutate mutato
 		return s.unrunnableStatus(ws, workspaceID, resolveErr), nil
 	}
 
-	// Adapters are consulted before the store lock is taken: an evaluation can
-	// reach a connector or the filesystem, and holding a workspace lock across
-	// that would serialize every other write to the workspace behind it.
-	readiness := s.evaluateSteps(ctx, workspaceID, resolved)
-
 	t := &transition{now: s.timestamp(), resolved: resolved}
 	// The persisted record is read from the *folder* workspace: the store's
 	// Update hands back a SQLite-shaped copy, which never carries setup progress
@@ -353,7 +360,17 @@ func (s *Service) refresh(ctx context.Context, workspaceID string, mutate mutato
 			opened := t.now
 			next.FirstOpenedAt = &opened
 		}
+		// The caller's intent is applied before the adapters are asked, so a
+		// choice made on this call is one they can see. Evaluating first would
+		// hand them the previous answer and report the step unsatisfied by the
+		// very action that satisfied it.
+		s.applyChoices(t, next)
 	}
+
+	// Adapters are consulted before the store lock is taken: an evaluation can
+	// reach a connector or the filesystem, and holding a workspace lock across
+	// that would serialize every other write to the workspace behind it.
+	readiness := s.evaluateSteps(ctx, workspaceID, resolved, next)
 	s.derive(t, next, readiness)
 
 	changed := mutate != nil || progressChanged(previous, next)
@@ -380,8 +397,12 @@ func (s *Service) refresh(ctx context.Context, workspaceID string, mutate mutato
 // evaluateSteps asks each step's adapter where its requirement stands. Steps
 // with no adapter get no verdict here: their readiness comes from the recorded
 // user decision, which derive() applies.
-func (s *Service) evaluateSteps(ctx context.Context, workspaceID string, resolved resolvedWizard) map[string]StepReadiness {
+func (s *Service) evaluateSteps(ctx context.Context, workspaceID string, resolved resolvedWizard, progress *workspace.SetupWizardProgress) map[string]StepReadiness {
 	out := make(map[string]StepReadiness, len(resolved.wizard.Steps))
+	// Every adapter sees every recorded choice, not just its own step's: the
+	// step that asks a question and the steps that must honor the answer are
+	// different steps.
+	selections := recordedSelections(progress)
 	for _, step := range resolved.wizard.Steps {
 		adapter, err := s.adapterFor(step)
 		if err != nil {
@@ -397,7 +418,12 @@ func (s *Service) evaluateSteps(ctx context.Context, workspaceID string, resolve
 		if adapter == nil {
 			continue
 		}
-		readiness, err := adapter.Evaluate(ctx, resolved.request(workspaceID, step))
+		request := resolved.request(workspaceID, step)
+		request.Selections = selections
+		if recorded, ok := progress.Step(step.ID); ok {
+			request.SelectedOption = recorded.SelectedOption
+		}
+		readiness, err := adapter.Evaluate(ctx, request)
 		if err != nil {
 			out[step.ID] = StepReadiness{
 				Blocked:       true,
@@ -409,6 +435,26 @@ func (s *Service) evaluateSteps(ctx context.Context, workspaceID string, resolve
 		out[step.ID] = readiness
 	}
 	return out
+}
+
+// applyChoices records an option the user picked on this call, so the adapters
+// evaluated next see the workspace as it is about to be, not as it was.
+func (s *Service) applyChoices(t *transition, progress *workspace.SetupWizardProgress) {
+	if t.acknowledged == "" || t.chosenOption == "" {
+		return
+	}
+	for i := range progress.Steps {
+		if progress.Steps[i].StepID == t.acknowledged {
+			progress.Steps[i].SelectedOption = t.chosenOption
+			return
+		}
+	}
+	progress.Steps = append(progress.Steps, workspace.SetupStepProgress{
+		StepID:         t.acknowledged,
+		Status:         workspace.SetupStepStatusActive,
+		SelectedOption: t.chosenOption,
+		UpdatedAt:      t.now,
+	})
 }
 
 // derive recomputes every step's status and the workspace's lifecycle state
@@ -448,6 +494,10 @@ func (s *Service) derive(t *transition, progress *workspace.SetupWizardProgress,
 
 		record := workspace.SetupStepProgress{StepID: step.ID, Status: status, UpdatedAt: t.now}
 		record.CompletedAt = prior.CompletedAt
+		record.SelectedOption = prior.SelectedOption
+		if t.acknowledged == step.ID && t.chosenOption != "" {
+			record.SelectedOption = t.chosenOption
+		}
 		if status == workspace.SetupStepStatusComplete || status == workspace.SetupStepStatusOptionalSkipped {
 			if record.CompletedAt == nil {
 				completed := t.now
@@ -575,18 +625,19 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		record, _ := progress.Step(step.ID)
 		verdict := readiness[step.ID]
 		projected := StepStatus{
-			ID:            step.ID,
-			Kind:          step.Kind,
-			Adapter:       step.Adapter,
-			Required:      step.Required,
-			Title:         step.Title,
-			Description:   step.Description,
-			Disclosure:    step.Disclosure,
-			Status:        workspace.NormalizeSetupStepStatus(record.Status),
-			Summary:       verdict.Summary,
-			ErrorCategory: verdict.ErrorCategory,
-			Options:       verdict.Options,
-			CompletedAt:   record.CompletedAt,
+			ID:             step.ID,
+			Kind:           step.Kind,
+			Adapter:        step.Adapter,
+			Required:       step.Required,
+			Title:          step.Title,
+			Description:    step.Description,
+			Disclosure:     step.Disclosure,
+			Status:         workspace.NormalizeSetupStepStatus(record.Status),
+			Summary:        verdict.Summary,
+			ErrorCategory:  verdict.ErrorCategory,
+			Options:        verdict.Options,
+			SelectedOption: record.SelectedOption,
+			CompletedAt:    record.CompletedAt,
 		}
 		if projected.Status == workspace.SetupStepStatusComplete {
 			projected.ErrorCategory = ""
@@ -696,4 +747,24 @@ func outstandingSummary(status Status) string {
 		return "no required step is outstanding"
 	}
 	return "outstanding required steps: " + strings.Join(pending, ", ")
+}
+
+// recordedSelections collects the choices a workspace has made so far, keyed by
+// step ID. Nil progress yields a nil map, which StepRequest.Choice reads as
+// "nothing chosen" — the correct answer for a wizard that has never been run.
+func recordedSelections(progress *workspace.SetupWizardProgress) map[string]string {
+	if progress == nil {
+		return nil
+	}
+	var out map[string]string
+	for _, record := range progress.Steps {
+		if record.SelectedOption == "" {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string, len(progress.Steps))
+		}
+		out[record.StepID] = record.SelectedOption
+	}
+	return out
 }

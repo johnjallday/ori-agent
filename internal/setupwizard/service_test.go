@@ -614,3 +614,189 @@ func TestRegistry_RejectsDuplicateAndBlankAdapters(t *testing.T) {
 		t.Fatal("a nil registry resolves nothing")
 	}
 }
+
+// optionAdapter offers two modes and passes only when one has been chosen —
+// REAPER's shape, where the simpler mode is a complete answer rather than a
+// half-finished one.
+type optionAdapter struct {
+	id       string
+	confirms int
+	lastSeen string
+}
+
+func (a *optionAdapter) ID() string { return a.id }
+
+func (a *optionAdapter) Evaluate(_ context.Context, req StepRequest) (StepReadiness, error) {
+	a.lastSeen = req.SelectedOption
+	readiness := StepReadiness{
+		Options: []StepOption{
+			{ID: "simple", Label: "Simple", Selected: req.SelectedOption == "simple"},
+			{ID: "full", Label: "Full", Selected: req.SelectedOption == "full"},
+		},
+	}
+	switch req.SelectedOption {
+	case "simple":
+		readiness.Ready = true
+		readiness.Summary = "Simple mode."
+	case "full":
+		readiness.Ready = true
+		readiness.Summary = "Full mode."
+	default:
+		readiness.Summary = "Choose how this should work."
+		readiness.ErrorCategory = ErrorCategoryNotConfigured
+	}
+	return readiness, nil
+}
+
+func (a *optionAdapter) Confirm(ctx context.Context, req StepRequest, action StepAction) (StepReadiness, error) {
+	a.confirms++
+	// The service records the choice; the adapter sees it on the next read.
+	return a.Evaluate(ctx, req)
+}
+
+func modeWizard() *workspace.SetupWizard {
+	return &workspace.SetupWizard{
+		Version: workspace.SetupWizardSchemaVersion,
+		Title:   "Set up",
+		Steps: []workspace.SetupWizardStep{
+			{ID: "mode", Kind: workspace.SetupStepKindPluginReadiness, RequirementKey: "reaper-plugin", Required: true, Adapter: "downloads_janitor"},
+		},
+	}
+}
+
+// TestService_RecordsTheChoiceAStepOffers covers the property a mode choice
+// needs and readiness alone cannot provide: the user's answer outlives the
+// click. Re-deriving it from whatever the domain looks like afterwards is how
+// "they chose the simpler path" becomes indistinguishable from "they never
+// finished".
+func TestService_RecordsTheChoiceAStepOffers(t *testing.T) {
+	adapter := &optionAdapter{id: "downloads_janitor"}
+	service, store := newTestService(t, modeWizard(), adapter)
+	ctx := context.Background()
+
+	before, err := service.Status(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	step := statusStep(t, before, "mode")
+	if step.Status != workspace.SetupStepStatusActive || len(step.Options) != 2 {
+		t.Fatalf("an unanswered choice is the outstanding step: %+v", step)
+	}
+	if step.SelectedOption != "" {
+		t.Fatalf("nothing is chosen yet: %q", step.SelectedOption)
+	}
+
+	after, err := service.Confirm(ctx, "ws-1", "mode", StepAction{Type: ActionConfirm, Option: "simple"})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if !after.Ready() {
+		t.Fatalf("the chosen mode satisfies the step: %+v", after)
+	}
+	chosen := statusStep(t, after, "mode")
+	if chosen.SelectedOption != "simple" {
+		t.Fatalf("the choice was not recorded: %+v", chosen)
+	}
+
+	// It survives a plain re-read, and the adapter is told what was chosen
+	// rather than having to guess.
+	adapter.lastSeen = ""
+	reread, err := service.Status(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if adapter.lastSeen != "simple" {
+		t.Fatalf("the adapter was not given the recorded choice, got %q", adapter.lastSeen)
+	}
+	if !reread.Ready() || statusStep(t, reread, "mode").SelectedOption != "simple" {
+		t.Fatalf("the recorded choice did not survive a re-read: %+v", reread)
+	}
+
+	// And it survives the SQLite-shaped write path, like every other part of
+	// setup progress.
+	if err := store.Update("ws-1", func(w *workspace.Workspace) error {
+		w.Name = "Renamed"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	final, err := service.Status(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statusStep(t, final, "mode").SelectedOption != "simple" {
+		t.Fatal("an unrelated write erased the recorded choice")
+	}
+}
+
+func TestService_ChangingTheChosenOptionReRunsTheAdapter(t *testing.T) {
+	adapter := &optionAdapter{id: "downloads_janitor"}
+	service, _ := newTestService(t, modeWizard(), adapter)
+	ctx := context.Background()
+
+	if _, err := service.Confirm(ctx, "ws-1", "mode", StepAction{Option: "simple"}); err != nil {
+		t.Fatal(err)
+	}
+	confirmsAfterFirst := adapter.confirms
+
+	// Re-confirming the same choice changes nothing: it is already satisfied.
+	if _, err := service.Confirm(ctx, "ws-1", "mode", StepAction{Option: "simple"}); err != nil {
+		t.Fatal(err)
+	}
+	if adapter.confirms != confirmsAfterFirst {
+		t.Fatalf("re-confirming the same choice acted again: %d -> %d", confirmsAfterFirst, adapter.confirms)
+	}
+
+	// Switching to the other one is a real change, and must reach the domain.
+	after, err := service.Confirm(ctx, "ws-1", "mode", StepAction{Option: "full"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapter.confirms == confirmsAfterFirst {
+		t.Fatal("switching modes must reach the adapter")
+	}
+	if statusStep(t, after, "mode").SelectedOption != "full" {
+		t.Fatalf("the new choice was not recorded: %+v", statusStep(t, after, "mode"))
+	}
+}
+
+// TestStatus_OptionsCrossTheWireInSnakeCase pins the payload's shape. The
+// browser reads these keys, and Go's default marshalling would emit its own
+// field names — a mismatch that no server-side assertion about StepReadiness
+// can see, and that shows up only as an empty choice on screen.
+func TestStatus_OptionsCrossTheWireInSnakeCase(t *testing.T) {
+	encoded, err := json.Marshal(StepStatus{
+		ID:   "mode",
+		Kind: workspace.SetupStepKindPluginReadiness,
+		Options: []StepOption{{
+			ID:          "file_only",
+			Label:       "File only",
+			Description: "Installs nothing.",
+			Selected:    true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Options []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+			Selected    bool   `json:"selected"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(decoded.Options) != 1 {
+		t.Fatalf("options = %s", encoded)
+	}
+	option := decoded.Options[0]
+	if option.ID != "file_only" || option.Label != "File only" {
+		t.Fatalf("a client cannot read the choice it must echo back: %s", encoded)
+	}
+	if option.Description != "Installs nothing." || !option.Selected {
+		t.Fatalf("option detail did not survive the wire: %s", encoded)
+	}
+}

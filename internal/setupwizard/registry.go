@@ -94,16 +94,20 @@ type StepReadiness struct {
 }
 
 // StepOption is one adapter-declared choice on a step.
+//
+// This type is serialized straight into the status payload, so the tags are
+// load-bearing: without them the browser receives Go field names and renders an
+// empty choice while every server-side test still passes.
 type StepOption struct {
 	// ID is the token a client echoes back to choose this option. Short and
 	// opaque: never a path, URL, or command.
-	ID string
+	ID string `json:"id"`
 	// Label is the user-facing choice text.
-	Label string
+	Label string `json:"label"`
 	// Description explains what choosing it does and does not do.
-	Description string
+	Description string `json:"description,omitempty"`
 	// Selected reports whether this option is the workspace's current choice.
-	Selected bool
+	Selected bool `json:"selected,omitempty"`
 }
 
 // StepRequest is everything an adapter is given about a step. Every field is
@@ -126,6 +130,25 @@ type StepRequest struct {
 	// the install source the blueprint declared for it (empty when none).
 	Plugin       string
 	PluginSource string
+	// SelectedOption is the option the user previously chose on this step, when
+	// it offers a choice. It comes from the workspace's persisted progress, not
+	// from the caller.
+	SelectedOption string
+	// Selections is every choice recorded across this wizard, keyed by step ID.
+	// A later step usually has to honor a decision made on an earlier one — the
+	// step that asks how REAPER should work is not the step that then checks the
+	// prerequisites for that answer — and this is where it reads it.
+	Selections map[string]string
+}
+
+// Choice returns the option recorded on stepID, or "" when that step has no
+// choice recorded. Adapters should prefer it over indexing Selections, since a
+// wizard whose progress predates any recorded choice has no map at all.
+func (r StepRequest) Choice(stepID string) string {
+	if r.Selections == nil {
+		return ""
+	}
+	return r.Selections[stepID]
 }
 
 // StepAction is the only thing a client may ask the server to do to a step.

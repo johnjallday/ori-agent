@@ -360,6 +360,13 @@ type SetupStepProgress struct {
 	// CompletedAt is when the server first confirmed this step, or when the user
 	// skipped it. Nil while it has never passed.
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// SelectedOption is the choice the user made on a step that offered one
+	// (e.g. which of two supported modes a blueprint should run in). It is an
+	// adapter-declared token, recorded because the choice outlives the click:
+	// re-deriving it from whatever the domain happens to look like afterwards is
+	// how "the user chose the simpler path" becomes indistinguishable from "the
+	// user never finished".
+	SelectedOption string `json:"selected_option,omitempty"`
 }
 
 // SetupWizardProgress is the workspace's authoritative setup state. It records

@@ -515,6 +515,9 @@ func (b *ServerBuilder) wireReaperSetup() {
 	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
 	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
 	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
+	// Held for the Setup Wizard's REAPER adapter, which reads the same resolver
+	// the readiness panel and the repair flow do.
+	b.reaperResolver = resolver
 }
 
 // wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. Like
@@ -591,6 +594,11 @@ func (b *ServerBuilder) wireSetupWizard() {
 			if err := registry.Register(adapter); err != nil {
 				logger.Warn("Calendar Ops setup adapter not registered", logger.Fields{"error": err})
 			}
+		}
+	}
+	if b.reaperResolver != nil {
+		if err := registry.Register(reapersetup.NewSetupAdapter(b.reaperResolver)); err != nil {
+			logger.Warn("Reaper Song setup adapter not registered", logger.Fields{"error": err})
 		}
 	}
 	if b.downloadsJanitorService != nil {

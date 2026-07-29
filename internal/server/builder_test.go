@@ -156,9 +156,10 @@ func TestSetupWizardRegistry_MatchesTheAuthorableAdapters(t *testing.T) {
 
 	// Blueprints whose migration has not landed yet. Remove an entry in the
 	// group that registers its adapter.
-	pending := map[string]bool{
-		"reaper_song": true,
-	}
+	// Every migrated blueprint's adapter is registered now. A new authorable
+	// adapter with no registration fails here rather than at a user's first
+	// blocked step.
+	pending := map[string]bool{}
 	for id := range authorable {
 		switch {
 		case registered[id] && pending[id]:

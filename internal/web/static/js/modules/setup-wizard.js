@@ -255,7 +255,23 @@
   }
 
   function renderDefaultStepContent(container, step) {
+    // A step that offers a choice renders it here, so a blueprint gets a real
+    // decision — with each option's consequences stated next to it — without
+    // any domain code. The IDs come from the server and go straight back to it.
+    if (Array.isArray(step.options) && step.options.length) {
+      renderStepOptions(container, step);
+      return;
+    }
     if (step.kind === 'summary') {
+      // The server's own sentence comes first. On a summary step it is where
+      // the limits of "ready" are stated — what was set up, and what was never
+      // checked — and a step list of ticks alone would quietly drop it.
+      if (step.summary) {
+        const verdict = document.createElement('p');
+        verdict.className = 'setup-wizard-step-description';
+        verdict.textContent = step.summary;
+        container.appendChild(verdict);
+      }
       const list = document.createElement('ul');
       list.className = 'setup-wizard-summary';
       (status?.steps || [])
@@ -281,6 +297,36 @@
       summary.textContent = step.summary;
       container.appendChild(summary);
     }
+  }
+
+  // renderStepOptions draws an adapter-declared choice. Choosing is the action:
+  // there is no separate confirm, because picking one *is* the decision the
+  // step was asking for.
+  function renderStepOptions(container, step) {
+    const list = document.createElement('ul');
+    list.className = 'setup-wizard-options';
+    step.options.forEach(option => {
+      const item = document.createElement('li');
+      item.className = 'setup-wizard-option' + (option.selected ? ' is-selected' : '');
+
+      const choose = document.createElement('button');
+      choose.type = 'button';
+      choose.className =
+        'modern-btn ' + (option.selected ? 'modern-btn-secondary' : 'modern-btn-primary');
+      choose.textContent = option.selected ? `${option.label} (chosen)` : option.label;
+      choose.disabled = busy;
+      choose.addEventListener('click', () => confirmStep(step.id, option.id));
+      item.appendChild(choose);
+
+      if (option.description) {
+        const description = document.createElement('p');
+        description.className = 'setup-wizard-option-detail';
+        description.textContent = option.description;
+        item.appendChild(description);
+      }
+      list.appendChild(item);
+    });
+    container.appendChild(list);
   }
 
   function renderActions() {
@@ -310,6 +356,14 @@
   // whether its own action has been taken.
   function primaryBlocked(step) {
     if (!step || isResolved(step)) return false;
+    // An unanswered choice is answered by choosing, not by Continue.
+    if (
+      Array.isArray(step.options) &&
+      step.options.length &&
+      !step.options.some(option => option.selected)
+    ) {
+      return true;
+    }
     const renderer = renderers.get(step.kind);
     if (renderer && typeof renderer.disablePrimary === 'function') {
       return Boolean(renderer.disablePrimary(rendererContext(step)));
@@ -325,6 +379,13 @@
     }
     // What the primary control does is the server's call — only it knows
     // whether a step has a requirement to re-check or a decision to record.
+    if (
+      Array.isArray(step.options) &&
+      step.options.length &&
+      !step.options.some(option => option.selected)
+    ) {
+      return 'Choose an option to continue';
+    }
     if (step.action === ACTION_RECHECK) return 'Check again';
     const renderer = renderers.get(step.kind);
     if (renderer && typeof renderer.primaryLabel === 'function') {
@@ -405,6 +466,10 @@
       refresh: () => refresh(),
       confirm: option => confirmStep(step.id, option),
       recheck: () => recheck(),
+      // renderDefault lets a renderer registered on a shared kind (readiness,
+      // summary) draw only its own blueprint's steps and hand every other
+      // blueprint's back, instead of blanking them.
+      renderDefault: container => renderDefaultStepContent(container, step),
       // rememberReturn records where to resume before the browser leaves for an
       // external authorization, so the same workspace, wizard, and step are
       // restored on return.

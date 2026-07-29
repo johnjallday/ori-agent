@@ -348,7 +348,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// missing its required tools. Reject with a structured 409 naming what to
 	// install/enable; the create modal surfaces this and offers the install/enable
 	// actions.
-	if templateResolved {
+	//
+	// A blueprint with a Setup Wizard is exempt, and deliberately so. Its wizard
+	// asks how the workspace should work — and for Reaper Song one of the two
+	// supported answers needs no plugin at all. Blocking creation on a plugin
+	// would force everyone through an install to reach a question whose answer
+	// might be "I don't need that", and there is no way to ask before the
+	// workspace exists.
+	if templateResolved && !resolvedTemplate.HasSetupWizard() {
 		if missing, disabled := h.unsatisfiedRequiredPlugins(resolvedTemplate.Tools); len(missing)+len(disabled) > 0 {
 			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 				"error":            "required plugins are not ready",

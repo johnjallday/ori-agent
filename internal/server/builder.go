@@ -50,6 +50,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
@@ -288,6 +289,9 @@ type ServerBuilder struct {
 	setupWizardService  *setupwizard.Service
 	setupWizardRegistry *setupwizard.Registry
 	setupWizardHandler  *setupwizardhttp.Handler
+	// reaperResolver is the normalized REAPER readiness resolver, held so the
+	// Setup Wizard's adapter reads the same one the panel and repair flow use.
+	reaperResolver *reapersetup.Resolver
 	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
 	// attached to it once the automation service exists (a later phase).
 	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter

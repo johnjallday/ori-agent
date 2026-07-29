@@ -526,3 +526,95 @@ test('a step whose own control is the action does not offer a Continue that must
   api.open();
   assert.equal(elements.setupWizardPrimary.disabled, false);
 });
+
+test('a step that offers a choice renders it, and choosing is the action', async () => {
+  const withOptions = status({
+    state: 'in_progress',
+    steps: [
+      step({
+        id: 'mode',
+        kind: 'plugin_readiness',
+        title: 'Choose how this works',
+        options: [
+          { id: 'file_only', label: 'File only', description: 'No plugin, no permissions.' },
+          { id: 'assisted', label: 'Assisted', description: 'Installs a plugin.' }
+        ]
+      })
+    ]
+  });
+  const chosen = status({
+    state: 'ready',
+    steps: [
+      step({
+        id: 'mode',
+        kind: 'plugin_readiness',
+        title: 'Choose how this works',
+        status: 'complete',
+        action: '',
+        selected_option: 'file_only',
+        options: [
+          { id: 'file_only', label: 'File only', description: 'No plugin.', selected: true },
+          { id: 'assisted', label: 'Assisted', description: 'Installs a plugin.' }
+        ]
+      })
+    ]
+  });
+  let confirmed = null;
+  const { api, elements, calls } = load({
+    status: withOptions,
+    routes: {
+      'POST /steps/mode/confirm': () => {
+        confirmed = calls.at(-1)?.body;
+        return chosen;
+      }
+    }
+  });
+  await api.init();
+  api.open();
+
+  // Each option states its consequence next to the button that takes it.
+  const rendered = elements.setupWizardStepContent.text;
+  assert.match(rendered, /File only/);
+  assert.match(rendered, /No plugin, no permissions\./);
+  assert.match(rendered, /Assisted/);
+
+  // Until one is chosen, Continue has nothing to do.
+  assert.equal(elements.setupWizardPrimary.textContent, 'Choose an option to continue');
+  assert.equal(elements.setupWizardPrimary.disabled, true);
+
+  // Choosing sends the option id — the only value a client may send back.
+  const optionButtons = elements.setupWizardStepContent.children[0].children.map(
+    item => item.children[0]
+  );
+  await click(optionButtons[0]);
+  assert.equal(confirmed, JSON.stringify({ option: 'file_only' }));
+
+  // And the chosen one is shown as chosen rather than offered again.
+  assert.match(elements.setupWizardStepContent.text, /File only \(chosen\)/);
+});
+
+test("the summary step shows the server's verdict, not just a list of ticks", async () => {
+  const { api, elements } = load({
+    status: status({
+      state: 'in_progress',
+      current_step_id: 'done',
+      steps: [
+        step({ id: 'folder', title: 'Choose a folder', status: 'complete' }),
+        step({
+          id: 'done',
+          kind: 'summary',
+          title: 'Ready',
+          status: 'active',
+          summary: 'Set up for file-only work. Ori has not checked whether REAPER is running.'
+        })
+      ]
+    })
+  });
+  await api.init();
+  api.open();
+  const text = elements.setupWizardStepContent.text;
+  // The limits of "ready" are stated where the user reads that they are ready.
+  assert.match(text, /has not checked whether REAPER is running/);
+  // And the per-step recap is still there.
+  assert.match(text, /Choose a folder — done/);
+});

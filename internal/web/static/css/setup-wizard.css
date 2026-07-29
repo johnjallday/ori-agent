@@ -488,3 +488,33 @@
 .setup-wizard-chip.is-ready {
   color: var(--success-color, #2e7d32);
 }
+
+/* ---------- Adapter-declared choices ---------- */
+
+/* A step that offers a choice states each option's consequences next to the
+   button that takes it — the decision and what it costs in one place. */
+.setup-wizard-options {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.setup-wizard-option {
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+}
+
+.setup-wizard-option.is-selected {
+  border-color: var(--primary-color, #1f6b4e);
+}
+
+.setup-wizard-option-detail {
+  margin: 0.45rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-secondary, #9aa0a6);
+}

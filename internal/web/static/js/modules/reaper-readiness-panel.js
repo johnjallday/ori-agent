@@ -75,6 +75,14 @@
       });
   }
 
+  // wizardOwnsSetup reports whether this workspace's blueprint declares a setup
+  // wizard. When it does, setup happens there and this card reports rather than
+  // repairs; a workspace from an older blueprint keeps the card's own actions.
+  function wizardOwnsSetup() {
+    const status = window.SetupWizard?.getStatus?.();
+    return !!(status && status.applicable);
+  }
+
   function openPluginsTab() {
     // Expand the (collapsed) config panel and switch to the Plugins tab, then
     // bring the card into view — the readiness card lives inside that tab.
@@ -275,26 +283,39 @@
     // Actions.
     if (actions) {
       actions.textContent = '';
-      if (r.status !== 'ori_ready') {
+      if (wizardOwnsSetup()) {
+        // Where a wizard owns this workspace's setup, the card stays a status
+        // surface and stops being a second place to repair things: two entry
+        // points that mutate the same prerequisites is how a user ends up
+        // half-way through both.
+        actions.appendChild(
+          button('Open setup', { primary: true, onClick: () => window.SetupWizard?.open?.() })
+        );
+      } else if (r.status !== 'ori_ready') {
         actions.appendChild(
           button('Repair REAPER setup', { primary: true, onClick: () => repair(false) })
         );
       }
-      if (r.status === 'ori_ready' && r.has_pending_setup_task) {
-        actions.appendChild(
-          button('Check again and start setup', { primary: true, onClick: checkAgainAndStartSetup })
-        );
-      }
-      if (!r.plugin_installed) {
-        actions.appendChild(button('Install plugin', { primary: true, onClick: installPlugin }));
-      }
-      if (r.status === 'cli_agent_required' || r.status === 'native_cli_access_required') {
-        actions.appendChild(
-          button('Native CLI access', {
-            onClick: () =>
-              document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.()
-          })
-        );
+      if (!wizardOwnsSetup()) {
+        if (r.status === 'ori_ready' && r.has_pending_setup_task) {
+          actions.appendChild(
+            button('Check again and start setup', {
+              primary: true,
+              onClick: checkAgainAndStartSetup
+            })
+          );
+        }
+        if (!r.plugin_installed) {
+          actions.appendChild(button('Install plugin', { primary: true, onClick: installPlugin }));
+        }
+        if (r.status === 'cli_agent_required' || r.status === 'native_cli_access_required') {
+          actions.appendChild(
+            button('Native CLI access', {
+              onClick: () =>
+                document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.()
+            })
+          );
+        }
       }
     }
 
@@ -320,10 +341,206 @@
     }
   }
 
+  // ---------- Setup Wizard step ----------
+
+  // The wizard's readiness step and this card describe the same setup, so they
+  // run the same repairs against the same endpoints. What the step adds is
+  // scope: it shows only the prerequisites of the mode the user chose, and only
+  // for the Ori-assisted answer — a file-only workspace has nothing to repair,
+  // and saying so is the whole point of offering that mode.
+  const REAPER_ADAPTER = 'reaper_song';
+
+  function chosenMode(status) {
+    const steps = (status && status.steps) || [];
+    for (const step of steps) {
+      const selected = step.selected_option || '';
+      if (selected === 'file_only' || selected === 'ori_assisted') return selected;
+    }
+    return '';
+  }
+
+  // wizardActions offers each repair the current readiness admits, and re-asks
+  // the server afterwards. Nothing here decides the step passed: every button
+  // ends in ctx.recheck(), and the server's next verdict is what the user sees.
+  function wizardActions(host, readiness, ctx) {
+    const act = async run => {
+      ctx.setBusy(true);
+      try {
+        await run();
+        await ctx.recheck();
+      } catch (_) {
+        ctx.setError('That did not go through. Nothing changed — you can try again.');
+      } finally {
+        ctx.setBusy(false);
+      }
+    };
+
+    if (!readiness.plugin_installed) {
+      host.appendChild(
+        button('Install the plugin', {
+          primary: true,
+          onClick: () => {
+            if (!window.ReaperPluginInstall) {
+              ctx.rememberReturn();
+              window.open('/plugins?install=reaper-plugin', '_blank', 'noopener');
+              return;
+            }
+            window.ReaperPluginInstall.begin({
+              host,
+              declaredSource: '',
+              onComplete: () => ctx.recheck(),
+              onCancel: () => ctx.recheck()
+            });
+          }
+        })
+      );
+      return;
+    }
+    if (readiness.status !== 'ori_ready') {
+      // Enabling a disabled plugin is a change the user has to approve, so the
+      // unconfirmed call is sent first and its needs_confirm answer is what
+      // asks them — the same two-step the card uses.
+      host.appendChild(
+        button(readiness.plugin_enabled ? 'Attach to this workspace' : 'Enable and attach', {
+          primary: true,
+          onClick: () =>
+            act(async () => {
+              const result = await post(
+                '/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
+                { confirm_enable: false }
+              );
+              if (result && result.needs_confirm) {
+                await post(
+                  '/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
+                  { confirm_enable: true }
+                );
+              }
+            })
+        })
+      );
+    }
+    if (
+      readiness.status === 'cli_agent_required' ||
+      readiness.status === 'native_cli_access_required'
+    ) {
+      host.appendChild(
+        button('Open native CLI access', {
+          onClick: () => {
+            // The setting lives behind this dialog, so the wizard steps aside
+            // and records where to come back to.
+            ctx.rememberReturn();
+            window.SetupWizard?.close?.();
+            document.getElementById('workspace-detail-config-toggle')?.click?.();
+            document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.();
+          }
+        })
+      );
+    }
+  }
+
+  async function renderWizardStep(container, ctx) {
+    const step = ctx.step || {};
+    // Registered on a shared kind: every other blueprint's readiness step is
+    // handed straight back to the dialog's own renderer.
+    if (step.adapter !== REAPER_ADAPTER) {
+      ctx.renderDefault(container);
+      return;
+    }
+    if (chosenMode(ctx.status) !== 'ori_assisted') {
+      ctx.renderDefault(container);
+      return;
+    }
+
+    const summary = document.createElement('p');
+    summary.className = 'setup-wizard-step-description';
+    summary.textContent = step.summary || '';
+    container.appendChild(summary);
+
+    const rows = document.createElement('ul');
+    rows.className = 'workspace-detail-reaper-rows';
+    container.appendChild(rows);
+    const actions = document.createElement('div');
+    actions.className = 'setup-wizard-step-actions';
+    container.appendChild(actions);
+
+    let readiness = null;
+    try {
+      const resp = await fetch('/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup');
+      if (!resp.ok) throw new Error('readiness failed');
+      readiness = await resp.json();
+    } catch (_) {
+      rows.appendChild(row('Prerequisites', 'Could not be read just now', false));
+      actions.appendChild(button('Check again', { primary: true, onClick: () => ctx.recheck() }));
+      return;
+    }
+
+    rows.appendChild(
+      row(
+        'Plugin',
+        readiness.plugin_installed
+          ? readiness.plugin_enabled
+            ? 'Installed and enabled'
+            : 'Installed but disabled'
+          : 'Not installed',
+        !!(readiness.plugin_installed && readiness.plugin_enabled)
+      )
+    );
+    rows.appendChild(
+      row(
+        'Workspace attachment',
+        readiness.plugin_attached ? 'Attached' : 'Not attached',
+        !!readiness.plugin_attached
+      )
+    );
+    rows.appendChild(
+      row(
+        'Agent',
+        readiness.setup_agent
+          ? readiness.setup_agent +
+              (readiness.setup_agent_is_cli ? ' (compatible)' : ' (needs Codex or Claude Code)')
+          : 'Not assigned',
+        !!readiness.setup_agent_is_cli
+      )
+    );
+    rows.appendChild(
+      row(
+        'Native CLI access',
+        (readiness.workspace_native_cli_enabled ? 'Workspace on' : 'Workspace off') +
+          ' · ' +
+          (readiness.agent_native_cli_enabled ? 'Agent on' : 'Agent off'),
+        !!(readiness.workspace_native_cli_enabled && readiness.agent_native_cli_enabled)
+      )
+    );
+    // Stated on the step where a user would most easily assume otherwise.
+    rows.appendChild(row('Live REAPER session', 'Not checked here', null));
+
+    wizardActions(actions, readiness, ctx);
+  }
+
+  function registerWizardStep() {
+    const wizard = typeof window !== 'undefined' && window.SetupWizard;
+    if (!wizard || typeof wizard.registerStepRenderer !== 'function') return;
+    wizard.registerStepRenderer('readiness', { render: renderWizardStep });
+  }
+
   function init(id) {
     workspaceId = id || wsId();
     const { chip } = els();
-    chip?.addEventListener?.('click', openPluginsTab);
+    chip?.addEventListener?.('click', () => {
+      // The chip points at whatever is actually in charge of setup here.
+      if (wizardOwnsSetup() && window.SetupWizard?.getStatus?.()?.state !== 'ready') {
+        window.SetupWizard?.open?.();
+        return;
+      }
+      openPluginsTab();
+    });
+    // Deferred scripts run in document order and this one precedes the wizard's,
+    // so registering here alone would silently register nothing. Registration is
+    // idempotent, so it is attempted now and again once every module has run.
+    registerWizardStep();
+    if (typeof document !== 'undefined' && document.readyState !== 'complete') {
+      document.addEventListener('DOMContentLoaded', registerWizardStep, { once: true });
+    }
     void refresh();
   }
 
