@@ -294,3 +294,10 @@
 /api/workspaces/x/directories/x/files
 /api/workspaces/x/directories/x/files/y
 /api/workspaces/x/agents/x
+/api/workspaces/x/setup-wizard
+/api/workspaces/x/setup-wizard/open
+/api/workspaces/x/setup-wizard/dismiss
+/api/workspaces/x/setup-wizard/recheck
+/api/workspaces/x/setup-wizard/complete
+/api/workspaces/x/setup-wizard/steps/folder/confirm
+/api/workspaces/x/setup-wizard/steps/folder/skip

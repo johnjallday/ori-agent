@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"maps"
 	"strings"
 	"time"
 )
@@ -30,6 +31,93 @@ type TemplateProvenance struct {
 	// install once the matching directory is confirmed. Recording one installs
 	// nothing: no watcher is registered and no schedule is enabled here.
 	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
+	// CapabilityRequirements are the abstract capabilities (e.g. "calendar")
+	// the template needs connected. Recorded unresolved: no connector is
+	// chosen, authorized, or bound here.
+	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
+	// Plugins are the plugin names the template declared, and PluginSources the
+	// install source it declared for each (see projecttemplates.ToolDefaults).
+	// Recorded so a setup step can name and install exactly what the blueprint
+	// asked for; recording installs, enables, and attaches nothing.
+	Plugins       []string          `json:"plugins,omitempty"`
+	PluginSources map[string]string `json:"plugin_sources,omitempty"`
+	// SetupWizard is the normalized setup flow the template declared, captured
+	// as it read at creation time. It is a snapshot, not a reference: editing
+	// or updating the source blueprint afterwards must not change what an
+	// existing workspace is being asked to do, nor invalidate progress the user
+	// has already made. Nil when the blueprint declares no wizard.
+	SetupWizard *SetupWizard `json:"setup_wizard,omitempty"`
+}
+
+// cloneCapabilityRequirements returns a defensive copy, including each
+// requirement's operation lists.
+func cloneCapabilityRequirements(reqs []CapabilityRequirement) []CapabilityRequirement {
+	if len(reqs) == 0 {
+		return nil
+	}
+	out := make([]CapabilityRequirement, 0, len(reqs))
+	for _, req := range reqs {
+		cp := req
+		cp.RequiredOperations = append([]string(nil), req.RequiredOperations...)
+		cp.OptionalOperations = append([]string(nil), req.OptionalOperations...)
+		out = append(out, cp)
+	}
+	return out
+}
+
+// clonePluginSources returns a defensive copy of the declared install sources.
+func clonePluginSources(sources map[string]string) map[string]string {
+	if len(sources) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(sources))
+	maps.Copy(out, sources)
+	return out
+}
+
+// cloneTemplateProvenanceInto deep-copies every reference-typed field from src
+// into dst. Every read and every write of provenance goes through it, so a
+// caller can neither observe nor mutate the workspace's stored snapshot through
+// a shared slice, map, or pointer.
+func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenance) {
+	dst.DirectoryRequirements = cloneDirectoryRequirements(src.DirectoryRequirements)
+	dst.AutomationRecipes = cloneAutomationRecipes(src.AutomationRecipes)
+	dst.CapabilityRequirements = cloneCapabilityRequirements(src.CapabilityRequirements)
+	dst.Plugins = append([]string(nil), src.Plugins...)
+	dst.PluginSources = clonePluginSources(src.PluginSources)
+	dst.SetupWizard = CloneSetupWizard(src.SetupWizard)
+}
+
+// SetupWizardSnapshot returns a copy of the setup wizard recorded for the
+// workspace at creation time, or nil when its blueprint declared none.
+func (w *Workspace) SetupWizardSnapshot() *SetupWizard {
+	p := w.GetTemplateProvenance()
+	if p == nil {
+		return nil
+	}
+	return p.SetupWizard
+}
+
+// HasSetupWizard reports whether the workspace carries a usable setup-wizard
+// snapshot.
+func (w *Workspace) HasSetupWizard() bool {
+	return !w.SetupWizardSnapshot().IsEmpty()
+}
+
+// TemplateCapabilityRequirement returns the capability the originating template
+// declared under the given key, if any.
+func (w *Workspace) TemplateCapabilityRequirement(key string) (CapabilityRequirement, bool) {
+	p := w.GetTemplateProvenance()
+	if p == nil {
+		return CapabilityRequirement{}, false
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, req := range p.CapabilityRequirements {
+		if strings.ToLower(strings.TrimSpace(req.Key)) == key {
+			return req, true
+		}
+	}
+	return CapabilityRequirement{}, false
 }
 
 // GetTemplateProvenance returns a copy of the workspace's template provenance, if
@@ -41,8 +129,7 @@ func (w *Workspace) GetTemplateProvenance() *TemplateProvenance {
 		return nil
 	}
 	cp := *w.TemplateProvenance
-	cp.DirectoryRequirements = cloneDirectoryRequirements(w.TemplateProvenance.DirectoryRequirements)
-	cp.AutomationRecipes = cloneAutomationRecipes(w.TemplateProvenance.AutomationRecipes)
+	cloneTemplateProvenanceInto(&cp, w.TemplateProvenance)
 	return &cp
 }
 
@@ -57,8 +144,7 @@ func (w *Workspace) SetTemplateProvenance(p *TemplateProvenance) {
 	}
 	cp := *p
 	cp.TemplateID = strings.TrimSpace(cp.TemplateID)
-	cp.DirectoryRequirements = cloneDirectoryRequirements(p.DirectoryRequirements)
-	cp.AutomationRecipes = cloneAutomationRecipes(p.AutomationRecipes)
+	cloneTemplateProvenanceInto(&cp, p)
 	if cp.AppliedAt.IsZero() {
 		cp.AppliedAt = time.Now()
 	}

@@ -272,6 +272,67 @@ func TestSyncStore_SavePreservesCanonicalTemplateProvenanceFromStalePrimaryWorks
 	}
 }
 
+func TestSyncStore_SavePreservesSetupWizardProgressFromStalePrimaryWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-setup-progress-sync", "Setup Progress Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Setup progress is a workspace.json-only field, like provenance. The user
+	// approving a folder writes it to disk; any unrelated task or agent update
+	// that saves a SQLite-fetched (stale) copy afterwards must not erase it, or
+	// the wizard would forget approvals the user has already given and ask for
+	// them again.
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace.SetSetupWizardProgress(&SetupWizardProgress{
+		WizardVersion: 1,
+		State:         SetupWizardStateInProgress,
+		CurrentStepID: "automation",
+		Steps:         []SetupStepProgress{{StepID: "folder", Status: SetupStepStatusComplete}},
+	})
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	staleWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleWorkspace.GetSetupWizardProgress() != nil {
+		t.Fatal("precondition: the in-memory stale copy should have no setup progress")
+	}
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-setup", Status: TaskStatusPending})
+	if err := store.Save(staleWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := diskWorkspace.GetSetupWizardProgress()
+	if progress == nil {
+		t.Fatal("setup progress was clobbered by an unrelated task update")
+	}
+	if progress.CurrentStepID != "automation" || progress.StepStatus("folder") != SetupStepStatusComplete {
+		t.Fatalf("setup progress was not preserved intact: %+v", progress)
+	}
+	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "after-setup" {
+		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)
+	}
+}
+
 func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

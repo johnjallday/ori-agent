@@ -52,6 +52,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupwizard"
+	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
@@ -557,6 +559,43 @@ func (b *ServerBuilder) wireDownloadsJanitor() {
 	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
 	b.downloadsJanitorService = service
 	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+}
+
+// wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled
+// adapter registry, the lifecycle service, and the workspace-scoped HTTP
+// handler. It runs in the workspace-store phase (18) for the same reason as
+// wireReaperSetup/wireCalendarOpsSetup — the service reads and writes the
+// workspace's canonical folder record, which does not exist until this phase.
+//
+// The store must expose GetFolderWorkspace: the wizard snapshot and its
+// progress are workspace.json-only fields, so the SQLite-primary Get reports
+// them as absent and every workspace would look like it had never started
+// setup. Without a folder-capable store the wizard stays unwired, which
+// surfaces as an honest 503 rather than a wizard that silently forgets.
+func (b *ServerBuilder) wireSetupWizard() {
+	if b.workspaceStore == nil {
+		return
+	}
+	folders, ok := b.workspaceStore.(setupwizard.Store)
+	if !ok {
+		logger.Warn("Setup Wizard not wired: workspace store lacks GetFolderWorkspace", logger.Fields{})
+		return
+	}
+	registry := setupwizard.NewRegistry()
+	b.setupWizardRegistry = registry
+	service := setupwizard.NewService(folders, registry)
+	b.setupWizardService = service
+	b.setupWizardHandler = setupwizardhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+
+	// When setup first passes, the blueprint's `setup: true` help task is marked
+	// complete — no model call, no agent run. The wizard did the work; the task
+	// only ever explained it.
+	if b.sessionHandler != nil {
+		sessionHandler := b.sessionHandler
+		service.SetCompletionHook(func(_ context.Context, workspaceID string) {
+			sessionHandler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
+		})
+	}
 }
 
 // wireDownloadsJanitorMover gives the Janitor its execution mechanism: the

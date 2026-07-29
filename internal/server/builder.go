@@ -55,6 +55,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupwizard"
+	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
@@ -279,6 +281,13 @@ type ServerBuilder struct {
 	downloadsJanitorService    *downloadsjanitor.Service
 	downloadsJanitorAutomation *downloadsjanitor.Automation
 	dailyBriefScheduler        *dailybrief.Scheduler
+
+	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
+	// adapter registry, plus its workspace-scoped HTTP handler. The registry is
+	// held so each domain can register its adapter as it is wired.
+	setupWizardService  *setupwizard.Service
+	setupWizardRegistry *setupwizard.Registry
+	setupWizardHandler  *setupwizardhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -467,6 +476,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		PersonalHQ:       b.personalHQHandler,
 		DailyBrief:       b.dailyBriefHandler,
 		DownloadsJanitor: b.downloadsJanitorHandler,
+		SetupWizard:      b.setupWizardHandler,
 		CLIAgents:        b.cliAgentHandler,
 		CLIAgentRegistry: b.cliAgentRegistry,
 		WorkspaceRuns:    b.workspaceRunHandler,

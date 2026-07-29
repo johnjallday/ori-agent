@@ -143,6 +143,13 @@ type Workspace struct {
 	// created without a template or before provenance was recorded.
 	TemplateProvenance *TemplateProvenance `json:"template_provenance,omitempty"`
 
+	// SetupWizardProgress is the authoritative record of how far the workspace
+	// has got through its blueprint's Setup Wizard (see setup_wizard.go). The
+	// server owns it: the browser never reports completion, and closing the
+	// dialog changes nothing here. Nil until the wizard is first opened, and
+	// always nil for a workspace whose blueprint declares no wizard.
+	SetupWizardProgress *SetupWizardProgress `json:"setup_wizard_progress,omitempty"`
+
 	// Mission fields — workspace-level proactive goal carried out by the entry
 	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
 	// with MissionEnabled = false (the zero value) behaves exactly as before.

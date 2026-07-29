@@ -42,6 +42,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerDownloadsJanitorRoutes(mux, s)
+	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
 	registerPluginRoutes(mux, s)
@@ -893,6 +894,16 @@ func registerDownloadsJanitorRoutes(mux *http.ServeMux, s *Server) {
 	// Downloads Janitor Endpoints
 	// =============================================================================
 	s.Handlers.DownloadsJanitor.Register(mux)
+}
+
+// registerSetupWizardRoutes registers the workspace-scoped blueprint Setup
+// Wizard endpoints. One set of routes serves every wizard-enabled blueprint;
+// there is no per-blueprint setup API.
+func registerSetupWizardRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Blueprint Setup Wizard Endpoints
+	// =============================================================================
+	s.Handlers.SetupWizard.Register(mux)
 }
 
 // registerExternalAgentRoutes registers external agent (Claude Code / Codex) endpoints.

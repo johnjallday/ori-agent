@@ -78,25 +78,13 @@ var ErrInvalidStarterTasks = errors.New("invalid starter tasks")
 // a blank key, a blank operation name, or a duplicate key.
 var ErrInvalidCapabilityRequirements = errors.New("invalid capability requirements")
 
-// CapabilityRequirement declares an abstract capability (e.g. "calendar")
-// this template needs, without naming a specific MCP server, skill, or
-// plugin. Workspace creation carries an unresolved requirement into setup
-// readiness rather than auto-installing or silently choosing a connector —
-// the user picks or connects one during guided setup. Key and operation
-// names are always normalized (trimmed, lower-cased); see
+// CapabilityRequirement declares an abstract capability (e.g. "calendar") this
+// template needs. Declared in internal/workspace alongside the other
+// setup-requirement types (a created workspace persists them as provenance) and
+// aliased here, so a manifest and a workspace's recorded requirements can never
+// drift apart. This file owns the authoring rules: see
 // normalizeCapabilityRequirements / validateCapabilityRequirements.
-type CapabilityRequirement struct {
-	// Key identifies the capability (e.g. "calendar"). Consuming code (e.g.
-	// internal/calendar for "calendar") defines what the key means and which
-	// operation names are valid; this package only stores and normalizes the
-	// data, staying domain-blind like the rest of the template system.
-	Key string `json:"key"`
-	// RequiredOperations must be mapped before the capability is ready.
-	RequiredOperations []string `json:"required_operations,omitempty"`
-	// OptionalOperations may be mapped; the corresponding UI action only
-	// appears when they are.
-	OptionalOperations []string `json:"optional_operations,omitempty"`
-}
+type CapabilityRequirement = workspace.CapabilityRequirement
 
 // validateCapabilityRequirements enforces authoring-save invariants on a raw
 // (pre-normalization) edit: every key must be non-blank and unique, and every
@@ -290,6 +278,29 @@ type Template struct {
 	// AutomationRecipes are the watchers/daily runs to install once the matching
 	// directory requirement has been confirmed. Inert until setup completes.
 	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
+	// SetupWizard is the optional ordered setup flow a workspace created from
+	// this template runs after creation. Normalized and fully validated, or nil
+	// — a declaration that could not be understood yields nil plus
+	// SetupWizardError rather than a partially interpreted wizard.
+	SetupWizard *SetupWizard `json:"setup_wizard,omitempty"`
+	// SetupWizardError is the actionable diagnostic for an invalid
+	// `setup_wizard` declaration. Unlike Warnings, it is not cosmetic: a
+	// template carrying one offers no setup wizard and cannot create a
+	// workspace, because "some of the setup ran" is the one outcome a
+	// half-understood flow must never produce.
+	SetupWizardError string `json:"setup_wizard_error,omitempty"`
+}
+
+// HasSetupWizard reports whether the template declares a usable setup wizard.
+func (t Template) HasSetupWizard() bool {
+	return !t.SetupWizard.IsEmpty()
+}
+
+// HasInvalidSetupWizard reports whether the template declares a `setup_wizard`
+// block that could not be understood. Workspace creation refuses such a
+// template: the author asked for setup steps, and Ori cannot honor them.
+func (t Template) HasInvalidSetupWizard() bool {
+	return strings.TrimSpace(t.SetupWizardError) != ""
 }
 
 // HasOnboarding reports whether the template still carries a legacy intake-era
@@ -328,6 +339,10 @@ type manifest struct {
 	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
 	DirectoryRequirements  []DirectoryRequirement  `json:"directory_requirements,omitempty"`
 	AutomationRecipes      []AutomationRecipe      `json:"automation_recipes,omitempty"`
+	// SetupWizard is held raw so a malformed wizard fails only the wizard: were
+	// it typed here, one bad step would fail the whole manifest decode and the
+	// template would silently lose its name, tasks, and agents too.
+	SetupWizard json.RawMessage `json:"setup_wizard,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -379,9 +394,18 @@ func newTemplate(path string) Template {
 	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
 	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
 	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
+	// The wizard is resolved last: its steps may only reference requirements
+	// this same manifest declares, so every other declaration must be
+	// normalized first.
+	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins))
+	t.SetupWizard = setupWizard
 	t.Warnings = manifestWarnings(m, t.Agents)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
+	}
+	if setupWizardErr != nil {
+		t.SetupWizardError = setupWizardErr.Error()
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json setup_wizard is unusable and blocks workspace creation: %v", setupWizardErr))
 	}
 	return t
 }
