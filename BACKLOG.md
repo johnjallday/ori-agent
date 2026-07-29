@@ -13,7 +13,6 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 `docs(backlog):` commit on dev, so this file never drifts from origin.
 
 ## Ideas
-- 2026-07-18 #dogfood `backlog` skill in Ori: add/list/prune/promote on workspace BACKLOG.md (DOGFOODING.md stage 1) #small
 - 2026-07-18 #dogfood Weekly discovery playbook as scheduled Workspace Run; audit web-research MCP availability first (stage 2)
 - 2026-07-18 #dogfood Discovery shortlist as Action Center items; forces pending periodic delivery wiring (stage 3)
 - 2026-07-18 #dogfood PRD-drafting workflow/orchestration template writing tasks/prd-<feature>.md (stage 4)
@@ -36,6 +35,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - downloads-janitor -> PRD at tasks/prd-downloads-janitor.md (started 2026-07-27)
 - 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small (started 2026-07-28)
 - blueprint-setup-wizards -> PRD at tasks/prd-blueprint-setup-wizards.md (started 2026-07-28)
+- 2026-07-18 #dogfood `backlog` skill in Ori: add/list/prune/promote on workspace BACKLOG.md (DOGFOODING.md stage 1) #small (started 2026-07-29)
 
 ## Shipped / dropped
 - 2026-07-28 google-account-email-ops-stabilization -> PRD at tasks/prd-google-account-email-ops-stabilization.md (started 2026-07-27) - PR #272 merged to dev (2026-07-28)
