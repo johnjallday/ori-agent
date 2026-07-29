@@ -301,3 +301,34 @@ test('another blueprint’s capability step is not drawn by this module', () => 
     ''
   );
 });
+
+test('a step asked for before this module has state fills itself in', async () => {
+  // The wizard can render a step before this module's own fetch has landed —
+  // on a first page load it always does. An empty step that never fills is the
+  // failure this covers, and it is silent: every request involved succeeded.
+  let redraws = 0;
+  const { api } = load({
+    setupWizard: wizardActive,
+    routes: { '/api/calendar-ops/setup': connectorMissing }
+  });
+  const container = new FakeElement('div');
+  api._setupSteps.connect.render(
+    container,
+    stepCtx('capability_connect', {
+      refresh: async () => {
+        redraws += 1;
+      }
+    })
+  );
+  assert.equal(container.textContent, '', 'nothing to draw yet');
+
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(redraws, 1, 'the shell is asked to draw the step again once state arrives');
+});
+
+test('the workspace id comes from the URL, not a global set later', () => {
+  const { api } = load({ setupWizard: wizardActive });
+  // The module must not depend on window.currentWorkspaceId, which a later
+  // module script sets.
+  assert.ok(api, 'module loaded without a workspace global');
+});

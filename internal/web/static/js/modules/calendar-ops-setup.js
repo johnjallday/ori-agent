@@ -34,7 +34,15 @@
   let lastCalendars = [];
 
   function wsId() {
-    return workspaceId || (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
+    if (workspaceId) return workspaceId;
+    // The URL is authoritative and available immediately. window.currentWorkspaceId
+    // is set by a module script that runs after this deferred one, so relying on
+    // it alone leaves this module idle on exactly the load that matters — the
+    // first one, when the Setup Wizard is already asking for content.
+    const match =
+      typeof window !== 'undefined' && /^\/workspaces\/([^/?#]+)/.exec(window.location?.pathname || '');
+    if (match) return decodeURIComponent(match[1]);
+    return (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
   }
 
   function setBadge(badge, label) {
@@ -294,6 +302,15 @@
               ops[s.operation] = { tool: s.tool };
               if (s.arguments) ops[s.operation].arguments = s.arguments;
             });
+            if (!Object.keys(ops).length) {
+              // A connector with no calendar-shaped tools is a real answer, and
+              // a common one when the wrong server was picked. Saying so beats
+              // replacing the editor with an empty mapping and no explanation.
+              reportError(
+                'This connector exposes no tools that look like listing calendars or events. Choose a different connector, or map the tools by hand below.'
+              );
+              return;
+            }
             mappingText = JSON.stringify({ capability: 'calendar', operations: ops }, null, 2);
             rerender();
           } catch (err) {
@@ -557,12 +574,22 @@
     return String(step?.adapter || '') === 'calendar_ops';
   }
 
+  // renderWhenLoaded covers the first paint: the wizard can ask for a step
+  // before this module's own state has arrived. Fetching and then asking the
+  // shell to redraw is what keeps that from leaving an empty step on screen
+  // forever — the failure is silent, because every request involved succeeded.
+  function renderWhenLoaded(ctx) {
+    void refresh().then(() => {
+      if (lastState) void ctx.refresh();
+    });
+  }
+
   const connectStepRenderer = {
     render(container, ctx) {
       if (!ownsStep(ctx.step)) return;
       stepCtx = ctx;
       if (!lastState) {
-        void refresh();
+        renderWhenLoaded(ctx);
         return;
       }
       if (lastState.state === 'connector_missing') {
@@ -591,7 +618,7 @@
       if (!ownsStep(ctx.step)) return;
       stepCtx = ctx;
       if (!lastState) {
-        void refresh();
+        renderWhenLoaded(ctx);
         return;
       }
       if (lastState.state === 'connector_missing' || lastState.state === 'auth_required') {
@@ -672,11 +699,28 @@ function waitForWorkspaceId(onReady) {
 
   registerSetupSteps();
 
+  // stateSignature is what "the Calendar picture changed" means: the derived
+  // state and which connector it is about. It is compared rather than trusted
+  // blindly so a redraw can be triggered exactly when the content would differ.
+  function stateSignature(state) {
+    if (!state) return '';
+    return [state.state || '', state.binding?.server_name || '', state.settings?.validated ? 'v' : ''].join('|');
+  }
+
   // The card and the wizard show the same workspace: when setup changes, this
   // module re-reads rather than showing what was true before.
+  //
+  // The redraw is conditional on purpose. Asking the shell to refresh makes it
+  // publish this same event again, so an unconditional redraw here would be an
+  // endless loop between the two; redrawing only when the Calendar picture
+  // actually changed converges after one round.
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('ori:setup-status', () => {
-      if (wsId()) void refresh();
+      if (!wsId()) return;
+      const before = stateSignature(lastState);
+      void refresh().then(() => {
+        if (stepCtx && stateSignature(lastState) !== before) void stepCtx.refresh();
+      });
     });
   }
 
