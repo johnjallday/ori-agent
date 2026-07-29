@@ -96,6 +96,12 @@ type StepStatus struct {
 	Disclosure  string `json:"disclosure,omitempty"`
 	// Status is one of workspace.SetupStepStatus*.
 	Status string `json:"status"`
+	// Action is what the step's primary control does next: "confirm" to commit
+	// it after the user approves, "recheck" to re-evaluate a requirement that is
+	// satisfied elsewhere, or "" when the step is already resolved. The server
+	// decides it because only the server knows whether a step is backed by an
+	// adapter with something to re-check or by a decision only the user can make.
+	Action string `json:"action,omitempty"`
 	// Summary is the adapter's plain-language statement of where the step
 	// stands. Never contains a path, address, account id, or filename.
 	Summary string `json:"summary,omitempty"`
@@ -580,6 +586,7 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		if projected.Status == workspace.SetupStepStatusComplete {
 			projected.ErrorCategory = ""
 		}
+		projected.Action = stepAction(step, projected.Status)
 		request := resolved.request(workspaceID, step)
 		if request.Directory != nil {
 			projected.DirectoryLabel = request.Directory.Label
@@ -593,6 +600,34 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		status.Steps = append(status.Steps, projected)
 	}
 	return status
+}
+
+// Step action names. A client asks for one of these; it never invents an action
+// of its own.
+const (
+	// StepActionConfirm commits the step after the user approves it.
+	StepActionConfirm = "confirm"
+	// StepActionRecheck re-evaluates a requirement satisfied outside the wizard
+	// (a connector authorized in another tab, a permission granted in Settings).
+	StepActionRecheck = "recheck"
+)
+
+// stepAction reports what a step's primary control should do next.
+//
+// The distinction that matters is between a requirement the wizard can commit
+// and one it can only observe. A readiness check has nothing to approve — its
+// answer comes from the domain, so the only useful action is to look again.
+// Everything else, including a summary the user must acknowledge, is committed
+// by an explicit confirmation.
+func stepAction(step workspace.SetupWizardStep, status string) string {
+	switch status {
+	case workspace.SetupStepStatusComplete, workspace.SetupStepStatusOptionalSkipped:
+		return ""
+	}
+	if step.Kind == workspace.SetupStepKindReadiness {
+		return StepActionRecheck
+	}
+	return StepActionConfirm
 }
 
 // unrunnableStatus reports a workspace whose recorded wizard this build cannot

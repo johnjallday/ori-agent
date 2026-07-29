@@ -1,0 +1,83 @@
+{{define "components/workspaces/setup-wizard-modal.tmpl"}}
+<!--
+  Shared blueprint Setup Wizard.
+
+  One dialog serves every wizard-enabled blueprint: the shell (identity,
+  progress, navigation, disclosure, errors, completion) is owned here, and a
+  step's domain content is rendered into #setupWizardStepContent by a renderer
+  the domain module registers. A blueprint contributes data, never markup.
+
+  It is a native <dialog>, not a Bootstrap modal, because the accessibility
+  requirements are the browser's defaults: showModal() traps focus, restores it
+  to the opener on close, and raises a *cancelable* `cancel` event for Escape —
+  which is what lets the wizard refuse to close mid-authorization instead of
+  leaving a half-finished grant behind.
+-->
+<div id="setupWizardBanner" class="setup-wizard-banner" hidden>
+  <div class="setup-wizard-banner-text">
+    <span class="setup-wizard-banner-state" id="setupWizardBannerState"></span>
+    <span class="setup-wizard-banner-detail" id="setupWizardBannerDetail"></span>
+  </div>
+  <button type="button" class="modern-btn modern-btn-primary modern-btn-sm" id="setupWizardBannerAction">
+    Continue setup
+  </button>
+</div>
+
+<dialog
+  id="setupWizardDialog"
+  class="setup-wizard"
+  aria-labelledby="setupWizardTitle"
+  aria-describedby="setupWizardStepDescription">
+  <div class="setup-wizard-shell">
+    <header class="setup-wizard-header">
+      <div class="setup-wizard-identity">
+        <span class="setup-wizard-icon" id="setupWizardIcon" aria-hidden="true"></span>
+        <div class="setup-wizard-heading">
+          <p class="setup-wizard-blueprint" id="setupWizardBlueprint"></p>
+          <h2 class="setup-wizard-title" id="setupWizardTitle" tabindex="-1">Set up this workspace</h2>
+        </div>
+      </div>
+      <button
+        type="button"
+        class="setup-wizard-close"
+        id="setupWizardClose"
+        aria-label="Close setup">&times;</button>
+    </header>
+
+    <!-- Progress. Each step carries a text mark and a status word as well as a
+         color, so state never depends on color alone. -->
+    <nav class="setup-wizard-progress" aria-label="Setup steps">
+      <ol class="setup-wizard-steps" id="setupWizardSteps"></ol>
+    </nav>
+
+    <div class="setup-wizard-body" id="setupWizardBody">
+      <h3 class="setup-wizard-step-title" id="setupWizardStepTitle"></h3>
+      <p class="setup-wizard-step-description" id="setupWizardStepDescription"></p>
+
+      <!-- Domain content for the current step. Rendered by a registered
+           renderer; empty for steps that need none. -->
+      <div class="setup-wizard-step-content" id="setupWizardStepContent"></div>
+
+      <!-- The disclosure sits immediately before the action that commits it, so
+           approval is always informed. -->
+      <div class="setup-wizard-disclosure" id="setupWizardDisclosure" hidden>
+        <h4 class="setup-wizard-disclosure-title">What this allows</h4>
+        <p class="setup-wizard-disclosure-body" id="setupWizardDisclosureBody"></p>
+      </div>
+
+      <p class="setup-wizard-error" id="setupWizardError" role="alert" hidden></p>
+    </div>
+
+    <footer class="setup-wizard-footer">
+      <p class="setup-wizard-live" id="setupWizardLive" role="status" aria-live="polite"></p>
+      <div class="setup-wizard-actions">
+        <button type="button" class="modern-btn modern-btn-secondary" id="setupWizardBack">Back</button>
+        <button type="button" class="modern-btn modern-btn-secondary" id="setupWizardSkip" hidden>
+          Skip for now
+        </button>
+        <button type="button" class="modern-btn modern-btn-primary" id="setupWizardPrimary">Continue</button>
+      </div>
+    </footer>
+  </div>
+</dialog>
+{{end}}

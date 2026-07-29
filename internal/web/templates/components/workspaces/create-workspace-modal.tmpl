@@ -341,6 +341,20 @@
 
               <div id="workspaceReviewSummary" class="workspace-review-summary" aria-live="polite"></div>
 
+              <!-- Blueprint setup preview. Disclosure only: it lists what the
+                   blueprint will ask for after creation and expands, opens,
+                   authorizes, installs, and enables nothing. Populated by
+                   sessions.js from the selected template's normalized manifest. -->
+              <section id="workspaceSetupPreview" class="workspace-setup-preview" hidden aria-labelledby="workspaceSetupPreviewTitle">
+                <div class="workspace-setup-preview-head">
+                  <span class="workspace-wizard-eyebrow">After you create it</span>
+                  <h3 id="workspaceSetupPreviewTitle">Setup this blueprint will ask for</h3>
+                </div>
+                <ul id="workspaceSetupPreviewList" class="workspace-setup-preview-list"></ul>
+                <p id="workspaceSetupPreviewNote" class="workspace-setup-preview-note"></p>
+              </section>
+
+
               <section id="workspaceTeamReview" class="workspace-team-review" aria-labelledby="workspaceTeamHeading">
                 <div class="workspace-team-review-head">
                   <div>
