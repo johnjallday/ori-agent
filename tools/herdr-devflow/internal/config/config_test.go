@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadAppliesExplicitOverridesAndRoleDefaults(t *testing.T) {
@@ -154,5 +155,105 @@ func TestGitHubRefreshIntervalIsClampedNotTrusted(t *testing.T) {
 	config.Status.GitHubRefreshInterval = "1s"
 	if got := config.GitHubRefreshInterval(); got < MinGitHubRefreshInterval {
 		t.Fatalf("interval = %v, want it clamped to %v", got, MinGitHubRefreshInterval)
+	}
+}
+
+func TestOvernightDefaultsMatchThePRD(t *testing.T) {
+	cfg := Default()
+	if cfg.Overnight.MaxResumes != DefaultMaxResumes {
+		t.Fatalf("max resumes = %d, want the documented default of %d", cfg.Overnight.MaxResumes, DefaultMaxResumes)
+	}
+	if cfg.Overnight.Deadline != "07:00" || cfg.Overnight.StartTime != "now" {
+		t.Fatalf("overnight defaults = %+v", cfg.Overnight)
+	}
+	if cfg.WakeLead() != 2*time.Minute {
+		t.Fatalf("wake lead = %v, want 2m", cfg.WakeLead())
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("the defaults do not validate: %v", err)
+	}
+}
+
+// TestOvernightConfigRejectsValuesItCannotHonor keeps a bad value a hard
+// failure. A silently corrected deadline or ceiling would have the run sleeping
+// the Mac against a boundary the user never chose.
+func TestOvernightConfigRejectsValuesItCannotHonor(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"a start time that is not a clock time", func(c *Config) { c.Overnight.StartTime = "tonight" }, "start_time"},
+		{"a deadline out of range", func(c *Config) { c.Overnight.Deadline = "25:00" }, "deadline"},
+		{"a deadline with no minutes", func(c *Config) { c.Overnight.Deadline = "7" }, "deadline"},
+		{"an unknown time zone", func(c *Config) { c.Overnight.Timezone = "Mars/Olympus" }, "timezone"},
+		{"a zero resume ceiling", func(c *Config) { c.Overnight.MaxResumes = 0 }, "max_resumes"},
+		{"a resume ceiling beyond one night", func(c *Config) { c.Overnight.MaxResumes = MaxAllowedResumes + 1 }, "max_resumes"},
+		{"a wake lead too short for macOS", func(c *Config) { c.Overnight.WakeLead = "1s" }, "wake_lead"},
+		{"a wake lead that keeps the Mac awake", func(c *Config) { c.Overnight.WakeLead = "1h" }, "wake_lead"},
+		{"a wake lead that is not a duration", func(c *Config) { c.Overnight.WakeLead = "soon" }, "wake_lead"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := Default()
+			testCase.mutate(&cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("an unusable overnight value validated")
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("error = %v, want it to name %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+func TestOvernightConfigAcceptsAnImmediateStartAndACrossMidnightDeadline(t *testing.T) {
+	cfg := Default()
+	cfg.Overnight.StartTime = "23:00"
+	cfg.Overnight.Deadline = "07:00"
+	cfg.Overnight.Timezone = "America/New_York"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a run that crosses midnight was rejected: %v", err)
+	}
+	start, err := ParseClockTime(cfg.Overnight.StartTime)
+	if err != nil || start.Hour != 23 || start.Minute != 0 {
+		t.Fatalf("start = %+v, %v", start, err)
+	}
+}
+
+// TestOvernightKeysAreOptionalInAnExistingConfig protects every installed
+// devflow.toml: none of them mentions overnight, and all of them must load.
+func TestOvernightKeysAreOptionalInAnExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "devflow.toml")
+	existing := `
+[bridge]
+enabled = true
+min_herdr_version = "0.7.5"
+source_id = "ori.devflow"
+[primary]
+role = "builder"
+kind = "claude"
+[roles]
+default_kind = "claude"
+[bootstrap]
+timeout_seconds = 30
+[scheduler]
+retry_window = "15m"
+[metadata]
+enabled = true
+[status]
+watch_poll_interval = "2s"
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path, func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatalf("an existing config without overnight keys failed to load: %v", err)
+	}
+	if cfg.Overnight.MaxResumes != DefaultMaxResumes {
+		t.Fatalf("max resumes = %d, want the default applied", cfg.Overnight.MaxResumes)
 	}
 }

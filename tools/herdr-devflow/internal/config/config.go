@@ -29,6 +29,28 @@ type Config struct {
 	Scheduler SchedulerConfig `toml:"scheduler"`
 	Metadata  MetadataConfig  `toml:"metadata"`
 	Status    StatusConfig    `toml:"status"`
+	Overnight OvernightConfig `toml:"overnight"`
+}
+
+// OvernightConfig holds the defaults an Overnight Run offers before the user
+// confirms one. Nothing here starts a run or changes an existing schedule; a
+// run is created only from an explicit, confirmed command, and these values are
+// the starting point that command presents.
+type OvernightConfig struct {
+	// StartTime is the default local start, as HH:MM. "now" means immediately.
+	StartTime string `toml:"start_time"`
+	// Deadline is the default absolute morning boundary, as HH:MM. It may be
+	// earlier in the day than StartTime, which is how a run crosses midnight.
+	Deadline string `toml:"deadline"`
+	// Timezone is the IANA zone both times are interpreted in. Empty means the
+	// machine's local zone, resolved when a run is created.
+	Timezone string `toml:"timezone"`
+	// MaxResumes is the default ceiling on acknowledged post-reset
+	// continuations.
+	MaxResumes int `toml:"max_resumes"`
+	// WakeLead is how far before a reset the Mac may be woken so macOS,
+	// network, Ori, and Herdr are ready. It never permits an early prompt.
+	WakeLead string `toml:"wake_lead"`
 }
 
 type BridgeConfig struct {
@@ -98,8 +120,29 @@ func Default() Config {
 			GitHubRefreshInterval: "60s",
 			GitHubCandidateLimit:  100,
 		},
+		Overnight: OvernightConfig{
+			StartTime:  "now",
+			Deadline:   "07:00",
+			MaxResumes: DefaultMaxResumes,
+			WakeLead:   "2m",
+		},
 	}
 }
+
+const (
+	// DefaultMaxResumes is the PRD's default ceiling on acknowledged post-reset
+	// continuations.
+	DefaultMaxResumes = 3
+	// MaxAllowedResumes bounds what the ceiling may be configured to. A night
+	// holds at most a handful of five-hour windows, so a larger number cannot
+	// describe a real night — it can only describe a loop nobody is watching.
+	MaxAllowedResumes = 6
+	// MinWakeLead and MaxWakeLead bound how early the Mac may wake before a
+	// reset. Too short and macOS is not ready; too long and the machine is
+	// awake for no reason.
+	MinWakeLead = 30 * time.Second
+	MaxWakeLead = 15 * time.Minute
+)
 
 // Load reads a config file, rejects unknown keys, applies explicit environment
 // overrides, and validates the resulting effective configuration.
@@ -171,6 +214,9 @@ func (c Config) Validate() error {
 	}
 	if timeout, err := time.ParseDuration(c.Status.GitHubTimeout); err != nil || timeout < time.Second || timeout > 2*time.Minute {
 		return fmt.Errorf("status.github_timeout must be a Go duration between 1s and 2m")
+	}
+	if err := c.Overnight.validate(); err != nil {
+		return err
 	}
 	// A floor of 30s is deliberate. The remote clock exists to keep a watched
 	// board from hammering the API; letting it be configured to 1s would
@@ -294,4 +340,60 @@ func (v Version) AtLeast(other Version) bool {
 		return v.Minor > other.Minor
 	}
 	return v.Patch >= other.Patch
+}
+
+// validate bounds every Overnight default. An invalid value here must fail the
+// whole configuration rather than be quietly replaced: a run built on a
+// silently corrected deadline would sleep the Mac against a boundary the user
+// never chose.
+func (o OvernightConfig) validate() error {
+	if o.StartTime != "now" {
+		if _, err := ParseClockTime(o.StartTime); err != nil {
+			return fmt.Errorf("overnight.start_time must be \"now\" or HH:MM")
+		}
+	}
+	if _, err := ParseClockTime(o.Deadline); err != nil {
+		return fmt.Errorf("overnight.deadline must be HH:MM")
+	}
+	if o.Timezone != "" {
+		if _, err := time.LoadLocation(o.Timezone); err != nil {
+			return fmt.Errorf("overnight.timezone must be an IANA time zone such as America/New_York")
+		}
+	}
+	if o.MaxResumes < 1 || o.MaxResumes > MaxAllowedResumes {
+		return fmt.Errorf("overnight.max_resumes must be between 1 and %d", MaxAllowedResumes)
+	}
+	lead, err := time.ParseDuration(o.WakeLead)
+	if err != nil || lead < MinWakeLead || lead > MaxWakeLead {
+		return fmt.Errorf("overnight.wake_lead must be a Go duration between %s and %s", MinWakeLead, MaxWakeLead)
+	}
+	return nil
+}
+
+// ClockTime is an hour and minute on an unspecified day.
+type ClockTime struct {
+	Hour   int
+	Minute int
+}
+
+var clockPattern = regexp.MustCompile(`^([01]?\d|2[0-3]):([0-5]\d)$`)
+
+// ParseClockTime reads an HH:MM local time.
+func ParseClockTime(raw string) (ClockTime, error) {
+	matches := clockPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if matches == nil {
+		return ClockTime{}, fmt.Errorf("must be a 24-hour time such as 07:00")
+	}
+	hour, _ := strconv.Atoi(matches[1])
+	minute, _ := strconv.Atoi(matches[2])
+	return ClockTime{Hour: hour, Minute: minute}, nil
+}
+
+// WakeLead is the effective lead time before a reset.
+func (c Config) WakeLead() time.Duration {
+	duration, err := time.ParseDuration(c.Overnight.WakeLead)
+	if err != nil {
+		return 2 * time.Minute
+	}
+	return duration
 }

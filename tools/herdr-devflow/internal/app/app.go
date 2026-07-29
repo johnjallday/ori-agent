@@ -180,6 +180,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.plugin(ctx, opts, commandArgs)
 	case "claude-usage":
 		return a.claudeUsage(ctx, opts, commandArgs)
+	case "overnight":
+		return a.overnight(ctx, opts, commandArgs)
 	default:
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
@@ -2402,6 +2404,13 @@ Usage:
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.
+  wt herd overnight start --agent NAME[:ROLE] [--start HH:MM] [--deadline HH:MM]
+                          [--timezone ZONE] [--max-resumes N] [--dry-run] [--confirm] [--json]
+                                Plan an Overnight Run over explicitly selected Claude agents.
+                                Prints the full consequences and creates nothing until you agree.
+  wt herd overnight list [--json]        List Overnight Runs, newest first
+  wt herd overnight show [ID] [--json]   Show one run's queue, cycles, wake, and next action
+  wt herd overnight cancel [ID] [--json] Stop future prompts; agents and worktrees are untouched
   wt herd claude-usage install  Print the Claude settings that let Ori observe usage windows.
                                 Prints only; it never edits your Claude configuration.
   wt herd claude-usage status   Report whether Claude usage records are being written
