@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "Status",
+  "session_id": "99999999-8888-7777-6666-555555555555",
+  "cwd": "/fixture/repo/worktrees/managed-feature",
+  "version": "2.1.220",
+  "model": {"id": "claude-opus-5", "display_name": "Opus 5"},
+  "context_window": {"used_percentage": 5.0}
+}

@@ -57,7 +57,7 @@ func BuildCheckouts(inventory worktree.Inventory, evidence AgentEvidence) []Chec
 // features must already be sorted, because the roster preserves their order:
 // the roster is the same evidence regrouped, so a reader comparing the two
 // surfaces sees the same agents in the same sequence.
-func BuildRoster(features []Feature, inventory worktree.Inventory, evidence AgentEvidence) ([]Agent, []Finding) {
+func BuildRoster(features []Feature, inventory worktree.Inventory, evidence AgentEvidence, claude ClaudeReadinessFunc) ([]Agent, []Finding) {
 	roster := make([]Agent, 0, len(evidence.Live))
 	claimed := map[string]struct{}{}
 	for index := range features {
@@ -68,7 +68,7 @@ func BuildRoster(features []Feature, inventory worktree.Inventory, evidence Agen
 			// copy: two surfaces disagreeing about whether an agent may be
 			// controlled is exactly the class of drift this snapshot exists to
 			// remove.
-			agent.Eligibility = evaluateEligibility(*agent, feature)
+			agent.Eligibility = evaluateEligibility(*agent, feature, claude)
 			roster = append(roster, *agent)
 			if agent.Live.Pane != "" {
 				claimed[agent.Live.Pane] = struct{}{}
@@ -84,7 +84,7 @@ func BuildRoster(features []Feature, inventory worktree.Inventory, evidence Agen
 
 	repository, findings := repositoryAgents(inventory, evidence, claimed)
 	for index := range repository {
-		repository[index].Eligibility = evaluateEligibility(repository[index], nil)
+		repository[index].Eligibility = evaluateEligibility(repository[index], nil, claude)
 	}
 	return append(roster, repository...), findings
 }

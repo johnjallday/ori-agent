@@ -18,6 +18,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
@@ -37,8 +38,10 @@ const (
 )
 
 type Dependencies struct {
-	Stdout       io.Writer
-	Stderr       io.Writer
+	Stdout io.Writer
+	Stderr io.Writer
+	// Stdin is where a recorder invoked by Claude Code reads its payload.
+	Stdin        io.Reader
 	Getwd        func() (string, error)
 	LookupEnv    func(string) (string, bool)
 	LookPath     func(string) (string, error)
@@ -53,6 +56,7 @@ type Dependencies struct {
 type App struct {
 	stdout         io.Writer
 	stderr         io.Writer
+	stdin          io.Reader
 	getwd          func() (string, error)
 	lookupEnv      func(string) (string, bool)
 	lookPath       func(string) (string, error)
@@ -71,6 +75,9 @@ func New(deps Dependencies) *App {
 	}
 	if deps.Stderr == nil {
 		deps.Stderr = os.Stderr
+	}
+	if deps.Stdin == nil {
+		deps.Stdin = os.Stdin
 	}
 	if deps.Getwd == nil {
 		deps.Getwd = os.Getwd
@@ -99,6 +106,7 @@ func New(deps Dependencies) *App {
 	return &App{
 		stdout:         deps.Stdout,
 		stderr:         deps.Stderr,
+		stdin:          deps.Stdin,
 		getwd:          deps.Getwd,
 		lookupEnv:      deps.LookupEnv,
 		lookPath:       deps.LookPath,
@@ -170,6 +178,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.dispatch(ctx, opts)
 	case "plugin":
 		return a.plugin(ctx, opts, commandArgs)
+	case "claude-usage":
+		return a.claudeUsage(ctx, opts, commandArgs)
 	default:
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
@@ -1514,7 +1524,26 @@ func (a *App) overviewService(runtime runtimeContext) *overview.Service {
 		RemoteRefreshInterval: runtime.config.GitHubRefreshInterval(),
 		Agents:                runtime.herdr,
 		Bridge:                state.New(runtime.paths.StateDir),
+		ClaudeReadiness:       claudeReadiness(runtime.paths.UsageDir),
 	})
+}
+
+// claudeReadiness adapts the Claude usage adapter to the snapshot's narrow
+// question. It reads only records the Claude-side recorder already persisted:
+// no Claude process is contacted, and nothing is spent, to answer it.
+func claudeReadiness(usageDir string) overview.ClaudeReadinessFunc {
+	if usageDir == "" {
+		return nil
+	}
+	adapter := claudeusage.NewAdapter(usageDir)
+	return func(sessionID string) overview.ClaudeReadinessReport {
+		readiness := adapter.Readiness(sessionID, time.Now())
+		return overview.ClaudeReadinessReport{
+			Ready:    readiness.Ready,
+			Reason:   readiness.Reason,
+			AuthMode: string(readiness.AuthMode),
+		}
+	}
 }
 
 // renderOverview writes one snapshot to the selected surface. Narrowing to a
@@ -2146,6 +2175,7 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 	} else {
 		diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "one-time continuation scheduling is macOS-only", Recovery: "run scheduling commands on macOS"})
 	}
+	diagnostics = append(diagnostics, a.claudeUsageDiagnostics(runtime)...)
 	a.writeDiagnostics(opts.json, diagnostics)
 	for _, item := range diagnostics {
 		if item.Status == "FAIL" {
@@ -2372,6 +2402,9 @@ Usage:
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.
+  wt herd claude-usage install  Print the Claude settings that let Ori observe usage windows.
+                                Prints only; it never edits your Claude configuration.
+  wt herd claude-usage status   Report whether Claude usage records are being written
   wt herd dispatch              Run due local schedules (used by the macOS LaunchAgent)
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 

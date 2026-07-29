@@ -2,6 +2,7 @@ package overview
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -50,7 +51,7 @@ func readyFeature(mutate ...func(*Feature)) Feature {
 // yet established that its next prompt uses included plan capacity. FR19, FR127.
 func TestEligibilityStopsShortOfClaimingReadiness(t *testing.T) {
 	feature := readyFeature()
-	result := evaluateEligibility(eligibleAgent(), &feature)
+	result := evaluateEligibility(eligibleAgent(), &feature, nil)
 
 	if result.State != EligibilityUnverified {
 		t.Fatalf("state = %q, want unverified until Claude readiness is checked", result.State)
@@ -114,7 +115,7 @@ func TestEligibilityRejectsEachMissingRequirement(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			feature := readyFeature()
-			result := evaluateEligibility(testCase.agent, &feature)
+			result := evaluateEligibility(testCase.agent, &feature, nil)
 			if result.State != EligibilityIneligible {
 				t.Fatalf("state = %q, want ineligible", result.State)
 			}
@@ -130,19 +131,19 @@ func TestEligibilityRejectsEachMissingRequirement(t *testing.T) {
 
 func TestEligibilityRequiresAReadableFeaturePlan(t *testing.T) {
 	missingWorktree := readyFeature(func(f *Feature) { f.Git.WorktreePath = "" })
-	if result := evaluateEligibility(eligibleAgent(), &missingWorktree); !slices.Contains(result.Blockers, BlockerNoWorktree) {
+	if result := evaluateEligibility(eligibleAgent(), &missingWorktree, nil); !slices.Contains(result.Blockers, BlockerNoWorktree) {
 		t.Fatalf("blockers = %v, want no_worktree", result.Blockers)
 	}
 
 	for _, availability := range []Availability{AvailabilityAbsent, AvailabilityMalformed, AvailabilityUnavailable, AvailabilityUnknown} {
 		unreadable := readyFeature(func(f *Feature) { f.Plan.TaskListAvailability = availability })
-		result := evaluateEligibility(eligibleAgent(), &unreadable)
+		result := evaluateEligibility(eligibleAgent(), &unreadable, nil)
 		if result.State != EligibilityIneligible || !slices.Contains(result.Blockers, BlockerTaskListUnreadable) {
 			t.Fatalf("task list %q produced %+v, want an ineligible task_list_unreadable result", availability, result)
 		}
 	}
 
-	if result := evaluateEligibility(eligibleAgent(), nil); result.State != EligibilityIneligible {
+	if result := evaluateEligibility(eligibleAgent(), nil, nil); result.State != EligibilityIneligible {
 		t.Fatalf("an agent with no feature row produced %+v, want ineligible", result)
 	}
 }
@@ -158,7 +159,7 @@ func TestEligibilityReportsEveryBlockerNotJustTheFirst(t *testing.T) {
 		a.Saved.Session = ""
 	})
 	feature := readyFeature()
-	result := evaluateEligibility(agent, &feature)
+	result := evaluateEligibility(agent, &feature, nil)
 
 	for _, want := range []EligibilityBlocker{BlockerUnmanaged, BlockerNotClaude, BlockerBindingNotExact, BlockerNoNativeSession} {
 		if !slices.Contains(result.Blockers, want) {
@@ -167,5 +168,63 @@ func TestEligibilityReportsEveryBlockerNotJustTheFirst(t *testing.T) {
 	}
 	if slices.Contains(result.Blockers, BlockerClaudeReadinessUnverified) {
 		t.Fatalf("an already-ineligible agent was also marked unverified: %v", result.Blockers)
+	}
+}
+
+// TestEligibilityUsesTheClaudeAdapterVerdictWhenOneExists covers the other two
+// thirds of the three-state answer: once the usage adapter has been consulted,
+// a session it approves becomes eligible and a session it refuses becomes
+// ineligible carrying the adapter's own reason.
+func TestEligibilityUsesTheClaudeAdapterVerdictWhenOneExists(t *testing.T) {
+	feature := readyFeature()
+
+	var asked []string
+	ready := func(sessionID string) ClaudeReadinessReport {
+		asked = append(asked, sessionID)
+		return ClaudeReadinessReport{Ready: true, AuthMode: "plan_backed"}
+	}
+	result := evaluateEligibility(eligibleAgent(), &feature, ready)
+	if result.State != EligibilityEligible || len(result.Blockers) != 0 {
+		t.Fatalf("result = %+v, want an eligible agent with no blockers", result)
+	}
+	// The adapter must be asked about the exact saved native session, never a
+	// pane or a name that could belong to a different conversation.
+	if len(asked) != 1 || asked[0] != "sess-1" {
+		t.Fatalf("adapter was asked about %v, want the saved native session", asked)
+	}
+
+	refused := func(string) ClaudeReadinessReport {
+		return ClaudeReadinessReport{
+			Reason: "This session reported no Claude.ai subscription window, so included-plan capacity could not be established.",
+		}
+	}
+	result = evaluateEligibility(eligibleAgent(), &feature, refused)
+	if result.State != EligibilityIneligible {
+		t.Fatalf("result = %+v, want ineligible", result)
+	}
+	if !slices.Contains(result.Blockers, BlockerClaudeNotReady) {
+		t.Fatalf("blockers = %v, want claude_not_ready", result.Blockers)
+	}
+	if !strings.Contains(result.Reason, "included-plan capacity") {
+		t.Fatalf("reason = %q, want the adapter's own explanation", result.Reason)
+	}
+}
+
+// TestEligibilityNeverConsultsClaudeForAStructurallyIneligibleAgent keeps the
+// cheap refusals first: a Codex agent is not a Claude session, so asking the
+// Claude adapter about it would be meaningless.
+func TestEligibilityNeverConsultsClaudeForAStructurallyIneligibleAgent(t *testing.T) {
+	feature := readyFeature()
+	consulted := false
+	claude := func(string) ClaudeReadinessReport {
+		consulted = true
+		return ClaudeReadinessReport{Ready: true}
+	}
+	agent := eligibleAgent(func(a *Agent) { a.Kind, a.Live.Kind, a.Saved.Kind = "codex", "codex", "codex" })
+	if result := evaluateEligibility(agent, &feature, claude); result.State != EligibilityIneligible {
+		t.Fatalf("result = %+v, want ineligible", result)
+	}
+	if consulted {
+		t.Fatal("the Claude usage adapter was consulted about a Codex agent")
 	}
 }

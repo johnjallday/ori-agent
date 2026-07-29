@@ -17,13 +17,17 @@ const (
 )
 
 type Paths struct {
-	RepoRoot         string
-	RepositoryID     string
-	GitCommonDir     string
-	ConfigPath       string
-	RuntimeRoot      string
-	StateDir         string
-	LogDir           string
+	RepoRoot     string
+	RepositoryID string
+	GitCommonDir string
+	ConfigPath   string
+	RuntimeRoot  string
+	StateDir     string
+	LogDir       string
+	// UsageDir holds the Claude usage records the Claude-side recorder writes.
+	// It is user-local and protected for the same reason the state directory
+	// is: it describes a private session's allowance, not repository content.
+	UsageDir         string
 	PluginRuntimeDir string
 	HelperPath       string
 	PluginSourceDir  string
@@ -88,6 +92,7 @@ func Resolve(repoRoot string, lookupEnv func(string) (string, bool)) (Paths, err
 		RuntimeRoot:      runtimeRoot,
 		StateDir:         filepath.Join(runtimeRoot, "state"),
 		LogDir:           filepath.Join(runtimeRoot, "logs"),
+		UsageDir:         filepath.Join(runtimeRoot, "usage"),
 		PluginRuntimeDir: filepath.Join(runtimeRoot, "plugin"),
 		HelperPath:       filepath.Join(runtimeRoot, "bin", "herdr-devflow"),
 		PluginSourceDir:  filepath.Join(canonicalRepo, "tools", "herdr-devflow"),

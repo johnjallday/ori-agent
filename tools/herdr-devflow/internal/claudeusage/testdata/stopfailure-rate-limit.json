@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "StopFailure",
+  "session_id": "11111111-2222-3333-4444-555555555555",
+  "transcript_path": "/fixture/.claude/projects/-fixture-repo/11111111-2222-3333-4444-555555555555.jsonl",
+  "cwd": "/fixture/repo/worktrees/managed-feature",
+  "permission_mode": "acceptEdits"
+}

@@ -65,7 +65,30 @@ const (
 	// but Claude's session-limit, authentication, and billing posture have not
 	// been established for this session.
 	BlockerClaudeReadinessUnverified EligibilityBlocker = "claude_readiness_unverified"
+	// BlockerClaudeNotReady means the usage adapter was consulted and refused:
+	// no record, a stale one, an unsupported version, or a session whose
+	// included-plan capacity could not be proved.
+	BlockerClaudeNotReady EligibilityBlocker = "claude_not_ready"
 )
+
+// ClaudeReadinessReport is what the Claude usage adapter can say about one
+// exact native session. It is a plain value rather than the adapter's own type
+// so the snapshot stays independent of how that evidence is collected — and so
+// a test can state a verdict without a usage directory on disk.
+type ClaudeReadinessReport struct {
+	// Ready is true only when every Claude-side requirement was checked and met.
+	Ready bool
+	// Reason is a sanitized sentence naming what is missing. It never carries
+	// account identity, credentials, or terminal content.
+	Reason string
+	// AuthMode is the established billing posture, for display.
+	AuthMode string
+}
+
+// ClaudeReadinessFunc answers for one native session id. A nil func means the
+// adapter was not consulted, which leaves eligibility unverified rather than
+// either eligible or ineligible.
+type ClaudeReadinessFunc func(sessionID string) ClaudeReadinessReport
 
 // Eligibility is the roster's answer plus the evidence behind it.
 type Eligibility struct {
@@ -88,7 +111,7 @@ const claudeKind = "claude"
 // structured limit adapter is installed, and whether the next prompt would
 // spend credits are separate checks, and until they have run the answer stays
 // unverified rather than optimistic.
-func evaluateEligibility(agent Agent, feature *Feature) Eligibility {
+func evaluateEligibility(agent Agent, feature *Feature, claude ClaudeReadinessFunc) Eligibility {
 	var blockers []EligibilityBlocker
 	reason := ""
 	block := func(code EligibilityBlocker, explanation string) {
@@ -126,11 +149,22 @@ func evaluateEligibility(agent Agent, feature *Feature) Eligibility {
 	if len(blockers) > 0 {
 		return Eligibility{State: EligibilityIneligible, Reason: reason, Blockers: blockers}
 	}
-	return Eligibility{
-		State:    EligibilityUnverified,
-		Reason:   "Claude session-limit, authentication, and billing readiness have not been checked for this session.",
-		Blockers: []EligibilityBlocker{BlockerClaudeReadinessUnverified},
+	if claude == nil {
+		return Eligibility{
+			State:    EligibilityUnverified,
+			Reason:   "Claude session-limit, authentication, and billing readiness have not been checked for this session.",
+			Blockers: []EligibilityBlocker{BlockerClaudeReadinessUnverified},
+		}
 	}
+	report := claude(agent.Saved.Session)
+	if !report.Ready {
+		return Eligibility{
+			State:    EligibilityIneligible,
+			Reason:   report.Reason,
+			Blockers: []EligibilityBlocker{BlockerClaudeNotReady},
+		}
+	}
+	return Eligibility{State: EligibilityEligible}
 }
 
 // isClaude reports whether either the live or saved kind names Claude. The two

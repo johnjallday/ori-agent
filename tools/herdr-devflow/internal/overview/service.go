@@ -58,6 +58,10 @@ type Config struct {
 	// Bridge loads the saved bridge records. Saved identity is only ever
 	// presented as a record, never as a live observation.
 	Bridge BridgeReader
+	// ClaudeReadiness answers whether one exact native Claude session may be
+	// run unattended. A nil func leaves every agent's Overnight eligibility
+	// unverified, which is the honest answer when nothing checked.
+	ClaudeReadiness ClaudeReadinessFunc
 	// Now supplies the observation clock. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -234,7 +238,7 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 	// same sequence. Repository-level agents are appended here rather than
 	// collected separately: one observation, two groupings.
 	snapshot.Checkouts = BuildCheckouts(checkouts, agentEvidence)
-	roster, rosterFindings := BuildRoster(features, checkouts, agentEvidence)
+	roster, rosterFindings := BuildRoster(features, checkouts, agentEvidence, s.config.ClaudeReadiness)
 	snapshot.Agents = roster
 	snapshot.Findings = append(snapshot.Findings, rosterFindings...)
 
