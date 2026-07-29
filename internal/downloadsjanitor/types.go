@@ -128,6 +128,12 @@ type JanitorSettings struct {
 	// Paused stops watcher and scheduled scans without discarding configuration
 	// or history.
 	Paused bool `json:"paused,omitempty"`
+	// AutomationApprovedAt is when the user approved unattended work — the
+	// folder watcher and the daily catch-up — after being shown what they do.
+	// Zero means they never have, which is not the same as having paused them:
+	// pausing is an operational choice about something already approved, and it
+	// must never read as unfinished setup.
+	AutomationApprovedAt time.Time `json:"automation_approved_at,omitempty"`
 	// SetupCompletedAt is when the user confirmed a folder. Zero means setup has
 	// not completed, which is what makes SetupRequired the default state.
 	SetupCompletedAt time.Time `json:"setup_completed_at,omitempty"`

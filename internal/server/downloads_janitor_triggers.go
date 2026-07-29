@@ -118,6 +118,11 @@ func (b *ServerBuilder) wireDownloadsJanitorAutomation() {
 	b.downloadsJanitorService.SetAutomationStatus(automation)
 	b.triggerService.RegisterDomainScanHandler(downloadsjanitor.DomainKey, automation)
 
+	if b.downloadsJanitorSetupAdapter != nil {
+		// The wizard's automation step activates the watcher the moment the user
+		// approves it, rather than at the next restart.
+		b.downloadsJanitorSetupAdapter.SetAutomation(automation)
+	}
 	if b.downloadsJanitorHandler != nil {
 		b.downloadsJanitorHandler.SetAutomation(automation)
 	}

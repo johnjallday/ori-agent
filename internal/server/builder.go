@@ -288,6 +288,9 @@ type ServerBuilder struct {
 	setupWizardService  *setupwizard.Service
 	setupWizardRegistry *setupwizard.Registry
 	setupWizardHandler  *setupwizardhttp.Handler
+	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
+	// attached to it once the automation service exists (a later phase).
+	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.

@@ -131,6 +131,11 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		Path               string `json:"path"`
 		DailyScanLocalTime string `json:"daily_scan_local_time"`
 		Timezone           string `json:"timezone"`
+		// Paused is optional and tri-state: omitted keeps the workspace's
+		// current setting. The Setup Wizard sends true so approving a folder
+		// grants access without also starting the watcher and daily scan the
+		// user has not been shown yet.
+		Paused *bool `json:"paused,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -140,6 +145,7 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		Path:               req.Path,
 		DailyScanLocalTime: req.DailyScanLocalTime,
 		Timezone:           req.Timezone,
+		Paused:             req.Paused,
 	})
 	if err != nil {
 		h.respondError(w, err, "Failed to set up Downloads Janitor")

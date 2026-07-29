@@ -311,6 +311,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	b.wireReaperSetup()
 	b.wireCalendarOpsSetup()
 	b.wireDownloadsJanitor()
+	// After the domain services above: the wizard registers their adapters.
 	b.wireSetupWizard()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace

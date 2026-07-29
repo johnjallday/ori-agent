@@ -87,13 +87,53 @@ async function createJanitorWorkspace(
   return (body.folder?.id || body.workspace?.id) as string;
 }
 
-/** Completes setup through the UI, which is itself under test. */
+/**
+ * Completes setup through the blueprint's Setup Wizard, which is itself under
+ * test.
+ *
+ * One step cannot be automated: choosing the folder opens the operating
+ * system's own picker, and no browser test can drive that dialog. The
+ * confirmation the picker produces is posted directly instead — the same
+ * request, with the same fixture path — and everything after it runs through
+ * the wizard exactly as a user does, including the separate approval that
+ * starts unattended work.
+ */
 async function completeSetup(page: Page, workspaceId: string, root: string) {
+  const confirmed = await page.request.post(
+    `/api/workspaces/${workspaceId}/downloads-janitor/setup`,
+    { data: { path: root, paused: true } }
+  );
+  expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
+
   await page.goto(`/workspaces/${workspaceId}`);
-  const path = page.locator('#downloadsJanitorPath');
-  await expect(path).toBeVisible({ timeout: 15000 });
-  await path.fill(root);
-  await page.getByRole('button', { name: 'Use this folder' }).click();
+  const dialog = page.locator('#setupWizardDialog');
+  // A fresh workspace opens the wizard itself; one whose wizard was dismissed
+  // waits to be asked, which is the whole point of dismissal.
+  if (!(await dialog.isVisible())) {
+    // The workspace-level banner is the entry that is always there, whatever
+    // state the domain panel happens to be in.
+    await page.locator('#setupWizardBannerAction').click();
+  }
+  await expect(dialog).toBeVisible({ timeout: 15000 });
+
+  // The folder step is already satisfied, so the wizard resumes at the first
+  // unresolved one — and the folder grant on its own has started nothing.
+  await expect(page.locator('#setupWizardStepTitle')).toHaveText('Review what runs on its own', {
+    timeout: 15000
+  });
+  await expect(page.locator('#setupWizardPrimary')).toHaveText('Turn this on');
+  await page.locator('#setupWizardPrimary').click();
+
+  // Readiness, then the summary, then the wizard finishes and closes.
+  await expect(page.locator('#setupWizardStepTitle')).toHaveText('Check everything is working', {
+    timeout: 15000
+  });
+  await page.locator('#setupWizardPrimary').click();
+  await expect(page.locator('#setupWizardStepTitle')).toHaveText('Downloads Janitor is ready', {
+    timeout: 15000
+  });
+  await page.locator('#setupWizardPrimary').click();
+  await expect(dialog).toBeHidden({ timeout: 15000 });
   await expect(page.locator('#downloadsJanitorScan')).toBeVisible({ timeout: 15000 });
 }
 
@@ -153,10 +193,17 @@ test.describe('Downloads Janitor', () => {
     await expect(mount).toBeVisible({ timeout: 15000 });
     await expect(mount).not.toHaveAttribute('hidden', /.*/);
     await expect(page.locator('#downloadsJanitorMount')).toContainText('Setup required');
-    // The folder field is pre-filled with the template's suggestion, and the
-    // disclosure states what access is being asked for before it is granted.
-    await expect(page.locator('#downloadsJanitorPath')).toHaveValue(/Downloads/);
-    const disclosure = page.locator('#downloadsJanitorDisclosure');
+    // The blueprint's wizard owns setup now, so the panel offers a way into it
+    // rather than a second folder chooser (FR-82).
+    await expect(page.locator('#downloadsJanitorOpenSetup')).toBeVisible();
+    await expect(page.locator('#downloadsJanitorPath')).toHaveCount(0);
+
+    // The wizard opens itself, and states what access it is asking for before
+    // anything is granted.
+    const dialog = page.locator('#setupWizardDialog');
+    await expect(dialog).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
+    const disclosure = page.locator('#setupWizardDisclosure');
     await expect(disclosure).toContainText('names, types, sizes');
     await expect(disclosure).toContainText('Trash');
     expect(errors, 'the panel must not throw while mounting').toEqual([]);
@@ -173,6 +220,64 @@ test.describe('Downloads Janitor', () => {
     await page.goto(`/workspaces/${id}`);
     await page.waitForTimeout(1500);
     await expect(page.locator('#downloadsJanitorMount')).toBeHidden();
+  });
+
+  test('setup can be dismissed and picked up again, and never reopens once ready', async ({
+    page,
+    request
+  }) => {
+    const id = await createJanitorWorkspace(request, `DJ Resume ${RUN}`);
+    const root = fixtureFolder('resume', { 'invoice.pdf': 'x' });
+
+    // Dismissing an unfinished wizard leaves the workspace visibly unfinished
+    // and starts nothing.
+    await page.goto(`/workspaces/${id}`);
+    await expect(page.locator('#setupWizardDialog')).toBeVisible({ timeout: 15000 });
+    await page.locator('#setupWizardClose').click();
+    await expect(page.locator('#setupWizardDialog')).toBeHidden();
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Setup required');
+
+    // A reload does not ambush the user again, and the panel still offers a way in.
+    await page.goto(`/workspaces/${id}`);
+    await expect(page.locator('#downloadsJanitorOpenSetup')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#setupWizardDialog')).toBeHidden();
+
+    // The panel's own entry opens the same wizard, at the step it left off on.
+    await page.locator('#downloadsJanitorOpenSetup').click();
+    await expect(page.locator('#setupWizardDialog')).toBeVisible();
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
+    await page.locator('#setupWizardClose').click();
+
+    await completeSetup(page, id, root);
+
+    // A workspace that is already set up is not asked again.
+    await page.goto(`/workspaces/${id}`);
+    await expect(page.locator('#downloadsJanitorScan')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#setupWizardDialog')).toBeHidden();
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready');
+  });
+
+  test('unattended watching cannot be started from the panel before setup approves it', async ({
+    page,
+    request
+  }) => {
+    const id = await createJanitorWorkspace(request, `DJ Gate ${RUN}`);
+    const root = fixtureFolder('gate', { 'invoice.pdf': 'x' });
+
+    // The folder is granted, but the automation step has not been approved.
+    const confirmed = await request.post(`/api/workspaces/${id}/downloads-janitor/setup`, {
+      data: { path: root, paused: true }
+    });
+    expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
+
+    await page.goto(`/workspaces/${id}`);
+    await expect(page.locator('#downloadsJanitorPause')).toBeVisible({ timeout: 15000 });
+    // The control points at the step that discloses what it would start.
+    await expect(page.locator('#downloadsJanitorPause')).toHaveText('Approve in setup');
+    await expect(page.locator('#downloadsJanitorScan')).toBeEnabled();
+
+    const status = await (await request.get(`/api/workspaces/${id}/downloads-janitor`)).json();
+    expect(status.status.settings.paused, 'nothing unattended may be running yet').toBeTruthy();
   });
 
   // ------------------------------------------------------------------- setup

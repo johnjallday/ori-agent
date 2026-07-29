@@ -94,6 +94,10 @@ type StepStatus struct {
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Disclosure  string `json:"disclosure,omitempty"`
+	// Adapter is the domain that serves this step. It is echoed so a domain
+	// module can render only its own steps; it is not a selector — the server
+	// resolves the adapter from the workspace's snapshot either way.
+	Adapter string `json:"adapter,omitempty"`
 	// Status is one of workspace.SetupStepStatus*.
 	Status string `json:"status"`
 	// Action is what the step's primary control does next: "confirm" to commit
@@ -573,6 +577,7 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		projected := StepStatus{
 			ID:            step.ID,
 			Kind:          step.Kind,
+			Adapter:       step.Adapter,
 			Required:      step.Required,
 			Title:         step.Title,
 			Description:   step.Description,

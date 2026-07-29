@@ -583,6 +583,15 @@ func (b *ServerBuilder) wireSetupWizard() {
 	}
 	registry := setupwizard.NewRegistry()
 	b.setupWizardRegistry = registry
+	// Domain adapters are registered from code, never from configuration: a
+	// manifest's adapter name is a key into this registry and nothing else.
+	if b.downloadsJanitorService != nil {
+		adapter := downloadsjanitor.NewSetupAdapter(b.downloadsJanitorService)
+		b.downloadsJanitorSetupAdapter = adapter
+		if err := registry.Register(adapter); err != nil {
+			logger.Warn("Downloads Janitor setup adapter not registered", logger.Fields{"error": err})
+		}
+	}
 	service := setupwizard.NewService(folders, registry)
 	b.setupWizardService = service
 	b.setupWizardHandler = setupwizardhttp.NewHandler(service, b.workspaceStore, b.userProvider)
