@@ -33,6 +33,9 @@ type Service struct {
 	registry *Registry
 	now      func() time.Time
 	onReady  CompletionHook
+	// blueprints backfills workspaces created before their blueprint declared a
+	// wizard. Nil means no workspace is ever migrated.
+	blueprints BlueprintLookup
 }
 
 // NewService returns a service over the given workspace store and adapter
@@ -330,6 +333,15 @@ func (s *Service) refresh(ctx context.Context, workspaceID string, mutate mutato
 	if err != nil {
 		return Status{}, err
 	}
+	// A workspace created before its blueprint declared a wizard is backfilled
+	// here, on the first look — not by a startup sweep over everything a user
+	// owns. Setup state is only ever needed for the workspace being looked at,
+	// and doing it lazily means a workspace nobody opens is never touched.
+	if s.migrateIfNeeded(ws) {
+		if reloaded, reloadErr := s.loadWorkspace(workspaceID); reloadErr == nil {
+			ws = reloaded
+		}
+	}
 
 	resolved, resolveErr := s.resolve(ws)
 	if resolveErr != nil {
@@ -539,6 +551,13 @@ func (s *Service) derive(t *transition, progress *workspace.SetupWizardProgress,
 		// deliberately kept: repair is not a first-time completion, and the
 		// blueprint's setup help task must not be reopened.
 		progress.State = workspace.SetupWizardStateNeedsAttention
+	case progress.WasMigrated() && configuredBefore(steps, readiness):
+		// A backfilled workspace has no completion timestamp — it was set up
+		// before anything recorded one. Its evidence of prior setup is what the
+		// adapters report: a revoked permission or a failing domain call, neither
+		// of which an untouched workspace can produce. Calling that "unfinished
+		// setup" would tell someone to configure what they already configured.
+		progress.State = workspace.SetupWizardStateNeedsAttention
 	case hasActivity(progress):
 		progress.State = workspace.SetupWizardStateInProgress
 	default:
@@ -616,8 +635,13 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 	// regressed is deliberately excluded: `needs_attention` is an invitation to
 	// repair, not a dialog that ambushes the user for something that was
 	// working when they last looked.
+	// A backfilled workspace is excluded for the same reason: the user did not
+	// create it just now and did not ask to reconfigure it. It gets the durable
+	// banner — visible, dismissible, theirs to act on — rather than a dialog
+	// over whatever they actually opened the workspace to do.
 	status.AutoOpen = status.State != workspace.SetupWizardStateReady &&
 		status.State != workspace.SetupWizardStateNeedsAttention &&
+		!progress.WasMigrated() &&
 		!progress.HasBeenOpened() &&
 		!progress.IsDismissed()
 

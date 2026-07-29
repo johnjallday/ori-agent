@@ -257,3 +257,36 @@ func TestSetupAdapter_BlockersDoNotInheritTheResolversModeWording(t *testing.T) 
 		t.Errorf("the summary must still name the blocker: %q", summary)
 	}
 }
+
+// TestSetupAdapter_AnAlreadyAssistedWorkspaceNeedsNoAnswer covers the workspaces
+// that existed before this wizard did. Someone who installed the plugin,
+// attached it, assigned a compatible agent, and granted both permissions has
+// already answered the question this step asks; making them answer it again
+// would be the migration talking, not a real choice.
+func TestSetupAdapter_AnAlreadyAssistedWorkspaceNeedsNoAnswer(t *testing.T) {
+	fullyReady := Readiness{Identified: true, Status: StatusOriReady}
+	nothing := reaperStep(workspace.SetupStepKindPluginReadiness, "")
+
+	if mode := effectiveMode(fullyReady, nothing); mode != ModeOriAssisted {
+		t.Fatalf("effectiveMode = %q, want the mode the workspace demonstrably took", mode)
+	}
+	if out := modeReadiness(fullyReady, effectiveMode(fullyReady, nothing)); !out.Ready {
+		t.Fatalf("an already-assisted workspace is not asked to choose: %+v", out)
+	}
+	if out := overallReadiness(fullyReady, effectiveMode(fullyReady, nothing)); !out.Ready {
+		t.Fatalf("its prerequisites are in place, so setup is finished: %+v", out)
+	}
+
+	// Everything short of that stays a real question: no plugin is equally
+	// consistent with "chose file-only" and "never finished", and inferring
+	// either would put words in the user's mouth.
+	for _, status := range []Status{StatusPluginMissing, StatusPluginDisabled, StatusPluginDetached, StatusCLIAgentRequired, StatusNativeCLIAccessRequired} {
+		readiness := Readiness{Identified: true, Status: status}
+		if mode := effectiveMode(readiness, nothing); mode != "" {
+			t.Errorf("%s inferred %q; only full readiness is evidence", status, mode)
+		}
+		if modeReadiness(readiness, effectiveMode(readiness, nothing)).Ready {
+			t.Errorf("%s must still ask the user to choose", status)
+		}
+	}
+}

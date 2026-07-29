@@ -45,6 +45,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
@@ -609,6 +610,7 @@ func (b *ServerBuilder) wireSetupWizard() {
 		}
 	}
 	service := setupwizard.NewService(folders, registry)
+	service.SetBlueprintLookup(b.blueprintWizardLookup())
 	b.setupWizardService = service
 	b.setupWizardHandler = setupwizardhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 
@@ -620,6 +622,38 @@ func (b *ServerBuilder) wireSetupWizard() {
 		service.SetCompletionHook(func(_ context.Context, workspaceID string) {
 			sessionHandler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
 		})
+	}
+}
+
+// blueprintWizardLookup resolves a blueprint by the template ID a workspace
+// recorded, for backfilling workspaces that predate their blueprint's wizard.
+//
+// It reads the template library at lookup time rather than caching it, because
+// the library is editable at runtime and a stale cache would backfill a wizard
+// the blueprint no longer declares. The read happens once per workspace — the
+// snapshot is written into the workspace and never re-read — so the cost is
+// paid on one page load, not on every one.
+func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
+	return func(templateID string) (setupwizard.Blueprint, bool) {
+		root := resolveTemplatesRoot(b.configManager)
+		if strings.TrimSpace(root) == "" {
+			return setupwizard.Blueprint{}, false
+		}
+		tpl, err := projecttemplates.FindLibraryTemplate(root, templateID)
+		if err != nil || !tpl.HasSetupWizard() || tpl.HasInvalidSetupWizard() {
+			return setupwizard.Blueprint{}, false
+		}
+		return setupwizard.Blueprint{
+			ID:                     tpl.ID,
+			Name:                   tpl.Name,
+			Version:                tpl.BuiltinVersion,
+			Wizard:                 tpl.SetupWizard,
+			DirectoryRequirements:  tpl.DirectoryRequirements,
+			AutomationRecipes:      tpl.AutomationRecipes,
+			CapabilityRequirements: tpl.CapabilityRequirements,
+			Plugins:                tpl.Tools.Plugins,
+			PluginSources:          tpl.Tools.PluginSources,
+		}, true
 	}
 }
 

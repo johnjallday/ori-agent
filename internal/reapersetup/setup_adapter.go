@@ -76,9 +76,9 @@ func (a *SetupAdapter) Evaluate(_ context.Context, req setupwizard.StepRequest) 
 	}
 	switch req.Step.Kind {
 	case workspace.SetupStepKindPluginReadiness:
-		return modeReadiness(readiness, req.SelectedOption), nil
+		return modeReadiness(readiness, effectiveMode(readiness, req)), nil
 	default:
-		return overallReadiness(readiness, chosenMode(req)), nil
+		return overallReadiness(readiness, effectiveMode(readiness, req)), nil
 	}
 }
 
@@ -95,6 +95,25 @@ func chosenMode(req setupwizard.StepRequest) string {
 		if isMode(selected) {
 			return selected
 		}
+	}
+	return ""
+}
+
+// effectiveMode is chosenMode plus the one inference that is not a guess.
+//
+// A workspace that predates this wizard recorded no answer, and asking someone
+// who wired up the plugin, the agent, and both permissions months ago to please
+// choose a mode is a migration artifact, not a question. Full Ori-assisted
+// readiness is only reachable by having taken that path deliberately, so it is
+// read as the answer. Anything short of it stays unanswered: a workspace with
+// no plugin is equally consistent with "chose file-only" and "never finished",
+// and those must not be conflated.
+func effectiveMode(readiness Readiness, req setupwizard.StepRequest) string {
+	if mode := chosenMode(req); mode != "" {
+		return mode
+	}
+	if readiness.Status == StatusOriReady {
+		return ModeOriAssisted
 	}
 	return ""
 }

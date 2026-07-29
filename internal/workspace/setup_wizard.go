@@ -400,6 +400,21 @@ type SetupWizardProgress struct {
 	// regression to needs_attention, which is why repair does not reopen the
 	// blueprint's setup help task.
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// MigratedAt is when this workspace was backfilled onto a wizard its
+	// blueprint gained after the workspace already existed. Nil for a workspace
+	// created with one.
+	//
+	// It is not cosmetic. A migrated workspace may have been set up by hand long
+	// ago, so its setup must not be presented as untouched, and the dialog must
+	// not open itself over work in progress on a workspace the user never asked
+	// to reconfigure.
+	MigratedAt *time.Time `json:"migrated_at,omitempty"`
+}
+
+// WasMigrated reports whether this progress record was created by backfilling
+// an existing workspace rather than by creating one from a wizard blueprint.
+func (p *SetupWizardProgress) WasMigrated() bool {
+	return p != nil && p.MigratedAt != nil
 }
 
 // Step returns the persisted state of the given step ID.

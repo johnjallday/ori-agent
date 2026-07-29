@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -463,6 +464,52 @@ func TestValidSetupWizardAdapters_CoversTheFourMigratedBlueprints(t *testing.T) 
 	for _, reject := range []string{"", "   ", "downloads", "internal/setupwizard", "../evil", "downloads_janitor2"} {
 		if isKnownSetupWizardAdapter(reject) {
 			t.Errorf("adapter %q must not be authorable", reject)
+		}
+	}
+}
+
+// TestShippedBlueprintsDeclareRunnableWizards is the cross-check none of the
+// per-blueprint tests can make: every adapter this build allows is actually
+// used by a shipped blueprint, and every shipped wizard names an adapter this
+// build implements. A typo on either side produces a workspace whose setup
+// nobody can finish, and it would otherwise only show up in a browser.
+func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	migrated := []string{"downloads-janitor", "calendar-ops", "email-ops", "reaper-song"}
+	used := map[string]bool{}
+	for _, id := range migrated {
+		tpl, err := FindLibraryTemplate(libDir, id)
+		if err != nil {
+			t.Fatalf("FindLibraryTemplate(%s): %v", id, err)
+		}
+		if !tpl.HasSetupWizard() {
+			t.Errorf("%s declares no setup wizard", id)
+			continue
+		}
+		if tpl.HasInvalidSetupWizard() {
+			t.Errorf("%s wizard does not parse: %v", id, tpl.SetupWizardError)
+			continue
+		}
+		if tpl.BuiltinVersion < 2 {
+			t.Errorf("%s builtin_version = %d; a blueprint that gained a wizard must bump it so existing installs refresh", id, tpl.BuiltinVersion)
+		}
+		for _, step := range tpl.SetupWizard.Steps {
+			if step.Adapter == "" {
+				continue
+			}
+			if !slices.Contains(ValidSetupWizardAdapters, step.Adapter) {
+				t.Errorf("%s step %q names unknown adapter %q", id, step.ID, step.Adapter)
+			}
+			used[step.Adapter] = true
+		}
+	}
+	for _, adapter := range ValidSetupWizardAdapters {
+		if !used[adapter] {
+			t.Errorf("adapter %q is allowed but no shipped blueprint uses it", adapter)
 		}
 	}
 }
