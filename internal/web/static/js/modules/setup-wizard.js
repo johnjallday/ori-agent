@@ -62,6 +62,7 @@
       bannerState: document.getElementById('setupWizardBannerState'),
       bannerDetail: document.getElementById('setupWizardBannerDetail'),
       bannerAction: document.getElementById('setupWizardBannerAction'),
+      chip: document.getElementById('setupWizardStatusChip'),
       icon: document.getElementById('setupWizardIcon'),
       blueprint: document.getElementById('setupWizardBlueprint'),
       title: document.getElementById('setupWizardTitle'),
@@ -322,6 +323,7 @@
 
   function renderBanner() {
     const { banner, bannerState, bannerDetail, bannerAction } = els();
+    renderChip();
     if (!banner) return;
     if (!status || !status.applicable || status.state === STATE_NOT_APPLICABLE) {
       banner.hidden = true;
@@ -335,6 +337,22 @@
     }
     if (bannerDetail) bannerDetail.textContent = presentation.detail;
     if (bannerAction) bannerAction.textContent = presentation.action;
+  }
+
+  // The station chip is the same status in the strip the Command/Map view
+  // relocates: one persisted state, rendered wherever the user happens to be.
+  function renderChip() {
+    const { chip } = els();
+    if (!chip) return;
+    if (!status || !status.applicable || status.state === STATE_NOT_APPLICABLE) {
+      chip.hidden = true;
+      return;
+    }
+    const presentation = bannerPresentation(status);
+    chip.hidden = false;
+    chip.textContent = `Setup: ${presentation.state}`;
+    chip.setAttribute('aria-label', `${presentation.state} — ${presentation.action}`);
+    chip.className = `workspace-detail-config-chip setup-wizard-chip is-${presentation.tone}`;
   }
 
   function bannerPresentation(current) {
@@ -632,6 +650,8 @@
     if (primary) primary.addEventListener('click', () => onPrimary());
     if (close) close.addEventListener('click', () => requestClose());
     if (bannerAction) bannerAction.addEventListener('click', () => openDialog());
+    const { chip } = els();
+    if (chip) chip.addEventListener('click', () => openDialog());
     if (dialog) {
       // Escape reaches us as a cancelable `cancel` event: refusing it while a
       // step is committing is what keeps a half-finished grant from being left

@@ -19,6 +19,7 @@ const ELEMENT_IDS = [
   'setupWizardBannerState',
   'setupWizardBannerDetail',
   'setupWizardBannerAction',
+  'setupWizardStatusChip',
   'setupWizardIcon',
   'setupWizardBlueprint',
   'setupWizardTitle',
@@ -238,6 +239,24 @@ test('a dismissed wizard does not auto-open, but its banner stays', async () => 
   assert.equal(elements.setupWizardBanner.hidden, false);
   assert.equal(elements.setupWizardBannerState.textContent, 'Setup required');
   assert.equal(elements.setupWizardBannerAction.textContent, 'Continue setup');
+});
+
+test('the station chip carries the same state as the banner', async () => {
+  const { api, elements } = load({
+    status: status({ state: 'needs_attention', auto_open: false })
+  });
+  await api.init();
+
+  assert.equal(elements.setupWizardStatusChip.hidden, false);
+  assert.equal(elements.setupWizardStatusChip.textContent, 'Setup: Needs attention');
+  assert.match(elements.setupWizardStatusChip.className, /is-attention/);
+
+  // A workspace with no wizard leaves the strip alone.
+  const { api: plain, elements: plainEls } = load({
+    status: { workspace_id: 'ws-1', applicable: false, state: 'not_applicable' }
+  });
+  await plain.init();
+  assert.equal(plainEls.setupWizardStatusChip.hidden, true);
 });
 
 test('a regressed workspace invites repair without ambushing the user', async () => {

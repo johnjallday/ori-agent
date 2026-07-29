@@ -123,6 +123,12 @@
                        relocates into Command view, so it also serves as the
                        Calendar station/entry in Command view (task 5.1). -->
                   <button type="button" class="workspace-detail-config-chip" id="calendarConsoleChip" hidden></button>
+                  <!-- Blueprint setup station. Hidden unless the workspace's
+                       blueprint declares a Setup Wizard; opens the same
+                       persisted dialog the banner does. Lives in the strip
+                       workspace-command.js relocates, so it is the setup entry
+                       in Command/Map view too. -->
+                  <button type="button" class="workspace-detail-config-chip" id="setupWizardStatusChip" hidden></button>
                 </div>
               </div>
               <button

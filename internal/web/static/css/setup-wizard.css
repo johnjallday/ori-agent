@@ -472,3 +472,19 @@
   font-size: 0.8rem;
   color: var(--text-secondary, #9aa0a6);
 }
+
+/* ---------- Station chip ---------- */
+
+/* The compact status in the workspace's configuration strip — the same state as
+   the banner, in the surface the Command/Map view relocates. */
+.setup-wizard-chip.is-required {
+  color: var(--warning-color, #b26a00);
+}
+
+.setup-wizard-chip.is-attention {
+  color: var(--danger-color, #c62828);
+}
+
+.setup-wizard-chip.is-ready {
+  color: var(--success-color, #2e7d32);
+}
