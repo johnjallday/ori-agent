@@ -1329,22 +1329,15 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	// `wt herd status` renders the same snapshot as `wt status`, expanded.
 	// Building a second inventory here is exactly how the two views used to
 	// disagree about progress, divergence, and agent state.
-	featureSlug := parsed.context.feature
-	if parsed.current || parsed.context.worktree != "" {
-		target := parsed.context.worktree
-		if parsed.current {
-			target = runtime.paths.RepoRoot
-		}
-		if resolved, ok := featureSlugForWorktree(target); ok {
-			featureSlug = resolved
-		}
-	}
+	//
+	// The selector is resolved against the collected snapshot rather than
+	// guessed from the directory name, so standing in the dev checkout shows
+	// the repository's work instead of asking for a feature named after it.
+	selectFor := statusSelector(runtime, parsed)
 
 	service := a.overviewService(runtime)
 	if parsed.watch {
-		return a.overviewWatch(ctx, service, runtime, overviewArgs{
-			feature: featureSlug, noColor: parsed.noColor, watch: true,
-		}, true)
+		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, true)
 	}
 
 	snapshot, err := service.Collect(ctx)
@@ -1356,7 +1349,12 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	// part of it, and it never reports semantic agent lifecycle state.
 	a.refreshDisplayMetadata(ctx, runtime, metadata)
 
-	if err := a.renderOverview(snapshot, true, featureSlug, opts.json, parsed.noColor); err != nil {
+	selector, err := selectFor(snapshot)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if err := a.renderOverview(snapshot, true, selector, opts.json, parsed.noColor); err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
@@ -1366,17 +1364,41 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	return 0
 }
 
-// featureSlugForWorktree resolves --current and --worktree onto a feature slug
-// so every selector narrows the shared snapshot the same way.
-func featureSlugForWorktree(path string) (string, bool) {
-	if strings.TrimSpace(path) == "" {
-		return "", false
+// selectorFunc resolves a selector against one collected snapshot. Watch
+// re-resolves per snapshot because a worktree can appear or be removed while
+// the board is open.
+type selectorFunc func(overview.Snapshot) (overview.Selector, error)
+
+// featureSelector narrows to one exact slug, failing when the repository has no
+// such feature. An explicit `--feature` is a claim about a name, so a name that
+// does not exist stays an error.
+func featureSelector(slug string) selectorFunc {
+	if strings.TrimSpace(slug) == "" {
+		return func(overview.Snapshot) (overview.Selector, error) { return overview.SelectAll(), nil }
 	}
-	base := strings.ToLower(filepath.Base(filepath.Clean(path)))
-	if planning.ValidSlug(base) {
-		return base, true
+	return func(snapshot overview.Snapshot) (overview.Selector, error) {
+		if _, ok := snapshot.Feature(slug); !ok {
+			return overview.Selector{}, fmt.Errorf("no feature named %q was found", slug)
+		}
+		return overview.SelectFeature(slug), nil
 	}
-	return "", false
+}
+
+// statusSelector builds the resolver for one status invocation.
+func statusSelector(runtime runtimeContext, parsed statusArgs) selectorFunc {
+	if parsed.context.feature != "" {
+		return featureSelector(parsed.context.feature)
+	}
+	target := parsed.context.worktree
+	if parsed.current {
+		target = runtime.paths.RepoRoot
+	}
+	if strings.TrimSpace(target) == "" {
+		return func(overview.Snapshot) (overview.Selector, error) { return overview.SelectAll(), nil }
+	}
+	return func(snapshot overview.Snapshot) (overview.Selector, error) {
+		return snapshot.ResolveSelector(target)
+	}
 }
 
 // refreshDisplayMetadata republishes Herdr's source-scoped display metadata.
@@ -1452,16 +1474,22 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 		return 1
 	}
 
+	selectFor := featureSelector(parsed.feature)
 	service := a.overviewService(runtime)
 	if parsed.watch {
-		return a.overviewWatch(ctx, service, runtime, parsed, false)
+		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, false)
 	}
 	snapshot, err := service.Collect(ctx)
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
-	if err := a.renderOverview(snapshot, false, parsed.feature, opts.json, parsed.noColor); err != nil {
+	selector, err := selectFor(snapshot)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if err := a.renderOverview(snapshot, false, selector, opts.json, parsed.noColor); err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
@@ -1489,38 +1517,39 @@ func (a *App) overviewService(runtime runtimeContext) *overview.Service {
 	})
 }
 
-// renderOverview writes one snapshot to the selected surface. Filtering to a
-// feature narrows the human view to its detail report; JSON always emits the
-// complete normalized snapshot, filtered to the requested feature.
-func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, featureSlug string, jsonOutput, noColor bool) error {
+// renderOverview writes one snapshot to the selected surface. Narrowing to a
+// feature renders its detail report; standing in a checkout that implements no
+// feature renders the repository's active work plus every unscoped agent. JSON
+// always emits the normalized snapshot, narrowed the same way the human view is.
+func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, selector overview.Selector, jsonOutput, noColor bool) error {
 	options := overview.RenderOptions{NoColor: !a.statusColorEnabled(noColor)}
-	if featureSlug != "" {
-		found, ok := snapshot.Feature(featureSlug)
+	narrowed := snapshot.Narrow(selector)
+	if selector.Kind == overview.SelectorFeature {
+		found, ok := narrowed.Feature(selector.Feature)
 		if !ok {
-			return fmt.Errorf("no feature named %q was found", featureSlug)
+			return fmt.Errorf("no feature named %q was found", selector.Feature)
 		}
-		snapshot.Features = []overview.Feature{found}
 		if jsonOutput {
-			a.writeResult(true, snapshot)
+			a.writeResult(true, narrowed)
 			return nil
 		}
-		return overview.RenderDetail(a.stdout, snapshot, found, options)
+		return overview.RenderDetail(a.stdout, narrowed, found, options)
 	}
 	if jsonOutput {
-		a.writeResult(true, snapshot)
+		a.writeResult(true, narrowed)
 		return nil
 	}
 	if expanded {
-		return overview.RenderExpanded(a.stdout, snapshot, options)
+		return overview.RenderExpanded(a.stdout, narrowed, options)
 	}
-	return overview.RenderCompact(a.stdout, snapshot, options)
+	return overview.RenderCompact(a.stdout, narrowed, options)
 }
 
 // overviewWatch renders the board on the fast local clock. The remote query is
 // separately rate limited inside the service, so a board left open all day
 // re-reads local files often and GitHub rarely.
-func (a *App) overviewWatch(ctx context.Context, service *overview.Service, runtime runtimeContext, parsed overviewArgs, expanded bool) int {
-	colorEnabled := a.statusColorEnabled(parsed.noColor)
+func (a *App) overviewWatch(ctx context.Context, service *overview.Service, selectFor selectorFunc, interval time.Duration, noColor, expanded bool) int {
+	colorEnabled := a.statusColorEnabled(noColor)
 	rendered := false
 	emit := func(snapshot overview.Snapshot) {
 		if rendered && colorEnabled {
@@ -1529,11 +1558,18 @@ func (a *App) overviewWatch(ctx context.Context, service *overview.Service, runt
 			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
 		}
 		rendered = true
-		if err := a.renderOverview(snapshot, expanded, parsed.feature, false, parsed.noColor); err != nil {
+		// The selector is re-resolved per snapshot: a worktree can be created
+		// or removed while the board is open.
+		selector, err := selectFor(snapshot)
+		if err != nil {
+			fmt.Fprintln(a.stdout, err.Error())
+			return
+		}
+		if err := a.renderOverview(snapshot, expanded, selector, false, noColor); err != nil {
 			fmt.Fprintln(a.stdout, err.Error())
 		}
 	}
-	if err := service.Watch(ctx, runtime.config.WatchPollInterval(), emit); err != nil {
+	if err := service.Watch(ctx, interval, emit); err != nil {
 		a.writeError(err, false)
 		return 1
 	}
@@ -2217,7 +2253,7 @@ func (a *App) pluginBoard(ctx context.Context, opts options) int {
 			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
 		}
 		rendered = true
-		if err := a.renderOverview(snapshot, true, "", opts.json, false); err != nil {
+		if err := a.renderOverview(snapshot, true, overview.SelectAll(), opts.json, false); err != nil {
 			fmt.Fprintln(a.stderr, err.Error())
 		}
 	}

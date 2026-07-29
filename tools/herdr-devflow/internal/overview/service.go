@@ -228,6 +228,16 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 	}
 
 	SortFeatures(features)
+
+	// The roster is derived after the features are ordered, so the flat
+	// all-agent view and the feature-first view present the same agents in the
+	// same sequence. Repository-level agents are appended here rather than
+	// collected separately: one observation, two groupings.
+	snapshot.Checkouts = BuildCheckouts(checkouts, agentEvidence)
+	roster, rosterFindings := BuildRoster(features, checkouts, agentEvidence)
+	snapshot.Agents = roster
+	snapshot.Findings = append(snapshot.Findings, rosterFindings...)
+
 	sortFindings(snapshot.Findings)
 	snapshot.Features = features
 	snapshot.Complete = requiredSourcesFresh(snapshot)

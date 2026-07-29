@@ -109,6 +109,9 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 		saved := state.Agents[role]
 		row := Agent{
 			Feature: feature.Slug,
+			// A saved role belongs to its feature whether or not a live agent
+			// currently answers for it.
+			Scope:   AgentScopeFeature,
 			Role:    identityField(saved.Role),
 			Managed: true,
 			Kind:    identityField(saved.Kind),
@@ -134,7 +137,7 @@ func AttachAgents(feature *Feature, evidence AgentEvidence) []Finding {
 		row.BindingCandidates = match.candidates
 		if match.live != nil {
 			row.Live = liveIdentity(*match.live)
-			row.MatchedPath = identityField(agentWorktree(*match.live, evidence.Workspaces))
+			row.MatchedPath = identityPath(agentWorktree(*match.live, evidence.Workspaces))
 			row.Status = AgentStatus(normalizeStatus(match.live.AgentStatus))
 			row.StatusAvailability = AvailabilityAvailable
 			claimed[match.live.PaneID] = struct{}{}
@@ -430,14 +433,15 @@ func discoverUnmanaged(feature *Feature, evidence AgentEvidence, claimed map[str
 		}
 		rows = append(rows, Agent{
 			Feature:            feature.Slug,
+			Scope:              AgentScopeFeature,
 			Managed:            false,
 			Kind:               identityField(candidate.Agent),
 			Live:               liveIdentity(candidate),
 			Status:             AgentStatus(normalizeStatus(candidate.AgentStatus)),
 			StatusAvailability: AvailabilityAvailable,
 			Binding:            BindingMissing,
-			BindingDetail:      "this agent has no bridge role for " + identityField(feature.Git.WorktreePath),
-			MatchedPath:        identityField(feature.Git.WorktreePath),
+			BindingDetail:      "this agent has no bridge role for " + identityPath(feature.Git.WorktreePath),
+			MatchedPath:        identityPath(feature.Git.WorktreePath),
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Live.Pane < rows[j].Live.Pane })
@@ -500,6 +504,7 @@ func savedIdentity(saved model.RoleAgent) Identity {
 		Workspace: identityField(saved.WorkspaceID),
 		Pane:      identityField(saved.PaneID),
 		Terminal:  identityField(saved.TerminalID),
+		Name:      identityField(saved.Name),
 		Session:   identityField(saved.NativeSession.Value),
 		Kind:      identityField(saved.Kind),
 		Source:    identityField(saved.NativeSession.Source),
@@ -511,6 +516,7 @@ func liveIdentity(live herdr.AgentInfo) Identity {
 		Workspace: identityField(live.WorkspaceID),
 		Pane:      identityField(live.PaneID),
 		Terminal:  identityField(live.TerminalID),
+		Name:      identityField(live.Name),
 		Kind:      identityField(live.Agent),
 	}
 	if live.AgentSession != nil {

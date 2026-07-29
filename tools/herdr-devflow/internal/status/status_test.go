@@ -22,13 +22,21 @@ type testStore struct{ state model.BridgeState }
 func (s testStore) Load() (model.BridgeState, error) { return s.state, nil }
 
 type fakeHerdr struct {
-	mu             sync.Mutex
-	agents         []herdr.AgentInfo
-	listErr        error
-	workspaceCalls []metadataCall
-	paneCalls      []metadataCall
-	viewParams     map[string]any
-	clearedSource  string
+	mu     sync.Mutex
+	agents []herdr.AgentInfo
+	// workspaces are the workspaces Herdr still has open. A saved record naming
+	// a workspace that is absent here is the deleted-workspace case.
+	workspaces       []herdr.WorkspaceInfo
+	workspaceListErr error
+	listErr          error
+	workspaceCalls   []metadataCall
+	paneCalls        []metadataCall
+	// workspaceErrors and paneErrors fail one target while leaving the rest
+	// healthy, which is how a deleted workspace behaves in the field.
+	workspaceErrors map[string]error
+	paneErrors      map[string]error
+	viewParams      map[string]any
+	clearedSource   string
 }
 
 type metadataCall struct {
@@ -45,16 +53,38 @@ func copyTokens(value map[string]string) map[string]string {
 	return result
 }
 
+// newFixtureHerdr answers with the fixture's agents and the workspaces those
+// agents live in. A Herdr that lists agents but no workspaces would be a
+// contradiction, and publication now reads both.
+func newFixtureHerdr(agents []herdr.AgentInfo) *fakeHerdr {
+	return &fakeHerdr{agents: agents, workspaces: []herdr.WorkspaceInfo{
+		{WorkspaceID: "w1", TabCount: 1},
+		{WorkspaceID: "w2", TabCount: 1},
+	}}
+}
+
 func (f *fakeHerdr) AgentListInfo(context.Context) ([]herdr.AgentInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]herdr.AgentInfo(nil), f.agents...), f.listErr
 }
 
+func (f *fakeHerdr) WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.workspaceListErr != nil {
+		return nil, f.workspaceListErr
+	}
+	return append([]herdr.WorkspaceInfo(nil), f.workspaces...), nil
+}
+
 func (f *fakeHerdr) ReportWorkspaceMetadata(_ context.Context, id, source string, tokens map[string]string) (json.RawMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.workspaceCalls = append(f.workspaceCalls, metadataCall{id: id, source: source, tokens: copyTokens(tokens)})
+	if err, failed := f.workspaceErrors[id]; failed {
+		return nil, err
+	}
 	return json.RawMessage(`{"type":"workspace_metadata"}`), nil
 }
 
@@ -62,6 +92,9 @@ func (f *fakeHerdr) ReportPaneMetadata(_ context.Context, id, source string, tok
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.paneCalls = append(f.paneCalls, metadataCall{id: id, source: source, tokens: copyTokens(tokens)})
+	if err, failed := f.paneErrors[id]; failed {
+		return nil, err
+	}
 	return json.RawMessage(`{"type":"pane_metadata"}`), nil
 }
 
@@ -91,7 +124,7 @@ func (f fakeGit) Inspect(_ context.Context, path string) (GitState, error) {
 func TestSnapshotKeepsObservedStateSeparateFromTaskAndGitHints(t *testing.T) {
 	now := time.Date(2026, time.July, 23, 16, 0, 0, 0, time.UTC)
 	state, agents, paths := fixtureState(t, now)
-	client := &fakeHerdr{agents: agents}
+	client := newFixtureHerdr(agents)
 	service := &Service{Store: testStore{state: state}, Client: client, Git: fakeGit{states: map[string]GitState{paths["alpha"]: {Dirty: true, Ahead: 2}, paths["beta"]: {Dirty: false}}}, Now: func() time.Time { return now }}
 
 	snapshot, err := service.Snapshot(context.Background(), Options{})
@@ -139,7 +172,7 @@ func TestSnapshotKeepsAFailedScheduleVisibleWhenNothingIsPending(t *testing.T) {
 		"sch-failed":    {ID: "sch-failed", DueAt: now.Add(-time.Hour), State: model.ScheduleFailed, UpdatedAt: now.Add(-30 * time.Minute)},
 	}
 	state.Features["repo:alpha"] = alpha
-	service := &Service{Store: testStore{state: state}, Client: &fakeHerdr{agents: agents}, Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
+	service := &Service{Store: testStore{state: state}, Client: newFixtureHerdr(agents), Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
 	snapshot, err := service.Snapshot(context.Background(), Options{FeatureName: "alpha"})
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +185,7 @@ func TestSnapshotKeepsAFailedScheduleVisibleWhenNothingIsPending(t *testing.T) {
 func TestMetadataAndViewStaySourceScoped(t *testing.T) {
 	now := time.Date(2026, time.July, 23, 16, 0, 0, 0, time.UTC)
 	state, agents, paths := fixtureState(t, now)
-	client := &fakeHerdr{agents: agents}
+	client := newFixtureHerdr(agents)
 	service := &Service{Store: testStore{state: state}, Client: client, SourceID: "ori.devflow", ViewSource: "plugin:ori.devflow", Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
 	snapshot, err := service.Snapshot(context.Background(), Options{})
 	if err != nil {
@@ -187,7 +220,7 @@ func TestMetadataUsesThePersistedSourceForEachManagedFeature(t *testing.T) {
 	beta := state.Features["repo:beta"]
 	beta.SourceID = "team.beta"
 	state.Features["repo:beta"] = beta
-	client := &fakeHerdr{agents: agents}
+	client := newFixtureHerdr(agents)
 	service := &Service{Store: testStore{state: state}, Client: client, SourceID: "ori.devflow", Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
 	snapshot, err := service.Snapshot(context.Background(), Options{})
 	if err != nil {
@@ -212,7 +245,7 @@ func TestMetadataRespectsPerFeatureOptOut(t *testing.T) {
 	alpha := state.Features["repo:alpha"]
 	alpha.MetadataEnabled = &disabled
 	state.Features["repo:alpha"] = alpha
-	client := &fakeHerdr{agents: agents}
+	client := newFixtureHerdr(agents)
 	service := &Service{Store: testStore{state: state}, Client: client, Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
 	snapshot, err := service.Snapshot(context.Background(), Options{})
 	if err != nil {
@@ -248,6 +281,83 @@ func TestMetadataSkipsAClosedWorkspaceWhoseSavedAgentsAreMissing(t *testing.T) {
 	}
 }
 
+// TestMetadataIsolatesADeletedWorkspaceFromHealthyTargets is the reported
+// failure: a legacy workspace-backed feature record whose Herdr workspace was
+// deleted has no agent rows at all, so the closed-workspace guard never sees
+// it. Publication reaches that dead workspace first, Herdr answers "workspace
+// w12 not found", and every healthy live agent after it is left with stale
+// board tokens. FR12, FR14.
+func TestMetadataIsolatesADeletedWorkspaceFromHealthyTargets(t *testing.T) {
+	client := &fakeHerdr{workspaceErrors: map[string]error{
+		"w12": &model.StageError{Code: model.ErrHerdrUnavailable, Message: "workspace w12 not found"},
+	}}
+	live := herdr.AgentInfo{PaneID: "w-managed:p1"}
+	service := &Service{Client: client, SourceID: "ori.devflow"}
+	snapshot := Snapshot{
+		Features: []FeatureSnapshot{
+			// Sorted first, exactly as the real snapshot orders it by name.
+			{Feature: model.Feature{Name: "archived-feature"}, WorkspaceID: "w12", MetadataEnabled: true},
+			{
+				Feature:     model.Feature{RepositoryID: "repo", Name: "managed-feature", Branch: "feature/managed-feature"},
+				WorkspaceID: "w-managed", TabID: "w-managed:t1", RootPaneID: "w-managed:p1", MetadataEnabled: true,
+			},
+		},
+		Rows: []AgentRow{{Feature: "managed-feature", Role: "builder", WorkspaceID: "w-managed", Live: &live}},
+	}
+
+	err := service.RehydrateMetadata(context.Background(), snapshot)
+	if err == nil {
+		t.Fatal("a failed publication was reported as success")
+	}
+	var published []string
+	for _, call := range client.paneCalls {
+		published = append(published, call.id)
+	}
+	if len(published) != 2 || published[0] != "w-managed:p1" || published[1] != "w-managed:p1" {
+		t.Fatalf("pane metadata calls = %v, want the healthy feature pane and its agent pane published despite the dead workspace", published)
+	}
+}
+
+// TestMetadataSkipsAWorkspaceHerdrNoLongerHas is the stronger half of FR13:
+// once Herdr has answered which workspaces are open, a saved record naming one
+// that is gone is skipped rather than attempted and failed.
+func TestMetadataSkipsAWorkspaceHerdrNoLongerHas(t *testing.T) {
+	client := &fakeHerdr{}
+	service := &Service{Client: client, SourceID: "ori.devflow"}
+	snapshot := Snapshot{
+		LiveSurfacesKnown: true,
+		LiveWorkspaces:    []string{"w-managed"},
+		Features: []FeatureSnapshot{
+			{Feature: model.Feature{Name: "archived-feature"}, WorkspaceID: "w12", MetadataEnabled: true},
+			{Feature: model.Feature{Name: "managed-feature"}, WorkspaceID: "w-managed", MetadataEnabled: true},
+		},
+	}
+	if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
+		t.Fatalf("skipping a closed workspace should not be an error: %v", err)
+	}
+	if len(client.workspaceCalls) != 1 || client.workspaceCalls[0].id != "w-managed" {
+		t.Fatalf("workspace metadata calls = %#v, want only the workspace Herdr still has", client.workspaceCalls)
+	}
+}
+
+// TestMetadataStillPublishesWhenWorkspaceLivenessIsUnknown keeps a Herdr that
+// cannot answer the workspace question from silently suppressing every update.
+func TestMetadataStillPublishesWhenWorkspaceLivenessIsUnknown(t *testing.T) {
+	client := &fakeHerdr{}
+	service := &Service{Client: client, SourceID: "ori.devflow"}
+	snapshot := Snapshot{
+		Features: []FeatureSnapshot{
+			{Feature: model.Feature{Name: "managed-feature"}, WorkspaceID: "w-managed", MetadataEnabled: true},
+		},
+	}
+	if err := service.RehydrateMetadata(context.Background(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.workspaceCalls) != 1 {
+		t.Fatalf("workspace metadata calls = %#v, want the update attempted", client.workspaceCalls)
+	}
+}
+
 func TestFeatureTokensClearAResolvedContinuation(t *testing.T) {
 	tokens := featureTokens(FeatureSnapshot{Feature: model.Feature{RepositoryID: "repo", Name: "bridge", Branch: "feature/bridge"}, Task: tasklist.Progress{Exists: true, Total: 1, Completed: 1, Next: "All checklist items are marked complete"}})
 	if value, found := tokens["next_schedule"]; !found || value != "" {
@@ -271,7 +381,7 @@ func TestRenderHumanHonorsColorAndSanitizesTaskText(t *testing.T) {
 func TestWatchUsesEventRefreshAndPollingFallback(t *testing.T) {
 	now := time.Now().UTC()
 	state, agents, paths := fixtureState(t, now)
-	client := &fakeHerdr{agents: agents}
+	client := newFixtureHerdr(agents)
 	stream := &testStream{events: make(chan error, 1)}
 	service := &Service{Store: testStore{state: state}, Client: client, Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Subscribe: func(context.Context, []map[string]any) (EventStream, error) { return stream, nil }, WatchPollInterval: 5 * time.Millisecond}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -305,7 +415,7 @@ func TestWatchUsesEventRefreshAndPollingFallback(t *testing.T) {
 func TestOverlappingStatusHooksKeepMetadataAndViewsSourceScoped(t *testing.T) {
 	now := time.Now().UTC()
 	state, agents, paths := fixtureState(t, now)
-	client := &fakeHerdr{agents: agents}
+	client := newFixtureHerdr(agents)
 	service := &Service{Store: testStore{state: state}, Client: client, SourceID: "ori.devflow", ViewSource: "plugin:ori.devflow", Git: fakeGit{states: map[string]GitState{paths["alpha"]: {}, paths["beta"]: {}}}, Now: func() time.Time { return now }}
 	snapshot, err := service.Snapshot(context.Background(), Options{})
 	if err != nil {

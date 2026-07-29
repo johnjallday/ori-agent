@@ -261,3 +261,70 @@ func TestListCheckoutsUsesFixedArgumentVector(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckoutForResolvesCanonicalPathsNotDirectoryNames(t *testing.T) {
+	repo := newFakeRepo(t)
+	main := repo.source(t, "ori-agent")
+	dev := repo.linked(t, "ori-agent-dev")
+	feature := repo.linked(t, "downloads-janitor")
+
+	inventory := listFor(t, repo, porcelain(
+		entry(main, "aaa", "main"),
+		entry(dev, "bbb", "dev"),
+		entry(feature, "ccc", "feature/downloads-janitor"),
+	))
+
+	cases := []struct {
+		name string
+		path string
+		want string
+		slug string
+	}{
+		{name: "the dev checkout itself", path: dev, want: dev},
+		{name: "a directory inside the dev checkout", path: filepath.Join(dev, "tasks"), want: dev},
+		{name: "a feature worktree", path: feature, want: feature, slug: "downloads-janitor"},
+		{name: "the source checkout", path: main, want: main},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			checkout, found := inventory.CheckoutFor(testCase.path)
+			if !found {
+				t.Fatalf("CheckoutFor(%q) found nothing", testCase.path)
+			}
+			if checkout.Path != testCase.want {
+				t.Fatalf("CheckoutFor(%q) = %q, want %q", testCase.path, checkout.Path, testCase.want)
+			}
+			// The dev checkout's basename is a valid slug shape. Resolving by
+			// path must never hand back a feature for it.
+			if checkout.Slug != testCase.slug {
+				t.Fatalf("CheckoutFor(%q) slug = %q, want %q", testCase.path, checkout.Slug, testCase.slug)
+			}
+		})
+	}
+
+	if _, found := inventory.CheckoutFor(filepath.Join(repo.root, "elsewhere")); found {
+		t.Fatal("a path outside every checkout resolved to one")
+	}
+	if _, found := inventory.CheckoutFor(""); found {
+		t.Fatal("an empty path resolved to a checkout")
+	}
+}
+
+// TestCheckoutForPrefersTheDeepestContainingCheckout covers a repository whose
+// linked worktrees live inside the source checkout, where a shallow match would
+// attribute every feature agent to the source.
+func TestCheckoutForPrefersTheDeepestContainingCheckout(t *testing.T) {
+	repo := newFakeRepo(t)
+	main := repo.source(t, "ori-agent")
+	feature := repo.linked(t, filepath.Join("ori-agent", "worktrees", "downloads-janitor"))
+
+	inventory := listFor(t, repo, porcelain(
+		entry(main, "aaa", "main"),
+		entry(feature, "ccc", "feature/downloads-janitor"),
+	))
+
+	checkout, found := inventory.CheckoutFor(filepath.Join(feature, "tools"))
+	if !found || checkout.Path != feature || checkout.Slug != "downloads-janitor" {
+		t.Fatalf("CheckoutFor(nested) = %+v, %v; want the feature worktree", checkout, found)
+	}
+}

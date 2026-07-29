@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,10 @@ type Store interface {
 
 type Herdr interface {
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
+	// WorkspaceListInfo reports the workspaces Herdr currently has open. It is
+	// how publication tells a live surface from a workspace that was closed
+	// months ago and survives only in a saved bridge record.
+	WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error)
 	ReportWorkspaceMetadata(context.Context, string, string, map[string]string) (json.RawMessage, error)
 	ReportPaneMetadata(context.Context, string, string, map[string]string) (json.RawMessage, error)
 	SetAgentView(context.Context, map[string]any) (json.RawMessage, error)
@@ -80,6 +85,13 @@ type Snapshot struct {
 	Detail      string            `json:"detail,omitempty"`
 	Features    []FeatureSnapshot `json:"features"`
 	Rows        []AgentRow        `json:"rows"`
+	// LiveWorkspaces are the workspace IDs Herdr reported open at collection
+	// time, and LiveSurfacesKnown says whether that listing succeeded. Together
+	// they let publication skip a workspace that no longer exists instead of
+	// asking Herdr to label it. They are diagnostics for the write path, not
+	// part of the rendered snapshot.
+	LiveWorkspaces    []string `json:"-"`
+	LiveSurfacesKnown bool     `json:"-"`
 }
 
 type FeatureSnapshot struct {
@@ -137,6 +149,16 @@ func (s *Service) Snapshot(ctx context.Context, options Options) (Snapshot, erro
 	if liveErr != nil {
 		snapshot.Stale = true
 		snapshot.Detail = conciseLiveError(liveErr)
+	} else if workspaces, err := s.Client.WorkspaceListInfo(ctx); err == nil {
+		// Which workspaces are open is a separate question from which agents are
+		// running: a feature's tab can be open with no agent in it, and a saved
+		// record can name a workspace that was closed long ago.
+		snapshot.LiveSurfacesKnown = true
+		for _, workspace := range workspaces {
+			if workspace.WorkspaceID != "" {
+				snapshot.LiveWorkspaces = append(snapshot.LiveWorkspaces, workspace.WorkspaceID)
+			}
+		}
 	}
 
 	keys := make([]string, 0, len(bridgeState.Features))
@@ -214,6 +236,14 @@ func (s *Service) Snapshot(ctx context.Context, options Options) (Snapshot, erro
 // RehydrateMetadata reports bridge-owned display tokens only. It intentionally
 // does not use pane.report_agent, so Herdr integrations retain lifecycle
 // authority for semantic status.
+//
+// Publication is best-effort per target. A saved record can name a workspace
+// Herdr deleted months ago, and asking Herdr to label it fails — that failure
+// used to abort the whole refresh, so one historical record left every live
+// agent on the board showing stale progress. Each target is now attempted
+// independently, known-dead surfaces are skipped rather than attempted, and the
+// failures are summarized in the returned error instead of hiding the rest of
+// the work.
 func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) error {
 	if s.Client == nil {
 		return stageError("status metadata", model.ErrHerdrUnavailable, "the Herdr client is unavailable", "wt herd doctor", nil)
@@ -239,6 +269,32 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 			missingWorkspaces[row.WorkspaceID] = true
 		}
 	}
+	// Herdr's own workspace listing is stronger evidence than the agent rows: a
+	// record with no agent rows at all — the shape that broke publication — is
+	// invisible to the row-derived sets above.
+	openWorkspaces := make(map[string]bool, len(snapshot.LiveWorkspaces))
+	for _, id := range snapshot.LiveWorkspaces {
+		openWorkspaces[id] = true
+	}
+	closed := func(workspaceID string) bool {
+		if workspaceID == "" {
+			return false
+		}
+		if snapshot.LiveSurfacesKnown && !openWorkspaces[workspaceID] {
+			return true
+		}
+		return missingWorkspaces[workspaceID] && !liveWorkspaces[workspaceID]
+	}
+
+	var failures []string
+	record := func(target string, err error) {
+		var stage *model.StageError
+		detail := "Herdr rejected the update"
+		if errors.As(err, &stage) && stage.Message != "" {
+			detail = stage.Message
+		}
+		failures = append(failures, safeToken(target)+": "+safeToken(detail))
+	}
 
 	for _, feature := range snapshot.Features {
 		if !feature.MetadataEnabled {
@@ -248,7 +304,7 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 		// record, its workspace) before Git removes the worktree. Keep the saved
 		// state visible as missing, but do not push display metadata into a
 		// surface that is already gone.
-		if feature.WorkspaceID != "" && missingWorkspaces[feature.WorkspaceID] && !liveWorkspaces[feature.WorkspaceID] {
+		if closed(feature.WorkspaceID) {
 			continue
 		}
 		if feature.TabID != "" {
@@ -259,7 +315,7 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 				continue
 			}
 			if _, err := s.Client.ReportPaneMetadata(ctx, feature.RootPaneID, s.metadataSource(feature), featureTokens(feature)); err != nil {
-				return wrapHerdr("report feature status metadata", err)
+				record(feature.RootPaneID, err)
 			}
 			continue
 		}
@@ -271,7 +327,7 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 			continue
 		}
 		if _, err := s.Client.ReportWorkspaceMetadata(ctx, feature.WorkspaceID, s.metadataSource(feature), featureTokens(feature)); err != nil {
-			return wrapHerdr("report workspace status metadata", err)
+			record(feature.WorkspaceID, err)
 		}
 	}
 
@@ -284,10 +340,27 @@ func (s *Service) RehydrateMetadata(ctx context.Context, snapshot Snapshot) erro
 			continue
 		}
 		if _, err := s.Client.ReportPaneMetadata(ctx, row.Live.PaneID, s.metadataSource(feature), paneTokens(feature, row)); err != nil {
-			return wrapHerdr("report agent status metadata", err)
+			record(row.Live.PaneID, err)
 		}
 	}
-	return nil
+	if len(failures) == 0 {
+		return nil
+	}
+	return stageError("status metadata", model.ErrHerdrUnavailable,
+		"display metadata could not be published to "+strconv.Itoa(len(failures))+
+			" of Herdr's surfaces; every other surface was updated ("+joinBounded(failures)+")",
+		"wt herd doctor", nil)
+}
+
+// maxReportedFailures bounds the failure summary so a repository with many
+// stale records cannot produce an unreadable error line.
+const maxReportedFailures = 5
+
+func joinBounded(values []string) string {
+	if len(values) > maxReportedFailures {
+		values = append(values[:maxReportedFailures:maxReportedFailures], "…")
+	}
+	return strings.Join(values, "; ")
 }
 
 func (s *Service) ApplyManagedView(ctx context.Context) error {

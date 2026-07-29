@@ -132,6 +132,28 @@ func (i Inventory) Feature(slug string) ([]Checkout, bool) {
 	return checkouts, ok
 }
 
+// CheckoutFor resolves the checkout that contains path.
+//
+// Matching is by canonical path on directory boundaries, never by directory
+// name: a basename is not an identity, and treating one as a feature slug is
+// how the dev checkout came to be mistaken for a feature named after it.
+//
+// The deepest containing checkout wins. Linked worktrees normally live outside
+// the source checkout, but a repository that keeps them inside it would
+// otherwise attribute every feature agent to the source.
+func (i Inventory) CheckoutFor(path string) (Checkout, bool) {
+	best, found := Checkout{}, false
+	for _, checkout := range i.Checkouts {
+		if !Contains(checkout.Path, path) {
+			continue
+		}
+		if !found || len(checkout.Path) > len(best.Path) {
+			best, found = checkout, true
+		}
+	}
+	return best, found
+}
+
 // Slugs returns the discovered feature slugs in sorted order.
 func (i Inventory) Slugs() []string {
 	slugs := make([]string, 0, len(i.Features))

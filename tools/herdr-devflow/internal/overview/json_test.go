@@ -153,3 +153,118 @@ func TestJSONOmitsEmptyOptionalStructsButKeepsRequiredState(t *testing.T) {
 		}
 	}
 }
+
+// rosterAgent finds one agent in the encoded roster by pane.
+func rosterAgent(t *testing.T, decoded map[string]any, pane string) map[string]any {
+	t.Helper()
+	agents, ok := decoded["agents"].([]any)
+	if !ok {
+		t.Fatalf("payload carried no agent roster: %v", decoded)
+	}
+	for _, entry := range agents {
+		agent, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatalf("agent was not an object: %v", entry)
+		}
+		live, _ := agent["live"].(map[string]any)
+		saved, _ := agent["saved"].(map[string]any)
+		if (live != nil && live["pane"] == pane) || (saved != nil && saved["pane"] == pane) {
+			return agent
+		}
+	}
+	t.Fatalf("no agent with pane %q in %v", pane, agents)
+	return nil
+}
+
+// TestJSONCarriesTheWholeAgentRoster locks in the contract an Overnight Run
+// selector consumes: every agent, its scope, kind, activity, worktree, feature,
+// eligibility, and reason, without parsing terminal output. FR15.
+func TestJSONCarriesTheWholeAgentRoster(t *testing.T) {
+	decoded := decode(t, newHerdScenario(t).snapshot(t))
+
+	managed := rosterAgent(t, decoded, "w-managed:p1")
+	for field, want := range map[string]any{
+		"feature": scenarioManagedFeature,
+		"scope":   string(AgentScopeFeature),
+		"managed": true,
+		"kind":    claudeKind,
+		"status":  string(AgentIdle),
+		"binding": string(BindingExact),
+	} {
+		if managed[field] != want {
+			t.Fatalf("managed agent %q = %v, want %v", field, managed[field], want)
+		}
+	}
+	if managed["matched_path"] == nil || managed["matched_path"] == "" {
+		t.Fatalf("managed agent carried no worktree: %v", managed)
+	}
+	if _, present := managed["run"]; present {
+		t.Fatalf("an agent in no Overnight Run carried run membership: %v", managed["run"])
+	}
+	eligibility, ok := managed["eligibility"].(map[string]any)
+	if !ok {
+		t.Fatalf("managed agent carried no eligibility: %v", managed)
+	}
+	// The structural requirements hold, but Claude's readiness has not been
+	// established, so the honest answer is unverified — never eligible.
+	if eligibility["state"] != string(EligibilityUnverified) || eligibility["reason"] == "" {
+		t.Fatalf("eligibility = %v, want an unverified state with a reason", eligibility)
+	}
+
+	repository := rosterAgent(t, decoded, "w-dev:p1")
+	if repository["scope"] != string(AgentScopeRepository) || repository["feature"] != "" {
+		t.Fatalf("repository agent = %v, want repository scope and no feature", repository)
+	}
+	repositoryEligibility := repository["eligibility"].(map[string]any)
+	if repositoryEligibility["state"] != string(EligibilityIneligible) {
+		t.Fatalf("repository agent eligibility = %v, want ineligible", repositoryEligibility)
+	}
+
+	unplaced := rosterAgent(t, decoded, "w-shared:p1")
+	if unplaced["scope"] != "unknown" {
+		t.Fatalf("unplaced agent scope = %v, want the explicit \"unknown\" spelling", unplaced["scope"])
+	}
+}
+
+// TestJSONCarriesEveryCheckoutWithOccupancy proves a consumer can see the
+// repository's non-feature checkouts without inferring them from agent paths.
+func TestJSONCarriesEveryCheckoutWithOccupancy(t *testing.T) {
+	decoded := decode(t, newHerdScenario(t).snapshot(t))
+
+	checkouts, ok := decoded["checkouts"].([]any)
+	if !ok || len(checkouts) != 4 {
+		t.Fatalf("checkouts = %v, want all four working copies", decoded["checkouts"])
+	}
+	baselines := 0
+	for _, entry := range checkouts {
+		checkout := entry.(map[string]any)
+		if checkout["path"] == nil || checkout["path"] == "" {
+			t.Fatalf("checkout carried no path: %v", checkout)
+		}
+		if _, present := checkout["occupancy"]; !present {
+			t.Fatalf("checkout carried no occupancy: %v", checkout)
+		}
+		if checkout["baseline"] == true {
+			baselines++
+		}
+	}
+	if baselines != 2 {
+		t.Fatalf("baseline checkouts = %d, want the main source checkout and the dev worktree", baselines)
+	}
+}
+
+func TestJSONRoundTripsAgentScope(t *testing.T) {
+	for _, scope := range []AgentScope{AgentScopeFeature, AgentScopeRepository, AgentScopeUnknown} {
+		encoded, err := json.Marshal(scope)
+		if err != nil {
+			t.Fatalf("marshal %q: %v", scope, err)
+		}
+		var decoded AgentScope
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatalf("unmarshal %s: %v", encoded, err)
+		}
+		if decoded != scope {
+			t.Fatalf("round trip of %q produced %q", scope, decoded)
+		}
+	}
+}
