@@ -72,6 +72,48 @@ func findCalendarBinding(ws *agentworkspace.Workspace) (*agentworkspace.MCPBindi
 	return nil, false
 }
 
+// derivedSetup is the part of the setup picture that does not depend on the
+// requesting user: the workspace's binding, the connector's runtime status, and
+// the state those reduce to.
+type derivedSetup struct {
+	state        calendar.SetupState
+	binding      *agentworkspace.MCPBinding
+	connector    *connectorStatus
+	settings     calendar.BindingSettings
+	mappingValid bool
+}
+
+// deriveSetupState computes the workspace's Calendar Ops setup state.
+//
+// It is factored out of buildStateResponse so the setup card, the Setup Wizard
+// adapter, and anything else asking "where is this workspace up to?" get the
+// same answer from the same code. A second derivation would be a second state
+// machine, and the two would disagree the first time one of them was updated.
+func (h *Handler) deriveSetupState(ws *agentworkspace.Workspace) derivedSetup {
+	binding, hasBinding := findCalendarBinding(ws)
+	in := calendar.SetupStateInput{HasBinding: hasBinding}
+	out := derivedSetup{}
+	if hasBinding {
+		out.binding = binding
+		out.settings = calendar.ReadBindingSettings(binding.Config)
+
+		status := h.connectorStatusFn(binding.ServerName)
+		out.connector = &status
+		in.ConnectorPresent = status.Present
+		in.Connected = status.Connected
+		in.AuthRequired = status.AuthRequired
+		in.Degraded = status.Degraded
+
+		if mapping, ok := binding.FindCapabilityMapping(calendar.CapabilityKey); ok {
+			out.mappingValid = calendar.ValidateMapping(mapping) == nil
+		}
+		in.MappingValid = out.mappingValid
+		in.Validated = out.settings.Validated
+	}
+	out.state = calendar.DeriveSetupState(in)
+	return out
+}
+
 // buildStateResponse assembles the full setup-state view: the derived
 // SetupState, the current binding/connector/settings, the shipped presets
 // (and whether each is already configured), existing MCP servers the user
@@ -97,37 +139,20 @@ func (h *Handler) buildStateResponse(ctx context.Context, ws *agentworkspace.Wor
 	resp.PresetAdded = presetAdded
 	resp.ExistingConnectors = h.existingConnectors()
 
-	binding, hasBinding := findCalendarBinding(ws)
-
-	in := calendar.SetupStateInput{HasBinding: hasBinding}
-	var settings calendar.BindingSettings
-	if hasBinding {
-		settings = calendar.ReadBindingSettings(binding.Config)
-
-		status := h.connectorStatusFn(binding.ServerName)
-		resp.Connector = &status
-		in.ConnectorPresent = status.Present
-		in.Connected = status.Connected
-		in.AuthRequired = status.AuthRequired
-		in.Degraded = status.Degraded
-
-		var mappingValid bool
-		if mapping, ok := binding.FindCapabilityMapping(calendar.CapabilityKey); ok {
-			mappingValid = calendar.ValidateMapping(mapping) == nil
-		}
-		in.MappingValid = mappingValid
-		in.Validated = settings.Validated
-
+	derived := h.deriveSetupState(ws)
+	if derived.binding != nil {
+		resp.Connector = derived.connector
 		resp.Binding = &bindingView{
-			ID:           binding.ID,
-			ServerName:   binding.ServerName,
-			HasMapping:   len(binding.CapabilityMappings) > 0,
-			MappingValid: mappingValid,
-			AllowedTools: binding.AllowedTools,
-			MappedOps:    mappedOperationNames(binding),
+			ID:           derived.binding.ID,
+			ServerName:   derived.binding.ServerName,
+			HasMapping:   len(derived.binding.CapabilityMappings) > 0,
+			MappingValid: derived.mappingValid,
+			AllowedTools: derived.binding.AllowedTools,
+			MappedOps:    mappedOperationNames(derived.binding),
 		}
 	}
-	resp.State = calendar.DeriveSetupState(in)
+	settings := derived.settings
+	resp.State = derived.state
 	resp.Settings = settingsView{
 		SelectedCalendarIDs: settings.SelectedCalendarIDs,
 		DisplayTimeZone:     settings.DisplayTimeZone,

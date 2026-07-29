@@ -585,6 +585,14 @@ func (b *ServerBuilder) wireSetupWizard() {
 	b.setupWizardRegistry = registry
 	// Domain adapters are registered from code, never from configuration: a
 	// manifest's adapter name is a key into this registry and nothing else.
+	if b.calendarOpsHandler != nil {
+		if folders, ok := b.workspaceStore.(calendarhttp.FolderStore); ok {
+			adapter := calendarhttp.NewSetupAdapter(b.calendarOpsHandler, folders)
+			if err := registry.Register(adapter); err != nil {
+				logger.Warn("Calendar Ops setup adapter not registered", logger.Fields{"error": err})
+			}
+		}
+	}
 	if b.downloadsJanitorService != nil {
 		adapter := downloadsjanitor.NewSetupAdapter(b.downloadsJanitorService)
 		b.downloadsJanitorSetupAdapter = adapter
