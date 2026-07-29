@@ -274,6 +274,18 @@ func normalizeDailyScanRecipe(key string, daily *DailyScanRecipe) *DailyScanReci
 	return &DailyScanRecipe{LocalTime: localTime, Timezone: strings.TrimSpace(daily.Timezone)}
 }
 
+// CapabilityRequirement returns the capability the template declares under the
+// given key, if any.
+func (t Template) CapabilityRequirement(key string) (CapabilityRequirement, bool) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, req := range t.CapabilityRequirements {
+		if req.Key == key {
+			return req, true
+		}
+	}
+	return CapabilityRequirement{}, false
+}
+
 // DirectoryRequirement returns the requirement with the given key, if declared.
 func (t Template) DirectoryRequirement(key string) (DirectoryRequirement, bool) {
 	key = strings.ToLower(strings.TrimSpace(key))

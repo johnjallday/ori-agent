@@ -713,6 +713,11 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 	// The orchestration task handler that consumes this is built later
 	// (Phase 21), so stash it rather than wiring a handler that is still nil.
 	b.emailReadiness = readiness
+	// The Setup Wizard's Email adapter is registered here, not with the other
+	// adapters, because this evaluator is what it reads and it does not exist
+	// until now. Registering it earlier would silently produce an adapter that
+	// reports "unavailable" forever.
+	b.wireEmailSetupAdapter(b.setupWizardRegistry)
 	if b.personalHQHandler != nil && b.personalHQService != nil {
 		linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
 		linker.readiness = readiness
