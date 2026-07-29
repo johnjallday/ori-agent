@@ -502,3 +502,27 @@ test('stable error codes map to actionable sentences', () => {
   assert.match(friendlyError({ code: 'unknown_step' }), /no longer part of/);
   assert.match(friendlyError({ message: 'boom' }), /boom/);
 });
+
+test('a step whose own control is the action does not offer a Continue that must fail', async () => {
+  const { api, elements } = load({ status: status({ state: 'in_progress' }) });
+  await api.init();
+  // A renderer that reports its own action is still outstanding.
+  api.registerStepRenderer('directory', {
+    render() {},
+    primaryLabel: () => 'Choose a folder to continue',
+    disablePrimary: () => true
+  });
+  api.open();
+
+  assert.equal(elements.setupWizardPrimary.textContent, 'Choose a folder to continue');
+  assert.equal(elements.setupWizardPrimary.disabled, true);
+
+  // Once the renderer says its action is done, the shell's Continue works again.
+  api.registerStepRenderer('directory', {
+    render() {},
+    primaryLabel: () => 'Continue',
+    disablePrimary: () => false
+  });
+  api.open();
+  assert.equal(elements.setupWizardPrimary.disabled, false);
+});

@@ -86,9 +86,39 @@
     return data;
   }
 
+  // stepCtx is set while this module is rendering into the shared Setup
+  // Wizard, and cleared when it renders its own card. The section builders
+  // below are shared by both surfaces, so busy state, re-rendering, and errors
+  // route through whichever one is actually on screen — the alternative is two
+  // copies of every section, which is how the two would drift apart.
+  let stepCtx = null;
+
   function setBusy(on) {
+    if (stepCtx) {
+      stepCtx.setBusy(on, on ? 'Working…' : '');
+      return;
+    }
     const { actions } = els();
     if (actions) actions.querySelectorAll('button, input').forEach(n => (n.disabled = on));
+  }
+
+  // rerender redraws the surface that is showing. In the wizard the shell owns
+  // that: asking it to refresh re-reads server-decided readiness and redraws
+  // the step, so a section can never advance the flow by itself.
+  function rerender() {
+    if (stepCtx) {
+      void stepCtx.refresh();
+      return;
+    }
+    render(lastState);
+  }
+
+  function reportError(message) {
+    if (stepCtx) {
+      stepCtx.setError(message);
+      return;
+    }
+    window.alert(message);
   }
 
   function stateLabel(state) {
@@ -215,6 +245,10 @@
             if (result.error === 'credentials_required') {
               authorizeMsg.textContent = 'Enter the client id and secret first.';
             } else if (result.authorize_url) {
+              // Authorization happens with the calendar provider, in another
+              // tab. Record where to come back to first, so returning to this
+              // workspace resumes the same step rather than the top of setup.
+              stepCtx?.rememberReturn?.();
               authorizeMsg.textContent = 'Opening the authorization page in a new tab…';
               window.open(result.authorize_url, '_blank', 'noopener');
             } else if (result.status === 'running') {
@@ -223,6 +257,7 @@
               authorizeMsg.textContent = 'Status: ' + (result.status || 'unknown');
             }
             await refresh();
+            rerender();
           } catch (err) {
             authorizeMsg.textContent = 'Could not start the connection: ' + err.message;
           } finally {
@@ -260,9 +295,9 @@
               if (s.arguments) ops[s.operation].arguments = s.arguments;
             });
             mappingText = JSON.stringify({ capability: 'calendar', operations: ops }, null, 2);
-            render(lastState);
+            rerender();
           } catch (err) {
-            window.alert('Could not discover tools: ' + err.message); // eslint-disable-line no-alert
+            reportError('Could not discover tools: ' + err.message);
           } finally {
             setBusy(false);
           }
@@ -319,7 +354,7 @@
               resultsBox.appendChild(el('div', { text: 'Could not list calendars: ' + result.calendars_error }));
             }
             lastCalendars = result.calendars || [];
-            render(lastState);
+            rerender();
           } catch (err) {
             resultsBox.appendChild(el('div', { text: 'Validation failed: ' + err.message }));
           } finally {
@@ -400,6 +435,7 @@
             });
             saveMsg.textContent = 'Saved.';
             await refresh();
+            rerender();
           } catch (err) {
             saveMsg.textContent = 'Could not save: ' + err.message;
           } finally {
@@ -418,8 +454,9 @@
       payload.workspace_id = wsId();
       await apiPost('/api/calendar-ops/setup/connector', payload);
       await refresh();
+      rerender();
     } catch (err) {
-      window.alert('Could not select this connector: ' + err.message); // eslint-disable-line no-alert
+      reportError('Could not select this connector: ' + err.message);
     } finally {
       setBusy(false);
     }
@@ -427,9 +464,23 @@
 
   // --- top-level render -------------------------------------------------
 
+  // setupWizardOwnsSetup reports whether this workspace's blueprint declares a
+  // Setup Wizard. When it does, the wizard is the setup surface and this card
+  // is only a status and a way in.
+  function setupWizardOwnsSetup() {
+    const status = window.SetupWizard?.getStatus?.();
+    return Boolean(status && status.applicable);
+  }
+
   function render(resp) {
     const { card, status, badge, body } = els();
     if (!card) return;
+    // Only the legacy card renders the sections itself; when a wizard owns
+    // setup this card is a status and a button. Clearing the step context here
+    // unconditionally would strand the wizard's own controls the moment a
+    // background refresh landed — their handlers would then act on a surface
+    // the user is not looking at.
+    if (!setupWizardOwnsSetup()) stepCtx = null;
     if (!resp || !resp.applicable) {
       card.hidden = true;
       return;
@@ -447,6 +498,11 @@
     if (!body) return;
     body.textContent = '';
 
+    if (setupWizardOwnsSetup()) {
+      renderWizardEntry(body, resp);
+      return;
+    }
+
     if (resp.state === 'connector_missing') {
       renderPresetSection(body, resp);
       return;
@@ -461,6 +517,102 @@
     if (resp.state === 'ready') {
       body.insertBefore(el('div', { text: 'Calendar Ops is ready.', style: 'font-weight:600;color:var(--success,#2e7d32);' }), body.firstChild);
     }
+  }
+
+  // renderWizardEntry is the compact stand-in for the full card: it says where
+  // setup stands and opens the wizard. It keeps no progress of its own, so
+  // there is one place a user can be part-way through setup.
+  function renderWizardEntry(body, resp) {
+    const setup = window.SetupWizard?.getStatus?.() || {};
+    const ready = setup.state === 'ready';
+    const needsAttention = setup.state === 'needs_attention' || resp.state === 'degraded';
+    body.appendChild(
+      el('div', {
+        text: ready
+          ? 'Calendar Ops is connected, mapped, and tested.'
+          : needsAttention
+            ? 'The calendar connection stopped working. Setup can walk you through reconnecting it.'
+            : 'Setup walks you through choosing a connector, signing in, mapping the operations Ori needs, and testing them.',
+        style: 'margin-bottom:8px;'
+      })
+    );
+    const row = el('div', { id: 'calendarOpsSetupOpenRow' });
+    row.appendChild(
+      button(ready ? 'View setup' : needsAttention ? 'Repair setup' : 'Continue setup', {
+        primary: !ready,
+        onClick: () => window.SetupWizard?.open?.()
+      })
+    );
+    body.appendChild(row);
+  }
+
+  // --- setup wizard steps ---------------------------------------------------
+  //
+  // The wizard's Calendar steps render the same sections this card used to,
+  // through the same endpoints. What changes hands is ownership: the shell asks
+  // the server where the workspace stands and decides when a step passes, and
+  // these renderers only supply the controls for the state it is in.
+
+  function ownsStep(step) {
+    return String(step?.adapter || '') === 'calendar_ops';
+  }
+
+  const connectStepRenderer = {
+    render(container, ctx) {
+      if (!ownsStep(ctx.step)) return;
+      stepCtx = ctx;
+      if (!lastState) {
+        void refresh();
+        return;
+      }
+      if (lastState.state === 'connector_missing') {
+        // Existing connectors are offered alongside the shipped preset, so a
+        // workspace can reuse one that is already authorized rather than
+        // creating a duplicate.
+        renderPresetSection(container, lastState);
+        return;
+      }
+      renderAuthSection(container, lastState);
+    },
+    primaryLabel(ctx) {
+      if (!ownsStep(ctx.step)) return '';
+      return lastState && lastState.state === 'connector_missing'
+        ? 'Choose a connector to continue'
+        : 'Check again';
+    },
+    disablePrimary(ctx) {
+      // Until a connector is chosen, this step's own buttons are the action.
+      return ownsStep(ctx.step) && Boolean(lastState) && lastState.state === 'connector_missing';
+    }
+  };
+
+  const configureStepRenderer = {
+    render(container, ctx) {
+      if (!ownsStep(ctx.step)) return;
+      stepCtx = ctx;
+      if (!lastState) {
+        void refresh();
+        return;
+      }
+      if (lastState.state === 'connector_missing' || lastState.state === 'auth_required') {
+        container.appendChild(
+          el('div', { text: 'Connect a calendar first — this step maps what Ori may read from it.' })
+        );
+        return;
+      }
+      renderMappingSection(container, lastState);
+      renderSaveSection(container, lastState);
+    },
+    primaryLabel(ctx) {
+      return ownsStep(ctx.step) ? 'Check again' : '';
+    }
+  };
+
+  function registerSetupSteps() {
+    const wizard = window.SetupWizard;
+    if (!wizard || typeof wizard.registerStepRenderer !== 'function') return;
+    wizard.registerStepRenderer('capability_connect', connectStepRenderer);
+    wizard.registerStepRenderer('capability_configure', configureStepRenderer);
   }
 
   async function refresh() {
@@ -518,5 +670,26 @@ function waitForWorkspaceId(onReady) {
     }
   }
 
-  window.CalendarOpsSetup = { init, refresh, render, _els: els };
+  registerSetupSteps();
+
+  // The card and the wizard show the same workspace: when setup changes, this
+  // module re-reads rather than showing what was true before.
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('ori:setup-status', () => {
+      if (wsId()) void refresh();
+    });
+  }
+
+  window.CalendarOpsSetup = {
+    init,
+    refresh,
+    render,
+    _els: els,
+    // The wizard step renderers, exposed so their content can be asserted
+    // without standing up the dialog.
+    _setupSteps: { connect: connectStepRenderer, configure: configureStepRenderer },
+    _setState: state => {
+      lastState = state;
+    }
+  };
 })();

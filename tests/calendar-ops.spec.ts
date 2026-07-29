@@ -184,6 +184,55 @@ test.describe.serial('Calendar Ops', () => {
     await expect(page.locator('#calendarConsoleBody')).toContainText(/no calendar connector is configured/i);
   });
 
+  test('the blueprint Setup Wizard owns Calendar setup and opens at the connect step', async ({
+    page,
+    request
+  }) => {
+    const freshId = await createCalendarOpsWorkspace(request, `Calendar Ops Wizard ${RUN_SUFFIX}`);
+    await page.goto(`/workspaces/${freshId}`);
+
+    // The wizard opens itself once, at the first thing this blueprint needs.
+    const dialog = page.locator('#setupWizardDialog');
+    await expect(dialog).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#setupWizardTitle')).toHaveText('Set up Calendar Ops');
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Connect your calendar');
+
+    // The connect step carries the connector choice, and states where signing
+    // in actually happens before sending anyone there.
+    const content = page.locator('#setupWizardStepContent');
+    await expect(content).toContainText('Choose a calendar connector');
+    await expect(page.locator('#setupWizardDisclosure')).toContainText('with your calendar provider');
+
+    // Dismissing leaves the workspace visibly unfinished and starts nothing.
+    await page.locator('#setupWizardClose').click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Setup required');
+
+    // The Calendar card is now a status and a way back in — not a second,
+    // parallel setup surface (FR-94).
+    await page.goto(`/workspaces/${freshId}?panel=calendar`);
+    const card = page.locator('#calendarOpsSetupBody');
+    if (await card.isVisible()) {
+      await expect(card).toContainText('Continue setup');
+      await expect(card).not.toContainText('Discover tools');
+    }
+
+    // Resuming returns to the same step rather than the top of setup.
+    await page.goto(`/workspaces/${freshId}`);
+    await expect(dialog).toBeHidden({ timeout: 15000 });
+    await page.locator('#setupWizardBannerAction').click();
+    await expect(dialog).toBeVisible();
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Connect your calendar');
+  });
+
+  test('an already-connected Calendar workspace is not asked to set up again', async ({ page }) => {
+    // readyWorkspaceId was connected and mapped through the API in beforeAll —
+    // the shape of a workspace that was set up before, or by someone else.
+    await page.goto(`/workspaces/${readyWorkspaceId}`);
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready', { timeout: 15000 });
+    await expect(page.locator('#setupWizardDialog')).toBeHidden();
+  });
+
   test('day view renders events grouped by day with conflict badges and a private-event redaction', async ({ page }) => {
     await page.goto(`/workspaces/${readyWorkspaceId}?panel=calendar`);
     const root = page.locator('#calendarConsoleRoot');

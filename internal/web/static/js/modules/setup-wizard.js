@@ -299,8 +299,22 @@
     }
     if (primary) {
       primary.textContent = primaryLabel(step);
-      primary.disabled = busy || !step;
+      // A step whose own control is the action — picking a folder, choosing a
+      // connector — says so instead of offering a Continue that can only fail.
+      primary.disabled = busy || !step || primaryBlocked(step);
     }
+  }
+
+  // primaryBlocked lets a renderer report that the shell's primary control
+  // cannot do anything useful yet. The renderer decides, because only it knows
+  // whether its own action has been taken.
+  function primaryBlocked(step) {
+    if (!step || isResolved(step)) return false;
+    const renderer = renderers.get(step.kind);
+    if (renderer && typeof renderer.disablePrimary === 'function') {
+      return Boolean(renderer.disablePrimary(rendererContext(step)));
+    }
+    return false;
   }
 
   function primaryLabel(step) {
@@ -722,7 +736,14 @@
       if (status && currentStep()?.kind === kind) renderStep();
     },
     // Exposed for tests and for domain modules that need the same vocabulary.
-    _internals: { STEP_MARKS, STEP_WORDS, bannerPresentation, primaryLabel, friendlyError }
+    _internals: {
+      STEP_MARKS,
+      STEP_WORDS,
+      bannerPresentation,
+      primaryLabel,
+      primaryBlocked,
+      friendlyError
+    }
   };
 
   window.SetupWizard = SetupWizard;

@@ -2152,6 +2152,9 @@
       // Until a folder exists there is nothing to approve; the step's own
       // button is the action.
       return chosenRoot() ? 'Continue' : 'Choose a folder to continue';
+    },
+    disablePrimary(ctx) {
+      return ownsStep(ctx.step) && !chosenRoot();
     }
   };
 
