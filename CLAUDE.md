@@ -302,6 +302,43 @@ lsof -ti :8765 | xargs kill
 PORT=9000 go run ./cmd/server
 ```
 
+## Shell Discipline (for AI agents)
+
+Most stalled tool calls in this repo come from command *shape*, not from missing
+permissions. Complex shell gets decomposed into fragments and re-prompted per
+fragment, and heredocs additionally trip a content-safety analyzer that no
+allowlist entry can pre-approve. Keep bash simple and the friction disappears.
+
+**Never write file content through bash.** Use the Write/Edit tools.
+- ❌ `cat > foo.js <<'EOF' ... EOF`, `cat >> foo.js <<'EOF' ... EOF`
+- ❌ `echo '...' > foo.js`, `printf ... > foo.js`
+- ✅ `Write` for a new/replaced file, `Edit` for a partial change
+
+Writes under `Projects/ori/**` are already blanket-allowed with
+`defaultMode: acceptEdits`, so the tools cost zero prompts while the heredoc
+equivalent is a guaranteed stop.
+
+**Never read file slices through bash.** Use `Read` with `offset`/`limit`.
+- ❌ `sed -n '1330,1420p' internal/foo/bar.go`, `head -80 f | tail -20`
+- ✅ `Read(file_path, offset: 1330, limit: 90)`
+
+`sed` is deliberately absent from the allowlist so both of the above stay
+friction-y. `awk`/`rg`/`grep` remain allowed for genuine stream filtering.
+
+**Wrap real multi-step shell in a checked-in script.** Compound one-liners with
+`for` / `if` / `&&` / `$(...)` fragment differently every time, so approving one
+never covers the next. A script is one stable token.
+- ❌ a 10-line inline `for`-loop pipeline
+- ✅ `scripts/thing.sh`, allowlisted once as `Bash(./scripts/thing.sh:*)`
+
+**Keep the allowlist generalizable.** Prefer commands that match a stable prefix
+(`kill:*`, `ps:*`, `staticcheck:*`) over ones baked around a PID, line number,
+or temp path — those can never match a second time and just bloat
+`.claude/settings.local.json`.
+
+**Do not use `pkill -f <pattern>`** to stop smoke servers; track the PID and
+`kill` it (see Smoke Testing above). `pkill` is intentionally not allowlisted.
+
 ## Code Conventions
 
 ### File Naming
