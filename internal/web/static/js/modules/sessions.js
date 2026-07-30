@@ -3630,6 +3630,9 @@ const sessionManager = {
     const api = window.CreateWorkspaceTeamDraft;
     if (api && this.teamDraft) api.resetDraft(this.teamDraft);
     else this.teamDraft = api ? api.createDraft() : null;
+    // Forget what was last announced so a reopened wizard announces its primary
+    // afresh rather than staying silent because the name happens to repeat.
+    this.announcedPrimaryName = '';
     this.templateAgentPlanRequestId += 1;
     if (this.templateAgentPlanTimer) {
       clearTimeout(this.templateAgentPlanTimer);
@@ -4248,13 +4251,15 @@ const sessionManager = {
     return Boolean(agent?.name) && String(agent?.source || 'user').toLowerCase() !== 'cli';
   },
 
+  // Whether the selected blueprint already contributes this agent.
+  //
+  // Delegates to the draft rather than re-deciding here: the draft is what
+  // actually refuses the add, so if the picker judged it differently it would
+  // show an enabled Add button that silently does nothing.
   templateAgentIsAlreadyIncluded(name) {
-    const key = this.existingAgentKey(name);
-    return (this.templateAgentPlan?.agents || []).some(
-      agent =>
-        String(agent?.action || '').toLowerCase() === 'reuse' &&
-        this.existingAgentKey(agent?.name) === key
-    );
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    return Boolean(draft && api && api.isBlueprintOwned(draft, name));
   },
 
   // Reloads the inline Your Agents picker. The panel is always present on Team,
@@ -4330,14 +4335,10 @@ const sessionManager = {
     status.textContent = matches.length
       ? `${matches.length} saved agent${matches.length === 1 ? '' : 's'}`
       : 'No matching saved agents.';
+    // No drag affordance: with the drop zone gone there is nothing to drop onto,
+    // and a draggable card would advertise an interaction that does nothing. Add
+    // is a button, so mouse and keyboard take the identical path.
     list.innerHTML = matches.map(agent => this.renderExistingAgentRosterCard(agent)).join('');
-    list.querySelectorAll('[draggable="true"]').forEach(card => {
-      card.addEventListener('dragstart', event => {
-        const name = card.dataset.existingAgentName || '';
-        event.dataTransfer?.setData('application/x-ori-agent-name', name);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
-      });
-    });
   },
 
   renderExistingAgentRosterCard(agent) {
@@ -4357,15 +4358,27 @@ const sessionManager = {
           ? 'Built-in CLI agents cannot be attached'
           : '';
     const workspaceCount = Number(agent?.workspace_count) || 0;
+    const label = selected
+      ? 'Added'
+      : alreadyIncluded
+        ? 'Included'
+        : attachable
+          ? 'Add'
+          : 'Unavailable';
+    // A disabled control's own label cannot explain itself, so the reason goes
+    // into the accessible name too — not only into the visible small print.
+    const accessibleName = reason
+      ? `${label} — ${name}: ${reason}`
+      : `Add ${name} to this workspace`;
     return `
-      <article class="workspace-existing-agent-card" ${attachable && !selected && !alreadyIncluded ? 'draggable="true"' : ''} data-existing-agent-name="${this.escapeHtml(name)}">
+      <article class="workspace-existing-agent-card" data-existing-agent-name="${this.escapeHtml(name)}">
         ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
         <div class="workspace-existing-agent-card-copy">
           <strong>${this.escapeHtml(name)}</strong>
           <span>${this.escapeHtml(agent?.model || 'Uses saved agent model')} · ${workspaceCount === 1 ? '1 workspace' : `${workspaceCount} workspaces`}</span>
           ${reason ? `<small>${this.escapeHtml(reason)}</small>` : ''}
         </div>
-        <button type="button" class="modern-btn modern-btn-secondary" data-existing-agent-add="${this.escapeHtml(name)}" ${disabled ? 'disabled' : ''} aria-label="Add ${this.escapeHtml(name)} to this workspace">${selected ? 'Added' : alreadyIncluded ? 'Included' : attachable ? 'Add' : 'Unavailable'}</button>
+        <button type="button" class="modern-btn modern-btn-secondary" data-existing-agent-add="${this.escapeHtml(name)}" ${disabled ? 'disabled' : ''} aria-label="${this.escapeHtml(accessibleName)}">${label}</button>
       </article>`;
   },
 

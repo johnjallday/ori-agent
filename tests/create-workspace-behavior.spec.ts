@@ -889,6 +889,191 @@ test('Advanced team options can exclude the blueprint team (FR48-FR50)', async (
   expect(payload?.entry_agent_name).toBe('Research Scout');
 });
 
+test('Your Agents searches, states why entries are unavailable, and needs no drag', async ({
+  page
+}) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        agents: [
+          { name: 'Research Scout', role: 'researcher', model: 'gpt-5.5', workspace_count: 2 },
+          { name: 'Data Miner', role: 'analyst', model: 'claude-opus-5', workspace_count: 1 },
+          { name: 'Blueprint Lead', role: 'orchestrator', model: 'gpt-5.5', workspace_count: 3 },
+          { name: 'Claude Code', role: 'cli', model: 'claude-opus-5', source: 'cli' }
+        ]
+      })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Blueprint Lead',
+        agents: [
+          { name: 'Blueprint Lead', action: 'reuse', entry_point: true, model_source: 'existing' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Picker WS');
+  await advanceToTeam(page);
+
+  const cards = page.locator('#existingAgentRosterList .workspace-existing-agent-card');
+  await expect(cards).toHaveCount(4);
+
+  // Each result shows name, model, and workspace count (FR60).
+  const scout = cards.filter({ hasText: 'Research Scout' });
+  await expect(scout).toContainText('gpt-5.5');
+  await expect(scout).toContainText('2 workspaces');
+
+  // Every non-addable entry says why, in text (FR62).
+  const included = cards.filter({ hasText: 'Blueprint Lead' });
+  await expect(included).toContainText('Already included by this blueprint');
+  await expect(included.locator('button')).toBeDisabled();
+  const cli = cards.filter({ hasText: 'Claude Code' });
+  await expect(cli).toContainText('Built-in CLI agents cannot be attached');
+  await expect(cli.locator('button')).toBeDisabled();
+  // The reason is in the accessible name too, since a disabled button's own
+  // label ("Included") cannot explain itself.
+  await expect(included.locator('button')).toHaveAccessibleName(
+    /Blueprint Lead: Already included by this blueprint/
+  );
+
+  // Adding flips the entry to a stated reason rather than silently doing nothing.
+  await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await expect(scout).toContainText('Added to this workspace');
+  await expect(scout.locator('button')).toBeDisabled();
+
+  // Search covers name, role, and model (FR59).
+  const search = page.locator('#existingAgentRosterSearch');
+  await search.fill('analyst');
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText('Data Miner');
+  await search.fill('claude-opus-5');
+  await expect(cards).toHaveCount(2);
+  await search.fill('nothing matches this');
+  await expect(page.locator('#existingAgentRosterStatus')).toHaveText('No matching saved agents.');
+  await search.fill('');
+
+  // Nothing in the picker advertises drag, because there is no drop target.
+  await expect(page.locator('#existingAgentRosterList [draggable="true"]')).toHaveCount(0);
+});
+
+test('Your Agents can be added and promoted by keyboard alone (FR61, FR101)', async ({ page }) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Blueprint Lead',
+        agents: [
+          { name: 'Blueprint Lead', action: 'reuse', entry_point: true, model_source: 'existing' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Keyboard WS');
+  await advanceToTeam(page);
+
+  await page.locator('[data-existing-agent-add="Research Scout"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(2);
+
+  await page.locator('[data-existing-agent-primary="Research Scout"]').focus();
+  await page.keyboard.press('Enter');
+
+  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
+  await expect(rows.nth(0)).toContainText('Research Scout');
+  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
+  // The previous primary stays attached, demoted (FR52).
+  await expect(rows.nth(1)).toContainText('Blueprint Lead');
+  await expect(rows.nth(1).locator('.workspace-team-badge')).toHaveText('Specialist');
+  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText(
+    'stays attached as a specialist'
+  );
+
+  // Removing by keyboard hands the primary slot back.
+  await page.locator('[data-existing-agent-remove="Research Scout"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText('Blueprint Lead');
+  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
+});
+
+test('a Your Agents failure stays advisory and offers Retry (FR65, FR66)', async ({ page }) => {
+  let attempts = 0;
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'roster backend down' })
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Blueprint Lead',
+        agents: [
+          { name: 'Blueprint Lead', action: 'reuse', entry_point: true, model_source: 'existing' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Advisory WS');
+  await advanceToTeam(page);
+
+  // The preconfigured blueprint team is unaffected and still reviewable.
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(1);
+  const issue = page.locator('#workspaceTeamIssues .workspace-team-issue');
+  await expect(issue).toHaveClass(/is-advisory/);
+  await expect(issue).toContainText('saved agents could not be loaded');
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(0);
+
+  // Retry recovers the picker in place.
+  await issue.locator('[data-team-recovery="retry-saved-roster"]').click();
+  await expect(page.locator('[data-existing-agent-add="Research Scout"]')).toBeVisible();
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue')).toHaveCount(0);
+});
+
 test('an agent-less team warns without blocking creation (FR55)', async ({ page }) => {
   await page.route('**/api/agents/dashboard/list**', async route => {
     await route.fulfill({
