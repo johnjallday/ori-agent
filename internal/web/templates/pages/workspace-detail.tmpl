@@ -68,6 +68,22 @@
             <div id="workspace-tools-panel-host" hidden></div>
           </section>
 
+          <!-- Built-in Workspace Capabilities. One card node, mounted on demand
+               by workspace-command.js into either the Tools modal or the Systems
+               rail (see mountSharedSurface) — both entry points therefore show
+               the same catalog rather than two implementations. Populated by
+               workspace-capabilities.js from the server's catalog response. -->
+          <section class="modern-card workspace-detail-tools-card mb-4" id="workspace-detail-capabilities-card" aria-labelledby="workspace-detail-capabilities-title">
+            <div class="workspace-detail-tools-head">
+              <div>
+                <div class="workspace-detail-goal-kicker">Built into Ori</div>
+                <h2 class="workspace-detail-tools-title" id="workspace-detail-capabilities-title">Capabilities</h2>
+                <p class="workspace-detail-tools-sub">Features you can add to this workspace. Unlike MCP servers, skills, and plugins, these are built into Ori and run as part of it.</p>
+              </div>
+            </div>
+            <div id="workspace-capabilities-list" class="ws-capability-list"></div>
+          </section>
+
           <style>
             .workspace-detail-tools-actions { display: flex; gap: 0.5rem; align-items: center; }
             .hq-email-setup-modal[hidden] { display: none; }
@@ -8803,6 +8819,7 @@
   <script defer src="/js/modules/reaper-readiness-panel.js"></script>
   <script defer src="/js/modules/setup-wizard.js"></script>
   <script defer src="/js/modules/downloads-janitor.js"></script>
+  <script defer src="/js/modules/workspace-capabilities.js"></script>
   <script defer src="/js/modules/calendar-ops-setup.js"></script>
   <script defer src="/js/modules/calendar-console.js"></script>
   <script defer src="/js/modules/sessions.js"></script>

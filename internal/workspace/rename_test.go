@@ -3,7 +3,114 @@ package workspace
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+// TestRenameWithSlug_PreservesInstalledCapabilities guards a non-obvious path:
+// RenameWithSlug persists s.cache[id], which is the METADATA-ONLY cache copy
+// (metadataCacheCopy detaches Messages/Tasks before cloning). A capability
+// install therefore survives a rename only because it stays in that lean copy.
+// If someone later trims more fields out of the metadata cache, this test fails
+// rather than silently uninstalling File Janitor on rename (PRD FR-144).
+//
+// Both branches are covered: the display-name-only rename (which writes the
+// cache copy directly and has no follow-up portable resync) and the
+// slug-changing rename (which moves the folder first).
+func TestRenameWithSlug_PreservesInstalledCapabilities(t *testing.T) {
+	install := InstalledCapability{
+		ID:          CapabilityFileJanitor,
+		Version:     1,
+		InstalledAt: time.Now(),
+		Source:      InstallSourceInPlace,
+	}
+
+	tests := []struct {
+		name     string
+		newName  string
+		wantSlug string
+	}{
+		{"display name only", "inbox", "inbox"},
+		{"slug changes", "Sorted Inbox", "sorted-inbox"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			st, err := NewFileStore(dir)
+			if err != nil {
+				t.Fatalf("NewFileStore: %v", err)
+			}
+
+			ws := newTestWorkspace("ws-rename-capability", "Inbox")
+			if _, err := ws.AddInstalledCapability(install); err != nil {
+				t.Fatalf("AddInstalledCapability: %v", err)
+			}
+			if err := st.Save(ws); err != nil {
+				t.Fatalf("Save: %v", err)
+			}
+
+			if _, err := st.RenameWithSlug(ws.ID, tc.newName, ""); err != nil {
+				t.Fatalf("RenameWithSlug: %v", err)
+			}
+
+			got, err := st.Get(ws.ID)
+			if err != nil {
+				t.Fatalf("Get after rename: %v", err)
+			}
+			if got.FolderSlug != tc.wantSlug {
+				t.Fatalf("slug = %q, want %q", got.FolderSlug, tc.wantSlug)
+			}
+			if !got.HasInstalledCapability(CapabilityFileJanitor) {
+				t.Fatalf("capability install lost by rename: %+v", got.GetInstalledCapabilities())
+			}
+		})
+	}
+}
+
+// TestRebindExistingFolder_PreservesInstalledCapabilitiesFromDisk covers the
+// sync-recreate path (sessionhttp's handleWorkspaceSync), which rebinds a folder
+// using a workspace built from the SQLite row. When that row predates the
+// installed_capabilities_json column it carries no installs, and rebinding must
+// take the canonical collection from the folder rather than write an erasure.
+func TestRebindExistingFolder_PreservesInstalledCapabilitiesFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	ws := newTestWorkspace("ws-rebind-capability", "Inbox")
+	if _, err := ws.AddInstalledCapability(InstalledCapability{
+		ID:          CapabilityFileJanitor,
+		Version:     1,
+		InstalledAt: time.Now(),
+		Source:      InstallSourceLegacyMigration,
+	}); err != nil {
+		t.Fatalf("AddInstalledCapability: %v", err)
+	}
+	if err := st.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	folderPath := mustFolderPath(t, st, ws.ID)
+
+	// A record with no capability data, as a pre-migration SQLite row yields.
+	stale := newTestWorkspace(ws.ID, "Inbox")
+	if err := st.RebindExistingFolder(stale, folderPath); err != nil {
+		t.Fatalf("RebindExistingFolder: %v", err)
+	}
+
+	got, err := st.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("Get after rebind: %v", err)
+	}
+	installed, ok := got.GetInstalledCapability(CapabilityFileJanitor)
+	if !ok {
+		t.Fatalf("capability install erased by rebind: %+v", got.GetInstalledCapabilities())
+	}
+	if installed.Source != InstallSourceLegacyMigration {
+		t.Fatalf("install provenance not preserved: %+v", installed)
+	}
+}
 
 // TestRenameWithSlug_RenamesGroupFolderAndRewritesMembers verifies that renaming
 // a group folder (which physically contains a nested member) moves the folder on

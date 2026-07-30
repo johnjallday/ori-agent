@@ -2195,6 +2195,23 @@
     });
   }
 
+  // Until File Janitor has its own console (Parent 5), the capability catalog's
+  // post-install "Set up File Janitor" action opens this panel's real setup
+  // renderer. Registering the handler here rather than in the catalog keeps the
+  // catalog capability-agnostic, and means the button is never a dead end.
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    const registerOpen = () => {
+      const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+      if (!catalog || typeof catalog.registerOpenHandler !== 'function') return;
+      catalog.registerOpenHandler('file-janitor', () => {
+        void refresh();
+        focusSetup();
+      });
+    };
+    document.addEventListener('DOMContentLoaded', registerOpen);
+    registerOpen();
+  }
+
   window.DownloadsJanitorPanel = {
     init,
     refresh,

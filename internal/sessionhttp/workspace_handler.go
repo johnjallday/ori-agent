@@ -1383,6 +1383,12 @@ func (h *Handler) hydrateWorkspaceMetadataInto(workspace *session.Workspace) {
 	mergeWorkspaceJSONField(&workspace.AgentMCPAccessJSON, fallback.AgentMCPAccessJSON)
 	mergeWorkspaceJSONField(&workspace.SkillBindingsJSON, fallback.SkillBindingsJSON)
 	mergeWorkspaceJSONField(&workspace.AgentSkillAccessJSON, fallback.AgentSkillAccessJSON)
+	// installed_capabilities has a SQLite column, so most reads already carry
+	// it. Hydration still matters for a row written before the column existed
+	// and for a workspace folder imported from another machine: workspace.json
+	// remains canonical, and a SQLite row that says nothing must not be
+	// reported to the UI as "File Janitor is not installed".
+	mergeWorkspaceJSONField(&workspace.InstalledCapabilitiesJSON, fallback.InstalledCapabilitiesJSON)
 
 	// Map-view summary fields (agent roster, task/tool/skill counts, ops mode,
 	// active flag) are always recomputed from the disk workspace rather than
@@ -1729,6 +1735,9 @@ func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Work
 	}
 	if err := decodeSessionWorkspaceJSONField(workspace.AgentSkillAccessJSON, &folderWS.AgentSkillAccess); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace agent skill access: %w", err)
+	}
+	if err := decodeSessionWorkspaceJSONField(workspace.InstalledCapabilitiesJSON, &folderWS.InstalledCapabilities); err != nil {
+		return nil, fmt.Errorf("failed to decode workspace installed capabilities: %w", err)
 	}
 
 	return folderWS, nil

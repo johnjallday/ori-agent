@@ -141,8 +141,9 @@ func FromJSON(data []byte) (*Workspace, error) {
 	if err := json.Unmarshal(data, &ws); err != nil {
 		return nil, err
 	}
-	ws.NormalizeAgentInstances()      // Collapse duplicate agent instances to one per profile
-	ws.MigrateScheduledTasksToTasks() // Auto-migrate legacy scheduled tasks
+	ws.NormalizeAgentInstances()        // Collapse duplicate agent instances to one per profile
+	ws.NormalizeInstalledCapabilities() // Canonicalize IDs, drop unusable records, one per capability
+	ws.MigrateScheduledTasksToTasks()   // Auto-migrate legacy scheduled tasks
 	if ws.Folders == nil {
 		ws.Folders = []Folder{}
 	}
@@ -177,6 +178,7 @@ func FromJSONMetadata(data []byte) (*Workspace, error) {
 	ws := &lite.Workspace
 	ws.Messages = nil
 	ws.NormalizeAgentInstances()
+	ws.NormalizeInstalledCapabilities()
 	ws.MigrateScheduledTasksToTasks()
 	if ws.Folders == nil {
 		ws.Folders = []Folder{}

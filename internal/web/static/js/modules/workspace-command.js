@@ -259,7 +259,31 @@ export class WorkspaceCommandView {
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
       window.addEventListener('popstate', this.boundPopState);
     }
+    this.ensureCapabilityStations();
     this.applyBootURLState();
+  }
+
+  // Installed capabilities drive Map stations, so the catalog has to be loaded
+  // before the map can render one — and re-rendered when an install changes it,
+  // in place rather than through a page reload (FR-99).
+  ensureCapabilityStations() {
+    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+    if (!catalog || typeof catalog.load !== 'function') return;
+
+    if (!this.boundCapabilitiesChanged) {
+      this.boundCapabilitiesChanged = () => {
+        if (this.active) this.render();
+      };
+      if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener('ori:capabilities-changed', this.boundCapabilitiesChanged);
+      }
+    }
+
+    if (this.capabilityCatalogRequested) return;
+    this.capabilityCatalogRequested = true;
+    void Promise.resolve(catalog.load()).then(() => {
+      if (this.active) this.render();
+    });
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -1579,8 +1603,15 @@ export class WorkspaceCommandView {
     const host = this.statModalEl.querySelector('[data-cmd-tools-host]');
     if (!host) return;
     const tab = this.toolsTab(this.activeToolsTab);
+    if (tab.host === 'capabilities') {
+      this.restoreSharedSurface('config');
+      this.restoreSharedSurface('tools');
+      if (!this.mountCapabilitiesSurface(host, 'ws-cmd-modal-empty')) return;
+      return;
+    }
     if (tab.host === 'tools') {
       this.restoreSharedSurface('config');
+      this.restoreSharedSurface('capabilities');
       const tools = this.mountSharedSurface('tools', '#workspace-detail-tools-card', host);
       if (!tools) {
         host.innerHTML = '<div class="ws-cmd-modal-empty">Find Tools is unavailable.</div>';
@@ -1590,6 +1621,7 @@ export class WorkspaceCommandView {
       return;
     }
     this.restoreSharedSurface('tools');
+    this.restoreSharedSurface('capabilities');
     const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
     if (!config) {
       host.innerHTML =
@@ -1601,6 +1633,33 @@ export class WorkspaceCommandView {
     if (tabId) this.showConfigTab({ tabId });
     this.refreshConfigData(tab.key);
     this.expandMountedConfig(config);
+  }
+
+  // Mount the one Capabilities catalog node into whichever surface asked for it
+  // and make sure it has fresh data. Both the Tools modal and the Systems rail
+  // call this, so there is exactly one catalog implementation (FR-17, FR-100).
+  mountCapabilitiesSurface(host, emptyClass) {
+    const node = this.mountSharedSurface(
+      'capabilities',
+      '#workspace-detail-capabilities-card',
+      host
+    );
+    if (!node) {
+      host.innerHTML = '<div class="' + emptyClass + '">Capabilities are unavailable.</div>';
+      return null;
+    }
+    if (node.style) node.style.display = '';
+    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+    if (catalog) {
+      const list = node.querySelector ? node.querySelector('#workspace-capabilities-list') : null;
+      if (list && typeof catalog.bindHost === 'function') catalog.bindHost(list);
+      if (typeof catalog.load === 'function') {
+        void Promise.resolve(catalog.load()).then(() => {
+          if (list && typeof catalog.renderInto === 'function') catalog.renderInto(list);
+        });
+      }
+    }
+    return node;
   }
 
   setToolsTab(key) {
@@ -5605,21 +5664,38 @@ export class WorkspaceCommandView {
   }
 
   // Stations a workspace earns from what it *is*, rather than from being the
-  // Personal HQ. A Downloads Janitor workspace awaiting setup is otherwise
+  // Personal HQ. A File Janitor workspace awaiting setup is otherwise
   // indistinguishable from a finished one on the map: its setup card lives in
   // the page body, so someone working on the map surface has no way to know a
   // folder is still needed.
+  //
+  // Presence comes from the persisted install record via the capability
+  // catalog — never from the workspace's name, template, folder, or agents
+  // (FR-93, FR-94). Status text comes from the catalog's derived health, so the
+  // station and the catalog can never disagree.
   workspaceStationRegistry() {
-    const janitor = typeof window === 'undefined' ? null : window.DownloadsJanitorPanel;
-    const state = janitor && janitor.stationState ? janitor.stationState() : null;
-    if (!state || !state.applies) return [];
+    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+    if (!catalog || typeof catalog.find !== 'function') return [];
+    const item = catalog.find('file-janitor');
+    if (!item || !item.installed || item.available === false) return [];
+
+    const status = item.status || {};
+    const folder = status.folder_display_name || '';
     return [
       {
-        key: 'downloads-janitor',
-        label: 'Downloads',
-        icon: 'bi-download',
-        state: () => state,
-        action: () => janitor.focusSetup && janitor.focusSetup()
+        key: 'file-janitor',
+        label: folder ? 'File Janitor · ' + folder : 'File Janitor',
+        icon: 'bi-folder-symlink',
+        state: () => ({
+          applies: true,
+          value: status.detail || '',
+          tone: status.state === 'needs_attention' ? 'warn' : ''
+        }),
+        action: () => {
+          if (typeof catalog.onOpen === 'function' && catalog.onOpen('file-janitor')) return;
+          const janitor = typeof window === 'undefined' ? null : window.DownloadsJanitorPanel;
+          if (janitor && typeof janitor.focusSetup === 'function') janitor.focusSetup();
+        }
       }
     ];
   }
@@ -7758,7 +7834,10 @@ export class WorkspaceCommandView {
         label: 'Triggers',
         tabId: 'workspace-detail-config-triggers-tab',
         host: 'config'
-      }
+      },
+      // Same catalog node the Tools modal mounts — one implementation reached
+      // from both entry points (FR-17, FR-100).
+      { key: 'capabilities', label: 'Capabilities', tabId: '', host: 'capabilities' }
     ];
   }
 
@@ -7781,6 +7860,10 @@ export class WorkspaceCommandView {
         host: 'config'
       },
       { key: 'find', label: 'Find Tools', tabId: '', host: 'tools' },
+      // Built-in capabilities are listed separately from MCP/Skills/Plugins on
+      // purpose (FR-16): they are part of Ori rather than something the user
+      // connects, and they carry an install lifecycle those providers do not.
+      { key: 'capabilities', label: 'Capabilities', tabId: '', host: 'capabilities' },
       {
         key: 'calendar',
         label: 'Calendar',
@@ -8318,8 +8401,15 @@ export class WorkspaceCommandView {
     }
 
     const tab = this.systemTab(this.activeSystemTab);
+    if (tab.host === 'capabilities') {
+      this.restoreSharedSurface('config');
+      this.restoreSharedSurface('tools');
+      this.mountCapabilitiesSurface(host, 'ws-cmd-rail-empty');
+      return;
+    }
     if (tab.host === 'tools') {
       this.restoreSharedSurface('config');
+      this.restoreSharedSurface('capabilities');
       const tools = this.mountSharedSurface('tools', '#workspace-detail-tools-card', host);
       if (!tools)
         host.innerHTML = '<div class="ws-cmd-rail-empty">Find Tools is unavailable.</div>';
@@ -8327,6 +8417,7 @@ export class WorkspaceCommandView {
     }
 
     this.restoreSharedSurface('tools');
+    this.restoreSharedSurface('capabilities');
     const config = this.mountSharedSurface('config', '#workspace-detail-settings-panel', host);
     if (!config) {
       host.innerHTML =

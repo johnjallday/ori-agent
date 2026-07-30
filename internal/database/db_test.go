@@ -872,3 +872,140 @@ func TestCascadeDelete(t *testing.T) {
 		t.Errorf("Expected 0 tags after cascade delete, got %d", tagCount)
 	}
 }
+
+// TestFreshSchemaHasInstalledCapabilitiesColumn proves a database created from
+// scratch carries installed_capabilities_json (PRD FR-4). The baseline CREATE
+// TABLE declares it and migration 34 re-adds it defensively; the duplicate-column
+// guard makes that a no-op, so a fresh open must still succeed and expose the
+// column with its empty-collection default.
+func TestFreshSchemaHasInstalledCapabilitiesColumn(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-fresh', 'Fresh', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("Failed to insert workspace: %v", err)
+	}
+
+	var installed string
+	if err := db.QueryRowContext(ctx, `
+		SELECT installed_capabilities_json FROM workspaces WHERE id = 'ws-fresh'
+	`).Scan(&installed); err != nil {
+		t.Fatalf("Failed to read installed_capabilities_json: %v", err)
+	}
+	if installed != "[]" {
+		t.Errorf("expected empty-collection default '[]', got %q", installed)
+	}
+}
+
+// TestMigration034UpgradesFromPriorSchema covers the upgrade path: a database
+// stamped at version 33 has no installed_capabilities_json column. Migration 34
+// must add it without disturbing the existing row, and every pre-existing
+// workspace must read back as "no capabilities installed" — never as a phantom
+// install (PRD FR-125, FR-136: legacy state alone must not imply an install).
+func TestMigration034UpgradesFromPriorSchema(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-034-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (33)`); err != nil {
+		t.Fatalf("Failed to seed schema version 33: %v", err)
+	}
+	// A pre-034 workspaces table: no installed_capabilities_json column.
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			tasks_json TEXT DEFAULT '[]',
+			status TEXT DEFAULT 'active'
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy workspaces table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, description, created_at, updated_at, tasks_json, status)
+		VALUES ('ws-legacy', 'Downloads Janitor', 'pre-existing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '[{"id":"t1"}]', 'active')
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy workspace: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var name, description, tasks string
+	var installed sql.NullString
+	if err := db.QueryRowContext(ctx, `
+		SELECT name, description, tasks_json, installed_capabilities_json
+		FROM workspaces WHERE id = 'ws-legacy'
+	`).Scan(&name, &description, &tasks, &installed); err != nil {
+		t.Fatalf("Failed to query workspace after upgrade: %v", err)
+	}
+
+	// Existing data is untouched: the migration is purely additive.
+	if name != "Downloads Janitor" || description != "pre-existing" {
+		t.Errorf("migration altered existing workspace metadata: name=%q description=%q", name, description)
+	}
+	if tasks != `[{"id":"t1"}]` {
+		t.Errorf("migration altered existing task state: %q", tasks)
+	}
+
+	// The upgraded row reports no installs. ALTER TABLE ... DEFAULT backfills
+	// existing rows with the default in SQLite, but NULL would be equally
+	// acceptable — both must read as "nothing installed", which is what the
+	// session store's `.Valid && != ""` guard relies on.
+	if installed.Valid && installed.String != "[]" && installed.String != "" {
+		t.Errorf("legacy workspace gained a capability install: %q", installed.String)
+	}
+}
+
+// TestMigration034IsIdempotentOnAlreadyMigratedSchema proves the duplicate-column
+// guard: re-running migration 34 against a workspaces table that already has the
+// column must succeed rather than fail the whole startup (PRD FR-145 isolation).
+func TestMigration034IsIdempotentOnAlreadyMigratedSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// The fresh schema already declares the column; running the migration body
+	// again must be a no-op.
+	if err := db.migration034WorkspaceInstalledCapabilities(ctx); err != nil {
+		t.Fatalf("re-running migration 34 failed: %v", err)
+	}
+}

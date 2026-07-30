@@ -333,6 +333,219 @@ func TestSyncStore_SavePreservesSetupWizardProgressFromStalePrimaryWorkspace(t *
 	}
 }
 
+// TestSyncStore_SavePreservesInstalledCapabilitiesFromStalePrimaryWorkspace is
+// the FR-144 guard for capability installs: "a stale workspace snapshot must not
+// silently erase a capability install or its directory reference". Unlike
+// provenance, this field IS mirrored into SQLite — but a record written before
+// the column existed, or built by a caller that never loaded it, still arrives
+// carrying nothing, and must not be treated as an uninstall.
+func TestSyncStore_SavePreservesInstalledCapabilitiesFromStalePrimaryWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-capability-sync", "Capability Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := canonicalWorkspace.AddInstalledCapability(InstalledCapability{
+		ID:          CapabilityFileJanitor,
+		Version:     1,
+		InstalledAt: time.Now(),
+		Source:      InstallSourceInPlace,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	staleWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleWorkspace.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatal("precondition: the stale copy should carry no capability install")
+	}
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-install", Status: TaskStatusPending})
+	if err := store.Save(staleWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, ok := diskWorkspace.GetInstalledCapability(CapabilityFileJanitor)
+	if !ok {
+		t.Fatalf("capability install was clobbered by an unrelated task update: %+v", diskWorkspace.GetInstalledCapabilities())
+	}
+	if installed.Source != InstallSourceInPlace || installed.Version != 1 {
+		t.Fatalf("install record was not preserved intact: %+v", installed)
+	}
+	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "after-install" {
+		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)
+	}
+}
+
+// TestSyncStore_SaveWritesThroughNewInstalledCapability is the other half of the
+// guard above: preserve-if-empty must not become preserve-always. A save that
+// genuinely carries an install has to reach disk.
+func TestSyncStore_SaveWritesThroughNewInstalledCapability(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-capability-install", "Capability Install")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		_, addErr := w.AddInstalledCapability(InstalledCapability{
+			ID:          CapabilityFileJanitor,
+			Version:     1,
+			InstalledAt: time.Now(),
+			Source:      InstallSourceBlueprint,
+		})
+		return addErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, ok := diskWorkspace.GetInstalledCapability(CapabilityFileJanitor)
+	if !ok {
+		t.Fatalf("install never reached workspace.json: %+v", diskWorkspace.GetInstalledCapabilities())
+	}
+	if installed.Source != InstallSourceBlueprint {
+		t.Fatalf("install source not written through: %+v", installed)
+	}
+
+	// And it must be readable back through the primary too, so a subsequent
+	// Get -> mutate -> Save cycle does not depend on the preservation shim.
+	primaryWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !primaryWorkspace.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatalf("install did not reach the primary store: %+v", primaryWorkspace.GetInstalledCapabilities())
+	}
+}
+
+// TestSyncStore_SaveWritesThroughDeliberateUninstall is the counterpart to the
+// stale-write guard above, and the reason Workspace tracks edit intent at all.
+//
+// Both an uninstall and a never-loaded record leave the collection empty. If the
+// guard used emptiness alone it would restore the install from workspace.json
+// and the uninstall would silently fail — so removal would have to bypass
+// SyncStore entirely. Tracking intent keeps removal on the ordinary Update path.
+func TestSyncStore_SaveWritesThroughDeliberateUninstall(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-capability-uninstall", "Capability Uninstall")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		_, addErr := w.AddInstalledCapability(InstalledCapability{
+			ID:          CapabilityFileJanitor,
+			Version:     1,
+			InstalledAt: time.Now(),
+			Source:      InstallSourceInPlace,
+		})
+		return addErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Precondition: it really is on disk, so a failed removal would be visible.
+	if diskWorkspace, err := fileSync.Get(ws.ID); err != nil {
+		t.Fatal(err)
+	} else if !diskWorkspace.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatal("precondition: install should be on disk before removal")
+	}
+
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		if !w.RemoveInstalledCapability(CapabilityFileJanitor) {
+			t.Fatal("RemoveInstalledCapability reported no change")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diskWorkspace.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatalf("uninstall was undone by the stale-write guard: %+v", diskWorkspace.GetInstalledCapabilities())
+	}
+
+	primaryWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if primaryWorkspace.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatalf("uninstall did not reach the primary store: %+v", primaryWorkspace.GetInstalledCapabilities())
+	}
+}
+
+// TestWorkspace_CapabilityEditIntentDoesNotSurviveReload proves the intent flag
+// is scoped to one mutate-then-save cycle. A workspace decoded from disk must
+// carry no pending intent, or the very next unrelated save from a partial record
+// would be treated as an authorized erasure.
+func TestWorkspace_CapabilityEditIntentDoesNotSurviveReload(t *testing.T) {
+	ws := newTestWorkspace("ws-intent", "Intent")
+	if _, err := ws.AddInstalledCapability(InstalledCapability{
+		ID:          CapabilityFileJanitor,
+		Version:     1,
+		InstalledAt: time.Now(),
+		Source:      InstallSourceInPlace,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !ws.InstalledCapabilitiesExplicit() {
+		t.Fatal("editing the collection should mark intent")
+	}
+
+	data, err := ws.ToJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := FromJSON(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.InstalledCapabilitiesExplicit() {
+		t.Fatal("edit intent leaked through a JSON round trip; a reloaded record must carry none")
+	}
+}
+
 func TestSyncStore_SaveSkipsDiskForTrashedWorkspace(t *testing.T) {
 	primary := NewInMemoryStore()
 	dir := t.TempDir()

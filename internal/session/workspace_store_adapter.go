@@ -286,6 +286,13 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.OpportunitiesJSON = data
 		}
 	}
+	if len(ws.InstalledCapabilities) > 0 {
+		if data, err := json.Marshal(ws.InstalledCapabilities); err != nil {
+			logger.Warn("Failed to marshal workspace installed capabilities", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.InstalledCapabilitiesJSON = data
+		}
+	}
 
 	return sessionWS
 }
@@ -445,6 +452,17 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			logger.Warn("Failed to unmarshal workspace opportunities", logger.Fields{"workspace_id": ws.ID, "error": err})
 		}
 	}
+
+	if len(ws.InstalledCapabilitiesJSON) > 0 {
+		if err := json.Unmarshal(ws.InstalledCapabilitiesJSON, &agentWS.InstalledCapabilities); err != nil {
+			logger.Warn("Failed to unmarshal workspace installed capabilities", logger.Fields{"workspace_id": ws.ID, "error": err})
+		}
+	}
+	// Deliberately left nil (not an empty slice) when absent: nil means "this
+	// record carried no capability data", which is what lets SyncStore.Save
+	// restore the canonical collection instead of writing an erasure. Contrast
+	// with MCPBindings above, where an empty slice is the intended zero value.
+	agentWS.InstalledCapabilities = workspace.NormalizeInstalledCapabilities(agentWS.InstalledCapabilities)
 
 	if agentWS.SharedData == nil {
 		agentWS.SharedData = make(map[string]any)

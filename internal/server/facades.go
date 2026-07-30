@@ -53,6 +53,7 @@ import (
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -152,6 +153,10 @@ type HandlerFacade struct {
 	Triggers         *triggerhttp.Handler
 	WorkspaceMemory  *memoryhttp.Handler
 	DownloadsJanitor *downloadsjanitorhttp.Handler
+	// WorkspaceCapabilities serves the built-in Workspace Capability catalog
+	// and install lifecycle. One set of routes serves every capability; there
+	// is no per-capability lifecycle API.
+	WorkspaceCapabilities *workspacecapabilityhttp.Handler
 	// SetupWizard serves the shared blueprint Setup Wizard for every
 	// wizard-enabled workspace, whichever blueprint it came from.
 	SetupWizard *setupwizardhttp.Handler

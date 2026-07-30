@@ -68,7 +68,19 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		// folder they just approved). There is no generic "empty means clear"
 		// operation through SyncStore; intentional removals must update the
 		// canonical FileStore explicitly.
-		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil {
+		//
+		// InstalledCapabilities joins them for a different reason: it IS mirrored
+		// into SQLite, but several read paths still yield a partial workspace
+		// (a legacy row written before the column existed, a record built by a
+		// caller that never loaded it). Restoring it from disk is what makes
+		// FR-144 hold — "a stale workspace snapshot must not silently erase a
+		// capability install".
+		//
+		// Unlike the fields above, though, this one has a legitimate empty
+		// value: uninstall. capabilitiesExplicit distinguishes the two, so an
+		// intentional removal writes through while an incidental absence is
+		// refilled — which is why removal does NOT need to bypass SyncStore.
+		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil || capabilitiesMissing(ws) {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
 				if ws.ProjectPath == "" {
 					ws.ProjectPath = diskWorkspace.ProjectPath
@@ -82,6 +94,9 @@ func (s *SyncStore) Save(ws *Workspace) error {
 				if ws.SetupWizardProgress == nil {
 					ws.SetupWizardProgress = diskWorkspace.SetupWizardProgress
 				}
+				if capabilitiesMissing(ws) {
+					ws.InstalledCapabilities = CloneInstalledCapabilities(diskWorkspace.InstalledCapabilities)
+				}
 			}
 		}
 		if err := s.fileSync.Save(ws); err != nil {
@@ -92,6 +107,14 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		}
 	}
 	return s.primary.Save(ws)
+}
+
+// capabilitiesMissing reports whether ws carries no capability records AND did
+// not mean to. An empty collection that was deliberately written (an uninstall,
+// or a rollback of a failed install) is a real value and must not be refilled
+// from disk.
+func capabilitiesMissing(ws *Workspace) bool {
+	return len(ws.InstalledCapabilities) == 0 && !ws.InstalledCapabilitiesExplicit()
 }
 
 // Get retrieves a workspace from the primary store.
