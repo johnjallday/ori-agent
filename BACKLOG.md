@@ -26,6 +26,7 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small (started 2026-07-28)
 - 2026-07-18 #dogfood `backlog` skill in Ori: add/list/prune/promote on workspace BACKLOG.md (DOGFOODING.md stage 1) #small (started 2026-07-29)
 - 2026-07-19 Template: Repo Watcher — GitHub MCP; PR/issue digest + weekly changelog mission #dogfood #small (started 2026-07-30)
+- create-workspace-team-step -> PRD at tasks/prd-create-workspace-team-step.md (started 2026-07-30)
 
 ## Shipped / dropped
 - 2026-07-30 blueprint-setup-wizards -> PRD at tasks/prd-blueprint-setup-wizards.md (started 2026-07-28) - PR #278 merged to dev (2026-07-30)
