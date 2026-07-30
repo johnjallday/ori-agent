@@ -489,3 +489,47 @@ test('selBarHTML offers group, delete, and clear actions for the multi-select se
   assert.match(html, /data-ws-selbar-delete/);
   assert.match(html, /data-ws-selbar-clear/);
 });
+
+// ---------------------------------------------------------------------------
+// Blueprint setup status (FR54-55): the Map is an entry point into a
+// workspace's own Setup Wizard, never a second copy of its state.
+
+function loadMapWithSetup(workspaceId, status) {
+  const window = {};
+  vm.runInNewContext(source, { window, document: {} }, { filename: 'workspace-map.js' });
+  window.OriWorkspaceMap._setSetupStatusForTest(workspaceId, status);
+  return window.OriWorkspaceMap;
+}
+
+test('a workspace with no wizard shows no setup row on the Map', () => {
+  const map = loadMapWithSetup('ws-1', { applicable: false, state: 'not_applicable' });
+  const html = map.overviewBodyHTML({ id: 'ws-1', name: 'Plain' }, {});
+  assert.doesNotMatch(html, /data-ws-open-setup/);
+  assert.doesNotMatch(html, /Setup required/);
+});
+
+test('an unfinished blueprint shows Setup required with a continue action', () => {
+  const map = loadMapWithSetup('ws-1', { applicable: true, state: 'in_progress' });
+  const html = map.overviewBodyHTML({ id: 'ws-1', name: 'Downloads' }, {});
+  assert.match(html, /data-ws-open-setup="ws-1"/);
+  assert.match(html, /Setup required/);
+  assert.match(html, /Continue setup/);
+});
+
+test('a regressed blueprint offers repair, and a ready one offers a view', () => {
+  const attention = loadMapWithSetup('ws-1', { applicable: true, state: 'needs_attention' });
+  const attentionHTML = attention.overviewBodyHTML({ id: 'ws-1', name: 'Calendar' }, {});
+  assert.match(attentionHTML, /Needs attention/);
+  assert.match(attentionHTML, /Repair setup/);
+
+  const ready = loadMapWithSetup('ws-2', { applicable: true, state: 'ready' });
+  const readyHTML = ready.overviewBodyHTML({ id: 'ws-2', name: 'Calendar' }, {});
+  assert.match(readyHTML, /Ready/);
+  assert.match(readyHTML, /View setup/);
+});
+
+test('the setup row states its workspace and action for a screen reader', () => {
+  const map = loadMapWithSetup('ws-1', { applicable: true, state: 'in_progress' });
+  const html = map.overviewBodyHTML({ id: 'ws-1', name: 'Downloads Janitor' }, {});
+  assert.match(html, /aria-label="Setup required — Continue setup for Downloads Janitor"/);
+});

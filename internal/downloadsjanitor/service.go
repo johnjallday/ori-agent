@@ -199,6 +199,32 @@ type SetupSuggestion struct {
 // template declares.
 const DirectoryRequirementKey = "downloads-root"
 
+// ApproveAutomation records the user's explicit approval of unattended work and
+// resumes it.
+//
+// It exists as its own operation, rather than a Paused=false write, because
+// approval and pausing answer different questions. Approval is a one-time
+// statement that the user was shown what the watcher and the daily scan do and
+// said yes; pausing is a reversible operational choice afterwards. Collapsing
+// them would make "the user paused it" indistinguishable from "the user never
+// approved it", and setup would keep reporting itself unfinished for a
+// workspace that is merely quiet.
+//
+// Idempotent: the approval timestamp is written once and a repeat call simply
+// resumes, so a retry after a timeout cannot rewrite when consent was given.
+func (s *Service) ApproveAutomation(workspaceID string) (Status, error) {
+	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
+		if settings.AutomationApprovedAt.IsZero() {
+			settings.AutomationApprovedAt = s.clock()
+		}
+		settings.Paused = false
+		return nil
+	}); err != nil {
+		return Status{}, err
+	}
+	return s.Status(workspaceID)
+}
+
 // SetPaused pauses or resumes unattended scanning. It changes nothing else:
 // settings, pending candidates, and history all survive, so resuming picks up
 // where the user left off.
@@ -326,6 +352,16 @@ type SetupRequest struct {
 	// default values.
 	DailyScanLocalTime string
 	Timezone           string
+	// Paused, when set, records whether unattended automation should be running
+	// after this confirmation. Tri-state on purpose: nil keeps the workspace's
+	// current setting, which is what every pre-wizard caller wants.
+	//
+	// The Setup Wizard confirms the folder with Paused=true, so approving a
+	// folder grants access and nothing else — the watcher and the daily scan
+	// start only when the user approves *them*, a step later, having read what
+	// they do. Without this, choosing a folder would silently switch on
+	// automation the user had not been shown yet.
+	Paused *bool
 }
 
 // ConfirmSetup validates a confirmed folder selection and configures the
@@ -371,6 +407,9 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 			return Status{}, setupErr(CodeInvalidPath, "That timezone is not recognized.", RepairRetry, tzErr)
 		}
 		next.Timezone = tz
+	}
+	if req.Paused != nil {
+		next.Paused = *req.Paused
 	}
 
 	// Create the destination folder now so the user sees "Filed" appear as part

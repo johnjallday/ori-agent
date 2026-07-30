@@ -1134,6 +1134,44 @@
   outline-offset: 2px;
 }
 
+/* Blueprint setup entry. Same affordance as the backlog link — a quiet inline
+   action, not a second setup surface — with the state word carrying its own
+   tone so "needs attention" is not conveyed by color alone. */
+.ws-map-ov-setup-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  color: var(--ws-faction);
+}
+.ws-map-ov-setup-open .ws-map-ov-v {
+  color: inherit;
+  font-weight: 700;
+}
+.ws-map-ov-setup-open.is-required .ws-map-ov-v {
+  color: var(--warning-color, #b26a00);
+}
+.ws-map-ov-setup-open.is-attention .ws-map-ov-v {
+  color: var(--danger-color, #c62828);
+}
+.ws-map-ov-setup-open.is-ready .ws-map-ov-v {
+  color: var(--success-color, #2e7d32);
+}
+.ws-map-ov-setup-open:hover,
+.ws-map-ov-setup-open:focus-visible {
+  color: #fff;
+  text-decoration: underline;
+}
+.ws-map-ov-setup-open:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
 /* Primary action lives in the hero row (top of the panel) so it stays reachable
    without scrolling to the bottom. */
 .ws-map-ov-open {

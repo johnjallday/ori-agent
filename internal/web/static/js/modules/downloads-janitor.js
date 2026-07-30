@@ -1499,6 +1499,19 @@
         ? 'Start watching this folder again.'
         : 'Stop automatic scanning. Your settings, pending review, and history are kept, and you can still scan on demand.'
     );
+    // Before setup finishes, resuming here would start the unattended work the
+    // wizard has not yet disclosed — the one step the user is supposed to read
+    // first. The control stays visible and says where the decision lives
+    // (FR-56); scanning on demand is unaffected, because the user is the one
+    // asking for each scan.
+    if (paused && setupAwaitingAutomationApproval()) {
+      pauseControl.textContent = 'Approve in setup';
+      pauseControl.setAttribute(
+        'title',
+        'Setup explains what folder watching and the daily scan do before turning them on.'
+      );
+      pauseControl.onclick = () => window.SetupWizard?.open?.('automation');
+    }
     actions.appendChild(pauseControl);
     const failing = (readiness.checks || []).filter(c => c.status === 'failed');
     if (
@@ -1614,9 +1627,69 @@
     clear(host);
     if (status.settings && status.settings.root_path && status.settings.directory_reference_id) {
       renderConfiguredCard(host, status);
+    } else if (setupWizardOwnsSetup()) {
+      // The blueprint's Setup Wizard is the authoritative setup surface. The
+      // panel keeps a compact entry into it rather than a second folder
+      // chooser: two surfaces that both configure the same folder is exactly
+      // the duplication this migration removes.
+      renderSetupEntry(host);
     } else {
       renderSetupCard(host, status);
     }
+  }
+
+  // setupWizardOwnsSetup reports whether this workspace's blueprint declares a
+  // Setup Wizard. A workspace created before the blueprint declared one keeps
+  // the original card, so nobody loses their way to set up.
+  function setupWizardOwnsSetup() {
+    const status = window.SetupWizard?.getStatus?.();
+    return Boolean(status && status.applicable);
+  }
+
+  // setupAwaitingAutomationApproval reports that this workspace's wizard exists
+  // and has not finished — the window in which unattended work must not be
+  // switched on from anywhere but the step that describes it.
+  function setupAwaitingAutomationApproval() {
+    const status = window.SetupWizard?.getStatus?.();
+    return Boolean(status && status.applicable && status.state !== 'ready');
+  }
+
+  // renderSetupEntry is the compact stand-in for the retired setup card: it
+  // says what state setup is in and opens the wizard.
+  function renderSetupEntry(host) {
+    const setup = window.SetupWizard?.getStatus?.() || {};
+    const card = el('section', 'dj-card');
+    const head = el('div', 'dj-head');
+    const heading = el('div', 'dj-heading');
+    const title = el('h2', 'dj-title', 'Downloads Janitor');
+    title.id = 'downloadsJanitorTitle';
+    heading.appendChild(title);
+    heading.appendChild(
+      el(
+        'p',
+        'dj-sub',
+        setup.state === 'needs_attention'
+          ? 'Something this workspace depends on stopped working.'
+          : 'Setup is not finished. Nothing is scanned or moved until it is.'
+      )
+    );
+    head.appendChild(heading);
+    head.appendChild(
+      stateBadge(setup.state === 'needs_attention' ? 'needs_attention' : 'setup_required')
+    );
+    card.appendChild(head);
+
+    const actions = el('div', 'dj-actions');
+    const open = button(
+      setup.state === 'needs_attention' ? 'Repair setup' : 'Continue setup',
+      'dj-btn dj-btn-primary',
+      () => window.SetupWizard?.open?.()
+    );
+    open.id = 'downloadsJanitorOpenSetup';
+    actions.appendChild(open);
+    card.appendChild(actions);
+    card.appendChild(errorRegion());
+    host.appendChild(card);
   }
 
   // statsLine states what is waiting and when Ori last looked — the two facts
@@ -1986,6 +2059,142 @@
     return Boolean(mount);
   }
 
+  // ---------------------------------------------------- setup wizard steps
+  //
+  // The blueprint's setup runs in the shared wizard; these renderers supply the
+  // content of its Downloads-specific steps. They own no navigation, no
+  // progress, and no readiness — the shell asks the server for all three.
+
+  // ownsStep keeps these renderers scoped to this blueprint's steps: the
+  // registry is keyed by step kind, and another blueprint's directory step is
+  // not ours to draw.
+  function ownsStep(step) {
+    return String(step?.adapter || '') === 'downloads_janitor';
+  }
+
+  // chooseFolder runs the native picker and confirms the result.
+  //
+  // The picker is the only way to choose a folder here: there is no editable
+  // path field, so there is no value a typo — or a paste — can turn into a
+  // grant the user did not mean to give. The confirmation is sent paused, so
+  // approving a folder grants access and starts nothing.
+  async function chooseFolder(ctx) {
+    const id = wsId();
+    if (!id) return;
+    ctx.setError('');
+    ctx.setBusy(true, 'Waiting for your folder choice…');
+    try {
+      const picker = await fetch('/api/folder-picker/select-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Choose the folder to tidy' })
+      });
+      const chosen = await picker.json().catch(() => ({}));
+      if (!picker.ok || !chosen.success) {
+        throw new Error(chosen.error || 'Could not open the folder picker.');
+      }
+      if (!chosen.selected || !chosen.path) {
+        ctx.setBusy(false, '');
+        return;
+      }
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/setup',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: chosen.path, paused: true })
+        }
+      );
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = result.error || result;
+        throw new Error((apiError && apiError.message) || 'Ori could not set up this folder.');
+      }
+      await refresh();
+      ctx.setBusy(false, '');
+      // The server decides whether that satisfied the step.
+      await ctx.confirm();
+    } catch (error) {
+      ctx.setBusy(false, '');
+      ctx.setError(error.message || 'Could not set up that folder.');
+    }
+  }
+
+  function chosenRoot() {
+    return (lastStatus && lastStatus.settings && lastStatus.settings.root_path) || '';
+  }
+
+  const directoryStepRenderer = {
+    render(container, ctx) {
+      if (!ownsStep(ctx.step)) return;
+      const root = chosenRoot();
+      const suggestion = (lastStatus && lastStatus.suggestion) || {};
+
+      const field = el('div', 'dj-field');
+      field.appendChild(el('span', 'dj-label', root ? 'Folder Ori will tidy' : 'Suggested folder'));
+      const value = el('p', 'dj-sub', root || suggestion.suggested_path || '~/Downloads');
+      value.id = 'downloadsJanitorWizardPath';
+      field.appendChild(value);
+      container.appendChild(field);
+
+      const actions = el('div', 'dj-actions');
+      const pick = button(
+        root ? 'Choose a different folder…' : 'Choose folder…',
+        'dj-btn dj-btn-primary',
+        () => void chooseFolder(ctx)
+      );
+      pick.id = 'downloadsJanitorWizardPick';
+      actions.appendChild(pick);
+      container.appendChild(actions);
+    },
+    primaryLabel(ctx) {
+      if (!ownsStep(ctx.step)) return '';
+      // Until a folder exists there is nothing to approve; the step's own
+      // button is the action.
+      return chosenRoot() ? 'Continue' : 'Choose a folder to continue';
+    },
+    disablePrimary(ctx) {
+      return ownsStep(ctx.step) && !chosenRoot();
+    }
+  };
+
+  const automationStepRenderer = {
+    render(container, ctx) {
+      if (!ownsStep(ctx.step)) return;
+      const settings = (lastStatus && lastStatus.settings) || {};
+      const list = el('ul', 'dj-disclosure-list');
+      [
+        'Watches this folder for files you download or rename, and waits five minutes so a download can finish.',
+        'Skips the ' + (settings.filing_root_name || 'Filed') + ' folder it files into.',
+        'Runs one catch-up scan a day at ' +
+          (settings.daily_scan_local_time || '09:00') +
+          ' your local time.',
+        'Every scan only proposes a batch. Nothing moves until you approve it.'
+      ].forEach(text => list.appendChild(el('li', 'dj-disclosure-item', text)));
+      container.appendChild(list);
+    },
+    primaryLabel(ctx) {
+      return ownsStep(ctx.step) ? 'Turn this on' : '';
+    }
+  };
+
+  function registerSetupSteps() {
+    const wizard = window.SetupWizard;
+    if (!wizard || typeof wizard.registerStepRenderer !== 'function') return;
+    wizard.registerStepRenderer('directory', directoryStepRenderer);
+    wizard.registerStepRenderer('automation_review', automationStepRenderer);
+  }
+
+  registerSetupSteps();
+
+  // The panel and the wizard show the same workspace: when setup changes, the
+  // panel re-reads rather than showing what was true before.
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('ori:setup-status', () => {
+      if (wsId()) void refresh();
+    });
+  }
+
   window.DownloadsJanitorPanel = {
     init,
     refresh,
@@ -2026,6 +2235,9 @@
     _select: id => {
       selected.add(id);
       updateSelectionSummary();
-    }
+    },
+    // The wizard step renderers, exposed so their content can be asserted
+    // without standing up the whole dialog.
+    _setupSteps: { directory: directoryStepRenderer, automation: automationStepRenderer }
   };
 })();

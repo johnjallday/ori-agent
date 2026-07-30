@@ -50,11 +50,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupwizard"
+	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
@@ -279,6 +282,19 @@ type ServerBuilder struct {
 	downloadsJanitorService    *downloadsjanitor.Service
 	downloadsJanitorAutomation *downloadsjanitor.Automation
 	dailyBriefScheduler        *dailybrief.Scheduler
+
+	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
+	// adapter registry, plus its workspace-scoped HTTP handler. The registry is
+	// held so each domain can register its adapter as it is wired.
+	setupWizardService  *setupwizard.Service
+	setupWizardRegistry *setupwizard.Registry
+	setupWizardHandler  *setupwizardhttp.Handler
+	// reaperResolver is the normalized REAPER readiness resolver, held so the
+	// Setup Wizard's adapter reads the same one the panel and repair flow use.
+	reaperResolver *reapersetup.Resolver
+	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
+	// attached to it once the automation service exists (a later phase).
+	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -467,6 +483,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		PersonalHQ:       b.personalHQHandler,
 		DailyBrief:       b.dailyBriefHandler,
 		DownloadsJanitor: b.downloadsJanitorHandler,
+		SetupWizard:      b.setupWizardHandler,
 		CLIAgents:        b.cliAgentHandler,
 		CLIAgentRegistry: b.cliAgentRegistry,
 		WorkspaceRuns:    b.workspaceRunHandler,

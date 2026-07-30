@@ -312,8 +312,12 @@ const sessionManager = {
         this.updateWizardRecap(template);
         void this.refreshTemplateAgentPlan();
         this.refreshWorkspaceReview();
-        // Show the REAPER Setup card only for the Reaper Song template.
-        window.ReaperSetupCard?.showForTemplate?.(template);
+        // The blueprint-specific REAPER card is only shown for a Reaper Song
+        // blueprint that has not yet declared a setup wizard. Once it does, the
+        // generic preview above describes its requirements and the workspace's
+        // own Setup Wizard performs them — one setup surface, not two.
+        if (template?.setup_wizard?.steps?.length) window.ReaperSetupCard?.hide?.();
+        else window.ReaperSetupCard?.showForTemplate?.(template);
       });
 
     document.getElementById('templateAgentReviewToggle')?.addEventListener('change', () => {
@@ -3282,9 +3286,7 @@ const sessionManager = {
   },
 
   isPersonalHQImport() {
-    return (
-      this.importModeEnabled && this.workspacePostCreateAction === 'designate_personal_hq'
-    );
+    return this.importModeEnabled && this.workspacePostCreateAction === 'designate_personal_hq';
   },
 
   setImportModeEnabled(enabled) {
@@ -3531,7 +3533,9 @@ const sessionManager = {
     });
     const stateResult = await stateResponse.json().catch(() => ({}));
     if (!stateResponse.ok || stateResult.error) {
-      throw new Error(stateResult.error || 'Personal HQ was designated, but setup could not finish.');
+      throw new Error(
+        stateResult.error || 'Personal HQ was designated, but setup could not finish.'
+      );
     }
 
     return {
@@ -4735,7 +4739,8 @@ const sessionManager = {
     const trigger = document.querySelector(
       `[data-template-agent-index="${Number.isInteger(agentIndex) ? agentIndex : ''}"]`
     );
-    if (!Number.isInteger(agentIndex) || !plannedAgent || (trigger && trigger.disabled)) return false;
+    if (!Number.isInteger(agentIndex) || !plannedAgent || (trigger && trigger.disabled))
+      return false;
 
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
@@ -4866,8 +4871,97 @@ const sessionManager = {
           <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
         </div>`;
     }
+    this.renderSetupPreview(selectedTemplate);
     this.renderExistingAgentTeam();
     this.renderWorkspaceAgentMapPreview();
+  },
+
+  /**
+   * Renders the blueprint's setup requirements in the review step.
+   *
+   * Disclosure only. It reads the template's already-normalized manifest and
+   * writes text: no path is expanded, no picker opens, no connector is
+   * authorized, no plugin is installed or enabled, and no watcher or schedule
+   * is created. Everything it names happens later, in the workspace's own
+   * Setup Wizard, after the user has a workspace to set up.
+   */
+  renderSetupPreview(template) {
+    const panel = document.getElementById('workspaceSetupPreview');
+    const list = document.getElementById('workspaceSetupPreviewList');
+    const note = document.getElementById('workspaceSetupPreviewNote');
+    if (!panel || !list || !note) return;
+
+    const steps = template?.setup_wizard?.steps || [];
+    const invalid = String(template?.setup_wizard_error || '').trim();
+    list.textContent = '';
+
+    if (invalid) {
+      // A blueprint whose setup cannot be read is refused at creation; saying
+      // so here beats a 409 the user cannot act on.
+      panel.hidden = false;
+      const item = document.createElement('li');
+      item.className = 'workspace-setup-preview-item is-error';
+      item.textContent = `This blueprint's setup cannot be read, so a workspace cannot be created from it: ${invalid}`;
+      list.appendChild(item);
+      note.textContent = 'Fix the blueprint\u2019s template.json, then try again.';
+      return;
+    }
+
+    if (!steps.length) {
+      // A blueprint with no wizard shows no empty setup panel at all.
+      panel.hidden = true;
+      note.textContent = '';
+      return;
+    }
+
+    panel.hidden = false;
+    steps.forEach(step => {
+      const item = document.createElement('li');
+      item.className = 'workspace-setup-preview-item';
+      const label = document.createElement('span');
+      label.className = 'workspace-setup-preview-label';
+      label.textContent = step?.title || this.setupPreviewFallbackLabel(step);
+      item.appendChild(label);
+      const badge = document.createElement('span');
+      badge.className = step?.required
+        ? 'workspace-setup-preview-badge is-required'
+        : 'workspace-setup-preview-badge';
+      badge.textContent = step?.required ? 'Required' : 'Optional';
+      item.appendChild(badge);
+      const detail = String(step?.description || '').trim();
+      if (detail) {
+        const description = document.createElement('span');
+        description.className = 'workspace-setup-preview-detail';
+        description.textContent = detail;
+        item.appendChild(description);
+      }
+      list.appendChild(item);
+    });
+    note.textContent =
+      'Setup continues after you create the workspace \u2014 nothing here is connected, installed, or granted yet.';
+  },
+
+  setupPreviewFallbackLabel(step) {
+    switch (String(step?.kind || '')) {
+      case 'directory':
+        return 'Choose a folder';
+      case 'automation_review':
+        return 'Review automation';
+      case 'capability_connect':
+        return 'Connect a service';
+      case 'capability_configure':
+        return 'Configure a service';
+      case 'account_link':
+        return 'Link an account';
+      case 'plugin_readiness':
+        return 'Prepare a plugin';
+      case 'readiness':
+        return 'Readiness check';
+      case 'summary':
+        return 'Summary';
+      default:
+        return 'Setup step';
+    }
   },
 
   announceWorkspaceTeamChange(message) {

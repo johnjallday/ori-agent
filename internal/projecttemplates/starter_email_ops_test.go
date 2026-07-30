@@ -122,6 +122,15 @@ func TestEmailOpsStarterTemplate_ProviderNeutral(t *testing.T) {
 		prose = append(prose, st.Description, st.Details)
 	}
 	prose = append(prose, tpl.Tags...)
+	// The Setup Wizard's copy is blueprint prose too, and it is the surface
+	// where naming a provider would be most tempting — it is the step that
+	// actually connects one.
+	if tpl.SetupWizard != nil {
+		prose = append(prose, tpl.SetupWizard.Title)
+		for _, step := range tpl.SetupWizard.Steps {
+			prose = append(prose, step.Title, step.Description, step.Disclosure)
+		}
+	}
 	haystack := strings.ToLower(strings.Join(prose, "\n"))
 
 	for _, provider := range []string{"gmail", "google", "outlook", "microsoft", "imap", "smtp", "fastmail", "proton"} {
@@ -161,6 +170,73 @@ func TestEmailOpsStarterTemplate_TriageRequiresEmailCapability(t *testing.T) {
 			if strings.Contains(strings.ToLower(key), "gmail") {
 				t.Errorf("capability key %q names a provider", key)
 			}
+		}
+	}
+}
+
+// TestEmailOpsStarterTemplate_SetupWizard pins the wizard contract (FR-95/96):
+// the blueprint declares its setup, and the steps keep the three things that
+// look alike from the outside apart — the account connection, the mail
+// permission, and this workspace's own link.
+func TestEmailOpsStarterTemplate_SetupWizard(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	tpl, err := projecttemplates.FindLibraryTemplate(libDir, "email-ops")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(email-ops): %v", err)
+	}
+
+	if tpl.SetupWizardError != "" {
+		t.Fatalf("the shipped wizard must be valid: %s", tpl.SetupWizardError)
+	}
+	wizard := tpl.SetupWizard
+	if wizard == nil {
+		t.Fatal("Email Ops must declare a setup wizard")
+	}
+	if tpl.BuiltinVersion < 3 {
+		t.Errorf("builtin_version = %d; adding the wizard must bump it", tpl.BuiltinVersion)
+	}
+
+	var kinds []string
+	for _, step := range wizard.Steps {
+		kinds = append(kinds, step.Kind)
+		if step.Adapter != "email_ops" {
+			t.Errorf("step %q names adapter %q, want email_ops", step.ID, step.Adapter)
+		}
+		if !step.Required {
+			t.Errorf("step %q is optional; every Email step gates the capability", step.ID)
+		}
+	}
+	if strings.Join(kinds, ",") != "account_link,readiness,summary" {
+		t.Fatalf("wizard steps = %v, want account_link,readiness,summary", kinds)
+	}
+
+	// The account-link step references the abstract capability the blueprint
+	// declares — "email", never a provider.
+	if wizard.Steps[0].RequirementKey != "email" {
+		t.Errorf("the link step references %q, want the declared email capability", wizard.Steps[0].RequirementKey)
+	}
+	if _, ok := tpl.CapabilityRequirement("email"); !ok {
+		t.Error("the wizard references a capability the template does not declare")
+	}
+
+	// The boundary the user is agreeing to is stated where they agree to it:
+	// read and draft, and nothing sent without confirming that message.
+	disclosure := strings.ToLower(wizard.Steps[0].Disclosure)
+	for _, phrase := range []string{"reads your mail", "drafts", "never sends"} {
+		if !strings.Contains(disclosure, phrase) {
+			t.Errorf("the link step must state the read/draft boundary (%q): %s", phrase, wizard.Steps[0].Disclosure)
+		}
+	}
+	if !strings.Contains(disclosure, "separate") {
+		t.Errorf("the link step must separate signing in from linking a mailbox: %s", wizard.Steps[0].Disclosure)
+	}
+	// No step may ask for permission to send.
+	for _, step := range wizard.Steps {
+		if strings.Contains(strings.ToLower(step.Disclosure+step.Description), "send permission") {
+			t.Errorf("version 1 setup must not request send permission: %+v", step)
 		}
 	}
 }

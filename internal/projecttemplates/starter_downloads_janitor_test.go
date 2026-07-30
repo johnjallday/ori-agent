@@ -168,33 +168,44 @@ func TestDownloadsJanitorStarterTemplate_CuratorPromptSafety(t *testing.T) {
 }
 
 // TestDownloadsJanitorStarterTemplate_StarterTasks pins the ordered starter
-// experience: a setup task, then an initial-backlog review task (FR-4).
+// experience: a setup help task, then an initial-backlog review task (FR-4).
 //
-// Neither is flagged `setup: true`, so neither auto-starts on first open. The
-// Janitor's setup card *is* the guided setup — it states what access it wants,
-// pre-fills the suggested folder, and needs one press. Auto-starting an agent
-// to narrate it put the platform's autonomy-gate confirmation modal directly
-// over the card the user has to act on, so the first thing a new workspace did
-// was block its own setup behind a dialog about something else. The tasks stay
-// seeded and visible; the user starts them if they want them.
+// The setup task is flagged `setup: true`, and that is safe *because* this
+// blueprint declares a Setup Wizard: a wizard-enabled blueprint suppresses the
+// first-open auto-start entirely (FR-67), and the server completes the task
+// when setup passes (FR-70). The flag is what links the two.
+//
+// The history matters, because the flag used to be forbidden here. Without a
+// wizard, `setup: true` auto-started an agent to narrate setup, and the
+// platform's autonomy-gate confirmation modal landed directly over the setup
+// card the user had to act on — the first thing a new workspace did was block
+// its own setup behind a dialog about something else. The wizard removes the
+// collision by owning setup outright; the task is now only optional help.
 func TestDownloadsJanitorStarterTemplate_StarterTasks(t *testing.T) {
 	tpl := loadDownloadsJanitorTemplate(t)
 
 	if len(tpl.StarterTasks) != 2 {
-		t.Fatalf("expected 2 starter tasks (setup + backlog review), got %d: %+v", len(tpl.StarterTasks), tpl.StarterTasks)
+		t.Fatalf("expected 2 starter tasks (setup help + backlog review), got %d: %+v", len(tpl.StarterTasks), tpl.StarterTasks)
 	}
-	for i, task := range tpl.StarterTasks {
-		if task.Setup {
-			t.Fatalf("starter task %d must not auto-start on first open: it would cover the setup card with a confirmation modal: %+v", i, task)
-		}
+	if !tpl.HasSetupWizard() {
+		t.Fatal("the setup task may only be flagged setup: true while a wizard owns setup")
+	}
+	if !tpl.StarterTasks[0].Setup {
+		t.Errorf("the setup help task must be linked to the wizard with setup: true: %+v", tpl.StarterTasks[0])
+	}
+	if tpl.StarterTasks[1].Setup {
+		t.Errorf("only one task may be the setup help task: %+v", tpl.StarterTasks[1])
 	}
 
 	setup := strings.ToLower(tpl.StarterTasks[0].Details)
-	if !strings.Contains(setup, "trash") || !strings.Contains(setup, "folder") {
-		t.Errorf("setup task must explain folder access and Trash: %s", tpl.StarterTasks[0].Details)
+	if !strings.Contains(setup, "wizard") {
+		t.Errorf("setup task must defer to the wizard that owns setup: %s", tpl.StarterTasks[0].Details)
 	}
-	if !strings.Contains(setup, "do not select a folder for them") && !strings.Contains(setup, "not select") {
+	if !strings.Contains(setup, "do not select a folder") && !strings.Contains(setup, "not select") {
 		t.Errorf("setup task must leave folder selection to the user: %s", tpl.StarterTasks[0].Details)
+	}
+	if !strings.Contains(setup, "do not claim setup is complete") {
+		t.Errorf("setup task must not claim completion it did not perform: %s", tpl.StarterTasks[0].Details)
 	}
 
 	review := strings.ToLower(tpl.StarterTasks[1].Details)
@@ -203,5 +214,67 @@ func TestDownloadsJanitorStarterTemplate_StarterTasks(t *testing.T) {
 	}
 	if !strings.Contains(review, "approve") && !strings.Contains(review, "approves") {
 		t.Errorf("review task must route every action through user approval: %s", tpl.StarterTasks[1].Details)
+	}
+}
+
+// TestDownloadsJanitorStarterTemplate_SetupWizard pins the wizard contract
+// (FR-75/76): the blueprint's setup is declared, not improvised, and every step
+// points at something the same manifest already declares.
+func TestDownloadsJanitorStarterTemplate_SetupWizard(t *testing.T) {
+	tpl := loadDownloadsJanitorTemplate(t)
+
+	if tpl.SetupWizardError != "" {
+		t.Fatalf("the shipped wizard must be valid: %s", tpl.SetupWizardError)
+	}
+	wizard := tpl.SetupWizard
+	if wizard == nil {
+		t.Fatal("Downloads Janitor must declare a setup wizard")
+	}
+	if tpl.BuiltinVersion < 2 {
+		t.Errorf("builtin_version = %d; adding the wizard must bump it so existing installs refresh", tpl.BuiltinVersion)
+	}
+
+	var kinds []string
+	for _, step := range wizard.Steps {
+		kinds = append(kinds, step.Kind)
+		if !step.Required {
+			t.Errorf("step %q is optional; every Downloads step gates a real capability", step.ID)
+		}
+		if step.Adapter != "downloads_janitor" {
+			t.Errorf("step %q names adapter %q, want downloads_janitor", step.ID, step.Adapter)
+		}
+	}
+	want := []string{"directory", "automation_review", "readiness", "summary"}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("wizard steps = %v, want %v", kinds, want)
+	}
+
+	// The folder and automation steps resolve against the blueprint's own
+	// declarations, so setup can never ask for a folder it never described.
+	for _, step := range wizard.Steps[:2] {
+		if step.RequirementKey != "downloads-root" {
+			t.Errorf("step %q references %q, want downloads-root", step.ID, step.RequirementKey)
+		}
+	}
+	if _, ok := tpl.DirectoryRequirement("downloads-root"); !ok {
+		t.Error("the wizard references a directory requirement the template does not declare")
+	}
+	if _, ok := tpl.AutomationRecipeFor("downloads-root"); !ok {
+		t.Error("the automation-review step has no recipe to review")
+	}
+
+	// The automation disclosure states what will run, in the terms the recipe
+	// actually uses, before anything is switched on.
+	disclosure := strings.ToLower(wizard.Steps[1].Disclosure)
+	for _, phrase := range []string{"five minutes", "filed", "09:00", "created or renamed"} {
+		if !strings.Contains(disclosure, phrase) {
+			t.Errorf("automation disclosure must mention %q: %s", phrase, wizard.Steps[1].Disclosure)
+		}
+	}
+	if !strings.Contains(disclosure, "nothing moves without you") {
+		t.Errorf("automation disclosure must say approval is still required: %s", wizard.Steps[1].Disclosure)
+	}
+	if strings.Contains(strings.ToLower(wizard.Steps[1].Description), "already running") {
+		t.Errorf("the automation step must not imply automation is already on: %s", wizard.Steps[1].Description)
 	}
 }

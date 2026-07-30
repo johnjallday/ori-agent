@@ -45,6 +45,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
@@ -52,6 +53,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupwizard"
+	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
@@ -521,6 +524,9 @@ func (b *ServerBuilder) wireReaperSetup() {
 	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
 	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
 	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
+	// Held for the Setup Wizard's REAPER adapter, which reads the same resolver
+	// the readiness panel and the repair flow do.
+	b.reaperResolver = resolver
 }
 
 // wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. Like
@@ -565,6 +571,98 @@ func (b *ServerBuilder) wireDownloadsJanitor() {
 	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
 	b.downloadsJanitorService = service
 	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+}
+
+// wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled
+// adapter registry, the lifecycle service, and the workspace-scoped HTTP
+// handler. It runs in the workspace-store phase (18) for the same reason as
+// wireReaperSetup/wireCalendarOpsSetup — the service reads and writes the
+// workspace's canonical folder record, which does not exist until this phase.
+//
+// The store must expose GetFolderWorkspace: the wizard snapshot and its
+// progress are workspace.json-only fields, so the SQLite-primary Get reports
+// them as absent and every workspace would look like it had never started
+// setup. Without a folder-capable store the wizard stays unwired, which
+// surfaces as an honest 503 rather than a wizard that silently forgets.
+func (b *ServerBuilder) wireSetupWizard() {
+	if b.workspaceStore == nil {
+		return
+	}
+	folders, ok := b.workspaceStore.(setupwizard.Store)
+	if !ok {
+		logger.Warn("Setup Wizard not wired: workspace store lacks GetFolderWorkspace", logger.Fields{})
+		return
+	}
+	registry := setupwizard.NewRegistry()
+	b.setupWizardRegistry = registry
+	// Domain adapters are registered from code, never from configuration: a
+	// manifest's adapter name is a key into this registry and nothing else.
+	if b.calendarOpsHandler != nil {
+		if folders, ok := b.workspaceStore.(calendarhttp.FolderStore); ok {
+			adapter := calendarhttp.NewSetupAdapter(b.calendarOpsHandler, folders)
+			if err := registry.Register(adapter); err != nil {
+				logger.Warn("Calendar Ops setup adapter not registered", logger.Fields{"error": err})
+			}
+		}
+	}
+	if b.reaperResolver != nil {
+		if err := registry.Register(reapersetup.NewSetupAdapter(b.reaperResolver)); err != nil {
+			logger.Warn("Reaper Song setup adapter not registered", logger.Fields{"error": err})
+		}
+	}
+	if b.downloadsJanitorService != nil {
+		adapter := downloadsjanitor.NewSetupAdapter(b.downloadsJanitorService)
+		b.downloadsJanitorSetupAdapter = adapter
+		if err := registry.Register(adapter); err != nil {
+			logger.Warn("Downloads Janitor setup adapter not registered", logger.Fields{"error": err})
+		}
+	}
+	service := setupwizard.NewService(folders, registry)
+	service.SetBlueprintLookup(b.blueprintWizardLookup())
+	b.setupWizardService = service
+	b.setupWizardHandler = setupwizardhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+
+	// When setup first passes, the blueprint's `setup: true` help task is marked
+	// complete — no model call, no agent run. The wizard did the work; the task
+	// only ever explained it.
+	if b.sessionHandler != nil {
+		sessionHandler := b.sessionHandler
+		service.SetCompletionHook(func(_ context.Context, workspaceID string) {
+			sessionHandler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
+		})
+	}
+}
+
+// blueprintWizardLookup resolves a blueprint by the template ID a workspace
+// recorded, for backfilling workspaces that predate their blueprint's wizard.
+//
+// It reads the template library at lookup time rather than caching it, because
+// the library is editable at runtime and a stale cache would backfill a wizard
+// the blueprint no longer declares. The read happens once per workspace — the
+// snapshot is written into the workspace and never re-read — so the cost is
+// paid on one page load, not on every one.
+func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
+	return func(templateID string) (setupwizard.Blueprint, bool) {
+		root := resolveTemplatesRoot(b.configManager)
+		if strings.TrimSpace(root) == "" {
+			return setupwizard.Blueprint{}, false
+		}
+		tpl, err := projecttemplates.FindLibraryTemplate(root, templateID)
+		if err != nil || !tpl.HasSetupWizard() || tpl.HasInvalidSetupWizard() {
+			return setupwizard.Blueprint{}, false
+		}
+		return setupwizard.Blueprint{
+			ID:                     tpl.ID,
+			Name:                   tpl.Name,
+			Version:                tpl.BuiltinVersion,
+			Wizard:                 tpl.SetupWizard,
+			DirectoryRequirements:  tpl.DirectoryRequirements,
+			AutomationRecipes:      tpl.AutomationRecipes,
+			CapabilityRequirements: tpl.CapabilityRequirements,
+			Plugins:                tpl.Tools.Plugins,
+			PluginSources:          tpl.Tools.PluginSources,
+		}, true
+	}
 }
 
 // wireDownloadsJanitorMover gives the Janitor its execution mechanism: the
@@ -665,6 +763,11 @@ func (b *ServerBuilder) wireMailboxRuntime() {
 	// The orchestration task handler that consumes this is built later
 	// (Phase 21), so stash it rather than wiring a handler that is still nil.
 	b.emailReadiness = readiness
+	// The Setup Wizard's Email adapter is registered here, not with the other
+	// adapters, because this evaluator is what it reads and it does not exist
+	// until now. Registering it earlier would silently produce an adapter that
+	// reports "unavailable" forever.
+	b.wireEmailSetupAdapter(b.setupWizardRegistry)
 	if b.personalHQHandler != nil && b.personalHQService != nil {
 		linker := newMailboxLinkerService(b.personalHQService, b.workspaceStore, b.vaultStore, cachedProvider)
 		linker.readiness = readiness

@@ -337,6 +337,25 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { started: false });
       return;
     }
+    // Blueprint Setup Wizard: setup-wizard.js and workspace-map.js both read a
+    // workspace's setup state on load, for every workspace regardless of
+    // blueprint. These fictional workspaces come from no blueprint, so the
+    // accurate mock is the real handler's own answer for that case --
+    // setupwizard.Status with applicable:false and state:not_applicable, which
+    // keeps the dialog closed and the banner hidden exactly as in production.
+    if (/^\/api\/workspaces\/[^/]+\/setup-wizard$/.test(url.pathname)) {
+      await json(route, {
+        success: true,
+        setup: {
+          workspace_id: url.pathname.split('/')[3],
+          applicable: false,
+          state: 'not_applicable',
+          dismissed: false,
+          auto_open: false,
+        },
+      });
+      return;
+    }
     // Calendar Ops: calendar-ops-setup.js and calendar-console.js are loaded
     // globally and both auto-check the current workspace on page load. This
     // fixture workspace isn't a Calendar Ops workspace, so the accurate mocks

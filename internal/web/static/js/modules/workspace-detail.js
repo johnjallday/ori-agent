@@ -344,11 +344,33 @@ export class WorkspaceDetailPage {
         360
       );
     }
-    if (!restoredBlockedTask && !this.checkAutoOpenCreateAgent()) {
+    // The blueprint Setup Wizard is resolved before any other first-open
+    // prompt. When a blueprint owns its setup, its dialog is the one the user
+    // should meet — not a missing-entry-agent prompt landing on top of it, and
+    // not an agent task racing the deterministic setup it duplicates.
+    const setupOwned = await this.initSharedSetupWizard();
+    if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
     }
-    if (!restoredBlockedTask) {
+    if (!restoredBlockedTask && !setupOwned) {
       await this.maybeStartTemplateSetup();
+    }
+  }
+
+  /**
+   * Initialize the shared blueprint Setup Wizard and report whether this
+   * workspace has one. The module also self-starts on DOM ready; init() is
+   * idempotent, so awaiting it here only sequences the page behind it.
+   */
+  async initSharedSetupWizard() {
+    try {
+      const wizard = window.SetupWizard;
+      if (!wizard || typeof wizard.init !== 'function') return false;
+      const status = await wizard.init();
+      return Boolean(status?.applicable);
+    } catch (error) {
+      console.warn('Shared setup wizard init failed:', error);
+      return false;
     }
   }
 

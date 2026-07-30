@@ -887,6 +887,7 @@
       '<span class="ws-map-ov-v">' +
       skills +
       '</span></div>' +
+      setupOverviewHTML(ws) +
       '<div class="ws-map-ov-actions">' +
       '<button type="button" class="ws-map-ov-delete" data-ws-delete="' +
       escapeHtml(ws.id) +
@@ -1041,6 +1042,78 @@
     });
   }
 
+  // ---- blueprint setup status -------------------------------------------
+  //
+  // The Map shows a workspace's setup state so an unfinished blueprint is
+  // visible from the base map, not only from inside the workspace. It is read
+  // lazily for the *selected* workspace only: evaluating every workspace's
+  // adapters on every list would make opening the Map cost one domain check per
+  // tile. Every entry point here navigates into the workspace's own dialog, so
+  // there is exactly one persisted setup state and one place it is changed.
+  var setupStatusCache = {};
+
+  function setupPresentation(status) {
+    if (!status || !status.applicable) return null;
+    if (status.state === 'ready') {
+      return { state: 'Ready', tone: 'ready', action: 'View setup' };
+    }
+    if (status.state === 'needs_attention') {
+      return { state: 'Needs attention', tone: 'attention', action: 'Repair setup' };
+    }
+    return { state: 'Setup required', tone: 'required', action: 'Continue setup' };
+  }
+
+  function setupOverviewHTML(ws) {
+    var view = setupPresentation(ws && setupStatusCache[ws.id]);
+    if (!view) return '';
+    return (
+      '<div class="ws-map-ov-row ws-map-ov-setup">' +
+      '<span class="ws-map-ov-k">Setup</span>' +
+      '<button type="button" class="ws-map-ov-setup-open is-' +
+      escapeHtml(view.tone) +
+      '" data-ws-open-setup="' +
+      escapeHtml(ws.id) +
+      '" aria-label="' +
+      escapeHtml(view.state + ' \u2014 ' + view.action + ' for ' + (ws.name || 'workspace')) +
+      '"><span class="ws-map-ov-v">' +
+      escapeHtml(view.state) +
+      '</span><span class="ws-map-ov-setup-action">' +
+      escapeHtml(view.action) +
+      ' \u25b8</span></button></div>'
+    );
+  }
+
+  // ensureSetupStatus fetches once per workspace and patches the row in when the
+  // answer arrives, so a workspace without a wizard never renders a placeholder
+  // that then disappears.
+  function ensureSetupStatus(container, ws) {
+    if (!ws || !ws.id || Object.prototype.hasOwnProperty.call(setupStatusCache, ws.id)) return;
+    setupStatusCache[ws.id] = null;
+    var id = ws.id;
+    fetch('/api/workspaces/' + encodeURIComponent(id) + '/setup-wizard')
+      .then(function (response) {
+        return response.ok ? response.json() : null;
+      })
+      .then(function (payload) {
+        var status = payload && payload.setup;
+        setupStatusCache[id] = status || null;
+        if (!status || !status.applicable || selectedId !== id) return;
+        var actions = container.querySelector('.ws-map-ov-actions');
+        var body = container.querySelector('.ws-map-overview-body');
+        if (!actions || !body || body.querySelector('[data-ws-open-setup]')) return;
+        var holder = document.createElement('div');
+        holder.innerHTML = setupOverviewHTML(ws);
+        var row = holder.firstChild;
+        if (!row) return;
+        actions.parentNode.insertBefore(row, actions);
+        bindOverviewActions(container, {});
+      })
+      .catch(function () {
+        /* A status that cannot be read leaves the Map as it was: the workspace
+           page is still the authoritative place to see and fix setup. */
+      });
+  }
+
   function openWorkspace(id, opts) {
     if (!id) return;
     // Owning-workspace deep link (FR59): ?panel=backlog opens straight into
@@ -1048,6 +1121,9 @@
     // deletes backlog items itself — it only ever navigates there.
     var panel = opts && opts.panel;
     var query = panel ? '?panel=' + encodeURIComponent(panel) : '';
+    // ?setup=1 opens the workspace's own Setup Wizard on arrival — the same
+    // persisted state its banner and dialog show, never a second copy.
+    if (opts && opts.setup) query = '?setup=1';
     window.location.href = '/workspaces/' + encodeURIComponent(id) + query;
   }
 
@@ -1081,6 +1157,14 @@
     Array.prototype.forEach.call(openBacklogs, function (el) {
       el.addEventListener('click', function () {
         openWorkspace(el.getAttribute('data-ws-open-backlog'), { panel: 'backlog' });
+      });
+    });
+    var openSetups = container.querySelectorAll('[data-ws-open-setup]');
+    Array.prototype.forEach.call(openSetups, function (el) {
+      if (el.dataset && el.dataset.wsSetupBound === '1') return;
+      if (el.dataset) el.dataset.wsSetupBound = '1';
+      el.addEventListener('click', function () {
+        openWorkspace(el.getAttribute('data-ws-open-setup'), { setup: true });
       });
     });
     var deletes = container.querySelectorAll('[data-ws-delete]');
@@ -1122,8 +1206,10 @@
     });
     var body = container.querySelector('.ws-map-overview-body');
     if (body) {
-      body.innerHTML = overviewBodyHTML(findWs(workspaces, id), options);
+      var selected = findWs(workspaces, id);
+      body.innerHTML = overviewBodyHTML(selected, options);
       bindOverviewActions(container, options);
+      ensureSetupStatus(container, selected);
     }
   }
 
@@ -1302,6 +1388,9 @@
     bindTiles(container, workspaces, state);
     bindHQSite(container, state);
     bindOverviewActions(container, state);
+    // The first paint has a selection too, so its setup state is read here as
+    // well as on every later selection change.
+    ensureSetupStatus(container, findWs(workspaces, selectedId));
     bindSelBar(container);
 
     if (!resizeBound && typeof window.addEventListener === 'function') {
@@ -1332,6 +1421,11 @@
     hqOverviewHTML: hqOverviewHTML,
     nextFreeMapCell: nextFreeMapCell,
     setHQStatus: setHQStatus,
+    // Test-only seam for the lazily-read setup status, so the overview's setup
+    // row can be asserted without a network round-trip.
+    _setSetupStatusForTest: function (workspaceId, status) {
+      setupStatusCache[workspaceId] = status;
+    },
     // Test-only seam for the real designated-HQ tile badge.
     _setHQWorkspaceIdForTest: function (id) {
       hqWorkspaceId = id;

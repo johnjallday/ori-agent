@@ -56,17 +56,19 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 // the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
-		// ProjectPath, Designation, and TemplateProvenance are canonical
-		// workspace.json fields not represented by the SQLite workspace table.
-		// A workspace fetched from SQLite (the primary store's Get) therefore
-		// always carries these as zero values, and must not erase values
-		// written directly to the folder store by an unrelated Update/Save
-		// cycle (e.g. the template-setup first-open auto-start saving a task
-		// status change would otherwise silently wipe out the template
-		// provenance persisted moments earlier at workspace-creation time).
-		// There is no generic "empty means clear" operation through SyncStore;
-		// intentional removals must update the canonical FileStore explicitly.
-		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil {
+		// ProjectPath, Designation, TemplateProvenance, and SetupWizardProgress
+		// are canonical workspace.json fields not represented by the SQLite
+		// workspace table. A workspace fetched from SQLite (the primary store's
+		// Get) therefore always carries these as zero values, and must not erase
+		// values written directly to the folder store by an unrelated
+		// Update/Save cycle (e.g. the template-setup first-open auto-start saving
+		// a task status change would otherwise silently wipe out the template
+		// provenance persisted moments earlier at workspace-creation time — or,
+		// for setup progress, hand the user a wizard that has forgotten the
+		// folder they just approved). There is no generic "empty means clear"
+		// operation through SyncStore; intentional removals must update the
+		// canonical FileStore explicitly.
+		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
 				if ws.ProjectPath == "" {
 					ws.ProjectPath = diskWorkspace.ProjectPath
@@ -76,6 +78,9 @@ func (s *SyncStore) Save(ws *Workspace) error {
 				}
 				if ws.TemplateProvenance == nil {
 					ws.TemplateProvenance = diskWorkspace.TemplateProvenance
+				}
+				if ws.SetupWizardProgress == nil {
+					ws.SetupWizardProgress = diskWorkspace.SetupWizardProgress
 				}
 			}
 		}

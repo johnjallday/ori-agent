@@ -248,6 +248,69 @@ func TestAgentSnapshotStore_GetFolderWorkspaceForwardsThroughWrapping(t *testing
 	}
 }
 
+// TestAgentSnapshotStore_AgentWorkSurvivesSetupProgress exercises the fully
+// wrapped production store chain (AgentSnapshotStore over SyncStore over
+// SQLite-shaped primary + FileStore) against the failure this feature cannot
+// tolerate: a routine agent/task update saving a stale copy and erasing setup
+// the user already completed.
+func TestAgentSnapshotStore_AgentWorkSurvivesSetupProgress(t *testing.T) {
+	dir := t.TempDir()
+	fileStore, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	primary := NewInMemoryStore()
+	store := NewAgentSnapshotStore(NewSyncStore(primary, fileStore), &resolverAgentStoreStub{agents: map[string]*agent.Agent{}})
+
+	ws := &Workspace{ID: "ws-setup", Name: "Setup", Status: StatusActive}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		w.SetTemplateProvenance(&TemplateProvenance{
+			TemplateID: "downloads-janitor",
+			Builtin:    true,
+			SetupWizard: &SetupWizard{Version: 1, Title: "Set up", Steps: []SetupWizardStep{
+				{ID: "folder", Kind: SetupStepKindDirectory, RequirementKey: "downloads-root", Required: true},
+			}},
+		})
+		w.SetSetupWizardProgress(&SetupWizardProgress{
+			WizardVersion: 1,
+			State:         SetupWizardStateReady,
+			Steps:         []SetupStepProgress{{StepID: "folder", Status: SetupStepStatusComplete}},
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// An ordinary task write, from a copy fetched through the primary — the
+	// shape of every unrelated update in the app.
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		w.Tasks = append(w.Tasks, Task{ID: "unrelated", Status: TaskStatusPending})
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := store.GetFolderWorkspace(ws.ID)
+	if err != nil {
+		t.Fatalf("GetFolderWorkspace: %v", err)
+	}
+	if !got.HasSetupWizard() {
+		t.Fatalf("wizard snapshot lost through the wrapped store: %+v", got.GetTemplateProvenance())
+	}
+	if got.SetupWizardState() != SetupWizardStateReady {
+		t.Fatalf("setup state = %q, want ready — an unrelated update reset completed setup", got.SetupWizardState())
+	}
+	if got.GetSetupWizardProgress().StepStatus("folder") != SetupStepStatusComplete {
+		t.Fatalf("per-step progress lost: %+v", got.GetSetupWizardProgress())
+	}
+	if len(got.Tasks) != 1 {
+		t.Fatalf("the unrelated task update was not written through: %+v", got.Tasks)
+	}
+}
+
 func TestRestoreWorkspaceAgents_RegistersMissingAgents(t *testing.T) {
 	primary := NewInMemoryStore()
 	manager := &agent.Agent{Type: agent.TypeToolCalling}

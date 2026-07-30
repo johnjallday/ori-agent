@@ -20,6 +20,25 @@ import (
 // filesystem, registers a watcher, or enables a schedule — resolution happens
 // only in guided setup, after the user confirms a folder.
 
+// CapabilityRequirement declares an abstract capability (e.g. "calendar") a
+// template needs, without naming a specific MCP server, skill, or plugin.
+// Workspace creation carries an unresolved requirement into setup readiness
+// rather than auto-installing or silently choosing a connector — the user picks
+// or connects one during guided setup. Key and operation names are always
+// normalized (trimmed, lower-cased) by the template layer.
+type CapabilityRequirement struct {
+	// Key identifies the capability (e.g. "calendar"). Consuming code (e.g.
+	// internal/calendar for "calendar") defines what the key means and which
+	// operation names are valid; the template and workspace layers only store
+	// and normalize the data, staying domain-blind.
+	Key string `json:"key"`
+	// RequiredOperations must be mapped before the capability is ready.
+	RequiredOperations []string `json:"required_operations,omitempty"`
+	// OptionalOperations may be mapped; the corresponding UI action only
+	// appears when they are.
+	OptionalOperations []string `json:"optional_operations,omitempty"`
+}
+
 // DirectoryRequirement declares one local directory a template needs the user
 // to choose during guided setup.
 type DirectoryRequirement struct {

@@ -329,12 +329,33 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Unusable-setup-wizard gate: a template whose `setup_wizard` block could not
+	// be understood is refused outright rather than created without its setup.
+	// The author declared steps that grant folder access, connect accounts, or
+	// change permissions; creating the workspace anyway would leave the user with
+	// a blueprint that silently does none of them. Reported before the plugin gate
+	// because a manifest Ori cannot read is the more fundamental problem.
+	if templateResolved && resolvedTemplate.HasInvalidSetupWizard() {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":              fmt.Sprintf("This blueprint's setup wizard is unusable, so no workspace was created. Fix its template.json: %s", resolvedTemplate.SetupWizardError),
+			"setup_wizard_error": resolvedTemplate.SetupWizardError,
+		})
+		return
+	}
+
 	// Required-plugin gate: a template that declares plugins requires them
 	// installed and enabled before creation, so the workspace is never created
 	// missing its required tools. Reject with a structured 409 naming what to
 	// install/enable; the create modal surfaces this and offers the install/enable
 	// actions.
-	if templateResolved {
+	//
+	// A blueprint with a Setup Wizard is exempt, and deliberately so. Its wizard
+	// asks how the workspace should work — and for Reaper Song one of the two
+	// supported answers needs no plugin at all. Blocking creation on a plugin
+	// would force everyone through an install to reach a question whose answer
+	// might be "I don't need that", and there is no way to ask before the
+	// workspace exists.
+	if templateResolved && !resolvedTemplate.HasSetupWizard() {
 		if missing, disabled := h.unsatisfiedRequiredPlugins(resolvedTemplate.Tools); len(missing)+len(disabled) > 0 {
 			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 				"error":            "required plugins are not ready",
@@ -829,13 +850,19 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 // after template application — would clobber a provenance write made here
 // earlier. Doing it last avoids that.
 func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool) {
-	if !resolved || !tmpl.Builtin || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
+	if !resolved || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
+		return
+	}
+	// Built-ins always record provenance. A user template records it too when it
+	// declares a setup wizard: the wizard snapshot *is* the workspace's setup, so
+	// without it the blueprint's declared steps would simply never be asked.
+	if !tmpl.Builtin && !tmpl.HasSetupWizard() {
 		return
 	}
 	prov := &agentworkspace.TemplateProvenance{
 		TemplateID:   tmpl.ID,
 		TemplateName: tmpl.Name,
-		Builtin:      true,
+		Builtin:      tmpl.Builtin,
 		Version:      tmpl.BuiltinVersion,
 		AppliedAt:    time.Now(),
 		// Setup requirements are recorded unresolved on purpose: creation states
@@ -845,6 +872,14 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		// user confirms a folder.
 		DirectoryRequirements: tmpl.DirectoryRequirements,
 		AutomationRecipes:     tmpl.AutomationRecipes,
+		// The capability and plugin declarations travel with the wizard because
+		// its steps reference them by key. Snapshotting them keeps setup and
+		// repair readable from the workspace alone, instead of re-reading a
+		// template the user may have since edited, replaced, or deleted.
+		CapabilityRequirements: tmpl.CapabilityRequirements,
+		Plugins:                tmpl.Tools.Plugins,
+		PluginSources:          tmpl.Tools.PluginSources,
+		SetupWizard:            tmpl.SetupWizard,
 	}
 	if err := h.workspaceTaskStore.Update(wsID, func(w *agentworkspace.Workspace) error {
 		w.SetTemplateProvenance(prov)

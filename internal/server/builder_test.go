@@ -7,6 +7,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -106,6 +107,66 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	// still nil. If this regresses, the create preview is stuck on plugin_missing.
 	if server.Handlers.Session == nil || !server.Handlers.Session.ReaperSetupWired() {
 		t.Error("REAPER setup (resolver/preview/repair) not wired onto the session handler")
+	}
+	// The shared Setup Wizard is wired in the same phase and for the same
+	// reason: its state lives in the workspace's canonical folder record. An
+	// unwired wizard makes every blueprint's setup unreachable.
+	if server.Handlers.SetupWizard == nil {
+		t.Error("Setup Wizard handler not wired")
+	}
+	if builder.setupWizardService == nil || builder.setupWizardRegistry == nil {
+		t.Error("Setup Wizard service/registry not wired")
+	}
+}
+
+// TestSetupWizardRegistry_MatchesTheAuthorableAdapters keeps the two halves of
+// the adapter contract in step: what a blueprint manifest may name, and what
+// this build can actually run.
+//
+// An adapter registered here but not authorable would be unreachable; an
+// authorable adapter with no registration blocks its steps at runtime. The
+// pending list is explicit so each blueprint migration has to remove its own
+// entry — the test fails the moment the two lists drift for any other reason.
+func TestSetupWizardRegistry_MatchesTheAuthorableAdapters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+	builder, err := NewServerBuilder()
+	if err != nil {
+		t.Fatalf("NewServerBuilder failed: %v", err)
+	}
+	if _, err := builder.Build(); err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	if builder.setupWizardRegistry == nil {
+		t.Fatal("Setup Wizard registry not wired")
+	}
+
+	authorable := map[string]bool{}
+	for _, id := range projecttemplates.ValidSetupWizardAdapters {
+		authorable[id] = true
+	}
+	registered := map[string]bool{}
+	for _, id := range builder.setupWizardRegistry.IDs() {
+		registered[id] = true
+		if !authorable[id] {
+			t.Errorf("adapter %q is registered but no manifest may name it", id)
+		}
+	}
+
+	// Blueprints whose migration has not landed yet. Remove an entry in the
+	// group that registers its adapter.
+	// Every migrated blueprint's adapter is registered now. A new authorable
+	// adapter with no registration fails here rather than at a user's first
+	// blocked step.
+	pending := map[string]bool{}
+	for id := range authorable {
+		switch {
+		case registered[id] && pending[id]:
+			t.Errorf("adapter %q is registered; remove it from this test's pending list", id)
+		case !registered[id] && !pending[id]:
+			t.Errorf("adapter %q may be authored but is not registered in this build", id)
+		}
 	}
 }
 

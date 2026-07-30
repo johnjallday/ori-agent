@@ -168,3 +168,67 @@ func assertContainsAll(t *testing.T, label string, got, want []string) {
 		}
 	}
 }
+
+// TestCalendarOpsStarterManifest_SetupWizard pins the wizard contract (FR-85):
+// the blueprint declares its setup, and the steps line up with the domain's own
+// state machine — connect, then map and validate, then check, then summarize.
+func TestCalendarOpsStarterManifest_SetupWizard(t *testing.T) {
+	libDir := filepath.Join(t.TempDir(), "templates")
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+	tpl, err := projecttemplates.FindLibraryTemplate(libDir, "calendar-ops")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(calendar-ops): %v", err)
+	}
+
+	if tpl.SetupWizardError != "" {
+		t.Fatalf("the shipped wizard must be valid: %s", tpl.SetupWizardError)
+	}
+	wizard := tpl.SetupWizard
+	if wizard == nil {
+		t.Fatal("Calendar Ops must declare a setup wizard")
+	}
+	if tpl.BuiltinVersion < 2 {
+		t.Errorf("builtin_version = %d; adding the wizard must bump it", tpl.BuiltinVersion)
+	}
+
+	var kinds []string
+	for _, step := range wizard.Steps {
+		kinds = append(kinds, step.Kind)
+		if step.Adapter != "calendar_ops" {
+			t.Errorf("step %q names adapter %q, want calendar_ops", step.ID, step.Adapter)
+		}
+		if !step.Required {
+			t.Errorf("step %q is optional; every Calendar step gates the capability", step.ID)
+		}
+	}
+	want := []string{"capability_connect", "capability_configure", "readiness", "summary"}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("wizard steps = %v, want %v", kinds, want)
+	}
+	for _, step := range wizard.Steps[:2] {
+		if step.RequirementKey != "calendar" {
+			t.Errorf("step %q references %q, want the declared calendar capability", step.ID, step.RequirementKey)
+		}
+	}
+
+	// Least privilege has to be stated where the user is deciding, not only in
+	// the code: mutation stays unmapped unless they map it themselves (FR-90).
+	configure := strings.ToLower(wizard.Steps[1].Disclosure)
+	for _, phrase := range []string{"listing calendars", "listing events", "required"} {
+		if !strings.Contains(configure, phrase) {
+			t.Errorf("the mapping step must state what is required (%q): %s", phrase, wizard.Steps[1].Disclosure)
+		}
+	}
+	if !strings.Contains(configure, "unmapped") {
+		t.Errorf("the mapping step must say mutation stays unmapped by default: %s", wizard.Steps[1].Disclosure)
+	}
+
+	// Signing in happens with the provider; the connect step says so before it
+	// sends anyone there.
+	connect := strings.ToLower(wizard.Steps[0].Disclosure)
+	if !strings.Contains(connect, "provider") {
+		t.Errorf("the connect step must state where sign-in happens: %s", wizard.Steps[0].Disclosure)
+	}
+}

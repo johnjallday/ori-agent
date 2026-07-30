@@ -1,0 +1,533 @@
+/* setup-wizard.css — the shared blueprint Setup Wizard dialog and its
+   workspace-level status banner.
+
+   Three rules shape this file:
+
+   - State is never carried by color alone. Every step marker renders a text
+     mark (✓, !, –, •) and every status renders a word, so the progress list
+     reads the same to a screen reader, in monochrome, and to anyone who does
+     not perceive the accent hues.
+   - The dialog owns a single scroll region. On a narrow or short viewport the
+     header, progress, and footer stay put while the body scrolls, so the
+     primary action is never pushed off-screen — the failure that makes a
+     mobile dialog unusable rather than merely cramped.
+   - Motion is opt-out. Everything animated here is suppressed under
+     prefers-reduced-motion. */
+
+/* ---------- Workspace status banner ---------- */
+
+.setup-wizard-banner[hidden] {
+  display: none;
+}
+
+.setup-wizard-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.7rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+}
+
+.setup-wizard-banner-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.setup-wizard-banner-state {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary, #9aa0a6);
+  white-space: nowrap;
+}
+
+.setup-wizard-banner-state-required {
+  color: var(--warning-color, #b26a00);
+}
+
+.setup-wizard-banner-state-attention {
+  color: var(--danger-color, #c62828);
+}
+
+.setup-wizard-banner-state-ready {
+  color: var(--success-color, #2e7d32);
+}
+
+.setup-wizard-banner-detail {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Dialog shell ---------- */
+
+.setup-wizard {
+  width: min(680px, 94vw);
+  max-height: min(90vh, 46rem);
+  padding: 0;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  background: var(--bg-primary, #16181c);
+  color: var(--text-primary, #e8e8e8);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.setup-wizard::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.setup-wizard[open] {
+  animation: setup-wizard-appear 140ms ease-out;
+}
+
+@keyframes setup-wizard-appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The shell is a three-row grid so only the body scrolls: navigation stays
+   reachable no matter how long a connector mapping or disclosure becomes. */
+.setup-wizard-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  max-height: inherit;
+  height: 100%;
+}
+
+.setup-wizard-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem 0.6rem;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.setup-wizard-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.setup-wizard-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.setup-wizard-heading {
+  min-width: 0;
+}
+
+.setup-wizard-blueprint {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+/* The app styles bare headings with a display serif; inside the dialog they
+   should read as the same UI as the cards around it. */
+.setup-wizard-title {
+  margin: 0.1rem 0 0;
+  font-family: inherit;
+  font-size: 1.1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Focus lands on the heading when the dialog opens, so the ring has to be
+   visible — but in the app's own accent, not a browser default that reads as a
+   text field. */
+.setup-wizard-title:focus-visible {
+  outline: 2px solid var(--primary-color, #1f6b4e);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.setup-wizard-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.setup-wizard-close:hover {
+  color: var(--text-primary, #e8e8e8);
+}
+
+/* ---------- Progress ---------- */
+
+.setup-wizard-progress {
+  padding: 0.6rem 1.15rem;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+/* Wrapping, not scrolling: a four-step flow clipped at the dialog edge reads
+   as broken, and a horizontal scrollbar is a worse answer than a second line. */
+.setup-wizard-steps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #9aa0a6);
+  white-space: nowrap;
+}
+
+.setup-wizard-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.setup-wizard-step-active {
+  color: var(--text-primary, #e8e8e8);
+  font-weight: 600;
+}
+
+.setup-wizard-step-complete {
+  color: var(--success-color, #2e7d32);
+}
+
+.setup-wizard-step-blocked {
+  color: var(--danger-color, #c62828);
+}
+
+.setup-wizard-step-optional-skipped {
+  color: var(--text-secondary, #9aa0a6);
+  text-decoration: line-through;
+}
+
+/* ---------- Body ---------- */
+
+.setup-wizard-body {
+  padding: 1rem 1.15rem;
+  overflow-y: auto;
+}
+
+.setup-wizard-step-title {
+  margin: 0;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.setup-wizard-step-description {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.setup-wizard-step-description:empty {
+  display: none;
+}
+
+.setup-wizard-step-content {
+  margin-top: 0.9rem;
+}
+
+.setup-wizard-step-content:empty {
+  display: none;
+}
+
+.setup-wizard-summary {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.setup-wizard-summary-item {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.setup-wizard-summary-mark {
+  font-weight: 700;
+}
+
+.setup-wizard-disclosure {
+  margin-top: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.05));
+}
+
+.setup-wizard-disclosure[hidden] {
+  display: none;
+}
+
+.setup-wizard-disclosure-title {
+  margin: 0 0 0.3rem;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.setup-wizard-disclosure-body {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.setup-wizard-error {
+  margin: 0.9rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid var(--danger-color, #c62828);
+  font-size: 0.85rem;
+  color: var(--danger-color, #c62828);
+  overflow-wrap: anywhere;
+}
+
+.setup-wizard-error[hidden] {
+  display: none;
+}
+
+/* ---------- Footer ---------- */
+
+.setup-wizard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.8rem 1.15rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.setup-wizard-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.setup-wizard-live {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setup-wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.setup-wizard-actions button[hidden] {
+  display: none;
+}
+
+.setup-wizard-busy .setup-wizard-actions button {
+  cursor: progress;
+}
+
+/* ---------- Narrow and short viewports ---------- */
+
+@media (max-width: 40rem), (max-height: 34rem) {
+  .setup-wizard {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border-width: 0;
+  }
+
+  .setup-wizard-footer {
+    /* Stack the label above full-width actions so nothing is clipped when the
+       viewport is both narrow and short. */
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .setup-wizard-actions {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-wizard[open] {
+    animation: none;
+  }
+}
+
+/* ---------- Creation review preview ---------- */
+
+/* Lives in the Create Workspace review step. It is disclosure only: nothing
+   here is interactive, because nothing in it has happened yet. */
+.workspace-setup-preview[hidden] {
+  display: none;
+}
+
+.workspace-setup-preview {
+  margin-top: 0.9rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+}
+
+.workspace-setup-preview-head h3 {
+  margin: 0.1rem 0 0;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.workspace-setup-preview-list {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.workspace-setup-preview-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.workspace-setup-preview-item.is-error {
+  color: var(--danger-color, #c62828);
+}
+
+.workspace-setup-preview-label {
+  font-weight: 600;
+}
+
+.workspace-setup-preview-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary, #9aa0a6);
+}
+
+.workspace-setup-preview-badge.is-required {
+  color: var(--warning-color, #b26a00);
+}
+
+.workspace-setup-preview-detail {
+  flex: 1 1 100%;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.workspace-setup-preview-note {
+  margin: 0.7rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+/* ---------- Station chip ---------- */
+
+/* The compact status in the workspace's configuration strip — the same state as
+   the banner, in the surface the Command/Map view relocates. */
+.setup-wizard-chip.is-required {
+  color: var(--warning-color, #b26a00);
+}
+
+.setup-wizard-chip.is-attention {
+  color: var(--danger-color, #c62828);
+}
+
+.setup-wizard-chip.is-ready {
+  color: var(--success-color, #2e7d32);
+}
+
+/* ---------- Adapter-declared choices ---------- */
+
+/* A step that offers a choice states each option's consequences next to the
+   button that takes it — the decision and what it costs in one place. */
+.setup-wizard-options {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.setup-wizard-option {
+  padding: 0.7rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+}
+
+.setup-wizard-option.is-selected {
+  border-color: var(--primary-color, #1f6b4e);
+}
+
+.setup-wizard-option-detail {
+  margin: 0.45rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-secondary, #9aa0a6);
+}

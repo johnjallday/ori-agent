@@ -1767,3 +1767,175 @@ test('a batch reload does not invalidate a confirmation already on screen', asyn
     'the approval must survive a reload of the same batch: ' + JSON.stringify(requested)
   );
 });
+
+// ---------------------------------------------------------------------------
+// Blueprint Setup Wizard migration (FR-82/83): the wizard owns setup; the panel
+// keeps a compact entry into it and its operational surfaces are untouched.
+
+function withSetupWizard(status) {
+  globalThis.window.SetupWizard = {
+    getStatus: () => status,
+    open: () => {
+      globalThis.window.__setupOpened = (globalThis.window.__setupOpened || 0) + 1;
+    },
+    registerStepRenderer: () => {}
+  };
+}
+
+function withoutSetupWizard() {
+  delete globalThis.window.SetupWizard;
+}
+
+test('a wizard-enabled workspace shows a setup entry, not a second folder chooser', () => {
+  const doc = setup();
+  withSetupWizard({ applicable: true, state: 'in_progress' });
+  panel.render(setupRequiredStatus);
+
+  // The retired card's controls are gone: one authoritative setup surface.
+  assert.equal(doc.getElementById('downloadsJanitorPath'), null);
+  assert.equal(doc.getElementById('downloadsJanitorConfirm'), null);
+  assert.match(text(doc), /Continue setup/);
+  assert.match(text(doc), /Setup is not finished/);
+  withoutSetupWizard();
+});
+
+test('a regressed workspace is offered repair, in the wizard', () => {
+  const doc = setup();
+  withSetupWizard({ applicable: true, state: 'needs_attention' });
+  panel.render(setupRequiredStatus);
+  assert.match(text(doc), /Repair setup/);
+  assert.match(text(doc), /stopped working/);
+  withoutSetupWizard();
+});
+
+test('a workspace whose blueprint has no wizard keeps the original setup card', () => {
+  const doc = setup();
+  withoutSetupWizard();
+  panel.render(setupRequiredStatus);
+  // Nobody loses their way to set up because their workspace predates the
+  // wizard.
+  assert.ok(doc.getElementById('downloadsJanitorPath'), 'the legacy card still renders');
+  assert.match(text(doc), /Use this folder/);
+});
+
+test('the directory step offers a picker and never an editable path field', () => {
+  const doc = setup();
+  panel._setStatus({
+    ...setupRequiredStatus,
+    settings: { ...setupRequiredStatus.settings, root_path: '' }
+  });
+  const container = doc.createElement('div');
+  panel._setupSteps.directory.render(container, {
+    step: { id: 'folder', kind: 'directory', adapter: 'downloads_janitor' }
+  });
+
+  assert.match(container.textContent, /Choose folder/);
+  assert.match(container.textContent, /~\/Downloads/);
+  // FR-52: the picker is the only way in. A text field would let a typo or a
+  // paste become a grant the user did not mean to give.
+  assert.equal(doc.getElementById('downloadsJanitorPath'), null);
+  const label = panel._setupSteps.directory.primaryLabel({
+    step: { adapter: 'downloads_janitor' }
+  });
+  assert.match(label, /Choose a folder to continue/);
+});
+
+test('the directory step shows the chosen folder once one is confirmed', () => {
+  const doc = setup();
+  panel._setStatus({
+    ...setupRequiredStatus,
+    settings: { ...setupRequiredStatus.settings, root_path: '/tmp/fixture-inbox' }
+  });
+  const container = doc.createElement('div');
+  panel._setupSteps.directory.render(container, {
+    step: { id: 'folder', kind: 'directory', adapter: 'downloads_janitor' }
+  });
+  assert.match(container.textContent, /\/tmp\/fixture-inbox/);
+  assert.match(container.textContent, /Choose a different folder/);
+  assert.equal(
+    panel._setupSteps.directory.primaryLabel({ step: { adapter: 'downloads_janitor' } }),
+    'Continue'
+  );
+});
+
+test('the automation step states what will run, in the workspace’s own terms', () => {
+  const doc = setup();
+  panel._setStatus({
+    ...setupRequiredStatus,
+    settings: {
+      ...setupRequiredStatus.settings,
+      root_path: '/tmp/fixture-inbox',
+      filing_root_name: 'Filed',
+      daily_scan_local_time: '07:30'
+    }
+  });
+  const container = doc.createElement('div');
+  panel._setupSteps.automation.render(container, {
+    step: { id: 'automation', kind: 'automation_review', adapter: 'downloads_janitor' }
+  });
+
+  assert.match(container.textContent, /five minutes/);
+  assert.match(container.textContent, /Skips the Filed folder/);
+  assert.match(container.textContent, /07:30/);
+  assert.match(container.textContent, /Nothing moves until you approve it/);
+  assert.equal(
+    panel._setupSteps.automation.primaryLabel({ step: { adapter: 'downloads_janitor' } }),
+    'Turn this on'
+  );
+});
+
+test('another blueprint’s directory step is not drawn by this module', () => {
+  const doc = setup();
+  const container = doc.createElement('div');
+  panel._setupSteps.directory.render(container, {
+    step: { id: 'folder', kind: 'directory', adapter: 'calendar_ops' }
+  });
+  assert.equal(container.textContent, '');
+  assert.equal(panel._setupSteps.directory.primaryLabel({ step: { adapter: 'calendar_ops' } }), '');
+});
+
+test('unattended watching cannot be resumed from the panel before setup approves it', () => {
+  const doc = setup();
+  withSetupWizard({ applicable: true, state: 'in_progress' });
+  panel.render({
+    applies: true,
+    settings: {
+      workspace_id: 'ws-1',
+      root_path: '/tmp/fixture-inbox',
+      directory_reference_id: 'dir-1',
+      filing_root_name: 'Filed',
+      daily_scan_local_time: '09:00',
+      paused: true
+    },
+    readiness: { state: 'ready', checks: [] },
+    privacy: {}
+  });
+
+  const control = doc.getElementById('downloadsJanitorPause');
+  assert.ok(control, 'the control stays visible rather than disappearing');
+  // FR-56: the action that needs the missing approval says where the decision
+  // lives instead of quietly doing it.
+  assert.equal(control.textContent, 'Approve in setup');
+  assert.ok(doc.getElementById('downloadsJanitorScan'), 'scanning on demand is unaffected');
+  withoutSetupWizard();
+});
+
+test('once setup is ready the panel resumes watching normally', () => {
+  const doc = setup();
+  withSetupWizard({ applicable: true, state: 'ready' });
+  panel.render({
+    applies: true,
+    settings: {
+      workspace_id: 'ws-1',
+      root_path: '/tmp/fixture-inbox',
+      directory_reference_id: 'dir-1',
+      filing_root_name: 'Filed',
+      daily_scan_local_time: '09:00',
+      paused: true
+    },
+    readiness: { state: 'ready', checks: [] },
+    privacy: {}
+  });
+  assert.equal(doc.getElementById('downloadsJanitorPause').textContent, 'Resume watching');
+  withoutSetupWizard();
+});

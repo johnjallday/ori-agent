@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -22,7 +23,16 @@ const (
 	taskContextTemplateStarterTask = "template_starter_task"
 	taskContextTemplateSetup       = "template_setup"
 	taskContextSetupConsumedAt     = "template_setup_autostart_consumed_at"
+	// taskContextSetupWizardCompletedAt marks a setup task the Setup Wizard
+	// completed on the user's behalf. It is also the idempotency key: a second
+	// completion attempt finds the marker and changes nothing.
+	taskContextSetupWizardCompletedAt = "setup_wizard_completed_at"
 )
+
+// setupWizardCompletionNote is the system-authored result recorded on a setup
+// task the wizard satisfied. It says who completed it and how, so the task's
+// history does not read as though an agent did work it never did.
+const setupWizardCompletionNote = "Completed by the blueprint Setup Wizard: every required setup step passed. No agent ran for this task."
 
 // seedTemplateStarterTasks creates the template's starter tasks on the folder
 // workspace, assigned to the entry agent (coordinator) with entry_agent_default
@@ -127,6 +137,20 @@ func (h *Handler) handleTemplateSetupStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// A blueprint that declares a Setup Wizard owns its own setup. Auto-starting
+	// the help task here would put an agent — and its autonomy prompt — on top of
+	// the deterministic setup dialog, which is the collision this feature exists
+	// to remove. The task stays seeded, pending, and unconsumed, so the user can
+	// still open it for help, and the wizard completes it when setup passes.
+	if h.workspaceHasSetupWizard(workspaceID) {
+		_ = orihttp.RespondSuccess(w, map[string]any{
+			"success": true,
+			"started": false,
+			"reason":  "setup_wizard_owned",
+		})
+		return
+	}
+
 	// Gate on normalized readiness BEFORE reserving/writing the consumed marker.
 	// For a REAPER workspace, auto-start proceeds only when Ori is configured to
 	// attempt live control (ori_ready). Otherwise the setup task is left pending
@@ -206,3 +230,119 @@ func (h *Handler) handleTemplateSetupStart(w http.ResponseWriter, r *http.Reques
 // errTemplateSetupNoChange skips the folder-store save (and its task-markdown
 // rewrite) when the sweep found nothing to consume, mirroring errNoTasksClaimed.
 var errTemplateSetupNoChange = errors.New("no template setup task to start")
+
+// folderWorkspaceReader reads the canonical workspace.json record. The wizard
+// snapshot has no SQLite column, so a plain Get would report every workspace as
+// having no wizard — and every setup task would auto-start on top of its own
+// setup dialog.
+type folderWorkspaceReader interface {
+	GetFolderWorkspace(id string) (*agentworkspace.Workspace, error)
+}
+
+// workspaceHasSetupWizard reports whether the workspace's blueprint recorded a
+// usable Setup Wizard. A store that cannot read the canonical record answers
+// "no", which preserves the pre-wizard behavior rather than silently disabling
+// setup for everyone.
+func (h *Handler) workspaceHasSetupWizard(workspaceID string) bool {
+	if h == nil || strings.TrimSpace(workspaceID) == "" {
+		return false
+	}
+	for _, candidate := range []agentworkspace.Store{h.workspaceTaskStore, h.workspaceStore} {
+		reader, ok := candidate.(folderWorkspaceReader)
+		// A store field can hold a typed nil pointer (an unwired handler), which
+		// satisfies the interface and then panics on first use — so the pointer
+		// itself has to be checked, not just the interface.
+		if !ok || isNilPointer(reader) {
+			continue
+		}
+		ws, err := reader.GetFolderWorkspace(workspaceID)
+		if err != nil || ws == nil {
+			continue
+		}
+		return ws.HasSetupWizard()
+	}
+	return false
+}
+
+// isNilPointer reports whether an interface value holds a nil pointer.
+func isNilPointer(v any) bool {
+	if v == nil {
+		return true
+	}
+	value := reflect.ValueOf(v)
+	switch value.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+// CompleteSetupHelpTaskOnWizardReady marks the blueprint's `setup: true` help
+// task complete once its Setup Wizard reaches ready. It is the completion hook
+// the wizard service fires.
+//
+// Three properties matter more than the mechanics. It spends no model call and
+// starts no agent: the work was done by the user in the dialog, and charging
+// them for a summary of it would be theatre. It records a system-authored note
+// so the task's history says plainly who completed it. And it is idempotent —
+// a replayed hook, a concurrent completion, or a repair-then-ready cycle finds
+// the marker and changes nothing, so the task is never completed twice or
+// reopened.
+//
+// A blueprint with no setup task is normal: the wizard is the setup, and the
+// help task is optional.
+func (h *Handler) CompleteSetupHelpTaskOnWizardReady(workspaceID string) {
+	if h == nil {
+		return
+	}
+	store := h.taskMutationStore()
+	if store == nil {
+		return
+	}
+	id := strings.TrimSpace(workspaceID)
+	if id == "" {
+		return
+	}
+
+	var completedTaskID string
+	err := store.Update(id, func(ws *agentworkspace.Workspace) error {
+		for i := range ws.Tasks {
+			task := &ws.Tasks[i]
+			if task.Context[taskContextTemplateSetup] != true {
+				continue
+			}
+			if _, done := task.Context[taskContextSetupWizardCompletedAt]; done {
+				return errTemplateSetupNoChange
+			}
+			// A task the user already finished, or one an agent is mid-way
+			// through, is left exactly as it is. Setup being ready is not a
+			// reason to rewrite someone else's work.
+			if task.Status == agentworkspace.TaskStatusCompleted || task.Status == agentworkspace.TaskStatusInProgress {
+				return errTemplateSetupNoChange
+			}
+			now := time.Now().UTC()
+			task.Status = agentworkspace.TaskStatusCompleted
+			task.CompletedAt = &now
+			task.Result = setupWizardCompletionNote
+			if task.Context == nil {
+				task.Context = map[string]any{}
+			}
+			task.Context[taskContextSetupWizardCompletedAt] = now.Format(time.RFC3339)
+			completedTaskID = task.ID
+			return nil
+		}
+		return errTemplateSetupNoChange
+	})
+	if err != nil && !errors.Is(err, errTemplateSetupNoChange) {
+		logger.Warn("Failed to complete setup help task after wizard readiness", logger.Fields{
+			"workspace_id": id, "error": err,
+		})
+		return
+	}
+	if completedTaskID != "" {
+		logger.Info("Setup Wizard completed the blueprint's setup task", logger.Fields{
+			"workspace_id": id, "task_id": completedTaskID,
+		})
+	}
+}

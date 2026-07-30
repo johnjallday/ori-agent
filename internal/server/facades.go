@@ -39,6 +39,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
+	"github.com/johnjallday/ori-agent/internal/setupwizardhttp"
 	"github.com/johnjallday/ori-agent/internal/skillshttp"
 	"github.com/johnjallday/ori-agent/internal/speechhttp"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -151,9 +152,12 @@ type HandlerFacade struct {
 	Triggers         *triggerhttp.Handler
 	WorkspaceMemory  *memoryhttp.Handler
 	DownloadsJanitor *downloadsjanitorhttp.Handler
-	User             *userhttp.Handler
-	PersonalHQ       *personalhqhttp.Handler
-	DailyBrief       *dailybriefhttp.Handler
+	// SetupWizard serves the shared blueprint Setup Wizard for every
+	// wizard-enabled workspace, whichever blueprint it came from.
+	SetupWizard *setupwizardhttp.Handler
+	User        *userhttp.Handler
+	PersonalHQ  *personalhqhttp.Handler
+	DailyBrief  *dailybriefhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade
