@@ -34,9 +34,17 @@ async function advanceToWorkspaceDetails(page: Page) {
   await expect(page.locator('#wizardStep2')).toBeVisible();
 }
 
-async function advanceToReview(page: Page) {
+// Create mode is Blueprint → Details → Team → Review. Details requires a
+// workspace name before Team, so callers must fill it first.
+async function advanceToTeam(page: Page) {
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
+}
+
+async function advanceToReview(page: Page) {
+  await advanceToTeam(page);
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
 }
 
 async function returnToBlueprints(page: Page) {
@@ -125,6 +133,97 @@ test.beforeEach(async ({ page }) => {
   // overlay that animates in) can't intercept create-modal clicks.
   await page.request.post('/api/onboarding/skip').catch(() => {});
   await page.goto('/workspaces');
+});
+
+test('Create mode shows four ordered steps and marks only the active one current', async ({
+  page
+}) => {
+  await openCreateModal(page);
+
+  const stepper = page.locator('#wizardStepper');
+  await expect(stepper).toBeVisible();
+  await expect(stepper.locator('.workspace-create-step')).toHaveText([
+    /1\s*Blueprint/,
+    /2\s*Details/,
+    /3\s*Team/,
+    /4\s*Review/
+  ]);
+
+  // Exactly one step is aria-current at a time, and it tracks navigation (FR3).
+  const current = stepper.locator('.workspace-create-step[aria-current="step"]');
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute('data-step', '1');
+  await expect(
+    page.locator('#wizardStep1 .workspace-wizard-step-heading .workspace-wizard-eyebrow')
+  ).toHaveText('Step 1 of 4');
+
+  await advanceToWorkspaceDetails(page);
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute('data-step', '2');
+  await page.locator('#folderNameInput').fill('Four Step WS');
+
+  await advanceToTeam(page);
+  await expect(current).toHaveAttribute('data-step', '3');
+  await expect(page.locator('#wizardStep3Title')).toHaveText('Build your workspace team');
+  // The final create action appears only on Review (FR11).
+  await expect(page.locator('#createFolderBtn')).toBeHidden();
+
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(current).toHaveAttribute('data-step', '4');
+  await expect(page.locator('#wizardStep4Title')).toHaveText('Ready to create?');
+  await expect(page.locator('#createFolderBtn')).toBeVisible();
+  await expect(page.locator('#wizardNextBtn')).toBeHidden();
+
+  // Back returns to Team and preserves the entered name (FR8).
+  await page.locator('#wizardBackBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await page.locator('#wizardBackBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#folderNameInput')).toHaveValue('Four Step WS');
+});
+
+test('Details blocks continuing to Team until the workspace is named', async ({ page }) => {
+  await openCreateModal(page);
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('');
+
+  await page.locator('#wizardNextBtn').click();
+
+  // Stays on Details, explains why, and puts focus on the field to fix (FR27, FR28).
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#workspaceNameHint')).toContainText('Workspace name is required');
+  await expect(page.locator('#folderNameInput')).toBeFocused();
+
+  await page.locator('#folderNameInput').fill('Now Named');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+});
+
+test('Import mode stays single-step and never exposes Team, Review, or the stepper', async ({
+  page
+}) => {
+  await page.evaluate(() => {
+    const el = document.getElementById('addFolderModal');
+    if (el) el.dataset.pendingImportMode = 'true';
+    // @ts-expect-error bootstrap is a page global
+    window.bootstrap.Modal.getOrCreateInstance(el).show();
+  });
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+
+  // Import renders the details layout only (FR12).
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#wizardStepper')).toBeHidden();
+  await expect(page.locator('#wizardStep1')).toBeHidden();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#wizardStep4')).toBeHidden();
+  await expect(page.locator('#wizardNextBtn')).toBeHidden();
+  await expect(page.locator('#wizardBackBtn')).toBeHidden();
+  await expect(page.locator('#folderImportSection')).toBeVisible();
+  // Import submits immediately from its single step.
+  await expect(page.locator('#createFolderBtn')).toBeVisible();
+  await expect(page.locator('#createFolderBtn')).toHaveText('Import Folder');
 });
 
 test('starting point sets Agent behavior; manual override is preserved; reopen resets', async ({
@@ -224,9 +323,10 @@ test('project-open option follows template defaults and resets for non-library f
   await expect(panel).toBeHidden();
   await expect(toggle).not.toBeChecked();
 
+  // "Open project after creation" is a mutable pre-create control, so it lives on
+  // Details (FR29) — Review only summarizes the choice.
   await cardByLabel(page, 'Auto Project').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
   await expect(panel).toBeVisible();
   await expect(toggle).toBeChecked();
 
@@ -234,7 +334,6 @@ test('project-open option follows template defaults and resets for non-library f
   await returnToBlueprints(page);
   await cardByLabel(page, 'Manual Project').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
   await expect(panel).toBeVisible();
   await expect(toggle).not.toBeChecked();
   await toggle.check();
@@ -243,18 +342,15 @@ test('project-open option follows template defaults and resets for non-library f
   await returnToBlueprints(page);
   await cardByLabel(page, 'Auto Project').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
   await expect(toggle).toBeChecked();
   await returnToBlueprints(page);
   await cardByLabel(page, 'Manual Project').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
   await expect(toggle).not.toBeChecked();
 
   await returnToBlueprints(page);
   await cardByLabel(page, 'No Entry').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
   await expect(panel).toBeHidden();
   await expect(toggle).not.toBeChecked();
 
@@ -300,8 +396,8 @@ test('live Reaper Song defaults to launch, supports keyboard opt-out, and never 
   await openCreateModal(page);
   await cardByLabel(page, 'Reaper Song').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
 
+  // Details owns the launch toggle (FR29); no need to reach Review to set it.
   const panel = page.locator('#projectTemplateOpenAfterCreate');
   const toggle = page.locator('#projectTemplateOpenAfterCreateToggle');
   await expect(panel).toBeVisible();
@@ -343,8 +439,10 @@ test('checked project-open option posts exactly once after create and before nav
 
   await cardByLabel(page, 'Auto Project').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
+  // Assert the launch choice on the step that owns it, then continue to Review,
+  // which is the only step with the final create action (FR11).
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).toBeChecked();
+  await advanceToReview(page);
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/created-open');
 
@@ -373,8 +471,8 @@ test('unchecked project-open option creates and navigates without an open reques
 
   await cardByLabel(page, 'Manual Project').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
   await expect(page.locator('#projectTemplateOpenAfterCreateToggle')).not.toBeChecked();
+  await advanceToReview(page);
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/created-closed');
   await expect.poll(() => openCalls).toBe(0);
@@ -482,7 +580,7 @@ test('createFolder submits workspace_preset for create and import', async ({ pag
   await expect.poll(() => captured.import).toBe('research');
 });
 
-test('review attaches a saved agent and submits the complete team atomically', async ({ page }) => {
+test('Team attaches a saved agent and submits the complete team atomically', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
@@ -506,9 +604,10 @@ test('review attaches a saved agent and submits the complete team atomically', a
   await cardByLabel(page, 'Blank').click();
   await advanceToWorkspaceDetails(page);
   await page.locator('#folderNameInput').fill('Atomic Team');
-  await advanceToReview(page);
+  await advanceToTeam(page);
 
-  await page.locator('#addExistingAgentBtn').click();
+  // The Your Agents picker is inline on Team and loads on arrival — no button
+  // press and no nested modal (FR56).
   await expect(page.locator('#existingAgentRosterPanel')).toBeVisible();
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
   await expect(page.locator('#existingAgentTeamList')).toContainText('Research Scout');
@@ -533,13 +632,17 @@ test('review attaches a saved agent and submits the complete team atomically', a
       body: JSON.stringify({ folder: { id: 'atomic-team' }, seeded_starter_tasks: 0 })
     });
   });
+  // Create lives only on Review (FR11), and names the workspace (FR88).
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await expect(page.locator('#createFolderBtn')).toHaveText('Create “Atomic Team”');
   await page.locator('#createFolderBtn').click();
   await page.waitForURL('**/workspaces/atomic-team');
   expect(payload?.existing_agent_names).toEqual(['Research Scout', 'Data Miner']);
   expect(payload?.entry_agent_name).toBe('Research Scout');
 });
 
-test('review visualizes every included template agent and its lifecycle', async ({ page }) => {
+test('Team visualizes every included template agent and its lifecycle', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
@@ -581,7 +684,8 @@ test('review visualizes every included template agent and its lifecycle', async 
   await openCreateModal(page);
   await cardByLabel(page, 'Reaper Song').click();
   await advanceToWorkspaceDetails(page);
-  await advanceToReview(page);
+  // The blueprint roster is edited on Team, not Review (FR32, FR83).
+  await advanceToTeam(page);
 
   const review = page.locator('#templateAgentReview');
   await expect(review).toContainText('Blueprint agents');

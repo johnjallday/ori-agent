@@ -56,9 +56,13 @@ const sessionManager = {
   // Starting point no longer overwrites their choice. Reset on modal open.
   behaviorOverridden: false,
 
-  // Create-workspace wizard step (1 = Choose Blueprint, 2 = Workspace Details,
-  // 3 = Review & Create). Import mode remains a single-step details layout.
+  // Create-workspace wizard step (1 = Blueprint, 2 = Details, 3 = Team,
+  // 4 = Review). Import mode remains a single-step details layout and never
+  // enters Team or Review.
   wizardStep: 1,
+  // Authoritative local team draft. Held here, never inferred from rendered
+  // controls, and converted to request fields only at final submission.
+  teamDraft: null,
 
   // Auto mode state
   chatAutoMode: false,
@@ -263,17 +267,18 @@ const sessionManager = {
       });
 
     // Name field: live folder-slug preview, clear the inline error on edit, and
-    // Enter to advance (step 1) or create (step 2). The field is a single
-    // relocated element, so binding once covers both steps.
+    // Enter to advance, or to create once the wizard is on Review.
     const workspaceNameInput = document.getElementById('folderNameInput');
     workspaceNameInput?.addEventListener('input', () => {
       this.clearWorkspaceNameError();
       this.updateWorkspaceNameHint();
+      // The final CTA names the workspace, so it tracks the name as it is typed.
+      this.refreshWorkspaceCreateCta();
     });
     workspaceNameInput?.addEventListener('keydown', event => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
-      if (this.importModeEnabled || this.wizardStep === 3) {
+      if (this.importModeEnabled || this.wizardStep === this.wizardStepCount) {
         this.createFolder();
       } else {
         this.goToWizardStep(this.wizardStep + 1);
@@ -351,9 +356,6 @@ const sessionManager = {
 
     document.getElementById('addExistingAgentBtn')?.addEventListener('click', () => {
       void this.openExistingAgentRoster();
-    });
-    document.getElementById('closeExistingAgentRosterBtn')?.addEventListener('click', () => {
-      this.closeExistingAgentRoster();
     });
     document.getElementById('existingAgentRosterSearch')?.addEventListener('input', () => {
       this.renderExistingAgentRoster();
@@ -495,6 +497,14 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingEntryPoint;
       delete addFolderModal.dataset.pendingPostCreateAction;
       delete addFolderModal.dataset.pendingBlueprint;
+    });
+
+    // Closing or cancelling discards the team draft immediately rather than
+    // leaving it to be overwritten on the next open, and invalidates any plan
+    // request still in flight so a late response cannot repopulate a closed
+    // wizard. Nothing was persisted, so nothing needs undoing (FR13).
+    addFolderModal?.addEventListener('hidden.bs.modal', () => {
+      this.discardWorkspaceTeamDraft();
     });
 
     // Close dropdowns when clicking outside
@@ -3562,6 +3572,9 @@ const sessionManager = {
       String(modalElement.dataset.askOriPostCreate || '') === 'open_workspace_dashboard'
     );
 
+    // Every open starts from a clean team draft; nothing staged in a previous
+    // (possibly cancelled) session may leak into this one.
+    this.discardWorkspaceTeamDraft();
     this.clearWorkspaceNameError();
     if (!keepSeedValues) {
       if (nameInput) nameInput.value = '';
@@ -3620,10 +3633,36 @@ const sessionManager = {
     this.updateWorkspaceNameHint();
   },
 
+  // Returns the wizard's team draft, creating it on first use. The helper module
+  // is loaded ahead of this file on every surface that renders the modal, but a
+  // missing global must degrade to null rather than throw mid-render.
+  ensureWorkspaceTeamDraft() {
+    const api = window.CreateWorkspaceTeamDraft;
+    if (!api) return null;
+    if (!this.teamDraft) this.teamDraft = api.createDraft();
+    return this.teamDraft;
+  },
+
+  // Local-only discard: clears every staged team edit and invalidates in-flight
+  // plan requests. No agent was persisted while editing, so there is nothing to
+  // roll back (FR13, FR67).
+  discardWorkspaceTeamDraft() {
+    const api = window.CreateWorkspaceTeamDraft;
+    if (api && this.teamDraft) api.resetDraft(this.teamDraft);
+    else this.teamDraft = api ? api.createDraft() : null;
+    this.templateAgentPlanRequestId += 1;
+    if (this.templateAgentPlanTimer) {
+      clearTimeout(this.templateAgentPlanTimer);
+      this.templateAgentPlanTimer = null;
+    }
+  },
+
   resetTemplateAgentReview() {
     this.templateAgentPlan = null;
     this.templateAgentPlanError = '';
     this.templateAgentPrecreateOverrides = new Map();
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (draft) window.CreateWorkspaceTeamDraft.clearPlan(draft);
     this.closeTemplateAgentSetup();
     this.templateAgentPlanRequestId += 1;
     if (this.templateAgentPlanTimer) {
@@ -3661,6 +3700,18 @@ const sessionManager = {
     }, 180);
   },
 
+  // Stable identity for the currently selected blueprint. The draft compares it
+  // to decide whether staged overrides belong to the blueprint still on screen:
+  // a change discards them (FR21), while a retry of the same blueprint keeps them.
+  currentBlueprintKey() {
+    const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
+    const templateId = String(fields.template_id || '').trim();
+    const templatePath = String(fields.template_path || '').trim();
+    if (templatePath) return `path:${templatePath}`;
+    if (templateId) return `template:${templateId}`;
+    return window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank ? 'blank' : '';
+  },
+
   async refreshTemplateAgentPlan() {
     const fields = window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
@@ -3673,12 +3724,16 @@ const sessionManager = {
       !templateId &&
       !templatePath;
     const requestId = ++this.templateAgentPlanRequestId;
+    const blueprintKey = this.currentBlueprintKey();
+    const draft = this.ensureWorkspaceTeamDraft();
+    const api = window.CreateWorkspaceTeamDraft;
 
     if (this.importModeEnabled || (!templateId && !templatePath && !isBlank)) {
       this.resetTemplateAgentReview();
       return;
     }
 
+    if (draft && api) api.setPlanLoading(draft, blueprintKey);
     this.setTemplateAgentReviewLoading();
     try {
       const response = await fetch('/api/workspaces/template-agent-plan', {
@@ -3697,6 +3752,7 @@ const sessionManager = {
         return;
       }
       this.templateAgentPlan = data;
+      if (draft && api) api.setPlanReady(draft, blueprintKey, data);
       await this.ensureEditAgentModelOptions();
       if (requestId !== this.templateAgentPlanRequestId) return;
       this.renderTemplateAgentPlan(data);
@@ -3732,6 +3788,14 @@ const sessionManager = {
   renderTemplateAgentPlanError(message) {
     this.templateAgentPlan = null;
     this.templateAgentPlanError = message || 'Could not load blueprint agents.';
+    const errorDraft = this.ensureWorkspaceTeamDraft();
+    if (errorDraft) {
+      window.CreateWorkspaceTeamDraft.setPlanError(
+        errorDraft,
+        this.currentBlueprintKey(),
+        this.templateAgentPlanError
+      );
+    }
     const review = document.getElementById('templateAgentReview');
     const summary = document.getElementById('templateAgentReviewSummary');
     const status = document.getElementById('templateAgentReviewStatus');
@@ -4160,8 +4224,9 @@ const sessionManager = {
     this.existingAgentSelections = [];
     this.existingAgentPrimaryName = '';
     this.existingAgentRosterError = '';
-    const panel = document.getElementById('existingAgentRosterPanel');
-    if (panel) panel.hidden = true;
+    // The Your Agents picker is now permanent inline markup inside the Team step
+    // rather than a panel toggled open, so a reset clears its query but never
+    // hides it.
     const search = document.getElementById('existingAgentRosterSearch');
     if (search) search.value = '';
     const list = document.getElementById('existingAgentTeamList');
@@ -4195,21 +4260,15 @@ const sessionManager = {
     );
   },
 
+  // Reloads the inline Your Agents picker. The panel is always present on Team,
+  // so this only refetches and re-renders — it never reveals a hidden surface.
   async openExistingAgentRoster() {
-    const panel = document.getElementById('existingAgentRosterPanel');
-    if (panel) panel.hidden = false;
-    const search = document.getElementById('existingAgentRosterSearch');
-    search?.focus();
     if (!this.existingAgentRosterLoaded && !this.existingAgentRosterLoading) {
       await this.loadExistingAgentRoster();
     } else {
-      this.renderExistingAgentRoster();
+      this.existingAgentRosterLoaded = false;
+      await this.loadExistingAgentRoster();
     }
-  },
-
-  closeExistingAgentRoster() {
-    const panel = document.getElementById('existingAgentRosterPanel');
-    if (panel) panel.hidden = true;
   },
 
   async loadExistingAgentRoster() {
@@ -5036,7 +5095,11 @@ const sessionManager = {
     hint.textContent = parts.join(' · ');
   },
 
-  // ----- Create-workspace wizard (Choose Blueprint → Details → Review) -----
+  // ----- Create-workspace wizard (Blueprint → Details → Team → Review) -----
+
+  // Total Create-mode steps. Import mode is deliberately outside this state
+  // machine: it renders the Details layout only and never reaches Team/Review.
+  wizardStepCount: 4,
 
   // Renders the wizard chrome for the current mode + step. Import remains a
   // single-step workflow and never exposes Create-only progress or review UI.
@@ -5044,9 +5107,7 @@ const sessionManager = {
     const importMode = Boolean(this.importModeEnabled);
     const step = importMode ? 2 : this.wizardStep;
 
-    const step1 = document.getElementById('wizardStep1');
-    const step2 = document.getElementById('wizardStep2');
-    const step3 = document.getElementById('wizardStep3');
+    const sections = [1, 2, 3, 4].map(index => document.getElementById(`wizardStep${index}`));
     const stepper = document.getElementById('wizardStepper');
     const backBtn = document.getElementById('wizardBackBtn');
     const nextBtn = document.getElementById('wizardNextBtn');
@@ -5055,64 +5116,83 @@ const sessionManager = {
     this.relocateWizardReviewFields();
     this.updateWorkspaceNameHint();
 
-    if (step1) {
-      step1.hidden = importMode || step !== 1;
-      step1.setAttribute('aria-hidden', String(step1.hidden));
-    }
-    if (step2) {
-      step2.hidden = step !== 2;
-      step2.setAttribute('aria-hidden', String(step2.hidden));
-    }
-    if (step3) {
-      step3.hidden = importMode || step !== 3;
-      step3.setAttribute('aria-hidden', String(step3.hidden));
-    }
+    sections.forEach((section, offset) => {
+      if (!section) return;
+      const sectionStep = offset + 1;
+      // Import mode shows only the Details layout; every Create-only step stays
+      // hidden so its controls are unreachable rather than merely off-screen.
+      section.hidden = sectionStep === 2 ? step !== 2 : importMode || step !== sectionStep;
+      section.setAttribute('aria-hidden', String(section.hidden));
+    });
     if (stepper) {
       stepper.hidden = importMode;
       stepper.setAttribute('aria-hidden', String(importMode));
     }
     stepper?.querySelectorAll('.workspace-create-step').forEach(el => {
-      const current = String(el.dataset.step || '') === String(step);
+      const current = !importMode && String(el.dataset.step || '') === String(step);
       el.classList.toggle('is-active', current);
       if (current) el.setAttribute('aria-current', 'step');
       else el.removeAttribute('aria-current');
     });
 
     const onStep1 = !importMode && step === 1;
+    const onFinalStep = !importMode && step === this.wizardStepCount;
     if (nextBtn) {
-      nextBtn.hidden = importMode || step === 3;
-      nextBtn.textContent = onStep1 ? 'Continue →' : 'Review & Create →';
+      nextBtn.hidden = importMode || onFinalStep;
+      // Continue through Blueprint and Details; the last hop names its target so
+      // the user knows the next screen confirms rather than configures.
+      nextBtn.textContent = step === 3 ? 'Review →' : 'Continue →';
     }
     if (backBtn) backBtn.hidden = importMode || onStep1;
     if (createBtn) {
-      createBtn.hidden = !importMode && step !== 3;
+      // The final create action exists only on Review (or in import mode).
+      createBtn.hidden = !importMode && !onFinalStep;
       if (!this.isCreatingFolder) {
-        const selected = window.ProjectTemplateCard?.getSelectedTemplate?.();
         createBtn.textContent = importMode
           ? this.isPersonalHQImport()
             ? 'Import HQ'
             : 'Import Folder'
-          : selected?.blank || !selected?.name
-            ? 'Create Workspace'
-            : `Create ${selected.name}`;
+          : this.workspaceCreateCtaLabel();
       }
     }
     // The step-2 recap names the chosen blueprint; import mode has no blueprint.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode;
-    if (!importMode && step === 3) this.refreshWorkspaceReview();
+    if (!importMode && step === 3) {
+      this.refreshWorkspaceReview();
+      // Your Agents loads on entering Team rather than behind a button, but the
+      // team already staged from the blueprint stays reviewable either way.
+      if (!this.existingAgentRosterLoaded && !this.existingAgentRosterLoading) {
+        void this.loadExistingAgentRoster();
+      }
+    }
+    if (onFinalStep) this.refreshWorkspaceReview();
   },
 
-  // Keep the source controls single-instance while moving their review-only
-  // cards into Step 3. This preserves their values, event listeners, and the
-  // existing REAPER readiness controller without shadow inputs.
+  // Names the workspace being created rather than the blueprint it came from, so
+  // the button says what will exist afterwards. Falls back to a generic label
+  // until the name is set.
+  workspaceCreateCtaLabel() {
+    const name = String(document.getElementById('folderNameInput')?.value || '').trim();
+    return name ? `Create “${name}”` : 'Create Workspace';
+  },
+
+  // Keeps the create button's label in step with the workspace name without
+  // re-rendering the whole wizard on every keystroke.
+  refreshWorkspaceCreateCta() {
+    const createBtn = document.getElementById('createFolderBtn');
+    if (!createBtn || this.isCreatingFolder || this.importModeEnabled) return;
+    createBtn.textContent = this.workspaceCreateCtaLabel();
+  },
+
+  // Moves the blueprint roster card into the Team step's mount, keeping it a
+  // single instance so its values, listeners, and staged state survive the move
+  // rather than being shadowed by a second copy.
+  //
+  // "Open project after creation" and the REAPER readiness card deliberately are
+  // NOT moved: they are mutable pre-create controls and belong on Details, where
+  // they are already declared. Review only summarizes their values.
   relocateWizardReviewFields() {
-    const mount = document.getElementById('wizardStep3ReviewMount');
-    if (!mount) return;
-    ['projectTemplateOpenAfterCreate', 'reaperSetupCard'].forEach(id => {
-      const field = document.getElementById(id);
-      if (field && field.parentElement !== mount) mount.appendChild(field);
-    });
     const templateMount = document.getElementById('templateAgentReviewMount');
     const review = document.getElementById('templateAgentReview');
     if (review && templateMount && review.parentElement !== templateMount)
@@ -5164,9 +5244,12 @@ const sessionManager = {
   },
 
   // Moves the wizard to a step and re-renders chrome. Scrolls the modal body to
-  // the top and moves focus to the step's primary control.
+  // the top and moves focus to the new step heading — or, when a step's own
+  // validation refuses the move, to the control that has to be fixed first.
   goToWizardStep(step) {
-    const targetStep = Math.max(1, Math.min(3, Number(step) || 1));
+    const targetStep = Math.max(1, Math.min(this.wizardStepCount, Number(step) || 1));
+    // Leaving Details requires a workspace name: without it neither the Team
+    // roster nor the Review receipt can describe a workspace that could exist.
     if (!this.importModeEnabled && targetStep >= 3) {
       const name = document.getElementById('folderNameInput')?.value.trim() || '';
       if (!name) {
