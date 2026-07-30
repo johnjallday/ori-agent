@@ -908,6 +908,27 @@
   margin-top: 10px;
 }
 
+/* Authoritative create failure, shown on Review with a route back. */
+.workspace-create-modal .workspace-review-error {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid #f57b72;
+  border-left-width: 3px;
+  background: rgba(245, 123, 114, 0.08);
+}
+.workspace-create-modal .workspace-review-error-text {
+  margin: 0;
+  color: var(--wc-ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-review-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
 /* Classified issues: severity is carried by the label text and the rule
    colour together, never by colour alone. */
 .workspace-create-modal .workspace-team-issues:empty {

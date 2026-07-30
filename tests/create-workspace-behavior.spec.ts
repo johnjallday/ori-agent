@@ -1308,6 +1308,111 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
   expect(payload?.entry_agent_name).toBeUndefined();
 });
 
+test('a failed create keeps the draft, shows the real error, and routes back (FR90, FR99)', async ({
+  page
+}) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Blueprint Lead',
+        agents: [
+          { name: 'Blueprint Lead', action: 'reuse', entry_point: true, model_source: 'existing' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  let attempts = 0;
+  await page.route('**/api/workspaces', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'entry agent "Ghost" does not exist or cannot be attached' })
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'recovered-ws' }, seeded_starter_tasks: 0 })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Recovering WS');
+  await advanceToTeam(page);
+  await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await advanceToReviewFromTeam(page);
+
+  await page.locator('#createFolderBtn').click();
+
+  // The modal stays open with the server's own message, focused and actionable.
+  await expect(page.locator('#addFolderModal')).toBeVisible();
+  const failure = page.locator('#workspaceReviewError');
+  await expect(failure).toBeVisible();
+  await expect(failure).toContainText('does not exist or cannot be attached');
+  await expect(failure).toBeFocused();
+
+  // Editing from the failure returns to Team with the draft intact.
+  await failure.locator('[data-wizard-edit-step="3"]').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(2);
+  await expect(page.locator('#workspaceTeamRoster')).toContainText('Research Scout');
+
+  // Resubmitting succeeds and the failure notice is gone.
+  await advanceToReviewFromTeam(page);
+  await expect(page.locator('#workspaceReviewError')).toBeHidden();
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/recovered-ws');
+});
+
+test('Team refuses to reach Review while a blocker is unresolved (FR89, FR94)', async ({
+  page
+}) => {
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'plan backend down' })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Blocked WS');
+  await advanceToTeam(page);
+
+  // Continuing is refused and focus lands on the reason.
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(page.locator('#wizardStep4')).toBeHidden();
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toBeFocused();
+
+  // Clearing the blocker lets the flow continue, and Create is enabled.
+  await page
+    .locator('#workspaceTeamIssues [data-team-recovery="exclude-blueprint-team"]')
+    .click();
+  await advanceToReviewFromTeam(page);
+  await expect(page.locator('#createFolderBtn')).toBeEnabled();
+});
+
 test('the wizard never persists an agent before the workspace is created (FR68)', async ({
   page
 }) => {

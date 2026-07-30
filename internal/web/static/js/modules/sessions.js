@@ -3556,6 +3556,7 @@ const sessionManager = {
     // (possibly cancelled) session may leak into this one.
     this.discardWorkspaceTeamDraft();
     this.clearWorkspaceNameError();
+    this.clearWorkspaceCreateError();
     if (!keepSeedValues) {
       if (nameInput) nameInput.value = '';
       if (nameInput) nameInput.dataset.autofillName = '';
@@ -3903,8 +3904,11 @@ const sessionManager = {
           })
           .filter(Boolean)
           .join('');
+        // Blockers are focus targets: attempting to continue past one moves
+        // focus here so the reason is announced rather than the click seeming
+        // to do nothing.
         return `
-        <div class="workspace-team-issue is-${this.escapeHtml(issue.severity)}" data-issue-id="${this.escapeHtml(issue.id)}">
+        <div class="workspace-team-issue is-${this.escapeHtml(issue.severity)}" data-issue-id="${this.escapeHtml(issue.id)}"${issue.severity === 'blocking' ? ' tabindex="-1"' : ''}>
           <span class="workspace-team-issue-label">${this.escapeHtml(this.teamIssueLabel(issue.severity))}</span>
           <span class="workspace-team-issue-text">${this.escapeHtml(issue.message)}</span>
           ${actions ? `<span class="workspace-team-issue-actions">${actions}</span>` : ''}
@@ -4803,6 +4807,9 @@ const sessionManager = {
             ? 'Import HQ'
             : 'Import Folder'
           : this.workspaceCreateCtaLabel();
+        // A known blocker means no trustworthy request can be built yet, so the
+        // final action is unavailable until it is resolved.
+        createBtn.disabled = !importMode && this.hasBlockingTeamIssue();
       }
     }
     // The step-2 recap names the chosen blueprint; import mode has no blueprint.
@@ -4817,6 +4824,14 @@ const sessionManager = {
       }
     }
     if (onFinalStep) this.refreshWorkspaceReview();
+  },
+
+  // Whether the team draft currently carries an issue that prevents building a
+  // valid create request. Advisory issues (an intentionally agent-less team, a
+  // picker that failed to load) deliberately do not count.
+  hasBlockingTeamIssue() {
+    const view = this.teamView();
+    return Boolean(view && view.blockingIssues.length > 0);
   },
 
   // Names the workspace being created rather than the blueprint it came from, so
@@ -4922,6 +4937,22 @@ const sessionManager = {
         document.getElementById('folderNameInput')?.focus();
         return;
       }
+    }
+    // Team refuses to hand off to Review while the resulting roster cannot be
+    // resolved: Review would otherwise present a receipt for a team nobody can
+    // see, and Create would build a request the server will reject.
+    if (!this.importModeEnabled && targetStep > 3 && this.wizardStep === 3) {
+      if (this.hasBlockingTeamIssue()) {
+        this.refreshWizardChrome();
+        document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
+        return;
+      }
+    }
+    // A create failure belongs to the attempt that produced it. Leaving Review to
+    // go and fix something ends that attempt, so the message does not linger and
+    // become stale advice about a problem the user has already addressed.
+    if (this.wizardStep === this.wizardStepCount && targetStep !== this.wizardStepCount) {
+      this.clearWorkspaceCreateError();
     }
     this.wizardStep = targetStep;
     this.refreshWizardChrome();
@@ -5068,6 +5099,8 @@ const sessionManager = {
     const color = colorBtn?.dataset.color || '';
     const originalCreateLabel = createBtn ? createBtn.textContent : '';
 
+    // A fresh attempt starts without the previous attempt's failure on screen.
+    this.clearWorkspaceCreateError();
     this.isCreatingFolder = true;
     if (createBtn) {
       createBtn.disabled = true;
@@ -5427,10 +5460,11 @@ const sessionManager = {
       }
     } catch (error) {
       console.error('Failed to create folder:', error);
-      this.showToast(
-        error && error.message ? error.message : 'Failed to create workspace',
-        'error'
-      );
+      const message = error && error.message ? error.message : 'Failed to create workspace';
+      this.showToast(message, 'error');
+      // The modal stays open and the draft is untouched, so the user can fix the
+      // problem and resubmit rather than rebuilding the team from scratch.
+      if (!importEnabled) this.showWorkspaceCreateError(message);
     } finally {
       this.isCreatingFolder = false;
       if (createBtn) {
@@ -5438,6 +5472,34 @@ const sessionManager = {
         createBtn.textContent = originalCreateLabel || 'Create';
       }
     }
+  },
+
+  // Renders the server's own failure message on Review with a route back to the
+  // step that can fix it, then moves focus there so it is announced and
+  // immediately actionable.
+  showWorkspaceCreateError(message) {
+    const host = document.getElementById('workspaceReviewError');
+    if (!host) return;
+    host.innerHTML = `
+      <p class="workspace-review-error-text">${this.escapeHtml(message)}</p>
+      <div class="workspace-review-error-actions">
+        <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit details</button>
+        <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit team</button>
+      </div>`;
+    host.hidden = false;
+    host.querySelectorAll('[data-wizard-edit-step]').forEach(button => {
+      button.addEventListener('click', () =>
+        this.goToWizardStep(Number(button.dataset.wizardEditStep))
+      );
+    });
+    host.focus();
+  },
+
+  clearWorkspaceCreateError() {
+    const host = document.getElementById('workspaceReviewError');
+    if (!host) return;
+    host.hidden = true;
+    host.innerHTML = '';
   },
 
   // Delete folder

@@ -336,6 +336,11 @@
 
               <div id="workspaceReviewSummary" class="workspace-review-summary" aria-live="polite"></div>
 
+              <!-- Authoritative server failure. A toast disappears and cannot be
+                   focused or acted on, so a failed create also lands here with
+                   the real message and a way back to the step that owns it. -->
+              <div id="workspaceReviewError" class="workspace-review-error" role="alert" tabindex="-1" hidden></div>
+
               <!-- Blueprint setup preview. Disclosure only: it lists what the
                    blueprint will ask for after creation and expands, opens,
                    authorizes, installs, and enables nothing. Populated by
