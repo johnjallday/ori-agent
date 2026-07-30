@@ -104,6 +104,13 @@ func (s *Service) publishOwner(settings config.MacWakeSettings) {
 	if s.coordinator == nil {
 		return
 	}
+	// A user who has never enabled or approved Mac wake scheduling has no
+	// capability to advertise, and creating a shared file to say so would put
+	// state on disk for a feature they never touched. Silence already reads as
+	// "cannot program a wake" to everything that asks.
+	if !settings.Enabled && !settings.AdminApprovalGranted {
+		return
+	}
 	owner := wakecoord.Owner{
 		Supported:       s.goos() == "darwin",
 		Enabled:         settings.Enabled,

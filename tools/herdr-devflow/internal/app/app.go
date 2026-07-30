@@ -1921,6 +1921,7 @@ func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.
 		Prompt: client,
 		Usage:  claudeusage.NewAdapter(filepath.Join(runtimeRoot, "usage")),
 		Power:  &systempower.Service{GOOS: a.goos},
+		Git:    worktree.GitRunner,
 	}
 	// Without a reachable wake coordinator the supervisor still runs; it simply
 	// can never sleep, which is the correct degraded behavior rather than a

@@ -194,3 +194,67 @@ func TestAProvisionalReportIsBuildableMidRun(t *testing.T) {
 	}
 	_ = context.Background()
 }
+
+// TestValidationIsObservedNotAssumed covers the difference between a clean
+// worktree and one nobody looked at. Only the first may be printed as clean.
+func TestValidationIsObservedNotAssumed(t *testing.T) {
+	h := newHarness(t)
+	// No Git runner configured: the summary stays empty rather than claiming a
+	// clean tree.
+	run := h.tick(t)
+	if run.Participants[0].Validation.ObservedAt.IsZero() == false {
+		t.Fatalf("validation = %+v, want nothing observed without a Git runner",
+			run.Participants[0].Validation)
+	}
+
+	// With one, the facts are recorded.
+	h2 := newHarness(t)
+	h2.supervisor.Git = func(_ context.Context, _ string, args ...string) (string, error) {
+		switch {
+		case len(args) > 0 && args[0] == "status":
+			return " M tools/thing.go", nil
+		case len(args) > 1 && args[0] == "rev-list" && args[1] == "--count":
+			return "3\t0", nil
+		case len(args) > 0 && args[0] == "rev-parse":
+			return "feature/alpha", nil
+		default:
+			return "", nil
+		}
+	}
+	run = h2.tick(t)
+	validation := run.Participants[0].Validation
+	if validation.ObservedAt.IsZero() {
+		t.Fatalf("validation = %+v, want the worktree inspected", validation)
+	}
+	if !validation.Dirty {
+		t.Fatalf("validation = %+v, want the uncommitted change recorded", validation)
+	}
+}
+
+// TestProgressThatWentBackwardsIsExplainedNotPrintedAsNegative covers a task
+// list that was edited while the run was watching it. "+-2" is both malformed
+// and a claim that work was undone.
+func TestProgressThatWentBackwardsIsExplainedNotPrintedAsNegative(t *testing.T) {
+	cases := []struct {
+		name          string
+		before, after int
+		want          string
+	}{
+		{"work was done", 4, 6, "(+2 overnight)"},
+		{"nothing moved", 4, 4, "(no change overnight)"},
+		{"the plan was replaced", 4, 2, "the task list changed overnight"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			label := movementLabel(model.ReportParticipant{
+				SubtasksBefore: testCase.before, SubtasksAfter: testCase.after,
+			})
+			if !strings.Contains(label, testCase.want) {
+				t.Fatalf("label = %q, want it to contain %q", label, testCase.want)
+			}
+			if strings.Contains(label, "+-") {
+				t.Fatalf("label = %q, which is malformed", label)
+			}
+		})
+	}
+}

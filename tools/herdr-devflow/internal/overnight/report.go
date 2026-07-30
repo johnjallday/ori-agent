@@ -174,9 +174,9 @@ func RenderReport(out io.Writer, run model.OvernightRun, report model.MorningRep
 			return err
 		}
 		if participant.SubtasksTotal > 0 {
-			moved := participant.SubtasksAfter - participant.SubtasksBefore
-			if err := write("      progress: %d of %d subtasks complete (+%d overnight)",
-				participant.SubtasksAfter, participant.SubtasksTotal, moved); err != nil {
+			if err := write("      progress: %d of %d subtasks complete %s",
+				participant.SubtasksAfter, participant.SubtasksTotal,
+				movementLabel(participant)); err != nil {
 				return err
 			}
 		}
@@ -271,6 +271,23 @@ func participantEnding(participant model.ReportParticipant) string {
 		return "uncertain"
 	default:
 		return string(participant.State)
+	}
+}
+
+// movementLabel says what changed overnight.
+//
+// A completed count that went *down* is not negative progress: it means the
+// task list itself was edited or replaced while the run was watching it, and
+// saying "+-2" would be both malformed and misleading.
+func movementLabel(participant model.ReportParticipant) string {
+	switch moved := participant.SubtasksAfter - participant.SubtasksBefore; {
+	case moved > 0:
+		return fmt.Sprintf("(+%d overnight)", moved)
+	case moved == 0:
+		return "(no change overnight)"
+	default:
+		return "(the task list changed overnight; started from " +
+			fmt.Sprintf("%d", participant.SubtasksBefore) + ")"
 	}
 }
 

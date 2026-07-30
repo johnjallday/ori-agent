@@ -196,12 +196,22 @@ func (s *Store) Register(candidate Candidate, now time.Time) error {
 	}, now)
 }
 
+// hasDocument reports whether the shared file exists at all.
+func (s *Store) hasDocument() bool {
+	_, err := os.Stat(s.Path())
+	return err == nil
+}
+
 // Cancel removes one candidate, scoped to its own source.
 //
 // The scoping is the whole point: an Overnight Run withdrawing its wake must
 // not be able to withdraw the wake a scheduled workspace task depends on, even
 // by accident and even if the identifiers collided.
 func (s *Store) Cancel(source, id string, now time.Time) error {
+	if !s.hasDocument() {
+		// Nothing was ever registered, so there is nothing to withdraw.
+		return nil
+	}
 	return s.mutate(func(doc *document) error {
 		remaining := doc.Candidates[:0]
 		for _, candidate := range doc.Candidates {
@@ -217,6 +227,9 @@ func (s *Store) Cancel(source, id string, now time.Time) error {
 
 // CancelSource removes every candidate belonging to one source.
 func (s *Store) CancelSource(source string, now time.Time) error {
+	if !s.hasDocument() {
+		return nil
+	}
 	return s.mutate(func(doc *document) error {
 		remaining := doc.Candidates[:0]
 		for _, candidate := range doc.Candidates {
@@ -317,7 +330,17 @@ func (s *Store) Owner() (Owner, bool, error) {
 }
 
 // ClearProgrammed records that no wake is programmed any more.
+//
+// It reads before it writes. Creating a shared file to record the absence of a
+// wake nobody asked for would put state on disk for every install that has
+// simply never scheduled one — and, less obviously, for every test that
+// constructs a server.
 func (s *Store) ClearProgrammed(now time.Time) error {
+	programmed, found, err := s.Programmed()
+	if err != nil || !found {
+		return err
+	}
+	_ = programmed
 	return s.mutate(func(doc *document) error {
 		doc.Programmed = nil
 		return nil
@@ -432,6 +455,10 @@ func bounded(value string, limit int) string {
 	return string(runes[:limit])
 }
 
+// DirOverrideEnv points both processes at an explicit shared directory. Tests
+// and isolated smoke servers set it so nothing reaches the real one.
+const DirOverrideEnv = "ORI_WAKE_DIR"
+
 // DefaultDir is where both the Ori server and the Herdr devflow helper look for
 // the shared document.
 //
@@ -440,6 +467,9 @@ func bounded(value string, limit int) string {
 // its state — and because both can compute this one independently, without a
 // configuration value that could drift between them.
 func DefaultDir() (string, error) {
+	if override := strings.TrimSpace(os.Getenv(DirOverrideEnv)); override != "" {
+		return override, nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve the user config directory: %w", err)

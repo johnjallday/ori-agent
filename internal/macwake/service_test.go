@@ -1,6 +1,7 @@
 package macwake
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -249,5 +250,48 @@ func enableWake(t *testing.T, manager *config.Manager) {
 	cfg.MacWake.AdminApprovalGranted = true
 	if err := manager.Update(cfg); err != nil {
 		t.Fatalf("enable wake: %v", err)
+	}
+}
+
+// TestAnUnconfiguredInstallWritesNoSharedState is why this feature does not
+// leave a file in the user's config directory on a machine where nobody has
+// ever turned Mac wake scheduling on.
+//
+// It is also what stopped the test suite from writing to the real one: server
+// tests construct this service, and an unconditional publish reached a global
+// path from every package that did.
+func TestAnUnconfiguredInstallWritesNoSharedState(t *testing.T) {
+	service, _, _ := newTestService(t)
+	dir := filepath.Join(t.TempDir(), "wake")
+	service.UseCoordinator(wakecoord.New(dir))
+	service.pmsetRunner = func([]string, bool) error { return nil }
+
+	if err := service.SyncNextWake(nil); err != nil {
+		t.Fatalf("SyncNextWake: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("an install that never enabled wake scheduling created %s", dir)
+	}
+}
+
+// TestAnEnabledInstallPublishesItsCapability is the other half: once the user
+// has turned it on, the helper can tell "running but not approved" from "not
+// running at all".
+func TestAnEnabledInstallPublishesItsCapability(t *testing.T) {
+	service, manager, _ := newTestService(t)
+	store := wakecoord.New(t.TempDir())
+	service.UseCoordinator(store)
+	service.pmsetRunner = func([]string, bool) error { return nil }
+	enableWake(t, manager)
+
+	if err := service.SyncNextWake(nil); err != nil {
+		t.Fatalf("SyncNextWake: %v", err)
+	}
+	owner, found, err := store.Owner()
+	if err != nil || !found {
+		t.Fatalf("owner = %v, %v; want the capability published", found, err)
+	}
+	if !owner.Ready() {
+		t.Fatalf("owner = %+v, want it ready", owner)
 	}
 }

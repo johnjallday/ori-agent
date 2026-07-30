@@ -62,6 +62,12 @@ type Supervisor struct {
 	Wake WakeCoordinator
 	// Power answers power questions and performs sleep. Nil means the same.
 	Power PowerService
+	// Git inspects a participant's worktree for the commit and cleanliness
+	// facts the morning report shows. Nil leaves those unknown rather than
+	// reporting a clean tree nobody looked at.
+	Git worktree.Runner
+	// Baseline is the integration branch divergence is counted against.
+	Baseline string
 	// Now supplies the clock.
 	Now func() time.Time
 	// PromptTimeout bounds one submission.
@@ -381,6 +387,7 @@ func (s *Supervisor) considerContinuation(ctx context.Context, run *model.Overni
 	// ticks its own checklist, and a supervisor that did so would be reporting
 	// work nobody had done.
 	updateCheckpoint(participant, plan, now)
+	s.recordValidation(participant, now)
 
 	if next, ok := plan.SafeNext(); ok {
 		return s.deliverContinuation(ctx, run, participant, live, next, now)
@@ -393,6 +400,37 @@ func (s *Supervisor) considerContinuation(ctx context.Context, run *model.Overni
 	return s.stopParticipant(run, participant, now, model.ParticipantCompleted, model.ReasonQueueComplete,
 		"every item an unattended agent may do is complete",
 		"review "+participant.Feature.Name+" and take it through delivery")
+}
+
+// recordValidation captures the Git facts the morning report promises.
+//
+// It is read-only and best-effort: an unreadable worktree leaves the previous
+// summary in place rather than replacing it with zeroes, because "clean" and
+// "nobody looked" are different claims and only one of them is safe to print.
+func (s *Supervisor) recordValidation(participant *model.RunParticipant, now time.Time) {
+	if s.Git == nil || participant.Feature.Path == "" {
+		return
+	}
+	baseline := s.Baseline
+	if baseline == "" {
+		baseline = "dev"
+	}
+	facts := worktree.InspectFacts(context.Background(), s.Git, participant.Feature.Path, baseline)
+	summary := participant.Validation
+	if facts.DirtyAvailability == worktree.FactAvailable {
+		summary.Dirty = facts.Dirty
+	}
+	if facts.DivergenceAvailability == worktree.FactAvailable {
+		// Commits made overnight are the growth in how far ahead the branch is
+		// of its baseline, which is the only count available without reading
+		// the log.
+		if facts.Ahead > summary.Ahead {
+			summary.Commits += facts.Ahead - summary.Ahead
+		}
+		summary.Ahead, summary.Behind = facts.Ahead, facts.Behind
+	}
+	summary.ObservedAt = now
+	participant.Validation = summary
 }
 
 // updateCheckpoint refreshes the recorded plan position from the file.
