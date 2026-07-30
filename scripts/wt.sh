@@ -15,12 +15,13 @@
 #   wt status --worktrees   # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
 #   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
-#   wt backlog [sub]        # BACKLOG.md: list (default) | add <idea> | sync  (scoped commit+push to dev)
+#   wt backlog [sub]        # BACKLOG.md: list | add | sync | prune [days] (scoped commit+push to dev)
 #   wt merge [name]         # Local merge into dev (legacy; prefer wt pr)
 #
 # Backlog is kept in sync with git automatically: `wt start` promotes the PRD's
 # feature to ## Doing, `wt done` retires it to ## Shipped with the merged PR
-# number, and both push a scoped docs(backlog) commit to dev.
+# number, and both push a scoped docs(backlog) commit to dev. Every mutation
+# also prunes date-prefixed Shipped / dropped history older than seven days.
 #
 # Planning docs live in the dev worktree's tasks/ folder (gitignored). Create
 # each PRD + task list there, then `wt start` fans a single PRD out into its
@@ -29,6 +30,7 @@
 WORKTREE_DIR="../"
 BASE_BRANCH="dev"
 PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
+WT_BACKLOG_RETENTION_DAYS="${WT_BACKLOG_RETENTION_DAYS:-7}"
 
 # Permission mode written into each new feature worktree's
 # .claude/settings.local.json. Feature worktrees are isolated and reviewed at
@@ -362,6 +364,54 @@ function wt_backlog_file {
   print -r -- "$dev_path/BACKLOG.md"
 }
 
+function wt_backlog_cutoff_date {
+  # Prints the oldest date retained in ## Shipped / dropped. macOS and GNU date
+  # use different relative-date syntax, so support both without adding another
+  # runtime dependency.
+  local days="$1" cutoff=""
+  if [[ "$days" != <-> ]] || (( days < 1 || days > 3650 )); then
+    echo "Backlog: retention days must be a whole number from 1 to 3650." >&2
+    return 1
+  fi
+  cutoff="$(date -v-"${days}"d +%F 2>/dev/null)" \
+    || cutoff="$(date -d "$days days ago" +%F 2>/dev/null)" \
+    || {
+      echo "Backlog: could not calculate the retention cutoff date." >&2
+      return 1
+    }
+  print -r -- "$cutoff"
+}
+
+function wt_backlog_prune {
+  # Removes only date-prefixed entries older than the retention window from
+  # ## Shipped / dropped. Ideas, Doing, and undated history are preserved.
+  # Git remains the durable archive for every removed line.
+  # Args: $1 = BACKLOG.md path, $2 = retention days (optional).
+  local file="$1" days="${2:-$WT_BACKLOG_RETENTION_DAYS}" cutoff tmp
+  [[ -f "$file" ]] || { echo "Backlog: no BACKLOG.md at $file" >&2; return 1; }
+  cutoff="$(wt_backlog_cutoff_date "$days")" || return 1
+  tmp="${file}.wt.$$"
+  awk -v cutoff="$cutoff" '
+    /^## / {
+      shipped = ($0 ~ /^## Shipped \/ dropped *$/)
+      print
+      next
+    }
+    shipped && /^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / {
+      entry_date = substr($0, 3, 10)
+      if (entry_date < cutoff) next
+    }
+    { print }
+  ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  if cmp -s "$file" "$tmp"; then
+    rm -f "$tmp"
+    echo "Backlog: no Shipped / dropped entries older than $days days."
+    return 0
+  fi
+  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+  echo "Backlog: pruned Shipped / dropped entries older than $days days (before $cutoff)."
+}
+
 function wt_backlog_commit_push {
   # Scoped commit of BACKLOG.md ONLY + push to origin/$BASE_BRANCH. The
   # path-limited commit never sweeps up unrelated WIP in the shared dev
@@ -369,8 +419,9 @@ function wt_backlog_commit_push {
   # rebases onto origin/$BASE_BRANCH - but only when nothing else is dirty,
   # since rebase can't run over unstaged edits. Non-fatal by contract: returns
   # non-zero on failure, but callers proceed with their real work.
-  # Args: $1 = dev worktree path, $2 = commit message.
-  local dev_path="$1" msg="$2"
+  # Args: $1 = dev worktree path, $2 = commit message, $3 = retention days (optional).
+  local dev_path="$1" msg="$2" retention_days="${3:-$WT_BACKLOG_RETENTION_DAYS}"
+  wt_backlog_prune "$dev_path/BACKLOG.md" "$retention_days" || return 1
   if [[ -z "$(git -C "$dev_path" status --porcelain -- BACKLOG.md 2>/dev/null)" ]]; then
     echo "Backlog: no BACKLOG.md changes to commit."
     return 0
@@ -1783,8 +1834,12 @@ function wt_dispatch {
       sync)
         wt_backlog_commit_push "$bl_dev" "docs(backlog): update"
         ;;
+      prune)
+        local retention_days="${3:-$WT_BACKLOG_RETENTION_DAYS}"
+        wt_backlog_commit_push "$bl_dev" "docs(backlog): prune shipped and dropped history" "$retention_days"
+        ;;
       *)
-        echo "Usage: wt backlog [list | add <idea> | sync]"
+        echo "Usage: wt backlog [list | add <idea> | sync | prune [days]]"
         return 1
         ;;
     esac
@@ -1811,7 +1866,7 @@ function wt_dispatch {
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
-    echo "  wt backlog [sub] - BACKLOG.md: list (default) | add <idea> | sync (scoped commit+push to $BASE_BRANCH)"
+    echo "  wt backlog [sub] - BACKLOG.md: list | add <idea> | sync | prune [days] (7-day shipped-history retention)"
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;
   esac

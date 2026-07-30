@@ -160,10 +160,10 @@ func TestExternalCandidatesShareTheSingleWakeEvent(t *testing.T) {
 	}
 	enableWake(t, manager)
 
-	// A workspace task wants a wake in two hours; an Overnight Run wants one in
-	// one hour. The earlier wake wins, whichever subsystem asked for it.
+	// A workspace task wants a wake in two hours; a one-time Herdr continuation
+	// wants one in an hour. The earlier wake wins, whichever subsystem asked.
 	if err := coordinator.Register(wakecoord.Candidate{
-		ID: "ovr-1", Source: wakecoord.SourceOvernightRun, WakeAt: fixed.Add(time.Hour),
+		ID: "sch-1", Source: wakecoord.SourceHerdrContinuation, WakeAt: fixed.Add(time.Hour),
 	}, fixed); err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -179,13 +179,13 @@ func TestExternalCandidatesShareTheSingleWakeEvent(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("programmed record = %v, %v", found, err)
 	}
-	if record.Source != wakecoord.SourceOvernightRun || record.CandidateID != "ovr-1" {
-		t.Fatalf("programmed = %+v, want the Overnight candidate", record)
+	if record.Source != wakecoord.SourceHerdrContinuation || record.CandidateID != "sch-1" {
+		t.Fatalf("programmed = %+v, want the continuation candidate", record)
 	}
 
-	// When the Overnight Run withdraws its candidate, the workspace task's wake
+	// When the continuation withdraws its candidate, the workspace task's wake
 	// is recomputed rather than lost.
-	if err := coordinator.Cancel(wakecoord.SourceOvernightRun, "ovr-1", fixed); err != nil {
+	if err := coordinator.Cancel(wakecoord.SourceHerdrContinuation, "sch-1", fixed); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	if err := service.SyncNextWake([]workspace.WakeCandidate{

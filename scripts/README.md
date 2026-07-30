@@ -90,8 +90,18 @@ wt new <name>          # create a worktree
 wt rm <name>           # remove a worktree
 wt ls                  # list worktrees
 wt cd <name>           # navigate to a worktree
+wt backlog             # read Ideas, Doing, and retained terminal history
+wt backlog prune       # force seven-day Shipped / dropped retention + push
 ```
 Source it (don't execute) so `cd` affects your current shell.
+
+Every backlog mutation (`add`, `sync`, `wt start`, and `wt done`) automatically
+removes date-prefixed `## Shipped / dropped` entries older than seven days,
+then commits only `BACKLOG.md` and pushes `dev` through the existing scoped
+workflow. `Ideas`, `Doing`, undated terminal records, and plain `wt backlog`
+listing are never pruned. Set `WT_BACKLOG_RETENTION_DAYS` before sourcing the
+script to choose a different retention window; Git remains the archive for
+removed history.
 
 ### `wt status` — feature overview
 
@@ -138,6 +148,16 @@ Git-worktree creator/remover. wt start <feature> --no-herdr skips it once. See
 selection, one-time continuations, guarded cleanup, and recovery. Claude is the
 configured default; use wt start <feature> --kind codex for a one-feature
 override without changing that default.
+
+One-time continuations can opt into the shared macOS wake owner:
+
+~~~bash
+wt herd continue builder --feature <feature> --at "2026-07-30 05:00" --wake
+~~~
+
+The command succeeds only after a running Ori server confirms the wake was
+programmed; Mac wake scheduling and administrator approval must already be
+enabled in Settings → Device Capabilities.
 
 The bridge resolves a feature's agents by canonical worktree path, not a saved
 workspace ID, so closing/reopening a workspace or opening a pane by hand on

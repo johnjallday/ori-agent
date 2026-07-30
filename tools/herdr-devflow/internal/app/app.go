@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
@@ -44,32 +45,43 @@ type Dependencies struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	// Stdin is where a recorder invoked by Claude Code reads its payload.
-	Stdin        io.Reader
-	Getwd        func() (string, error)
-	LookupEnv    func(string) (string, bool)
-	LookPath     func(string) (string, error)
-	Runner       herdr.Runner
-	BuildHelper  func(context.Context, string, string) error
-	GOOS         string
-	UserHomeDir  func() (string, error)
-	Getuid       func() int
-	LaunchctlRun func(context.Context, string, ...string) error
+	Stdin               io.Reader
+	Getwd               func() (string, error)
+	LookupEnv           func(string) (string, bool)
+	LookPath            func(string) (string, error)
+	Runner              herdr.Runner
+	BuildHelper         func(context.Context, string, string) error
+	GOOS                string
+	UserHomeDir         func() (string, error)
+	Getuid              func() int
+	LaunchctlRun        func(context.Context, string, ...string) error
+	NewContinuationWake func() (WakeCoordinator, error)
+}
+
+// WakeCoordinator is the continuation helper's source-scoped view of Ori's
+// single macOS wake owner.
+type WakeCoordinator interface {
+	Register(string, time.Time, string) error
+	Verify(context.Context, string, time.Time) (time.Time, error)
+	Cancel(string) error
+	Owner() wakeclient.OwnerReadiness
 }
 
 type App struct {
-	stdout         io.Writer
-	stderr         io.Writer
-	stdin          io.Reader
-	getwd          func() (string, error)
-	lookupEnv      func(string) (string, bool)
-	lookPath       func(string) (string, error)
-	runner         herdr.Runner
-	buildHelper    func(context.Context, string, string) error
-	goos           string
-	userHomeDir    func() (string, error)
-	getuid         func() int
-	launchctlRun   func(context.Context, string, ...string) error
-	cleanupTimeout time.Duration
+	stdout              io.Writer
+	stderr              io.Writer
+	stdin               io.Reader
+	getwd               func() (string, error)
+	lookupEnv           func(string) (string, bool)
+	lookPath            func(string) (string, error)
+	runner              herdr.Runner
+	buildHelper         func(context.Context, string, string) error
+	goos                string
+	userHomeDir         func() (string, error)
+	getuid              func() int
+	launchctlRun        func(context.Context, string, ...string) error
+	newContinuationWake func() (WakeCoordinator, error)
+	cleanupTimeout      time.Duration
 }
 
 func New(deps Dependencies) *App {
@@ -106,20 +118,26 @@ func New(deps Dependencies) *App {
 	if deps.Getuid == nil {
 		deps.Getuid = os.Getuid
 	}
+	if deps.NewContinuationWake == nil {
+		deps.NewContinuationWake = func() (WakeCoordinator, error) {
+			return wakeclient.DefaultForSource(wakecoord.SourceHerdrContinuation)
+		}
+	}
 	return &App{
-		stdout:         deps.Stdout,
-		stderr:         deps.Stderr,
-		stdin:          deps.Stdin,
-		getwd:          deps.Getwd,
-		lookupEnv:      deps.LookupEnv,
-		lookPath:       deps.LookPath,
-		runner:         deps.Runner,
-		buildHelper:    deps.BuildHelper,
-		goos:           deps.GOOS,
-		userHomeDir:    deps.UserHomeDir,
-		getuid:         deps.Getuid,
-		launchctlRun:   deps.LaunchctlRun,
-		cleanupTimeout: defaultCleanupTimeout,
+		stdout:              deps.Stdout,
+		stderr:              deps.Stderr,
+		stdin:               deps.Stdin,
+		getwd:               deps.Getwd,
+		lookupEnv:           deps.LookupEnv,
+		lookPath:            deps.LookPath,
+		runner:              deps.Runner,
+		buildHelper:         deps.BuildHelper,
+		goos:                deps.GOOS,
+		userHomeDir:         deps.UserHomeDir,
+		getuid:              deps.Getuid,
+		launchctlRun:        deps.LaunchctlRun,
+		newContinuationWake: deps.NewContinuationWake,
+		cleanupTimeout:      defaultCleanupTimeout,
 	}
 }
 
@@ -445,6 +463,7 @@ type continueArgs struct {
 	role    string
 	at      string
 	prompt  string
+	wake    bool
 }
 
 func parseContinueArgs(args []string) (continueArgs, error) {
@@ -466,6 +485,8 @@ func parseContinueArgs(args []string) (continueArgs, error) {
 				parsed.prompt = remaining[index+1]
 			}
 			index++
+		case "--wake":
+			parsed.wake = true
 		default:
 			if strings.HasPrefix(remaining[index], "--") {
 				return continueArgs{}, fmt.Errorf("unknown continue option %q", remaining[index])
@@ -1199,10 +1220,14 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		"timezone":       timezone,
 		"retry_until":    dueAt.Add(runtime.config.RetryWindow()).Format(time.RFC3339),
 		"prompt_summary": promptSummary,
+		"wake_required":  parsed.wake,
 	}
 	if !opts.json {
 		fmt.Fprintln(a.stdout, "Continuation preview (not saved yet):")
 		fmt.Fprintf(a.stdout, "  Feature: %s\n  Worktree: %s\n  Role: %s\n  Agent: %s (%s)\n  Due: %s (%s)\n  Retry until: %s\n  Prompt: %s\n", target.Feature.Name, target.Feature.Path, target.Agent.Role, target.Agent.Name, target.Agent.Kind, dueAt.Format(time.RFC3339), timezone, dueAt.Add(runtime.config.RetryWindow()).Format(time.RFC3339), promptSummary)
+		if parsed.wake {
+			fmt.Fprintln(a.stdout, "  Wake: required; Ori must confirm a macOS wake before this schedule is ready")
+		}
 	}
 	// Register before saving so unsupported platforms cannot leave behind a
 	// continuation that nothing is capable of dispatching. Registration is
@@ -1211,18 +1236,62 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		a.writeError(err, opts.json)
 		return 1
 	}
+	var wake WakeCoordinator
+	if parsed.wake {
+		wake, err = a.newContinuationWake()
+		if err != nil {
+			a.writeError(continuationWakeError("Ori's shared wake coordinator is unavailable", err), opts.json)
+			return 1
+		}
+		readiness := wake.Owner()
+		if !readiness.Ready {
+			a.writeError(continuationWakeError(readiness.Detail, nil), opts.json)
+			return 1
+		}
+	}
 	scheduleService := &scheduler.Service{Store: state.New(runtime.paths.StateDir)}
 	record, err := scheduleService.Create(ctx, scheduler.CreateRequest{
-		Feature:     target.Feature,
-		Agent:       target.Agent,
-		DueAt:       dueAt,
-		Timezone:    timezone,
-		Prompt:      prompt,
-		RetryWindow: runtime.config.RetryWindow(),
+		Feature:      target.Feature,
+		Agent:        target.Agent,
+		DueAt:        dueAt,
+		Timezone:     timezone,
+		Prompt:       prompt,
+		RetryWindow:  runtime.config.RetryWindow(),
+		WakeRequired: parsed.wake,
 	})
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
+	}
+	if parsed.wake {
+		ref := scheduler.ScheduleRef{RepositoryID: target.Feature.RepositoryID, FeatureName: target.Feature.Name}
+		failWake := func(message string, cause error) int {
+			_, markErr := scheduleService.RecordWakeResult(ctx, ref, record.ID, time.Time{}, message)
+			if cancelErr := wake.Cancel(record.ID); cancelErr != nil {
+				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: continuation wake %s was not confirmed withdrawn\n", record.ID)
+			}
+			if markErr != nil {
+				a.writeError(markErr, opts.json)
+			} else {
+				a.writeError(continuationWakeError(message, cause), opts.json)
+			}
+			return 1
+		}
+		detail := fmt.Sprintf("Herdr continuation for %s:%s", target.Feature.Name, target.Agent.Role)
+		if registerErr := wake.Register(record.ID, record.DueAt, detail); registerErr != nil {
+			return failWake("Ori's wake coordinator did not accept the continuation wake", registerErr)
+		}
+		programmedAt, verifyErr := wake.Verify(ctx, record.ID, record.DueAt)
+		if verifyErr != nil {
+			return failWake("Ori did not confirm that macOS programmed the continuation wake", verifyErr)
+		}
+		updated, wakeResultErr := scheduleService.RecordWakeResult(ctx, ref, record.ID, programmedAt, "")
+		if wakeResultErr != nil {
+			_ = wake.Cancel(record.ID)
+			a.writeError(wakeResultErr, opts.json)
+			return 1
+		}
+		record = updated
 	}
 	a.refreshStatusDisplay(ctx, runtime)
 	a.recordAudit(runtime, audit.Event{Operation: "continue", Feature: target.Feature.Name, Role: target.Agent.Role, Stage: "schedule", Outcome: "scheduled"})
@@ -1230,8 +1299,39 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		a.writeResult(true, map[string]any{"status": "scheduled", "preview": preview, "schedule": scheduleView(target.Feature, record)})
 	} else {
 		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: scheduled %s for %s at %s (%s)\n", record.ID, target.Agent.Name, record.DueAt.Format(time.RFC3339), record.Timezone)
+		if record.WakeRequired {
+			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: macOS wake confirmed for %s\n", record.WakeProgrammedAt.Format(time.RFC3339))
+		}
 	}
 	return 0
+}
+
+func continuationWakeError(message string, cause error) *model.StageError {
+	if strings.TrimSpace(message) == "" {
+		message = "macOS wake scheduling is not ready"
+	}
+	return &model.StageError{
+		Stage:    "schedule wake",
+		Code:     model.ErrWakeUnavailable,
+		Message:  message,
+		Recovery: "open Ori, enable Mac wake scheduling in Settings > Device Capabilities, grant approval, then recreate the continuation with --wake",
+		Cause:    cause,
+	}
+}
+
+func (a *App) withdrawContinuationWake(record model.Schedule) error {
+	if !record.WakeRequired {
+		return nil
+	}
+	wake, err := a.newContinuationWake()
+	if err != nil {
+		return err
+	}
+	id := record.WakeCandidateID
+	if id == "" {
+		id = record.ID
+	}
+	return wake.Cancel(id)
 }
 
 func (a *App) schedule(ctx context.Context, opts options, args []string) int {
@@ -1294,8 +1394,19 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 			a.writeError(cancelErr, opts.json)
 			return 1
 		}
+		wakeErr := a.withdrawContinuationWake(record)
 		a.refreshStatusDisplay(ctx, runtime)
 		a.recordAudit(runtime, audit.Event{Operation: "schedule", Feature: feature.Name, Role: record.Role, Stage: "cancel", Outcome: "canceled"})
+		if wakeErr != nil {
+			a.writeError(&model.StageError{
+				Stage:    "schedule cancel",
+				Code:     model.ErrWakeUnavailable,
+				Message:  "the continuation prompt was canceled, but its macOS wake was not confirmed withdrawn",
+				Recovery: "open Ori and inspect Mac wake scheduling in Settings > Device Capabilities before allowing this Mac to sleep",
+				Cause:    wakeErr,
+			}, opts.json)
+			return 1
+		}
 		if opts.json {
 			a.writeResult(true, map[string]any{"status": "canceled", "schedule": scheduleView(feature, record)})
 		} else {
@@ -1863,6 +1974,14 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	for _, result := range results {
+		switch result.Schedule.State {
+		case model.ScheduleDelivered, model.ScheduleFailed, model.ScheduleUncertain, model.ScheduleCanceled:
+			if wakeErr := a.withdrawContinuationWake(result.Schedule); wakeErr != nil {
+				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: continuation wake %s was not confirmed withdrawn\n", result.Schedule.ID)
+			}
+		}
+	}
 	// The same detached dispatcher advances Overnight Runs. Giving runs their
 	// own daemon would mean two processes each believing they owned the queue
 	// and the system wake; there is one dispatcher, and it does both jobs.
@@ -1974,6 +2093,11 @@ func scheduleView(feature model.Feature, record model.Schedule) map[string]any {
 		"delivered_at":         formatOptionalTime(record.DeliveredAt),
 		"failure_reason":       record.FailureReason,
 		"recovery":             record.RecoveryCommand,
+		"wake_required":        record.WakeRequired,
+		"wake_candidate_id":    record.WakeCandidateID,
+		"wake_programmed_at":   formatOptionalTime(record.WakeProgrammedAt),
+		"wake_verified_at":     formatOptionalTime(record.WakeVerifiedAt),
+		"wake_failure_reason":  record.WakeFailureReason,
 		"prompt_summary":       fmt.Sprintf("stored continuation prompt (%d characters)", len([]rune(record.Prompt))),
 	}
 }
@@ -2487,7 +2611,7 @@ Usage:
   wt herd focus [role] [--target TARGET] [--feature NAME|--worktree PATH]
   wt herd read [role] [--target TARGET] [--lines N] [--feature NAME|--worktree PATH]
   wt herd rebind <role> --target TARGET [--feature NAME|--worktree PATH]
-  wt herd continue [role] --at TIME [--prompt TEXT] [--feature NAME|--worktree PATH]
+  wt herd continue [role] --at TIME [--prompt TEXT] [--wake] [--feature NAME|--worktree PATH]
                                 Schedule one safe continuation for an existing managed agent
   wt herd schedule list [--feature NAME|--worktree PATH]
   wt herd schedule show <schedule-id> [--feature NAME|--worktree PATH]

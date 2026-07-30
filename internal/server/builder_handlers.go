@@ -73,9 +73,9 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
 	b.macWakeService = macwake.NewService(b.configManager)
 	// Ori owns one system wake event and this service is the only thing that
-	// programs it. The shared coordinator is how other Ori processes — today
-	// the Herdr devflow helper's Overnight Runs — ask for one without ever
-	// calling pmset themselves.
+	// programs it. The shared coordinator is how other Ori processes —
+	// including Herdr Overnight Runs and wake-enabled continuations — ask for
+	// one without ever calling pmset themselves.
 	if dir, err := wakecoord.DefaultDir(); err == nil {
 		b.macWakeService.UseCoordinator(wakecoord.New(dir))
 	}
