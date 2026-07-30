@@ -140,26 +140,6 @@
                 </label>
               </div>
 
-              <div id="templateAgentReview" class="workspace-template-agent-review mb-2" hidden>
-                <div class="workspace-template-agent-review-head">
-                  <div>
-                    <div class="workspace-template-agent-review-title">Blueprint agents</div>
-                    <div id="templateAgentReviewSummary" class="workspace-template-agent-review-summary" aria-live="polite"></div>
-                  </div>
-                </div>
-                <div id="templateAgentReviewStatus" class="workspace-template-agent-review-status" aria-live="polite"></div>
-                <div id="templateAgentReviewList" class="workspace-template-agent-list"></div>
-                <div id="templateAgentReviewWarnings" class="workspace-template-agent-warnings" hidden></div>
-                <details class="workspace-template-agent-advanced">
-                  <summary>Advanced team options</summary>
-                  <label class="workspace-template-agent-toggle" title="Clear this to create the workspace without the assistant included by this blueprint.">
-                    <input type="checkbox" id="templateAgentReviewToggle" checked>
-                    <span>Include blueprint assistant/team</span>
-                  </label>
-                  <span class="workspace-template-agent-advanced-help">Clear this to create without the included assistant/team. Starter tasks will remain unassigned unless you add an existing agent.</span>
-                </details>
-              </div>
-
               <!-- REAPER Setup card: shown only when the Reaper Song template is
                    selected. Populated by sessions.js from /api/reaper-setup/preview. -->
               <div id="reaperSetupCard" class="workspace-setup-card reaper-setup-card mb-2" role="group" aria-label="REAPER Setup" hidden>
@@ -301,11 +281,26 @@
                       <p id="workspaceTeamSummary" class="workspace-team-review-summary" aria-live="polite"></p>
                     </div>
                   </div>
-                  <div id="templateAgentReviewMount"></div>
-                  <div id="existingAgentTeamList" class="workspace-existing-agent-team" aria-live="polite"></div>
-                  <div id="workspaceTeamDropZone" class="workspace-team-drop-zone" tabindex="0" aria-label="Drop an existing agent here to attach it to this workspace">
-                    Drop an existing agent here to attach it — it stays in its other workspaces.
-                  </div>
+
+                  <!-- Blockers first, then advisories. Rendered from the team
+                       draft's classified issues so Team and Review agree. -->
+                  <div id="workspaceTeamIssues" class="workspace-team-issues"></div>
+
+                  <!-- ONE roster: blueprint agents and manually added saved
+                       agents together, primary first. There is no separate
+                       nested "Blueprint agents" card. -->
+                  <ul id="workspaceTeamRoster" class="workspace-team-roster" aria-labelledby="workspaceTeamHeading"></ul>
+
+                  <p id="workspaceTeamModelNote" class="workspace-team-model-note"></p>
+
+                  <details id="workspaceTeamAdvanced" class="workspace-template-agent-advanced">
+                    <summary>Advanced team options</summary>
+                    <label class="workspace-template-agent-toggle" title="Clear this to create the workspace without the assistant included by this blueprint.">
+                      <input type="checkbox" id="templateAgentReviewToggle" checked>
+                      <span>Include blueprint assistant/team</span>
+                    </label>
+                    <span class="workspace-template-agent-advanced-help">Clear this to create without the included assistant/team. Starter tasks will remain unassigned unless you add an existing agent.</span>
+                  </details>
                 </section>
 
                 <!-- Inline picker: the same step, never a nested modal. On wide

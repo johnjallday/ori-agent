@@ -537,3 +537,125 @@ test('create_template_agents is omitted when the blueprint declares no agents', 
   const draft = readyDraft([]);
   assert.deepEqual(Draft.toCreatePayload(draft), {});
 });
+
+test('the roster keeps a stable order as members are added and promoted', () => {
+  const draft = readyDraft([
+    planAgent('Lead', { entry_point: true, action: 'reuse' }),
+    planAgent('Helper A'),
+    planAgent('Helper B')
+  ]);
+  withSavedRoster(draft, [{ name: 'Scout' }, { name: 'Miner' }]);
+  Draft.addSavedAgent(draft, 'Scout');
+  Draft.addSavedAgent(draft, 'Miner');
+
+  assert.deepEqual(
+    Draft.derive(draft).roster.map(entry => entry.name),
+    ['Lead', 'Helper A', 'Helper B', 'Scout', 'Miner'],
+    'blueprint order first, then selection order'
+  );
+
+  // Promoting a saved agent moves only that entry; everything else holds its place.
+  Draft.setExplicitPrimary(draft, 'Miner');
+  assert.deepEqual(
+    Draft.derive(draft).roster.map(entry => entry.name),
+    ['Miner', 'Lead', 'Helper A', 'Helper B', 'Scout']
+  );
+});
+
+test('a customized copy of a reused agent leaves the blueprint entry identifiable', () => {
+  const draft = readyDraft([
+    planAgent('Shared Lead', {
+      entry_point: true,
+      action: 'reuse',
+      model: 'gpt-5',
+      provider: 'openai'
+    })
+  ]);
+  Draft.stageOverride(draft, 0, {
+    name: 'Shared Lead Studio',
+    model: 'claude-opus-5',
+    provider: 'anthropic',
+    systemPrompt: 'Be terse.',
+    role: 'orchestrator'
+  });
+  const view = Draft.derive(draft);
+  const row = view.roster[0];
+
+  assert.equal(row.name, 'Shared Lead Studio');
+  assert.equal(row.originalName, 'Shared Lead', 'the source definition stays identifiable');
+  assert.equal(row.lifecycle, 'customized-copy');
+  assert.equal(row.isCustomized, true);
+  assert.equal(row.modelLabel, 'anthropic / claude-opus-5');
+  assert.deepEqual(view.payload.template_agent_overrides, [
+    {
+      index: 0,
+      name: 'Shared Lead Studio',
+      model: 'claude-opus-5',
+      provider: 'anthropic',
+      system_prompt: 'Be terse.',
+      role: 'orchestrator'
+    }
+  ]);
+});
+
+test('overrides serialize in index order regardless of the order they were staged', () => {
+  const draft = readyDraft([
+    planAgent('Zero', { entry_point: true }),
+    planAgent('One'),
+    planAgent('Two')
+  ]);
+  Draft.stageOverride(draft, 2, { name: 'Two Renamed' });
+  Draft.stageOverride(draft, 0, { name: 'Zero Renamed' });
+  Draft.stageOverride(draft, 1, { name: 'One Renamed' });
+
+  assert.deepEqual(
+    Draft.derive(draft).payload.template_agent_overrides.map(override => override.index),
+    [0, 1, 2]
+  );
+});
+
+test('excluding the blueprint team drops its overrides from the request but not the draft', () => {
+  const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
+  Draft.stageOverride(draft, 0, { name: 'Renamed Lead' });
+  Draft.setIncludeBlueprintTeam(draft, false);
+
+  const view = Draft.derive(draft);
+  assert.equal(view.payload.create_template_agents, false);
+  assert.equal(
+    view.payload.template_agent_overrides,
+    undefined,
+    'no point sending overrides for a team that is not being created'
+  );
+  assert.equal(draft.overrides.size, 1, 'the staged edit survives so re-enabling restores it');
+
+  Draft.setIncludeBlueprintTeam(draft, true);
+  assert.deepEqual(Draft.derive(draft).payload.template_agent_overrides, [
+    { index: 0, name: 'Renamed Lead' }
+  ]);
+});
+
+test('an agent-less team is advisory and still produces a valid request', () => {
+  const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
+  Draft.setIncludeBlueprintTeam(draft, false);
+  const view = Draft.derive(draft);
+
+  assert.deepEqual(view.roster, []);
+  assert.equal(view.primaryName, '');
+  const empty = view.issues.find(issue => issue.id === 'empty-team');
+  assert.equal(empty.severity, 'advisory');
+  assert.match(empty.message, /may remain unassigned/);
+  assert.equal(view.canContinueFromTeam, true, 'never blocks creation (FR55)');
+  assert.equal(view.payload.create_template_agents, false);
+});
+
+test('issue ordering puts blockers ahead of advisories', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanError(draft, 'template:x', 'plan unavailable');
+  Draft.setSavedRosterError(draft, 'roster unavailable');
+  const view = Draft.derive(draft);
+
+  assert.equal(view.blockingIssues.length, 1);
+  assert.equal(view.blockingIssues[0].id, 'plan-error');
+  assert.ok(view.advisoryIssues.some(issue => issue.id === 'saved-roster-error'));
+  assert.equal(view.canContinueFromTeam, false, 'a blocker stops Team continuation');
+});

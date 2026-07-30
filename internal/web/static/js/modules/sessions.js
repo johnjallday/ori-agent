@@ -355,7 +355,9 @@ const sessionManager = {
       const button = event.target.closest('[data-existing-agent-add]');
       if (button) this.addExistingAgent(button.dataset.existingAgentAdd || '');
     });
-    document.getElementById('existingAgentTeamList')?.addEventListener('click', event => {
+    // Roster actions are delegated: the list re-renders on every draft change,
+    // so per-row listeners would have to be rebound each time.
+    document.getElementById('workspaceTeamRoster')?.addEventListener('click', event => {
       const remove = event.target.closest('[data-existing-agent-remove]');
       if (remove) this.removeExistingAgent(remove.dataset.existingAgentRemove || '');
       const primary = event.target.closest('[data-existing-agent-primary]');
@@ -364,19 +366,6 @@ const sessionManager = {
     document.getElementById('workspaceReviewSummary')?.addEventListener('click', event => {
       const edit = event.target.closest('[data-wizard-edit-step]');
       if (edit) this.goToWizardStep(Number(edit.dataset.wizardEditStep));
-    });
-    const dropZone = document.getElementById('workspaceTeamDropZone');
-    dropZone?.addEventListener('dragover', event => {
-      event.preventDefault();
-      dropZone.classList.add('is-drag-over');
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    });
-    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('is-drag-over'));
-    dropZone?.addEventListener('drop', event => {
-      event.preventDefault();
-      dropZone.classList.remove('is-drag-over');
-      const agentName = event.dataTransfer?.getData('application/x-ori-agent-name') || '';
-      this.addExistingAgent(agentName, { announceDrop: true });
     });
 
     document.getElementById('projectTemplatePathInput')?.addEventListener('input', () => {
@@ -3662,7 +3651,9 @@ const sessionManager = {
     this.refreshWorkspaceReview();
   },
 
-  // Empties the Team roster card's DOM without touching the draft's plan status.
+  // Restores the Advanced include-blueprint-team default. The roster itself is
+  // rendered from the draft, so there is no separate DOM state to clear —
+  // re-deriving is what empties it.
   //
   // Kept separate from resetTemplateAgentReview because "this blueprint declares
   // no agents" and "there is no blueprint to check" are different states that
@@ -3670,25 +3661,10 @@ const sessionManager = {
   // second has nothing to say at all. Collapsing them would make a no-agent
   // blueprint show no summary instead of saying so.
   clearTemplateAgentReviewCard() {
-    const review = document.getElementById('templateAgentReview');
-    const summary = document.getElementById('templateAgentReviewSummary');
-    const status = document.getElementById('templateAgentReviewStatus');
-    const list = document.getElementById('templateAgentReviewList');
-    const warnings = document.getElementById('templateAgentReviewWarnings');
     const toggle = document.getElementById('templateAgentReviewToggle');
-    if (review) {
-      review.hidden = true;
-      review.classList.remove('is-disabled');
-    }
-    if (summary) summary.textContent = '';
-    if (status) status.textContent = '';
-    if (list) list.innerHTML = '';
-    if (warnings) {
-      warnings.hidden = true;
-      warnings.innerHTML = '';
-    }
     if (toggle) toggle.checked = true;
     this.syncIncludeBlueprintTeam(true);
+    this.closeTeamCustomizeEditors();
   },
 
   scheduleTemplateAgentPlanRefresh() {
@@ -3767,23 +3743,8 @@ const sessionManager = {
   setTemplateAgentReviewLoading() {
     this.templateAgentPlan = null;
     this.templateAgentPlanError = '';
-    const review = document.getElementById('templateAgentReview');
-    const summary = document.getElementById('templateAgentReviewSummary');
-    const status = document.getElementById('templateAgentReviewStatus');
-    const list = document.getElementById('templateAgentReviewList');
-    const warnings = document.getElementById('templateAgentReviewWarnings');
-    if (review) {
-      review.hidden = false;
-      review.classList.remove('is-disabled');
-    }
-    if (summary) summary.textContent = 'Checking reusable agents...';
-    if (status) status.textContent = '';
-    if (list) list.innerHTML = '';
-    if (warnings) {
-      warnings.hidden = true;
-      warnings.innerHTML = '';
-    }
-    this.renderBlueprintAgentSummary();
+    this.closeTeamCustomizeEditors();
+    this.refreshWorkspaceReview();
   },
 
   renderTemplateAgentPlanError(message) {
@@ -3797,186 +3758,212 @@ const sessionManager = {
         this.templateAgentPlanError
       );
     }
-    const review = document.getElementById('templateAgentReview');
-    const summary = document.getElementById('templateAgentReviewSummary');
-    const status = document.getElementById('templateAgentReviewStatus');
-    const list = document.getElementById('templateAgentReviewList');
-    const toggle = document.getElementById('templateAgentReviewToggle');
-    if (review) {
-      review.hidden = false;
-      review.classList.remove('is-disabled');
-    }
-    if (summary) summary.textContent = 'Blueprint agents could not be checked.';
-    if (status) status.textContent = message || 'Could not load blueprint agents.';
-    if (list) list.innerHTML = '';
-    if (toggle) toggle.checked = true;
-    this.syncIncludeBlueprintTeam(true);
-    this.renderBlueprintAgentSummary();
+    this.closeTeamCustomizeEditors();
+    this.refreshWorkspaceReview();
   },
 
   renderTemplateAgentPlan(plan) {
     const agents = Array.isArray(plan?.agents) ? plan.agents : [];
     if (!plan?.has_agents || agents.length === 0) {
       // A blueprint that declares no agents is a CONFIRMED empty team, not an
-      // absent one: clear the roster card but keep the plan's ready status so
-      // Blueprint can say so plainly.
+      // absent one: reset the include-team default but keep the plan's ready
+      // status so Blueprint can say so plainly.
       this.clearTemplateAgentReviewCard();
       this.refreshWorkspaceReview();
       return;
     }
-
-    const review = document.getElementById('templateAgentReview');
-    const summary = document.getElementById('templateAgentReviewSummary');
-    const status = document.getElementById('templateAgentReviewStatus');
-    const list = document.getElementById('templateAgentReviewList');
-    const warnings = document.getElementById('templateAgentReviewWarnings');
     const toggle = document.getElementById('templateAgentReviewToggle');
-    if (review) review.hidden = false;
     if (toggle) toggle.checked = true;
     this.syncIncludeBlueprintTeam(true);
-
-    const createCount = agents.filter(agent => agent.action === 'create').length;
-    const reuseCount = agents.filter(agent => agent.action === 'reuse').length;
-    const parts = [];
-    if (reuseCount) {
-      parts.push(`${reuseCount} saved agent${reuseCount === 1 ? '' : 's'} will be attached`);
-    }
-    if (createCount) {
-      parts.push(
-        `${createCount} reusable agent${createCount === 1 ? '' : 's'} will be added to Your Agents and attached`
-      );
-    }
-    if (summary) {
-      summary.textContent = parts.join(' · ');
-    }
-    if (status) {
-      const provider = String(plan.system_provider || '').trim();
-      const model = String(plan.system_model || '').trim();
-      // Applies to any blueprint's roster, not just Blank — the message names
-      // where agents without an explicit model get theirs from.
-      status.textContent =
-        provider && model
-          ? `Agents without their own model use ${provider} / ${model}.`
-          : 'Agents without their own model use the app default because no system model is configured.';
-    }
-    if (list) {
-      list.innerHTML = agents
-        .map((agent, index) => this.renderTemplateAgentPlanRow(agent, index))
-        .join('');
-    }
-    const warningMessages = [...(Array.isArray(plan.warnings) ? plan.warnings : [])].filter(
-      msg => typeof msg === 'string' && msg.trim()
-    );
-    if (warnings) {
-      warnings.hidden = warningMessages.length === 0;
-      warnings.innerHTML = warningMessages
-        .map(msg => `<div>${this.escapeHtml(msg)}</div>`)
-        .join('');
-    }
-    this.bindTemplateAgentReviewInputs();
-    this.updateTemplateAgentReviewDisabledState();
+    this.closeTeamCustomizeEditors();
     this.refreshWorkspaceReview();
   },
 
-  renderTemplateAgentPlanRow(agent, index) {
-    const action = String(agent?.action || 'create').trim() === 'reuse' ? 'reuse' : 'create';
-    const actionLabel = action === 'reuse' ? 'Reuse' : 'Create';
-    const role = String(agent?.role || '').trim();
-    const type = String(agent?.type || '').trim();
-    const model = String(agent?.model || '').trim();
-    const provider = String(agent?.provider || '').trim();
-    const source = this.templateAgentModelSourceLabel(agent?.model_source);
-    const tools = this.templateAgentToolsLabel(agent?.tools);
-    const name = String(agent?.name || '').trim();
-    const systemPrompt = String(agent?.system_prompt || '').trim();
-    const editableModel = ['template', 'existing'].includes(
-      String(agent?.model_source || '').trim()
-    )
-      ? model
-      : '';
-    const editableProvider = editableModel ? provider : '';
-    const modelText = model ? `${provider ? `${provider} / ` : ''}${model}` : 'App default';
-    const modelOptions = this.renderTemplateAgentModelOptions(
-      agent,
-      editableModel,
-      editableProvider,
-      modelText
-    );
-    const promptState = systemPrompt ? 'Prompt set' : 'No prompt';
-    const isReuse = action === 'reuse';
-    // The role/type chip pair shared by both the compact reuse view and the
-    // editable view. The action chip lives only in the editable view so its
-    // "Reuse -> Create" flip on fork targets a single element.
-    const roleChips = [
-      agent?.entry_point
-        ? '<span class="workspace-template-agent-chip entry">Entry</span>'
-        : '<span class="workspace-template-agent-chip">Specialist</span>',
-      role ? `<span class="workspace-template-agent-chip">${this.escapeHtml(role)}</span>` : '',
-      type ? `<span class="workspace-template-agent-chip">${this.escapeHtml(type)}</span>` : '',
-      tools ? `<span class="workspace-template-agent-chip">${this.escapeHtml(tools)}</span>` : ''
-    ]
-      .filter(Boolean)
-      .join('');
-    const chips = `<span class="workspace-template-agent-chip ${action} workspace-template-agent-action">${actionLabel}</span>${roleChips}`;
+  // One roster row. `entry` is a derived roster member — blueprint or saved —
+  // so both sources render through the same markup and the same rules.
+  renderWorkspaceTeamRow(entry, index) {
+    const isPrimary = entry.designation === 'primary';
+    const isBlueprint = entry.source === 'blueprint';
+    const rowId = isBlueprint ? `team-agent-${entry.templateAgentIndex}` : `team-saved-${index}`;
+    // Designation and lifecycle are both plain text, never colour or icon alone.
+    const badge = isPrimary
+      ? '<span class="workspace-team-badge is-primary">Primary</span>'
+      : '<span class="workspace-team-badge">Specialist</span>';
+    const meta = [entry.modelLabel, entry.modelSourceLabel].filter(Boolean).join(' · ');
 
-    const designation = agent?.entry_point ? 'Primary workspace agent' : 'Workspace specialist';
-    const provision = isReuse
-      ? 'Saved agent · Will be attached'
-      : 'New reusable agent · Added to Your Agents and attached';
-    const summaryAction = isReuse
-      ? '<button type="button" class="workspace-template-agent-fork-btn">Make a workspace copy</button>'
-      : '<button type="button" class="workspace-wizard-inline-action workspace-template-agent-customize-btn" aria-expanded="false">Customize</button>';
-    const summaryView = `
-        <div class="workspace-template-agent-summary-card">
-          ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
-          <div class="workspace-template-agent-summary-copy">
-            <strong>${this.escapeHtml(name)}</strong>
-            <span>${provision}</span>
-            <small>${designation} · ${this.escapeHtml(modelText)} · ${this.escapeHtml(source)}</small>
-          </div>
-          <div class="workspace-template-agent-summary-action">${summaryAction}</div>
-        </div>`;
+    const actions = [];
+    if (entry.customizable) {
+      actions.push(
+        `<button type="button" class="workspace-wizard-inline-action" data-team-customize="${entry.templateAgentIndex}" aria-expanded="false" aria-controls="${rowId}-editor">Customize for this workspace</button>`
+      );
+    }
+    if (entry.canMakePrimary) {
+      actions.push(
+        `<button type="button" class="workspace-wizard-inline-action" data-existing-agent-primary="${this.escapeHtml(entry.name)}">Make Primary</button>`
+      );
+    }
+    if (entry.removable) {
+      actions.push(
+        `<button type="button" class="workspace-wizard-inline-action" data-existing-agent-remove="${this.escapeHtml(entry.name)}">Remove</button>`
+      );
+    }
 
     return `
-      <div class="workspace-template-agent-row${isReuse ? ' is-reuse' : ''}"
-           data-template-agent-index="${index}"
-           data-forked="false"
-           data-original-action="${this.escapeHtml(action)}"
-           data-original-name="${this.escapeHtml(name)}"
-           data-original-model="${this.escapeHtml(editableModel)}"
-           data-original-provider="${this.escapeHtml(editableProvider)}"
-           data-original-system-prompt="${this.escapeHtml(systemPrompt)}">
-        ${summaryView}
-        <div class="workspace-template-agent-main" hidden>
-          <div class="workspace-template-agent-fields">
-            <label class="workspace-template-agent-field">
-              <span>Name</span>
-              <input type="text"
-                     class="modern-input workspace-template-agent-control workspace-template-agent-name-input"
-                     value="${this.escapeHtml(name)}"
-                     placeholder="Agent name">
-            </label>
-            <label class="workspace-template-agent-field">
-              <span>Model</span>
-              <select class="modern-input workspace-template-agent-control workspace-template-agent-model-input">
-                ${modelOptions}
-              </select>
-            </label>
+      <li class="workspace-team-row${isPrimary ? ' is-primary' : ''}"
+          id="${rowId}"
+          data-agent-key="${this.escapeHtml(entry.key)}"
+          ${isBlueprint ? `data-template-agent-index="${entry.templateAgentIndex}"` : ''}>
+        <div class="workspace-team-row-main">
+          ${this.renderAgentAvatar(entry.name, 'workspace-agent-avatar')}
+          <div class="workspace-team-row-copy">
+            <strong>${this.escapeHtml(entry.name)}${badge}</strong>
+            <span class="workspace-team-row-lifecycle">${this.escapeHtml(entry.lifecycleLabel)}</span>
+            <small>${this.escapeHtml(meta)}</small>
           </div>
-          <div class="workspace-template-agent-meta">${chips}</div>
-          ${isReuse ? '<div class="workspace-template-agent-fork-note">New workspace copy — edit freely. Your existing agent is left untouched.</div>' : ''}
-          <details class="workspace-template-agent-prompt" open>
-            <summary>
-              <span>System prompt</span>
-              <span class="workspace-template-agent-prompt-state">${this.escapeHtml(promptState)}</span>
-            </summary>
-            <textarea class="modern-input workspace-template-agent-control workspace-template-agent-prompt-input"
-                      rows="4"
-                      placeholder="Optional system prompt">${this.escapeHtml(systemPrompt)}</textarea>
-          </details>
+          <div class="workspace-team-row-actions">${actions.join('')}</div>
         </div>
-      </div>
-    `;
+        <div class="workspace-team-customize" id="${rowId}-editor" hidden></div>
+      </li>`;
+  },
+
+  // The Team step's single roster: blueprint agents and manually added saved
+  // agents in one list, primary first, rendered entirely from the derived team
+  // view so it cannot disagree with Review or with the request payload.
+  renderWorkspaceTeamRoster() {
+    const list = document.getElementById('workspaceTeamRoster');
+    const note = document.getElementById('workspaceTeamModelNote');
+    const advanced = document.getElementById('workspaceTeamAdvanced');
+    if (!list) return;
+
+    const view = this.teamView();
+    if (!view) {
+      list.innerHTML = '';
+      return;
+    }
+
+    // Preserve which editors were open across a re-render; the roster re-renders
+    // on every draft change and reopening by hand would lose the user's place.
+    const openEditors = new Set(
+      Array.from(list.querySelectorAll('.workspace-team-customize'))
+        .filter(editor => !editor.hidden)
+        .map(editor => editor.id)
+    );
+
+    list.innerHTML = view.roster
+      .map((entry, index) => this.renderWorkspaceTeamRow(entry, index))
+      .join('');
+    if (note) {
+      note.textContent = view.roster.some(entry => entry.inheritsModel)
+        ? view.inheritedModelNote
+        : '';
+      note.hidden = !note.textContent;
+    }
+    // Advanced team options only make sense while a blueprint contributes a team.
+    if (advanced) {
+      advanced.hidden = view.blueprintSummary.count === 0;
+    }
+
+    list.querySelectorAll('[data-team-customize]').forEach(button => {
+      const index = Number.parseInt(button.dataset.teamCustomize || '', 10);
+      button.addEventListener('click', () => this.toggleTeamCustomizeEditor(index));
+    });
+    openEditors.forEach(editorId => {
+      const index = Number.parseInt(String(editorId).replace(/^team-agent-|-editor$/g, ''), 10);
+      if (Number.isInteger(index)) this.openTeamCustomizeEditor(index, { focus: false });
+    });
+  },
+
+  // Renders classified issues, blockers before advisories, each with the concrete
+  // recovery actions its classification implies.
+  renderWorkspaceTeamIssues() {
+    const host = document.getElementById('workspaceTeamIssues');
+    if (!host) return;
+    const view = this.teamView();
+    if (!view) {
+      host.innerHTML = '';
+      return;
+    }
+
+    const ordered = [
+      ...view.issues.filter(issue => issue.severity === 'blocking'),
+      ...view.issues.filter(issue => issue.severity === 'loading'),
+      ...view.issues.filter(issue => issue.severity === 'advisory')
+    ];
+    host.innerHTML = ordered
+      .map(issue => {
+        const actions = (issue.recovery || [])
+          .map(action => {
+            const label = this.teamRecoveryLabel(action);
+            return label
+              ? `<button type="button" class="workspace-wizard-inline-action" data-team-recovery="${this.escapeHtml(action)}">${this.escapeHtml(label)}</button>`
+              : '';
+          })
+          .filter(Boolean)
+          .join('');
+        return `
+        <div class="workspace-team-issue is-${this.escapeHtml(issue.severity)}" data-issue-id="${this.escapeHtml(issue.id)}">
+          <span class="workspace-team-issue-label">${this.escapeHtml(this.teamIssueLabel(issue.severity))}</span>
+          <span class="workspace-team-issue-text">${this.escapeHtml(issue.message)}</span>
+          ${actions ? `<span class="workspace-team-issue-actions">${actions}</span>` : ''}
+        </div>`;
+      })
+      .join('');
+
+    host.querySelectorAll('[data-team-recovery]').forEach(button => {
+      button.addEventListener('click', () =>
+        this.runTeamRecovery(button.dataset.teamRecovery || '')
+      );
+    });
+  },
+
+  teamIssueLabel(severity) {
+    switch (severity) {
+      case 'blocking':
+        return 'Needs attention';
+      case 'loading':
+        return 'Checking';
+      default:
+        return 'Note';
+    }
+  },
+
+  teamRecoveryLabel(action) {
+    switch (action) {
+      case 'retry-plan':
+        return 'Retry';
+      case 'edit-blueprint':
+        return 'Edit blueprint';
+      case 'exclude-blueprint-team':
+        return 'Create without blueprint team';
+      case 'retry-saved-roster':
+        return 'Retry';
+      default:
+        return '';
+    }
+  },
+
+  runTeamRecovery(action) {
+    switch (action) {
+      case 'retry-plan':
+        void this.refreshTemplateAgentPlan();
+        break;
+      case 'edit-blueprint':
+        this.goToWizardStep(1);
+        break;
+      case 'exclude-blueprint-team': {
+        const toggle = document.getElementById('templateAgentReviewToggle');
+        if (toggle) toggle.checked = false;
+        this.syncIncludeBlueprintTeam(false);
+        this.refreshWorkspaceReview();
+        this.announceResolvedPrimary();
+        break;
+      }
+      case 'retry-saved-roster':
+        void this.openExistingAgentRoster();
+        break;
+      default:
+        break;
+    }
   },
 
   renderTemplateAgentModelOptions(agent, currentModel, currentProvider, inheritedLabel) {
@@ -4020,214 +4007,215 @@ const sessionManager = {
     return options.join('');
   },
 
-  bindTemplateAgentReviewInputs() {
-    const list = document.getElementById('templateAgentReviewList');
-    if (!list) return;
-    list.querySelectorAll('.workspace-template-agent-row').forEach(row => {
-      row.querySelectorAll('.workspace-template-agent-control').forEach(control => {
-        control.addEventListener('input', () => this.updateTemplateAgentReviewRowState(row));
-        control.addEventListener('change', () => this.updateTemplateAgentReviewRowState(row));
-      });
-      row
-        .querySelector('.workspace-template-agent-fork-btn')
-        ?.addEventListener('click', () => this.forkTemplateAgentRow(row));
-      row
-        .querySelector('.workspace-template-agent-customize-btn')
-        ?.addEventListener('click', () => this.toggleTemplateAgentCustomization(row));
-      this.updateTemplateAgentReviewRowState(row);
-    });
-  },
-
-  // Fork a reused (name-matched) agent into a fresh workspace-scoped copy:
-  // reveal the editable view, suffix the name so it no longer matches the
-  // existing agent (which flips the row to "Create"), and let the existing
-  // rename-fork override path carry the edits. The existing agent is untouched.
-  forkTemplateAgentRow(row) {
-    if (!row) return;
-    const summaryView = row.querySelector('.workspace-template-agent-summary-card');
-    const main = row.querySelector('.workspace-template-agent-main');
-    const nameInput = row.querySelector('.workspace-template-agent-name-input');
-    row.dataset.forked = 'true';
-    if (summaryView) summaryView.hidden = true;
-    if (main) main.hidden = false;
-    if (nameInput) {
-      nameInput.value = this.suggestForkedAgentName(row.dataset.originalName || nameInput.value);
-      nameInput.focus();
-      nameInput.select?.();
-    }
-    this.updateTemplateAgentReviewRowState(row);
-  },
-
-  toggleTemplateAgentCustomization(row) {
-    const main = row?.querySelector('.workspace-template-agent-main');
-    const button = row?.querySelector('.workspace-template-agent-customize-btn');
-    if (!main || !button) return;
-    main.hidden = !main.hidden;
-    button.setAttribute('aria-expanded', String(!main.hidden));
-    button.textContent = main.hidden ? 'Customize' : 'Hide details';
-    if (!main.hidden) row.querySelector('.workspace-template-agent-name-input')?.focus();
-  },
-
-  suggestForkedAgentName(base) {
-    const trimmed = String(base || '').trim();
-    return trimmed ? `${trimmed} copy` : 'Agent copy';
-  },
-
-  updateTemplateAgentReviewRowState(row) {
-    if (!row) return;
-    const nameInput = row.querySelector('.workspace-template-agent-name-input');
-    const modelInput = row.querySelector('.workspace-template-agent-model-input');
-    const promptInput = row.querySelector('.workspace-template-agent-prompt-input');
-    const actionChip = row.querySelector('.workspace-template-agent-action');
-    const sourceLabel = row.querySelector('.workspace-template-agent-model-source');
-    const promptState = row.querySelector('.workspace-template-agent-prompt-state');
-    const originalName = row.dataset.originalName || '';
-    const originalModel = row.dataset.originalModel || '';
-    const originalProvider = row.dataset.originalProvider || '';
-    const originalPrompt = row.dataset.originalSystemPrompt || '';
-    const name = String(nameInput?.value || '').trim();
-    const model = String(modelInput?.value || '').trim();
-    const provider = String(
-      modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
-    ).trim();
-    const prompt = String(promptInput?.value || '').trim();
-    const dirty =
-      name !== originalName ||
-      model !== originalModel ||
-      provider !== originalProvider ||
-      prompt !== originalPrompt;
-    row.classList.toggle('is-edited', dirty);
-
-    if (actionChip && row.dataset.originalAction === 'reuse') {
-      const renamed = name !== '' && name !== originalName;
-      actionChip.textContent = renamed ? 'Create' : 'Reuse';
-      actionChip.classList.toggle('create', renamed);
-      actionChip.classList.toggle('reuse', !renamed);
-    }
-    if (sourceLabel && modelInput) {
-      sourceLabel.textContent =
-        model !== originalModel || provider !== originalProvider
-          ? 'Custom model'
-          : this.templateAgentModelSourceLabel(this.findTemplateAgentPlanItemSource(row));
-    }
-    if (promptState) {
-      promptState.textContent = prompt ? 'Prompt set' : 'No prompt';
-    }
-  },
-
-  findTemplateAgentPlanItemSource(row) {
-    return this.findTemplateAgentPlanItem(row)?.model_source || '';
-  },
-
-  findTemplateAgentPlanItem(row) {
-    const index = Number.parseInt(row?.dataset?.templateAgentIndex || '', 10);
+  // The blueprint plan entry a roster index refers to, before any staged
+  // customization is applied.
+  planAgentAt(index) {
     const agents = Array.isArray(this.templateAgentPlan?.agents)
       ? this.templateAgentPlan.agents
       : [];
     return Number.isInteger(index) && agents[index] ? agents[index] : null;
   },
 
-  collectTemplateAgentOverrides() {
-    const review = document.getElementById('templateAgentReview');
-    const toggle = document.getElementById('templateAgentReviewToggle');
-    if (!review || !toggle || !toggle.checked) return [];
-
-    const rows = Array.from(review.querySelectorAll('.workspace-template-agent-row'));
-    // Overrides come only from the rows the user actually edited. There is no
-    // longer a pre-create save path whose already-persisted choices had to be
-    // carried forward separately.
-    const overridesByIndex = new Map();
-    const names = new Map();
-    for (const row of rows) {
-      const index = Number.parseInt(row.dataset.templateAgentIndex || '', 10);
-      if (!Number.isInteger(index)) continue;
-      const nameInput = row.querySelector('.workspace-template-agent-name-input');
-      const modelInput = row.querySelector('.workspace-template-agent-model-input');
-      const promptInput = row.querySelector('.workspace-template-agent-prompt-input');
-      const name = String(nameInput?.value || '').trim();
-      const model = String(modelInput?.value || '').trim();
-      const provider = String(
-        modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
-      ).trim();
-      const systemPrompt = String(promptInput?.value || '').trim();
-      if (!name) {
-        nameInput?.focus();
-        throw new Error('Template agent name cannot be empty.');
-      }
-      if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
-        nameInput?.focus();
-        throw new Error(
-          'Template agent names can use letters, numbers, spaces, underscores, and hyphens.'
-        );
-      }
-      const duplicateKey = name.toLowerCase();
-      if (names.has(duplicateKey)) {
-        nameInput?.focus();
-        throw new Error(`Template agent "${name}" duplicates "${names.get(duplicateKey)}".`);
-      }
-      names.set(duplicateKey, name);
-
-      const originalName = row.dataset.originalName || '';
-      const originalModel = row.dataset.originalModel || '';
-      const originalProvider = row.dataset.originalProvider || '';
-      const originalPrompt = row.dataset.originalSystemPrompt || '';
-      const renamed = name !== originalName;
-      const modelChanged = model !== originalModel || provider !== originalProvider;
-      const promptChanged = systemPrompt !== originalPrompt;
-      if (row.dataset.originalAction === 'reuse' && !renamed && (modelChanged || promptChanged)) {
-        nameInput?.focus();
-        throw new Error(
-          `Rename "${name}" before changing its model or prompt. Existing shared agents are reused as-is.`
-        );
-      }
-
-      const override = { index };
-      if (renamed) {
-        override.name = name;
-        if (row.dataset.originalAction === 'reuse') {
-          const planItem = this.findTemplateAgentPlanItem(row) || {};
-          override.model = model;
-          override.provider = provider;
-          override.system_prompt = systemPrompt;
-          if (planItem.role) override.role = String(planItem.role).trim();
-          if (planItem.type) override.type = String(planItem.type).trim();
-        }
-      }
-      if (modelChanged) {
-        override.model = model;
-        override.provider = provider;
-      }
-      if (promptChanged) override.system_prompt = systemPrompt;
-      if (Object.keys(override).length > 1) {
-        overridesByIndex.set(index, { ...overridesByIndex.get(index), ...override });
-      }
-    }
-    return Array.from(overridesByIndex.values()).sort((left, right) => left.index - right.index);
+  closeTeamCustomizeEditors() {
+    document.querySelectorAll('#workspaceTeamRoster .workspace-team-customize').forEach(editor => {
+      editor.hidden = true;
+      editor.innerHTML = '';
+    });
+    document.querySelectorAll('#workspaceTeamRoster [data-team-customize]').forEach(button => {
+      button.setAttribute('aria-expanded', 'false');
+      button.textContent = 'Customize for this workspace';
+    });
   },
 
-  templateAgentModelSourceLabel(source) {
-    switch (String(source || '').trim()) {
-      case 'system':
-        return 'System model';
-      case 'template':
-        return 'Template model';
-      case 'existing':
-        return 'Saved agent model';
-      case 'agent_default':
-      default:
-        return 'Default model';
+  toggleTeamCustomizeEditor(index) {
+    const editor = document.getElementById(`team-agent-${index}-editor`);
+    if (!editor) return;
+    if (editor.hidden) this.openTeamCustomizeEditor(index);
+    else this.closeTeamCustomizeEditor(index);
+  },
+
+  closeTeamCustomizeEditor(index) {
+    const editor = document.getElementById(`team-agent-${index}-editor`);
+    const button = document.querySelector(`[data-team-customize="${index}"]`);
+    if (editor) {
+      editor.hidden = true;
+      editor.innerHTML = '';
+    }
+    if (button) {
+      button.setAttribute('aria-expanded', 'false');
+      button.textContent = 'Customize for this workspace';
+      button.focus();
     }
   },
 
-  templateAgentToolsLabel(tools) {
-    const parts = [];
-    const skills = Array.isArray(tools?.skills) ? tools.skills.length : 0;
-    const mcp = Array.isArray(tools?.mcp_servers) ? tools.mcp_servers.length : 0;
-    const plugins = Array.isArray(tools?.plugins) ? tools.plugins.length : 0;
-    if (skills) parts.push(`${skills} skill${skills === 1 ? '' : 's'}`);
-    if (mcp) parts.push(`${mcp} MCP`);
-    if (plugins) parts.push(`${plugins} plugin${plugins === 1 ? '' : 's'}`);
-    return parts.join(' / ');
+  // Opens the staged-customization editor for one blueprint roster entry.
+  //
+  // Everything here writes to the team draft only — Save draft never contacts the
+  // server. Customizing a REUSED agent pre-fills a suggested copy name because
+  // the rename is what makes it an independent definition; the shared saved agent
+  // is left untouched either way.
+  openTeamCustomizeEditor(index, options = {}) {
+    const editor = document.getElementById(`team-agent-${index}-editor`);
+    const button = document.querySelector(`[data-team-customize="${index}"]`);
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const planAgent = this.planAgentAt(index);
+    if (!editor || !draft || !api || !planAgent) return;
+
+    const staged = api.getOverride(draft, index) || {};
+    const isReuse = String(planAgent.action || '').toLowerCase() === 'reuse';
+    const planName = String(planAgent.name || '').trim();
+    const hasStagedName = Object.prototype.hasOwnProperty.call(staged, 'name');
+    // A reused agent opens with a suggested copy name so the required rename is
+    // one keystroke away rather than a puzzle.
+    const nameValue = hasStagedName ? staged.name : isReuse ? `${planName} copy` : planName;
+
+    const planModel = String(planAgent.model || '').trim();
+    const planProvider = String(planAgent.provider || '').trim();
+    const hasStagedModel = Object.prototype.hasOwnProperty.call(staged, 'model');
+    const modelValue = hasStagedModel ? staged.model : planModel;
+    const providerValue = Object.prototype.hasOwnProperty.call(staged, 'provider')
+      ? staged.provider
+      : planProvider;
+    const inheritedLabel = planModel
+      ? `${planProvider ? `${planProvider} / ` : ''}${planModel}`
+      : 'App default';
+    const promptValue = Object.prototype.hasOwnProperty.call(staged, 'systemPrompt')
+      ? staged.systemPrompt
+      : String(planAgent.system_prompt || '');
+
+    editor.innerHTML = `
+      <p class="workspace-team-customize-note">${
+        isReuse
+          ? `This creates an independent reusable agent for this workspace. ${this.escapeHtml(planName)} stays exactly as it is in Your Agents.`
+          : 'These changes are staged for this workspace and saved when you create it.'
+      }</p>
+      <div class="workspace-team-customize-fields">
+        <label class="workspace-team-customize-field">
+          <span>Name</span>
+          <input type="text" class="modern-input" data-team-customize-name value="${this.escapeHtml(nameValue)}" maxlength="100" placeholder="Agent name">
+        </label>
+        <label class="workspace-team-customize-field">
+          <span>Model</span>
+          <select class="modern-input" data-team-customize-model>
+            ${this.renderTemplateAgentModelOptions(planAgent, modelValue, providerValue, inheritedLabel)}
+          </select>
+        </label>
+      </div>
+      <label class="workspace-team-customize-field">
+        <span>Instructions <em>optional</em></span>
+        <textarea class="modern-input" data-team-customize-prompt rows="4" placeholder="Use the blueprint instructions">${this.escapeHtml(promptValue)}</textarea>
+      </label>
+      <p class="workspace-team-customize-status" role="alert"></p>
+      <div class="workspace-team-customize-actions">
+        <button type="button" class="workspace-wizard-inline-action" data-team-customize-cancel>Cancel</button>
+        <button type="button" class="modern-btn modern-btn-primary" data-team-customize-save>Save draft</button>
+      </div>`;
+    editor.hidden = false;
+    if (button) {
+      button.setAttribute('aria-expanded', 'true');
+      button.textContent = 'Hide customization';
+    }
+
+    editor
+      .querySelector('[data-team-customize-save]')
+      ?.addEventListener('click', () => this.saveTeamCustomization(index));
+    editor
+      .querySelector('[data-team-customize-cancel]')
+      ?.addEventListener('click', () => this.closeTeamCustomizeEditor(index));
+
+    if (options.focus !== false) {
+      const nameInput = editor.querySelector('[data-team-customize-name]');
+      nameInput?.focus();
+      nameInput?.select?.();
+    }
+  },
+
+  // Stages the editor's values into the draft. Only fields that actually differ
+  // from the blueprint are staged, so an untouched form leaves the entry
+  // uncustomized — and an explicitly emptied model IS staged, because empty means
+  // "inherit the default" rather than "unchanged".
+  saveTeamCustomization(index) {
+    const editor = document.getElementById(`team-agent-${index}-editor`);
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    const planAgent = this.planAgentAt(index);
+    if (!editor || !draft || !api || !planAgent) return;
+
+    const nameInput = editor.querySelector('[data-team-customize-name]');
+    const modelInput = editor.querySelector('[data-team-customize-model]');
+    const promptInput = editor.querySelector('[data-team-customize-prompt]');
+    const status = editor.querySelector('.workspace-team-customize-status');
+    const fail = message => {
+      if (status) status.textContent = message;
+      nameInput?.focus();
+    };
+
+    const name = String(nameInput?.value || '').trim();
+    const model = String(modelInput?.value || '').trim();
+    const provider = String(
+      modelInput?.selectedOptions?.[0]?.getAttribute('data-provider') || ''
+    ).trim();
+    const systemPrompt = String(promptInput?.value || '').trim();
+
+    if (!name) return fail('Enter a name for this agent.');
+    if (!/^[a-zA-Z0-9_\- ]+$/.test(name)) {
+      return fail('Names can use letters, numbers, spaces, underscores, and hyphens.');
+    }
+
+    const planName = String(planAgent.name || '').trim();
+    const isReuse = String(planAgent.action || '').toLowerCase() === 'reuse';
+    const planModel = String(planAgent.model || '').trim();
+    const planProvider = String(planAgent.provider || '').trim();
+    const planPrompt = String(planAgent.system_prompt || '').trim();
+    const renamed = api.agentKey(name) !== api.agentKey(planName);
+    const modelChanged = model !== planModel || provider !== planProvider;
+    const promptChanged = systemPrompt !== planPrompt;
+
+    // A shared saved agent is reused exactly as it is. Changing how it behaves
+    // means creating a separate definition, and that needs its own name.
+    if (isReuse && !renamed && (modelChanged || promptChanged)) {
+      return fail(
+        `Give this copy a different name from “${planName}”. Your saved agent is reused as-is and never modified.`
+      );
+    }
+
+    // The resulting name must be unique across the whole resulting roster, not
+    // just among blueprint entries — a collision with a selected saved agent is
+    // just as broken.
+    const collision = (this.teamView()?.roster || []).some(
+      entry => entry.templateAgentIndex !== index && entry.key === api.agentKey(name)
+    );
+    if (collision) {
+      return fail(`Another agent in this team is already called “${name}”. Choose another name.`);
+    }
+
+    const fields = {};
+    if (renamed || name !== planName) fields.name = name;
+    if (modelChanged) {
+      fields.model = model;
+      fields.provider = provider;
+    }
+    if (promptChanged) fields.systemPrompt = systemPrompt;
+    // Renaming a reused agent produces a brand-new definition, so it must carry
+    // the blueprint's role/type rather than inheriting them from a saved agent
+    // that is no longer involved.
+    if (isReuse && renamed) {
+      if (planAgent.role) fields.role = String(planAgent.role).trim();
+      if (planAgent.type) fields.type = String(planAgent.type).trim();
+      if (!Object.prototype.hasOwnProperty.call(fields, 'model')) {
+        fields.model = model;
+        fields.provider = provider;
+      }
+      if (!Object.prototype.hasOwnProperty.call(fields, 'systemPrompt')) {
+        fields.systemPrompt = systemPrompt;
+      }
+    }
+
+    api.stageOverride(draft, index, fields);
+    this.closeTeamCustomizeEditor(index);
+    this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange(`${name} is staged for this workspace.`);
   },
 
   // Clears the picker's own UI. The selections themselves live in the team draft
@@ -4239,8 +4227,7 @@ const sessionManager = {
     // hides it.
     const search = document.getElementById('existingAgentRosterSearch');
     if (search) search.value = '';
-    const list = document.getElementById('existingAgentTeamList');
-    if (list) list.innerHTML = '';
+    this.closeTeamCustomizeEditors();
     this.refreshWorkspaceReview();
   },
 
@@ -4478,39 +4465,6 @@ const sessionManager = {
     return view ? view.primaryName : '';
   },
 
-  // Renders only the manually added saved agents. A selection the blueprint also
-  // contributes is deliberately absent: derive() gives its roster slot to the
-  // blueprint entry so the agent is shown — and attached — exactly once (FR23).
-  renderExistingAgentTeam() {
-    const list = document.getElementById('existingAgentTeamList');
-    if (!list) return;
-    const view = this.teamView();
-    if (!view) {
-      list.innerHTML = '';
-      return;
-    }
-    list.innerHTML = view.roster
-      .filter(entry => entry.source === 'saved')
-      .map(entry => {
-        const name = entry.name;
-        const isPrimary = entry.designation === 'primary';
-        return `
-        <article class="workspace-team-agent-card">
-          ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
-          <div class="workspace-team-agent-copy">
-            <strong>${this.escapeHtml(name)}</strong>
-            <span>${isPrimary ? 'Primary workspace agent' : 'Workspace specialist'} · ${this.escapeHtml(entry.lifecycleLabel)}</span>
-            <small>${this.escapeHtml(entry.modelLabel)}</small>
-          </div>
-          <div class="workspace-team-agent-actions">
-            ${isPrimary ? '' : `<button type="button" class="workspace-wizard-inline-action" data-existing-agent-primary="${this.escapeHtml(name)}">Make Primary</button>`}
-            <button type="button" class="workspace-wizard-inline-action" data-existing-agent-remove="${this.escapeHtml(name)}">Remove</button>
-          </div>
-        </article>`;
-      })
-      .join('');
-  },
-
   // Blueprint's read-only agent summary. It reports what the selected blueprint
   // will contribute — how many agents, their names, and which one it declares as
   // primary — and nothing else: every agent action lives on Team.
@@ -4572,31 +4526,13 @@ const sessionManager = {
     const teamSummary = document.getElementById('workspaceTeamSummary');
     const selectedTemplate = window.ProjectTemplateCard?.getSelectedTemplate?.();
     const name = String(document.getElementById('folderNameInput')?.value || '').trim();
-    const templateAgents = this.includedTemplateAgents();
-    const existingCount = this.existingAgentSelections.length;
-    const total = templateAgents.length + existingCount;
-    const created = templateAgents.filter(agent => String(agent?.action || '') === 'create').length;
-    const reused = templateAgents.filter(agent => String(agent?.action || '') === 'reuse').length;
-    if (heading) heading.textContent = total === 1 ? 'Workspace Assistant' : 'Workspace Team';
-    if (teamSummary) {
-      const parts = [];
-      if (created) {
-        parts.push(
-          `${created} reusable agent${created === 1 ? '' : 's'} will be added to Your Agents and attached`
-        );
-      }
-      if (existingCount)
-        parts.push(
-          `${existingCount} saved agent${existingCount === 1 ? '' : 's'} will be attached`
-        );
-      if (reused)
-        parts.push(
-          `${reused} blueprint agent${reused === 1 ? '' : 's'} already saved and attached`
-        );
-      teamSummary.textContent =
-        parts.join(' · ') ||
-        'No agent will be attached. Starter tasks will remain unassigned until you add one.';
+    const view = this.teamView();
+    const roster = view ? view.roster : [];
+
+    if (heading) {
+      heading.textContent = roster.length === 1 ? 'Workspace Assistant' : 'Workspace Team';
     }
+    if (teamSummary) teamSummary.textContent = this.workspaceTeamSummaryText(view);
     if (summary) {
       const blueprint =
         selectedTemplate?.blank || !selectedTemplate?.name
@@ -4614,8 +4550,33 @@ const sessionManager = {
         </div>`;
     }
     this.renderSetupPreview(selectedTemplate);
-    this.renderExistingAgentTeam();
+    this.renderWorkspaceTeamIssues();
+    this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
+  },
+
+  // Counts what the request will actually do, in future tense. Grouped by
+  // lifecycle rather than by source, because "will be created" versus "will be
+  // attached" is the distinction that matters before the workspace exists.
+  workspaceTeamSummaryText(view) {
+    const roster = view ? view.roster : [];
+    // The consequence is spelled out by the advisory issue below the summary;
+    // repeating it here would say the same thing twice in two shapes.
+    if (roster.length === 0) return 'No agent will be attached to this workspace.';
+    const created = roster.filter(
+      entry => entry.lifecycle === 'create' || entry.lifecycle === 'customized-copy'
+    ).length;
+    const attached = roster.length - created;
+    const parts = [];
+    if (attached) {
+      parts.push(`${attached} saved agent${attached === 1 ? '' : 's'} will be attached`);
+    }
+    if (created) {
+      parts.push(
+        `${created} new reusable agent${created === 1 ? '' : 's'} will be created and attached`
+      );
+    }
+    return parts.join(' · ');
   },
 
   /**
@@ -4711,17 +4672,11 @@ const sessionManager = {
     if (region && message) region.textContent = message;
   },
 
+  // Excluding the blueprint team removes its entries from the roster entirely
+  // rather than greying them out, so there is nothing left to disable — the
+  // re-render is the state change.
   updateTemplateAgentReviewDisabledState() {
-    const review = document.getElementById('templateAgentReview');
-    const toggle = document.getElementById('templateAgentReviewToggle');
-    if (!review || !toggle) return;
-    review.classList.toggle('is-disabled', !toggle.checked);
-    review.querySelectorAll('.workspace-template-agent-control').forEach(control => {
-      control.disabled = !toggle.checked;
-    });
-    review.querySelectorAll('.workspace-template-agent-fork-btn').forEach(btn => {
-      btn.disabled = !toggle.checked;
-    });
+    this.closeTeamCustomizeEditors();
   },
 
   // Fills a create-modal input from a template default while tracking the
@@ -4796,7 +4751,6 @@ const sessionManager = {
     const nextBtn = document.getElementById('wizardNextBtn');
     const createBtn = document.getElementById('createFolderBtn');
 
-    this.relocateWizardReviewFields();
     this.updateWorkspaceNameHint();
 
     sections.forEach((section, offset) => {
@@ -4866,20 +4820,6 @@ const sessionManager = {
     const createBtn = document.getElementById('createFolderBtn');
     if (!createBtn || this.isCreatingFolder || this.importModeEnabled) return;
     createBtn.textContent = this.workspaceCreateCtaLabel();
-  },
-
-  // Moves the blueprint roster card into the Team step's mount, keeping it a
-  // single instance so its values, listeners, and staged state survive the move
-  // rather than being shadowed by a second copy.
-  //
-  // "Open project after creation" and the REAPER readiness card deliberately are
-  // NOT moved: they are mutable pre-create controls and belong on Details, where
-  // they are already declared. Review only summarizes their values.
-  relocateWizardReviewFields() {
-    const templateMount = document.getElementById('templateAgentReviewMount');
-    const review = document.getElementById('templateAgentReview');
-    if (review && templateMount && review.parentElement !== templateMount)
-      templateMount.appendChild(review);
   },
 
   // Shows the folder the current name will map to on disk, so the name→folder
@@ -5184,24 +5124,21 @@ const sessionManager = {
             payload.blank = true;
           }
         }
-        if (this.templateAgentPlan?.has_agents) {
-          const createTemplateAgents = Boolean(
-            document.getElementById('templateAgentReviewToggle')?.checked
-          );
-          payload.create_template_agents = createTemplateAgents;
-          if (createTemplateAgents) {
-            const templateAgentOverrides = this.collectTemplateAgentOverrides();
-            if (templateAgentOverrides.length > 0) {
-              payload.template_agent_overrides = templateAgentOverrides;
-            }
-          }
-        }
-        // Saved-agent composition comes from the derived team, so a selection the
-        // blueprint also contributes is sent once (not twice), the order matches
-        // what Team showed, and entry_agent_name is only set when the resolved
-        // primary is genuinely one of the selections — which is the server's
-        // requirement for that field.
+        // The whole team composition is converted from the draft here, at submit
+        // time, and nowhere else. Because it comes from the same derived view the
+        // Team and Review steps rendered, the request cannot describe a different
+        // team than the one the user just confirmed: a selection the blueprint
+        // also contributes is sent once, the order matches what Team showed,
+        // staged customizations ride the existing override field, and
+        // entry_agent_name is set only when the resolved primary is genuinely one
+        // of the saved selections — the server's requirement for that field.
         const teamPayload = this.teamView()?.payload || {};
+        if (typeof teamPayload.create_template_agents === 'boolean') {
+          payload.create_template_agents = teamPayload.create_template_agents;
+        }
+        if (Array.isArray(teamPayload.template_agent_overrides)) {
+          payload.template_agent_overrides = teamPayload.template_agent_overrides;
+        }
         if (Array.isArray(teamPayload.existing_agent_names)) {
           payload.existing_agent_names = [...teamPayload.existing_agent_names];
         }

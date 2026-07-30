@@ -198,14 +198,19 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		// Details keeps the mutable pre-create readiness controls (FR29, FR30).
 		`id="projectTemplateOpenAfterCreate"`,
 		`id="reaperSetupCard"`,
-		// Team owns the roster and the inline saved-agent picker.
+		// Team owns ONE roster plus the inline saved-agent picker, and the
+		// Advanced include-team disclosure now lives here rather than on Details.
 		`id="workspaceTeamLayout"`,
 		`id="workspaceTeamReview"`,
-		`id="templateAgentReviewMount"`,
+		`id="workspaceTeamRoster"`,
+		`id="workspaceTeamIssues"`,
+		`id="workspaceTeamAdvanced"`,
+		`id="templateAgentReviewToggle"`,
 		`id="existingAgentRosterPanel"`,
 		`id="existingAgentRosterSearch"`,
 		`id="workspaceTeamLiveRegion"`,
 		`Resulting workspace team`,
+		`Advanced team options`,
 		// Review keeps the read-only post-create setup preview.
 		`id="workspaceSetupPreview"`,
 		`aria-label="Close create workspace"`,
@@ -245,6 +250,16 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="workspaceTemplateAgentSetupSave"`,
 		`Create all defaults`,
 		`Save reusable agent`,
+		// The roster is one list: no nested "Blueprint agents" card, no separate
+		// saved-agent list, and no drop zone (FR33, FR63).
+		`id="templateAgentReview"`,
+		`id="templateAgentReviewMount"`,
+		`id="templateAgentReviewList"`,
+		`id="existingAgentTeamList"`,
+		`id="workspaceTeamDropZone"`,
+		`Blueprint agents`,
+		`Make a workspace copy`,
+		`Drop an existing agent here`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Create Workspace wizard contains stale markup/copy %q", gone)

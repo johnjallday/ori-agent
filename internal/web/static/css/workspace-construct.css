@@ -718,8 +718,6 @@
   font-size: 10px;
   font-weight: 700;
 }
-.workspace-create-modal .workspace-template-agent-summary-card,
-.workspace-create-modal .workspace-team-agent-card,
 .workspace-create-modal .workspace-existing-agent-card {
   display: flex;
   align-items: center;
@@ -728,23 +726,21 @@
   border: 1px solid var(--wc-line);
   background: rgba(4, 8, 12, 0.24);
 }
-.workspace-create-modal .workspace-template-agent-summary-copy,
-.workspace-create-modal .workspace-team-agent-copy,
 .workspace-create-modal .workspace-existing-agent-card-copy {
   min-width: 0;
   flex: 1 1 auto;
 }
-.workspace-create-modal .workspace-template-agent-summary-copy strong,
-.workspace-create-modal .workspace-team-agent-copy strong,
+/* Keep the Add/Added/Unavailable button intact: without this the longest label
+   was clipped by the card edge inside the narrow picker column. */
+.workspace-create-modal .workspace-existing-agent-card > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .workspace-create-modal .workspace-existing-agent-card-copy strong {
   display: block;
   color: var(--wc-ink);
   font-size: 13px;
 }
-.workspace-create-modal .workspace-template-agent-summary-copy span,
-.workspace-create-modal .workspace-template-agent-summary-copy small,
-.workspace-create-modal .workspace-team-agent-copy span,
-.workspace-create-modal .workspace-team-agent-copy small,
 .workspace-create-modal .workspace-existing-agent-card-copy span,
 .workspace-create-modal .workspace-existing-agent-card-copy small {
   display: block;
@@ -753,32 +749,218 @@
   font-size: 11px;
   line-height: 1.4;
 }
-.workspace-create-modal .workspace-template-agent-summary-action,
-.workspace-create-modal .workspace-team-agent-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-}
-.workspace-create-modal .workspace-existing-agent-team,
 .workspace-create-modal .workspace-existing-agent-roster-list {
   display: grid;
   gap: 7px;
   margin-top: 9px;
 }
-.workspace-create-modal .workspace-team-drop-zone {
-  margin-top: 9px;
-  padding: 11px;
-  border: 1px dashed var(--wc-line-bright);
+
+/* ---- Team step: one unified roster ---- */
+
+/* Wide viewports put the resulting team beside the picker; narrow ones stack
+   them with the team FIRST, so the resulting team is understood before
+   browsing agents to add. */
+.workspace-create-modal .workspace-team-layout {
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 900px) {
+  .workspace-create-modal .workspace-team-layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.workspace-create-modal .workspace-team-roster {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-create-modal .workspace-team-row {
+  border: 1px solid var(--wc-line);
+  background: rgba(4, 8, 12, 0.24);
+}
+/* The primary is marked by a solid left rule AND by its Primary badge text. */
+.workspace-create-modal .workspace-team-row.is-primary {
+  border-left: 3px solid var(--wc-faction);
+}
+/* Avatar in its own column, name/status and actions stacked beside it. Actions
+   sit on their own line rather than competing with the name for width: side by
+   side, a label as long as "Customize for this workspace" squeezed agent names
+   into one word per line inside the two-column Team layout. */
+.workspace-create-modal .workspace-team-row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 9px;
+  padding: 9px;
+}
+.workspace-create-modal .workspace-team-row-main > .workspace-agent-avatar {
+  grid-row: 1 / span 2;
+  align-self: start;
+  margin-top: 1px;
+}
+.workspace-create-modal .workspace-team-row-copy {
+  min-width: 0;
+}
+.workspace-create-modal .workspace-team-row-copy strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  overflow-wrap: anywhere;
+  color: var(--wc-ink);
+  font-size: 13px;
+}
+.workspace-create-modal .workspace-team-row-copy span,
+.workspace-create-modal .workspace-team-row-copy small {
+  display: block;
+  overflow-wrap: anywhere;
   color: var(--wc-ink-dim);
   font-size: 11px;
   line-height: 1.4;
-  text-align: center;
 }
-.workspace-create-modal .workspace-team-drop-zone.is-drag-over {
-  border-color: var(--wc-faction);
-  background: color-mix(in srgb, var(--wc-faction) 10%, transparent);
+.workspace-create-modal .workspace-team-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-badge.is-primary {
+  border-color: color-mix(in srgb, var(--wc-faction) 60%, var(--wc-line));
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-team-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+.workspace-create-modal .workspace-team-row-actions:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-team-model-note {
+  margin: 8px 0 0;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Staged customization editor */
+.workspace-create-modal .workspace-team-customize {
+  padding: 10px 9px 11px;
+  border-top: 1px dashed var(--wc-line-bright);
+}
+.workspace-create-modal .workspace-team-customize-note {
+  margin: 0 0 8px;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+/* Deliberately one column at every width. A viewport-width media query is the
+   wrong instrument here: once the Team layout goes two-column the editor's own
+   container is only ~360px wide, so a "wide viewport" two-column field grid
+   clipped both the agent name and the model name. */
+.workspace-create-modal .workspace-team-customize-fields {
+  display: grid;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-team-customize-field {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+.workspace-create-modal .workspace-team-customize-fields .workspace-team-customize-field {
+  margin-top: 0;
+}
+.workspace-create-modal .workspace-team-customize-field > span {
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-customize-field > span em {
+  color: var(--wc-ink-dim);
+  font-style: normal;
+  font-weight: 500;
+}
+.workspace-create-modal .workspace-team-customize-status:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-team-customize-status {
+  margin: 8px 0 0;
+  color: #f57b72;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.workspace-create-modal .workspace-team-customize-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+/* Classified issues: severity is carried by the label text and the rule
+   colour together, never by colour alone. */
+.workspace-create-modal .workspace-team-issues:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-team-issues {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+.workspace-create-modal .workspace-team-issue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 9px;
+  padding: 8px 9px;
+  border: 1px solid var(--wc-line);
+  border-left-width: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-team-issue-label {
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-issue-text {
+  flex: 1 1 220px;
+  min-width: 0;
   color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-team-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.workspace-create-modal .workspace-team-issue.is-blocking {
+  border-left-color: #f57b72;
+}
+.workspace-create-modal .workspace-team-issue.is-blocking .workspace-team-issue-label {
+  color: #f57b72;
+}
+.workspace-create-modal .workspace-team-issue.is-advisory {
+  border-left-color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-team-issue.is-advisory .workspace-team-issue-label {
+  color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-team-issue.is-loading {
+  border-left-color: var(--wc-line-bright);
 }
 .workspace-create-modal .workspace-existing-agent-roster-status {
   margin-top: 7px;
@@ -849,15 +1031,8 @@
   .workspace-create-modal .workspace-create-step-sep {
     display: none;
   }
-  .workspace-create-modal .workspace-template-agent-summary-card,
-  .workspace-create-modal .workspace-team-agent-card,
   .workspace-create-modal .workspace-existing-agent-card {
     align-items: flex-start;
-  }
-  .workspace-create-modal .workspace-template-agent-summary-action,
-  .workspace-create-modal .workspace-team-agent-actions {
-    flex-direction: column;
-    align-items: flex-end;
   }
 }
 

@@ -43,6 +43,11 @@ async function advanceToTeam(page: Page) {
 
 async function advanceToReview(page: Page) {
   await advanceToTeam(page);
+  await advanceToReviewFromTeam(page);
+}
+
+// For tests that already interacted with Team and just need the last hop.
+async function advanceToReviewFromTeam(page: Page) {
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
 }
@@ -641,19 +646,17 @@ test('Team attaches a saved agent and submits the complete team atomically', asy
   // The Your Agents picker is inline on Team and loads on arrival — no button
   // press and no nested modal (FR56).
   await expect(page.locator('#existingAgentRosterPanel')).toBeVisible();
+  const roster = page.locator('#workspaceTeamRoster');
   await page.locator('[data-existing-agent-add="Research Scout"]').click();
-  await expect(page.locator('#existingAgentTeamList')).toContainText('Research Scout');
-  await expect(page.locator('#existingAgentTeamList')).toContainText('Primary workspace agent');
-  await page.locator('[data-existing-agent-name="Data Miner"]').evaluate(card => {
-    const data = new DataTransfer();
-    data.setData('application/x-ori-agent-name', 'Data Miner');
-    document
-      .getElementById('workspaceTeamDropZone')
-      ?.dispatchEvent(
-        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data })
-      );
-  });
-  await expect(page.locator('#existingAgentTeamList')).toContainText('Data Miner');
+  await expect(roster.locator('.workspace-team-row').first()).toContainText('Research Scout');
+  await expect(roster.locator('.workspace-team-badge.is-primary')).toHaveText('Primary');
+  await expect(roster).toContainText('Saved agent · will be attached');
+
+  // Buttons are the whole interaction — there is no drop zone to fall back on.
+  await expect(page.locator('#workspaceTeamDropZone')).toHaveCount(0);
+  await page.locator('[data-existing-agent-add="Data Miner"]').click();
+  await expect(roster.locator('.workspace-team-row')).toHaveCount(2);
+  await expect(roster).toContainText('Data Miner');
 
   let payload: Record<string, unknown> | undefined;
   await page.route('**/api/workspaces', async route => {
@@ -719,9 +722,233 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   // The blueprint roster is edited on Team, not Review (FR32, FR83).
   await advanceToTeam(page);
 
-  const review = page.locator('#templateAgentReview');
-  await expect(review).toContainText('Research Lead');
-  await expect(review).toContainText('Primary workspace agent');
+  // ONE roster, primary first, everything else a Specialist (FR32-FR35).
+  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
+  await expect(rows).toHaveCount(3);
+  await expect(page.locator('#templateAgentReview')).toHaveCount(0);
+  await expect(rows.nth(0)).toContainText('Research Lead');
+  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
+  await expect(rows.nth(1).locator('.workspace-team-badge')).toHaveText('Specialist');
+  await expect(rows.nth(2).locator('.workspace-team-badge')).toHaveText('Specialist');
+
+  // Lifecycle copy is future tense and never claims prior attachment (FR37-FR39).
+  await expect(rows.nth(0)).toContainText('Saved agent · will be attached');
+  await expect(rows.nth(2)).toContainText('New reusable agent · will be created and attached');
+  await expect(page.locator('#workspaceTeamRoster')).not.toContainText('already saved and attached');
+  await expect(page.locator('#workspaceTeamRoster')).not.toContainText(
+    'Added to Your Agents and attached'
+  );
+
+  // Resolved model information is shown per row (FR36).
+  await expect(rows.nth(0)).toContainText('codex / gpt-5.3-codex');
+
+  // The action is named for what it does, not for copying (FR42).
+  await expect(rows.nth(0).locator('[data-team-customize]')).toHaveText(
+    'Customize for this workspace'
+  );
+  await expect(page.locator('#workspaceTeamRoster')).not.toContainText('Make a workspace copy');
+});
+
+test('Team stages a customized copy without touching the reused agent (FR40-FR47)', async ({
+  page
+}) => {
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Shared Lead',
+        agents: [
+          { name: 'Shared Lead', action: 'reuse', entry_point: true, model_source: 'existing' },
+          { name: 'Brand New', action: 'create', entry_point: false, model_source: 'agent_default' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Copy WS');
+  await advanceToTeam(page);
+
+  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
+  await rows.nth(0).locator('[data-team-customize]').click();
+  const editor = page.locator('#team-agent-0-editor');
+  await expect(editor).toBeVisible();
+  // It says plainly that the shared agent is left alone (FR43).
+  await expect(editor).toContainText('Shared Lead stays exactly as it is in Your Agents');
+  // A reused agent opens pre-named as a copy, because the rename is what makes
+  // it independent.
+  await expect(editor.locator('[data-team-customize-name]')).toHaveValue('Shared Lead copy');
+
+  // Reverting to the shared agent's own name is refused: that would silently
+  // modify a shared definition.
+  await editor.locator('[data-team-customize-name]').fill('Shared Lead');
+  await editor.locator('[data-team-customize-prompt]').fill('Behave differently.');
+  await editor.locator('[data-team-customize-save]').click();
+  await expect(editor.locator('.workspace-team-customize-status')).toContainText(
+    'Give this copy a different name'
+  );
+
+  // A name that collides with another roster member is refused too (FR45).
+  await editor.locator('[data-team-customize-name]').fill('brand new');
+  await editor.locator('[data-team-customize-save]').click();
+  await expect(editor.locator('.workspace-team-customize-status')).toContainText(
+    'already called “brand new”'
+  );
+
+  // A unique name stages the copy, in place, without adding a row (FR46).
+  await editor.locator('[data-team-customize-name]').fill('Shared Lead Studio');
+  await editor.locator('[data-team-customize-save]').click();
+  await expect(editor).toBeHidden();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('Shared Lead Studio');
+  await expect(rows.nth(0)).toContainText('Customized copy · will be created and attached');
+
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/workspaces', async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'copy-ws' }, seeded_starter_tasks: 0 })
+    });
+  });
+  await advanceToReviewFromTeam(page);
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/copy-ws');
+
+  expect(payload?.create_template_agents).toBe(true);
+  expect(payload?.template_agent_overrides).toEqual([
+    expect.objectContaining({ index: 0, name: 'Shared Lead Studio', system_prompt: 'Behave differently.' })
+  ]);
+});
+
+test('Advanced team options can exclude the blueprint team (FR48-FR50)', async ({ page }) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Blueprint Lead',
+        agents: [
+          { name: 'Blueprint Lead', action: 'reuse', entry_point: true, model_source: 'existing' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Excluded WS');
+  await advanceToTeam(page);
+
+  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
+  await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await expect(rows.nth(0)).toContainText('Blueprint Lead');
+
+  await page.locator('#workspaceTeamAdvanced summary').click();
+  await page.locator('#templateAgentReviewToggle').uncheck();
+
+  // Blueprint entries leave the roster and the primary is recomputed.
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText('Research Scout');
+  await expect(rows.nth(0).locator('.workspace-team-badge')).toHaveText('Primary');
+  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText(
+    "Research Scout is now this workspace's primary agent"
+  );
+
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/workspaces', async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'excluded-ws' }, seeded_starter_tasks: 0 })
+    });
+  });
+  await advanceToReviewFromTeam(page);
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/excluded-ws');
+
+  expect(payload?.create_template_agents).toBe(false);
+  expect(payload?.existing_agent_names).toEqual(['Research Scout']);
+  expect(payload?.entry_agent_name).toBe('Research Scout');
+});
+
+test('an agent-less team warns without blocking creation (FR55)', async ({ page }) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Travels').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Empty Team WS');
+  await advanceToTeam(page);
+
+  const issue = page.locator('#workspaceTeamIssues .workspace-team-issue');
+  await expect(issue).toContainText('Starter and setup tasks may remain unassigned');
+  await expect(issue).toHaveClass(/is-advisory/);
+  await expect(issue.locator('.workspace-team-issue-label')).toHaveText('Note');
+
+  // Advisory, never blocking: Review is still reachable and Create still works.
+  await advanceToReviewFromTeam(page);
+  await expect(page.locator('#createFolderBtn')).toBeEnabled();
+});
+
+test('an unavailable blueprint plan blocks Team and offers recovery (FR94, FR95)', async ({
+  page
+}) => {
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'plan backend down' })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Blocked WS');
+  await advanceToTeam(page);
+
+  const blocker = page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking');
+  await expect(blocker).toContainText('plan backend down');
+  await expect(blocker.locator('.workspace-team-issue-label')).toHaveText('Needs attention');
+  // All three documented recovery paths are offered (FR95).
+  await expect(blocker.locator('[data-team-recovery="retry-plan"]')).toBeVisible();
+  await expect(blocker.locator('[data-team-recovery="edit-blueprint"]')).toBeVisible();
+  await expect(blocker.locator('[data-team-recovery="exclude-blueprint-team"]')).toBeVisible();
+
+  // Taking the exclude path clears the blocker.
+  await blocker.locator('[data-team-recovery="exclude-blueprint-team"]').click();
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(0);
 });
 
 test('Blueprint summarizes included agents read-only, with no agent controls', async ({ page }) => {
@@ -854,9 +1081,10 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
   // Add both saved agents while the blueprint contributes none.
   await page.locator('[data-existing-agent-add="Research Lead"]').click();
   await page.locator('[data-existing-agent-add="Data Miner"]').click();
-  const team = page.locator('#existingAgentTeamList');
-  await expect(team).toContainText('Research Lead');
-  await expect(team).toContainText('Data Miner');
+  const rows = page.locator('#workspaceTeamRoster .workspace-team-row');
+  await expect(rows).toHaveCount(2);
+  await expect(page.locator('#workspaceTeamRoster')).toContainText('Research Lead');
+  await expect(page.locator('#workspaceTeamRoster')).toContainText('Data Miner');
 
   // Switch to a blueprint that already includes Research Lead.
   await returnToBlueprints(page);
@@ -866,11 +1094,15 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await advanceToTeam(page);
 
-  // Research Lead is now owned by the blueprint roster, so the saved-agent list
-  // shows only Data Miner — one attachment, not two.
-  await expect(page.locator('#templateAgentReview')).toContainText('Research Lead');
-  await expect(team).toContainText('Data Miner');
-  await expect(team).not.toContainText('Research Lead');
+  // One roster entry for Research Lead, owned by the blueprint — not two.
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('Research Lead');
+  await expect(rows.nth(0).locator('[data-team-customize]')).toBeVisible();
+  await expect(rows.nth(1)).toContainText('Data Miner');
+  // ...and the wizard explains which source owns it (FR23).
+  await expect(page.locator('#workspaceTeamIssues')).toContainText(
+    'Research Lead is already included by this blueprint'
+  );
 
   let payload: Record<string, unknown> | undefined;
   await page.route('**/api/workspaces', async route => {
@@ -928,9 +1160,10 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
   await advanceToTeam(page);
 
   // Edit a staged blueprint agent on Team: still no persistence request.
-  const row = page.locator('.workspace-template-agent-row').first();
-  await row.locator('.workspace-template-agent-customize-btn').click();
-  await row.locator('.workspace-template-agent-name-input').fill('Renamed Producer');
+  const row = page.locator('#workspaceTeamRoster .workspace-team-row').first();
+  await row.locator('[data-team-customize]').click();
+  await page.locator('#team-agent-0-editor [data-team-customize-name]').fill('Renamed Producer');
+  await page.locator('#team-agent-0-editor [data-team-customize-save]').click();
 
   // Cancel the whole wizard.
   await page.evaluate(() => {
