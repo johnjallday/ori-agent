@@ -7,7 +7,7 @@ import {
   utimesSync,
   readdirSync
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
@@ -53,6 +53,16 @@ const OLD = new Date(Date.now() - 6 * 60 * 60 * 1000);
 
 function fixtureFolder(label: string, files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), `dj-${label}-`));
+  // This feature really moves and really trashes files, so every fixture is
+  // asserted to be a throwaway temp directory before anything is written into
+  // it. The failure this prevents is not subtle: a fixture that resolved under
+  // the developer's home would file their actual Downloads folder.
+  if (!root.startsWith(tmpdir()) || root === tmpdir()) {
+    throw new Error(`refusing to use ${root} as a fixture: not a temp directory`);
+  }
+  if (homedir() !== tmpdir() && root.startsWith(join(homedir(), 'Downloads'))) {
+    throw new Error(`refusing to use ${root} as a fixture: it is inside a real Downloads folder`);
+  }
   for (const [name, contents] of Object.entries(files)) {
     const path = join(root, name);
     mkdirSync(join(path, '..'), { recursive: true });
@@ -544,5 +554,54 @@ test.describe('Downloads Janitor', () => {
     await expect(page.locator('[data-cmd-hq-station="downloads-janitor"]').first()).toContainText(
       'Needs attention'
     );
+  });
+
+  test('setup that stops working asks to be repaired, and never re-ambushes', async ({
+    page,
+    request
+  }) => {
+    // The state this covers is the one a user actually hits months later: setup
+    // was finished, and then something outside Ori changed. It must read as
+    // "this broke", not as "you never set this up", and it must not throw a
+    // modal over whatever they opened the workspace to do.
+    const id = await createJanitorWorkspace(request, `DJ Repair ${RUN}`);
+    const root = fixtureFolder('repair', { 'statement.pdf': 'pdf' });
+    await completeSetup(page, id, root);
+
+    const setup = async () => {
+      const res = await request.get(`/api/workspaces/${id}/setup-wizard`);
+      expect(res.ok(), await res.text()).toBeTruthy();
+      return (await res.json()).setup;
+    };
+    expect((await setup()).state).toBe('ready');
+
+    // A finished workspace does not reopen its wizard on the next visit.
+    await page.goto(`/workspaces/${id}`);
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready', { timeout: 15000 });
+    await expect(page.locator('#setupWizardDialog')).toBeHidden();
+
+    // Now break it the way reality does: the folder the user granted is gone.
+    const dirs = await (await request.get(`/api/workspaces/${id}/directories`)).json();
+    const ref = (dirs.directories || []).find((d: { path: string }) => d.path === root);
+    expect(ref).toBeTruthy();
+    await request.delete(`/api/workspaces/${id}/directories/${ref.id}`);
+
+    // The server notices on the next look — no mutation needed to discover it.
+    const degraded = await setup();
+    expect(degraded.state).toBe('needs_attention');
+    expect(degraded.completed_at, 'it completed once; that history is kept').toBeTruthy();
+    expect(degraded.auto_open, 'a regression invites repair, it does not ambush').toBe(false);
+
+    await page.goto(`/workspaces/${id}`);
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Needs attention', {
+      timeout: 15000
+    });
+    await expect(page.locator('#setupWizardBannerAction')).toHaveText('Repair setup');
+    await expect(page.locator('#setupWizardDialog')).toBeHidden();
+
+    // Repair opens at the step that broke, not back at the beginning.
+    await page.locator('#setupWizardBannerAction').click();
+    await expect(page.locator('#setupWizardDialog')).toBeVisible();
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
   });
 });

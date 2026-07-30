@@ -150,7 +150,11 @@ func directoryReadiness(status Status) setupwizard.StepReadiness {
 			ErrorCategory: setupwizard.ErrorCategoryNotConfigured,
 		}
 	}
-	for _, component := range []ReadinessComponent{ComponentDirectoryAccess, ComponentDestination} {
+	// The binding is checked here, with the folder itself, because its repair is
+	// re-granting folder access — which is this step's control. Reporting it only
+	// on the later readiness step would land a repair on a step whose only
+	// action is "check again", one step past the thing that fixes it.
+	for _, component := range []ReadinessComponent{ComponentDirectoryAccess, ComponentDestination, ComponentMCPBinding} {
 		if check, ok := findCheck(status.Readiness, component); ok && check.Status == ComponentFailed {
 			return setupwizard.StepReadiness{
 				Blocked:       true,

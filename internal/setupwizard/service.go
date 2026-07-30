@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
+
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -230,6 +232,12 @@ func (s *Service) Confirm(ctx context.Context, workspaceID, stepID string, actio
 		return Status{}, err
 	}
 	if adapter == nil {
+		// A step with no adapter offers no choices, so a client sending one is
+		// sending something this step does not have. Recording it anyway would
+		// persist an option no adapter ever declared.
+		if strings.TrimSpace(action.Option) != "" {
+			return Status{}, fmt.Errorf("%w: step %q offers no options", ErrInvalidAction, step.ID)
+		}
 		// A step with no adapter has no external truth to check: the user's
 		// explicit approval, recorded here, *is* the server-side fact. That is
 		// not the browser deciding readiness — it is the server recording a
@@ -248,6 +256,13 @@ func (s *Service) Confirm(ctx context.Context, workspaceID, stepID string, actio
 		req.SelectedOption = recorded.SelectedOption
 	}
 	before, evalErr := adapter.Evaluate(ctx, req)
+	// The option a client may send is exactly one the adapter itself just
+	// offered. Checking it here rather than in each adapter makes it a property
+	// of the platform: an unrecognized token is refused before any domain code
+	// sees it, whatever the blueprint.
+	if err := validateOption(step, before, evalErr, action.Option); err != nil {
+		return Status{}, err
+	}
 	alreadySatisfied := evalErr == nil && before.Ready && optionAlreadySelected(before, action.Option)
 	if !alreadySatisfied {
 		if _, err := adapter.Confirm(ctx, req, action); err != nil {
@@ -384,6 +399,10 @@ func (s *Service) refresh(ctx context.Context, workspaceID string, mutate mutato
 	// that would serialize every other write to the workspace behind it.
 	readiness := s.evaluateSteps(ctx, workspaceID, resolved, next)
 	s.derive(t, next, readiness)
+
+	// Emitted from the two records rather than from the call sites, so an event
+	// can only describe a move the workspace actually made.
+	s.emitTransitions(resolved, previous, next, readiness)
 
 	changed := mutate != nil || progressChanged(previous, next)
 	if changed && !(previous == nil && next.State == workspace.SetupWizardStateNotStarted) {
@@ -734,6 +753,13 @@ func (s *Service) unrunnableStatus(ws *workspace.Workspace, workspaceID string, 
 			status.Title = provenance.SetupWizard.Title
 			status.WizardVersion = provenance.SetupWizard.Version
 		}
+		// Worth counting: a snapshot this build refuses is a workspace nobody can
+		// finish setting up, and it is invisible from the outside otherwise.
+		fields := logger.Fields{eventFieldVersion: status.WizardVersion}
+		if id := strings.TrimSpace(provenance.TemplateID); id != "" {
+			fields[eventFieldBlueprint] = id
+		}
+		s.event(EventSnapshotRefused, fields)
 	}
 	if progress := ws.GetSetupWizardProgress(); progress != nil {
 		status.Dismissed = progress.IsDismissed()
@@ -791,4 +817,24 @@ func recordedSelections(progress *workspace.SetupWizardProgress) map[string]stri
 		out[record.StepID] = record.SelectedOption
 	}
 	return out
+}
+
+// validateOption refuses any option the step is not currently offering.
+//
+// Fail-closed on an evaluation error: if the adapter could not say what the
+// choices are, there is no basis for accepting one.
+func validateOption(step workspace.SetupWizardStep, before StepReadiness, evalErr error, option string) error {
+	option = strings.TrimSpace(option)
+	if option == "" {
+		return nil
+	}
+	if evalErr != nil {
+		return fmt.Errorf("%w: step %q could not be checked, so no option can be chosen", ErrInvalidAction, step.ID)
+	}
+	for _, offered := range before.Options {
+		if offered.ID == option {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: step %q does not offer that option", ErrInvalidAction, step.ID)
 }

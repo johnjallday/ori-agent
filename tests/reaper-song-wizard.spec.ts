@@ -118,10 +118,12 @@ test.describe('Reaper Song setup wizard', () => {
       (task.description || '').includes('REAPER setup choices')
     );
     const adjust = tasks.find((task: { description?: string }) =>
-      (task.description || '').includes("Adjust the new REAPER session")
+      (task.description || '').includes('Adjust the new REAPER session')
     );
     expect(help?.status, 'the setup help task is completed by the wizard').toBe('completed');
-    expect(adjust?.status, 'session work is not completed by finishing setup').not.toBe('completed');
+    expect(adjust?.status, 'session work is not completed by finishing setup').not.toBe(
+      'completed'
+    );
   });
 
   test('a reloaded file-only workspace stays finished and stops asking', async ({
@@ -148,7 +150,10 @@ test.describe('Reaper Song setup wizard', () => {
     expect((await setupState(request, workspaceId)).state).toBe('ready');
   });
 
-  test('Ori-assisted names its prerequisites and grants none of them', async ({ page, request }) => {
+  test('Ori-assisted names its prerequisites and grants none of them', async ({
+    page,
+    request
+  }) => {
     const workspaceId = await createReaperWorkspace(request, 'Reaper Assisted');
     await page.goto(`/workspaces/${workspaceId}`);
     await expect(dialog(page)).toBeVisible({ timeout: 20000 });

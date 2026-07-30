@@ -299,4 +299,152 @@ test.describe('Blueprint Setup Wizard', () => {
     await expect(dialog(page)).toBeHidden();
     await expect(page.locator('#setupWizardBanner')).toBeHidden();
   });
+
+  // ---- accessibility (FR140) ----
+  //
+  // The dialog is a native <dialog> precisely so these hold without being
+  // hand-rolled, but "we used the right element" is a claim about the code, not
+  // about the page. These drive it the way someone using a keyboard and a
+  // screen reader would.
+
+  test('the whole wizard is completable with the keyboard alone', async ({ page, request }) => {
+    const workspaceId = await createWorkspace(
+      request,
+      `Wizard Keyboard ${Date.now().toString(36)}`
+    );
+    await page.goto(`/workspaces/${workspaceId}`);
+    await expect(dialog(page)).toBeVisible({ timeout: 15000 });
+
+    // Focus lands inside the dialog, not behind it.
+    const focusedInsideDialog = () =>
+      page.evaluate(() => {
+        const active = document.activeElement;
+        const dialogEl = document.getElementById('setupWizardDialog');
+        return !!(active && dialogEl && dialogEl.contains(active));
+      });
+    expect(await focusedInsideDialog()).toBe(true);
+
+    // Tab must never reach a control behind the dialog. Chromium parks focus on
+    // <body> when it wraps around a modal's tab ring, which is not an escape —
+    // what would be one is landing on a button, link, or field on the page.
+    const focusedBehindDialog = () =>
+      page.evaluate(() => {
+        const active = document.activeElement as HTMLElement | null;
+        const dialogEl = document.getElementById('setupWizardDialog');
+        if (!active || !dialogEl || dialogEl.contains(active)) return '';
+        if (active === document.body || active === document.documentElement) return '';
+        return active.tagName + '#' + (active.id || '') + '.' + (active.className || '');
+      });
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press('Tab');
+      expect(await focusedBehindDialog(), `focus escaped after ${i + 1} tabs`).toBe('');
+    }
+
+    // Every step is reachable and confirmable from the keyboard.
+    for (let step = 0; step < 6; step++) {
+      if (!(await dialog(page).isVisible())) break;
+      await page.locator('#setupWizardPrimary').focus();
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(700);
+    }
+    await expect(dialog(page)).toBeHidden({ timeout: 15000 });
+    expect((await setupState(request, workspaceId)).state).toBe('ready');
+  });
+
+  test('Escape dismisses, and focus returns to what opened the dialog', async ({
+    page,
+    request
+  }) => {
+    const workspaceId = await createWorkspace(request, `Wizard Escape ${Date.now().toString(36)}`);
+    await page.goto(`/workspaces/${workspaceId}`);
+    await expect(dialog(page)).toBeVisible({ timeout: 15000 });
+
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).toBeHidden();
+    // Dismissal is recorded server-side, and it does not make the workspace
+    // ready — closing a dialog is not finishing setup.
+    const dismissed = await setupState(request, workspaceId);
+    expect(dismissed.dismissed).toBe(true);
+    expect(dismissed.state).not.toBe('ready');
+
+    // Reopening from the banner and closing again returns focus to the control
+    // the user pressed, instead of dropping them at the top of the page.
+    await page.locator('#setupWizardBannerAction').click();
+    await expect(dialog(page)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).toBeHidden();
+    const focusedId = await page.evaluate(() => document.activeElement?.id || '');
+    expect(focusedId).toBe('setupWizardBannerAction');
+  });
+
+  test('state is announced and never carried by color alone', async ({ page, request }) => {
+    const workspaceId = await createWorkspace(request, `Wizard A11y ${Date.now().toString(36)}`);
+    await page.goto(`/workspaces/${workspaceId}`);
+    await expect(dialog(page)).toBeVisible({ timeout: 15000 });
+
+    // The step list carries a word per step, not a colored dot.
+    await expect(page.locator('#setupWizardSteps')).toContainText('(current)');
+    await expect(page.locator('#setupWizardSteps')).toContainText('(not started)');
+
+    // Where the user is is announced, not left to a changed heading nobody
+    // hears — and it is announced without being drawn next to the heading that
+    // already says it.
+    const stepLive = page.locator('#setupWizardStepLive');
+    await expect(stepLive).toHaveAttribute('aria-live', 'polite');
+    await expect(stepLive).toHaveAttribute('role', 'status');
+    await expect(stepLive).toContainText(/Step 1 of \d+/, { timeout: 15000 });
+    // Present for assistive technology, not painted: an sr-only region keeps a
+    // 1px box (removing it from the layout would also remove it from some
+    // screen readers), so the check is on its size rather than visibility.
+    const box = await stepLive.boundingBox();
+    expect(
+      box && box.width <= 1 && box.height <= 1,
+      `step announcer is drawn: ${JSON.stringify(box)}`
+    ).toBe(true);
+    await page.locator('#setupWizardPrimary').click();
+    await expect(stepLive).toContainText(/Step 2 of \d+/, { timeout: 15000 });
+
+    // And the footer's progress line stays free for transient feedback rather
+    // than permanently repeating the step name.
+    await expect(page.locator('#setupWizardLive')).toBeEmpty();
+
+    // The dialog names itself for assistive technology.
+    await expect(dialog(page)).toHaveAttribute('aria-labelledby', 'setupWizardTitle');
+    await expect(page.locator('#setupWizardClose')).toHaveAttribute('aria-label', /close/i);
+  });
+
+  test('on a small screen the dialog scrolls instead of stranding its buttons', async ({
+    page,
+    request
+  }) => {
+    const workspaceId = await createWorkspace(request, `Wizard Narrow ${Date.now().toString(36)}`);
+    await page.setViewportSize({ width: 390, height: 620 });
+    await page.goto(`/workspaces/${workspaceId}`);
+    await expect(dialog(page)).toBeVisible({ timeout: 15000 });
+
+    // The primary action is reachable without leaving the viewport — the failure
+    // that makes a mobile dialog unusable rather than merely cramped is a
+    // Continue button pushed off the bottom.
+    const primary = page.locator('#setupWizardPrimary');
+    await primary.scrollIntoViewIfNeeded();
+    await expect(primary).toBeInViewport();
+
+    // The dialog itself never scrolls sideways: long author text wraps and the
+    // body scrolls vertically instead. (The workspace page behind it does
+    // overflow horizontally at this width — that predates this feature and
+    // redesigning that page is out of scope here.)
+    const dialogOverflow = await page.evaluate(() => {
+      const el = document.getElementById('setupWizardDialog');
+      if (!el) return null;
+      const body = el.querySelector('.setup-wizard-body');
+      return {
+        sideways: el.scrollWidth > el.clientWidth + 1,
+        fitsViewport: el.getBoundingClientRect().width <= window.innerWidth + 1,
+        bodyScrollsVertically: !!body && body.scrollHeight >= body.clientHeight
+      };
+    });
+    expect(dialogOverflow?.sideways, 'the dialog scrolls sideways').toBe(false);
+    expect(dialogOverflow?.fitsViewport, 'the dialog is wider than the screen').toBe(true);
+    expect(dialogOverflow?.bodyScrollsVertically).toBe(true);
+  });
 });

@@ -8,7 +8,7 @@
 // decides readiness for itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./setup-wizard.js', import.meta.url), 'utf8');
@@ -31,6 +31,7 @@ const ELEMENT_IDS = [
   'setupWizardDisclosureBody',
   'setupWizardError',
   'setupWizardLive',
+  'setupWizardStepLive',
   'setupWizardBack',
   'setupWizardSkip',
   'setupWizardPrimary',
@@ -617,4 +618,89 @@ test("the summary step shows the server's verdict, not just a list of ticks", as
   assert.match(text, /has not checked whether REAPER is running/);
   // And the per-step recap is still there.
   assert.match(text, /Choose a folder — done/);
+});
+
+test('each step says where the user is, for someone who cannot see the list', async () => {
+  const two = status({
+    state: 'in_progress',
+    steps: [
+      step({ id: 'folder', title: 'Choose a folder' }),
+      step({ id: 'done', kind: 'summary', title: 'Ready', status: 'pending' })
+    ]
+  });
+  const { api, elements } = load({ status: two });
+  await api.init();
+  api.open();
+
+  // Position, name, and state — the three things the sighted user reads off the
+  // step list and the progress marks.
+  assert.match(elements.setupWizardStepLive.textContent, /Step 1 of 2: Choose a folder/);
+  assert.match(elements.setupWizardStepLive.textContent, /current/);
+  // Announced, not drawn: the visible progress line stays free for transient
+  // "applying…" feedback.
+  assert.equal(elements.setupWizardLive.textContent, '');
+
+  // The same step re-rendering does not talk over the user again.
+  elements.setupWizardStepLive.textContent = '';
+  api.open();
+  assert.equal(elements.setupWizardStepLive.textContent, '');
+});
+
+test('setup state has exactly one authoritative writer', () => {
+  // Four blueprints kept their own setup cards before this feature, each with
+  // its own idea of how far along the user was. The point of the shared wizard
+  // is that there is now one answer, and it comes from the server. A domain
+  // module that posted its own transitions would recreate the divergence.
+  const dir = new URL('./', import.meta.url);
+  const modules = readdirSync(dir).filter(
+    name => name.endsWith('.js') && !name.endsWith('.test.js') && name !== 'setup-wizard.js'
+  );
+  const offenders = [];
+  for (const name of modules) {
+    const text = readFileSync(new URL(name, dir), 'utf8');
+    // A GET of the status endpoint is fine — other surfaces show the same state.
+    // Writing to it is not.
+    const writes = /setup-wizard\/(open|dismiss|recheck|complete|steps)/.test(text);
+    if (writes) offenders.push(name);
+  }
+  assert.deepEqual(offenders, [], 'these modules write setup state directly');
+});
+
+test('opening the dialog re-asks the server instead of trusting the last render', async () => {
+  // Setup moves outside this dialog: a folder picked in the domain panel, a
+  // permission granted in Settings, a second tab. Opening on a stale render
+  // showed a step as outstanding that the user had already satisfied.
+  const stale = status({
+    state: 'in_progress',
+    current_step_id: 'folder',
+    steps: [
+      step({ id: 'folder', title: 'Choose a folder', status: 'active', action: 'confirm' }),
+      step({ id: 'done', kind: 'summary', title: 'Ready', status: 'pending' })
+    ]
+  });
+  const fresh = status({
+    state: 'in_progress',
+    current_step_id: 'done',
+    steps: [
+      step({ id: 'folder', title: 'Choose a folder', status: 'complete', action: '' }),
+      step({ id: 'done', kind: 'summary', title: 'Ready', status: 'active', action: 'confirm' })
+    ]
+  });
+  const { api, elements, calls } = load({
+    status: stale,
+    routes: { 'POST /open': () => fresh }
+  });
+  await api.init();
+  // Not auto-opened (auto_open defaults false in this fixture) — this is the
+  // user pressing the banner's Continue setup.
+  api.open();
+  assert.equal(elements.setupWizardStepTitle.textContent, 'Choose a folder');
+
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(
+    calls.some(call => call.key === 'POST /open'),
+    'opening must record the open and re-read state'
+  );
+  // The step the user already satisfied is not re-asked.
+  assert.equal(elements.setupWizardStepTitle.textContent, 'Ready');
 });

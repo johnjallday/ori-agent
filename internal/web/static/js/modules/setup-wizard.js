@@ -54,6 +54,9 @@
   let currentStepId = '';
   let busy = false;
   let openedOnce = false;
+  // The last thing said in the live region, so the same sentence is not
+  // repeated over a user on every re-render.
+  let lastAnnouncement = '';
 
   function els() {
     return {
@@ -74,6 +77,7 @@
       disclosureBody: document.getElementById('setupWizardDisclosureBody'),
       error: document.getElementById('setupWizardError'),
       live: document.getElementById('setupWizardLive'),
+      stepLive: document.getElementById('setupWizardStepLive'),
       back: document.getElementById('setupWizardBack'),
       skip: document.getElementById('setupWizardSkip'),
       primary: document.getElementById('setupWizardPrimary'),
@@ -252,6 +256,37 @@
     const text = step.disclosure || step.directory_access_disclosure || '';
     if (disclosure) disclosure.hidden = !text;
     if (disclosureBody) disclosureBody.textContent = text;
+
+    announceStep(step);
+  }
+
+  // announceStep says where the user is, for someone who cannot see the step
+  // list. Without it, confirming a step is silent: the heading changes, the
+  // progress marks change, and a screen-reader user hears nothing at all.
+  //
+  // Only a changed message is written, because re-announcing the same step on
+  // every re-render would talk over the user.
+  function announceStep(step) {
+    const steps = status?.steps || [];
+    const position = stepIndex(step.id);
+    const title = step.title || defaultStepTitle(step);
+    // The same derivation the step list uses, so what is announced matches what
+    // is on screen: the current step reads as current even before the server
+    // has recorded anything about it.
+    const derived = step.id === currentStepId && !isResolved(step) ? 'active' : step.status;
+    const state = STEP_WORDS[derived] || '';
+    const message =
+      position >= 0 && steps.length
+        ? `Step ${position + 1} of ${steps.length}: ${title}${state ? ` — ${state}` : ''}`
+        : title;
+    if (message === lastAnnouncement) return;
+    lastAnnouncement = message;
+    // The step-position region, not the footer's progress line: that one carries
+    // transient "applying…" text a sighted user reads, and permanently parking
+    // the step name there would duplicate the heading beside it.
+    const { stepLive } = els();
+    if (stepLive) stepLive.textContent = message;
+    else announce(message);
   }
 
   function renderDefaultStepContent(container, step) {
@@ -685,7 +720,30 @@
     }
     openedOnce = true;
     focusHeading();
-    announce('');
+    // Not cleared here: renderStep() has already said which step this is, and
+    // blanking it would leave a keyboard user with no idea where they landed.
+
+    // Then re-ask the server. Setup can move outside this dialog — the folder
+    // picker, a connector's own panel, a permission granted in Settings, a
+    // second tab — so opening on the last render would show a step as
+    // outstanding that the user has already satisfied.
+    void refreshOnOpen(stepId);
+  }
+
+  // refreshOnOpen records the open and re-renders from the server's answer. It
+  // runs after the dialog is already on screen, so a slow evaluation delays the
+  // content rather than the dialog.
+  async function refreshOnOpen(stepId) {
+    try {
+      status = await api('/open', { method: 'POST' });
+    } catch (error) {
+      console.warn('Could not refresh setup state on open:', error);
+      return;
+    }
+    if (!status || !status.applicable) return;
+    currentStepId = stepId && stepById(stepId) ? stepId : firstUnresolvedId();
+    render();
+    publish();
   }
 
   function closeDialog() {
@@ -775,16 +833,9 @@
       return status;
     }
     if (current.auto_open && !openedOnce) {
+      // openDialog records the open server-side, so the one auto-open is spent
+      // even if the user closes the tab without touching anything.
       openDialog();
-      // Recorded server-side, so the one auto-open is spent even if the user
-      // closes the tab without touching anything.
-      try {
-        status = await api('/open', { method: 'POST' });
-        render();
-        publish();
-      } catch (error) {
-        console.warn('Could not record the setup first open:', error);
-      }
     }
     return status;
   }

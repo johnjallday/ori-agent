@@ -66,6 +66,12 @@
       </div>
 
       <p class="setup-wizard-error" id="setupWizardError" role="alert" hidden></p>
+
+      <!-- Where the user is, announced but not drawn: the step list and heading
+           already say it on screen, so repeating it as visible text would be
+           noise. Screen-reader users get it because a changed heading is not
+           announced on its own. -->
+      <p class="setup-wizard-sr-only" id="setupWizardStepLive" role="status" aria-live="polite"></p>
     </div>
 
     <footer class="setup-wizard-footer">

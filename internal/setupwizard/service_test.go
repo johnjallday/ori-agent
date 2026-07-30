@@ -800,3 +800,79 @@ func TestStatus_OptionsCrossTheWireInSnakeCase(t *testing.T) {
 		t.Fatalf("option detail did not survive the wire: %s", encoded)
 	}
 }
+
+// TestService_OnlyAnOfferedOptionCanBeChosen closes the one field a client can
+// put a value of its own into. The option is short and opaque by design, but
+// "short and opaque" is not the guarantee — "the adapter just offered it" is,
+// and it holds for every blueprint rather than each one remembering to check.
+func TestService_OnlyAnOfferedOptionCanBeChosen(t *testing.T) {
+	adapter := &fakeAdapter{
+		id: "downloads_janitor",
+		options: []StepOption{
+			{ID: "keep", Label: "Keep"},
+			{ID: "move", Label: "Move"},
+		},
+	}
+	service, _ := newTestService(t, downloadsWizard(), adapter)
+
+	_, err := service.Confirm(context.Background(), "ws-1", "folder", StepAction{
+		Type:   ActionConfirm,
+		Option: "rm -rf /",
+	})
+	if !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("an unoffered option must be refused, got %v", err)
+	}
+	if adapter.confirms != 0 {
+		t.Fatalf("the adapter was asked to act on an option it never offered (%d times)", adapter.confirms)
+	}
+
+	// The offered one goes through.
+	if _, err := service.Confirm(context.Background(), "ws-1", "folder", StepAction{
+		Type:   ActionConfirm,
+		Option: "move",
+	}); err != nil {
+		t.Fatalf("Confirm with an offered option: %v", err)
+	}
+}
+
+// TestService_AStepWithNoAdapterOffersNoOptions covers the other half: a step
+// the service itself handles has no adapter to declare choices, so any option
+// sent for it is a value with no source.
+func TestService_AStepWithNoAdapterOffersNoOptions(t *testing.T) {
+	service, store := newTestService(t, downloadsWizard(), &fakeAdapter{id: "downloads_janitor", ready: true})
+
+	_, err := service.Confirm(context.Background(), "ws-1", "automation", StepAction{
+		Type:   ActionConfirm,
+		Option: "whatever",
+	})
+	if !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("expected the option to be refused, got %v", err)
+	}
+	if step, ok := store.ws.GetSetupWizardProgress().Step("automation"); ok && step.SelectedOption != "" {
+		t.Fatalf("a refused option was recorded anyway: %+v", step)
+	}
+	// Without one, the same step confirms normally.
+	if _, err := service.Confirm(context.Background(), "ws-1", "automation", StepAction{Type: ActionConfirm}); err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+}
+
+// TestService_AnUncheckableStepAcceptsNoChoice is the fail-closed half: if the
+// adapter could not say what the options are, there is no basis for accepting
+// one, and guessing would let a stale client's token through during an outage.
+func TestService_AnUncheckableStepAcceptsNoChoice(t *testing.T) {
+	adapter := &fakeAdapter{
+		id:      "downloads_janitor",
+		evalErr: errors.New("domain is down"),
+		options: []StepOption{{ID: "keep"}},
+	}
+	service, _ := newTestService(t, downloadsWizard(), adapter)
+
+	_, err := service.Confirm(context.Background(), "ws-1", "folder", StepAction{
+		Type:   ActionConfirm,
+		Option: "keep",
+	})
+	if !errors.Is(err, ErrInvalidAction) {
+		t.Fatalf("expected a refusal while the step cannot be checked, got %v", err)
+	}
+}
