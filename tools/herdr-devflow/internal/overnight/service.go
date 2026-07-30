@@ -118,13 +118,14 @@ func (s *Service) Create(ctx context.Context, plan Plan, confirmation string) (m
 	}
 	for index, planned := range plan.Participants {
 		run.Participants = append(run.Participants, model.RunParticipant{
-			ID:         fmt.Sprintf("%s-p%d", run.ID, index+1),
-			Position:   index + 1,
-			State:      model.ParticipantQueued,
-			Feature:    planned.Feature,
-			Binding:    planned.Binding,
-			Checkpoint: planned.Checkpoint,
-			UpdatedAt:  now,
+			ID:                fmt.Sprintf("%s-p%d", run.ID, index+1),
+			Position:          index + 1,
+			State:             model.ParticipantQueued,
+			Feature:           planned.Feature,
+			Binding:           planned.Binding,
+			Checkpoint:        planned.Checkpoint,
+			StartingCompleted: planned.Checkpoint.SubtasksCompleted,
+			UpdatedAt:         now,
 		})
 	}
 	run.Timeline = []model.RunEvent{{

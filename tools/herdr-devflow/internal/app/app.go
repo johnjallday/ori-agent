@@ -1530,7 +1530,38 @@ func (a *App) overviewService(runtime runtimeContext) *overview.Service {
 		Agents:                runtime.herdr,
 		Bridge:                state.New(runtime.paths.StateDir),
 		ClaudeReadiness:       claudeReadiness(runtime.paths.UsageDir),
+		RunMembership:         overnightMembership(runtime.paths.StateDir, runtime.paths.RepositoryID),
 	})
+}
+
+// overnightMembership tells the shared snapshot which agents an Overnight Run
+// has enrolled, so every surface that lists agents says the same thing about
+// them. It reads the same durable records the overnight commands do — there is
+// no second view of a run to disagree with the first.
+func overnightMembership(stateDir, repositoryID string) overview.RunMembershipFunc {
+	if stateDir == "" {
+		return nil
+	}
+	service := &overnight.Service{Store: state.New(stateDir)}
+	return func() map[string]overview.RunMembership {
+		run, found, err := service.Active(repositoryID)
+		if err != nil || !found {
+			return nil
+		}
+		membership := map[string]overview.RunMembership{}
+		for _, participant := range run.Participants {
+			if participant.Binding.NativeSession.Value == "" {
+				continue
+			}
+			membership[participant.Binding.NativeSession.Value] = overview.RunMembership{
+				RunID:         run.ID,
+				State:         string(participant.State),
+				QueuePosition: participant.Position,
+				Active:        participant.ID == run.ActiveParticipant,
+			}
+		}
+		return membership
+	}
 }
 
 // claudeReadiness adapts the Claude usage adapter to the snapshot's narrow
@@ -2478,6 +2509,8 @@ Usage:
                                 Prints the full consequences and creates nothing until you agree.
   wt herd overnight list [--json]        List Overnight Runs, newest first
   wt herd overnight show [ID] [--json]   Show one run's queue, cycles, wake, and next action
+  wt herd overnight watch [ID]           Re-render one run until it finishes or you interrupt
+  wt herd overnight report [ID] [--json] The morning summary: what moved, what stopped, what next
   wt herd overnight cancel [ID] [--json] Stop future prompts; agents and worktrees are untouched
   wt herd claude-usage install  Print the Claude settings that let Ori observe usage windows.
                                 Prints only; it never edits your Claude configuration.

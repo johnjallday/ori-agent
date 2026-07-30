@@ -672,6 +672,9 @@ func (s *Supervisor) finishRun(run *model.OvernightRun, now time.Time,
 	// A finished run must not leave the Mac waking up for work nobody will do.
 	s.withdrawWake(run, now)
 	run.Timeline = append(run.Timeline, model.RunEvent{At: now, Kind: "run_finished", Detail: detail})
+	run.UpdatedAt = now
+	report := BuildReport(*run, now)
+	run.Report = &report
 	return true
 }
 

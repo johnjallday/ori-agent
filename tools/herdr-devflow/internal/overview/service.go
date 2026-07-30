@@ -62,6 +62,10 @@ type Config struct {
 	// run unattended. A nil func leaves every agent's Overnight eligibility
 	// unverified, which is the honest answer when nothing checked.
 	ClaudeReadiness ClaudeReadinessFunc
+	// RunMembership reports which native sessions an Overnight Run has
+	// enrolled, keyed by session. Nil means no run is being tracked, which is
+	// distinct from a run that enrolled nobody.
+	RunMembership RunMembershipFunc
 	// Now supplies the observation clock. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -239,6 +243,7 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 	// collected separately: one observation, two groupings.
 	snapshot.Checkouts = BuildCheckouts(checkouts, agentEvidence)
 	roster, rosterFindings := BuildRoster(features, checkouts, agentEvidence, s.config.ClaudeReadiness)
+	attachRunMembership(features, roster, s.config.RunMembership)
 	snapshot.Agents = roster
 	snapshot.Findings = append(snapshot.Findings, rosterFindings...)
 

@@ -201,7 +201,7 @@ func renderExpandedFeature(write func(string, ...any) error, colors palette, fea
 			colors.paint(agentLabel(agent), ansiBold), status, colors.binding(agent.Binding)); err != nil {
 			return err
 		}
-		if err := write("      %s", eligibilityLine(agent.Eligibility)); err != nil {
+		if err := write("      %s", overnightLine(agent)); err != nil {
 			return err
 		}
 		if agent.BindingDetail != "" && agent.Binding != BindingExact {
@@ -249,6 +249,25 @@ func agentName(agent Agent) string {
 		}
 	}
 	return ""
+}
+
+// overnightLine is what an agent's Overnight status reads as: its membership in
+// a live run when it has one, and otherwise whether it could join one.
+//
+// A run in progress is the more useful fact. "Not eligible" next to an agent a
+// run is actively driving would be true only in the narrow sense that it could
+// not be enrolled twice, and misleading in every sense that matters.
+func overnightLine(agent Agent) string {
+	if agent.Run == nil {
+		return eligibilityLine(agent.Eligibility)
+	}
+	line := "overnight: " + agent.Run.State
+	if agent.Run.Active {
+		line += " (queue head)"
+	} else if agent.Run.QueuePosition > 0 {
+		line += " (position " + strconv.Itoa(agent.Run.QueuePosition) + ")"
+	}
+	return line + " in run " + agent.Run.RunID
 }
 
 // eligibilityLine states, for one agent, whether an Overnight Run may control
@@ -309,7 +328,7 @@ func renderUnscopedAgents(write func(string, ...any) error, colors palette, snap
 			colors.paint(truncate(name, 48), ansiBold), kind, status, agent.Scope.Label(), truncatePath(where, 96)); err != nil {
 			return err
 		}
-		if err := write("      %s", eligibilityLine(agent.Eligibility)); err != nil {
+		if err := write("      %s", overnightLine(agent)); err != nil {
 			return err
 		}
 	}

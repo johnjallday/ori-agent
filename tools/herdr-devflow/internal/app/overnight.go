@@ -25,7 +25,7 @@ import (
 
 func (a *App) overnight(ctx context.Context, opts options, args []string) int {
 	if len(args) == 0 {
-		a.writeError(fmt.Errorf("overnight requires start, list, show, status, or cancel"), opts.json)
+		a.writeError(fmt.Errorf("overnight requires start, list, show, status, watch, report, or cancel"), opts.json)
 		return 2
 	}
 	switch args[0] {
@@ -37,6 +37,10 @@ func (a *App) overnight(ctx context.Context, opts options, args []string) int {
 		return a.overnightShow(opts, args[1:])
 	case "cancel":
 		return a.overnightCancel(ctx, opts, args[1:])
+	case "report":
+		return a.overnightReport(opts, args[1:])
+	case "watch":
+		return a.overnightWatch(ctx, opts, args[1:])
 	default:
 		a.writeError(fmt.Errorf("unknown overnight command %q", args[0]), opts.json)
 		return 2
@@ -444,5 +448,125 @@ func auditOvernightEvent(run model.OvernightRun, stage string) audit.Event {
 		Feature:   run.ID,
 		Stage:     stage,
 		Outcome:   string(run.State),
+	}
+}
+
+// overnightReport writes the morning report.
+//
+// It renders what the run recorded rather than recomputing anything from live
+// state: by the time someone reads this the agents may be closed, and a report
+// whose content depended on when it was opened would be no record at all.
+func (a *App) overnightReport(opts options, args []string) int {
+	var id string
+	for _, argument := range args {
+		switch {
+		case argument == "--json":
+			opts.json = true
+		case strings.HasPrefix(argument, "--"):
+			a.writeError(fmt.Errorf("unknown overnight report option %q", argument), opts.json)
+			return 2
+		default:
+			id = argument
+		}
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return 1
+	}
+	service := &overnight.Service{Store: state.New(runtime.paths.StateDir)}
+	run, err := a.resolveReportableRun(service, runtime.paths.RepositoryID, id)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+
+	report := run.Report
+	if report == nil {
+		// A run still in flight has no durable report yet; build a provisional
+		// one from what it has recorded so far, and say which it is.
+		provisional := overnight.BuildReport(run, time.Now())
+		report = &provisional
+	}
+	if opts.json {
+		payload := overnight.ReportPayload(run, *report)
+		payload["final"] = run.Report != nil
+		a.writeResult(true, map[string]any{"report": payload})
+		return 0
+	}
+	if run.Report == nil {
+		fmt.Fprintln(a.stdout, "This run has not finished; the summary below is provisional.")
+	}
+	if err := overnight.RenderReport(a.stdout, run, *report); err != nil {
+		a.writeError(err, false)
+		return 1
+	}
+	return 0
+}
+
+// resolveReportableRun prefers an explicit identity, then the active run, then
+// the most recent finished one — which is what somebody typing `report` with no
+// arguments in the morning almost always means.
+func (a *App) resolveReportableRun(service *overnight.Service, repositoryID, id string) (model.OvernightRun, error) {
+	if id != "" || func() bool { _, found, _ := service.Active(repositoryID); return found }() {
+		return a.resolveRun(service, repositoryID, id)
+	}
+	runs, err := service.List(repositoryID)
+	if err != nil {
+		return model.OvernightRun{}, err
+	}
+	if len(runs) == 0 {
+		return model.OvernightRun{}, errors.New("no Overnight Run has been created for this repository")
+	}
+	return runs[0], nil
+}
+
+// overnightWatch re-renders one run until interrupted. It only reads.
+func (a *App) overnightWatch(ctx context.Context, opts options, args []string) int {
+	var id string
+	for _, argument := range args {
+		switch {
+		case argument == "--json":
+			a.writeError(errors.New("overnight watch cannot be combined with --json"), opts.json)
+			return 2
+		case strings.HasPrefix(argument, "--"):
+			a.writeError(fmt.Errorf("unknown overnight watch option %q", argument), opts.json)
+			return 2
+		default:
+			id = argument
+		}
+	}
+	runtime, err := a.load(opts)
+	if err != nil {
+		a.writeError(stageConfigError(err), opts.json)
+		return 1
+	}
+	service := &overnight.Service{Store: state.New(runtime.paths.StateDir)}
+	interval := runtime.config.WatchPollInterval()
+	rendered := false
+
+	for {
+		run, err := a.resolveRun(service, runtime.paths.RepositoryID, id)
+		if err != nil {
+			a.writeError(err, false)
+			return 1
+		}
+		if rendered && a.statusColorEnabled(false) {
+			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
+		}
+		rendered = true
+		if err := overnight.RenderRun(a.stdout, run); err != nil {
+			a.writeError(err, false)
+			return 1
+		}
+		if run.State.Terminal() {
+			// Watching a finished run forever would just reprint it.
+			return 0
+		}
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(interval):
+		}
 	}
 }

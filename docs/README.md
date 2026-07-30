@@ -15,7 +15,10 @@ This directory contains detailed documentation for Ori Agent.
 - [LLM Provider Guide](../internal/llm/README.md) - LLM provider abstraction and implementation
 
 ### Feature Guides
-- [Ori–Herdr Devflow Bridge](./herdr-devflow.md) - Local programmable Herdr worktree and agent workflow
+- [Ori–Herdr Devflow Bridge](./herdr-devflow.md) - Local programmable Herdr worktree and agent workflow,
+  including Overnight Runs
+- [Claude usage-signal contract](./herdr-devflow-claude-usage-signal.md) - What Ori reads to recognize a
+  Claude session limit, and everything it deliberately does not
 - [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
 - [Multi-Agent Support](./features/multi-agent-support.md) - Running multiple agents
 - [Home Assistant Task Routing](./features/home-assistant-task-routing.md) - "Ask Ori" task routing

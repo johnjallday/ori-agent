@@ -234,3 +234,43 @@ func checkoutLabel(checkout worktree.Checkout) string {
 func identityPath(value string) string {
 	return planning.Sanitize(value, maxIdentityPathRunes)
 }
+
+// RunMembershipFunc reports which native Claude sessions an Overnight Run has
+// enrolled, keyed by session value.
+//
+// It is injected rather than collected here so the snapshot stays independent
+// of how runs are stored, and so a test can state membership without a state
+// file. A nil func means no run is being tracked at all, which is different
+// from a run that enrolled nobody.
+type RunMembershipFunc func() map[string]RunMembership
+
+// attachRunMembership stamps run membership onto both the roster and the
+// feature rows, so the flat and grouped views cannot disagree about which agent
+// a run is currently driving.
+func attachRunMembership(features []Feature, roster []Agent, lookup RunMembershipFunc) {
+	if lookup == nil {
+		return
+	}
+	membership := lookup()
+	if len(membership) == 0 {
+		return
+	}
+	stamp := func(agent *Agent) {
+		session := agent.Saved.Session
+		if session == "" {
+			session = agent.Live.Session
+		}
+		if found, ok := membership[session]; ok && session != "" {
+			copied := found
+			agent.Run = &copied
+		}
+	}
+	for index := range roster {
+		stamp(&roster[index])
+	}
+	for index := range features {
+		for position := range features[index].Agents {
+			stamp(&features[index].Agents[position])
+		}
+	}
+}

@@ -301,6 +301,10 @@ type RunParticipant struct {
 	Binding AgentBinding `json:"binding"`
 	// Checkpoint is the task-list position last observed.
 	Checkpoint TaskCheckpoint `json:"checkpoint,omitzero"`
+	// StartingCompleted is how many subtasks were already done when the user
+	// confirmed the run. It never changes, which is what makes "what moved"
+	// answerable in the morning.
+	StartingCompleted int `json:"starting_completed"`
 	// Delivery is the most recent unattended prompt attempt.
 	Delivery RunDelivery `json:"delivery,omitzero"`
 	// Limit is the most recent verified limit for this participant.
