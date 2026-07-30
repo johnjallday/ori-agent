@@ -187,6 +187,8 @@ func frozen(state model.RunState) bool {
 	switch state {
 	case model.RunLimitDetected, model.RunPreparingSleep, model.RunSleeping,
 		model.RunWaking, model.RunWaitingForReset:
+		// Resuming is deliberately absent: it is the one state inside a cycle
+		// where the queue head may be prompted again.
 		return true
 	default:
 		return false
@@ -479,9 +481,40 @@ func (s *Supervisor) deliverContinuation(ctx context.Context, run *model.Overnig
 			At: settled, Kind: "prompt_acknowledged", Participant: participant.ID,
 			Detail: "continuation " + participant.Delivery.ID + " acknowledged",
 		})
+		s.consumeResume(run, participant, settled)
 	}
 	participant.UpdatedAt = settled
 	return true
+}
+
+// consumeResume counts a post-reset continuation, and only that.
+//
+// A cycle is consumed by an acknowledged continuation reaching the exact
+// session — never by scheduling a wake, waking early, or a delivery whose
+// acknowledgement nobody could confirm. Counting any of those would let a run
+// exhaust its budget without doing any work.
+func (s *Supervisor) consumeResume(run *model.OvernightRun, participant *model.RunParticipant, now time.Time) {
+	if run.State != model.RunResuming {
+		// An ordinary continuation inside the current window. The initial
+		// execution window is cycle zero and costs nothing.
+		return
+	}
+	participant.AcknowledgedResumes++
+	run.AcknowledgedResumes++
+	if participant.Limit != nil && !participant.Limit.ResetAt.IsZero() {
+		// Record the boundary as handled so a repeat of the same reset can
+		// never start another sleep/wake cycle.
+		participant.ConsumedResets = append(participant.ConsumedResets, participant.Limit.ResetAt)
+		participant.Limit = nil
+	}
+	// The wake this cycle owned has fired and is spent.
+	run.Wake = model.WakeOwnership{}
+	run.State = model.RunRunning
+	run.Timeline = append(run.Timeline, model.RunEvent{
+		At: now, Kind: "resume_acknowledged", Participant: participant.ID,
+		Detail: fmt.Sprintf("resume %d of %d reached the exact session",
+			run.AcknowledgedResumes, run.MaxResumes),
+	})
 }
 
 // persistDelivery writes the in-flight delivery before the prompt is sent.
@@ -636,6 +669,8 @@ func (s *Supervisor) finishRun(run *model.OvernightRun, now time.Time,
 	run.State = state
 	run.TerminalReason = reason
 	run.ActiveParticipant = ""
+	// A finished run must not leave the Mac waking up for work nobody will do.
+	s.withdrawWake(run, now)
 	run.Timeline = append(run.Timeline, model.RunEvent{At: now, Kind: "run_finished", Detail: detail})
 	return true
 }

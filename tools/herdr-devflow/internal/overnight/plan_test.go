@@ -572,3 +572,74 @@ func TestCancelIsIdempotentAndFindsNothingTwice(t *testing.T) {
 		t.Fatalf("a second cancel changed the run: %+v", second)
 	}
 }
+
+// TestDeadlinesLandOnTheWallClockAcrossADaylightSavingChange is why the
+// deadline is built from a calendar date rather than by adding hours: on the
+// night the clocks change, "07:00" still means seven in the morning.
+func TestDeadlinesLandOnTheWallClockAcrossADaylightSavingChange(t *testing.T) {
+	// 2026-11-01 is when US clocks go back; the night is 25 hours long.
+	fallBack := time.Date(2026, 11, 1, 0, 30, 0, 0, newYork).UTC()
+	plan, err := BuildPlan(snapshotWith(eligible("alpha", "builder")), model.NewBridgeState(), Request{
+		Selections: []string{"alpha"}, Start: "00:30", Deadline: "07:00", Timezone: "America/New_York",
+	}, defaults(), fallBack)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	deadline := plan.DeadlineAt.In(newYork)
+	if deadline.Hour() != 7 || deadline.Minute() != 0 || deadline.Day() != 1 {
+		t.Fatalf("deadline = %v, want 07:00 on the same long night", deadline)
+	}
+	// Seven wall-clock hours, but seven and a half real ones.
+	if elapsed := plan.DeadlineAt.Sub(plan.StartAt); elapsed != 7*time.Hour+30*time.Minute {
+		t.Fatalf("elapsed = %v, want the extra hour the clock change adds", elapsed)
+	}
+
+	// And the spring-forward night is an hour shorter.
+	springForward := time.Date(2026, 3, 8, 0, 30, 0, 0, newYork).UTC()
+	plan, err = BuildPlan(snapshotWith(eligible("alpha", "builder")), model.NewBridgeState(), Request{
+		Selections: []string{"alpha"}, Start: "00:30", Deadline: "07:00", Timezone: "America/New_York",
+	}, defaults(), springForward)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if deadline := plan.DeadlineAt.In(newYork); deadline.Hour() != 7 {
+		t.Fatalf("deadline = %v, want 07:00", deadline)
+	}
+	if elapsed := plan.DeadlineAt.Sub(plan.StartAt); elapsed != 5*time.Hour+30*time.Minute {
+		t.Fatalf("elapsed = %v, want the hour the clock change removes", elapsed)
+	}
+}
+
+// TestTimesArePersistedAbsolutelySoADisplayZoneCannotMoveThem keeps a stored
+// deadline meaning one instant regardless of how it is later shown.
+func TestTimesArePersistedAbsolutelySoADisplayZoneCannotMoveThem(t *testing.T) {
+	plan, err := BuildPlan(snapshotWith(eligible("alpha", "builder")), model.NewBridgeState(), Request{
+		Selections: []string{"alpha"}, Start: "23:00", Deadline: "07:00", Timezone: "America/New_York",
+	}, defaults(), evening)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	service := newService(t)
+	run, err := service.Create(context.Background(), plan, ConfirmationFlag)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	reloaded, err := service.Get(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.DeadlineAt.Equal(plan.DeadlineAt) {
+		t.Fatalf("deadline = %v, want the exact instant preserved (%v)", reloaded.DeadlineAt, plan.DeadlineAt)
+	}
+	if reloaded.Timezone != "America/New_York" {
+		t.Fatalf("timezone = %q, want the display zone recorded alongside", reloaded.Timezone)
+	}
+	// Displayed in another zone it is a different clock time and the same moment.
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	if !reloaded.DeadlineAt.In(tokyo).Equal(reloaded.DeadlineAt.In(newYork)) {
+		t.Fatal("the stored deadline is not one absolute instant")
+	}
+}

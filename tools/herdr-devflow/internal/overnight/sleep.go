@@ -171,13 +171,31 @@ func (s *Supervisor) PrepareAndSleep(ctx context.Context, runID string, config S
 	now := s.now()
 	decision := EvaluateSleep(run, participant, s.Power, config, now)
 	if !decision.Sleep {
-		// Awake, waiting, and explicit about why. Queued participants stay
-		// unprompted: the included allowance is shared, so there is nothing
-		// useful for anyone else to do either.
-		run.State = model.RunWaitingForReset
+		// Two of these refusals are not "wait and see" — they are the end of
+		// unattended execution, and saying so is the difference between a run
+		// that finished and one that is still hoping.
+		switch {
+		case run.RemainingResumes() <= 0:
+			run.State = model.RunCycleLimitReached
+			run.TerminalReason = model.ReasonCycleLimitReached
+			run.ActiveParticipant = ""
+		case participant.Limit != nil && !participant.Limit.ResetAt.IsZero() &&
+			!participant.Limit.ResetAt.Before(run.DeadlineAt):
+			run.State = model.RunDeadlineReached
+			run.TerminalReason = model.ReasonDeadlineReached
+			run.ActiveParticipant = ""
+		default:
+			// Awake, waiting, and explicit about why. Queued participants stay
+			// unprompted: the included allowance is shared, so there is
+			// nothing useful for anyone else to do either.
+			run.State = model.RunWaitingForReset
+		}
 		run.Timeline = append(run.Timeline, model.RunEvent{
 			At: now, Kind: "sleep_refused", Participant: participant.ID, Detail: decision.Reason,
 		})
+		if run.State.Terminal() {
+			s.withdrawWake(&run, now)
+		}
 		run.UpdatedAt = now
 		saved.Runs[runID] = run
 		err := s.Store.Save(saved)
@@ -327,6 +345,7 @@ func (s *Supervisor) Resume(ctx context.Context, runID string) (model.OvernightR
 	switch {
 	case participant.Limit == nil || participant.Limit.ResetAt.IsZero():
 		run.State = model.RunWaitingManual
+		s.withdrawWake(&run, now)
 		run.Timeline = append(run.Timeline, model.RunEvent{
 			At: now, Kind: "resume_refused", Participant: participant.ID,
 			Detail: "no reset time is recorded, so there is nothing to resume against",
@@ -348,6 +367,10 @@ func (s *Supervisor) Resume(ctx context.Context, runID string) (model.OvernightR
 		// the exact session is not even restored.
 		run.State = model.RunDeadlineReached
 		run.TerminalReason = model.ReasonDeadlineReached
+		run.ActiveParticipant = ""
+		// The wake that brought the machine back has served its purpose, and
+		// this run will not use another.
+		s.withdrawWake(&run, now)
 		run.Timeline = append(run.Timeline, model.RunEvent{
 			At: now, Kind: "late_wake", Participant: participant.ID,
 			Detail: "woke at or after the morning deadline; no continuation was sent",
@@ -375,4 +398,30 @@ func (s *Supervisor) Resume(ctx context.Context, runID string) (model.OvernightR
 		return model.OvernightRun{}, fmt.Errorf("persist the resume: %w", err)
 	}
 	return run, nil
+}
+
+// withdrawWake removes this run's wake candidate when the run will never use
+// it. It is scoped to the run's own candidate: another subsystem's wake is not
+// this run's to cancel, and a cancellation that cannot be confirmed is recorded
+// as uncertain rather than claimed.
+func (s *Supervisor) withdrawWake(run *model.OvernightRun, now time.Time) {
+	if run.Wake.CandidateID == "" || run.Wake.Canceled {
+		return
+	}
+	if s.Wake == nil {
+		run.Wake.Uncertain = true
+		run.Wake.Detail = "no wake coordinator was available to withdraw this run's candidate"
+		return
+	}
+	if err := s.Wake.Cancel(run.Wake.CandidateID); err != nil {
+		run.Wake.Uncertain = true
+		run.Wake.Detail = "this run's wake candidate could not be confirmed withdrawn"
+		return
+	}
+	run.Wake.Canceled = true
+	run.Wake.Uncertain = false
+	run.Wake.Detail = ""
+	run.Timeline = append(run.Timeline, model.RunEvent{
+		At: now, Kind: "wake_withdrawn", Detail: "this run's wake candidate was withdrawn",
+	})
 }

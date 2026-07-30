@@ -257,8 +257,10 @@ func TestAResetAfterTheDeadlineIsNeverSleptFor(t *testing.T) {
 	if power.slept != 0 || len(wake.registered) != 0 {
 		t.Fatal("a reset after the deadline produced a wake or a sleep")
 	}
-	if updated.State != model.RunWaitingForReset {
-		t.Fatalf("state = %q", updated.State)
+	// A reset the run can never reach is the end of unattended execution, not
+	// something to keep waiting for.
+	if updated.State != model.RunDeadlineReached || updated.TerminalReason != model.ReasonDeadlineReached {
+		t.Fatalf("run = %+v, want deadline_reached", updated)
 	}
 }
 
