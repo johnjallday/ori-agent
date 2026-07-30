@@ -24,11 +24,11 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 
 ## Doing
 - 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small (started 2026-07-28)
-- blueprint-setup-wizards -> PRD at tasks/prd-blueprint-setup-wizards.md (started 2026-07-28)
 - 2026-07-18 #dogfood `backlog` skill in Ori: add/list/prune/promote on workspace BACKLOG.md (DOGFOODING.md stage 1) #small (started 2026-07-29)
 - 2026-07-19 Template: Repo Watcher — GitHub MCP; PR/issue digest + weekly changelog mission #dogfood #small (started 2026-07-30)
 
 ## Shipped / dropped
+- 2026-07-30 blueprint-setup-wizards -> PRD at tasks/prd-blueprint-setup-wizards.md (started 2026-07-28) - PR #278 merged to dev (2026-07-30)
 - 2026-07-30 herdr-overnight-agent-completion -> PRD at tasks/prd-herdr-overnight-agent-completion.md (started 2026-07-29) - PR #277 merged to dev (2026-07-30)
 - 2026-07-29 dropped: disposable "First Mission" tutorial workspace — superseded by the Home-first Mission 01 pull invite (PRs #214 and #215) and specialized workspaces that teach through real use
 - 2026-07-28 google-account easy connection setup — unified Google Account Connection Hub (PR #265), ship-readiness and migration (PR #266), then Email Ops stabilization (PR #272)
