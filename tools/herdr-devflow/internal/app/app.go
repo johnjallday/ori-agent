@@ -56,6 +56,7 @@ type Dependencies struct {
 	Getuid              func() int
 	LaunchctlRun        func(context.Context, string, ...string) error
 	NewContinuationWake func() (WakeCoordinator, error)
+	IsInteractive       func() bool
 }
 
 // WakeCoordinator is the continuation helper's source-scoped view of Ori's
@@ -81,6 +82,7 @@ type App struct {
 	getuid              func() int
 	launchctlRun        func(context.Context, string, ...string) error
 	newContinuationWake func() (WakeCoordinator, error)
+	isInteractive       func() bool
 	cleanupTimeout      time.Duration
 }
 
@@ -123,6 +125,20 @@ func New(deps Dependencies) *App {
 			return wakeclient.DefaultForSource(wakecoord.SourceHerdrContinuation)
 		}
 	}
+	if deps.IsInteractive == nil {
+		deps.IsInteractive = func() bool {
+			input, inputOK := deps.Stdin.(*os.File)
+			output, outputOK := deps.Stdout.(*os.File)
+			if !inputOK || !outputOK {
+				return false
+			}
+			inputInfo, inputErr := input.Stat()
+			outputInfo, outputErr := output.Stat()
+			return inputErr == nil && outputErr == nil &&
+				inputInfo.Mode()&os.ModeCharDevice != 0 &&
+				outputInfo.Mode()&os.ModeCharDevice != 0
+		}
+	}
 	return &App{
 		stdout:              deps.Stdout,
 		stderr:              deps.Stderr,
@@ -137,6 +153,7 @@ func New(deps Dependencies) *App {
 		getuid:              deps.Getuid,
 		launchctlRun:        deps.LaunchctlRun,
 		newContinuationWake: deps.NewContinuationWake,
+		isInteractive:       deps.IsInteractive,
 		cleanupTimeout:      defaultCleanupTimeout,
 	}
 }
@@ -187,9 +204,11 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.continueAgent(ctx, opts, commandArgs)
 	case "schedule":
 		return a.schedule(ctx, opts, commandArgs)
-	case "status":
+	case "status", "overview":
 		return a.status(ctx, opts, commandArgs)
-	case "overview":
+	case "go":
+		return a.goAgent(ctx, opts, commandArgs)
+	case "feature-overview":
 		return a.overview(ctx, opts, commandArgs)
 	case "target":
 		return a.handoffTarget(ctx, opts)
@@ -1419,9 +1438,9 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 	}
 }
 
-// status is deliberately read-only with respect to bridge state. It treats a
-// live Herdr outage as stale data rather than hiding the local feature and
-// schedule records that help an operator recover.
+// status lists only agents Herdr reports as open right now. Repository plans,
+// saved bridge records, Git state, and GitHub delivery state belong to
+// `wt status`; coupling them here made a live-agent check both noisy and stale.
 func (a *App) status(ctx context.Context, opts options, args []string) int {
 	parsed, err := parseStatusArgs(args)
 	if err != nil {
@@ -1431,19 +1450,21 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	if parsed.json {
 		opts.json = true
 	}
+	if parsed.watch && opts.json {
+		a.writeError(fmt.Errorf("status --watch cannot be combined with --json"), opts.json)
+		return 2
+	}
 	runtime, err := a.load(opts)
 	if err != nil {
 		a.writeError(stageConfigError(err), opts.json)
 		return 1
 	}
-	if !runtime.config.Bridge.Enabled {
-		a.writeResult(opts.json, map[string]any{"status": "disabled", "message": "Ori Herdr Devflow is disabled; no status view was changed."})
-		return 0
-	}
-	// Clearing the source-scoped Herdr view is a write, so it stays on the
-	// metadata service rather than the read-only overview collector.
-	metadata := a.statusService(runtime)
+
+	// Clearing the source-scoped Herdr view remains the one explicit mutation
+	// on this command. A normal roster read never refreshes metadata or bridge
+	// state as a side effect.
 	if parsed.clearView {
+		metadata := a.statusService(runtime)
 		if err := metadata.ClearManagedView(ctx); err != nil {
 			a.writeError(err, opts.json)
 			return 1
@@ -1452,39 +1473,22 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 		return 0
 	}
 
-	// `wt herd status` renders the same snapshot as `wt status`, expanded.
-	// Building a second inventory here is exactly how the two views used to
-	// disagree about progress, divergence, and agent state.
-	//
-	// The selector is resolved against the collected snapshot rather than
-	// guessed from the directory name, so standing in the dev checkout shows
-	// the repository's work instead of asking for a feature named after it.
-	selectFor := statusSelector(runtime, parsed)
-
-	service := a.overviewService(runtime)
+	include, err := statusAgentFilter(ctx, runtime, parsed)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
 	if parsed.watch {
-		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, true)
+		return a.watchLiveAgentRoster(ctx, runtime.herdr, include, runtime.config.WatchPollInterval(), parsed.noColor)
 	}
 
-	snapshot, err := service.Collect(ctx)
+	roster, err := collectLiveAgentRoster(ctx, runtime.herdr, include)
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
-	// Herdr's display-only metadata is refreshed after collection, never as
-	// part of it, and it never reports semantic agent lifecycle state.
-	a.refreshDisplayMetadata(ctx, runtime, metadata)
-
-	selector, err := selectFor(snapshot)
-	if err != nil {
+	if err := a.writeLiveAgentRoster(roster, opts.json); err != nil {
 		a.writeError(err, opts.json)
-		return 1
-	}
-	if err := a.renderOverview(snapshot, true, selector, opts.json, parsed.noColor); err != nil {
-		a.writeError(err, opts.json)
-		return 1
-	}
-	if !snapshot.Complete {
 		return 1
 	}
 	return 0
@@ -1508,37 +1512,6 @@ func featureSelector(slug string) selectorFunc {
 		}
 		return overview.SelectFeature(slug), nil
 	}
-}
-
-// statusSelector builds the resolver for one status invocation.
-func statusSelector(runtime runtimeContext, parsed statusArgs) selectorFunc {
-	if parsed.context.feature != "" {
-		return featureSelector(parsed.context.feature)
-	}
-	target := parsed.context.worktree
-	if parsed.current {
-		target = runtime.paths.RepoRoot
-	}
-	if strings.TrimSpace(target) == "" {
-		return func(overview.Snapshot) (overview.Selector, error) { return overview.SelectAll(), nil }
-	}
-	return func(snapshot overview.Snapshot) (overview.Selector, error) {
-		return snapshot.ResolveSelector(target)
-	}
-}
-
-// refreshDisplayMetadata republishes Herdr's source-scoped display metadata.
-// It is deliberately separate from collection: a read-only board must not
-// write, and display metadata is never identity or semantic-status authority.
-func (a *App) refreshDisplayMetadata(ctx context.Context, runtime runtimeContext, metadata *status.Service) {
-	if !runtime.config.Metadata.Enabled {
-		return
-	}
-	snapshot, err := metadata.Snapshot(ctx, status.Options{})
-	if err != nil {
-		return
-	}
-	a.rehydrateStatus(ctx, runtime, metadata, snapshot)
 }
 
 type overviewArgs struct {
@@ -1574,7 +1547,9 @@ func parseOverviewArgs(args []string) (overviewArgs, error) {
 	return parsed, nil
 }
 
-// overview renders the shared feature-first snapshot. It is read-only: no
+// overview renders the feature-first snapshot behind `wt status`. It is
+// intentionally separate from the live roster behind `wt herd status` and
+// `wt herd overview`. It is read-only: no
 // planning file, backlog entry, Git object, bridge binding, or Herdr view is
 // written by this command.
 //
@@ -1625,10 +1600,7 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 	return 0
 }
 
-// overviewService builds the one collector every surface renders. Compact
-// `wt status`, expanded `wt herd status`, `--json`, and the Herdr board all go
-// through this, which is what makes their values equal by construction rather
-// than by careful duplication.
+// overviewService builds the collector used by `wt status` and the Herdr board.
 func (a *App) overviewService(runtime runtimeContext) *overview.Service {
 	return overview.NewService(overview.Config{
 		RepoRoot: runtime.paths.RepoRoot,
@@ -2617,13 +2589,14 @@ Usage:
   wt herd schedule show <schedule-id> [--feature NAME|--worktree PATH]
   wt herd schedule cancel <schedule-id> [--feature NAME|--worktree PATH]
                                 Inspect or cancel local one-time continuations without prompting
-  wt herd overview [--feature NAME] [--json] [--no-color] [--watch]
-                                Feature-first overview: planning, backlog, worktrees, Git,
-                                GitHub pull requests, and live Herdr agents, joined on the
-                                exact feature slug. Read-only. Exits nonzero while a
-                                required source (normally GitHub) is unavailable.
   wt herd status [--current|--feature NAME|--worktree PATH] [--watch] [--json] [--no-color]
-                                Show all managed features by default, or a filtered live status board
+                                List only the coding agents Herdr reports as open now.
+                                Shows agent, kind, live status, and worktree; no planning,
+                                bridge history, Git, GitHub, or saved missing-agent rows.
+  wt herd go                  Interactively select and focus one open Herdr agent.
+                                Works directly and from the wt REPL.
+  wt herd overview [same options]
+                                Compatibility alias for wt herd status.
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or

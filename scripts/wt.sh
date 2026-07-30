@@ -686,7 +686,7 @@ function wt_status {
 
   # Arguments are passed as separate words, never through eval, so a slug
   # containing shell metacharacters cannot be executed.
-  wt_herd overview "${forward[@]}"
+  wt_herd feature-overview "${forward[@]}"
 }
 
 function wt_status_help {

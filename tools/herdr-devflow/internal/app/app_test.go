@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -701,8 +700,8 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	}
 }
 
-func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testing.T) {
-	_, feature := createLinkedFeatureWorktree(t)
+func TestStatusUsesOnlyLiveAgentsAndFeatureOverviewStaysSeparate(t *testing.T) {
+	primary, feature := createLinkedFeatureWorktree(t)
 	home := filepath.Join(t.TempDir(), "runtime")
 	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
 		if key == worktree.HomeOverrideEnv {
@@ -719,8 +718,14 @@ func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testi
 	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
 		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
 		WorkspaceID: "w1",
-		Agents:      map[string]model.RoleAgent{"builder": agent},
-		Schedules:   map[string]model.Schedule{},
+		Agents: map[string]model.RoleAgent{
+			"builder": agent,
+			"ghost": {
+				Role: "ghost", Name: "saved-but-closed", Kind: "claude",
+				WorkspaceID: "w-old", PaneID: "w-old:p1", TerminalID: "term-old",
+			},
+		},
+		Schedules: map[string]model.Schedule{},
 	}
 	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
 		t.Fatal(err)
@@ -732,53 +737,75 @@ func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testi
 		Stderr:    &stderr,
 		Getwd:     func() (string, error) { return feature, nil },
 		LookupEnv: func(string) (string, bool) { return "", false },
-		Runner:    continuationRunner{},
+		Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
 	})
-	// `wt herd status` renders the shared overview snapshot. Without a reachable
-	// GitHub the snapshot is incomplete by design, so the command exits 1 while
-	// still emitting every local fact it did observe.
-	args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
-	if exit := application.Run(context.Background(), args); exit != 1 {
-		t.Fatalf("status exit=%d, want 1 for an incomplete snapshot; stderr=%s", exit, stderr.String())
+	args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--json"}
+	if exit := application.Run(context.Background(), args); exit != 0 {
+		t.Fatalf("status exit=%d, want 0 for a successful live roster; stderr=%s", exit, stderr.String())
 	}
-	var snapshot overview.Snapshot
-	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+	var roster liveAgentRoster
+	if err := json.Unmarshal(output.Bytes(), &roster); err != nil {
 		t.Fatalf("status JSON = %q: %v", output.String(), err)
 	}
-	if snapshot.SchemaVersion != overview.SchemaVersion {
-		t.Fatalf("schema version = %d, want %d", snapshot.SchemaVersion, overview.SchemaVersion)
+	if len(roster.Agents) != 2 {
+		t.Fatalf("live roster = %#v, want exactly the two open agents", roster.Agents)
 	}
-	if snapshot.Complete {
-		t.Fatal("a snapshot without a fresh GitHub query called itself complete")
+	for _, agent := range roster.Agents {
+		if agent.Agent == "saved-but-closed" {
+			t.Fatalf("live roster included a closed saved bridge record: %#v", roster.Agents)
+		}
 	}
-	row, ok := snapshot.Feature("bridge")
-	if !ok {
-		t.Fatalf("status snapshot carried no bridge feature: %#v", snapshot.Features)
-	}
-	if row.Plan.Progress.NextActionable.Text != "Continue implementation" {
-		t.Fatalf("next actionable = %#v", row.Plan.Progress.NextActionable)
-	}
-	if len(row.Agents) != 1 || row.Agents[0].Role != "builder" {
-		t.Fatalf("agent rows = %#v, want the saved builder", row.Agents)
-	}
-	if row.Agents[0].Status != overview.AgentIdle {
-		t.Fatalf("observed status = %q, want idle", row.Agents[0].Status)
+	if strings.Contains(output.String(), "schema_version") || strings.Contains(output.String(), "features") {
+		t.Fatalf("status JSON leaked the feature overview contract: %s", output.String())
 	}
 
 	output.Reset()
-	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--no-color"}); exit != 1 {
-		t.Fatalf("human status exit=%d, want 1; stderr=%s", exit, stderr.String())
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "overview", "--json"}); exit != 0 {
+		t.Fatalf("overview alias exit=%d stderr=%s", exit, stderr.String())
+	}
+	var alias liveAgentRoster
+	if err := json.Unmarshal(output.Bytes(), &alias); err != nil || len(alias.Agents) != len(roster.Agents) {
+		t.Fatalf("overview alias = %#v, %v; want same live roster as status", alias, err)
+	}
+
+	// The full normalized snapshot remains available to the shell-only
+	// feature-overview command used by `wt status`.
+	output.Reset()
+	stderr.Reset()
+	featureArgs := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "feature-overview", "--feature", "bridge", "--json"}
+	if exit := application.Run(context.Background(), featureArgs); exit != 1 {
+		t.Fatalf("feature overview exit=%d, want 1 while GitHub is unavailable; stderr=%s", exit, stderr.String())
+	}
+	var snapshot overview.Snapshot
+	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+		t.Fatalf("feature overview JSON = %q: %v", output.String(), err)
+	}
+	row, ok := snapshot.Feature("bridge")
+	if !ok || row.Plan.Progress.NextActionable.Text != "Continue implementation" {
+		t.Fatalf("feature overview lost its plan snapshot: %#v", snapshot.Features)
+	}
+
+	output.Reset()
+	stderr.Reset()
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--no-color"}); exit != 0 {
+		t.Fatalf("human status exit=%d, want 0; stderr=%s", exit, stderr.String())
 	}
 	if strings.ContainsRune(output.String(), '\x1b') {
 		t.Fatalf("no-color output contained escape sequences: %q", output.String())
 	}
-	for _, want := range []string{"bridge", "builder", "idle", "INCOMPLETE"} {
+	for _, want := range []string{"Open agents: 2", "ori-repo-bridge-builder", "claude", "idle", "bridge"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("human status = %q, want it to contain %q", output.String(), want)
 		}
 	}
+	for _, unwanted := range []string{"saved-but-closed", "INCOMPLETE", "phase:", "overnight:"} {
+		if strings.Contains(output.String(), unwanted) {
+			t.Fatalf("human status included %q from the old feature snapshot:\n%s", unwanted, output.String())
+		}
+	}
 
 	output.Reset()
+	stderr.Reset()
 	if exit := application.Run(context.Background(), []string{"--home", home, "--herdr-bin", "fake-herdr", "plugin", "refresh"}); exit != 0 {
 		t.Fatalf("plugin refresh exit=%d stderr=%s", exit, stderr.String())
 	}
@@ -822,38 +849,9 @@ func (r primaryCheckoutRunner) Run(_ context.Context, command herdr.Command) (he
 	}
 }
 
-// TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork is the reported
-// failure. `--current` derives a feature slug from the checkout's directory
-// name, so running it in `ori-agent-dev` asks the snapshot for a feature named
-// after the dev checkout and fails with `no feature named "ori-agent-dev"`
-// instead of showing the repository's active work. FR9, FR10, FR11.
-func TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork(t *testing.T) {
+func TestStatusCurrentListsOnlyAgentsInTheCurrentCheckout(t *testing.T) {
 	primary, feature := createPrimaryCheckoutWithFeature(t)
 	home := filepath.Join(t.TempDir(), "runtime")
-	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
-		if key == worktree.HomeOverrideEnv {
-			return home, true
-		}
-		return "", false
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
-	bridgeState := model.NewBridgeState()
-	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
-		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
-		WorkspaceID: "w1",
-		Agents: map[string]model.RoleAgent{"builder": {
-			Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude",
-			WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native,
-			UpdatedAt: time.Now().Add(-time.Minute),
-		}},
-		Schedules: map[string]model.Schedule{},
-	}
-	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
-		t.Fatal(err)
-	}
 
 	var output, stderr bytes.Buffer
 	application := New(Dependencies{
@@ -863,38 +861,23 @@ func TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork(t *testing.T) {
 		LookupEnv: func(string) (string, bool) { return "", false },
 		Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
 	})
-	// The snapshot is incomplete without a reachable GitHub, so exit 1 is
-	// expected; what must not happen is the selector rejecting the checkout.
 	args := []string{"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
-	application.Run(context.Background(), args)
-	if strings.Contains(output.String()+stderr.String(), "no feature named") {
-		t.Fatalf("--current invented a feature slug from the dev checkout name: %s%s", output.String(), stderr.String())
+	if exit := application.Run(context.Background(), args); exit != 0 {
+		t.Fatalf("status --current exit=%d stderr=%s", exit, stderr.String())
 	}
 
-	var snapshot overview.Snapshot
-	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+	var roster liveAgentRoster
+	if err := json.Unmarshal(output.Bytes(), &roster); err != nil {
 		t.Fatalf("status JSON = %q: %v", output.String(), err)
 	}
-	if _, ok := snapshot.Feature("bridge"); !ok {
-		t.Fatalf("--current from the primary checkout hid the repository's active feature: %+v", snapshot.Features)
-	}
-	var panes []string
-	for _, agent := range snapshot.Agents {
-		panes = append(panes, agent.Live.Pane)
-	}
-	if !slices.Contains(panes, "w-dev:p1") || !slices.Contains(panes, "w1:p2") {
-		t.Fatalf("roster panes = %v, want both the feature agent and the agent in the primary checkout", panes)
+	if len(roster.Agents) != 1 || roster.Agents[0].Agent != "ori-dev-claude" || roster.Agents[0].Worktree != primary {
+		t.Fatalf("status --current roster = %#v, want only the primary-checkout agent", roster.Agents)
 	}
 }
 
-// TestStatusSelectorsResolveByPathNotByDirectoryName covers the human surface
-// of the same regression, plus the explicit `--worktree` form: standing in the
-// dev checkout lists the repository's work and its agents, and pointing at a
-// feature worktree narrows to that feature. FR9, FR10, FR11.
-func TestStatusSelectorsResolveByPathNotByDirectoryName(t *testing.T) {
+func TestStatusSelectorsFilterTheLiveRosterByCanonicalWorktree(t *testing.T) {
 	primary, feature := createPrimaryCheckoutWithFeature(t)
 	home := filepath.Join(t.TempDir(), "runtime")
-	writePrimaryCheckoutBridgeState(t, home, feature)
 
 	run := func(args ...string) string {
 		t.Helper()
@@ -907,33 +890,30 @@ func TestStatusSelectorsResolveByPathNotByDirectoryName(t *testing.T) {
 			Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
 		})
 		base := []string{"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr", "status", "--no-color"}
-		application.Run(context.Background(), append(base, args...))
-		if strings.Contains(stderr.String(), "no feature named") {
-			t.Fatalf("a selector invented a feature slug from a directory name: %s", stderr.String())
+		if exit := application.Run(context.Background(), append(base, args...)); exit != 0 {
+			t.Fatalf("status selector exit=%d stderr=%s", exit, stderr.String())
 		}
 		return output.String()
 	}
 
 	fromPrimary := run("--current")
-	for _, want := range []string{"bridge", "Agents outside a feature", "ori-dev-claude", "overnight:"} {
-		if !strings.Contains(fromPrimary, want) {
-			t.Fatalf("status --current from the dev checkout did not mention %q:\n%s", want, fromPrimary)
-		}
+	if !strings.Contains(fromPrimary, "ori-dev-claude") || strings.Contains(fromPrimary, "ori-repo-bridge-builder") {
+		t.Fatalf("status --current did not isolate the current checkout:\n%s", fromPrimary)
 	}
 
 	fromFeature := run("--worktree", feature)
-	if !strings.Contains(fromFeature, "bridge") {
+	if !strings.Contains(fromFeature, "ori-repo-bridge-builder") || strings.Contains(fromFeature, "ori-dev-claude") {
 		t.Fatalf("status --worktree did not select the feature:\n%s", fromFeature)
 	}
-	// A feature detail view is about that feature; the repository's other
-	// agents belong to the wider roster, not to this report.
-	if strings.Contains(fromFeature, "Agents outside a feature") {
-		t.Fatalf("the feature detail view included unrelated agents:\n%s", fromFeature)
+
+	fromSlug := run("--feature", "bridge")
+	if !strings.Contains(fromSlug, "ori-repo-bridge-builder") || strings.Contains(fromSlug, "ori-dev-claude") {
+		t.Fatalf("status --feature did not resolve the feature worktree:\n%s", fromSlug)
 	}
 }
 
-// writePrimaryCheckoutBridgeState saves the bridge record for the fixture's
-// feature worktree so status has a managed agent to resolve.
+// writePrimaryCheckoutBridgeState saves the bridge record used by tests of the
+// feature overview and unattended-run eligibility.
 func writePrimaryCheckoutBridgeState(t *testing.T, home, feature string) {
 	t.Helper()
 	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {

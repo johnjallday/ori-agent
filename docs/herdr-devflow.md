@@ -418,15 +418,15 @@ anything by itself.
 
 ### Unmanaged agents
 
-`wt status` and `wt herd status` show **every** agent whose working directory
-resolves inside a feature's worktree, whether or not the bridge started it. An
-agent with no saved bridge record is labelled `unmanaged`, with its live
-status and the reason: no bridge record for this worktree. A feature can have
-zero, one, or several agents; each renders with its own status, and a feature
-summary never collapses several agents into one. Panes with no agent running
-still count toward **occupancy** (`wt status` reports "N pane(s) open" when a
-worktree is busy but nothing is attributed as an agent) — they are never
-rendered as agent rows themselves.
+`wt herd status` shows **every open agent Herdr reports**, whether or not the
+bridge started it. It does not require or display a saved bridge role.
+
+The broader `wt status` feature overview also discovers live agents whose
+working directory resolves inside a feature worktree. There, an agent with no
+saved bridge record is labelled `unmanaged`, and saved/live identity is
+compared for diagnostics. A feature can have zero, one, or several agents.
+Panes with no agent running still count toward **occupancy** in `wt status`;
+they are never rendered as live-agent rows themselves.
 
 Discovery is strictly diagnostic. Finding an unmanaged agent never creates a
 bridge record, writes Herdr metadata, renames, rebinds, starts, stops, or
@@ -437,12 +437,12 @@ action for a future release, not something a status query does implicitly.
 When two live agents both plausibly match one saved role, the bridge raises
 `agent_ambiguous` and chooses neither, rather than guessing.
 
-### The Ori Devflow view shows every agent, same as `wt status`
+### The Ori Devflow board uses the feature overview
 
-The "Ori Devflow" view registered inside Herdr carries no filter — it is not
-scoped to bridge-managed agents. It shows the same population as `wt status`
-and `wt herd status`: every agent Herdr reports, managed or unmanaged. There
-is no separate `ori_devflow` metadata token gating which agents appear in it.
+The "Ori Devflow" board registered inside Herdr renders the expanded
+feature/delivery snapshot used by `wt status`. It may therefore include saved
+binding diagnostics and feature history that the deliberately smaller
+`wt herd status` live roster omits.
 
 ## Feature overview
 
@@ -544,21 +544,63 @@ no more often than `status.github_refresh_interval` (default 60s, floor 30s).
 After a successful query, a later failure reuses the last good result, labels
 it `stale`, and keeps retrying — the board degrades rather than blanking.
 
-## Status board and automation
+## Live agent status
 
 ~~~bash
 wt herd status
 wt herd status --current --watch
 wt herd status --json
+wt herd go                       # select and focus an open agent
+wt herd overview                 # compatibility alias
 wt herd status --clear-view
 ~~~
 
-`wt herd status` renders the same snapshot as `wt status`, expanded: each
-feature followed by its agent rows. Because both surfaces render one snapshot,
-they cannot disagree about progress, divergence, pull requests, or agents.
+`wt herd status` answers only "which coding agents are open right now?" Its
+human output has four columns: agent, kind, Herdr's live status, and worktree.
+It reads Herdr's live `agent.list` result and does not join plans, backlog
+history, saved bridge records, Git state, GitHub pull requests, schedules, or
+Overnight eligibility.
 
-Every agent row separates what the bridge saved from what Herdr currently
-reports, and grades the mapping between them:
+With no selector it lists every open Herdr agent. `--current` narrows to the
+current checkout, `--worktree PATH` narrows by canonical path, and `--feature
+NAME` resolves that feature's linked worktree before filtering. `--watch`
+polls the same live list. An empty successful result prints `No open agents.`
+and exits 0; failure means Herdr itself could not be queried. If direct local
+socket access is unavailable, the adapter falls back to the structured
+`herdr agent list` CLI operation.
+
+`wt herd go` presents this same live roster as a numbered interactive picker
+and asks Herdr to focus the selected agent. It works as a direct command or as
+`herd go` inside the `wt` REPL. The picker includes unmanaged agents and agents
+without a saved bridge role; it uses the exact live Herdr name or pane ID shown
+by the roster. Enter `q` or press Return to cancel. Because selection and focus
+require a terminal, the command refuses non-interactive use and does not support
+`--json`.
+
+`--json` emits the same narrow contract:
+
+~~~json
+{
+  "agents": [
+    {
+      "agent": "ori-example-builder",
+      "kind": "claude",
+      "status": "working",
+      "worktree": "/absolute/path/to/example"
+    }
+  ]
+}
+~~~
+
+`wt herd overview` is retained as a compatibility alias for this roster.
+`wt herd status --clear-view` remains an explicit cleanup operation for an old
+source-scoped Herdr view; ordinary status reads do not refresh metadata or
+write bridge state.
+
+### Feature-overview agent diagnostics
+
+`wt status` and the Herdr board still compare saved bridge identity with live
+Herdr observations and grade the mapping:
 
 | Binding | Means |
 | --- | --- |
@@ -568,15 +610,9 @@ reports, and grades the mapping between them:
 | `missing` | no live agent matches the saved record |
 | `unavailable` | Herdr could not be consulted |
 
-Herdr's idle, working, blocked, done, and unknown states remain authoritative;
-task progress is supplemental and is never written back as an agent status. A
-saved status is a bridge record, never a live observation — during a Herdr
-outage saved values stay visible but observed status reads `unavailable`.
-
-Live agents in a feature's worktree without a bridge role appear as
-`unmanaged` (see "Unmanaged agents" above); they are surfaced, never adopted.
-A feature worktree with no agent at all says so, because silence would look
-identical to a healthy, quietly working agent.
+Herdr's idle, working, blocked, done, and unknown states remain authoritative
+there; task progress is supplemental and is never written back as an agent
+status. A saved status is a bridge record, never a live observation.
 
 Interactive output uses color and text labels together, and every phase,
 availability, binding, and severity also prints as full text — stripping the
@@ -590,18 +626,15 @@ and --no-color disable it entirely.
 | yellow | needs attention: drift, a behind branch, pending checks, cleanup outstanding |
 | red | broken or ambiguous: failing checks, a missing or ambiguous agent, an incomplete snapshot |
 | cyan / blue / magenta | active phases (implementing, ready, review) |
-| dim | history, absences, and supporting detail | --json emits the versioned machine-readable snapshot
-instead, making it suitable for scripts.
+| dim | history, absences, and supporting detail |
 
-The plugin also provides an unfiltered Ori Devflow view and board, rendered
-from the same snapshot. Clear it with wt herd status --clear-view; doing so
-never changes unrelated user views or metadata. Display metadata is refreshed
-only after collection, never as part of it, and is never identity or
-semantic-status authority.
+The plugin also provides the expanded Ori Devflow feature board. Clear its
+source-scoped view with `wt herd status --clear-view`; doing so never changes
+unrelated user views or metadata.
 
-### JSON contract
+### Feature-overview JSON contract
 
-`--json` emits schema version 2 (`overview.Snapshot`). It carries the
+`wt status --json` emits schema version 2 (`overview.Snapshot`). It carries the
 generation and GitHub-check timestamps, repository and baseline identity,
 overall completeness and staleness, one entry per feature, per-source
 availability, and every finding.
@@ -701,7 +734,8 @@ For recovery, start with:
 
 ~~~bash
 wt herd doctor
-wt herd status --json
+wt herd status --json             # current open agents
+wt status --json                  # feature and delivery diagnostics
 wt herd retry --feature <feature> --worktree <absolute-worktree-path>
 ~~~
 

@@ -396,18 +396,18 @@ function wt_herd {
 }
 
 wt status > "$fixture_root/overview-output"
-[[ "$(<"$fixture_root/overview-calls")" == "overview" ]]
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview" ]]
 [[ ! -s "$fixture_root/overview-output" ]]
 
 # Every supported option is forwarded as separate words, and a feature slug is
 # never concatenated into a single argument or passed through eval.
 > "$fixture_root/overview-calls"
 wt status --feature downloads-janitor --json --no-color > /dev/null
-[[ "$(<"$fixture_root/overview-calls")" == "overview --feature downloads-janitor --json --no-color" ]]
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --feature downloads-janitor --json --no-color" ]]
 
 > "$fixture_root/overview-calls"
 wt status --feature=downloads-janitor > /dev/null
-[[ "$(<"$fixture_root/overview-calls")" == "overview --feature downloads-janitor" ]]
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --feature downloads-janitor" ]]
 
 # The helper's exit status is the command's exit status: an incomplete
 # snapshot must not be reported to a script as success.
@@ -443,15 +443,15 @@ function wt_herd {
 # arguments as separate words and never evaluates them.
 > "$fixture_root/overview-calls"
 wt status --feature "a-b-c" > /dev/null
-[[ "$(<"$fixture_root/overview-calls")" == "overview --feature a-b-c" ]]
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --feature a-b-c" ]]
 
 # NO_COLOR and --no-color are both honoured, and neither is swallowed.
 > "$fixture_root/overview-calls"
 NO_COLOR=1 wt status > /dev/null
-[[ "$(<"$fixture_root/overview-calls")" == "overview" ]]
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview" ]]
 > "$fixture_root/overview-calls"
 wt status --no-color --watch > /dev/null
-[[ "$(<"$fixture_root/overview-calls")" == "overview --no-color --watch" ]]
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --no-color --watch" ]]
 
 # The exit status distinguishes a usage error (2) from an incomplete
 # snapshot (1) from success (0). Scripts branch on these, so each is asserted
@@ -477,6 +477,15 @@ function wt_herd {
 }
 wt status --worktrees > /dev/null
 [[ ! -f "$fixture_root/legacy-calls" ]]
+
+# The REPL dispatches the same picker command as one-shot `wt herd go`; the
+# helper keeps stdin/stdout attached so its numbered prompt remains interactive.
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/repl-herd-calls"
+  return 0
+}
+printf 'herd go\nq\n' | wt repl > /dev/null
+[[ "$(<"$fixture_root/repl-herd-calls")" == "go" ]]
 
 # FR-36: the Git-and-GitHub half of wt must stay Herdr-free. Adding tabs and
 # routing wt new through the shared flow must not quietly make Herdr a

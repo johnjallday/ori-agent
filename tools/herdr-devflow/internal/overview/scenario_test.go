@@ -15,8 +15,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
 
-// This file is the hermetic reproduction of the reported `wt herd status`
-// gaps. One fixture carries every shape the roster has to survive at once,
+// This file is the hermetic reproduction of the feature-overview roster gaps.
+// One fixture carries every shape the roster has to survive at once,
 // because the reported failures only appear together: a repository-level agent
 // in the primary checkout, a managed feature worktree with several agents, an
 // unmanaged worktree, a saved feature whose worktree is gone, an occupied pane
@@ -571,11 +571,11 @@ func TestScenarioRetainsTheDeletedWorkspaceRecordAsHistory(t *testing.T) {
 	}
 }
 
-// TestScenarioHumanStatusShowsEveryOpenAgent is the rendered half of the
-// roster: `wt herd status` must name every agent an operator has open,
+// TestScenarioExpandedBoardShowsEveryObservedAgent is the rendered half of the
+// feature overview: the expanded Herdr board must name every observed agent,
 // including the ones no feature accounts for, with a plain-language reason it
 // can or cannot be run overnight. FR5, FR8, FR15.
-func TestScenarioHumanStatusShowsEveryOpenAgent(t *testing.T) {
+func TestScenarioExpandedBoardShowsEveryObservedAgent(t *testing.T) {
 	scenario := newHerdScenario(t)
 	snapshot := scenario.snapshot(t)
 

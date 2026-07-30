@@ -231,6 +231,22 @@ func TestAgentListAndWorkspaceClosePreferTheStructuredSocket(t *testing.T) {
 	}
 }
 
+func TestAgentListFallsBackToTheCLIWhenTheSocketIsUnavailable(t *testing.T) {
+	t.Parallel()
+	runner := &fakeRunner{responses: map[string]CommandResult{
+		"agent list": {Stdout: fixture(t, "agent-list-0.7.5.json")},
+	}}
+	client := New("fake-herdr", filepath.Join(t.TempDir(), "missing.sock"), runner)
+
+	agents, err := client.AgentListInfo(context.Background())
+	if err != nil || len(agents) != 1 || agents[0].Name != "ori-repo-feature-builder" {
+		t.Fatalf("AgentListInfo() fallback = %#v, %v", agents, err)
+	}
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0].Args, " ") != "agent list" {
+		t.Fatalf("fallback CLI calls = %#v, want one agent list call", runner.calls)
+	}
+}
+
 func TestIntegrationStatusIsOpaqueAndRedacted(t *testing.T) {
 	t.Parallel()
 	runner := &fakeRunner{responses: map[string]CommandResult{

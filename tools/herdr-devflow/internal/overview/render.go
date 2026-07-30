@@ -105,8 +105,8 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 	return renderFooter(out, snapshot, options)
 }
 
-// RenderExpanded writes the herd view: every feature with its agent rows
-// beneath it. It is what `wt herd status` and the Herdr board print.
+// RenderExpanded writes the Herdr board: every feature with its agent rows
+// beneath it.
 //
 // It renders the same Snapshot as the compact table, so a value cannot differ
 // between the two surfaces — that equality is the point of the shared

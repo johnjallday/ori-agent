@@ -137,7 +137,16 @@ through the sourced wt function:
 wt herd setup
 wt herd doctor
 wt herd status --watch
+wt herd go
 ~~~
+
+`wt herd status` is intentionally narrow: it lists only agents Herdr reports as
+open now, with agent, kind, live status, and worktree columns. It does not join
+planning, saved bridge history, Git, or GitHub. `wt herd overview` is a
+compatibility alias for the same roster; use `wt status` for the broader
+feature/delivery snapshot. `wt herd go` turns the live roster into a numbered
+picker and focuses the selected agent; use `herd go` for the same picker inside
+the `wt` REPL.
 
 wt herd setup installs a stable user-local helper/plugin copy, rather than
 linking Herdr to a removable feature worktree. wt start <feature> then attempts

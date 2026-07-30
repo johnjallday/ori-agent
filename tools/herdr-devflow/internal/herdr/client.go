@@ -694,7 +694,16 @@ func (c *Client) PaneProcessInfo(ctx context.Context, paneID string) (PaneProces
 
 func (c *Client) AgentList(ctx context.Context) (json.RawMessage, error) {
 	if c.SocketPath != "" {
-		return c.CallSocket(ctx, "agent.list", map[string]any{})
+		response, err := c.CallSocket(ctx, "agent.list", map[string]any{})
+		if err == nil {
+			return response, nil
+		}
+		// Sandboxed coding agents may be allowed to invoke the Herdr CLI while
+		// direct Unix-socket access is denied. The CLI is the supported wrapper
+		// for the same structured operation, so use it as a read-only fallback.
+		if ctx.Err() != nil {
+			return nil, err
+		}
 	}
 	return c.CLIJSON(ctx, "agent", "list")
 }
