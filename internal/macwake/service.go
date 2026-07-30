@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -49,6 +50,10 @@ type Service struct {
 	euid          func() int
 	pmsetRunner   func(args []string, allowAdminPrompt bool) error
 	eventLister   func() []string
+	// coordinator holds wake candidates written by other Ori processes — today
+	// the Herdr devflow helper's Overnight Runs. This service remains the only
+	// caller of pmset; the coordinator is how anything else asks it for a wake.
+	coordinator *wakecoord.Store
 }
 
 // NewService creates a macOS wake scheduling service.
@@ -58,6 +63,77 @@ func NewService(configManager *config.Manager) *Service {
 		now:           time.Now,
 		goos:          func() string { return runtime.GOOS },
 		euid:          os.Geteuid,
+	}
+}
+
+// UseCoordinator points the service at the shared candidate store. Without one
+// the service behaves exactly as it did before: workspace tasks only.
+func (s *Service) UseCoordinator(store *wakecoord.Store) { s.coordinator = store }
+
+// externalCandidates reads what other Ori processes have asked for.
+//
+// A failure here is deliberately quiet. The coordinator is an additional source
+// of wakes, and losing it must never stop a scheduled workspace task from
+// getting the wake it already had.
+func (s *Service) externalCandidates() []workspace.WakeCandidate {
+	if s.coordinator == nil {
+		return nil
+	}
+	candidates, err := s.coordinator.Candidates(s.now())
+	if err != nil {
+		macWakeLog.Warn("Could not read shared wake candidates", logger.Fields{"error": err.Error()})
+		return nil
+	}
+	converted := make([]workspace.WakeCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		converted = append(converted, workspace.WakeCandidate{
+			WorkspaceID: candidate.Source,
+			TaskID:      candidate.Source + ":" + candidate.ID,
+			TaskName:    candidate.Detail,
+			RunAt:       candidate.WakeAt,
+			// An external candidate names the instant it must be awake by; the
+			// lead time it wanted is already inside that value.
+			LeadMinutes: 1,
+		})
+	}
+	return converted
+}
+
+// publishOwner states this service's own capability in the shared store.
+func (s *Service) publishOwner(settings config.MacWakeSettings) {
+	if s.coordinator == nil {
+		return
+	}
+	// A user who has never enabled or approved Mac wake scheduling has no
+	// capability to advertise, and creating a shared file to say so would put
+	// state on disk for a feature they never touched. Silence already reads as
+	// "cannot program a wake" to everything that asks.
+	if !settings.Enabled && !settings.AdminApprovalGranted {
+		return
+	}
+	owner := wakecoord.Owner{
+		Supported:       s.goos() == "darwin",
+		Enabled:         settings.Enabled,
+		ApprovalGranted: s.permissionReady(settings),
+	}
+	if err := s.coordinator.PublishOwner(owner, s.now()); err != nil {
+		macWakeLog.Warn("Could not publish wake owner state", logger.Fields{"error": err.Error()})
+	}
+}
+
+// recordProgrammed tells the coordinator what was actually programmed, which is
+// the only evidence another process may treat as proof that a wake exists.
+func (s *Service) recordProgrammed(candidate workspace.WakeCandidate, wakeAt time.Time) {
+	if s.coordinator == nil {
+		return
+	}
+	source, id, found := strings.Cut(candidate.TaskID, ":")
+	if !found {
+		source, id = wakecoord.SourceWorkspaceTask, candidate.TaskID
+	}
+	programmed := wakecoord.Programmed{CandidateID: id, Source: source, WakeAt: wakeAt}
+	if err := s.coordinator.RecordProgrammed(programmed, s.now()); err != nil {
+		macWakeLog.Warn("Could not record the programmed wake", logger.Fields{"error": err.Error()})
 	}
 }
 
@@ -171,12 +247,25 @@ func (s *Service) SyncNextWake(candidates []workspace.WakeCandidate) error {
 	settings := cfg.MacWake
 	validateSettings(&settings)
 
+	// Publish what this owner can do before deciding anything, so a helper
+	// waiting on a wake can tell "Ori is running but cannot program wakes" from
+	// "Ori is not running at all".
+	s.publishOwner(settings)
+
 	if !settings.Enabled {
 		return s.cancelStoredWakeIfNeeded(cfg, settings)
 	}
 
-	candidate, ok := s.chooseEarliestCandidate(candidates, settings.DefaultLeadMinutes)
+	// Workspace tasks and every other Ori wake source are considered together,
+	// so the earliest required wake wins whichever subsystem asked for it.
+	candidate, ok := s.chooseEarliestCandidate(append(append([]workspace.WakeCandidate(nil), candidates...),
+		s.externalCandidates()...), settings.DefaultLeadMinutes)
 	if !ok {
+		if s.coordinator != nil {
+			if err := s.coordinator.ClearProgrammed(s.now()); err != nil {
+				macWakeLog.Warn("Could not clear the programmed wake", logger.Fields{"error": err.Error()})
+			}
+		}
 		return s.cancelStoredWakeIfNeeded(cfg, settings)
 	}
 	if !s.permissionReady(settings) {
@@ -195,6 +284,10 @@ func (s *Service) SyncNextWake(candidates []workspace.WakeCandidate) error {
 	if settings.LastScheduledWakeAt != nil &&
 		settings.LastScheduledTaskID == candidate.TaskID &&
 		settings.LastScheduledWakeAt.Equal(wakeAt) {
+		// Already programmed. Re-record it anyway: a helper that restarted and
+		// is waiting for verification needs to see the evidence, and this is
+		// the only process that can honestly supply it.
+		s.recordProgrammed(candidate, wakeAt)
 		return nil
 	}
 
@@ -218,6 +311,7 @@ func (s *Service) SyncNextWake(candidates []workspace.WakeCandidate) error {
 		return err
 	}
 
+	s.recordProgrammed(candidate, wakeAt)
 	macWakeLog.Info("Scheduled macOS wake event", logger.Fields{
 		"task_id": candidate.TaskID,
 		"wake_at": wakeAt.Format(time.RFC3339),

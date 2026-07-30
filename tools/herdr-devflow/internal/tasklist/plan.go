@@ -50,6 +50,9 @@ type Item struct {
 	// Checkpoint marks delivery work (validate, demo, commit, PR, merge,
 	// `wt done`) rather than implementation work.
 	Checkpoint bool `json:"checkpoint"`
+	// Boundary says who may do this item. It refines Checkpoint: a commit and
+	// a demo are both delivery work, and only one of them is safe unattended.
+	Boundary Boundary `json:"boundary"`
 	// Line is the 1-based source line.
 	Line int `json:"line"`
 }
@@ -223,13 +226,15 @@ func parseInto(plan *Plan, contents string) {
 			continue
 		}
 		text := sanitize(match[3], MaxItemRunes)
+		checkpoint := isCheckpoint(text)
 		item := Item{
 			Ordinal:    match[1] + "." + match[2],
 			Parent:     parent,
 			Index:      child,
 			Text:       text,
 			Completed:  checked,
-			Checkpoint: isCheckpoint(text),
+			Checkpoint: checkpoint,
+			Boundary:   classifyBoundary(text, checkpoint),
 			Line:       index + 1,
 		}
 

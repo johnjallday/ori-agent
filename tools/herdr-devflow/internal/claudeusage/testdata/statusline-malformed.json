@@ -1,0 +1,1 @@
+{ "session_id": "11111111-2222-3333-4444-555555555555", "rate_limits": { "five_hour": { "used_percentage": "not-a-number", "resets_at": "tomorrow" } }

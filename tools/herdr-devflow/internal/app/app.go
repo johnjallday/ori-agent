@@ -18,16 +18,20 @@ import (
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/cleanup"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overnight"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/planning"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -37,8 +41,10 @@ const (
 )
 
 type Dependencies struct {
-	Stdout       io.Writer
-	Stderr       io.Writer
+	Stdout io.Writer
+	Stderr io.Writer
+	// Stdin is where a recorder invoked by Claude Code reads its payload.
+	Stdin        io.Reader
 	Getwd        func() (string, error)
 	LookupEnv    func(string) (string, bool)
 	LookPath     func(string) (string, error)
@@ -53,6 +59,7 @@ type Dependencies struct {
 type App struct {
 	stdout         io.Writer
 	stderr         io.Writer
+	stdin          io.Reader
 	getwd          func() (string, error)
 	lookupEnv      func(string) (string, bool)
 	lookPath       func(string) (string, error)
@@ -71,6 +78,9 @@ func New(deps Dependencies) *App {
 	}
 	if deps.Stderr == nil {
 		deps.Stderr = os.Stderr
+	}
+	if deps.Stdin == nil {
+		deps.Stdin = os.Stdin
 	}
 	if deps.Getwd == nil {
 		deps.Getwd = os.Getwd
@@ -99,6 +109,7 @@ func New(deps Dependencies) *App {
 	return &App{
 		stdout:         deps.Stdout,
 		stderr:         deps.Stderr,
+		stdin:          deps.Stdin,
 		getwd:          deps.Getwd,
 		lookupEnv:      deps.LookupEnv,
 		lookPath:       deps.LookPath,
@@ -170,6 +181,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.dispatch(ctx, opts)
 	case "plugin":
 		return a.plugin(ctx, opts, commandArgs)
+	case "claude-usage":
+		return a.claudeUsage(ctx, opts, commandArgs)
+	case "overnight":
+		return a.overnight(ctx, opts, commandArgs)
 	default:
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
@@ -1329,22 +1344,15 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	// `wt herd status` renders the same snapshot as `wt status`, expanded.
 	// Building a second inventory here is exactly how the two views used to
 	// disagree about progress, divergence, and agent state.
-	featureSlug := parsed.context.feature
-	if parsed.current || parsed.context.worktree != "" {
-		target := parsed.context.worktree
-		if parsed.current {
-			target = runtime.paths.RepoRoot
-		}
-		if resolved, ok := featureSlugForWorktree(target); ok {
-			featureSlug = resolved
-		}
-	}
+	//
+	// The selector is resolved against the collected snapshot rather than
+	// guessed from the directory name, so standing in the dev checkout shows
+	// the repository's work instead of asking for a feature named after it.
+	selectFor := statusSelector(runtime, parsed)
 
 	service := a.overviewService(runtime)
 	if parsed.watch {
-		return a.overviewWatch(ctx, service, runtime, overviewArgs{
-			feature: featureSlug, noColor: parsed.noColor, watch: true,
-		}, true)
+		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, true)
 	}
 
 	snapshot, err := service.Collect(ctx)
@@ -1356,7 +1364,12 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	// part of it, and it never reports semantic agent lifecycle state.
 	a.refreshDisplayMetadata(ctx, runtime, metadata)
 
-	if err := a.renderOverview(snapshot, true, featureSlug, opts.json, parsed.noColor); err != nil {
+	selector, err := selectFor(snapshot)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if err := a.renderOverview(snapshot, true, selector, opts.json, parsed.noColor); err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
@@ -1366,17 +1379,41 @@ func (a *App) status(ctx context.Context, opts options, args []string) int {
 	return 0
 }
 
-// featureSlugForWorktree resolves --current and --worktree onto a feature slug
-// so every selector narrows the shared snapshot the same way.
-func featureSlugForWorktree(path string) (string, bool) {
-	if strings.TrimSpace(path) == "" {
-		return "", false
+// selectorFunc resolves a selector against one collected snapshot. Watch
+// re-resolves per snapshot because a worktree can appear or be removed while
+// the board is open.
+type selectorFunc func(overview.Snapshot) (overview.Selector, error)
+
+// featureSelector narrows to one exact slug, failing when the repository has no
+// such feature. An explicit `--feature` is a claim about a name, so a name that
+// does not exist stays an error.
+func featureSelector(slug string) selectorFunc {
+	if strings.TrimSpace(slug) == "" {
+		return func(overview.Snapshot) (overview.Selector, error) { return overview.SelectAll(), nil }
 	}
-	base := strings.ToLower(filepath.Base(filepath.Clean(path)))
-	if planning.ValidSlug(base) {
-		return base, true
+	return func(snapshot overview.Snapshot) (overview.Selector, error) {
+		if _, ok := snapshot.Feature(slug); !ok {
+			return overview.Selector{}, fmt.Errorf("no feature named %q was found", slug)
+		}
+		return overview.SelectFeature(slug), nil
 	}
-	return "", false
+}
+
+// statusSelector builds the resolver for one status invocation.
+func statusSelector(runtime runtimeContext, parsed statusArgs) selectorFunc {
+	if parsed.context.feature != "" {
+		return featureSelector(parsed.context.feature)
+	}
+	target := parsed.context.worktree
+	if parsed.current {
+		target = runtime.paths.RepoRoot
+	}
+	if strings.TrimSpace(target) == "" {
+		return func(overview.Snapshot) (overview.Selector, error) { return overview.SelectAll(), nil }
+	}
+	return func(snapshot overview.Snapshot) (overview.Selector, error) {
+		return snapshot.ResolveSelector(target)
+	}
 }
 
 // refreshDisplayMetadata republishes Herdr's source-scoped display metadata.
@@ -1452,16 +1489,22 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 		return 1
 	}
 
+	selectFor := featureSelector(parsed.feature)
 	service := a.overviewService(runtime)
 	if parsed.watch {
-		return a.overviewWatch(ctx, service, runtime, parsed, false)
+		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, false)
 	}
 	snapshot, err := service.Collect(ctx)
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
-	if err := a.renderOverview(snapshot, false, parsed.feature, opts.json, parsed.noColor); err != nil {
+	selector, err := selectFor(snapshot)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	if err := a.renderOverview(snapshot, false, selector, opts.json, parsed.noColor); err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
@@ -1486,41 +1529,92 @@ func (a *App) overviewService(runtime runtimeContext) *overview.Service {
 		RemoteRefreshInterval: runtime.config.GitHubRefreshInterval(),
 		Agents:                runtime.herdr,
 		Bridge:                state.New(runtime.paths.StateDir),
+		ClaudeReadiness:       claudeReadiness(runtime.paths.UsageDir),
+		RunMembership:         overnightMembership(runtime.paths.StateDir, runtime.paths.RepositoryID),
 	})
 }
 
-// renderOverview writes one snapshot to the selected surface. Filtering to a
-// feature narrows the human view to its detail report; JSON always emits the
-// complete normalized snapshot, filtered to the requested feature.
-func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, featureSlug string, jsonOutput, noColor bool) error {
-	options := overview.RenderOptions{NoColor: !a.statusColorEnabled(noColor)}
-	if featureSlug != "" {
-		found, ok := snapshot.Feature(featureSlug)
-		if !ok {
-			return fmt.Errorf("no feature named %q was found", featureSlug)
-		}
-		snapshot.Features = []overview.Feature{found}
-		if jsonOutput {
-			a.writeResult(true, snapshot)
+// overnightMembership tells the shared snapshot which agents an Overnight Run
+// has enrolled, so every surface that lists agents says the same thing about
+// them. It reads the same durable records the overnight commands do — there is
+// no second view of a run to disagree with the first.
+func overnightMembership(stateDir, repositoryID string) overview.RunMembershipFunc {
+	if stateDir == "" {
+		return nil
+	}
+	service := &overnight.Service{Store: state.New(stateDir)}
+	return func() map[string]overview.RunMembership {
+		run, found, err := service.Active(repositoryID)
+		if err != nil || !found {
 			return nil
 		}
-		return overview.RenderDetail(a.stdout, snapshot, found, options)
+		membership := map[string]overview.RunMembership{}
+		for _, participant := range run.Participants {
+			if participant.Binding.NativeSession.Value == "" {
+				continue
+			}
+			membership[participant.Binding.NativeSession.Value] = overview.RunMembership{
+				RunID:         run.ID,
+				State:         string(participant.State),
+				QueuePosition: participant.Position,
+				Active:        participant.ID == run.ActiveParticipant,
+			}
+		}
+		return membership
+	}
+}
+
+// claudeReadiness adapts the Claude usage adapter to the snapshot's narrow
+// question. It reads only records the Claude-side recorder already persisted:
+// no Claude process is contacted, and nothing is spent, to answer it.
+func claudeReadiness(usageDir string) overview.ClaudeReadinessFunc {
+	if usageDir == "" {
+		return nil
+	}
+	adapter := claudeusage.NewAdapter(usageDir)
+	return func(sessionID string) overview.ClaudeReadinessReport {
+		readiness := adapter.Readiness(sessionID, time.Now())
+		return overview.ClaudeReadinessReport{
+			Ready:    readiness.Ready,
+			Reason:   readiness.Reason,
+			AuthMode: string(readiness.AuthMode),
+		}
+	}
+}
+
+// renderOverview writes one snapshot to the selected surface. Narrowing to a
+// feature renders its detail report; standing in a checkout that implements no
+// feature renders the repository's active work plus every unscoped agent. JSON
+// always emits the normalized snapshot, narrowed the same way the human view is.
+func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, selector overview.Selector, jsonOutput, noColor bool) error {
+	options := overview.RenderOptions{NoColor: !a.statusColorEnabled(noColor)}
+	narrowed := snapshot.Narrow(selector)
+	if selector.Kind == overview.SelectorFeature {
+		found, ok := narrowed.Feature(selector.Feature)
+		if !ok {
+			return fmt.Errorf("no feature named %q was found", selector.Feature)
+		}
+		if jsonOutput {
+			a.writeResult(true, narrowed)
+			return nil
+		}
+		return overview.RenderDetail(a.stdout, narrowed, found, options)
 	}
 	if jsonOutput {
-		a.writeResult(true, snapshot)
+		a.writeResult(true, narrowed)
 		return nil
 	}
 	if expanded {
-		return overview.RenderExpanded(a.stdout, snapshot, options)
+		return overview.RenderExpanded(a.stdout, narrowed, options)
 	}
-	return overview.RenderCompact(a.stdout, snapshot, options)
+	return overview.RenderCompact(a.stdout, narrowed, options)
 }
 
 // overviewWatch renders the board on the fast local clock. The remote query is
 // separately rate limited inside the service, so a board left open all day
 // re-reads local files often and GitHub rarely.
-func (a *App) overviewWatch(ctx context.Context, service *overview.Service, runtime runtimeContext, parsed overviewArgs, expanded bool) int {
-	colorEnabled := a.statusColorEnabled(parsed.noColor)
+func (a *App) overviewWatch(ctx context.Context, service *overview.Service, selectFor selectorFunc, interval time.Duration, noColor, expanded bool) int {
+	colorEnabled := a.statusColorEnabled(noColor)
 	rendered := false
 	emit := func(snapshot overview.Snapshot) {
 		if rendered && colorEnabled {
@@ -1529,11 +1623,18 @@ func (a *App) overviewWatch(ctx context.Context, service *overview.Service, runt
 			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
 		}
 		rendered = true
-		if err := a.renderOverview(snapshot, expanded, parsed.feature, false, parsed.noColor); err != nil {
+		// The selector is re-resolved per snapshot: a worktree can be created
+		// or removed while the board is open.
+		selector, err := selectFor(snapshot)
+		if err != nil {
+			fmt.Fprintln(a.stdout, err.Error())
+			return
+		}
+		if err := a.renderOverview(snapshot, expanded, selector, false, noColor); err != nil {
 			fmt.Fprintln(a.stdout, err.Error())
 		}
 	}
-	if err := service.Watch(ctx, runtime.config.WatchPollInterval(), emit); err != nil {
+	if err := service.Watch(ctx, interval, emit); err != nil {
 		a.writeError(err, false)
 		return 1
 	}
@@ -1762,6 +1863,11 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
+	// The same detached dispatcher advances Overnight Runs. Giving runs their
+	// own daemon would mean two processes each believing they owned the queue
+	// and the system wake; there is one dispatcher, and it does both jobs.
+	supervised := a.dispatchOvernight(ctx, opts, store)
+
 	views := make([]map[string]any, 0, len(results))
 	for _, result := range results {
 		runtimeRoot, rootErr := a.runtimeRootFor(opts)
@@ -1777,13 +1883,73 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		views = append(views, scheduleView(result.Feature, result.Schedule))
 	}
 	if opts.json {
-		a.writeResult(true, map[string]any{"status": "ok", "processed": len(views), "schedules": views})
-	} else if len(views) > 0 {
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow dispatcher: processed %d schedule(s)\n", len(views))
+		a.writeResult(true, map[string]any{
+			"status": "ok", "processed": len(views), "schedules": views, "overnight": supervised,
+		})
+	} else if len(views) > 0 || len(supervised) > 0 {
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow dispatcher: processed %d schedule(s), %d Overnight Run(s)\n",
+			len(views), len(supervised))
 	} else {
 		fmt.Fprintln(a.stdout, "Ori Herdr Devflow dispatcher: no due schedules")
 	}
 	return 0
+}
+
+// dispatchOvernight advances every non-terminal Overnight Run by one step.
+//
+// It is best-effort and never fails the dispatcher: a run that cannot be
+// advanced right now is a run that stays where it is, and a scheduler outage
+// must not also stop one-time continuations from being delivered.
+func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.Store) []map[string]any {
+	runtimeRoot, err := a.runtimeRootFor(opts)
+	if err != nil {
+		return nil
+	}
+	// The dispatcher runs detached, without a repository checkout, so the
+	// Overnight defaults come from the built-in configuration rather than a
+	// project file it cannot resolve.
+	runtime := runtimeContext{config: config.Default()}
+	service := &overnight.Service{Store: store}
+	runs, err := service.List("")
+	if err != nil {
+		return nil
+	}
+	client := a.newHerdrClient(opts, a.withOverrides(opts))
+	supervisor := &overnight.Supervisor{
+		Store:  store,
+		Agents: client,
+		Prompt: client,
+		Usage:  claudeusage.NewAdapter(filepath.Join(runtimeRoot, "usage")),
+		Power:  &systempower.Service{GOOS: a.goos},
+		Git:    worktree.GitRunner,
+	}
+	// Without a reachable wake coordinator the supervisor still runs; it simply
+	// can never sleep, which is the correct degraded behavior rather than a
+	// reason to stop supervising.
+	approvalGranted := false
+	if wake, err := wakeclient.Default(); err == nil {
+		supervisor.Wake = wake
+		// Approval is the user's, recorded by Ori itself. The helper reads what
+		// the wake owner published and never grants it to itself.
+		approvalGranted = wake.Owner().Ready
+	}
+
+	advanced := make([]map[string]any, 0)
+	for _, run := range runs {
+		if run.State.Terminal() {
+			continue
+		}
+		updated, err := a.advanceOvernightRun(ctx, supervisor, run.ID, runtime.config, approvalGranted)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: Overnight Run %s was not advanced\n", run.ID)
+			continue
+		}
+		a.recordAuditAt(filepath.Join(runtimeRoot, "logs"), auditOvernightEvent(updated, "dispatch"))
+		advanced = append(advanced, map[string]any{
+			"id": updated.ID, "state": string(updated.State), "active": updated.ActiveParticipant,
+		})
+	}
+	return advanced
 }
 
 func scheduleView(feature model.Feature, record model.Schedule) map[string]any {
@@ -2110,6 +2276,8 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 	} else {
 		diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "one-time continuation scheduling is macOS-only", Recovery: "run scheduling commands on macOS"})
 	}
+	diagnostics = append(diagnostics, a.claudeUsageDiagnostics(runtime)...)
+	diagnostics = append(diagnostics, a.wakeDiagnostics()...)
 	a.writeDiagnostics(opts.json, diagnostics)
 	for _, item := range diagnostics {
 		if item.Status == "FAIL" {
@@ -2217,7 +2385,7 @@ func (a *App) pluginBoard(ctx context.Context, opts options) int {
 			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
 		}
 		rendered = true
-		if err := a.renderOverview(snapshot, true, "", opts.json, false); err != nil {
+		if err := a.renderOverview(snapshot, true, overview.SelectAll(), opts.json, false); err != nil {
 			fmt.Fprintln(a.stderr, err.Error())
 		}
 	}
@@ -2336,6 +2504,18 @@ Usage:
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.
+  wt herd overnight start --agent NAME[:ROLE] [--start HH:MM] [--deadline HH:MM]
+                          [--timezone ZONE] [--max-resumes N] [--dry-run] [--confirm] [--json]
+                                Plan an Overnight Run over explicitly selected Claude agents.
+                                Prints the full consequences and creates nothing until you agree.
+  wt herd overnight list [--json]        List Overnight Runs, newest first
+  wt herd overnight show [ID] [--json]   Show one run's queue, cycles, wake, and next action
+  wt herd overnight watch [ID]           Re-render one run until it finishes or you interrupt
+  wt herd overnight report [ID] [--json] The morning summary: what moved, what stopped, what next
+  wt herd overnight cancel [ID] [--json] Stop future prompts; agents and worktrees are untouched
+  wt herd claude-usage install  Print the Claude settings that let Ori observe usage windows.
+                                Prints only; it never edits your Claude configuration.
+  wt herd claude-usage status   Report whether Claude usage records are being written
   wt herd dispatch              Run due local schedules (used by the macOS LaunchAgent)
   scripts/herdr-devflow.sh ...  Invoke the helper directly
 
@@ -2430,4 +2610,31 @@ func diagnosticFromError(name string, err error) diagnostic {
 
 func samePath(left, right string) bool {
 	return filepath.Clean(left) == filepath.Clean(right)
+}
+
+// advanceOvernightRun moves one run forward by one step, including the parts of
+// the cycle that happen outside an ordinary tick.
+//
+// The three phases are separate calls on purpose. A tick decides what to do; the
+// sleep sequence has effects outside this process and needs its own ordering
+// guarantees; and resuming happens after a wake, when the only thing that can be
+// trusted is what was written down before the machine slept.
+func (a *App) advanceOvernightRun(ctx context.Context, supervisor *overnight.Supervisor,
+	runID string, cfg config.Config, approvalGranted bool,
+) (model.OvernightRun, error) {
+	run, err := supervisor.Tick(ctx, runID)
+	if err != nil {
+		return model.OvernightRun{}, err
+	}
+	switch run.State {
+	case model.RunLimitDetected, model.RunPreparingSleep:
+		return supervisor.PrepareAndSleep(ctx, runID, overnight.SleepConfig{
+			WakeLead:        cfg.WakeLead(),
+			ApprovalGranted: approvalGranted,
+		})
+	case model.RunSleeping, model.RunWaking, model.RunWaitingForReset:
+		return supervisor.Resume(ctx, runID)
+	default:
+		return run, nil
+	}
 }

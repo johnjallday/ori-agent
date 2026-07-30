@@ -90,6 +90,18 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 			return err
 		}
 	}
+	// The table is feature-first by design, so agents belonging to no feature
+	// get one honest summary line rather than being left out of the count.
+	if unscoped := unscopedAgents(snapshot); len(unscoped) > 0 {
+		summary := make([]string, 0, len(unscoped))
+		for _, agent := range unscoped {
+			summary = append(summary, truncate(agentName(agent), 32)+" ("+agent.Scope.Label()+")")
+		}
+		if _, err := fmt.Fprintln(out, colors.paint(
+			strconv.Itoa(len(unscoped))+" agent(s) outside a feature: "+joinBounded(summary), ansiDim)); err != nil {
+			return err
+		}
+	}
 	return renderFooter(out, snapshot, options)
 }
 
@@ -100,7 +112,7 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 // between the two surfaces — that equality is the point of the shared
 // snapshot, not an incidental property of it.
 func RenderExpanded(out io.Writer, snapshot Snapshot, options RenderOptions) error {
-	if len(snapshot.Features) == 0 {
+	if len(snapshot.Features) == 0 && len(snapshot.Agents) == 0 {
 		return renderEmpty(out, snapshot, options)
 	}
 	colors := newPalette(options)
@@ -110,15 +122,17 @@ func RenderExpanded(out io.Writer, snapshot Snapshot, options RenderOptions) err
 	}
 
 	managed := 0
-	for _, feature := range snapshot.Features {
-		for _, agent := range feature.Agents {
-			if agent.Managed {
-				managed++
-			}
+	for _, agent := range snapshot.Agents {
+		if agent.Managed {
+			managed++
 		}
 	}
+	// The agent count is the whole roster, not the feature-scoped part of it: a
+	// header that counted only managed feature agents is what made agents in
+	// the dev checkout look like they did not exist.
 	if err := write("%s", colors.header(fmt.Sprintf(
-		"Ori Devflow overview: %d feature(s), %d managed agent(s)", len(snapshot.Features), managed))); err != nil {
+		"Ori Devflow overview: %d feature(s), %d agent(s), %d managed",
+		len(snapshot.Features), len(snapshot.Agents), managed))); err != nil {
 		return err
 	}
 
@@ -135,6 +149,9 @@ func RenderExpanded(out io.Writer, snapshot Snapshot, options RenderOptions) err
 		if err := renderExpandedFeature(write, colors, feature); err != nil {
 			return err
 		}
+	}
+	if err := renderUnscopedAgents(write, colors, snapshot); err != nil {
+		return err
 	}
 	return renderFooter(out, snapshot, options)
 }
@@ -176,16 +193,15 @@ func renderExpandedFeature(write func(string, ...any) error, colors palette, fea
 		}
 	}
 	for _, agent := range feature.Agents {
-		name := agent.Role
-		if !agent.Managed {
-			name = "(unmanaged)"
-		}
 		status := "unavailable"
 		if agent.StatusAvailability.OK() {
 			status = string(agent.Status)
 		}
 		if err := write("  agent %s: status %s · binding %s",
-			colors.paint(name, ansiBold), status, colors.binding(agent.Binding)); err != nil {
+			colors.paint(agentLabel(agent), ansiBold), status, colors.binding(agent.Binding)); err != nil {
+			return err
+		}
+		if err := write("      %s", overnightLine(agent)); err != nil {
 			return err
 		}
 		if agent.BindingDetail != "" && agent.Binding != BindingExact {
@@ -208,11 +224,131 @@ func renderExpandedFeature(write func(string, ...any) error, colors palette, fea
 	return nil
 }
 
+// agentLabel names an agent the way an operator would refer to it: by its
+// bridge role when one claims it, and otherwise by the identity Herdr reports.
+// An unmanaged agent rendered as a bare "(unmanaged)" is unactionable — there
+// can be several, and none of them can be told apart.
+func agentLabel(agent Agent) string {
+	if agent.Role != "" {
+		return agent.Role
+	}
+	if name := agentName(agent); name != "" {
+		return truncate(name, 48) + " (unmanaged)"
+	}
+	return "(unmanaged)"
+}
+
+// agentName is the identity an operator recognizes, strongest first: Herdr's
+// stable agent name, then its native session, then the pane it occupies.
+func agentName(agent Agent) string {
+	for _, candidate := range []string{
+		agent.Live.Name, agent.Saved.Name, agent.Live.Session, agent.Live.Pane, agent.Saved.Pane,
+	} {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// overnightLine is what an agent's Overnight status reads as: its membership in
+// a live run when it has one, and otherwise whether it could join one.
+//
+// A run in progress is the more useful fact. "Not eligible" next to an agent a
+// run is actively driving would be true only in the narrow sense that it could
+// not be enrolled twice, and misleading in every sense that matters.
+func overnightLine(agent Agent) string {
+	if agent.Run == nil {
+		return eligibilityLine(agent.Eligibility)
+	}
+	line := "overnight: " + agent.Run.State
+	if agent.Run.Active {
+		line += " (queue head)"
+	} else if agent.Run.QueuePosition > 0 {
+		line += " (position " + strconv.Itoa(agent.Run.QueuePosition) + ")"
+	}
+	return line + " in run " + agent.Run.RunID
+}
+
+// eligibilityLine states, for one agent, whether an Overnight Run may control
+// it and why not. It is deliberately printed for every agent: an operator
+// choosing agents at bedtime needs the reason next to the agent, not in a
+// separate command.
+func eligibilityLine(eligibility Eligibility) string {
+	line := "overnight: " + eligibility.State.Label()
+	if eligibility.Reason != "" {
+		line += " — " + truncate(eligibility.Reason, 140)
+	}
+	return line
+}
+
+// unscopedAgents are the roster rows that belong to no feature: agents working
+// in a baseline or source checkout, and agents that could not be placed at all.
+func unscopedAgents(snapshot Snapshot) []Agent {
+	var rows []Agent
+	for _, agent := range snapshot.Agents {
+		if agent.Scope != AgentScopeFeature {
+			rows = append(rows, agent)
+		}
+	}
+	return rows
+}
+
+// renderUnscopedAgents prints the agents that no feature accounts for.
+//
+// Without this section the roster is only as complete as the feature list, and
+// an agent working in the dev checkout is invisible on every surface Ori
+// prints while `herdr agent list` shows it plainly.
+func renderUnscopedAgents(write func(string, ...any) error, colors palette, snapshot Snapshot) error {
+	rows := unscopedAgents(snapshot)
+	if len(rows) == 0 {
+		return nil
+	}
+	if err := write("\n%s", colors.header("Agents outside a feature")); err != nil {
+		return err
+	}
+	for _, agent := range rows {
+		kind := agent.Kind
+		if kind == "" {
+			kind = placeholderUnknown
+		}
+		status := "unavailable"
+		if agent.StatusAvailability.OK() {
+			status = string(agent.Status)
+		}
+		where := agent.MatchedPath
+		if where == "" {
+			where = "no working directory reported"
+		}
+		name := agentName(agent)
+		if name == "" {
+			name = placeholderUnknown
+		}
+		if err := write("  %s (%s): status %s · %s · %s",
+			colors.paint(truncate(name, 48), ansiBold), kind, status, agent.Scope.Label(), truncatePath(where, 96)); err != nil {
+			return err
+		}
+		if err := write("      %s", overnightLine(agent)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func renderEmpty(out io.Writer, snapshot Snapshot, options RenderOptions) error {
 	if _, err := fmt.Fprintln(out, "No features were found in this repository."); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(out, "Looked for planning artifacts, BACKLOG.md entries, and feature worktrees."); err != nil {
+		return err
+	}
+	// A repository with no features can still have agents open in it, and those
+	// are exactly the agents nothing else would show.
+	write := func(format string, args ...any) error {
+		_, err := fmt.Fprintf(out, format+"\n", args...)
+		return err
+	}
+	if err := renderUnscopedAgents(write, newPalette(options), snapshot); err != nil {
 		return err
 	}
 	return renderFooter(out, snapshot, options)
@@ -591,16 +727,12 @@ func renderDetailAgents(write func(string, ...any) error, colors palette, featur
 		return err
 	}
 	for _, agent := range feature.Agents {
-		name := agent.Role
-		if !agent.Managed {
-			name = "(unmanaged)"
-		}
 		status := "unavailable"
 		if agent.StatusAvailability.OK() {
 			status = string(agent.Status)
 		}
 		if err := write("  %s — status %s · binding %s",
-			colors.paint(name, ansiBold), status, colors.binding(agent.Binding)); err != nil {
+			colors.paint(agentLabel(agent), ansiBold), status, colors.binding(agent.Binding)); err != nil {
 			return err
 		}
 		if agent.Kind != "" {
@@ -622,6 +754,9 @@ func renderDetailAgents(write func(string, ...any) error, colors palette, featur
 			if err := write("      matched worktree: %s", agent.MatchedPath); err != nil {
 				return err
 			}
+		}
+		if err := write("      %s", eligibilityLine(agent.Eligibility)); err != nil {
+			return err
 		}
 		if agent.BindingDetail != "" {
 			if err := write("      %s", agent.BindingDetail); err != nil {
@@ -685,4 +820,15 @@ func truncate(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit-1]) + "…"
+}
+
+// truncatePath keeps the end of a path rather than the start. Every checkout in
+// a repository shares its leading directories, so trimming from the left is
+// what leaves an unreadable prefix and drops the part that identifies it.
+func truncatePath(value string, limit int) string {
+	runes := []rune(value)
+	if limit <= 0 || len(runes) <= limit {
+		return value
+	}
+	return "…" + string(runes[len(runes)-limit+1:])
 }

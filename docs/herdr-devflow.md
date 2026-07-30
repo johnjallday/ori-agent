@@ -184,6 +184,188 @@ The local dispatch service is intentionally macOS-only in v1. The helper still
 builds on Linux and Windows, but scheduling commands report that unsupported
 platform clearly instead of installing cron, systemd, or Windows scheduling.
 
+## Overnight Runs
+
+A one-time continuation sends one prompt and stops. An **Overnight Run** watches
+an ordered queue of Claude agents for hours, and — when the active one reaches
+its included five-hour session limit — puts this Mac to sleep until Claude's
+own reported reset, wakes it, and continues the same conversation.
+
+That last part is why every command below is explicit about consequences. The
+run cannot start without you reading a summary and answering it.
+
+~~~bash
+# Plan a run over exactly the agents you name, in the order you name them.
+wt herd overnight start --agent blueprint-setup-wizards --agent another-feature \
+  --start 23:00 --deadline 07:00 --timezone America/New_York
+
+# See what it would do without creating anything.
+wt herd overnight start --agent blueprint-setup-wizards --dry-run
+
+wt herd overnight list
+wt herd overnight show            # the active run
+wt herd overnight watch           # the active run, refreshed
+wt herd overnight report          # the morning summary
+wt herd overnight cancel
+~~~
+
+There is no "enrol every agent" option. The set of agents controlled while you
+are asleep is a decision, not a default.
+
+### What the run may and may not do
+
+An enrolled agent may implement code, update tests and documentation its plan
+calls for, run the validations the plan lists, and make the milestone commits
+the plan already requires. It stops before anything else.
+
+Specifically, it stops before a `Demo:`, a design sign-off, anything needing
+credentials or external authorization, `Open PR`, a merge, a deploy, a release,
+and `wt done`. A checkpoint the parser does not recognize is treated as manual,
+because reading manual work as safe means an agent opens a PR overnight, while
+reading safe work as manual means the run stops early and tells you why.
+
+Order matters as much as classification. If a demo sits between the agent and
+the next implementation task, there is no safe next task — the run does not
+reach past it.
+
+### Selection, ordering, and the queue
+
+Agents run **one at a time**, in the order you listed them. The next agent
+starts only when the current one completes or stops for a reason that is not a
+usage limit. If the active agent hits its limit, it keeps the queue head across
+the sleep: Claude's allowance is shared between your sessions, so promoting
+somebody else would just consume the same exhausted window.
+
+A run refuses to start when it cannot control something safely:
+
+| Refusal | Why |
+| --- | --- |
+| the agent is not eligible | see readiness below |
+| two agents in one worktree | two autonomous agents editing one checkout cannot be untangled |
+| two selected agents already working | the supervisor cannot tell which one it is watching |
+| an unresolved continuation for that session | two plans aiming a prompt at one conversation |
+| another active run | two supervisors each believing they own the queue |
+
+### Claude readiness, and why an agent may be ineligible
+
+Overnight Runs are Claude-only in v1, and they use **included plan capacity
+only**. They never accept an extra-usage offer, never switch to API-key
+billing, and never spend credits.
+
+Ori establishes that positively rather than assuming it. Claude Code reports
+its subscription rate-limit windows only for Claude.ai Pro and Max sessions,
+so their presence *is* the proof; their absence means an API-key session, an
+unsupported version, or a session that has not called the API yet — all
+ineligible, all left awake.
+
+Reading those windows needs a small recorder in your own Claude configuration.
+Ori prints it and never installs it:
+
+~~~bash
+wt herd claude-usage install    # prints the settings; changes nothing
+wt herd claude-usage status     # reports whether records are being written
+~~~
+
+The printed `statusLine` entry **wraps** whatever status line you already have
+and forwards its output unchanged, so installing this does not cost you the one
+you wrote. The recorder stores window state and session identity only: no
+prompts, transcripts, paths, or costs.
+
+Until it is installed, every agent reports `overnight: not eligible` with the
+reason, and no run can be created. That is deliberate.
+
+### Deadlines and the resume ceiling
+
+Every run has an absolute morning deadline and a maximum number of resumes,
+three by default.
+
+- At or after the deadline: no new prompt, no new wake. An agent that is
+  already working is **observed to a stop, never interrupted** — the run reports
+  `overrun` and lets the turn finish.
+- A reset that falls at or after the deadline ends the run with
+  `deadline_reached` rather than scheduling a wake it could not use.
+- A resume is consumed only when a post-reset continuation is **acknowledged by
+  the exact session**. Scheduling a wake, waking early, and an unconfirmed
+  delivery all cost nothing.
+- When the ceiling is used up, the next limit ends the run with
+  `cycle_limit_reached` instead of sleeping again.
+
+Deadlines are wall-clock times in the zone you chose, so a 23:00 → 07:00 run
+still ends at seven in the morning on the night the clocks change.
+
+### Sleeping this Mac
+
+**A verified included-session limit puts the whole machine to sleep.** Every
+other process on it is suspended by macOS until the wake. Unsaved work in other
+applications is your responsibility.
+
+Before that happens, all of these must hold — and each refuses independently,
+with a reason you can read in `wt herd overnight show`:
+
+- macOS, and Ori authorized to program wake events
+- external power (unknown counts as battery)
+- an exact native Claude session to return to
+- a reset that is in the future, before the deadline, and newer than any this
+  participant already handled
+- remaining resume budget
+- a wake that Ori has **programmed and confirmed**, not merely requested
+
+That last one matters most. Ori owns exactly one macOS wake event, shared with
+scheduled workspace tasks. The Herdr helper never programs it: it writes a
+candidate to a shared store, and the Ori server — the only process that runs
+`pmset` — programs the earliest and records what it actually did. The helper
+sleeps only after reading that record back. If Ori is not running, no record
+appears, and the Mac stays awake.
+
+Cancelling a run withdraws only that run's wake candidate; a scheduled workspace
+task's wake is recomputed and preserved.
+
+### After the wake
+
+Being awake proves nothing — you may have opened the lid. Durable state decides:
+
+- **before** the reset: the run waits, and prompts nobody
+- **after** the deadline: the run ends without even restoring the session
+- **in between**: the exact recorded session is revalidated and continued once
+
+If that session is gone or ambiguous, the run stops. It never creates a
+replacement conversation to talk to instead.
+
+### Reading it in the morning
+
+~~~bash
+wt herd overnight report
+~~~
+
+The report gives the queue in the order you confirmed it, what each agent
+completed against where it started, the commits and Git state, every limit,
+sleep and wake, anything uncertain, and what to do next. It says an
+implementation boundary was completed — never "shipped" or "merged", because
+the run never crossed a delivery checkpoint.
+
+Anything the run could not establish either way is listed under **Uncertain**
+rather than resolved optimistically. A continuation that was in flight when the
+run ended may have arrived; check the agent before prompting it again.
+
+### When it will not sleep
+
+`wt herd doctor` reports each requirement separately, because their fixes
+differ:
+
+~~~
+Claude usage recorder    records are being written to …
+Claude overnight readiness  1 saved Claude session reports plan-backed capacity
+wake coordinator         the shared wake store is readable
+wake owner               Ori is running and can program macOS wake events
+power source             this Mac is on external power
+~~~
+
+A failed check disables only what depends on it. Missing wake approval stops
+sleeping; it does not hide the agent roster.
+
+Setting `[bridge] enabled = false` stops new Overnight actions entirely while
+leaving existing runs inspectable.
+
 ## Path is identity, IDs are hints
 
 The bridge resolves a feature's agents by **canonical worktree path**, not by a

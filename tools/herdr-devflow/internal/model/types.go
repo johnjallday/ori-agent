@@ -155,6 +155,10 @@ func (s ScheduleState) IsUnresolved() bool {
 type BridgeState struct {
 	Version  int                     `json:"version"`
 	Features map[string]FeatureState `json:"features"`
+	// Runs are Overnight Runs keyed by run ID. The field is additive on
+	// purpose: a state file written before Overnight Runs existed simply has no
+	// key here, and must keep loading rather than being migrated or rejected.
+	Runs map[string]OvernightRun `json:"runs,omitempty"`
 }
 
 type FeatureState struct {
@@ -210,5 +214,6 @@ func NewBridgeState() BridgeState {
 	return BridgeState{
 		Version:  StateVersion,
 		Features: make(map[string]FeatureState),
+		Runs:     make(map[string]OvernightRun),
 	}
 }

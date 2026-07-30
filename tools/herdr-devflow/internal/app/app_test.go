@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +23,28 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
+
+// devflowConfigFixture is the checked-in bridge configuration every repository
+// fixture writes, so a change to the required keys is made in one place.
+const devflowConfigFixture = `
+[bridge]
+enabled = true
+min_herdr_version = "0.7.5"
+source_id = "ori.devflow"
+[primary]
+role = "builder"
+kind = "claude"
+[roles]
+default_kind = "claude"
+[bootstrap]
+timeout_seconds = 30
+[scheduler]
+retry_window = "15m"
+[metadata]
+enabled = true
+[status]
+watch_poll_interval = "2s"
+`
 
 type setupRunner struct {
 	mu         sync.Mutex
@@ -712,6 +735,218 @@ func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testi
 	}
 }
 
+// primaryCheckoutRunner answers as Herdr does when agents are open in both the
+// repository's primary `dev` checkout and a feature worktree. The primary
+// checkout is not a feature, and its agents are the ones the feature-first
+// roster drops today.
+type primaryCheckoutRunner struct {
+	primary string
+	feature string
+}
+
+func (r primaryCheckoutRunner) Run(_ context.Context, command herdr.Command) (herdr.CommandResult, error) {
+	key := strings.Join(command.Args, " ")
+	switch {
+	case key == "--version":
+		return herdr.CommandResult{Stdout: []byte("herdr 0.7.5\n")}, nil
+	case key == "api schema --json":
+		return herdr.CommandResult{Stdout: []byte(schemaFixture())}, nil
+	case key == "agent list":
+		return herdr.CommandResult{Stdout: []byte(fmt.Sprintf(`{"result":{"agents":[
+			{"agent":"claude","name":"ori-repo-bridge-builder","agent_status":"idle","workspace_id":"w1","pane_id":"w1:p2","terminal_id":"term-2","cwd":%q,"agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-123"}},
+			{"agent":"claude","name":"ori-dev-claude","agent_status":"working","workspace_id":"w-dev","pane_id":"w-dev:p1","terminal_id":"term-dev-1","cwd":%q,"agent_session":{"source":"herdr:claude","agent":"claude","kind":"id","value":"native-dev"}}
+		]}}`, r.feature, r.primary))}, nil
+	case key == "workspace list":
+		return herdr.CommandResult{Stdout: []byte(fmt.Sprintf(`{"result":{"workspaces":[
+			{"workspace_id":"w1","cwd":%q,"label":"bridge","tab_count":1},
+			{"workspace_id":"w-dev","cwd":%q,"label":"ori-agent-dev","tab_count":1}
+		]}}`, r.feature, r.primary))}, nil
+	case strings.HasPrefix(key, "workspace report-metadata "):
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"workspace_metadata"}}`)}, nil
+	case strings.HasPrefix(key, "pane report-metadata "):
+		return herdr.CommandResult{Stdout: []byte(`{"result":{"type":"pane_metadata"}}`)}, nil
+	default:
+		return herdr.CommandResult{}, fmt.Errorf("unexpected Herdr command: %s", key)
+	}
+}
+
+// TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork is the reported
+// failure. `--current` derives a feature slug from the checkout's directory
+// name, so running it in `ori-agent-dev` asks the snapshot for a feature named
+// after the dev checkout and fails with `no feature named "ori-agent-dev"`
+// instead of showing the repository's active work. FR9, FR10, FR11.
+func TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork(t *testing.T) {
+	primary, feature := createPrimaryCheckoutWithFeature(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
+		if key == worktree.HomeOverrideEnv {
+			return home, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
+		WorkspaceID: "w1",
+		Agents: map[string]model.RoleAgent{"builder": {
+			Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude",
+			WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native,
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}},
+		Schedules: map[string]model.Schedule{},
+	}
+	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout:    &output,
+		Stderr:    &stderr,
+		Getwd:     func() (string, error) { return primary, nil },
+		LookupEnv: func(string) (string, bool) { return "", false },
+		Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
+	})
+	// The snapshot is incomplete without a reachable GitHub, so exit 1 is
+	// expected; what must not happen is the selector rejecting the checkout.
+	args := []string{"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
+	application.Run(context.Background(), args)
+	if strings.Contains(output.String()+stderr.String(), "no feature named") {
+		t.Fatalf("--current invented a feature slug from the dev checkout name: %s%s", output.String(), stderr.String())
+	}
+
+	var snapshot overview.Snapshot
+	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+		t.Fatalf("status JSON = %q: %v", output.String(), err)
+	}
+	if _, ok := snapshot.Feature("bridge"); !ok {
+		t.Fatalf("--current from the primary checkout hid the repository's active feature: %+v", snapshot.Features)
+	}
+	var panes []string
+	for _, agent := range snapshot.Agents {
+		panes = append(panes, agent.Live.Pane)
+	}
+	if !slices.Contains(panes, "w-dev:p1") || !slices.Contains(panes, "w1:p2") {
+		t.Fatalf("roster panes = %v, want both the feature agent and the agent in the primary checkout", panes)
+	}
+}
+
+// TestStatusSelectorsResolveByPathNotByDirectoryName covers the human surface
+// of the same regression, plus the explicit `--worktree` form: standing in the
+// dev checkout lists the repository's work and its agents, and pointing at a
+// feature worktree narrows to that feature. FR9, FR10, FR11.
+func TestStatusSelectorsResolveByPathNotByDirectoryName(t *testing.T) {
+	primary, feature := createPrimaryCheckoutWithFeature(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+	writePrimaryCheckoutBridgeState(t, home, feature)
+
+	run := func(args ...string) string {
+		t.Helper()
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout:    &output,
+			Stderr:    &stderr,
+			Getwd:     func() (string, error) { return primary, nil },
+			LookupEnv: func(string) (string, bool) { return "", false },
+			Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
+		})
+		base := []string{"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr", "status", "--no-color"}
+		application.Run(context.Background(), append(base, args...))
+		if strings.Contains(stderr.String(), "no feature named") {
+			t.Fatalf("a selector invented a feature slug from a directory name: %s", stderr.String())
+		}
+		return output.String()
+	}
+
+	fromPrimary := run("--current")
+	for _, want := range []string{"bridge", "Agents outside a feature", "ori-dev-claude", "overnight:"} {
+		if !strings.Contains(fromPrimary, want) {
+			t.Fatalf("status --current from the dev checkout did not mention %q:\n%s", want, fromPrimary)
+		}
+	}
+
+	fromFeature := run("--worktree", feature)
+	if !strings.Contains(fromFeature, "bridge") {
+		t.Fatalf("status --worktree did not select the feature:\n%s", fromFeature)
+	}
+	// A feature detail view is about that feature; the repository's other
+	// agents belong to the wider roster, not to this report.
+	if strings.Contains(fromFeature, "Agents outside a feature") {
+		t.Fatalf("the feature detail view included unrelated agents:\n%s", fromFeature)
+	}
+}
+
+// writePrimaryCheckoutBridgeState saves the bridge record for the fixture's
+// feature worktree so status has a managed agent to resolve.
+func writePrimaryCheckoutBridgeState(t *testing.T, home, feature string) {
+	t.Helper()
+	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
+		if key == worktree.HomeOverrideEnv {
+			return home, true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
+	bridgeState := model.NewBridgeState()
+	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
+		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
+		WorkspaceID: "w1",
+		Agents: map[string]model.RoleAgent{"builder": {
+			Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude",
+			WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native,
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}},
+		Schedules: map[string]model.Schedule{},
+	}
+	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// createPrimaryCheckoutWithFeature builds a repository whose primary checkout
+// is named like the real one (`ori-agent-dev`) plus one linked feature
+// worktree, so `--current` resolution can be exercised from either side.
+func createPrimaryCheckoutWithFeature(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	primary := filepath.Join(root, "ori-agent-dev")
+	runAppGit(t, "", "init", "-b", "dev", primary)
+	if err := os.MkdirAll(filepath.Join(primary, ".herdr"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(primary, ".herdr", "devflow.toml"), []byte(devflowConfigFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(primary, "tasks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(primary, "tasks", "prd-bridge.md"), []byte("# PRD: Bridge\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(primary, "README.md"), []byte("fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runAppGit(t, primary, "add", ".")
+	runAppGit(t, primary, "-c", "user.name=Ori Test", "-c", "user.email=ori@example.test", "commit", "-m", "fixture")
+
+	feature := filepath.Join(root, "worktrees", "bridge")
+	runAppGit(t, primary, "worktree", "add", "-b", "feature/bridge", feature)
+	if err := os.MkdirAll(filepath.Join(feature, "tasks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(feature, "tasks", "tasks-bridge.md"), []byte("- [ ] 1.1 Continue implementation\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return primary, feature
+}
+
 func createLinkedFeatureWorktree(t *testing.T) (string, string) {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")
@@ -719,25 +954,7 @@ func createLinkedFeatureWorktree(t *testing.T) (string, string) {
 	if err := os.MkdirAll(filepath.Join(repo, ".herdr"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".herdr", "devflow.toml"), []byte(`
-[bridge]
-enabled = true
-min_herdr_version = "0.7.5"
-source_id = "ori.devflow"
-[primary]
-role = "builder"
-kind = "claude"
-[roles]
-default_kind = "claude"
-[bootstrap]
-timeout_seconds = 30
-[scheduler]
-retry_window = "15m"
-[metadata]
-enabled = true
-[status]
-watch_poll_interval = "2s"
-`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".herdr", "devflow.toml"), []byte(devflowConfigFixture), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0600); err != nil {
@@ -814,25 +1031,7 @@ func writeSetupFixture(t *testing.T, repo string) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".herdr", "devflow.toml"), []byte(`
-[bridge]
-enabled = true
-min_herdr_version = "0.7.5"
-source_id = "ori.devflow"
-[primary]
-role = "builder"
-kind = "claude"
-[roles]
-default_kind = "claude"
-[bootstrap]
-timeout_seconds = 30
-[scheduler]
-retry_window = "15m"
-[metadata]
-enabled = true
-[status]
-watch_poll_interval = "2s"
-`), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".herdr", "devflow.toml"), []byte(devflowConfigFixture), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "tools", "herdr-devflow", "herdr-plugin.toml"), []byte("id = \"ori.devflow\"\n"), 0600); err != nil {

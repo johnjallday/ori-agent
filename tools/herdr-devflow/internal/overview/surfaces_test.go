@@ -200,7 +200,7 @@ func TestEverySurfaceStatesIncompleteness(t *testing.T) {
 func TestExpandedSurfaceCountsManagedAgents(t *testing.T) {
 	snapshot := richSnapshot(t)
 	_, expanded, _, _ := renderAll(t, snapshot)
-	want := "1 managed agent(s)"
+	want := "1 agent(s), 1 managed"
 	if !strings.Contains(expanded, want) {
 		t.Fatalf("expanded surface = %q, want it to state %q", expanded, want)
 	}

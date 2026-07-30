@@ -1,0 +1,4 @@
+{
+  "hook_event_name": "StopFailure",
+  "cwd": "/fixture/repo/worktrees/managed-feature"
+}

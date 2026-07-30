@@ -16,12 +16,20 @@ func renderToString(t *testing.T, snapshot Snapshot) string {
 }
 
 func baseSnapshot(features ...Feature) Snapshot {
+	// The roster mirrors the feature rows, exactly as the collector builds it.
+	// A hand-made snapshot that skipped this would let a renderer look correct
+	// against a shape the service never produces.
+	var roster []Agent
+	for _, row := range features {
+		roster = append(roster, row.Agents...)
+	}
 	return Snapshot{
 		SchemaVersion: SchemaVersion,
 		GeneratedAt:   time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC),
 		Repository:    Repository{ID: "repo-1", Baseline: "dev"},
 		Complete:      true,
 		Features:      features,
+		Agents:        roster,
 		Sources:       []Source{{Kind: SourceGitHub, Availability: AvailabilityAvailable, Required: true}},
 	}
 }

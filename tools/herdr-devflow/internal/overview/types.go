@@ -280,6 +280,7 @@ const (
 	FindingAgentAmbiguous        FindingCode = "agent_ambiguous"
 	FindingAgentDrift            FindingCode = "agent_possible_drift"
 	FindingAgentUnmanaged        FindingCode = "agent_unmanaged"
+	FindingAgentUnscoped         FindingCode = "agent_unscoped"
 	FindingNoAgent               FindingCode = "no_agent"
 	FindingHandoffIncomplete     FindingCode = "handoff_incomplete"
 	FindingScheduleFailed        FindingCode = "schedule_failed"
@@ -522,14 +523,19 @@ type Identity struct {
 	Workspace string `json:"workspace,omitempty"`
 	Pane      string `json:"pane,omitempty"`
 	Terminal  string `json:"terminal,omitempty"`
-	Session   string `json:"session,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Source    string `json:"source,omitempty"`
+	// Name is the stable Herdr agent name. It is what `herdr agent list` shows
+	// and what an operator recognizes, so it is the label every surface prefers
+	// over an opaque session value.
+	Name    string `json:"name,omitempty"`
+	Session string `json:"session,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Source  string `json:"source,omitempty"`
 }
 
 // Empty reports whether no identity field was populated.
 func (i Identity) Empty() bool {
-	return i.Workspace == "" && i.Pane == "" && i.Terminal == "" && i.Session == "" && i.Kind == "" && i.Source == ""
+	return i.Workspace == "" && i.Pane == "" && i.Terminal == "" &&
+		i.Name == "" && i.Session == "" && i.Kind == "" && i.Source == ""
 }
 
 // Schedule is one Herdr schedule relevant to a feature or role. Prompt text is
@@ -543,11 +549,68 @@ type Schedule struct {
 	DueAt   time.Time `json:"due_at,omitzero"`
 }
 
-// Agent is one role row: a managed bridge role or an unmanaged live agent
-// discovered in a feature workspace. Neither is ever adopted automatically.
+// AgentScope names which kind of checkout an agent's work resolved into. It is
+// the difference between "this agent is implementing a feature" and "this agent
+// is open in the dev checkout", and only a feature-scoped agent can ever be a
+// candidate for unattended control.
+type AgentScope string
+
+const (
+	// AgentScopeFeature means the agent resolved into a feature worktree, or is
+	// a saved bridge role belonging to one.
+	AgentScopeFeature AgentScope = "feature"
+	// AgentScopeRepository means the agent resolved into a checkout of this
+	// repository that implements no feature: the source checkout, or a baseline
+	// dev/main worktree. These agents are real work and must stay visible.
+	AgentScopeRepository AgentScope = "repository"
+	// AgentScopeUnknown is the zero value: no working directory could be
+	// resolved, so the agent was not placed in any checkout.
+	AgentScopeUnknown AgentScope = ""
+)
+
+// Label is the full textual scope for human output.
+func (s AgentScope) Label() string {
+	switch s {
+	case AgentScopeFeature:
+		return "feature"
+	case AgentScopeRepository:
+		return "repository"
+	default:
+		return "unknown"
+	}
+}
+
+// MarshalJSON emits the zero value as an explicit "unknown", so a consumer can
+// tell "not placed" from a missing field.
+func (s AgentScope) MarshalJSON() ([]byte, error) {
+	if s == AgentScopeUnknown {
+		return []byte(`"unknown"`), nil
+	}
+	return json.Marshal(string(s))
+}
+
+// UnmarshalJSON accepts the explicit "unknown" spelling and the empty string.
+func (s *AgentScope) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw == "unknown" {
+		raw = string(AgentScopeUnknown)
+	}
+	*s = AgentScope(raw)
+	return nil
+}
+
+// Agent is one row of the roster: a managed bridge role, an unmanaged live
+// agent discovered in a feature worktree, or an agent working in a checkout
+// that implements no feature. None of them is ever adopted automatically.
 type Agent struct {
-	// Feature is the slug this agent belongs to.
+	// Feature is the slug this agent belongs to, empty for a repository-scoped
+	// agent. Emptiness is meaningful, so the field is always emitted.
 	Feature string `json:"feature"`
+	// Scope records which kind of checkout the agent was placed in.
+	Scope AgentScope `json:"scope"`
 	// Role is the bridge role name; empty for unmanaged agents.
 	Role string `json:"role,omitempty"`
 	// Managed distinguishes a saved bridge role from a discovered live agent.
@@ -573,11 +636,34 @@ type Agent struct {
 	// Schedules are the role's unresolved, failed, or recently delivered
 	// one-time schedules.
 	Schedules []Schedule `json:"schedules,omitempty"`
-	// LastActivityAt is Herdr's authoritative event/activity timestamp.
+	// LastActivityAt is Herdr's authoritative event/activity timestamp. It is
+	// zero when Herdr reported none, which is distinct from "no activity".
 	LastActivityAt time.Time `json:"last_activity_at,omitzero"`
-	// MatchedPath is the canonical worktree this agent's working directory
-	// resolved into. It is the evidence for the attribution.
+	// MatchedPath is the canonical checkout this agent's working directory
+	// resolved into. It is the evidence for the attribution, and it is empty
+	// when the agent could not be placed.
 	MatchedPath string `json:"matched_path,omitempty"`
+	// Eligibility answers whether an Overnight Run may control this agent, and
+	// why not when it may not.
+	Eligibility Eligibility `json:"eligibility"`
+	// Run is this agent's membership in an Overnight Run. It is absent until a
+	// run enrolls the agent, which is distinct from a run that enrolled it and
+	// has not started.
+	Run *RunMembership `json:"run,omitempty"`
+}
+
+// RunMembership is one agent's place in an Overnight Run. Only one participant
+// per run is active; every other enrolled participant is queued and must not
+// receive an unattended prompt.
+type RunMembership struct {
+	// RunID is the immutable identity of the run that enrolled this agent.
+	RunID string `json:"run_id"`
+	// State is the participant's state within the run.
+	State string `json:"state,omitempty"`
+	// QueuePosition is 1-based; zero means the position is unknown.
+	QueuePosition int `json:"queue_position,omitempty"`
+	// Active marks the single participant the supervisor may prompt.
+	Active bool `json:"active"`
 }
 
 // Feature is one row of the feature-first overview: the union of planning,
@@ -637,6 +723,35 @@ func (f Feature) Attention() (Severity, bool) {
 	return best, found
 }
 
+// Checkout is one working copy of this repository: the source checkout, a
+// baseline dev/main checkout, or a feature worktree.
+//
+// It exists so an agent that implements no feature still has an honest home in
+// the snapshot. Before this row existed, the roster was feature-first all the
+// way down, and an agent working in `ori-agent-dev` was simply absent — Herdr
+// could see it and Ori could not.
+type Checkout struct {
+	// Path is the canonical checkout root.
+	Path string `json:"path"`
+	// Branch is the checked-out branch without refs/heads/, empty if detached.
+	Branch string `json:"branch,omitempty"`
+	// Feature is the exact slug this checkout implements, empty for baseline
+	// and source checkouts.
+	Feature string `json:"feature,omitempty"`
+	// Baseline marks an integration checkout: dev, main, master, or develop.
+	Baseline bool `json:"baseline"`
+	// Source marks the repository's normal checkout, which owns the .git
+	// directory every linked worktree points at.
+	Source bool `json:"source"`
+	// Detached marks a checkout with no branch.
+	Detached bool `json:"detached"`
+	// Occupancy counts panes resolving into this checkout, agent-bearing or
+	// not: a worktree can be occupied without an agent running in it.
+	Occupancy int `json:"occupancy"`
+	// Agents counts the live agents observed in this checkout.
+	Agents int `json:"agents"`
+}
+
 // Repository identifies the checkout the snapshot describes.
 type Repository struct {
 	// ID is the stable local identity derived from the Git common directory.
@@ -672,6 +787,15 @@ type Snapshot struct {
 	Stale bool `json:"stale"`
 	// Features are the feature rows, sorted by the shared deterministic order.
 	Features []Feature `json:"features"`
+	// Checkouts are every working copy of this repository, feature and
+	// non-feature alike, with their pane occupancy.
+	Checkouts []Checkout `json:"checkouts,omitempty"`
+	// Agents is the complete agent roster: every managed, unmanaged, and
+	// repository-level agent in one deterministic order. Feature rows carry the
+	// same values grouped for the feature-first display; this flat list is what
+	// a roster, a selector, and an Overnight Run consume, because it is the only
+	// view in which an agent cannot be hidden by lacking a feature.
+	Agents []Agent `json:"agents,omitempty"`
 	// Sources records every evidence producer's outcome for this collection.
 	Sources []Source `json:"sources"`
 	// Findings are repository-scoped gaps not attributable to one feature.

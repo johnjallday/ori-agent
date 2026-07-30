@@ -1,0 +1,12 @@
+{
+  "hook_event_name": "Status",
+  "session_id": "11111111-2222-3333-4444-555555555555",
+  "cwd": "/fixture/repo/worktrees/managed-feature",
+  "version": "2.1.220",
+  "context_window": {"context_window_size": 200000, "used_percentage": 99.6, "remaining_percentage": 0.4},
+  "exceeds_200k_tokens": true,
+  "rate_limits": {
+    "five_hour": {"used_percentage": 18.0, "resets_at": 1785358800},
+    "seven_day": {"used_percentage": 30.0, "resets_at": 1785790800}
+  }
+}

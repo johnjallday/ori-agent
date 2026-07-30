@@ -41,6 +41,11 @@ func (s *Store) Load() (model.BridgeState, error) {
 	if state.Features == nil {
 		state.Features = make(map[string]model.FeatureState)
 	}
+	// A state file written before Overnight Runs existed carries no runs key.
+	// That is a normal, supported shape, not a migration.
+	if state.Runs == nil {
+		state.Runs = make(map[string]model.OvernightRun)
+	}
 	return state, nil
 }
 
@@ -53,6 +58,9 @@ func (s *Store) Save(state model.BridgeState) error {
 	}
 	if state.Features == nil {
 		state.Features = make(map[string]model.FeatureState)
+	}
+	if state.Runs == nil {
+		state.Runs = make(map[string]model.OvernightRun)
 	}
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
