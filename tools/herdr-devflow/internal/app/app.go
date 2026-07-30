@@ -30,6 +30,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/scheduler"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -1872,6 +1874,10 @@ func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.
 	if err != nil {
 		return nil
 	}
+	// The dispatcher runs detached, without a repository checkout, so the
+	// Overnight defaults come from the built-in configuration rather than a
+	// project file it cannot resolve.
+	runtime := runtimeContext{config: config.Default()}
 	service := &overnight.Service{Store: store}
 	runs, err := service.List("")
 	if err != nil {
@@ -1883,6 +1889,17 @@ func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.
 		Agents: client,
 		Prompt: client,
 		Usage:  claudeusage.NewAdapter(filepath.Join(runtimeRoot, "usage")),
+		Power:  &systempower.Service{GOOS: a.goos},
+	}
+	// Without a reachable wake coordinator the supervisor still runs; it simply
+	// can never sleep, which is the correct degraded behavior rather than a
+	// reason to stop supervising.
+	approvalGranted := false
+	if wake, err := wakeclient.Default(); err == nil {
+		supervisor.Wake = wake
+		// Approval is the user's, recorded by Ori itself. The helper reads what
+		// the wake owner published and never grants it to itself.
+		approvalGranted = wake.Owner().Ready
 	}
 
 	advanced := make([]map[string]any, 0)
@@ -1890,7 +1907,7 @@ func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.
 		if run.State.Terminal() {
 			continue
 		}
-		updated, err := supervisor.Tick(ctx, run.ID)
+		updated, err := a.advanceOvernightRun(ctx, supervisor, run.ID, runtime.config, approvalGranted)
 		if err != nil {
 			fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: Overnight Run %s was not advanced\n", run.ID)
 			continue
@@ -2228,6 +2245,7 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 		diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "one-time continuation scheduling is macOS-only", Recovery: "run scheduling commands on macOS"})
 	}
 	diagnostics = append(diagnostics, a.claudeUsageDiagnostics(runtime)...)
+	diagnostics = append(diagnostics, a.wakeDiagnostics()...)
 	a.writeDiagnostics(opts.json, diagnostics)
 	for _, item := range diagnostics {
 		if item.Status == "FAIL" {
@@ -2558,4 +2576,31 @@ func diagnosticFromError(name string, err error) diagnostic {
 
 func samePath(left, right string) bool {
 	return filepath.Clean(left) == filepath.Clean(right)
+}
+
+// advanceOvernightRun moves one run forward by one step, including the parts of
+// the cycle that happen outside an ordinary tick.
+//
+// The three phases are separate calls on purpose. A tick decides what to do; the
+// sleep sequence has effects outside this process and needs its own ordering
+// guarantees; and resuming happens after a wake, when the only thing that can be
+// trusted is what was written down before the machine slept.
+func (a *App) advanceOvernightRun(ctx context.Context, supervisor *overnight.Supervisor,
+	runID string, cfg config.Config, approvalGranted bool,
+) (model.OvernightRun, error) {
+	run, err := supervisor.Tick(ctx, runID)
+	if err != nil {
+		return model.OvernightRun{}, err
+	}
+	switch run.State {
+	case model.RunLimitDetected, model.RunPreparingSleep:
+		return supervisor.PrepareAndSleep(ctx, runID, overnight.SleepConfig{
+			WakeLead:        cfg.WakeLead(),
+			ApprovalGranted: approvalGranted,
+		})
+	case model.RunSleeping, model.RunWaking, model.RunWaitingForReset:
+		return supervisor.Resume(ctx, runID)
+	default:
+		return run, nil
+	}
 }

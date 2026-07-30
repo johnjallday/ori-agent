@@ -12,6 +12,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 )
 
 // This file is Ori's side of the Claude usage contract described in
@@ -223,6 +225,73 @@ func (a *App) claudeUsageInstall(opts options, args []string) int {
 	fmt.Fprintln(a.stdout, "The statusLine entry wraps the command you already have, so your status line keeps working.")
 	fmt.Fprintf(a.stdout, "Records are written to %s and are readable only by you.\n", runtime.paths.UsageDir)
 	return 0
+}
+
+// wakeDiagnostics reports what stands between a detected limit and a sleeping
+// Mac, as separate checks. They are the questions a person asks at midnight —
+// "would this actually sleep?" — and each has a different fix.
+func (a *App) wakeDiagnostics() []diagnostic {
+	if a.goos != "darwin" {
+		return []diagnostic{{
+			Name:     "Overnight sleep",
+			Status:   "WARN",
+			Detail:   "system sleep and wake are supported on macOS only",
+			Recovery: "run Overnight Runs on macOS; every other command works here",
+		}}
+	}
+	client, err := wakeclient.Default()
+	if err != nil {
+		return []diagnostic{{
+			Name:     "wake coordinator",
+			Status:   "WARN",
+			Detail:   "Ori's shared wake coordinator could not be located",
+			Recovery: "start Ori, then run wt herd doctor",
+		}}
+	}
+
+	diagnostics := []diagnostic{}
+	if client.Available() {
+		diagnostics = append(diagnostics, diagnostic{
+			Name: "wake coordinator", Status: "PASS", Detail: "the shared wake store is readable",
+		})
+	} else {
+		diagnostics = append(diagnostics, diagnostic{
+			Name: "wake coordinator", Status: "WARN",
+			Detail:   "the shared wake store could not be read",
+			Recovery: "start Ori, then run wt herd doctor",
+		})
+	}
+
+	readiness := client.Owner()
+	switch {
+	case readiness.Ready:
+		diagnostics = append(diagnostics, diagnostic{
+			Name: "wake owner", Status: "PASS", Detail: "Ori is running and can program macOS wake events",
+		})
+	default:
+		recovery := "open Ori and enable Mac wake scheduling"
+		if !readiness.Running {
+			recovery = "start Ori; the Herdr helper never programs wake events itself"
+		}
+		diagnostics = append(diagnostics, diagnostic{
+			Name: "wake owner", Status: "WARN", Detail: readiness.Detail, Recovery: recovery,
+		})
+	}
+
+	power := &systempower.Service{GOOS: a.goos}
+	source := power.PowerSource(context.Background())
+	if source.External() {
+		diagnostics = append(diagnostics, diagnostic{
+			Name: "power source", Status: "PASS", Detail: "this Mac is on external power",
+		})
+	} else {
+		diagnostics = append(diagnostics, diagnostic{
+			Name: "power source", Status: "WARN",
+			Detail:   "this Mac is on " + source.Label() + "; an Overnight Run sleeps only on external power",
+			Recovery: "connect power before starting an Overnight Run",
+		})
+	}
+	return diagnostics
 }
 
 // claudeUsageDiagnostics reports Overnight readiness as separate checks rather

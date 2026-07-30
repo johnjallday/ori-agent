@@ -57,6 +57,11 @@ type Supervisor struct {
 	// Usage classifies Claude limits; nil means no limit can be recognized,
 	// so nothing ever sleeps.
 	Usage LimitClassifier
+	// Wake is the helper's side of Ori's shared wake coordinator. Nil means no
+	// wake can be requested, so nothing sleeps.
+	Wake WakeCoordinator
+	// Power answers power questions and performs sleep. Nil means the same.
+	Power PowerService
 	// Now supplies the clock.
 	Now func() time.Time
 	// PromptTimeout bounds one submission.

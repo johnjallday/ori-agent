@@ -61,6 +61,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/vault"
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
+	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
@@ -71,6 +72,13 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.usageHandler = usagehttp.NewHandler(b.costTracker)
 	b.mcpHandler = mcphttp.NewHandler(b.mcpRegistry, b.mcpConfigManager)
 	b.macWakeService = macwake.NewService(b.configManager)
+	// Ori owns one system wake event and this service is the only thing that
+	// programs it. The shared coordinator is how other Ori processes — today
+	// the Herdr devflow helper's Overnight Runs — ask for one without ever
+	// calling pmset themselves.
+	if dir, err := wakecoord.DefaultDir(); err == nil {
+		b.macWakeService.UseCoordinator(wakecoord.New(dir))
+	}
 	b.settingsHandler = settingshttp.NewHandler(b.st, b.configManager, b.clientFactory, b.llmFactory)
 	b.settingsHandler.SetMacWakeService(b.macWakeService)
 	b.speechHandler = speechhttp.NewHandler(b.configManager)
