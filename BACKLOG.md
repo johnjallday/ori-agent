@@ -44,5 +44,3 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-24 herdr-start-kind - PR #260 merged to dev (2026-07-24)
 - 2026-07-24 herdr-devflow-cleanup-guard - PR #259 merged to dev (2026-07-24)
 - 2026-07-24 herdr-devflow-bridge -> PRD at tasks/prd-herdr-devflow-bridge.md (started 2026-07-23) - PR #258 merged to dev (2026-07-24)
-- 2026-07-21 unit-sheet-model-editing — includes Commander-capable Codex model choices - PR #246 merged to dev (2026-07-21)
-- 2026-07-19 HQ cross-workspace visibility (hq_overview + Watchtower) — PR #240 merged to dev; post-merge live demo verified (badge/panel/navigation/all-clear + Chief hq_overview call on local model)
