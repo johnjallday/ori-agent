@@ -183,6 +183,7 @@ test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge 
 	$(GOTEST) ./tools/herdr-devflow/...
 	@bash scripts/herdr-devflow.test.sh
 	@zsh scripts/wt-herd.test.sh
+	@zsh scripts/wt-backlog.test.sh
 
 test-integration: ## Run integration tests
 	@echo "$(BLUE)Running integration tests...$(NC)"

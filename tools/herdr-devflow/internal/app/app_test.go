@@ -21,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -295,8 +296,8 @@ func TestParseScopedAgentCommandsKeepsContextAndTargetExplicit(t *testing.T) {
 
 func TestParseOneTimeContinuationAndScheduleCommands(t *testing.T) {
 	t.Parallel()
-	continuation, err := parseContinueArgs([]string{"reviewer", "--at", "2026-07-24 09:30", "--prompt", "Resume safely", "--feature", "bridge"})
-	if err != nil || continuation.role != "reviewer" || continuation.at != "2026-07-24 09:30" || continuation.prompt != "Resume safely" || continuation.context.FeatureName != "bridge" {
+	continuation, err := parseContinueArgs([]string{"reviewer", "--at", "2026-07-24 09:30", "--prompt", "Resume safely", "--wake", "--feature", "bridge"})
+	if err != nil || continuation.role != "reviewer" || continuation.at != "2026-07-24 09:30" || continuation.prompt != "Resume safely" || !continuation.wake || continuation.context.FeatureName != "bridge" {
 		t.Fatalf("parseContinueArgs() = %#v, %v", continuation, err)
 	}
 	if _, err := parseContinueArgs([]string{"--at", "every hour"}); err != nil {
@@ -554,6 +555,35 @@ func (continuationRunner) Run(_ context.Context, command herdr.Command) (herdr.C
 	}
 }
 
+type continuationWake struct {
+	registeredID string
+	registeredAt time.Time
+	canceledID   string
+	readiness    wakeclient.OwnerReadiness
+}
+
+func (w *continuationWake) Register(id string, wakeAt time.Time, _ string) error {
+	w.registeredID = id
+	w.registeredAt = wakeAt
+	return nil
+}
+
+func (w *continuationWake) Verify(_ context.Context, id string, wakeAt time.Time) (time.Time, error) {
+	if id != w.registeredID || !wakeAt.Equal(w.registeredAt) {
+		return time.Time{}, errors.New("wake identity mismatch")
+	}
+	return wakeAt.Add(-time.Minute), nil
+}
+
+func (w *continuationWake) Cancel(id string) error {
+	w.canceledID = id
+	return nil
+}
+
+func (w *continuationWake) Owner() wakeclient.OwnerReadiness {
+	return w.readiness
+}
+
 func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *testing.T) {
 	repo, feature := createLinkedFeatureWorktree(t)
 	home := filepath.Join(t.TempDir(), "runtime")
@@ -582,6 +612,7 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	}
 
 	launchHome := t.TempDir()
+	wake := &continuationWake{readiness: wakeclient.OwnerReadiness{Running: true, Ready: true}}
 	var output, stderr bytes.Buffer
 	application := New(Dependencies{
 		Stdout:      &output,
@@ -595,13 +626,14 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 		LaunchctlRun: func(context.Context, string, ...string) error {
 			return nil
 		},
+		NewContinuationWake: func() (WakeCoordinator, error) { return wake, nil },
 	})
 	due := time.Now().Add(time.Hour).Format(time.RFC3339)
 	privatePrompt := "Continue after reading OPENAI_API_KEY=sk-not-a-real-secret and do not expose this prompt."
-	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due, "--prompt", privatePrompt}); exit != 0 {
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due, "--prompt", privatePrompt, "--wake"}); exit != 0 {
 		t.Fatalf("continue exit = %d; stderr=%s", exit, stderr.String())
 	}
-	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") {
+	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") || !strings.Contains(output.String(), "macOS wake confirmed") {
 		t.Fatalf("continue output = %q", output.String())
 	}
 	stateAfter, err := store.Load()
@@ -615,9 +647,12 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	scheduleID := ""
 	for _, record := range schedules {
 		scheduleID = record.ID
-		if record.AgentName != agent.Name || record.State != model.SchedulePending || record.Prompt != privatePrompt {
+		if record.AgentName != agent.Name || record.State != model.SchedulePending || record.Prompt != privatePrompt || !record.WakeRequired || record.WakeVerifiedAt.IsZero() {
 			t.Fatalf("schedule = %#v", record)
 		}
+	}
+	if wake.registeredID != scheduleID {
+		t.Fatalf("registered wake = %q, want %q", wake.registeredID, scheduleID)
 	}
 	output.Reset()
 	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "schedule", "show", scheduleID}); exit != 0 {
@@ -634,6 +669,9 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	if err != nil || stateAfter.Features[paths.RepositoryID+":bridge"].Schedules[scheduleID].State != model.ScheduleCanceled {
 		t.Fatalf("schedule cancel state = %#v, %v", stateAfter.Features[paths.RepositoryID+":bridge"].Schedules[scheduleID], err)
 	}
+	if wake.canceledID != scheduleID {
+		t.Fatalf("canceled wake = %q, want %q", wake.canceledID, scheduleID)
+	}
 	if _, err := os.Stat(filepath.Join(launchHome, "Library", "LaunchAgents", "com.ori.herdr-devflow.plist")); err != nil {
 		t.Fatalf("continuation did not install a stable LaunchAgent: %v", err)
 	}
@@ -643,6 +681,20 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	}
 	if !strings.Contains(string(audit), "\"operation\":\"continue\"") || strings.Contains(string(audit), privatePrompt) || strings.Contains(string(audit), "OPENAI_API_KEY") || strings.Contains(string(audit), "sk-not-a-real-secret") {
 		t.Fatalf("continuation audit exposed prompt data: %q", audit)
+	}
+	wake.readiness = wakeclient.OwnerReadiness{Running: true, Detail: "Mac wake scheduling is turned off in Ori's settings"}
+	output.Reset()
+	stderr.Reset()
+	nextDue := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", nextDue, "--wake"}); exit != 1 {
+		t.Fatalf("wake-disabled continue exit = %d; output=%s stderr=%s", exit, output.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "wake_unavailable") || !strings.Contains(stderr.String(), "turned off") {
+		t.Fatalf("wake-disabled error = %q", stderr.String())
+	}
+	stateAfter, err = store.Load()
+	if err != nil || len(stateAfter.Features[paths.RepositoryID+":bridge"].Schedules) != 1 {
+		t.Fatalf("wake-disabled continuation created a schedule: %#v, %v", stateAfter, err)
 	}
 	if filepath.Clean(repo) == filepath.Clean(feature) {
 		t.Fatal("fixture did not create a linked feature worktree")

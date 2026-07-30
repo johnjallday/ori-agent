@@ -2,12 +2,13 @@
 //
 // The helper never programs a macOS wake. It writes a candidate to the shared
 // store and then waits to be told, by the one process that runs `pmset`, that
-// the wake actually exists. That distinction is the whole design: an Overnight
-// Run may only sleep the Mac on evidence it did not produce itself.
+// the wake actually exists. That distinction is the whole design: a helper may
+// only claim wake coverage on evidence it did not produce itself.
 //
 // If Ori's server is not running, nothing picks the candidate up, verification
-// never succeeds, and the run stays awake. That is the correct outcome, and it
-// is reached by doing nothing rather than by handling an error.
+// never succeeds. An Overnight Run stays awake, and a wake-required one-time
+// continuation fails before it can claim readiness. Those are the correct
+// outcomes, reached by doing nothing rather than by guessing.
 package wakeclient
 
 import (
@@ -43,6 +44,9 @@ var ErrNotProgrammed = errors.New("the requested wake has not been programmed")
 type Client struct {
 	// Store is the shared coordinator; nil resolves the default location.
 	Store *wakecoord.Store
+	// Source scopes registration, verification, and cancellation to one
+	// subsystem. Existing callers default to Overnight Runs.
+	Source string
 	// Now supplies the clock.
 	Now func() time.Time
 	// VerifyTimeout and VerifyInterval bound waiting for the owner.
@@ -51,15 +55,36 @@ type Client struct {
 }
 
 // New builds a Client over an explicit coordinator directory.
-func New(dir string) *Client { return &Client{Store: wakecoord.New(dir)} }
+func New(dir string) *Client {
+	return NewForSource(dir, wakecoord.SourceOvernightRun)
+}
+
+// NewForSource builds a client whose candidate operations are isolated to one
+// wake source.
+func NewForSource(dir, source string) *Client {
+	return &Client{Store: wakecoord.New(dir), Source: source}
+}
 
 // Default builds a Client over the shared location both processes compute.
 func Default() (*Client, error) {
+	return DefaultForSource(wakecoord.SourceOvernightRun)
+}
+
+// DefaultForSource builds a source-scoped client over the shared location both
+// processes compute.
+func DefaultForSource(source string) (*Client, error) {
 	dir, err := wakecoord.DefaultDir()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrUnavailable, err)
 	}
-	return New(dir), nil
+	return NewForSource(dir, source), nil
+}
+
+func (c *Client) source() string {
+	if c.Source != "" {
+		return c.Source
+	}
+	return wakecoord.SourceOvernightRun
 }
 
 func (c *Client) now() time.Time {
@@ -94,7 +119,7 @@ func (c *Client) Register(runID string, wakeAt time.Time, detail string) error {
 	now := c.now()
 	candidate := wakecoord.Candidate{
 		ID:     runID,
-		Source: wakecoord.SourceOvernightRun,
+		Source: c.source(),
 		WakeAt: wakeAt.UTC(),
 		Detail: detail,
 		// An unclaimed candidate expires shortly after the wake it asked for,
@@ -130,7 +155,7 @@ func (c *Client) Verify(ctx context.Context, runID string, wakeAt time.Time) (ti
 		if err != nil {
 			return time.Time{}, fmt.Errorf("%w: %s", ErrUnavailable, err)
 		}
-		if found && matches(programmed, runID, wakeAt) {
+		if found && matches(programmed, c.source(), runID, wakeAt) {
 			return programmed.WakeAt, nil
 		}
 		select {
@@ -144,8 +169,8 @@ func (c *Client) Verify(ctx context.Context, runID string, wakeAt time.Time) (ti
 }
 
 // matches reports whether a programmed record describes this run's wake.
-func matches(programmed wakecoord.Programmed, runID string, wakeAt time.Time) bool {
-	if programmed.Source != wakecoord.SourceOvernightRun || programmed.CandidateID != runID {
+func matches(programmed wakecoord.Programmed, source, runID string, wakeAt time.Time) bool {
+	if programmed.Source != source || programmed.CandidateID != runID {
 		return false
 	}
 	if programmed.WakeAt.After(wakeAt) {
@@ -161,7 +186,7 @@ func (c *Client) Cancel(runID string) error {
 	if c.Store == nil {
 		return ErrUnavailable
 	}
-	if err := c.Store.Cancel(wakecoord.SourceOvernightRun, runID, c.now()); err != nil {
+	if err := c.Store.Cancel(c.source(), runID, c.now()); err != nil {
 		return fmt.Errorf("%w: %s", ErrUnavailable, err)
 	}
 	return nil

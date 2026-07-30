@@ -155,6 +155,10 @@ wt herd continue --at 2026-07-24T09:30:00-04:00
 wt herd continue reviewer --at "2026-07-24 09:30" \
   --prompt "Re-read the task list and continue the next incomplete item."
 
+# Opt in to a coordinated macOS wake shortly before the due time.
+wt herd continue builder --feature another-feature \
+  --at "2026-07-24 05:00" --wake
+
 wt herd schedule list
 wt herd schedule show sch-example
 wt herd schedule cancel sch-example
@@ -163,6 +167,21 @@ wt herd schedule cancel sch-example
 Before saving, the command displays the normalized absolute time, timezone,
 feature, role, agent kind, retry deadline, and a prompt summary. Recurrence
 syntax is rejected: v1 supports one-time continuations only.
+
+`--wake` asks Ori's existing single macOS wake owner to make the machine awake
+by the due time. It is deliberately opt-in because waking the whole Mac is a
+system-wide side effect. The command does not report success until the running
+Ori server confirms that `pmset` programmed this exact continuation's wake.
+Ori must already have Mac wake scheduling enabled and administrator approval
+under Settings → Device Capabilities. If registration or confirmation fails,
+the continuation is marked failed and cannot prompt later as an ordinary
+non-waking schedule.
+
+The wake candidate is scoped to the continuation schedule. Delivery, failure,
+or cancellation withdraws only that candidate; workspace-task and Overnight
+Run wakes are preserved. Ori may program a small lead before the requested
+time so macOS, networking, Herdr, and the saved agent session are ready, but
+the continuation prompt is still withheld until the original due time.
 
 On macOS, setup registers a user-level LaunchAgent that runs the stable
 user-local helper. At the due time, only idle and done agents are eligible.

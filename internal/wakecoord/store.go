@@ -2,10 +2,11 @@
 // and the one process allowed to program it.
 //
 // Ori owns exactly one system wake event. Scheduled workspace tasks ask for one
-// from inside the server; an Overnight Run asks for one from the Herdr devflow
-// helper, which is a separate process started by a LaunchAgent. If both called
-// `pmset` there would be two processes each believing they owned Ori's single
-// wake, and whichever ran last would silently cancel the other's.
+// from inside the server; Herdr Overnight Runs and wake-enabled one-time
+// continuations ask from the devflow helper, which is a separate process
+// started by a LaunchAgent. If each called `pmset` there would be several
+// processes believing they owned Ori's single wake, and whichever ran last
+// would silently cancel the others.
 //
 // So they do not both call it. Candidates are written to a shared, file-locked
 // store that any Ori process may append to, and exactly one owner — the macOS
@@ -18,9 +19,10 @@
 // no port, no token to distribute, and no new network surface. It also makes
 // verification honest: the helper does not get to claim its own wake was
 // programmed — it reads back a record written by the only process that ran
-// `pmset`. If that record never appears, the wake was never programmed, and the
-// Overnight Run stays awake. The failure mode is reached by doing nothing,
-// which is the only failure mode worth relying on.
+// `pmset`. If that record never appears, the wake was never programmed: an
+// Overnight Run stays awake, and a wake-required continuation fails readiness.
+// The failure mode is reached by doing nothing, which is the only failure mode
+// worth relying on.
 package wakecoord
 
 import (
@@ -48,11 +50,12 @@ const (
 )
 
 // Known sources. A candidate names the subsystem that wants the wake so
-// cancellation can be scoped: withdrawing an Overnight Run's wake must never
-// withdraw a scheduled workspace task's.
+// cancellation can be scoped: withdrawing one continuation's wake must never
+// withdraw an Overnight Run or scheduled workspace task wake.
 const (
-	SourceWorkspaceTask = "workspace-task"
-	SourceOvernightRun  = "herdr-overnight"
+	SourceWorkspaceTask     = "workspace-task"
+	SourceOvernightRun      = "herdr-overnight"
+	SourceHerdrContinuation = "herdr-continuation"
 )
 
 // Candidate is one requested wake.
@@ -204,9 +207,9 @@ func (s *Store) hasDocument() bool {
 
 // Cancel removes one candidate, scoped to its own source.
 //
-// The scoping is the whole point: an Overnight Run withdrawing its wake must
-// not be able to withdraw the wake a scheduled workspace task depends on, even
-// by accident and even if the identifiers collided.
+// The scoping is the whole point: one subsystem withdrawing its wake must not
+// be able to withdraw another subsystem's, even by accident and even if their
+// identifiers collided.
 func (s *Store) Cancel(source, id string, now time.Time) error {
 	if !s.hasDocument() {
 		// Nothing was ever registered, so there is nothing to withdraw.

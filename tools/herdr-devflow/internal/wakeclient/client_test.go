@@ -132,6 +132,43 @@ func TestCancelWithdrawsOnlyThisRunsCandidate(t *testing.T) {
 	}
 }
 
+func TestSourceScopedClientDoesNotClaimOrCancelAnotherHerdrWake(t *testing.T) {
+	dir := t.TempDir()
+	continuation := NewForSource(dir, wakecoord.SourceHerdrContinuation)
+	continuation.Now = func() time.Time { return now }
+	continuation.VerifyTimeout = 10 * time.Millisecond
+	continuation.VerifyInterval = time.Millisecond
+	overnight := NewForSource(dir, wakecoord.SourceOvernightRun)
+	overnight.Now = func() time.Time { return now }
+	store := wakecoord.New(dir)
+	wakeAt := now.Add(time.Hour)
+
+	if err := continuation.Register("sch-1", wakeAt, "one-time continuation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := overnight.Register("sch-1", now.Add(2*time.Hour), "Claude reset"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordProgrammed(wakecoord.Programmed{
+		CandidateID: "sch-1", Source: wakecoord.SourceOvernightRun, WakeAt: wakeAt,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := continuation.Verify(context.Background(), "sch-1", wakeAt); !errors.Is(err, ErrNotProgrammed) {
+		t.Fatalf("continuation verified an Overnight wake: %v", err)
+	}
+	if err := continuation.Cancel("sch-1"); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := store.Candidates(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].Source != wakecoord.SourceOvernightRun {
+		t.Fatalf("candidates = %+v, want only the Overnight wake", candidates)
+	}
+}
+
 // TestASilentOwnerIsNotReady is the case where Ori simply is not running.
 func TestASilentOwnerIsNotReady(t *testing.T) {
 	client, _ := newClient(t)

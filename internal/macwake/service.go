@@ -50,9 +50,10 @@ type Service struct {
 	euid          func() int
 	pmsetRunner   func(args []string, allowAdminPrompt bool) error
 	eventLister   func() []string
-	// coordinator holds wake candidates written by other Ori processes — today
-	// the Herdr devflow helper's Overnight Runs. This service remains the only
-	// caller of pmset; the coordinator is how anything else asks it for a wake.
+	// coordinator holds wake candidates written by other Ori processes,
+	// including Herdr Overnight Runs and wake-enabled one-time continuations.
+	// This service remains the only caller of pmset; the coordinator is how
+	// anything else asks it for a wake.
 	coordinator *wakecoord.Store
 }
 

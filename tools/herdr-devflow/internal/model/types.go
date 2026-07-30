@@ -26,6 +26,7 @@ const (
 	ErrAgentAmbiguous       ErrorCode = "agent_ambiguous"
 	ErrScheduleInvalid      ErrorCode = "schedule_invalid"
 	ErrSchedulerUnsupported ErrorCode = "scheduler_unsupported"
+	ErrWakeUnavailable      ErrorCode = "wake_unavailable"
 	ErrStateCorrupt         ErrorCode = "state_corrupt"
 )
 
@@ -107,29 +108,34 @@ type PromptDelivery struct {
 // Schedule records a one-time continuation. Prompt text stays in user-local
 // state and must never be rendered by status or diagnostics.
 type Schedule struct {
-	ID              string        `json:"id"`
-	FeaturePath     string        `json:"feature_path"`
-	Role            string        `json:"role"`
-	AgentName       string        `json:"agent_name"`
-	AgentKind       string        `json:"agent_kind"`
-	WorkspaceID     string        `json:"workspace_id"`
-	PaneID          string        `json:"pane_id"`
-	TerminalID      string        `json:"terminal_id"`
-	NativeSession   NativeSession `json:"native_session"`
-	DueAt           time.Time     `json:"due_at"`
-	RetryUntil      time.Time     `json:"retry_until"`
-	Timezone        string        `json:"timezone"`
-	Prompt          string        `json:"prompt"`
-	State           ScheduleState `json:"state"`
-	Attempts        int           `json:"attempts"`
-	LastCheckedAt   time.Time     `json:"last_checked_at,omitempty"`
-	LastAttemptAt   time.Time     `json:"last_attempt_at,omitempty"`
-	DeliveredAt     time.Time     `json:"delivered_at,omitempty"`
-	CanceledAt      time.Time     `json:"canceled_at,omitempty"`
-	FailureReason   string        `json:"failure_reason,omitempty"`
-	RecoveryCommand string        `json:"recovery_command,omitempty"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+	ID                string        `json:"id"`
+	FeaturePath       string        `json:"feature_path"`
+	Role              string        `json:"role"`
+	AgentName         string        `json:"agent_name"`
+	AgentKind         string        `json:"agent_kind"`
+	WorkspaceID       string        `json:"workspace_id"`
+	PaneID            string        `json:"pane_id"`
+	TerminalID        string        `json:"terminal_id"`
+	NativeSession     NativeSession `json:"native_session"`
+	DueAt             time.Time     `json:"due_at"`
+	RetryUntil        time.Time     `json:"retry_until"`
+	Timezone          string        `json:"timezone"`
+	Prompt            string        `json:"prompt"`
+	WakeRequired      bool          `json:"wake_required,omitempty"`
+	WakeCandidateID   string        `json:"wake_candidate_id,omitempty"`
+	WakeProgrammedAt  time.Time     `json:"wake_programmed_at,omitempty"`
+	WakeVerifiedAt    time.Time     `json:"wake_verified_at,omitempty"`
+	WakeFailureReason string        `json:"wake_failure_reason,omitempty"`
+	State             ScheduleState `json:"state"`
+	Attempts          int           `json:"attempts"`
+	LastCheckedAt     time.Time     `json:"last_checked_at,omitempty"`
+	LastAttemptAt     time.Time     `json:"last_attempt_at,omitempty"`
+	DeliveredAt       time.Time     `json:"delivered_at,omitempty"`
+	CanceledAt        time.Time     `json:"canceled_at,omitempty"`
+	FailureReason     string        `json:"failure_reason,omitempty"`
+	RecoveryCommand   string        `json:"recovery_command,omitempty"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 // ScheduleState is intentionally richer than a boolean so users can see

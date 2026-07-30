@@ -50,12 +50,13 @@ type Service struct {
 }
 
 type CreateRequest struct {
-	Feature     model.Feature
-	Agent       model.RoleAgent
-	DueAt       time.Time
-	Timezone    string
-	Prompt      string
-	RetryWindow time.Duration
+	Feature      model.Feature
+	Agent        model.RoleAgent
+	DueAt        time.Time
+	Timezone     string
+	Prompt       string
+	RetryWindow  time.Duration
+	WakeRequired bool
 }
 
 type DispatchResult struct {
@@ -192,15 +193,79 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (model.Sche
 		RetryUntil:    request.DueAt.UTC().Add(request.RetryWindow),
 		Timezone:      request.Timezone,
 		Prompt:        request.Prompt,
+		WakeRequired:  request.WakeRequired,
 		State:         model.SchedulePending,
 		CreatedAt:     now,
 		UpdatedAt:     now,
+	}
+	if request.WakeRequired {
+		schedule.WakeCandidateID = id
 	}
 	featureState.Schedules[id] = schedule
 	featureState.UpdatedAt = now
 	state.Features[key] = featureState
 	if err := s.Store.Save(state); err != nil {
 		return model.Schedule{}, stateError("schedule state", "could not save the one-time continuation", "check local state permissions, then retry", err)
+	}
+	return schedule, nil
+}
+
+// RecordWakeResult stores the single wake owner's evidence, or fails a
+// wake-required schedule before it can be delivered. Registration alone is
+// never treated as proof that macOS will wake the machine.
+func (s *Service) RecordWakeResult(ctx context.Context, ref ScheduleRef, id string, programmedAt time.Time, failure string) (model.Schedule, error) {
+	if !scheduleIDPattern.MatchString(id) {
+		return model.Schedule{}, stateError("schedule wake", "schedule id is invalid", "use wt herd schedule list", nil)
+	}
+	if s.Store == nil {
+		return model.Schedule{}, stateError("schedule wake", "the local schedule store is unavailable", "wt herd doctor", nil)
+	}
+	unlock, err := s.Store.Lock(ctx)
+	if err != nil {
+		return model.Schedule{}, stateError("schedule lock", "could not acquire the local scheduler lock", "retry", err)
+	}
+	defer unlock()
+	state, err := s.Store.Load()
+	if err != nil {
+		return model.Schedule{}, stateError("schedule state", "could not load local schedules", "wt herd doctor", err)
+	}
+	key := ref.RepositoryID + ":" + ref.FeatureName
+	featureState, ok := state.Features[key]
+	if !ok {
+		return model.Schedule{}, stateError("schedule wake", "managed feature was not found", "run from a managed feature worktree", nil)
+	}
+	schedule, ok := featureState.Schedules[id]
+	if !ok {
+		return model.Schedule{}, stateError("schedule wake", "schedule was not found", "wt herd schedule list", nil)
+	}
+	if !schedule.WakeRequired {
+		return model.Schedule{}, stateError("schedule wake", "this continuation did not request a system wake", "recreate it with wt herd continue --wake", nil)
+	}
+	if schedule.State != model.SchedulePending {
+		return model.Schedule{}, stateError("schedule wake", "only a pending continuation can record wake readiness", "wt herd schedule show "+id, nil)
+	}
+
+	now := s.now()
+	failure = strings.TrimSpace(failure)
+	if failure != "" {
+		schedule.State = model.ScheduleFailed
+		schedule.WakeFailureReason = failure
+		schedule.FailureReason = "required system wake was not confirmed"
+		schedule.RecoveryCommand = "wt herd schedule show " + id
+	} else {
+		if programmedAt.IsZero() || programmedAt.After(schedule.DueAt) {
+			return model.Schedule{}, stateError("schedule wake", "the confirmed wake time is missing or later than the continuation", "cancel and recreate the continuation", nil)
+		}
+		schedule.WakeProgrammedAt = programmedAt.UTC()
+		schedule.WakeVerifiedAt = now
+		schedule.WakeFailureReason = ""
+	}
+	schedule.UpdatedAt = now
+	featureState.Schedules[id] = schedule
+	featureState.UpdatedAt = now
+	state.Features[key] = featureState
+	if err := s.Store.Save(state); err != nil {
+		return model.Schedule{}, stateError("schedule state", "could not save wake readiness", "check local state permissions, then retry", err)
 	}
 	return schedule, nil
 }
@@ -316,6 +381,16 @@ func (s *Service) dispatchOne(ctx context.Context, feature model.Feature, schedu
 	if !schedule.RetryUntil.IsZero() && now.After(schedule.RetryUntil) {
 		schedule.State = model.ScheduleFailed
 		schedule.FailureReason = "retry window elapsed before a safe delivery"
+		schedule.RecoveryCommand = "wt herd schedule show " + schedule.ID
+		schedule.UpdatedAt = now
+		return resultFor(feature, *schedule), true, false, nil
+	}
+	if schedule.WakeRequired && schedule.WakeVerifiedAt.IsZero() {
+		schedule.State = model.ScheduleFailed
+		schedule.FailureReason = "required system wake was never verified"
+		if schedule.WakeFailureReason == "" {
+			schedule.WakeFailureReason = schedule.FailureReason
+		}
 		schedule.RecoveryCommand = "wt herd schedule show " + schedule.ID
 		schedule.UpdatedAt = now
 		return resultFor(feature, *schedule), true, false, nil

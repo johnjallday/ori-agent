@@ -236,6 +236,99 @@ func TestCreatePersistsFeatureScopedOneTimeSchedule(t *testing.T) {
 	}
 }
 
+func TestWakeRequiredScheduleNeedsOwnerEvidenceBeforeDispatch(t *testing.T) {
+	now := testNow()
+	feature, agent, live := testIdentity()
+	store := newMemoryStore()
+	store.seed(feature, agent)
+	service := &Service{
+		Store:  store,
+		Client: newFakeHerdr(live),
+		Now: func() time.Time {
+			return now
+		},
+		NewID: func() (string, error) { return "sch-wake", nil },
+	}
+	record, err := service.Create(context.Background(), CreateRequest{
+		Feature: feature, Agent: agent, DueAt: now.Add(time.Hour), Timezone: "America/New_York",
+		Prompt: "Continue safely.", RetryWindow: 15 * time.Minute, WakeRequired: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.WakeRequired || record.WakeCandidateID != record.ID || !record.WakeVerifiedAt.IsZero() {
+		t.Fatalf("wake fields = %#v", record)
+	}
+
+	service.Now = func() time.Time { return record.DueAt }
+	results, err := service.DispatchDue(context.Background())
+	if err != nil || len(results) != 1 || results[0].Outcome != model.ScheduleFailed {
+		t.Fatalf("unverified DispatchDue() = %#v, %v", results, err)
+	}
+	if service.Client.(*fakeHerdr).promptCalls != 0 {
+		t.Fatal("unverified wake schedule prompted the agent")
+	}
+}
+
+func TestRecordWakeResultAllowsVerifiedScheduleAndFailsUnverifiedOne(t *testing.T) {
+	now := testNow()
+	feature, agent, live := testIdentity()
+	ref := ScheduleRef{RepositoryID: feature.RepositoryID, FeatureName: feature.Name}
+
+	t.Run("verified", func(t *testing.T) {
+		store := newMemoryStore()
+		store.seed(feature, agent)
+		client := newFakeHerdr(live)
+		service := &Service{
+			Store: store, Client: client, Now: func() time.Time { return now },
+			NewID: func() (string, error) { return "sch-verified", nil },
+		}
+		record, err := service.Create(context.Background(), CreateRequest{
+			Feature: feature, Agent: agent, DueAt: now.Add(time.Hour), Prompt: "Continue safely.",
+			RetryWindow: 15 * time.Minute, WakeRequired: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		programmed := record.DueAt.Add(-time.Minute)
+		record, err = service.RecordWakeResult(context.Background(), ref, record.ID, programmed, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.WakeVerifiedAt.IsZero() || !record.WakeProgrammedAt.Equal(programmed) {
+			t.Fatalf("verified wake = %#v", record)
+		}
+		service.Now = func() time.Time { return record.DueAt }
+		results, err := service.DispatchDue(context.Background())
+		if err != nil || len(results) != 1 || results[0].Outcome != model.ScheduleDelivered || client.promptCalls != 1 {
+			t.Fatalf("verified DispatchDue() = %#v, %v, prompts=%d", results, err, client.promptCalls)
+		}
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		store := newMemoryStore()
+		store.seed(feature, agent)
+		service := &Service{
+			Store: store, Now: func() time.Time { return now },
+			NewID: func() (string, error) { return "sch-failed-wake", nil },
+		}
+		record, err := service.Create(context.Background(), CreateRequest{
+			Feature: feature, Agent: agent, DueAt: now.Add(time.Hour), Prompt: "Continue safely.",
+			RetryWindow: 15 * time.Minute, WakeRequired: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, err = service.RecordWakeResult(context.Background(), ref, record.ID, time.Time{}, "Ori did not confirm a wake")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.State != model.ScheduleFailed || record.WakeFailureReason == "" {
+			t.Fatalf("failed wake = %#v", record)
+		}
+	})
+}
+
 func TestDispatcherDeliversStubAgentAtOneMinuteDueTime(t *testing.T) {
 	current := testNow()
 	feature, agent, live := testIdentity()
