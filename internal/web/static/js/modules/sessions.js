@@ -3879,8 +3879,11 @@ const sessionManager = {
 
   // Renders classified issues, blockers before advisories, each with the concrete
   // recovery actions its classification implies.
-  renderWorkspaceTeamIssues() {
-    const host = document.getElementById('workspaceTeamIssues');
+  //
+  // Team and Review render the SAME issues from the same classification, so the
+  // receipt can never look calmer than the step it summarizes.
+  renderWorkspaceTeamIssues(hostId = 'workspaceTeamIssues') {
+    const host = document.getElementById(hostId);
     if (!host) return;
     const view = this.teamView();
     if (!view) {
@@ -4550,26 +4553,127 @@ const sessionManager = {
       heading.textContent = roster.length === 1 ? 'Workspace Assistant' : 'Workspace Team';
     }
     if (teamSummary) teamSummary.textContent = this.workspaceTeamSummaryText(view);
-    if (summary) {
-      const blueprint =
-        selectedTemplate?.blank || !selectedTemplate?.name
-          ? 'Blank workspace'
-          : selectedTemplate.name;
-      const slug = name ? this.slugifyWorkspaceName(name) : 'Set a workspace name';
-      summary.innerHTML = `
-        <div class="workspace-review-summary-row">
-          <div><span>Blueprint</span><strong>${this.escapeHtml(blueprint)}</strong></div>
-          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="1">Edit</button>
-        </div>
-        <div class="workspace-review-summary-row">
-          <div><span>Workspace</span><strong>${this.escapeHtml(name || 'Untitled workspace')}</strong><small>Folder: ${this.escapeHtml(slug)}</small></div>
-          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
-        </div>`;
-    }
+    if (summary) summary.innerHTML = this.renderWorkspaceReceipt(view, selectedTemplate, name);
     this.renderSetupPreview(selectedTemplate);
     this.renderWorkspaceTeamIssues();
+    this.renderWorkspaceTeamIssues('workspaceReviewIssues');
     this.renderWorkspaceTeamRoster();
     this.renderBlueprintAgentSummary();
+  },
+
+  // Review's receipt: what will exist, stated once, with a route back to the step
+  // that owns each value. Deliberately read-only — every control that could
+  // change something lives on the step it belongs to.
+  renderWorkspaceReceipt(view, selectedTemplate, name) {
+    const blueprint =
+      selectedTemplate?.blank || !selectedTemplate?.name
+        ? 'Blank workspace'
+        : selectedTemplate.name;
+    const slug = name ? this.slugifyWorkspaceName(name) : '';
+    // The workspace name is the primary value; the blueprint is where it came
+    // from, so it reads as provenance rather than a second, equal identity.
+    const provenance = [
+      `Based on ${this.escapeHtml(blueprint)}`,
+      slug ? `Folder: ${this.escapeHtml(slug)}` : ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const identity = `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled workspace')}</strong>
+          <span class="workspace-review-card-meta">${provenance}</span>
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="1">Change blueprint</button>
+        </div>
+      </div>`;
+
+    const choices = this.workspaceReviewDetailChoices();
+    const details = choices.length
+      ? `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Details</span>
+          <span class="workspace-review-card-meta">${this.escapeHtml(choices.join(' · '))}</span>
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
+        </div>
+      </div>`
+      : '';
+
+    return identity + details + this.renderWorkspaceReceiptTeam(view);
+  },
+
+  // Names the primary and accounts for the specialists — the two facts that
+  // decide whether this is the team the user meant. Never the roster editor.
+  renderWorkspaceReceiptTeam(view) {
+    const roster = view ? view.roster : [];
+    const specialists = roster.filter(entry => entry.designation === 'specialist');
+    const primary = roster.find(entry => entry.designation === 'primary');
+
+    const lines = [];
+    if (primary) {
+      lines.push(`${primary.name} · Primary`);
+    } else {
+      lines.push('No primary agent');
+    }
+    if (specialists.length) {
+      // Name them while the list is short enough to be worth reading; past that
+      // the count is the useful fact.
+      lines.push(
+        specialists.length <= 3
+          ? `${specialists.length} specialist${specialists.length === 1 ? '' : 's'}: ${specialists.map(entry => entry.name).join(', ')}`
+          : `${specialists.length} specialists`
+      );
+    }
+    lines.push(this.workspaceTeamSummaryText(view));
+
+    return `
+      <div class="workspace-review-card">
+        <div class="workspace-review-card-main">
+          <span class="workspace-review-card-label">Team</span>
+          ${lines.map(line => `<span class="workspace-review-card-meta">${this.escapeHtml(line)}</span>`).join('')}
+        </div>
+        <div class="workspace-review-card-actions">
+          <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit</button>
+        </div>
+      </div>`;
+  },
+
+  // Only choices that materially change what gets created, and only when they
+  // differ from the default. A receipt listing every default would bury the few
+  // things the user actually decided.
+  workspaceReviewDetailChoices() {
+    const choices = [];
+
+    const parentSelect = document.getElementById('folderParentSelect');
+    if (parentSelect && parentSelect.value) {
+      const label = parentSelect.options[parentSelect.selectedIndex]?.textContent?.trim();
+      if (label) choices.push(`Group: ${label}`);
+    }
+
+    if (window.ProjectTemplateCard?.shouldOpenAfterCreate?.()) {
+      choices.push('Opens the project after creation');
+    }
+
+    const profile = document.getElementById('folderPresetSelect')?.value || 'general';
+    if (profile !== 'general') {
+      choices.push(`Agent behavior: ${this.behaviorProfileLabel(profile)}`);
+    }
+
+    const templatePath = String(
+      document.getElementById('projectTemplatePathInput')?.value || ''
+    ).trim();
+    if (templatePath) choices.push(`Folder template: ${templatePath}`);
+
+    const tagCount = window.WorkspaceTagsCard?.getPayloadFields?.().tags?.length || 0;
+    if (tagCount > 0) choices.push(`${tagCount} tag${tagCount === 1 ? '' : 's'}`);
+
+    return choices;
   },
 
   // Counts what the request will actually do, in future tense. Grouped by

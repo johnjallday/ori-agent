@@ -1308,6 +1308,107 @@ test('changing blueprint keeps saved agents and attaches a duplicate only once',
   expect(payload?.entry_agent_name).toBeUndefined();
 });
 
+test('Review reads as a receipt: name once, blueprint as provenance, team summarized', async ({
+  page
+}) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Reaper Producer',
+        agents: [
+          { name: 'Reaper Producer', action: 'reuse', entry_point: true, model_source: 'existing' },
+          { name: 'Session Scout', action: 'create', entry_point: false, model_source: 'agent_default' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Midnight Sessions');
+  await advanceToTeam(page);
+  await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await advanceToReviewFromTeam(page);
+
+  const receipt = page.locator('#workspaceReviewSummary');
+
+  // The workspace name appears once, as the primary value; the blueprint is
+  // provenance beneath it, not a second equal-weight row (FR78, FR79).
+  await expect(receipt.locator('.workspace-review-identity-name')).toHaveText('Midnight Sessions');
+  await expect(receipt).toContainText('Based on Reaper Song');
+  await expect(receipt).toContainText('Folder: midnight-sessions');
+  await expect(receipt.locator('.workspace-review-identity-name')).toHaveCount(1);
+
+  // A compact team summary: who is primary, how many specialists, what happens.
+  await expect(receipt).toContainText('Reaper Producer · Primary');
+  await expect(receipt).toContainText('2 specialists: Session Scout, Research Scout');
+  await expect(receipt).toContainText('will be created and attached');
+
+  // Review is a receipt, not a second configuration surface (FR83).
+  await expect(page.locator('#wizardStep4 #workspaceTeamRoster')).toHaveCount(0);
+  await expect(page.locator('#wizardStep4 #existingAgentRosterPanel')).toHaveCount(0);
+  await expect(page.locator('#wizardStep4 [data-team-customize]')).toHaveCount(0);
+  await expect(page.locator('#wizardStep4 [data-existing-agent-add]')).toHaveCount(0);
+  await expect(page.locator('#wizardStep4 [data-existing-agent-primary]')).toHaveCount(0);
+  await expect(page.locator('#wizardStep4 #templateAgentReviewToggle')).toHaveCount(0);
+  await expect(page.locator('#wizardStep4 #projectTemplateOpenAfterCreateToggle')).toHaveCount(0);
+
+  // The post-create setup preview stays (FR84).
+  await expect(page.locator('#workspaceSetupPreview')).toBeVisible();
+
+  // Edit round trips return to the owning step and preserve everything else.
+  await receipt.locator('[data-wizard-edit-step="3"]').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(3);
+  await advanceToReviewFromTeam(page);
+  await expect(receipt).toContainText('Midnight Sessions');
+
+  // The identity card's own Edit (the Details card carries a second one).
+  const identityCard = receipt
+    .locator('.workspace-review-card')
+    .filter({ has: page.locator('.workspace-review-identity-name') });
+  await identityCard.locator('[data-wizard-edit-step="2"]').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#folderNameInput')).toHaveValue('Midnight Sessions');
+  await advanceToReview(page);
+  await expect(receipt).toContainText('2 specialists: Session Scout, Research Scout');
+});
+
+test('Review summarizes only the details that were actually chosen (FR81)', async ({ page }) => {
+  await routeProjectEntryTemplates(page);
+
+  await openCreateModal(page);
+  // Blank with no extra choices: nothing material to restate.
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Plain WS');
+  await advanceToReview(page);
+  await expect(page.locator('#workspaceReviewSummary')).not.toContainText('Agent behavior:');
+  await expect(page.locator('#workspaceReviewSummary')).not.toContainText('Opens the project');
+
+  // A non-default behavior profile and a launch choice are worth restating.
+  await returnToBlueprints(page);
+  await cardByLabel(page, 'Auto Project').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderAdvancedDisclosure .workspace-advanced-summary').click();
+  await page.locator('#folderPresetSelect').selectOption('research');
+  await advanceToReview(page);
+  await expect(page.locator('#workspaceReviewSummary')).toContainText('Opens the project after creation');
+  await expect(page.locator('#workspaceReviewSummary')).toContainText('Agent behavior: Research');
+});
+
 test('a failed create keeps the draft, shows the real error, and routes back (FR90, FR99)', async ({
   page
 }) => {

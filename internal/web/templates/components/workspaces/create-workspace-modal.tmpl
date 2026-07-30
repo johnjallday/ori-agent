@@ -336,6 +336,10 @@
 
               <div id="workspaceReviewSummary" class="workspace-review-summary" aria-live="polite"></div>
 
+              <!-- The same classified issues Team shows, blockers first, so the
+                   receipt can never look calmer than the step it summarizes. -->
+              <div id="workspaceReviewIssues" class="workspace-team-issues"></div>
+
               <!-- Authoritative server failure. A toast disappears and cannot be
                    focused or acted on, so a failed create also lands here with
                    the real message and a way back to the step that owns it. -->
