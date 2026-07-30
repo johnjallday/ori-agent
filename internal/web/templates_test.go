@@ -185,6 +185,19 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		// Step headings: Team assembles, Review confirms.
 		`Build your workspace team`,
 		`Ready to create?`,
+		// Blueprint shows a read-only, plan-derived included-agent summary.
+		`id="blueprintAgentSummary"`,
+		`id="blueprintAgentSummaryText"`,
+		`Included agents`,
+		// Blueprint keeps selection, briefing, scaffold, add-ons, and Manage.
+		`id="templatePicker"`,
+		`id="projectTemplateManageLink"`,
+		`id="templateBriefing"`,
+		`id="templateBriefingScaffoldRow"`,
+		`id="templateBriefingAddonsRow"`,
+		// Details keeps the mutable pre-create readiness controls (FR29, FR30).
+		`id="projectTemplateOpenAfterCreate"`,
+		`id="reaperSetupCard"`,
 		// Team owns the roster and the inline saved-agent picker.
 		`id="workspaceTeamLayout"`,
 		`id="workspaceTeamReview"`,
@@ -219,6 +232,19 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		// The picker is permanent inline markup on Team, so it has no close
 		// button and is never opened from a Review-step button.
 		`id="closeExistingAgentRosterBtn"`,
+		// Blueprint carries NO interactive agent surface (FR20): no map preview,
+		// no create-all shortcut, and no reusable-agent setup form.
+		`id="workspaceAgentMapPreview"`,
+		`id="workspaceAgentMapNode"`,
+		`id="workspaceAgentMapStatus"`,
+		`id="workspaceAgentMapAvatarAction"`,
+		`id="workspaceAgentMapCreateAll"`,
+		`id="workspaceAgentMapSpecialists"`,
+		`id="workspaceTemplateAgentSetup"`,
+		`id="workspaceTemplateAgentSetupForm"`,
+		`id="workspaceTemplateAgentSetupSave"`,
+		`Create all defaults`,
+		`Save reusable agent`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Create Workspace wizard contains stale markup/copy %q", gone)

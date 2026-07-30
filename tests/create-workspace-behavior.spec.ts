@@ -201,6 +201,38 @@ test('Details blocks continuing to Team until the workspace is named', async ({ 
   await expect(page.locator('#wizardStep3')).toBeVisible();
 });
 
+test('Details blocks a folder slug an existing workspace already uses (FR28)', async ({ page }) => {
+  // The workspace list the modal compares against is loaded from
+  // /api/workspaces?tree=true; match the query string explicitly so this stub
+  // cannot swallow the create POST to the bare /api/workspaces path.
+  await page.route('**/api/workspaces?tree=true*', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        folders: [{ id: 'ws-1', name: 'Taken Name', kind: 'workspace', folder_slug: 'taken-name' }],
+        workspaces: []
+      })
+    });
+  });
+  await page.reload();
+
+  await openCreateModal(page);
+  await advanceToWorkspaceDetails(page);
+  // Different capitalisation and punctuation, same resulting folder.
+  await page.locator('#folderNameInput').fill('taken NAME');
+  await page.locator('#wizardNextBtn').click();
+
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await expect(page.locator('#wizardStep3')).toBeHidden();
+  await expect(page.locator('#workspaceNameHint')).toContainText('already uses the folder');
+  await expect(page.locator('#folderNameInput')).toBeFocused();
+
+  await page.locator('#folderNameInput').fill('Fresh Name');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+});
+
 test('Import mode stays single-step and never exposes Team, Review, or the stepper', async ({
   page
 }) => {
@@ -688,50 +720,25 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   await advanceToTeam(page);
 
   const review = page.locator('#templateAgentReview');
-  await expect(review).toContainText('Blueprint agents');
   await expect(review).toContainText('Research Lead');
-  await expect(review).toContainText('New reusable agent · Added to Your Agents and attached');
   await expect(review).toContainText('Primary workspace agent');
-  const preview = page.locator('#workspaceAgentMapPreview');
-  await expect(preview).toContainText('Workspace team · 3 agents');
-  await expect(preview).toContainText('Research Lead');
-  await expect(preview).toContainText('Source Scout');
-  await expect(preview).toContainText('Synthesis Writer');
-  await expect(preview).toContainText('Synthesis Writer is not in Your Agents yet');
-  await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-ready/);
-  await expect(page.locator('#workspaceAgentMapSpecialists')).toHaveText(
-    /Source Scout[\s\S]*Synthesis Writer/
-  );
-  await expect(page.locator('.workspace-agent-map-specialist-create-badge')).toHaveCSS(
-    'display',
-    'grid'
-  );
-
-  await review.locator('.workspace-template-agent-advanced summary').click();
-  await review.locator('#templateAgentReviewToggle').uncheck();
-  await expect(preview).toContainText('No agent selected');
-  await expect(page.locator('#workspaceAgentMapNode')).toHaveClass(/is-missing/);
-  await expect(page.locator('.workspace-agent-map-avatar-placeholder')).toHaveCSS(
-    'display',
-    'block'
-  );
 });
 
-test('primary avatar opens setup before saving a reusable template agent', async ({ page }) => {
-  let createPayload: Record<string, unknown> | null = null;
+test('Blueprint summarizes included agents read-only, with no agent controls', async ({ page }) => {
   await page.route('**/api/workspaces/template-agent-plan**', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         has_agents: true,
+        entry_agent_name: 'Research Lead',
         agents: [
+          { name: 'Research Lead', action: 'reuse', entry_point: true, model_source: 'template' },
+          { name: 'Source Scout', action: 'reuse', entry_point: false, model_source: 'agent_default' },
           {
-            name: 'Reaper Producer',
-            scope: 'reusable',
+            name: 'Synthesis Writer',
             action: 'create',
-            entry_point: true,
-            role: 'orchestrator',
+            entry_point: false,
             model_source: 'agent_default'
           }
         ],
@@ -739,127 +746,199 @@ test('primary avatar opens setup before saving a reusable template agent', async
       })
     });
   });
-  await page.route('**/api/workspaces/template-agent-create', async route => {
-    createPayload = route.request().postDataJSON();
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+
+  // One plain sentence: count, names, and which agent is primary (FR15-FR17).
+  const summary = page.locator('#blueprintAgentSummary');
+  await expect(summary).toBeVisible();
+  await expect(page.locator('#blueprintAgentSummaryText')).toHaveText(
+    'Includes 3 agents: Research Lead (primary), Source Scout, Synthesis Writer.'
+  );
+
+  // FR20: Blueprint offers no agent action at all — the map, the create-all
+  // shortcut, the reusable-agent setup form, and every per-agent control are gone.
+  await expect(page.locator('#workspaceAgentMapPreview')).toHaveCount(0);
+  await expect(page.locator('#workspaceTemplateAgentSetup')).toHaveCount(0);
+  await expect(page.locator('#workspaceAgentMapCreateAll')).toHaveCount(0);
+  await expect(page.locator('#wizardStep1 [data-template-agent-index]')).toHaveCount(0);
+  await expect(page.locator('#wizardStep1 #templateAgentReview')).toHaveCount(0);
+  await expect(page.locator('#wizardStep1 #templateAgentReviewToggle')).toHaveCount(0);
+});
+
+test('Blueprint tells checking, empty, and unavailable apart (FR18, FR19)', async ({ page }) => {
+  // A blueprint that declares no agents: a confirmed empty team, not a blank panel.
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ has_agents: false, agents: [], warnings: [] })
+    });
+  });
+  await openCreateModal(page);
+  await cardByLabel(page, 'Travels').click();
+  await expect(page.locator('#blueprintAgentSummaryText')).toHaveText(
+    'This blueprint includes no agents. You can add saved agents to the team in step 3.'
+  );
+  await expect(page.locator('#blueprintAgentSummary')).toHaveClass(/is-empty/);
+
+  // A plan that cannot be loaded says so, and is never shown as "no agents".
+  await page.unroute('**/api/workspaces/template-agent-plan**');
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'plan backend down' })
+    });
+  });
+  await cardByLabel(page, 'Research Project').click();
+  await expect(page.locator('#blueprintAgentSummary')).toHaveClass(/is-error/);
+  await expect(page.locator('#blueprintAgentSummaryText')).toContainText('could not be checked');
+  await expect(page.locator('#blueprintAgentSummaryText')).not.toContainText('includes no agents');
+});
+
+test('changing blueprint keeps saved agents and attaches a duplicate only once', async ({
+  page
+}) => {
+  // Blueprint A declares no agents; blueprint B declares the very agent the user
+  // added by hand. The selection must survive the switch (FR22) and be attached
+  // exactly once, owned by the blueprint (FR23).
+  await page.route('**/api/agents/dashboard/list**', async route => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        created: true,
-        agent: {
-          name: 'My Reaper Producer',
-          scope: 'reusable',
-          action: 'reuse',
-          entry_point: true,
-          role: 'orchestrator',
-          model: 'gpt-5.3-codex',
-          provider: 'codex',
-          model_source: 'existing'
-        },
-        plan: {
-          has_agents: true,
-          agents: [
-            {
-              name: 'My Reaper Producer',
-              scope: 'reusable',
-              action: 'reuse',
-              entry_point: true,
-              role: 'orchestrator',
-              model: 'gpt-5.3-codex',
-              provider: 'codex',
-              model_source: 'existing'
+        agents: [
+          { name: 'Research Lead', model: 'gpt-5.5', workspace_count: 1 },
+          { name: 'Data Miner', model: 'gpt-5.5-mini', workspace_count: 0 }
+        ]
+      })
+    });
+  });
+  // routeProjectEntryTemplates also stubs the agent plan, so register it first
+  // and let this per-blueprint stub take precedence.
+  await routeProjectEntryTemplates(page);
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    const body = route.request().postDataJSON() || {};
+    const isResearch = String(body.template_id || '') === 'research-project';
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        isResearch
+          ? {
+              has_agents: true,
+              entry_agent_name: 'Research Lead',
+              agents: [
+                {
+                  name: 'Research Lead',
+                  action: 'reuse',
+                  entry_point: true,
+                  model_source: 'existing'
+                }
+              ],
+              warnings: []
             }
-          ],
-          warnings: []
-        }
+          : { has_agents: false, agents: [], warnings: [] }
+      )
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Travels').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Dedup WS');
+  await advanceToTeam(page);
+
+  // Add both saved agents while the blueprint contributes none.
+  await page.locator('[data-existing-agent-add="Research Lead"]').click();
+  await page.locator('[data-existing-agent-add="Data Miner"]').click();
+  const team = page.locator('#existingAgentTeamList');
+  await expect(team).toContainText('Research Lead');
+  await expect(team).toContainText('Data Miner');
+
+  // Switch to a blueprint that already includes Research Lead.
+  await returnToBlueprints(page);
+  await cardByLabel(page, 'Research Project').click();
+  await expect(page.locator('#blueprintAgentSummaryText')).toContainText('Research Lead (primary)');
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await advanceToTeam(page);
+
+  // Research Lead is now owned by the blueprint roster, so the saved-agent list
+  // shows only Data Miner — one attachment, not two.
+  await expect(page.locator('#templateAgentReview')).toContainText('Research Lead');
+  await expect(team).toContainText('Data Miner');
+  await expect(team).not.toContainText('Research Lead');
+
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/workspaces', async route => {
+    payload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ folder: { id: 'dedup-ws' }, seeded_starter_tasks: 0 })
+    });
+  });
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep4')).toBeVisible();
+  await page.locator('#createFolderBtn').click();
+  await page.waitForURL('**/workspaces/dedup-ws');
+
+  // The duplicate is not sent, and the blueprint keeps the primary slot.
+  expect(payload?.existing_agent_names).toEqual(['Data Miner']);
+  expect(payload?.entry_agent_name).toBeUndefined();
+});
+
+test('the wizard never persists an agent before the workspace is created (FR68)', async ({
+  page
+}) => {
+  // The old flow saved reusable agents from the Blueprint step via
+  // /api/workspaces/template-agent-create, so cancelling left them behind in
+  // Your Agents. That path is gone: this asserts no such request is made while
+  // browsing, customizing, or cancelling.
+  const precreateCalls: string[] = [];
+  await page.route('**/api/workspaces/template-agent-create', async route => {
+    precreateCalls.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Reaper Producer',
+        agents: [
+          { name: 'Reaper Producer', action: 'create', entry_point: true, model_source: 'agent_default' },
+          { name: 'Session Scout', action: 'create', entry_point: false, model_source: 'agent_default' }
+        ],
+        warnings: []
       })
     });
   });
 
   await openCreateModal(page);
   await cardByLabel(page, 'Reaper Song').click();
-  const action = page.locator('#workspaceAgentMapAvatarAction');
-  await expect(action).toBeEnabled();
-  await expect(action).toHaveAccessibleName(/set up reaper producer as a reusable agent/i);
-  await action.click();
+  await expect(page.locator('#blueprintAgentSummaryText')).toContainText('Includes 2 agents');
 
-  await expect(page.locator('#workspaceTemplateAgentSetup')).toBeVisible();
-  await expect(page.locator('#workspaceTemplateAgentSetupName')).toHaveValue('Reaper Producer');
-  expect(createPayload).toBeNull();
-  await page.locator('#workspaceTemplateAgentSetupName').fill('My Reaper Producer');
-  await page.locator('#workspaceTemplateAgentSetupModel').selectOption('gpt-5.3-codex');
-  await page.locator('#workspaceTemplateAgentSetupPrompt').fill('Produce with deliberate restraint.');
-  await page.locator('#workspaceTemplateAgentSetupSave').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('No Orphans WS');
+  await advanceToTeam(page);
 
-  await expect(page.locator('#workspaceAgentMapState')).toHaveText('Ready');
-  await expect(page.locator('#workspaceAgentMapNodeDetail')).toHaveText('Saved reusable agent');
-  expect(createPayload).toMatchObject({
-    agent_index: 0,
-    override: {
-      index: 0,
-      name: 'My Reaper Producer',
-      model: 'gpt-5.3-codex',
-      provider: 'codex',
-      system_prompt: 'Produce with deliberate restraint.'
-    }
+  // Edit a staged blueprint agent on Team: still no persistence request.
+  const row = page.locator('.workspace-template-agent-row').first();
+  await row.locator('.workspace-template-agent-customize-btn').click();
+  await row.locator('.workspace-template-agent-name-input').fill('Renamed Producer');
+
+  // Cancel the whole wizard.
+  await page.evaluate(() => {
+    const el = document.getElementById('addFolderModal');
+    // @ts-expect-error bootstrap is a page global
+    window.bootstrap.Modal.getInstance(el)?.hide();
   });
-});
+  await expect(page.locator('#addFolderModal')).toBeHidden();
 
-test('team preview exposes specialist setup and keeps create-all as a defaults shortcut', async ({ page }) => {
-  const createdIndexes: number[] = [];
-  const agentNames = ['Research Lead', 'Source Scout', 'Synthesis Writer'];
-  const plan = () => ({
-    has_agents: true,
-    agents: agentNames.map((name, index) => ({
-      name,
-      scope: 'reusable',
-      action: createdIndexes.includes(index) || index === 2 ? 'reuse' : 'create',
-      entry_point: index === 0,
-      role: index === 0 ? 'orchestrator' : 'specialist',
-      model_source: 'agent_default'
-    })),
-    warnings: []
-  });
-  await page.route('**/api/workspaces/template-agent-plan**', async route => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(plan())
-    });
-  });
-  await page.route('**/api/workspaces/template-agent-create', async route => {
-    const payload = route.request().postDataJSON();
-    createdIndexes.push(payload.agent_index);
-    const nextPlan = plan();
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        created: true,
-        agent: nextPlan.agents[payload.agent_index],
-        plan: nextPlan
-      })
-    });
-  });
-
-  await openCreateModal(page);
-  await cardByLabel(page, 'Research Project').click();
-  const createAll = page.locator('#workspaceAgentMapCreateAll');
-  await expect(createAll).toBeVisible();
-  await expect(createAll).toHaveText('Create all defaults (2)');
-
-  const specialist = page.locator('button.workspace-agent-map-specialist-avatar[data-template-agent-index="1"]');
-  await expect(specialist).toBeVisible();
-  await specialist.click();
-  await expect(page.locator('#workspaceTemplateAgentSetup')).toBeVisible();
-  await expect(page.locator('#workspaceTemplateAgentSetupName')).toHaveValue('Source Scout');
-  await page.locator('#workspaceTemplateAgentSetupBack').click();
-  expect(createdIndexes).toEqual([]);
-
-  await createAll.click();
-
-  await expect.poll(() => createdIndexes.length).toBe(2);
-  expect(createdIndexes).toEqual([0, 1]);
-  await expect(createAll).toBeHidden();
-  await expect(page.locator('#workspaceAgentMapState')).toHaveText('Ready');
+  expect(precreateCalls).toEqual([]);
 });
