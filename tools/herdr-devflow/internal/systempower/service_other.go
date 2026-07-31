@@ -24,3 +24,9 @@ func (s *Service) Sleep(context.Context) error { return ErrUnsupported }
 
 // SupportsSleep is false on every non-macOS build.
 func (s *Service) SupportsSleep() bool { return false }
+
+func (s *Service) AcquireIdleSleepAssertion(context.Context, string) (string, error) {
+	return "", ErrUnsupported
+}
+func (s *Service) IdleSleepAssertionActive(context.Context, string) bool   { return false }
+func (s *Service) ReleaseIdleSleepAssertion(context.Context, string) error { return ErrUnsupported }

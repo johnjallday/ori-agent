@@ -7,15 +7,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 )
 
 // overnightFixture is a repository with one eligible Claude agent: a bridge
 // record naming an exact native session, and a recorded plan-backed usage
 // window for that same session.
 type overnightFixture struct {
-	primary string
-	feature string
-	home    string
+	primary          string
+	feature          string
+	home             string
+	newOvernightWake func(wakeprotocol.Purpose) (WakeCoordinator, error)
 }
 
 func newOvernightFixture(t *testing.T) overnightFixture {
@@ -44,16 +49,60 @@ func (f overnightFixture) run(t *testing.T, answer string, args ...string) (int,
 	t.Helper()
 	var output, stderr bytes.Buffer
 	application := New(Dependencies{
-		Stdout:    &output,
-		Stderr:    &stderr,
-		Stdin:     strings.NewReader(answer),
-		Getwd:     func() (string, error) { return f.primary, nil },
-		LookupEnv: func(string) (string, bool) { return "", false },
-		Runner:    primaryCheckoutRunner{primary: f.primary, feature: f.feature},
+		Stdout:           &output,
+		Stderr:           &stderr,
+		Stdin:            strings.NewReader(answer),
+		Getwd:            func() (string, error) { return f.primary, nil },
+		LookupEnv:        func(string) (string, bool) { return "", false },
+		Runner:           primaryCheckoutRunner{primary: f.primary, feature: f.feature},
+		NewOvernightWake: f.newOvernightWake,
 	})
 	base := []string{"--repo-root", f.primary, "--home", f.home, "--herdr-bin", "fake-herdr", "overnight"}
-	exit := application.Run(context.Background(), append(base, args...))
+	command := append([]string(nil), args...)
+	if len(command) > 0 && command[0] == "start" && f.newOvernightWake == nil {
+		// These plan/supervisor fixtures do not install the separately tested
+		// standalone wake daemon. Keep their no-host-wake execution explicit.
+		command = append(command, "--stay-awake")
+	}
+	exit := application.Run(context.Background(), append(base, command...))
 	return exit, output.String(), stderr.String()
+}
+
+func TestFutureOvernightStartVerifiesStandaloneWakeAndCancelsExactly(t *testing.T) {
+	fixture := newOvernightFixture(t)
+	wake := &continuationWake{readiness: wakeclient.OwnerReadiness{Running: true, Ready: true}}
+	fixture.newOvernightWake = func(wakeprotocol.Purpose) (WakeCoordinator, error) { return wake, nil }
+	start := time.Now().In(time.Local).Add(2 * time.Hour)
+	deadline := start.Add(5 * time.Hour)
+	exit, _, stderr := fixture.run(t, "", "start", "--agent", "bridge", "--confirm",
+		"--start", start.Format("15:04"), "--deadline", deadline.Format("15:04"))
+	if exit != 0 {
+		t.Fatalf("future start exit=%d stderr=%s", exit, stderr)
+	}
+	exit, listed, _ := fixture.run(t, "", "list", "--json")
+	if exit != 0 {
+		t.Fatalf("list exit=%d", exit)
+	}
+	var payload struct {
+		Runs []struct {
+			ID   string `json:"id"`
+			Wake struct {
+				CandidateID string `json:"candidate_id"`
+				Purpose     string `json:"purpose"`
+				Verified    bool   `json:"verified"`
+			} `json:"wake"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(listed), &payload); err != nil || len(payload.Runs) != 1 {
+		t.Fatalf("list payload=%q err=%v", listed, err)
+	}
+	run := payload.Runs[0]
+	if run.Wake.CandidateID != run.ID || run.Wake.Purpose != string(wakeprotocol.PurposeOvernightStart) || !run.Wake.Verified || wake.registeredID != run.ID {
+		t.Fatalf("pre-start wake was not verified and persisted: %+v registered=%q", run, wake.registeredID)
+	}
+	if exit, _, stderr = fixture.run(t, "", "cancel", run.ID); exit != 0 || wake.canceledID != run.ID {
+		t.Fatalf("cancel exit=%d stderr=%s canceled=%q", exit, stderr, wake.canceledID)
+	}
 }
 
 // TestOvernightStartRequiresAnExplicitSelection keeps "enrol everything" from

@@ -83,7 +83,11 @@ func RenderConfirmation(out io.Writer, plan Plan) error {
 	if err := write("Stops before:  Demo, approval, credentials, PR, merge, deploy, wt done"); err != nil {
 		return err
 	}
-	if err := write("Wake:          scheduled through Ori's shared macOS wake coordinator and verified before sleeping"); err != nil {
+	if plan.WakeMode == model.WakeModeStayAwake {
+		if err := write("Wake mode:     stay awake; no deliberate sleep or reset wake will be requested"); err != nil {
+			return err
+		}
+	} else if err := write("Wake:          standalone Herdr service; future starts and reset wakes are directly verified before sleeping"); err != nil {
 		return err
 	}
 

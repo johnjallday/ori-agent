@@ -10,9 +10,13 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overnight"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 )
 
 // This file is the `wt herd overnight` command family.
@@ -90,6 +94,8 @@ func parseOvernightStartArgs(args []string) (overnightStartArgs, error) {
 			parsed.request.MaxResumes = value
 		case "--confirm":
 			parsed.confirm = true
+		case "--stay-awake":
+			parsed.request.StayAwake = true
 		case "--dry-run":
 			parsed.dryRun = true
 		case "--json":
@@ -144,6 +150,16 @@ func (a *App) overnightStart(ctx context.Context, opts options, args []string) i
 		a.writeError(err, opts.json)
 		return 2
 	}
+	usage := claudeusage.NewAdapter(runtime.paths.UsageDir)
+	for index := range plan.Participants {
+		participant := &plan.Participants[index]
+		proof, proofErr := usage.BuildPlanProof(participant.Binding.NativeSession.Value, time.Now().UTC(), plan.DeadlineAt)
+		if proofErr != nil {
+			a.writeError(proofErr, opts.json)
+			return 1
+		}
+		participant.PlanProof = proof
+	}
 
 	if opts.json && !parsed.confirm {
 		// A machine caller gets the plan to inspect, and still cannot start a
@@ -188,6 +204,50 @@ func (a *App) overnightStart(ctx context.Context, opts options, args []string) i
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
+	}
+	if run.WakeMode != model.WakeModeStayAwake && run.StartAt.After(time.Now().UTC()) {
+		wake, wakeErr := a.newOvernightWake(wakeprotocol.PurposeOvernightStart)
+		if wakeErr != nil || !wake.Owner().Ready {
+			detail := "standalone Herdr wake service is not ready; run wt herd wake doctor or recreate this run with --stay-awake"
+			run.Wake = model.WakeOwnership{CandidateID: run.ID, Source: string(wakeprotocol.SourceOvernight), Purpose: string(wakeprotocol.PurposeOvernightStart), RequestedAt: run.StartAt.Add(-runtime.config.WakeLead()), Uncertain: true, Detail: detail}
+			run, _ = service.RecordWake(ctx, run.ID, run.Wake, detail)
+			a.writeError(errors.New(detail), opts.json)
+			return 1
+		}
+		requested := run.StartAt.Add(-runtime.config.WakeLead())
+		intent := model.WakeOwnership{CandidateID: run.ID, Source: string(wakeprotocol.SourceOvernight), Purpose: string(wakeprotocol.PurposeOvernightStart), RequestedAt: requested}
+		if run, err = service.RecordWake(ctx, run.ID, intent, ""); err != nil {
+			a.writeError(err, opts.json)
+			return 1
+		}
+		evidence, registerErr := wake.RegisterCandidate(ctx, run.ID, requested, "scheduled Overnight Run start")
+		if registerErr == nil {
+			evidence, registerErr = wake.VerifyCandidate(ctx, run.ID, requested)
+		}
+		intent.RegisteredAt = time.Now().UTC()
+		intent.ProgrammedAt = evidence.ProgrammedAt
+		intent.VerifiedAt = evidence.VerifiedAt
+		intent.ProtocolVersion = evidence.ProtocolVersion
+		intent.DaemonBuild = evidence.DaemonBuild
+		intent.HelperBuild = evidence.HelperBuild
+		intent.Verified = registerErr == nil
+		intent.Uncertain = registerErr != nil && errors.Is(registerErr, wakeclient.ErrUncertain)
+		intent.Detail = evidence.Message
+		if registerErr != nil {
+			_, cancelErr := wake.CancelCandidate(ctx, run.ID)
+			if cancelErr != nil {
+				intent.Uncertain = true
+				intent.Detail = "pre-start wake cancellation was not proven; run wt herd wake doctor"
+			}
+			run, _ = service.RecordWake(ctx, run.ID, intent, "future start wake was not verified; inspect with wt herd wake doctor or cancel this run")
+			a.writeError(fmt.Errorf("standalone pre-start wake: %w", registerErr), opts.json)
+			return 1
+		}
+		if run, err = service.RecordWake(ctx, run.ID, intent, ""); err != nil {
+			_, _ = wake.CancelCandidate(ctx, run.ID)
+			a.writeError(err, opts.json)
+			return 1
+		}
 	}
 	a.recordAudit(runtime, auditOvernightEvent(run, "created"))
 	if opts.json {
@@ -334,6 +394,54 @@ func (a *App) overnightCancel(ctx context.Context, opts options, args []string) 
 		a.writeError(err, opts.json)
 		return 1
 	}
+	if run.Wake.CandidateID != "" && !run.Wake.Canceled {
+		purpose := wakeprotocol.Purpose(run.Wake.Purpose)
+		if purpose == "" {
+			purpose = wakeprotocol.PurposeClaudeReset
+		}
+		wake, wakeErr := a.newOvernightWake(purpose)
+		if wakeErr == nil {
+			_, wakeErr = wake.CancelCandidate(ctx, run.Wake.CandidateID)
+		}
+		if wakeErr != nil {
+			run.Wake.Uncertain = true
+			run.Wake.Detail = "exact standalone wake cancellation was not proven; run wt herd wake doctor"
+			run, _ = service.RecordWake(ctx, run.ID, run.Wake, "")
+			a.recordAudit(runtime, auditOvernightEvent(run, "wake_withdrawal_uncertain"))
+			a.writeError(fmt.Errorf("Overnight Run canceled, but standalone wake withdrawal is uncertain: %w", wakeErr), opts.json)
+			return 1
+		}
+		run.Wake.Canceled = true
+		run.Wake.Uncertain = false
+		run.Wake.Detail = ""
+		if run.Uncertainty == "cancellation requested; the wake candidate has not been confirmed withdrawn" {
+			run.Uncertainty = ""
+		}
+		run, err = service.RecordWake(ctx, run.ID, run.Wake, "")
+		if err != nil {
+			a.writeError(err, opts.json)
+			return 1
+		}
+	}
+	if run.Assertion.ID != "" && run.Assertion.ReleasedAt.IsZero() {
+		power := &systempower.Service{GOOS: a.goos}
+		if releaseErr := power.ReleaseIdleSleepAssertion(ctx, run.Assertion.ID); releaseErr != nil {
+			run.Assertion.Uncertain = true
+			run.Assertion.Detail = "run-owned idle-sleep assertion release was not proven"
+			run, _ = service.RecordAssertion(ctx, run.ID, run.Assertion)
+			a.writeError(fmt.Errorf("Overnight Run canceled, but stay-awake assertion release is uncertain: %w", releaseErr), opts.json)
+			return 1
+		}
+		run.Assertion.ReleasedAt = time.Now().UTC()
+		run.Assertion.Uncertain = false
+		run.Assertion.Detail = "run-owned idle-sleep assertion released"
+		var assertionErr error
+		run, assertionErr = service.RecordAssertion(ctx, run.ID, run.Assertion)
+		if assertionErr != nil {
+			a.writeError(assertionErr, opts.json)
+			return 1
+		}
+	}
 	a.recordAudit(runtime, auditOvernightEvent(run, "canceled"))
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": string(run.State), "run": runPayload(run)})
@@ -356,15 +464,16 @@ func planPayload(plan overnight.Plan) map[string]any {
 	participants := make([]map[string]any, 0, len(plan.Participants))
 	for _, participant := range plan.Participants {
 		participants = append(participants, map[string]any{
-			"position":       participant.Position,
-			"feature":        participant.Feature.Name,
-			"worktree":       participant.Feature.Path,
-			"role":           participant.Binding.Role,
-			"kind":           participant.Binding.AgentKind,
-			"native_session": participant.Binding.NativeSession.Value,
-			"working":        participant.Working,
-			"next_task":      participant.Checkpoint.NextOrdinal,
-			"manual_stop":    participant.Checkpoint.ManualOrdinal,
+			"position":         participant.Position,
+			"feature":          participant.Feature.Name,
+			"worktree":         participant.Feature.Path,
+			"role":             participant.Binding.Role,
+			"kind":             participant.Binding.AgentKind,
+			"native_session":   participant.Binding.NativeSession.Value,
+			"plan_proof_valid": participant.PlanProof.PlanBacked,
+			"working":          participant.Working,
+			"next_task":        participant.Checkpoint.NextOrdinal,
+			"manual_stop":      participant.Checkpoint.ManualOrdinal,
 		})
 	}
 	excluded := make([]map[string]any, 0, len(plan.Excluded))
@@ -380,6 +489,7 @@ func planPayload(plan overnight.Plan) map[string]any {
 		"deadline_at":  plan.DeadlineAt,
 		"timezone":     plan.Timezone,
 		"max_resumes":  plan.MaxResumes,
+		"wake_mode":    string(plan.WakeMode),
 		"participants": participants,
 		"excluded":     excluded,
 		"warnings":     plan.Warnings,
@@ -399,6 +509,7 @@ func runPayload(run model.OvernightRun) map[string]any {
 			"worktree":             participant.Feature.Path,
 			"role":                 participant.Binding.Role,
 			"native_session":       participant.Binding.NativeSession.Value,
+			"plan_proof_valid":     participant.PlanProof.PlanBacked,
 			"subtasks_total":       participant.Checkpoint.SubtasksTotal,
 			"subtasks_completed":   participant.Checkpoint.SubtasksCompleted,
 			"acknowledged_resumes": participant.AcknowledgedResumes,
@@ -426,15 +537,26 @@ func runPayload(run model.OvernightRun) map[string]any {
 		"acknowledged_resumes": run.AcknowledgedResumes,
 		"active_participant":   run.ActiveParticipant,
 		"confirmation":         run.Confirmation,
+		"wake_mode":            string(run.WakeMode),
 		"terminal_reason":      string(run.TerminalReason),
 		"uncertainty":          run.Uncertainty,
 		"participants":         participants,
 		"wake": map[string]any{
-			"candidate_id": run.Wake.CandidateID,
-			"requested_at": run.Wake.RequestedAt,
-			"verified":     run.Wake.Verified,
-			"canceled":     run.Wake.Canceled,
-			"uncertain":    run.Wake.Uncertain,
+			"candidate_id":  run.Wake.CandidateID,
+			"source":        run.Wake.Source,
+			"purpose":       run.Wake.Purpose,
+			"requested_at":  run.Wake.RequestedAt,
+			"programmed_at": run.Wake.ProgrammedAt,
+			"verified":      run.Wake.Verified,
+			"canceled":      run.Wake.Canceled,
+			"uncertain":     run.Wake.Uncertain,
+		},
+		"stay_awake_assertion": map[string]any{
+			"id":          run.Assertion.ID,
+			"verified_at": run.Assertion.VerifiedAt,
+			"released_at": run.Assertion.ReleasedAt,
+			"uncertain":   run.Assertion.Uncertain,
+			"detail":      run.Assertion.Detail,
 		},
 	}
 }

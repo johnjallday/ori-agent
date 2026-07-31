@@ -93,6 +93,7 @@ menubar: ## Build the menu bar app
 herdr-devflow: ## Build the Ori-to-Herdr devflow helper
 	@echo "$(BLUE)Building Herdr devflow helper...$(NC)"
 	$(GOBUILD) -o $(BUILD_DIR)/herdr-devflow ./tools/herdr-devflow/cmd/herdr-devflow
+	$(GOBUILD) -o $(BUILD_DIR)/herdr-wake ./tools/herdr-devflow/cmd/herdr-wake
 	@echo "$(GREEN)✓ Build complete: $(BUILD_DIR)/herdr-devflow$(NC)"
 
 
@@ -176,8 +177,11 @@ test-unit: ## Run unit tests only
 test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported targets
 	@mkdir -p $(BUILD_DIR)
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-darwin-arm64 ./tools/herdr-devflow/cmd/herdr-devflow
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BUILD_DIR)/herdr-wake-darwin-arm64 ./tools/herdr-devflow/cmd/herdr-wake
 	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-linux-amd64 ./tools/herdr-devflow/cmd/herdr-devflow
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-wake-linux-amd64 ./tools/herdr-devflow/cmd/herdr-wake
 	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-windows-amd64.exe ./tools/herdr-devflow/cmd/herdr-devflow
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-wake-windows-amd64.exe ./tools/herdr-devflow/cmd/herdr-wake
 
 test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge tests
 	$(GOTEST) ./tools/herdr-devflow/...

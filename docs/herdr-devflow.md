@@ -168,14 +168,14 @@ Before saving, the command displays the normalized absolute time, timezone,
 feature, role, agent kind, retry deadline, and a prompt summary. Recurrence
 syntax is rejected: v1 supports one-time continuations only.
 
-`--wake` asks Ori's existing single macOS wake owner to make the machine awake
-by the due time. It is deliberately opt-in because waking the whole Mac is a
-system-wide side effect. The command does not report success until the running
-Ori server confirms that `pmset` programmed this exact continuation's wake.
-Ori must already have Mac wake scheduling enabled and administrator approval
-under Settings → Device Capabilities. If registration or confirmation fails,
-the continuation is marked failed and cannot prompt later as an ordinary
-non-waking schedule.
+`--wake` asks the separately installed **Herdr Wake Service** to make the
+machine awake by the due time. It is deliberately opt-in because waking the
+whole Mac is a system-wide side effect. The command does not report success
+until the service directly verifies the exact fixed-owner `pmset` event. Install
+and diagnose it with `wt herd wake install` and `wt herd wake doctor`; no Ori
+server, Device Capabilities setting, or Ori runtime is required. If registration
+or confirmation fails, the continuation is marked failed and cannot prompt
+later as an ordinary non-waking schedule.
 
 The wake candidate is scoped to the continuation schedule. Delivery, failure,
 or cancellation withdraws only that candidate; workspace-task and Overnight
@@ -217,6 +217,10 @@ run cannot start without you reading a summary and answering it.
 # Plan a run over exactly the agents you name, in the order you name them.
 wt herd overnight start --agent blueprint-setup-wizards --agent another-feature \
   --start 23:00 --deadline 07:00 --timezone America/New_York
+
+# Keep the Mac awake with a verified run-owned idle-sleep assertion. This mode
+# never deliberately sleeps or registers a reset wake.
+wt herd overnight start --agent blueprint-setup-wizards --stay-awake
 
 # See what it would do without creating anything.
 wt herd overnight start --agent blueprint-setup-wizards --dry-run
@@ -321,20 +325,19 @@ applications is your responsibility.
 Before that happens, all of these must hold — and each refuses independently,
 with a reason you can read in `wt herd overnight show`:
 
-- macOS, and Ori authorized to program wake events
+- macOS, and a healthy standalone Herdr Wake Service
 - external power (unknown counts as battery)
 - an exact native Claude session to return to
 - a reset that is in the future, before the deadline, and newer than any this
   participant already handled
 - remaining resume budget
-- a wake that Ori has **programmed and confirmed**, not merely requested
+- a wake that the standalone service has **programmed and confirmed**, not merely requested
 
-That last one matters most. Ori owns exactly one macOS wake event, shared with
-scheduled workspace tasks. The Herdr helper never programs it: it writes a
-candidate to a shared store, and the Ori server — the only process that runs
-`pmset` — programs the earliest and records what it actually did. The helper
-sleeps only after reading that record back. If Ori is not running, no record
-appears, and the Mac stays awake.
+That last one matters most. The standalone daemon owns exactly one fixed-owner
+macOS wake event and arbitrates Herdr continuation and Overnight candidates.
+The unprivileged helper cannot run `pmset`; it uses authenticated local IPC and
+sleeps only after direct read-back verification. If the service is unavailable,
+the Mac stays awake.
 
 Cancelling a run withdraws only that run's wake candidate; a scheduled workspace
 task's wake is recomputed and preserved.
@@ -374,8 +377,8 @@ differ:
 ~~~
 Claude usage recorder    records are being written to …
 Claude overnight readiness  1 saved Claude session reports plan-backed capacity
-wake coordinator         the shared wake store is readable
-wake owner               Ori is running and can program macOS wake events
+wake service             the standalone socket, protocol, UID, and self-test are healthy
+wake event               the exact fixed-owner event is directly verified
 power source             this Mac is on external power
 ~~~
 

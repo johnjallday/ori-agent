@@ -158,15 +158,15 @@ selection, one-time continuations, guarded cleanup, and recovery. Claude is the
 configured default; use wt start <feature> --kind codex for a one-feature
 override without changing that default.
 
-One-time continuations can opt into the shared macOS wake owner:
+One-time continuations can opt into the standalone macOS Herdr Wake Service:
 
 ~~~bash
 wt herd continue builder --feature <feature> --at "2026-07-30 05:00" --wake
 ~~~
 
-The command succeeds only after a running Ori server confirms the wake was
-programmed; Mac wake scheduling and administrator approval must already be
-enabled in Settings → Device Capabilities.
+The command succeeds only after `herdr-wake` directly verifies the wake. Install
+the service once with `wt herd wake install`; it does not depend on an Ori
+server, Device Capabilities, or Ori settings.
 
 The bridge resolves a feature's agents by canonical worktree path, not a saved
 workspace ID, so closing/reopening a workspace or opening a pane by hand on
