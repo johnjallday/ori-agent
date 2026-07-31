@@ -16,4 +16,5 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/capabilities", h.ListCapabilities)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/capabilities/{capabilityID}/install", h.InstallCapability)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/capabilities/{capabilityID}/companion", h.AddCompanion)
 }

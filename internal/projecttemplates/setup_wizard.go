@@ -44,15 +44,14 @@ type SetupWizardStep = workspace.SetupWizardStep
 // server-side registry (internal/setupwizard) is what actually resolves an
 // adapter at runtime, and a parity test keeps the two lists identical. A name
 // here is a lookup key and nothing more — never a package, path, or command.
-// The canonical `file_janitor` key is deliberately absent until the generic
-// File Janitor blueprint exists to name it: TestShippedBlueprintsDeclareRunnableWizards
-// requires every allowed adapter to be used by a shipped blueprint, and an
-// unused entry here would be dead authoring surface. The compiled adapter
-// already resolves under both keys (see downloadsjanitor.SetupAdapter.Aliases),
-// which is what keeps a persisted `file_janitor` step runnable — that is
-// independent of what a manifest is allowed to declare.
+// Both File Janitor keys are listed because both are authored today: the
+// Downloads preset still names the legacy `downloads_janitor` (and every
+// workspace mid-setup persisted it), while the generic File Janitor blueprint
+// names the canonical `file_janitor`. One compiled adapter serves both — see
+// downloadsjanitor.SetupAdapter.Aliases.
 var ValidSetupWizardAdapters = []string{
 	"downloads_janitor",
+	"file_janitor",
 	"calendar_ops",
 	"email_ops",
 	"reaper_song",

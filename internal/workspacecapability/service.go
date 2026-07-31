@@ -69,6 +69,9 @@ type Service struct {
 	registry *Registry
 	store    WorkspaceStore
 	now      func() time.Time
+	// companions creates the optional companion agent. Nil until wired, which
+	// makes the offer unavailable rather than broken.
+	companions CompanionProvisioner
 }
 
 // NewService builds the lifecycle service.

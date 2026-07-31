@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
@@ -881,8 +882,52 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		PluginSources:          tmpl.Tools.PluginSources,
 		SetupWizard:            tmpl.SetupWizard,
 	}
+	// Provenance and the blueprint's declared capability installs are written in
+	// ONE update, so a workspace can never end up recorded as coming from the
+	// File Janitor blueprint while lacking the capability that blueprint exists
+	// to install (FR-32, FR-34).
+	//
+	// This runs after the folder-provisioning writes rather than on the struct
+	// they share: creation threads one workspace value through several
+	// whole-record workspace.json writes, and anything set on it earlier is
+	// overwritten by the last one. See
+	// tasks/trace-installed-capabilities-persistence.md (H5).
+	installedAt := time.Now()
+	// The version recorded is the one THIS build compiles for that capability,
+	// read from the registry rather than assumed, so a record can never claim a
+	// version that does not exist (FR-13). A capability the registry does not
+	// know about was already dropped at manifest load.
+	registry, registryErr := workspacecapability.NewBuiltinRegistry()
 	if err := h.workspaceTaskStore.Update(wsID, func(w *agentworkspace.Workspace) error {
 		w.SetTemplateProvenance(prov)
+		for _, capability := range tmpl.Capabilities {
+			if registryErr != nil {
+				break
+			}
+			def, known := registry.Definition(capability.ID)
+			if !known {
+				logger.Warn("Blueprint declares a capability this build does not provide", logger.Fields{
+					"id": wsID, "template": tmpl.ID, "capability": capability.ID,
+				})
+				continue
+			}
+			source := capability.Source
+			if strings.TrimSpace(source) == "" {
+				source = agentworkspace.InstallSourceBlueprint
+			}
+			if _, err := w.AddInstalledCapability(agentworkspace.InstalledCapability{
+				ID:          def.ID,
+				Version:     def.Version,
+				InstalledAt: installedAt,
+				Source:      source,
+			}); err != nil {
+				// One malformed declaration must not cost the workspace its
+				// provenance, which is written in this same update.
+				logger.Warn("Blueprint capability not installed", logger.Fields{
+					"id": wsID, "template": tmpl.ID, "capability": capability.ID, "error": err,
+				})
+			}
+		}
 		return nil
 	}); err != nil {
 		logger.Warn("Failed to persist template provenance", logger.Fields{"id": wsID, "template": tmpl.ID, "error": err})

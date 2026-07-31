@@ -616,6 +616,12 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	}
 
 	service := workspacecapability.NewService(registry, b.workspaceStore)
+	// Companion creation belongs to the layer that owns the agent store; the
+	// capability service only decides whether one is wanted. Without this the
+	// offer reports itself unavailable rather than failing obscurely.
+	if b.sessionHandler != nil {
+		service.SetCompanionProvisioner(sessionhttp.NewCapabilityCompanionProvisioner(b.sessionHandler))
+	}
 	b.workspaceCapabilityService = service
 	b.workspaceCapabilityHandler = workspacecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 

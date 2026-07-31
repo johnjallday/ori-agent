@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,5 +145,57 @@ func TestWorkspaceCapabilityWiringFailureIsIsolated(t *testing.T) {
 	degradedMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/workspaces/ws-1/capabilities", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 from a degraded capability handler", rec.Code)
+	}
+}
+
+// TestCompanionRouteIsRegistered proves the optional-Curator offer is reachable
+// on the real server. The service was wired and tested well before anything
+// called it; without this, the endpoint could stay unrouted and every unit test
+// would still pass.
+func TestCompanionRouteIsRegistered(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/ws-1/capabilities/file-janitor/companion", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// The workspace does not exist, so the ownership boundary answers 404 —
+	// with the handler's JSON body, which is what distinguishes "route present,
+	// boundary enforced" from "route missing".
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for an unknown workspace (body %s)", rec.Code, rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("expected the handler's JSON error (route registered), got %q", rec.Body.String())
+	}
+}
+
+// TestCompanionProvisionerIsWired guards the other half: a registered route in
+// front of an unwired provisioner would report the companion permanently
+// unavailable.
+func TestCompanionProvisionerIsWired(t *testing.T) {
+	builder := newBuiltTestBuilder(t)
+	if builder.workspaceCapabilityService == nil {
+		t.Fatal("capability service was not wired")
+	}
+	if builder.sessionHandler == nil {
+		t.Skip("session handler unavailable in this build; the provisioner has nothing to wire to")
+	}
+
+	// A capability that is not installed is the nearest observable proof the
+	// provisioner was attached: an unwired one reports companion_unavailable
+	// first, before the capability is even considered.
+	_, err := builder.workspaceCapabilityService.AddCompanion("nonexistent-workspace", workspace.CapabilityFileJanitor)
+	if err == nil {
+		t.Fatal("expected an error for an unknown workspace")
+	}
+	var lifecycleErr *workspacecapability.Error
+	if !errors.As(err, &lifecycleErr) {
+		t.Fatalf("expected a lifecycle error, got %v", err)
+	}
+	if lifecycleErr.Code == workspacecapability.CodeCompanionUnavailable {
+		t.Fatal("the companion provisioner was never wired")
 	}
 }

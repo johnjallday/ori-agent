@@ -124,6 +124,38 @@ func (h *Handler) InstallCapability(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AddCompanion handles
+// POST /api/workspaces/{workspaceID}/capabilities/{capabilityID}/companion.
+//
+// The companion is a separate, optional choice from installing the capability
+// (FR-36): installing never adds an agent, and declining leaves File Janitor
+// fully functional (FR-37). Repeating the request returns the existing
+// companion rather than creating a second one (FR-39).
+func (h *Handler) AddCompanion(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	capabilityID := strings.TrimSpace(r.PathValue("capabilityID"))
+	if capabilityID == "" {
+		_ = orihttp.RespondBadRequest(w, "capability id is required")
+		return
+	}
+
+	result, err := h.service.AddCompanion(workspaceID, capabilityID)
+	if err != nil {
+		h.respondError(w, err, "Failed to add the companion agent")
+		return
+	}
+
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"success":         true,
+		"agent_instance":  result.AgentInstanceID,
+		"display_name":    result.DisplayName,
+		"already_present": result.AlreadyPresent,
+	})
+}
+
 // resolveWorkspace enforces the boundary shared by every endpoint: the service
 // is wired, the workspace exists, and it belongs to the current user. A
 // workspace owned by someone else is reported as not found rather than
@@ -190,6 +222,12 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 			status = http.StatusNotFound
 		case workspacecapability.CodeInstallLimit:
 			status = http.StatusConflict
+		case workspacecapability.CodeCapabilityNotInstalled:
+			status = http.StatusConflict
+		case workspacecapability.CodeCompanionUnavailable:
+			status = http.StatusServiceUnavailable
+		case workspacecapability.CodeCompanionFailed:
+			status = http.StatusInternalServerError
 		case workspacecapability.CodeInstallFailed, workspacecapability.CodeInstallIncomplete:
 			status = http.StatusInternalServerError
 		}
