@@ -4378,7 +4378,7 @@ const sessionManager = {
       ? `${label} — ${name}: ${reason}`
       : `Add ${name} to this workspace`;
     return `
-      <article class="workspace-existing-agent-card" data-existing-agent-name="${this.escapeHtml(name)}">
+      <article class="workspace-existing-agent-card" role="listitem" data-existing-agent-name="${this.escapeHtml(name)}">
         ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
         <div class="workspace-existing-agent-card-copy">
           <strong>${this.escapeHtml(name)}</strong>
@@ -4418,8 +4418,13 @@ const sessionManager = {
     const canonicalName = String(api.findSavedAgent(draft, name)?.name || name).trim();
     this.renderExistingAgentRoster();
     this.refreshWorkspaceReview();
-    if (options.announceDrop)
-      this.announceWorkspaceTeamChange(`${canonicalName} will be attached to this workspace.`);
+    // The roster itself is not a live region — it re-renders wholesale — so the
+    // change is announced here, once, in words.
+    if (!options.silent) {
+      this.announceWorkspaceTeamChange(
+        `${canonicalName} added. ${this.workspaceTeamSummaryText(this.teamView())}`
+      );
+    }
     this.announceResolvedPrimary();
   },
 
@@ -4430,6 +4435,9 @@ const sessionManager = {
     if (!api.removeSavedAgent(draft, name)) return;
     this.renderExistingAgentRoster();
     this.refreshWorkspaceReview();
+    this.announceWorkspaceTeamChange(
+      `${String(name).trim()} removed. ${this.workspaceTeamSummaryText(this.teamView())}`
+    );
     // Removing a member can hand the primary slot to someone else; say so.
     this.announceResolvedPrimary();
   },
@@ -4788,10 +4796,27 @@ const sessionManager = {
     }
   },
 
+  // Announces a team change without moving focus.
+  //
+  // One interaction can produce several changes — adding an agent can also hand
+  // over the primary slot — so messages are collected and flushed together.
+  // Writing them one after another would overwrite the first before a screen
+  // reader ever read it.
   announceWorkspaceTeamChange(message) {
     const region = document.getElementById('workspaceTeamLiveRegion');
-    if (region && message) region.textContent = message;
+    if (!region || !message) return;
+    this.pendingTeamAnnouncements = this.pendingTeamAnnouncements || [];
+    this.pendingTeamAnnouncements.push(String(message).trim());
+    if (this.teamAnnouncementTimer) return;
+    this.teamAnnouncementTimer = setTimeout(() => {
+      this.teamAnnouncementTimer = null;
+      const text = (this.pendingTeamAnnouncements || []).filter(Boolean).join(' ');
+      this.pendingTeamAnnouncements = [];
+      region.textContent = text;
+    }, 0);
   },
+  pendingTeamAnnouncements: null,
+  teamAnnouncementTimer: null,
 
   // Excluding the blueprint team removes its entries from the roster entirely
   // rather than greying them out, so there is nothing left to disable — the

@@ -1514,6 +1514,147 @@ test('Team refuses to reach Review while a blocker is unresolved (FR89, FR94)', 
   await expect(page.locator('#createFolderBtn')).toBeEnabled();
 });
 
+test('Team carries text semantics, list roles, and quiet live-region updates', async ({ page }) => {
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'Blueprint Lead',
+        agents: [
+          { name: 'Blueprint Lead', action: 'reuse', entry_point: true, model_source: 'existing' }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Semantics WS');
+  await advanceToTeam(page);
+
+  // Both collections are lists with accessible names (FR105).
+  await expect(page.locator('#workspaceTeamRoster')).toHaveRole('list');
+  await expect(page.locator('#existingAgentRosterList')).toHaveRole('list');
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-row').first()).toHaveRole(
+    'listitem'
+  );
+  await expect(page.locator('#existingAgentRosterList .workspace-existing-agent-card').first()).toHaveRole(
+    'listitem'
+  );
+
+  // Designation and lifecycle are words, not colour (FR102).
+  await expect(page.locator('#workspaceTeamRoster .workspace-team-badge').first()).toHaveText(
+    'Primary'
+  );
+
+  // Neither the roster nor the receipt is itself a live region — they re-render
+  // wholesale, and announcing them would repeat the whole team on each edit.
+  await expect(page.locator('#workspaceTeamSummary')).not.toHaveAttribute('aria-live', /.*/);
+  await expect(page.locator('#workspaceReviewSummary')).not.toHaveAttribute('aria-live', /.*/);
+
+  // A single deliberate message covers the change, and focus does not move (FR103).
+  await page.locator('#folderNameInput').focus();
+  await page.locator('[data-existing-agent-add="Research Scout"]').click();
+  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText('Research Scout added');
+  await expect(page.locator('#workspaceTeamLiveRegion')).toContainText('will be attached');
+});
+
+test('the modal never scrolls horizontally at a narrow viewport (FR108)', async ({ page }) => {
+  await page.setViewportSize({ width: 380, height: 800 });
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        agents: [{ name: 'An Extremely Long Saved Agent Name For Wrapping', model: 'gpt-5.5' }]
+      })
+    });
+  });
+  await page.route('**/api/workspaces/template-agent-plan**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        has_agents: true,
+        entry_agent_name: 'A Very Long Blueprint Agent Name Indeed',
+        agents: [
+          {
+            name: 'A Very Long Blueprint Agent Name Indeed',
+            action: 'reuse',
+            entry_point: true,
+            model_source: 'existing'
+          }
+        ],
+        warnings: []
+      })
+    });
+  });
+
+  const noHorizontalOverflow = async () =>
+    page.evaluate(() => {
+      const body = document.getElementById('addFolderModal')?.querySelector('.modal-body');
+      if (!body) return true;
+      // 1px of tolerance for sub-pixel layout rounding.
+      return body.scrollWidth <= body.clientWidth + 1;
+    });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Reaper Song').click();
+  expect(await noHorizontalOverflow()).toBe(true);
+
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('A Rather Long Workspace Name For Narrow Screens');
+  expect(await noHorizontalOverflow()).toBe(true);
+
+  await advanceToTeam(page);
+  // Team stacks with the resulting team above the picker (FR58, FR110).
+  const teamBox = await page.locator('#workspaceTeamReview').boundingBox();
+  const pickerBox = await page.locator('#existingAgentRosterPanel').boundingBox();
+  expect(teamBox!.y).toBeLessThan(pickerBox!.y);
+  await page.locator('[data-existing-agent-add="An Extremely Long Saved Agent Name For Wrapping"]').click();
+  expect(await noHorizontalOverflow()).toBe(true);
+
+  await page.locator('#workspaceTeamRoster [data-team-customize]').first().click();
+  expect(await noHorizontalOverflow()).toBe(true);
+
+  await advanceToReviewFromTeam(page);
+  expect(await noHorizontalOverflow()).toBe(true);
+});
+
+test('a wide viewport puts the resulting team beside Your Agents (FR57)', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route('**/api/agents/dashboard/list**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ agents: [{ name: 'Research Scout', model: 'gpt-5.5' }] })
+    });
+  });
+
+  await openCreateModal(page);
+  await cardByLabel(page, 'Blank').click();
+  await advanceToWorkspaceDetails(page);
+  await page.locator('#folderNameInput').fill('Wide WS');
+  await advanceToTeam(page);
+
+  const teamBox = await page.locator('#workspaceTeamReview').boundingBox();
+  const pickerBox = await page.locator('#existingAgentRosterPanel').boundingBox();
+  // Side by side: the picker starts to the right of the team, on the same row.
+  expect(pickerBox!.x).toBeGreaterThan(teamBox!.x + teamBox!.width - 5);
+  expect(Math.abs(pickerBox!.y - teamBox!.y)).toBeLessThan(40);
+});
+
 test('the wizard never persists an agent before the workspace is created (FR68)', async ({
   page
 }) => {

@@ -459,20 +459,6 @@
   border-color: var(--wc-faction);
 }
 
-.workspace-create-modal .workspace-template-agent-review {
-  background: rgba(70, 211, 154, 0.06);
-  border-color: var(--wc-faction-deep);
-}
-.workspace-create-modal .workspace-template-agent-review-title {
-  color: #f3f5f8;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-.workspace-create-modal .workspace-template-agent-review-summary,
-.workspace-create-modal .workspace-template-agent-review-status,
-.workspace-create-modal .workspace-template-agent-warnings {
-  color: var(--wc-ink-dim);
-}
 .workspace-create-modal .workspace-template-agent-advanced {
   margin-top: 9px;
   padding-top: 8px;
@@ -496,126 +482,14 @@
   font-size: 11px;
   line-height: 1.4;
 }
-.workspace-create-modal .workspace-template-agent-toggle,
-.workspace-create-modal .workspace-template-agent-row {
+.workspace-create-modal .workspace-template-agent-toggle {
   background: var(--wc-panel-2);
   border-color: var(--wc-line);
-}
-.workspace-create-modal .workspace-template-agent-toggle {
   color: var(--wc-faction);
-}
-.workspace-create-modal .workspace-template-agent-model strong {
-  color: #f3f5f8;
-}
-.workspace-create-modal .workspace-template-agent-model {
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-template-agent-field,
-.workspace-create-modal .workspace-template-agent-note,
-.workspace-create-modal .workspace-template-agent-prompt summary {
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-template-agent-control {
-  background: rgba(4, 8, 12, 0.48);
-  border-color: var(--wc-line);
-  color: #f3f5f8;
-}
-.workspace-create-modal .workspace-template-agent-control::placeholder {
-  color: rgba(198, 207, 216, 0.54);
-}
-.workspace-create-modal .workspace-template-agent-row.is-edited {
-  border-color: var(--wc-faction-deep);
-  box-shadow: 0 0 0 1px rgba(70, 211, 154, 0.22) inset;
-}
-.workspace-create-modal .workspace-template-agent-prompt {
-  border-top-color: var(--wc-line);
-}
-.workspace-create-modal .workspace-template-agent-chip {
-  border-color: var(--wc-line-bright);
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-template-agent-chip.create {
-  color: #9af2c5;
-  background: rgba(70, 211, 154, 0.1);
-  border-color: rgba(70, 211, 154, 0.26);
-}
-.workspace-create-modal .workspace-template-agent-chip.reuse {
-  color: #f7d27a;
-  background: rgba(232, 181, 75, 0.12);
-  border-color: rgba(232, 181, 75, 0.28);
-}
-.workspace-create-modal .workspace-template-agent-chip.entry {
-  color: #9be2f4;
-  background: rgba(78, 197, 230, 0.1);
-  border-color: rgba(78, 197, 230, 0.24);
 }
 
-/* Reused agent: a compact "already exists, will be linked" row. Its editable
-   view is hidden until "Make a workspace copy" forks a fresh agent. */
-.workspace-create-modal .workspace-template-agent-reuse {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.workspace-create-modal .workspace-template-agent-reuse-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-}
-.workspace-create-modal .workspace-template-agent-reuse-head .workspace-template-agent-meta {
-  margin-top: 0;
-}
-.workspace-create-modal .workspace-template-agent-reuse-name {
-  font-weight: 650;
-  color: var(--wc-ink);
-}
-.workspace-create-modal .workspace-template-agent-reuse-sub {
-  font-family: var(--wc-font-mono);
-  font-size: 11px;
-  color: var(--wc-ink-dim);
-}
-/* A locked reuse row hides the right-hand model column (the sub-line already
-   names the saved model); forking reveals the full editable layout. */
-.workspace-create-modal
-  .workspace-template-agent-row.is-reuse:not([data-forked="true"])
-  .workspace-template-agent-model {
-  display: none;
-}
-.workspace-create-modal .workspace-template-agent-fork-btn {
-  align-self: flex-start;
-  margin-top: 2px;
-  font-family: var(--wc-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  padding: 3px 10px;
-  color: var(--wc-faction);
-  background: color-mix(in srgb, var(--wc-faction) 8%, transparent);
-  border: 1px solid var(--wc-faction-deep);
-  cursor: pointer;
-}
-.workspace-create-modal .workspace-template-agent-fork-btn:hover {
-  background: color-mix(in srgb, var(--wc-faction) 16%, transparent);
-}
-.workspace-create-modal .workspace-template-agent-fork-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.workspace-create-modal .workspace-template-agent-fork-note {
-  display: none;
-  margin-top: 0.35rem;
-  font-size: 11px;
-  color: var(--wc-faction);
-}
-.workspace-create-modal
-  .workspace-template-agent-row[data-forked="true"]
-  .workspace-template-agent-fork-note {
-  display: block;
-}
+/* Wizard chrome shared by every step. */
 
-/* Final review: plain-language assistant cards keep setup readable by default;
-   deeper configuration only appears after an intentional Customize action. */
 .workspace-create-modal .workspace-wizard-step-heading {
   margin: 2px 0 14px;
 }
@@ -1129,9 +1003,7 @@
 [data-bs-theme="light"] .workspace-create-modal .workspace-setup-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-advanced-summary-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-card-label,
-[data-bs-theme="light"] .workspace-create-modal .workspace-create-recap-name,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-title,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model strong {
+[data-bs-theme="light"] .workspace-create-modal .workspace-create-recap-name {
   color: var(--wc-ink-heading);
 }
 
@@ -1144,15 +1016,13 @@
   opacity: 0.9;
 }
 
-[data-bs-theme="light"] .workspace-create-modal .modern-input,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-control {
+[data-bs-theme="light"] .workspace-create-modal .modern-input {
   background: var(--wc-field-bg);
   border-color: var(--wc-line-bright);
   color: var(--wc-ink);
 }
 
-[data-bs-theme="light"] .workspace-create-modal .modern-input::placeholder,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-control::placeholder {
+[data-bs-theme="light"] .workspace-create-modal .modern-input::placeholder {
   color: var(--wc-ink-faint);
 }
 
@@ -1167,8 +1037,7 @@
 
 [data-bs-theme="light"] .workspace-create-modal .workspace-setup-card,
 [data-bs-theme="light"] .workspace-create-modal .workspace-advanced-details,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-toggle,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-row {
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-toggle {
   background: var(--wc-field-bg);
   border-color: var(--wc-line);
 }
@@ -1180,42 +1049,15 @@
 }
 
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-card.is-selected,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-row.is-selected,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review {
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-row.is-selected {
   background: rgba(31, 107, 78, 0.08);
 }
 
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-card-desc,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-summary,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-status,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-warnings,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-field,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-note,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-prompt summary {
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-card-desc {
   color: var(--wc-ink-dim);
 }
 
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-prompt {
-  border-top-color: var(--wc-line);
-}
-
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.create {
-  color: var(--wc-faction);
-  background: rgba(31, 107, 78, 0.1);
-  border-color: rgba(31, 107, 78, 0.26);
-}
-
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.reuse {
-  color: var(--wc-keeper);
-}
-
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.entry {
-  color: var(--wc-idle);
-}
-
-[data-bs-theme="dark"] .workspace-create-modal .modern-input,
-[data-bs-theme="dark"] .workspace-create-modal .workspace-template-agent-control {
+[data-bs-theme="dark"] .workspace-create-modal .modern-input {
   background: var(--wc-bg-2) !important;
   border-color: var(--wc-line-bright) !important;
   color: var(--wc-ink) !important;

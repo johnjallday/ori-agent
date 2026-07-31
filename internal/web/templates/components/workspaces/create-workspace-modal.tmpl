@@ -278,7 +278,11 @@
                     <div>
                       <span class="workspace-wizard-eyebrow">Resulting workspace team</span>
                       <h3 id="workspaceTeamHeading">Workspace Assistant</h3>
-                      <p id="workspaceTeamSummary" class="workspace-team-review-summary" aria-live="polite"></p>
+                      <!-- Not a live region: this line re-renders on every draft
+                           change, so announcing it would repeat the whole team
+                           summary on each edit. Deliberate change messages go to
+                           #workspaceTeamLiveRegion instead. -->
+                      <p id="workspaceTeamSummary" class="workspace-team-review-summary"></p>
                     </div>
                   </div>
 
@@ -317,7 +321,7 @@
                   <label class="visually-hidden" for="existingAgentRosterSearch">Search your agents</label>
                   <input type="search" id="existingAgentRosterSearch" class="modern-input w-100" placeholder="Search saved agents">
                   <div id="existingAgentRosterStatus" class="workspace-existing-agent-roster-status" aria-live="polite"></div>
-                  <div id="existingAgentRosterList" class="workspace-existing-agent-roster-list"></div>
+                  <div id="existingAgentRosterList" class="workspace-existing-agent-roster-list" role="list" aria-labelledby="existingAgentRosterTitle"></div>
                 </section>
               </div>
 
@@ -334,7 +338,10 @@
                 <p>Check the workspace, its team, and anything it will ask for after creation.</p>
               </div>
 
-              <div id="workspaceReviewSummary" class="workspace-review-summary" aria-live="polite"></div>
+              <!-- Not a live region either: the receipt re-renders on every
+                   draft change, and Review is entered deliberately with focus
+                   moved to its heading, so its content is already discoverable. -->
+              <div id="workspaceReviewSummary" class="workspace-review-summary"></div>
 
               <!-- The same classified issues Team shows, blockers first, so the
                    receipt can never look calmer than the step it summarizes. -->
