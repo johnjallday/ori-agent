@@ -1591,15 +1591,38 @@ function wt_dispatch {
     local demo_port="${2:-8931}"
     echo "Building $demo_root ..."
     (cd "$demo_root" && go build -o bin/ori-agent ./cmd/server) || return 1
-    # Purge sandboxes left behind by prior demo runs before creating a new one,
-    # so these don't accumulate indefinitely in $TMPDIR across sessions.
-    rm -rf "${TMPDIR:-/tmp}"/ori-demo.* 2>/dev/null
+    local demo_parent
+    demo_parent="$(cd "${TMPDIR:-/tmp}" 2>/dev/null && pwd -P)" || {
+      echo "Could not resolve the demo temporary directory"
+      return 1
+    }
     local demo_dir
-    demo_dir="$(mktemp -d "${TMPDIR:-/tmp}/ori-demo.XXXXXX")" || return 1
-    echo "Demo sandbox: $demo_dir   (safe to rm -rf when done)"
+    demo_dir="$(mktemp -d "$demo_parent/ori-demo.XXXXXX")" || return 1
+    echo "Demo sandbox: $demo_dir   (removed automatically on exit)"
     echo "Branch:       $(git -C "$demo_root" branch --show-current)"
     echo "URL:          http://localhost:$demo_port   (Ctrl-C to stop)"
-    (cd "$demo_dir" && HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" "$demo_root/bin/ori-agent")
+    local demo_status=0
+    {
+      (cd "$demo_dir" && HOME="$demo_dir" ORI_DATA_DIR="$demo_dir" PORT="$demo_port" "$demo_root/bin/ori-agent") || demo_status=$?
+    } always {
+      if [[ "${ORI_KEEP_DEMO_SANDBOX:-0}" == "1" ]]; then
+        echo "Demo sandbox preserved: $demo_dir"
+      else
+        case "$demo_dir" in
+          "$demo_parent"/ori-demo.*)
+            rm -rf -- "$demo_dir" || {
+              echo "Failed to remove demo sandbox: $demo_dir"
+              [[ "$demo_status" -ne 0 ]] || demo_status=1
+            }
+            ;;
+          *)
+            echo "Refusing to remove unexpected demo sandbox: $demo_dir"
+            [[ "$demo_status" -ne 0 ]] || demo_status=1
+            ;;
+        esac
+      fi
+    }
+    return "$demo_status"
     ;;
   cd)
     local name="$2"

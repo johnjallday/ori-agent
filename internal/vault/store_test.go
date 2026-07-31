@@ -27,7 +27,7 @@ func newTestVaultStore(t *testing.T) (*Store, *database.DB) {
 		t.Fatalf("open database: %v", err)
 	}
 
-	return NewStore(db, StoreOptions{}), db
+	return NewStore(db, StoreOptions{VaultFilesBaseDir: t.TempDir()}), db
 }
 
 func createTestVault(t *testing.T, ctx context.Context, store *Store, name string) Vault {
@@ -333,6 +333,7 @@ func TestStoreCreateGrantRefreshPreservesCreatedAt(t *testing.T) {
 
 	currentTime := time.Date(2026, time.April, 3, 9, 0, 0, 0, time.UTC)
 	store := NewStore(db, StoreOptions{
+		VaultFilesBaseDir: t.TempDir(),
 		Clock: func() time.Time {
 			return currentTime
 		},

@@ -508,7 +508,7 @@ func (h *HTTPHandler) OpenWorkspaceOutputDir(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := platform.OpenFolder(outputDir); err != nil {
+	if err := callDesktopOpener(h.openFolder, outputDir); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to open output directory: %v", err))
 		return
 	}

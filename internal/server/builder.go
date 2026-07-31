@@ -46,6 +46,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
@@ -122,6 +123,8 @@ import (
 //	builder.WithStore(mockStore).WithLLMFactory(mockFactory)
 type ServerBuilder struct {
 	server *Server
+
+	desktopOpener platform.DesktopOpener
 
 	// Internal fields populated during initialization
 	clientFactory         *client.Factory
@@ -299,14 +302,17 @@ type ServerBuilder struct {
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
 func NewServerBuilder() (*ServerBuilder, error) {
+	desktopOpener := platform.NativeDesktopOpener{}
 	return &ServerBuilder{
+		desktopOpener: desktopOpener,
 		server: &Server{
-			Core:        &CoreSystemFacade{},
-			Storage:     &StorageSystemFacade{},
-			Workflow:    &WorkflowSystemFacade{},
-			Integration: &IntegrationSystemFacade{},
-			UI:          &UISystemFacade{},
-			Handlers:    &HandlerFacade{},
+			Core:          &CoreSystemFacade{},
+			Storage:       &StorageSystemFacade{},
+			Workflow:      &WorkflowSystemFacade{},
+			Integration:   &IntegrationSystemFacade{},
+			UI:            &UISystemFacade{},
+			Handlers:      &HandlerFacade{},
+			desktopOpener: desktopOpener,
 		},
 	}, nil
 }
@@ -536,5 +542,17 @@ func (b *ServerBuilder) WithWorkspaceStore(ws workspace.Store) *ServerBuilder {
 		b.server.Storage = &StorageSystemFacade{}
 	}
 	b.server.Storage.WorkspaceStore = ws
+	return b
+}
+
+// WithDesktopOpener injects the boundary used for Finder/Explorer and default
+// application launches. Automated tests use a no-op implementation so route
+// probes cannot create real desktop side effects.
+func (b *ServerBuilder) WithDesktopOpener(opener platform.DesktopOpener) *ServerBuilder {
+	if opener == nil {
+		return b
+	}
+	b.desktopOpener = opener
+	b.server.desktopOpener = opener
 	return b
 }

@@ -50,12 +50,20 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 - `docker-test-installers.sh` — Installer tests inside Docker.
 - `test-with-ollama.sh` — Run the suite against a local Ollama provider.
 - `diagnose-test-failures.sh` — Summarize and triage failing Go tests.
+- `run-test-command.sh` — Run one Go, Node, or Playwright test command inside
+  an exact run-owned temp sandbox. The sandbox is removed on success, failure,
+  or interruption. Set `ORI_KEEP_TEST_SANDBOX=1` to preserve it for debugging.
+- `prune-test-cache.sh` — Automatic post-test maintenance. It removes stale
+  Ori-owned temp artifacts older than 24 hours and runs `go clean -cache` only
+  when the shared Go build cache exceeds 20 GiB. Set
+  `ORI_SKIP_CACHE_PRUNE=1` to opt out. It never clears the Go module cache or
+  Playwright browser cache. Use `make cache-report` to preview the decision.
 - `clean-test-artifacts.sh` — Preview or delete Ori-owned test logs and
   temporary directories left in the system temp folder. Run it with no
   arguments for a dry run, with `--delete` to clean, or use
-  `make clean-test-artifacts`. It only matches known `ori-test-*`,
-  `ori-vault-files-*`, `ori-agent-test-*`, `ori-db-test-*`, and
-  `ori-db-migration-*` names.
+  `make clean-test-artifacts`. Automatic maintenance applies a 24-hour age
+  guard; manual cleanup has no age guard unless `--older-than-hours` is set.
+  The script only matches known Ori-owned artifact prefixes.
 - `check-cross-platform.sh` — Verify the code cross-compiles for release targets.
 - `check-go-version.sh` — Assert the toolchain matches the required Go version.
 
@@ -94,6 +102,9 @@ wt backlog             # read Ideas, Doing, and retained terminal history
 wt backlog prune       # force seven-day Shipped / dropped retention + push
 ```
 Source it (don't execute) so `cd` affects your current shell.
+
+`wt demo` removes its exact sandbox when the demo exits. Set
+`ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
 Every backlog mutation (`add`, `sync`, `wt start`, and `wt done`) automatically
 removes date-prefixed `## Shipped / dropped` entries older than seven days,

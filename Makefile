@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
+.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-test-maintenance lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
 
 # Default target
 .DEFAULT_GOAL := help
@@ -14,6 +14,7 @@ GOBUILD=$(GO) build
 GORUN=$(GO) run
 GOVET=$(GO) vet
 GOFMT=$(GO) fmt
+TEST_RUNNER=./scripts/run-test-command.sh
 PORT?=8765
 MONOREPO_ROOT?=$(abspath $(CURDIR)/..)
 
@@ -117,6 +118,12 @@ clean: ## Clean build artifacts
 clean-test-artifacts: ## Delete Ori test artifacts from the system temp directory
 	@./scripts/clean-test-artifacts.sh --delete
 
+prune-test-cache: ## Prune stale Ori artifacts and an oversized Go build cache
+	@./scripts/prune-test-cache.sh
+
+cache-report: ## Preview automatic test artifact and Go cache pruning
+	@./scripts/prune-test-cache.sh --dry-run
+
 clean-state: ## Delete all configuration and state files (fresh start)
 	@echo "$(YELLOW)⚠️  WARNING: This will delete ALL configuration, agents, workspaces, and settings!$(NC)"
 	@echo "$(YELLOW)You will need to reconfigure the app from scratch.$(NC)"
@@ -165,12 +172,12 @@ run-menubar: menubar ## Build and run the menu bar app
 
 test: ## Run all tests (unit + integration)
 	@echo "$(BLUE)Running all tests...$(NC)"
-	$(GOTEST) -v $$(go list ./... | grep -v '/tests$$')
+	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/tests$$')
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
 test-unit: ## Run unit tests only
 	@echo "$(BLUE)Running unit tests...$(NC)"
-	$(GOTEST) -v -short $$(go list ./... | grep -v '/tests$$')
+	$(TEST_RUNNER) $(GOTEST) -v -short $$(go list ./... | grep -v '/tests$$')
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
 
 test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported targets
@@ -180,17 +187,17 @@ test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported 
 	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BUILD_DIR)/herdr-devflow-windows-amd64.exe ./tools/herdr-devflow/cmd/herdr-devflow
 
 test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge tests
-	$(GOTEST) ./tools/herdr-devflow/...
-	@bash scripts/herdr-devflow.test.sh
-	@zsh scripts/wt-herd.test.sh
-	@zsh scripts/wt-backlog.test.sh
+	$(TEST_RUNNER) $(GOTEST) ./tools/herdr-devflow/...
+	@$(TEST_RUNNER) bash scripts/herdr-devflow.test.sh
+	@$(TEST_RUNNER) zsh scripts/wt-herd.test.sh
+	@$(TEST_RUNNER) zsh scripts/wt-backlog.test.sh
 
 test-integration: ## Run integration tests
 	@echo "$(BLUE)Running integration tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping integration tests (OPENAI_API_KEY not set)$(NC)"; \
 	else \
-		$(GOTEST) -v -run Integration ./...; \
+		$(TEST_RUNNER) $(GOTEST) -v -run Integration ./...; \
 		echo "$(GREEN)✓ Integration tests passed$(NC)"; \
 	fi
 
@@ -199,14 +206,14 @@ test-e2e: build ## Run end-to-end tests
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping E2E tests (OPENAI_API_KEY not set)$(NC)"; \
 	else \
-		$(GOTEST) -v ./tests/e2e/...; \
+		$(TEST_RUNNER) $(GOTEST) -v ./tests/e2e/...; \
 		echo "$(GREEN)✓ E2E tests passed$(NC)"; \
 	fi
 
 test-coverage: ## Run tests with coverage report
 	@echo "$(BLUE)Running tests with coverage...$(NC)"
 	@mkdir -p $(COVERAGE_DIR)
-	$(GOTEST) -v -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	$(TEST_RUNNER) $(GOTEST) -v -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
 	$(GO) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
 	$(GO) tool cover -func=$(COVERAGE_DIR)/coverage.out | grep total:
 	@echo "$(GREEN)✓ Coverage report generated: $(COVERAGE_DIR)/coverage.html$(NC)"
@@ -228,13 +235,13 @@ test-user: build ## Run user workflow tests
 		echo "$(YELLOW)Skipping user tests (no LLM provider configured)$(NC)"; \
 		echo "$(YELLOW)Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or USE_OLLAMA=true$(NC)"; \
 	else \
-		$(GOTEST) -p 1 -v -timeout 5m ./tests/user/...; \
+		$(TEST_RUNNER) $(GOTEST) -p 1 -v -timeout 5m ./tests/user/...; \
 		echo "$(GREEN)✓ User tests passed$(NC)"; \
 	fi
 
 test-ollama: ## Run user tests with Ollama (local LLM)
 	@echo "$(BLUE)Running tests with Ollama...$(NC)"
-	@./scripts/test-with-ollama.sh
+	@$(TEST_RUNNER) ./scripts/test-with-ollama.sh
 
 test-cli: build ## Build and run interactive testing CLI
 	@echo "$(BLUE)Building test CLI...$(NC)"
@@ -281,11 +288,19 @@ lint-fix: ## Auto-fix lint issues where possible (gofmt rewrites + golangci-lint
 
 test-js: ## Run JS unit tests (Node 18+ built-in test runner; no npm install needed)
 	@echo "$(BLUE)Running JS unit tests...$(NC)"
-	node --test internal/web/static/js/modules/*.test.js
+	$(TEST_RUNNER) node --test internal/web/static/js/modules/*.test.js
 	@echo "$(GREEN)✓ JS tests passed$(NC)"
 
 test-clean-test-artifacts: ## Test the temp artifact cleanup script in an isolated directory
 	@./scripts/clean-test-artifacts.test.sh
+
+test-prune-test-cache: ## Test automatic cache pruning in isolated fixtures
+	@./scripts/prune-test-cache.test.sh
+
+test-run-test-command: ## Test run-owned sandbox cleanup and opt-outs
+	@./scripts/run-test-command.test.sh
+
+test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command ## Test all test-maintenance helpers
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)
 	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"

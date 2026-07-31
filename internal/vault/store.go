@@ -17,6 +17,9 @@ import (
 )
 
 type StoreOptions struct {
+	// VaultFilesBaseDir should be set to t.TempDir() by tests that use an
+	// in-memory catalog database so backing vault packages share the test's
+	// automatic cleanup lifecycle.
 	VaultFilesBaseDir string
 	ManagedVaultRoot  string
 	Clock             func() time.Time

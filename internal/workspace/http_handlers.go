@@ -29,7 +29,9 @@ type HTTPHandler struct {
 	emailAccounts           emailAccountStore
 	folderResolver          FolderResolver
 	folderWorkspaceResolver folderWorkspaceResolver
+	openFolder              func(string) error
 	openFile                func(string) error
+	revealFile              func(string) error
 	// scheduler is the TaskScheduler that owns the MissionTrigger reference.
 	// Mission-related HTTP endpoints route through it so they share the same
 	// trigger configuration as cadence-driven runs. Optional — handlers
@@ -43,7 +45,9 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 		store:        store,
 		orchestrator: orchestrator,
 		eventBus:     eventBus,
+		openFolder:   platform.OpenFolder,
 		openFile:     platform.OpenFile,
+		revealFile:   platform.RevealInFileManager,
 	}
 	if resolver, ok := store.(FolderResolver); ok {
 		handler.folderResolver = resolver
@@ -52,6 +56,18 @@ func NewHTTPHandler(store Store, orchestrator *Orchestrator, eventBus *EventBus)
 		handler.folderWorkspaceResolver = resolver
 	}
 	return handler
+}
+
+// SetDesktopOpener replaces native desktop side effects for all workspace
+// handlers. Tests inject a no-op or recorder so routing checks never launch a
+// GUI application.
+func (h *HTTPHandler) SetDesktopOpener(opener platform.DesktopOpener) {
+	if h == nil || opener == nil {
+		return
+	}
+	h.openFolder = opener.OpenFolder
+	h.openFile = opener.OpenFile
+	h.revealFile = opener.RevealInFileManager
 }
 
 // SetFolderStore wires the canonical folder-backed workspace store used by

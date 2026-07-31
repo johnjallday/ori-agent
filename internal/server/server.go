@@ -30,6 +30,15 @@ type Server struct {
 	Integration *IntegrationSystemFacade
 	UI          *UISystemFacade
 	Handlers    *HandlerFacade
+
+	desktopOpener platform.DesktopOpener
+}
+
+func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
+	if s != nil && s.desktopOpener != nil {
+		return s.desktopOpener
+	}
+	return platform.NativeDesktopOpener{}
 }
 
 // New creates and initializes a new Server with all dependencies using the ServerBuilder.

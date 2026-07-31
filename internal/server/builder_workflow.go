@@ -538,6 +538,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	}
 
 	b.workspaceHandler = workspace.NewHTTPHandler(b.workspaceStore, b.workspaceOrchestrator, b.eventBus)
+	b.workspaceHandler.SetDesktopOpener(b.desktopOpener)
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)
 	}
