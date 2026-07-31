@@ -192,6 +192,9 @@ func (s *Service) Serve(ctx context.Context) error {
 	if err := prepareSocketPath(s.config.SocketPath, s.config.AllowedUID); err != nil {
 		return err
 	}
+	if err := s.reconcileStartup(ctx); err != nil {
+		return fmt.Errorf("reconcile standalone wake state before serving: %w", err)
+	}
 	listener, err := s.config.Listen("unix", s.config.SocketPath)
 	if err != nil {
 		return fmt.Errorf("listen on fixed wake socket: %w", err)
@@ -296,19 +299,22 @@ func (s *Service) Handle(ctx context.Context, uid int, request wakeprotocol.Requ
 	if err != nil {
 		return s.refusal(request, wakeprotocol.CodeStateFailed, err.Error())
 	}
+	var response wakeprotocol.Response
 	switch request.Operation {
 	case wakeprotocol.OperationRegisterOrReplace:
-		return s.register(ctx, uid, request, state, now)
+		response = s.register(ctx, uid, request, state, now)
 	case wakeprotocol.OperationCancel:
-		return s.cancel(ctx, uid, request, state, now)
+		response = s.cancel(ctx, uid, request, state, now)
 	case wakeprotocol.OperationList:
 		public := state.public()
-		return s.success(request, "wake state listed", &public, nil)
+		response = s.success(request, "wake state listed", &public, nil)
 	case wakeprotocol.OperationVerify:
-		return s.verify(ctx, request, state, now)
+		response = s.verify(ctx, request, state, now)
 	default:
-		return s.refusal(request, wakeprotocol.CodeUnsupported, "operation is not implemented by this daemon build")
+		response = s.refusal(request, wakeprotocol.CodeUnsupported, "operation is not implemented by this daemon build")
 	}
+	s.recordAudit(uid, request, response, now)
+	return response
 }
 
 func (s *Service) success(

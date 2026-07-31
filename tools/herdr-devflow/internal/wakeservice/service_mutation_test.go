@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,6 +225,59 @@ func TestMutationIdempotencyReplaysAndRejectsConflictingReuse(t *testing.T) {
 	}
 }
 
+func TestCandidateArbitrationReplacesEarlierAndRecomputesAfterCancelAndExpiry(t *testing.T) {
+	t.Parallel()
+	current := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	power := &fakePowerScheduler{}
+	service, err := New(Config{
+		BuildVersion: "test", StateDir: filepath.Join(t.TempDir(), "state"), AllowedUID: os.Getuid(),
+		Now: func() time.Time { return current }, Power: power, RequireRoot: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := wakeprotocol.Candidate{ID: "later", Source: wakeprotocol.SourceContinuation, Purpose: wakeprotocol.PurposeContinuation, WakeAt: current.Add(3 * time.Hour), ExpiresAt: current.Add(4 * time.Hour)}
+	earlier := wakeprotocol.Candidate{ID: "earlier", Source: wakeprotocol.SourceOvernight, Purpose: wakeprotocol.PurposeClaudeReset, WakeAt: current.Add(2 * time.Hour), ExpiresAt: current.Add(2*time.Hour + 30*time.Minute)}
+	for _, candidate := range []wakeprotocol.Candidate{later, earlier} {
+		response := service.Handle(context.Background(), os.Getuid(), mutationRequest(
+			"register-"+candidate.ID, "idem-"+candidate.ID, wakeprotocol.OperationRegisterOrReplace, &candidate, nil,
+		))
+		if response.Result != wakeprotocol.ResultSuccess || response.State == nil || response.State.Programmed == nil {
+			t.Fatalf("register %s response=%+v", candidate.ID, response)
+		}
+	}
+	if got := power.events; len(got) != 1 || !got[0].At.Equal(earlier.WakeAt) {
+		t.Fatalf("earlier candidate was not selected: %#v", got)
+	}
+	earlierTarget := wakeprotocol.Target{ID: earlier.ID, Source: earlier.Source, Purpose: earlier.Purpose}
+	response := service.Handle(context.Background(), os.Getuid(), mutationRequest(
+		"cancel-earlier", "idem-cancel-earlier", wakeprotocol.OperationCancel, nil, &earlierTarget,
+	))
+	if response.Result != wakeprotocol.ResultSuccess || response.State == nil || response.State.Programmed == nil || !response.State.Programmed.WakeAt.Equal(later.WakeAt) {
+		t.Fatalf("cancel did not restore later candidate: %+v", response)
+	}
+	earlier = wakeprotocol.Candidate{ID: "expires-first", Source: wakeprotocol.SourceContinuation, Purpose: wakeprotocol.PurposeContinuation, WakeAt: current.Add(time.Hour), ExpiresAt: current.Add(90 * time.Minute)}
+	response = service.Handle(context.Background(), os.Getuid(), mutationRequest(
+		"register-expiring", "idem-expiring", wakeprotocol.OperationRegisterOrReplace, &earlier, nil,
+	))
+	if response.Result != wakeprotocol.ResultSuccess {
+		t.Fatalf("register expiring candidate=%+v", response)
+	}
+	current = current.Add(2 * time.Hour)
+	laterTarget := wakeprotocol.Target{ID: later.ID, Source: later.Source, Purpose: later.Purpose}
+	response = service.Handle(context.Background(), os.Getuid(), mutationRequest(
+		"verify-later-after-expiry", "", wakeprotocol.OperationVerify, nil, &laterTarget,
+	))
+	if response.Result != wakeprotocol.ResultSuccess || response.State == nil || response.State.Programmed == nil || !response.State.Programmed.WakeAt.Equal(later.WakeAt) {
+		t.Fatalf("expiry did not recompute the later winner: %+v", response)
+	}
+	for _, call := range power.calls {
+		if strings.Contains(call, "cancelall") {
+			t.Fatalf("unsafe broad cancellation was attempted: %s", call)
+		}
+	}
+}
+
 func TestScheduleFailureReturnsUncertainAndRetainsRecoveryIntent(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
@@ -246,6 +300,50 @@ func TestScheduleFailureReturnsUncertainAndRetainsRecoveryIntent(t *testing.T) {
 	}
 	if len(state.Candidates) != 1 || state.Intent == nil || state.Intent.Desired == nil {
 		t.Fatalf("recovery state = %+v", state)
+	}
+}
+
+func TestRestartReconcilesPersistedCandidateAndAuditExcludesReason(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	stateDir := filepath.Join(t.TempDir(), "state")
+	power := &fakePowerScheduler{}
+	config := Config{
+		BuildVersion: "test", StateDir: stateDir, AllowedUID: os.Getuid(),
+		Now: func() time.Time { return now }, Power: power, RequireRoot: false,
+	}
+	first, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := wakeprotocol.Candidate{
+		ID: "restart-candidate", Source: wakeprotocol.SourceContinuation,
+		Purpose: wakeprotocol.PurposeContinuation, WakeAt: now.Add(time.Hour),
+		ExpiresAt: now.Add(2 * time.Hour), Reason: "secret prompt and repository content must never reach audit",
+	}
+	response := first.Handle(context.Background(), os.Getuid(), mutationRequest(
+		"restart-register", "restart-idempotency", wakeprotocol.OperationRegisterOrReplace, &candidate, nil,
+	))
+	if response.Result != wakeprotocol.ResultSuccess {
+		t.Fatalf("register response = %+v", response)
+	}
+	power.events = nil // Simulate a daemon crash after the host event was lost.
+	restarted, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.reconcileStartup(context.Background()); err != nil {
+		t.Fatalf("restart reconciliation failed: %v", err)
+	}
+	if len(power.events) != 1 || power.events[0].Owner != PMSetOwner || !power.events[0].At.Equal(candidate.WakeAt) {
+		t.Fatalf("restart did not recreate exact owned event: %#v", power.events)
+	}
+	payload, err := os.ReadFile(filepath.Join(stateDir, AuditFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), candidate.Reason) || !strings.Contains(string(payload), `"uid":`) || !strings.Contains(string(payload), `"candidate_id":"restart-candidate"`) {
+		t.Fatalf("bounded wake audit is missing identity or leaked a reason: %s", payload)
 	}
 }
 

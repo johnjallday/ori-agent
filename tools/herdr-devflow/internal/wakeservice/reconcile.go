@@ -15,6 +15,38 @@ type reconcileFailure struct {
 	message   string
 }
 
+// reconcileStartup makes a crashed or restarted daemon recover its bounded
+// root intent before accepting callers. A missing event is recreated only
+// when the persisted candidate set still authorizes it; an unknown owned event
+// remains a conflict rather than becoming silently adopted.
+func (s *Service) reconcileStartup(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := s.store.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	state, err := s.store.load()
+	if err != nil {
+		return err
+	}
+	now := s.config.Now().UTC()
+	state.prune(now)
+	if err := s.reconcile(ctx, &state, state.winner(now), now); err != nil {
+		return err
+	}
+	if err := s.store.save(state); err != nil {
+		return err
+	}
+	// Startup is a root-owned operation, not an unprivileged caller action.
+	// It records only the reconciled programmed time through the state-free
+	// response shape so no candidate reason enters the privileged audit.
+	response := s.success(wakeprotocol.Request{Operation: wakeprotocol.OperationList}, "wake daemon startup reconciled", nil, nil)
+	s.recordAudit(0, wakeprotocol.Request{Operation: wakeprotocol.OperationList}, response, now)
+	return nil
+}
+
 func (e *reconcileFailure) Error() string {
 	return e.message
 }
