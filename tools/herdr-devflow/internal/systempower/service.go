@@ -11,6 +11,7 @@ package systempower
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -61,6 +62,11 @@ type Service struct {
 	Run Runner
 	// Timeout bounds one command.
 	Timeout time.Duration
+	// Assertion hooks are test seams for the user-level caffeinate assertion.
+	AcquireAssertion func(context.Context, string) (string, error)
+	CheckAssertion   func(context.Context, string) bool
+	ReleaseAssertion func(context.Context, string) error
+	assertions       sync.Map
 }
 
 // DefaultTimeout bounds one power command.

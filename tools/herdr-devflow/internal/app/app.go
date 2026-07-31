@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
@@ -33,6 +33,9 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeinstall"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeservice"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -56,16 +59,60 @@ type Dependencies struct {
 	Getuid              func() int
 	LaunchctlRun        func(context.Context, string, ...string) error
 	NewContinuationWake func() (WakeCoordinator, error)
+	NewOvernightWake    func(wakeprotocol.Purpose) (WakeCoordinator, error)
 	IsInteractive       func() bool
+	WakeLifecycle       WakeLifecycle
 }
 
-// WakeCoordinator is the continuation helper's source-scoped view of Ori's
-// single macOS wake owner.
+// WakeCoordinator is the continuation helper's source-scoped view of the
+// standalone Herdr Wake Service.
 type WakeCoordinator interface {
-	Register(string, time.Time, string) error
-	Verify(context.Context, string, time.Time) (time.Time, error)
-	Cancel(string) error
+	RegisterCandidate(context.Context, string, time.Time, string) (wakeclient.Evidence, error)
+	VerifyCandidate(context.Context, string, time.Time) (wakeclient.Evidence, error)
+	CancelCandidate(context.Context, string) (wakeclient.Evidence, error)
 	Owner() wakeclient.OwnerReadiness
+}
+
+// overnightWakeAdapter keeps the Overnight supervisor's legacy-shaped wake
+// boundary while every operation still goes through the typed standalone
+// client. The source/purpose is fixed by NewOvernightWake at construction.
+type overnightWakeAdapter struct{ WakeCoordinator }
+
+func (w overnightWakeAdapter) Register(id string, wakeAt time.Time, detail string) error {
+	_, err := w.RegisterCandidate(context.Background(), id, wakeAt, detail)
+	return err
+}
+
+func (w overnightWakeAdapter) Verify(ctx context.Context, id string, wakeAt time.Time) (time.Time, error) {
+	evidence, err := w.VerifyCandidate(ctx, id, wakeAt)
+	return evidence.ProgrammedAt, err
+}
+
+func (w overnightWakeAdapter) Cancel(id string) error {
+	_, err := w.CancelCandidate(context.Background(), id)
+	return err
+}
+
+func (w overnightWakeAdapter) RegisterCandidate(ctx context.Context, id string, wakeAt time.Time, detail string) (wakeclient.Evidence, error) {
+	return w.WakeCoordinator.RegisterCandidate(ctx, id, wakeAt, detail)
+}
+
+func (w overnightWakeAdapter) VerifyCandidate(ctx context.Context, id string, wakeAt time.Time) (wakeclient.Evidence, error) {
+	return w.WakeCoordinator.VerifyCandidate(ctx, id, wakeAt)
+}
+
+func (w overnightWakeAdapter) CancelCandidate(ctx context.Context, id string) (wakeclient.Evidence, error) {
+	return w.WakeCoordinator.CancelCandidate(ctx, id)
+}
+
+// WakeLifecycle is injectable so CLI tests can prove that confirmation gates
+// all administrator actions without invoking sudo or touching system paths.
+type WakeLifecycle interface {
+	PrepareInstall(context.Context, string, int) (wakeinstall.PreparedInstall, error)
+	Install(context.Context, wakeinstall.PreparedInstall) (wakeinstall.Status, error)
+	Status(context.Context) (wakeinstall.Status, error)
+	Doctor(context.Context) ([]wakeinstall.Diagnostic, error)
+	Uninstall(context.Context, int) (wakeinstall.Status, error)
 }
 
 type App struct {
@@ -82,7 +129,9 @@ type App struct {
 	getuid              func() int
 	launchctlRun        func(context.Context, string, ...string) error
 	newContinuationWake func() (WakeCoordinator, error)
+	newOvernightWake    func(wakeprotocol.Purpose) (WakeCoordinator, error)
 	isInteractive       func() bool
+	wakeLifecycle       WakeLifecycle
 	cleanupTimeout      time.Duration
 }
 
@@ -122,7 +171,12 @@ func New(deps Dependencies) *App {
 	}
 	if deps.NewContinuationWake == nil {
 		deps.NewContinuationWake = func() (WakeCoordinator, error) {
-			return wakeclient.DefaultForSource(wakecoord.SourceHerdrContinuation)
+			return wakeclient.DefaultForSource(wakeprotocol.SourceContinuation)
+		}
+	}
+	if deps.NewOvernightWake == nil {
+		deps.NewOvernightWake = func(purpose wakeprotocol.Purpose) (WakeCoordinator, error) {
+			return wakeclient.DefaultForPurpose(wakeprotocol.SourceOvernight, purpose)
 		}
 	}
 	if deps.IsInteractive == nil {
@@ -139,6 +193,9 @@ func New(deps Dependencies) *App {
 				outputInfo.Mode()&os.ModeCharDevice != 0
 		}
 	}
+	if deps.WakeLifecycle == nil {
+		deps.WakeLifecycle = wakeinstall.NewManager()
+	}
 	return &App{
 		stdout:              deps.Stdout,
 		stderr:              deps.Stderr,
@@ -153,7 +210,9 @@ func New(deps Dependencies) *App {
 		getuid:              deps.Getuid,
 		launchctlRun:        deps.LaunchctlRun,
 		newContinuationWake: deps.NewContinuationWake,
+		newOvernightWake:    deps.NewOvernightWake,
 		isInteractive:       deps.IsInteractive,
+		wakeLifecycle:       deps.WakeLifecycle,
 		cleanupTimeout:      defaultCleanupTimeout,
 	}
 }
@@ -222,9 +281,340 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.claudeUsage(ctx, opts, commandArgs)
 	case "overnight":
 		return a.overnight(ctx, opts, commandArgs)
+	case "wake":
+		return a.wake(ctx, opts, commandArgs)
 	default:
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
+	}
+}
+
+type wakeCommandArgs struct {
+	command string
+	yes     bool
+	json    bool
+}
+
+func parseWakeCommandArgs(args []string) (wakeCommandArgs, error) {
+	if len(args) == 0 {
+		return wakeCommandArgs{}, fmt.Errorf("wake requires install, status, doctor, or uninstall")
+	}
+	parsed := wakeCommandArgs{command: args[0]}
+	switch parsed.command {
+	case "install", "status", "doctor", "uninstall":
+	default:
+		return wakeCommandArgs{}, fmt.Errorf("unknown wake command %q", parsed.command)
+	}
+	for _, argument := range args[1:] {
+		switch argument {
+		case "--yes":
+			if parsed.command != "install" && parsed.command != "uninstall" {
+				return wakeCommandArgs{}, fmt.Errorf("--yes is only valid with wake install or uninstall")
+			}
+			parsed.yes = true
+		case "--json":
+			parsed.json = true
+		default:
+			return wakeCommandArgs{}, fmt.Errorf("unknown wake %s option %q", parsed.command, argument)
+		}
+	}
+	return parsed, nil
+}
+
+func (a *App) wake(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseWakeCommandArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	asJSON := opts.json || parsed.json
+	switch parsed.command {
+	case "status":
+		status, err := a.wakeLifecycle.Status(ctx)
+		if err != nil {
+			a.writeError(err, asJSON)
+			return 1
+		}
+		a.writeWakeStatus(asJSON, "status", status)
+		if status.Supported && status.Installed && status.Running && status.Compatible {
+			return 0
+		}
+		return 1
+	case "doctor":
+		diagnostics, err := a.wakeLifecycle.Doctor(ctx)
+		if err != nil {
+			a.writeError(err, asJSON)
+			return 1
+		}
+		a.writeWakeDiagnostics(asJSON, diagnostics)
+		for _, diagnostic := range diagnostics {
+			if diagnostic.Status == "FAIL" {
+				return 1
+			}
+		}
+		return 0
+	case "install":
+		return a.wakeInstall(ctx, opts, parsed, asJSON)
+	case "uninstall":
+		return a.wakeUninstall(ctx, opts, parsed, asJSON)
+	default:
+		return 2
+	}
+}
+
+func (a *App) wakeInstall(
+	ctx context.Context,
+	opts options,
+	parsed wakeCommandArgs,
+	asJSON bool,
+) int {
+	if a.goos != "darwin" {
+		a.writeError(wakeservice.ErrUnsupported, asJSON)
+		return 1
+	}
+	repoRoot, err := a.wakeRepoRoot(opts)
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	prepared, err := a.wakeLifecycle.PrepareInstall(ctx, repoRoot, a.getuid())
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	defer prepared.Cleanup()
+
+	preview := wakeInstallPreview(prepared)
+	if asJSON {
+		if !parsed.yes {
+			a.writeResult(true, map[string]any{
+				"status":  "confirmation_required",
+				"install": preview,
+				"error":   "wake install requires --yes in JSON or other non-interactive use",
+			})
+			return 2
+		}
+	} else {
+		writeWakeInstallPreview(a.stdout, preview)
+	}
+	if !a.confirmWakeAction(parsed.yes, asJSON, "Install the standalone Herdr Wake Service?") {
+		if !parsed.yes && !a.isInteractive() {
+			a.writeError(fmt.Errorf("wake install requires an interactive confirmation or --yes"), asJSON)
+			return 2
+		}
+		if !asJSON {
+			fmt.Fprintln(a.stdout, "Installation canceled; no administrator action was requested.")
+		}
+		return 1
+	}
+	status, err := a.wakeLifecycle.Install(ctx, prepared)
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	if asJSON {
+		a.writeResult(true, map[string]any{
+			"status": "installed", "install": preview, "wake_service": status,
+		})
+	} else {
+		a.writeWakeStatus(false, "installed", status)
+	}
+	return 0
+}
+
+func (a *App) wakeUninstall(
+	ctx context.Context,
+	opts options,
+	parsed wakeCommandArgs,
+	asJSON bool,
+) int {
+	if a.goos != "darwin" {
+		a.writeError(wakeservice.ErrUnsupported, asJSON)
+		return 1
+	}
+	// The standalone daemon is intentionally not removed while saved work
+	// still depends on one of its exact candidates. Refusing is safer than
+	// converting a future continuation or Overnight Run into an unowned wake.
+	runtime, runtimeErr := a.load(opts)
+	var dependents []string
+	if runtimeErr == nil {
+		bridgeState, stateErr := state.New(runtime.paths.StateDir).Load()
+		if stateErr != nil {
+			a.writeError(fmt.Errorf("read wake dependents before uninstall: %w", stateErr), asJSON)
+			return 1
+		}
+		for _, run := range bridgeState.Runs {
+			if !run.State.Terminal() && run.WakeMode != model.WakeModeStayAwake {
+				dependents = append(dependents, "Overnight Run "+run.ID)
+			}
+		}
+		for _, featureState := range bridgeState.Features {
+			for _, schedule := range featureState.Schedules {
+				if schedule.WakeRequired && schedule.State.IsUnresolved() {
+					dependents = append(dependents, "continuation "+schedule.ID)
+				}
+			}
+		}
+	}
+	if len(dependents) > 0 {
+		a.writeError(fmt.Errorf("cannot uninstall the standalone wake service while %s still depends on it; cancel the listed work first", strings.Join(dependents, ", ")), asJSON)
+		return 1
+	}
+	status, err := a.wakeLifecycle.Status(ctx)
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	preview := map[string]any{
+		"label":           wakeservice.LaunchDaemonLabel,
+		"executable_path": wakeservice.ExecutablePath,
+		"plist_path":      wakeservice.PlistPath,
+		"socket_path":     wakeservice.SocketPath,
+		"state_path":      wakeservice.StateDir,
+		"installed":       status.Installed,
+	}
+	if asJSON {
+		if !parsed.yes {
+			a.writeResult(true, map[string]any{
+				"status":    "confirmation_required",
+				"uninstall": preview,
+				"error":     "wake uninstall requires --yes in JSON or other non-interactive use",
+			})
+			return 2
+		}
+	} else {
+		fmt.Fprintf(a.stdout, "Herdr Wake Service uninstall\n")
+		fmt.Fprintf(a.stdout, "  LaunchDaemon: %s\n", wakeservice.LaunchDaemonLabel)
+		fmt.Fprintf(a.stdout, "  Executable:   %s\n", wakeservice.ExecutablePath)
+		fmt.Fprintf(a.stdout, "  Plist:        %s\n", wakeservice.PlistPath)
+		fmt.Fprintf(a.stdout, "  Socket:       %s\n", wakeservice.SocketPath)
+		fmt.Fprintf(a.stdout, "  Private state:%s\n", wakeservice.StateDir)
+		fmt.Fprintln(a.stdout, "  The user-level Herdr dispatcher, agents, worktrees, and Ori files are not removed.")
+	}
+	if !a.confirmWakeAction(parsed.yes, asJSON, "Uninstall the standalone Herdr Wake Service?") {
+		if !parsed.yes && !a.isInteractive() {
+			a.writeError(fmt.Errorf("wake uninstall requires an interactive confirmation or --yes"), asJSON)
+			return 2
+		}
+		if !asJSON {
+			fmt.Fprintln(a.stdout, "Uninstall canceled; no administrator action was requested.")
+		}
+		return 1
+	}
+	removed, err := a.wakeLifecycle.Uninstall(ctx, a.getuid())
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	if asJSON {
+		a.writeResult(true, map[string]any{
+			"status": "uninstalled", "uninstall": preview, "wake_service": removed,
+		})
+	} else {
+		a.writeWakeStatus(false, "uninstalled", removed)
+	}
+	return 0
+}
+
+func (a *App) wakeRepoRoot(opts options) (string, error) {
+	if opts.repoRoot != "" {
+		return worktree.FindRepoRoot(opts.repoRoot)
+	}
+	if value, ok := a.withOverrides(opts)(worktree.RepoOverrideEnv); ok &&
+		strings.TrimSpace(value) != "" {
+		return worktree.FindRepoRoot(value)
+	}
+	cwd, err := a.getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	return worktree.FindRepoRoot(cwd)
+}
+
+func (a *App) confirmWakeAction(yes, asJSON bool, question string) bool {
+	if yes {
+		return true
+	}
+	if asJSON || !a.isInteractive() {
+		return false
+	}
+	fmt.Fprintf(a.stdout, "%s [y/N] ", question)
+	answer, err := bufio.NewReader(a.stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes"
+}
+
+func wakeInstallPreview(prepared wakeinstall.PreparedInstall) map[string]any {
+	return map[string]any{
+		"label":           wakeservice.LaunchDaemonLabel,
+		"executable_path": wakeservice.ExecutablePath,
+		"plist_path":      wakeservice.PlistPath,
+		"socket_path":     wakeservice.SocketPath,
+		"state_path":      wakeservice.StateDir,
+		"pmset_owner":     wakeservice.PMSetOwner,
+		"pmset_type":      wakeservice.PMSetEventType,
+		"allowed_uid":     prepared.AllowedUID,
+		"artifact_digest": prepared.ArtifactDigest,
+		"build":           prepared.BuildVersion,
+		"capability":      "list, schedule, verify, reconcile, and exact-cancel only Herdr-owned macOS wake events",
+		"uninstall":       "wt herd wake uninstall",
+	}
+}
+
+func writeWakeInstallPreview(writer io.Writer, preview map[string]any) {
+	fmt.Fprintln(writer, "Herdr Wake Service installation")
+	fmt.Fprintf(writer, "  LaunchDaemon: %s\n", preview["label"])
+	fmt.Fprintf(writer, "  Executable:   %s\n", preview["executable_path"])
+	fmt.Fprintf(writer, "  Plist:        %s\n", preview["plist_path"])
+	fmt.Fprintf(writer, "  Socket:       %s\n", preview["socket_path"])
+	fmt.Fprintf(writer, "  Private state:%s\n", preview["state_path"])
+	fmt.Fprintf(writer, "  Allowed UID:  %v\n", preview["allowed_uid"])
+	fmt.Fprintf(writer, "  Artifact:     %s (%s)\n", preview["artifact_digest"], preview["build"])
+	fmt.Fprintf(writer, "  Capability:   %s\n", preview["capability"])
+	fmt.Fprintf(writer, "  Uninstall:    %s\n", preview["uninstall"])
+	fmt.Fprintln(writer, "  Authorization: normal macOS administrator approval via /usr/bin/sudo -k")
+	fmt.Fprintln(writer, "  No password, Keychain item, authorization cache, askpass program, or sudoers rule is stored.")
+}
+
+func (a *App) writeWakeStatus(asJSON bool, operation string, status wakeinstall.Status) {
+	if asJSON {
+		a.writeResult(true, map[string]any{"status": operation, "wake_service": status})
+		return
+	}
+	fmt.Fprintf(a.stdout, "Herdr Wake Service: %s\n", status.Detail)
+	fmt.Fprintf(a.stdout, "  supported=%t installed=%t running=%t compatible=%t\n",
+		status.Supported, status.Installed, status.Running, status.Compatible)
+	if status.DaemonBuild != "" {
+		fmt.Fprintf(a.stdout, "  protocol=%d state=%d build=%s allowed_uid=%d\n",
+			status.ProtocolVersion, status.StateVersion, status.DaemonBuild, status.AllowedUID)
+	}
+	if !status.LastSelfTestAt.IsZero() {
+		fmt.Fprintf(a.stdout, "  last_self_test=%s\n", status.LastSelfTestAt.Format(time.RFC3339))
+	}
+	if status.WakeState != nil {
+		state := status.WakeState
+		fmt.Fprintf(a.stdout, "  candidates=%d reconciled_at=%s\n", len(state.Candidates), state.ReconciledAt.Format(time.RFC3339))
+		if state.Programmed != nil {
+			fmt.Fprintf(a.stdout, "  programmed=%s/%s at %s\n", state.Programmed.Source, state.Programmed.Purpose, state.Programmed.WakeAt.Format(time.RFC3339))
+		}
+	} else if status.StateDetail != "" {
+		fmt.Fprintf(a.stdout, "  candidate_inventory=%s\n", status.StateDetail)
+	}
+}
+
+func (a *App) writeWakeDiagnostics(asJSON bool, diagnostics []wakeinstall.Diagnostic) {
+	if asJSON {
+		a.writeResult(true, map[string]any{"status": "diagnostics", "diagnostics": diagnostics})
+		return
+	}
+	for _, diagnostic := range diagnostics {
+		fmt.Fprintf(a.stdout, "[%s] %s: %s\n", diagnostic.Status, diagnostic.Name, diagnostic.Detail)
+		if diagnostic.Recovery != "" {
+			fmt.Fprintf(a.stdout, "       recovery: %s\n", diagnostic.Recovery)
+		}
 	}
 }
 
@@ -827,6 +1217,29 @@ func (a *App) setup(ctx context.Context, opts options) int {
 	}
 	a.recordAudit(runtime, audit.Event{Operation: "setup", Stage: "runtime", Outcome: "ready"})
 
+	wakeStatus, wakeStatusErr := a.wakeLifecycle.Status(ctx)
+	wakeView := map[string]any{
+		"installed": false,
+		"ready":     false,
+		"install":   "wt herd wake install",
+		"fallback":  "use --stay-awake for an Overnight Run that must not depend on hardware wake",
+	}
+	warnings := []string{}
+	if wakeStatusErr == nil {
+		wakeView["installed"] = wakeStatus.Installed
+		wakeView["ready"] = wakeStatus.Installed && wakeStatus.Running &&
+			wakeStatus.Compatible && wakeStatus.AllowedUID == a.getuid() &&
+			!wakeStatus.LastSelfTestAt.IsZero()
+		wakeView["detail"] = wakeStatus.Detail
+	} else {
+		wakeView["detail"] = "wake-service status could not be read"
+	}
+	if ready, _ := wakeView["ready"].(bool); !ready {
+		warnings = append(
+			warnings,
+			"Standalone wake support is not ready. Run wt herd wake install, or use --stay-awake for an Overnight Run.",
+		)
+	}
 	a.writeResult(opts.json, map[string]any{
 		"status":        "ready",
 		"repository_id": runtime.paths.RepositoryID,
@@ -837,7 +1250,9 @@ func (a *App) setup(ctx context.Context, opts options) int {
 			"root":    plugin.PluginRoot,
 			"enabled": plugin.Enabled,
 		},
-		"scheduler": schedulerStatus,
+		"scheduler":    schedulerStatus,
+		"wake_service": wakeView,
+		"warnings":     warnings,
 		"integrations": map[string]string{
 			"policy": "not changed by setup",
 			"claude": "inspect with: herdr integration status; install manually with: herdr integration install claude",
@@ -1245,7 +1660,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		fmt.Fprintln(a.stdout, "Continuation preview (not saved yet):")
 		fmt.Fprintf(a.stdout, "  Feature: %s\n  Worktree: %s\n  Role: %s\n  Agent: %s (%s)\n  Due: %s (%s)\n  Retry until: %s\n  Prompt: %s\n", target.Feature.Name, target.Feature.Path, target.Agent.Role, target.Agent.Name, target.Agent.Kind, dueAt.Format(time.RFC3339), timezone, dueAt.Add(runtime.config.RetryWindow()).Format(time.RFC3339), promptSummary)
 		if parsed.wake {
-			fmt.Fprintln(a.stdout, "  Wake: required; Ori must confirm a macOS wake before this schedule is ready")
+			fmt.Fprintln(a.stdout, "  Wake: required; the standalone Herdr Wake Service must directly verify its macOS event")
 		}
 	}
 	// Register before saving so unsupported platforms cannot leave behind a
@@ -1259,7 +1674,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 	if parsed.wake {
 		wake, err = a.newContinuationWake()
 		if err != nil {
-			a.writeError(continuationWakeError("Ori's shared wake coordinator is unavailable", err), opts.json)
+			a.writeError(continuationWakeError("standalone Herdr wake service is unavailable", err), opts.json)
 			return 1
 		}
 		readiness := wake.Owner()
@@ -1284,11 +1699,55 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 	}
 	if parsed.wake {
 		ref := scheduler.ScheduleRef{RepositoryID: target.Feature.RepositoryID, FeatureName: target.Feature.Name}
-		failWake := func(message string, cause error) int {
-			_, markErr := scheduleService.RecordWakeResult(ctx, ref, record.ID, time.Time{}, message)
-			if cancelErr := wake.Cancel(record.ID); cancelErr != nil {
-				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: continuation wake %s was not confirmed withdrawn\n", record.ID)
+		registeredAt := time.Time{}
+		failWake := func(message string, cause error, evidence wakeclient.Evidence) int {
+			rollbackAt := time.Now().UTC()
+			rollback, cancelErr := wake.CancelCandidate(ctx, record.ID)
+			rollbackProven := cancelErr == nil || wakeNotFound(cancelErr)
+			uncertain := errors.Is(cause, wakeclient.ErrUncertain) || !rollbackProven
+			rollbackResult := string(rollback.Result)
+			rollbackDetail := rollback.Message
+			rollbackVerifiedAt := time.Time{}
+			if rollbackProven {
+				rollbackVerifiedAt = time.Now().UTC()
+				if rollbackResult == "" {
+					rollbackResult = string(wakeprotocol.ResultSuccess)
+				}
+			} else {
+				if rollbackResult == "" {
+					rollbackResult = string(wakeprotocol.ResultUncertain)
+				}
+				if rollbackDetail == "" && cancelErr != nil {
+					rollbackDetail = "exact standalone wake cancellation was not proven"
+				}
 			}
+			result := string(evidence.Result)
+			code := string(evidence.Code)
+			if result == "" {
+				if uncertain {
+					result = string(wakeprotocol.ResultUncertain)
+					code = string(wakeprotocol.CodeUncertain)
+				} else {
+					result = string(wakeprotocol.ResultRefusal)
+					code = string(wakeprotocol.CodeVerificationFailed)
+				}
+			}
+			_, markErr := scheduleService.RecordWakeEvidence(ctx, ref, record.ID, scheduler.WakeEvidenceUpdate{
+				RegisteredAt:        registeredAt,
+				ProgrammedAt:        evidence.ProgrammedAt,
+				VerifiedAt:          evidence.VerifiedAt,
+				ProtocolVersion:     evidence.ProtocolVersion,
+				DaemonBuild:         evidence.DaemonBuild,
+				HelperBuild:         evidence.HelperBuild,
+				Result:              result,
+				Code:                code,
+				Failure:             message,
+				Uncertain:           uncertain,
+				RollbackAttemptedAt: rollbackAt,
+				RollbackVerifiedAt:  rollbackVerifiedAt,
+				RollbackResult:      rollbackResult,
+				RollbackDetail:      rollbackDetail,
+			})
 			if markErr != nil {
 				a.writeError(markErr, opts.json)
 			} else {
@@ -1297,16 +1756,27 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 			return 1
 		}
 		detail := fmt.Sprintf("Herdr continuation for %s:%s", target.Feature.Name, target.Agent.Role)
-		if registerErr := wake.Register(record.ID, record.DueAt, detail); registerErr != nil {
-			return failWake("Ori's wake coordinator did not accept the continuation wake", registerErr)
+		registered, registerErr := wake.RegisterCandidate(ctx, record.ID, record.DueAt, detail)
+		if registerErr != nil {
+			return failWake("standalone wake service did not accept the continuation wake", registerErr, registered)
 		}
-		programmedAt, verifyErr := wake.Verify(ctx, record.ID, record.DueAt)
+		registeredAt = time.Now().UTC()
+		verified, verifyErr := wake.VerifyCandidate(ctx, record.ID, record.DueAt)
 		if verifyErr != nil {
-			return failWake("Ori did not confirm that macOS programmed the continuation wake", verifyErr)
+			return failWake("standalone wake service did not directly verify the continuation wake", verifyErr, verified)
 		}
-		updated, wakeResultErr := scheduleService.RecordWakeResult(ctx, ref, record.ID, programmedAt, "")
+		updated, wakeResultErr := scheduleService.RecordWakeEvidence(ctx, ref, record.ID, scheduler.WakeEvidenceUpdate{
+			RegisteredAt:    registeredAt,
+			ProgrammedAt:    verified.ProgrammedAt,
+			VerifiedAt:      verified.VerifiedAt,
+			ProtocolVersion: verified.ProtocolVersion,
+			DaemonBuild:     verified.DaemonBuild,
+			HelperBuild:     verified.HelperBuild,
+			Result:          string(verified.Result),
+			Code:            string(verified.Code),
+		})
 		if wakeResultErr != nil {
-			_ = wake.Cancel(record.ID)
+			_, _ = wake.CancelCandidate(ctx, record.ID)
 			a.writeError(wakeResultErr, opts.json)
 			return 1
 		}
@@ -1319,7 +1789,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 	} else {
 		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: scheduled %s for %s at %s (%s)\n", record.ID, target.Agent.Name, record.DueAt.Format(time.RFC3339), record.Timezone)
 		if record.WakeRequired {
-			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: macOS wake confirmed for %s\n", record.WakeProgrammedAt.Format(time.RFC3339))
+			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: standalone macOS wake verified for %s\n", record.WakeProgrammedAt.Format(time.RFC3339))
 		}
 	}
 	return 0
@@ -1333,24 +1803,32 @@ func continuationWakeError(message string, cause error) *model.StageError {
 		Stage:    "schedule wake",
 		Code:     model.ErrWakeUnavailable,
 		Message:  message,
-		Recovery: "open Ori, enable Mac wake scheduling in Settings > Device Capabilities, grant approval, then recreate the continuation with --wake",
+		Recovery: "run wt herd wake doctor, repair with wt herd wake install if needed, then inspect or cancel this continuation",
 		Cause:    cause,
 	}
 }
 
-func (a *App) withdrawContinuationWake(record model.Schedule) error {
+func wakeNotFound(err error) bool {
+	var operationError *wakeclient.OperationError
+	return errors.As(err, &operationError) && operationError.Code == wakeprotocol.CodeNotFound
+}
+
+func (a *App) withdrawContinuationWake(
+	ctx context.Context,
+	record model.Schedule,
+) (wakeclient.Evidence, error) {
 	if !record.WakeRequired {
-		return nil
+		return wakeclient.Evidence{}, nil
 	}
 	wake, err := a.newContinuationWake()
 	if err != nil {
-		return err
+		return wakeclient.Evidence{}, err
 	}
 	id := record.WakeCandidateID
 	if id == "" {
 		id = record.ID
 	}
-	return wake.Cancel(id)
+	return wake.CancelCandidate(ctx, id)
 }
 
 func (a *App) schedule(ctx context.Context, opts options, args []string) int {
@@ -1413,7 +1891,19 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 			a.writeError(cancelErr, opts.json)
 			return 1
 		}
-		wakeErr := a.withdrawContinuationWake(record)
+		var wakeErr error
+		if record.WakeRequired {
+			withdrawal, withdrawalErr := a.withdrawContinuationWake(ctx, record)
+			wakeErr = withdrawalErr
+			withdrawnAt := time.Time{}
+			if wakeErr == nil {
+				withdrawnAt = time.Now().UTC()
+			}
+			if _, recordErr := scheduleService.RecordWakeWithdrawal(ctx, ref, record.ID, time.Now().UTC(), withdrawnAt, string(withdrawal.Result), withdrawal.Message, wakeErr != nil); recordErr != nil {
+				a.writeError(recordErr, opts.json)
+				return 1
+			}
+		}
 		a.refreshStatusDisplay(ctx, runtime)
 		a.recordAudit(runtime, audit.Event{Operation: "schedule", Feature: feature.Name, Role: record.Role, Stage: "cancel", Outcome: "canceled"})
 		if wakeErr != nil {
@@ -1421,7 +1911,7 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 				Stage:    "schedule cancel",
 				Code:     model.ErrWakeUnavailable,
 				Message:  "the continuation prompt was canceled, but its macOS wake was not confirmed withdrawn",
-				Recovery: "open Ori and inspect Mac wake scheduling in Settings > Device Capabilities before allowing this Mac to sleep",
+				Recovery: "run wt herd wake doctor, then inspect this continuation with wt herd schedule show " + record.ID + " before allowing this Mac to sleep",
 				Cause:    wakeErr,
 			}, opts.json)
 			return 1
@@ -1947,9 +2437,21 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		return 1
 	}
 	for _, result := range results {
+		if !result.Schedule.WakeRequired {
+			continue
+		}
 		switch result.Schedule.State {
 		case model.ScheduleDelivered, model.ScheduleFailed, model.ScheduleUncertain, model.ScheduleCanceled:
-			if wakeErr := a.withdrawContinuationWake(result.Schedule); wakeErr != nil {
+			withdrawal, wakeErr := a.withdrawContinuationWake(ctx, result.Schedule)
+			withdrawnAt := time.Time{}
+			if wakeErr == nil {
+				withdrawnAt = time.Now().UTC()
+			}
+			ref := scheduler.ScheduleRef{RepositoryID: result.Feature.RepositoryID, FeatureName: result.Feature.Name}
+			if _, recordErr := service.RecordWakeWithdrawal(ctx, ref, result.Schedule.ID, time.Now().UTC(), withdrawnAt, string(withdrawal.Result), withdrawal.Message, wakeErr != nil); recordErr != nil {
+				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: could not persist wake withdrawal evidence for %s\n", result.Schedule.ID)
+			}
+			if wakeErr != nil {
 				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: continuation wake %s was not confirmed withdrawn\n", result.Schedule.ID)
 			}
 		}
@@ -2014,15 +2516,18 @@ func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.
 		Power:  &systempower.Service{GOOS: a.goos},
 		Git:    worktree.GitRunner,
 	}
-	// Without a reachable wake coordinator the supervisor still runs; it simply
+	// Without a reachable standalone wake service the supervisor still runs; it simply
 	// can never sleep, which is the correct degraded behavior rather than a
 	// reason to stop supervising.
 	approvalGranted := false
-	if wake, err := wakeclient.Default(); err == nil {
-		supervisor.Wake = wake
-		// Approval is the user's, recorded by Ori itself. The helper reads what
-		// the wake owner published and never grants it to itself.
+	if wake, err := a.newOvernightWake(wakeprotocol.PurposeClaudeReset); err == nil {
+		supervisor.Wake = overnightWakeAdapter{wake}
+		// Readiness comes from the independently installed standalone daemon;
+		// the dispatcher never grants this capability to itself.
 		approvalGranted = wake.Owner().Ready
+	}
+	if wake, err := a.newOvernightWake(wakeprotocol.PurposeOvernightStart); err == nil {
+		supervisor.StartWake = overnightWakeAdapter{wake}
 	}
 
 	advanced := make([]map[string]any, 0)
@@ -2067,8 +2572,23 @@ func scheduleView(feature model.Feature, record model.Schedule) map[string]any {
 		"recovery":             record.RecoveryCommand,
 		"wake_required":        record.WakeRequired,
 		"wake_candidate_id":    record.WakeCandidateID,
+		"wake_source":          record.WakeSource,
+		"wake_purpose":         record.WakePurpose,
+		"wake_requested_at":    formatOptionalTime(record.WakeRequestedAt),
+		"wake_registered_at":   formatOptionalTime(record.WakeRegisteredAt),
 		"wake_programmed_at":   formatOptionalTime(record.WakeProgrammedAt),
 		"wake_verified_at":     formatOptionalTime(record.WakeVerifiedAt),
+		"wake_protocol":        record.WakeProtocol,
+		"wake_daemon_build":    record.WakeDaemonBuild,
+		"wake_helper_build":    record.WakeHelperBuild,
+		"wake_result":          record.WakeResult,
+		"wake_code":            record.WakeCode,
+		"wake_uncertain":       record.WakeUncertain,
+		"wake_rollback_at":     formatOptionalTime(record.WakeRollbackAt),
+		"wake_rollback_ok_at":  formatOptionalTime(record.WakeRollbackOKAt),
+		"wake_rollback_result": record.WakeRollbackState,
+		"wake_rollback_detail": record.WakeRollbackInfo,
+		"wake_withdrawn_at":    formatOptionalTime(record.WakeWithdrawnAt),
 		"wake_failure_reason":  record.WakeFailureReason,
 		"prompt_summary":       fmt.Sprintf("stored continuation prompt (%d characters)", len([]rune(record.Prompt))),
 	}
@@ -2373,7 +2893,7 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 		diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "one-time continuation scheduling is macOS-only", Recovery: "run scheduling commands on macOS"})
 	}
 	diagnostics = append(diagnostics, a.claudeUsageDiagnostics(runtime)...)
-	diagnostics = append(diagnostics, a.wakeDiagnostics()...)
+	diagnostics = append(diagnostics, a.wakeDiagnostics(ctx)...)
 	a.writeDiagnostics(opts.json, diagnostics)
 	for _, item := range diagnostics {
 		if item.Status == "FAIL" {
@@ -2568,6 +3088,11 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
+  wt herd wake install [--yes]  Stage, explain, authorize, install, and self-test the root wake service
+  wt herd wake status [--json]  Report fixed files, daemon health, compatibility, UID, and self-test
+  wt herd wake doctor [--json]  Diagnose standalone wake installation and health
+  wt herd wake uninstall [--yes]
+                                Remove only the standalone Herdr wake service after safety checks
   wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--no-prompt]
                                 Add a tab for an existing Git worktree in the focused workspace
                                 and launch its primary agent there. --no-prompt starts the agent
@@ -2602,7 +3127,7 @@ Usage:
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.
   wt herd overnight start --agent NAME[:ROLE] [--start HH:MM] [--deadline HH:MM]
-                          [--timezone ZONE] [--max-resumes N] [--dry-run] [--confirm] [--json]
+                          [--timezone ZONE] [--max-resumes N] [--stay-awake] [--dry-run] [--confirm] [--json]
                                 Plan an Overnight Run over explicitly selected Claude agents.
                                 Prints the full consequences and creates nothing until you agree.
   wt herd overnight list [--json]        List Overnight Runs, newest first
@@ -2723,13 +3248,38 @@ func (a *App) advanceOvernightRun(ctx context.Context, supervisor *overnight.Sup
 	if err != nil {
 		return model.OvernightRun{}, err
 	}
+	if run.State.Terminal() && run.WakeMode == model.WakeModeStayAwake && run.Assertion.ID != "" {
+		return supervisor.ReleaseStayAwake(ctx, runID)
+	}
 	switch run.State {
 	case model.RunLimitDetected, model.RunPreparingSleep:
+		if run.WakeMode == model.WakeModeStayAwake {
+			return supervisor.EnsureStayAwake(ctx, runID)
+		}
 		return supervisor.PrepareAndSleep(ctx, runID, overnight.SleepConfig{
 			WakeLead:        cfg.WakeLead(),
 			ApprovalGranted: approvalGranted,
+			StayAwake:       run.WakeMode == model.WakeModeStayAwake,
 		})
 	case model.RunSleeping, model.RunWaking, model.RunWaitingForReset:
+		if run.WakeMode == model.WakeModeStayAwake {
+			if participant, ok := run.Active(); ok && participant.Limit != nil && participant.Limit.ResetAt.After(time.Now().UTC()) {
+				return supervisor.EnsureStayAwake(ctx, runID)
+			}
+			if run.Assertion.ID != "" {
+				released, err := supervisor.ReleaseStayAwake(ctx, runID)
+				if err != nil {
+					return model.OvernightRun{}, err
+				}
+				// A failed release is recorded as uncertain.  Do not continue the
+				// run until a later dispatcher pass can prove that this run's
+				// assertion is gone; otherwise the durable record would claim a
+				// completed lifecycle that the host still contradicts.
+				if released.Assertion.Uncertain {
+					return released, nil
+				}
+			}
+		}
 		return supervisor.Resume(ctx, runID)
 	default:
 		return run, nil

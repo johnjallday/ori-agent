@@ -3,221 +3,238 @@ package wakeclient
 import (
 	"context"
 	"errors"
-	"strings"
+	"net"
+	"reflect"
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/wakecoord"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 )
 
-// These tests exercise the helper against a real shared store in a temporary
-// directory. Nothing here programs a wake: the only thing that can do that is
-// the owner, and in these tests the owner is whatever the test writes.
+var clientNow = time.Date(2026, 7, 30, 1, 0, 0, 0, time.UTC)
 
-var now = time.Date(2026, 7, 30, 1, 0, 0, 0, time.UTC)
-
-func newClient(t *testing.T) (*Client, *wakecoord.Store) {
-	t.Helper()
-	dir := t.TempDir()
-	client := New(dir)
-	client.Now = func() time.Time { return now }
-	client.VerifyTimeout = 10 * time.Millisecond
-	client.VerifyInterval = time.Millisecond
-	return client, wakecoord.New(dir)
+type scriptedDaemon struct {
+	requests []wakeprotocol.Request
+	handle   func(wakeprotocol.Request) wakeprotocol.Response
 }
 
-// TestVerifyFailsUntilTheOwnerProgramsTheWake is the property the sleep
-// sequence depends on: registering is a request, not a wake.
-func TestVerifyFailsUntilTheOwnerProgramsTheWake(t *testing.T) {
-	client, store := newClient(t)
-	wakeAt := now.Add(time.Hour)
-
-	if err := client.Register("ovr-1", wakeAt, "Claude reset"); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	if _, err := client.Verify(context.Background(), "ovr-1", wakeAt); !errors.Is(err, ErrNotProgrammed) {
-		t.Fatalf("Verify before the owner acted = %v, want ErrNotProgrammed", err)
-	}
-
-	// Now the owner does its job.
-	if err := store.RecordProgrammed(wakecoord.Programmed{
-		CandidateID: "ovr-1", Source: wakecoord.SourceOvernightRun, WakeAt: wakeAt,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	programmed, err := client.Verify(context.Background(), "ovr-1", wakeAt)
-	if err != nil {
-		t.Fatalf("Verify after the owner acted: %v", err)
-	}
-	if !programmed.Equal(wakeAt.UTC()) {
-		t.Fatalf("programmed = %v, want %v", programmed, wakeAt)
-	}
-}
-
-// TestVerifyRejectsAWakeForSomebodyElse stops one run from mistaking another
-// subsystem's wake for its own.
-func TestVerifyRejectsAWakeForSomebodyElse(t *testing.T) {
-	client, store := newClient(t)
-	wakeAt := now.Add(time.Hour)
-
-	for _, programmed := range []wakecoord.Programmed{
-		{CandidateID: "ovr-2", Source: wakecoord.SourceOvernightRun, WakeAt: wakeAt},
-		{CandidateID: "ovr-1", Source: wakecoord.SourceWorkspaceTask, WakeAt: wakeAt},
-	} {
-		if err := store.RecordProgrammed(programmed, now); err != nil {
-			t.Fatal(err)
+func (d *scriptedDaemon) dial(context.Context, string) (net.Conn, error) {
+	client, server := net.Pipe()
+	go func() {
+		defer server.Close()
+		request, err := wakeprotocol.ReadRequest(server)
+		if err != nil {
+			return
 		}
-		if _, err := client.Verify(context.Background(), "ovr-1", wakeAt); err == nil {
-			t.Fatalf("verified against a wake belonging to %+v", programmed)
+		d.requests = append(d.requests, request)
+		response := d.handle(request)
+		response.ProtocolVersion = wakeprotocol.Version
+		response.RequestID = request.RequestID
+		response.DaemonBuild = "daemon-2"
+		response.Operation = request.Operation
+		_ = wakeprotocol.WriteResponse(server, response)
+	}()
+	return client, nil
+}
+
+func newClientForTest(daemon *scriptedDaemon) *Client {
+	client := NewForPurpose(
+		"/test/wake.sock",
+		wakeprotocol.SourceContinuation,
+		wakeprotocol.PurposeContinuation,
+	)
+	client.BuildVersion = "helper-1"
+	client.Now = func() time.Time { return clientNow }
+	client.Timeout = time.Second
+	client.Dial = daemon.dial
+	return client
+}
+
+func TestClientHealthRegisterVerifyListAndExactCancel(t *testing.T) {
+	t.Parallel()
+	wakeAt := clientNow.Add(time.Hour)
+	target := wakeprotocol.Target{
+		ID: "sch-1", Source: wakeprotocol.SourceContinuation,
+		Purpose: wakeprotocol.PurposeContinuation,
+	}
+	daemon := &scriptedDaemon{}
+	daemon.handle = func(request wakeprotocol.Request) wakeprotocol.Response {
+		response := wakeprotocol.Response{Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK}
+		switch request.Operation {
+		case wakeprotocol.OperationHealth:
+			response.Health = &wakeprotocol.Health{
+				Installed: true, Running: true, ProtocolVersion: wakeprotocol.Version,
+				StateVersion: wakeprotocol.StateVersion, DaemonBuild: "daemon-2", AllowedUID: 501,
+			}
+		case wakeprotocol.OperationRegisterOrReplace:
+			if request.Candidate == nil || request.Candidate.ID != target.ID {
+				t.Fatalf("register request = %+v", request)
+			}
+		case wakeprotocol.OperationVerify:
+			response.Verification = &wakeprotocol.Verification{
+				Target: target, RequestedWakeAt: wakeAt, ProgrammedWakeAt: wakeAt,
+				VerifiedAt: clientNow.Add(time.Second), Matched: true,
+			}
+		case wakeprotocol.OperationList:
+			response.State = &wakeprotocol.State{
+				StateVersion: wakeprotocol.StateVersion, AllowedUID: 501,
+				Candidates: []wakeprotocol.Candidate{},
+			}
 		}
+		return response
+	}
+	client := newClientForTest(daemon)
+	health, err := client.Health(context.Background())
+	if err != nil || health.AllowedUID != 501 {
+		t.Fatalf("Health() = %+v, %v", health, err)
+	}
+	registered, err := client.RegisterCandidate(context.Background(), target.ID, wakeAt, "continuation")
+	if err != nil || registered.DaemonBuild != "daemon-2" ||
+		registered.ProtocolVersion != wakeprotocol.Version {
+		t.Fatalf("RegisterCandidate() = %+v, %v", registered, err)
+	}
+	verified, err := client.VerifyCandidate(context.Background(), target.ID, wakeAt)
+	if err != nil || !verified.ProgrammedAt.Equal(wakeAt) ||
+		!verified.VerifiedAt.Equal(clientNow.Add(time.Second)) {
+		t.Fatalf("VerifyCandidate() = %+v, %v", verified, err)
+	}
+	if _, err := client.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	canceled, err := client.CancelCandidate(context.Background(), target.ID)
+	if err != nil || canceled.Result != wakeprotocol.ResultSuccess {
+		t.Fatalf("CancelCandidate() = %+v, %v", canceled, err)
+	}
+	want := []wakeprotocol.Operation{
+		wakeprotocol.OperationHealth,
+		wakeprotocol.OperationRegisterOrReplace,
+		wakeprotocol.OperationVerify,
+		wakeprotocol.OperationList,
+		wakeprotocol.OperationCancel,
+	}
+	var got []wakeprotocol.Operation
+	for _, request := range daemon.requests {
+		got = append(got, request.Operation)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("operations = %v, want %v", got, want)
+	}
+	if daemon.requests[1].IdempotencyKey == "" ||
+		daemon.requests[4].IdempotencyKey == "" ||
+		daemon.requests[1].Candidate.Source != wakeprotocol.SourceContinuation ||
+		daemon.requests[1].Candidate.Purpose != wakeprotocol.PurposeContinuation {
+		t.Fatalf("mutation identity = %+v / %+v", daemon.requests[1], daemon.requests[4])
 	}
 }
 
-// TestVerifyRejectsAWakeProgrammedTooLate covers the case that would leave the
-// machine asleep through the reset.
-func TestVerifyRejectsAWakeProgrammedTooLate(t *testing.T) {
-	client, store := newClient(t)
-	wakeAt := now.Add(time.Hour)
-
-	if err := store.RecordProgrammed(wakecoord.Programmed{
-		CandidateID: "ovr-1", Source: wakecoord.SourceOvernightRun, WakeAt: wakeAt.Add(time.Minute),
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.Verify(context.Background(), "ovr-1", wakeAt); err == nil {
-		t.Fatal("a wake programmed after the requested time was accepted")
-	}
-}
-
-// TestVerifyAcceptsAnEarlierWake covers the normal case: the owner applies its
-// own lead time, so the machine wakes a little sooner than asked.
-func TestVerifyAcceptsAnEarlierWake(t *testing.T) {
-	client, store := newClient(t)
-	wakeAt := now.Add(time.Hour)
-
-	if err := store.RecordProgrammed(wakecoord.Programmed{
-		CandidateID: "ovr-1", Source: wakecoord.SourceOvernightRun, WakeAt: wakeAt.Add(-5 * time.Minute),
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	programmed, err := client.Verify(context.Background(), "ovr-1", wakeAt)
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if !programmed.Before(wakeAt) {
-		t.Fatalf("programmed = %v, want the owner's earlier wake", programmed)
-	}
-}
-
-func TestCancelWithdrawsOnlyThisRunsCandidate(t *testing.T) {
-	client, store := newClient(t)
-	if err := client.Register("ovr-1", now.Add(time.Hour), "Claude reset"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Register(wakecoord.Candidate{
-		ID: "task-1", Source: wakecoord.SourceWorkspaceTask, WakeAt: now.Add(2 * time.Hour),
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.Cancel("ovr-1"); err != nil {
-		t.Fatalf("Cancel: %v", err)
-	}
-
-	candidates, err := store.Candidates(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 || candidates[0].Source != wakecoord.SourceWorkspaceTask {
-		t.Fatalf("candidates = %+v, want the workspace task untouched", candidates)
-	}
-}
-
-func TestSourceScopedClientDoesNotClaimOrCancelAnotherHerdrWake(t *testing.T) {
-	dir := t.TempDir()
-	continuation := NewForSource(dir, wakecoord.SourceHerdrContinuation)
-	continuation.Now = func() time.Time { return now }
-	continuation.VerifyTimeout = 10 * time.Millisecond
-	continuation.VerifyInterval = time.Millisecond
-	overnight := NewForSource(dir, wakecoord.SourceOvernightRun)
-	overnight.Now = func() time.Time { return now }
-	store := wakecoord.New(dir)
-	wakeAt := now.Add(time.Hour)
-
-	if err := continuation.Register("sch-1", wakeAt, "one-time continuation"); err != nil {
-		t.Fatal(err)
-	}
-	if err := overnight.Register("sch-1", now.Add(2*time.Hour), "Claude reset"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.RecordProgrammed(wakecoord.Programmed{
-		CandidateID: "sch-1", Source: wakecoord.SourceOvernightRun, WakeAt: wakeAt,
-	}, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := continuation.Verify(context.Background(), "sch-1", wakeAt); !errors.Is(err, ErrNotProgrammed) {
-		t.Fatalf("continuation verified an Overnight wake: %v", err)
-	}
-	if err := continuation.Cancel("sch-1"); err != nil {
-		t.Fatal(err)
-	}
-	candidates, err := store.Candidates(now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 || candidates[0].Source != wakecoord.SourceOvernightRun {
-		t.Fatalf("candidates = %+v, want only the Overnight wake", candidates)
-	}
-}
-
-// TestASilentOwnerIsNotReady is the case where Ori simply is not running.
-func TestASilentOwnerIsNotReady(t *testing.T) {
-	client, _ := newClient(t)
-	readiness := client.Owner()
-	if readiness.Running || readiness.Ready {
-		t.Fatalf("readiness = %+v, want an owner that has said nothing to be treated as absent", readiness)
-	}
-	if readiness.Detail == "" {
-		t.Fatal("the refusal was not explained")
-	}
-}
-
-func TestAStaleOwnerReportIsNotBelieved(t *testing.T) {
-	client, store := newClient(t)
-	if err := store.PublishOwner(wakecoord.Owner{
-		Supported: true, Enabled: true, ApprovalGranted: true,
-	}, now.Add(-time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if readiness := client.Owner(); readiness.Ready {
-		t.Fatalf("readiness = %+v, want a stale report disbelieved", readiness)
-	}
-}
-
-func TestOwnerReadinessExplainsEachRefusal(t *testing.T) {
-	cases := []struct {
-		name     string
-		owner    wakecoord.Owner
-		ready    bool
-		contains string
+func TestVerifyRejectsWrongLateAndExcessivelyEarlyEvidence(t *testing.T) {
+	t.Parallel()
+	wakeAt := clientNow.Add(time.Hour)
+	tests := []struct {
+		name       string
+		programmed time.Time
+		targetID   string
 	}{
-		{"unsupported platform", wakecoord.Owner{Enabled: true, ApprovalGranted: true}, false, "cannot program"},
-		{"turned off", wakecoord.Owner{Supported: true, ApprovalGranted: true}, false, "turned off"},
-		{"not approved", wakecoord.Owner{Supported: true, Enabled: true}, false, "approval"},
-		{"ready", wakecoord.Owner{Supported: true, Enabled: true, ApprovalGranted: true}, true, ""},
+		{name: "later", programmed: wakeAt.Add(time.Second), targetID: "sch-1"},
+		{name: "too early", programmed: wakeAt.Add(-MaxSkew - time.Second), targetID: "sch-1"},
+		{name: "wrong target", programmed: wakeAt, targetID: "sch-other"},
 	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			client, store := newClient(t)
-			if err := store.PublishOwner(testCase.owner, now); err != nil {
-				t.Fatal(err)
-			}
-			readiness := client.Owner()
-			if readiness.Ready != testCase.ready {
-				t.Fatalf("ready = %v, want %v (%s)", readiness.Ready, testCase.ready, readiness.Detail)
-			}
-			if !testCase.ready && !strings.Contains(readiness.Detail, testCase.contains) {
-				t.Fatalf("detail = %q, want it to mention %q", readiness.Detail, testCase.contains)
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			daemon := &scriptedDaemon{handle: func(request wakeprotocol.Request) wakeprotocol.Response {
+				return wakeprotocol.Response{
+					Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+					Verification: &wakeprotocol.Verification{
+						Target: wakeprotocol.Target{
+							ID: test.targetID, Source: wakeprotocol.SourceContinuation,
+							Purpose: wakeprotocol.PurposeContinuation,
+						},
+						RequestedWakeAt: wakeAt, ProgrammedWakeAt: test.programmed,
+						VerifiedAt: clientNow, Matched: test.targetID == "sch-1",
+					},
+				}
+			}}
+			client := newClientForTest(daemon)
+			if _, err := client.VerifyCandidate(context.Background(), "sch-1", wakeAt); err == nil {
+				t.Fatal("unsafe verification was accepted")
 			}
 		})
 	}
+}
+
+func TestLostResponseIsUncertainAndRetryUsesSameIdempotencyKey(t *testing.T) {
+	t.Parallel()
+	wakeAt := clientNow.Add(time.Hour)
+	var requests []wakeprotocol.Request
+	client := NewForSource("/test/wake.sock", wakeprotocol.SourceContinuation)
+	client.BuildVersion = "test"
+	client.Now = func() time.Time { return clientNow }
+	client.Timeout = 50 * time.Millisecond
+	client.Dial = func(context.Context, string) (net.Conn, error) {
+		caller, daemon := net.Pipe()
+		go func() {
+			defer daemon.Close()
+			request, _ := wakeprotocol.ReadRequest(daemon)
+			requests = append(requests, request)
+			// Deliberately close without a response.
+		}()
+		return caller, nil
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		evidence, err := client.RegisterCandidate(context.Background(), "sch-1", wakeAt, "continuation")
+		if !errors.Is(err, ErrUncertain) || evidence.CandidateID != "sch-1" {
+			t.Fatalf("attempt %d evidence/error = %+v, %v", attempt, evidence, err)
+		}
+	}
+	if len(requests) != 2 || requests[0].IdempotencyKey != requests[1].IdempotencyKey {
+		t.Fatalf("retry keys = %+v", requests)
+	}
+}
+
+func TestRefusalAndProtocolMismatchRemainMachineReadable(t *testing.T) {
+	t.Parallel()
+	daemon := &scriptedDaemon{handle: func(request wakeprotocol.Request) wakeprotocol.Response {
+		return wakeprotocol.Response{
+			Result:  wakeprotocol.ResultRefusal,
+			Code:    wakeprotocol.CodeConflict,
+			Message: "an untracked Herdr-owned event exists",
+		}
+	}}
+	client := newClientForTest(daemon)
+	_, err := client.RegisterCandidate(
+		context.Background(), "sch-1", clientNow.Add(time.Hour), "continuation",
+	)
+	var operationError *OperationError
+	if !errors.As(err, &operationError) ||
+		operationError.Code != wakeprotocol.CodeConflict ||
+		operationError.Result != wakeprotocol.ResultRefusal {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestUnavailableClientHasNoOriFallback(t *testing.T) {
+	t.Parallel()
+	client := NewForSource("/missing/standalone.sock", wakeprotocol.SourceContinuation)
+	client.BuildVersion = "test"
+	client.Now = func() time.Time { return clientNow }
+	client.Dial = func(context.Context, string) (net.Conn, error) {
+		return nil, errors.New("missing")
+	}
+	_, err := client.RegisterCandidate(
+		context.Background(), "sch-1", clientNow.Add(time.Hour), "continuation",
+	)
+	if !errors.Is(err, ErrUnavailable) ||
+		!stringsContains(err.Error(), "standalone") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func stringsContains(value, fragment string) bool {
+	for index := 0; index+len(fragment) <= len(value); index++ {
+		if value[index:index+len(fragment)] == fragment {
+			return true
+		}
+	}
+	return false
 }

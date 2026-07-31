@@ -113,6 +113,7 @@ func (s *Service) Create(ctx context.Context, plan Plan, confirmation string) (m
 		DeadlineAt:   plan.DeadlineAt,
 		Timezone:     plan.Timezone,
 		MaxResumes:   plan.MaxResumes,
+		WakeMode:     plan.WakeMode,
 		Confirmation: confirmation,
 		UpdatedAt:    now,
 	}
@@ -123,6 +124,7 @@ func (s *Service) Create(ctx context.Context, plan Plan, confirmation string) (m
 			State:             model.ParticipantQueued,
 			Feature:           planned.Feature,
 			Binding:           planned.Binding,
+			PlanProof:         planned.PlanProof,
 			Checkpoint:        planned.Checkpoint,
 			StartingCompleted: planned.Checkpoint.SubtasksCompleted,
 			UpdatedAt:         now,
@@ -140,6 +142,62 @@ func (s *Service) Create(ctx context.Context, plan Plan, confirmation string) (m
 	saved.Runs[run.ID] = run
 	if err := s.Store.Save(saved); err != nil {
 		return model.OvernightRun{}, fmt.Errorf("persist the Overnight Run: %w", err)
+	}
+	return run, nil
+}
+
+// RecordWake persists a pre-start or reset wake intent/evidence. The caller
+// performs the standalone daemon operation outside this lock, but records the
+// intent first so a crash never leaves an unowned host wake.
+func (s *Service) RecordWake(ctx context.Context, id string, wake model.WakeOwnership, blocked string) (model.OvernightRun, error) {
+	release, err := s.Store.Lock(ctx)
+	if err != nil {
+		return model.OvernightRun{}, fmt.Errorf("lock local state: %w", err)
+	}
+	defer release()
+	saved, err := s.Store.Load()
+	if err != nil {
+		return model.OvernightRun{}, fmt.Errorf("read local state: %w", err)
+	}
+	run, ok := saved.Runs[id]
+	if !ok {
+		return model.OvernightRun{}, ErrNotFound
+	}
+	run.Wake = wake
+	if blocked != "" {
+		run.State = model.RunWaitingManual
+		run.Uncertainty = blocked
+		run.Timeline = append(run.Timeline, model.RunEvent{At: s.now(), Kind: "wake_blocked", Detail: blocked})
+	}
+	run.UpdatedAt = s.now()
+	saved.Runs[id] = run
+	if err := s.Store.Save(saved); err != nil {
+		return model.OvernightRun{}, fmt.Errorf("persist standalone wake evidence: %w", err)
+	}
+	return run, nil
+}
+
+// RecordAssertion persists the run-owned stay-awake assertion result without
+// changing its terminal/cancellation decision.
+func (s *Service) RecordAssertion(ctx context.Context, id string, assertion model.StayAwakeAssertion) (model.OvernightRun, error) {
+	release, err := s.Store.Lock(ctx)
+	if err != nil {
+		return model.OvernightRun{}, fmt.Errorf("lock local state: %w", err)
+	}
+	defer release()
+	saved, err := s.Store.Load()
+	if err != nil {
+		return model.OvernightRun{}, fmt.Errorf("read local state: %w", err)
+	}
+	run, ok := saved.Runs[id]
+	if !ok {
+		return model.OvernightRun{}, ErrNotFound
+	}
+	run.Assertion = assertion
+	run.UpdatedAt = s.now()
+	saved.Runs[id] = run
+	if err := s.Store.Save(saved); err != nil {
+		return model.OvernightRun{}, fmt.Errorf("persist stay-awake assertion: %w", err)
 	}
 	return run, nil
 }

@@ -37,14 +37,17 @@ type Request struct {
 	Timezone string
 	// MaxResumes overrides the configured ceiling when positive.
 	MaxResumes int
+	// StayAwake keeps the run awake rather than allowing reset sleep cycles.
+	StayAwake bool
 }
 
 // PlannedParticipant is one resolved agent in the proposed queue.
 type PlannedParticipant struct {
 	// Position is 1-based and is exactly the order the user typed.
-	Position int
-	Feature  model.Feature
-	Binding  model.AgentBinding
+	Position  int
+	Feature   model.Feature
+	Binding   model.AgentBinding
+	PlanProof model.PlanProof
 	// Checkpoint is where this feature's plan currently stands.
 	Checkpoint model.TaskCheckpoint
 	// Working records that the agent is already busy. One working participant
@@ -72,6 +75,7 @@ type Plan struct {
 	DeadlineAt   time.Time
 	Timezone     string
 	MaxResumes   int
+	WakeMode     model.WakeMode
 	// Warnings are things the user should know before confirming but that do
 	// not prevent the run.
 	Warnings []string
@@ -89,7 +93,10 @@ func (p Plan) Startable() bool { return len(p.Conflicts) == 0 && len(p.Participa
 // It reads only: no agent is prompted, no worktree is created, no binding is
 // repaired, and no Claude session is contacted.
 func BuildPlan(snapshot overview.Snapshot, saved model.BridgeState, request Request, cfg config.OvernightConfig, now time.Time) (Plan, error) {
-	plan := Plan{RepositoryID: snapshot.Repository.ID}
+	plan := Plan{RepositoryID: snapshot.Repository.ID, WakeMode: model.WakeModeSleep}
+	if request.StayAwake {
+		plan.WakeMode = model.WakeModeStayAwake
+	}
 
 	location, err := resolveLocation(request.Timezone, cfg.Timezone)
 	if err != nil {

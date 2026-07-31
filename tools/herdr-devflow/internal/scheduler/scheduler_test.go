@@ -256,7 +256,10 @@ func TestWakeRequiredScheduleNeedsOwnerEvidenceBeforeDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !record.WakeRequired || record.WakeCandidateID != record.ID || !record.WakeVerifiedAt.IsZero() {
+	if !record.WakeRequired || record.WakeCandidateID != record.ID ||
+		record.WakeSource != "herdr-continuation" ||
+		record.WakePurpose != "one_time_continuation" ||
+		!record.WakeRequestedAt.Equal(record.DueAt) || !record.WakeVerifiedAt.IsZero() {
 		t.Fatalf("wake fields = %#v", record)
 	}
 
@@ -267,6 +270,60 @@ func TestWakeRequiredScheduleNeedsOwnerEvidenceBeforeDispatch(t *testing.T) {
 	}
 	if service.Client.(*fakeHerdr).promptCalls != 0 {
 		t.Fatal("unverified wake schedule prompted the agent")
+	}
+}
+
+func TestRecordStandaloneWakeEvidencePersistsRecoveryAndWithdrawalProof(t *testing.T) {
+	now := testNow()
+	feature, agent, _ := testIdentity()
+	ref := ScheduleRef{RepositoryID: feature.RepositoryID, FeatureName: feature.Name}
+	store := newMemoryStore()
+	store.seed(feature, agent)
+	service := &Service{
+		Store: store, Now: func() time.Time { return now },
+		NewID: func() (string, error) { return "sch-evidence", nil },
+	}
+	record, err := service.Create(context.Background(), CreateRequest{
+		Feature: feature, Agent: agent, DueAt: now.Add(time.Hour), Prompt: "Continue safely.",
+		RetryWindow: 15 * time.Minute, WakeRequired: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := now.Add(time.Second)
+	verified := now.Add(2 * time.Second)
+	record, err = service.RecordWakeEvidence(context.Background(), ref, record.ID, WakeEvidenceUpdate{
+		RegisteredAt: registered, ProgrammedAt: record.DueAt.Add(-time.Minute),
+		VerifiedAt: verified, ProtocolVersion: 1, DaemonBuild: "daemon-build",
+		HelperBuild: "helper-build", Result: "success", Code: "ok",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.WakeRegisteredAt.Equal(registered) || !record.WakeVerifiedAt.Equal(verified) ||
+		record.WakeProtocol != 1 || record.WakeDaemonBuild != "daemon-build" ||
+		record.WakeHelperBuild != "helper-build" || record.WakeUncertain {
+		t.Fatalf("wake evidence = %#v", record)
+	}
+	withdrawn := now.Add(3 * time.Second)
+	record, err = service.RecordWakeWithdrawal(
+		context.Background(), ref, record.ID, withdrawn, withdrawn, "success", "", false,
+	)
+	if err != nil || !record.WakeWithdrawnAt.Equal(withdrawn) || record.WakeUncertain {
+		t.Fatalf("wake withdrawal = %#v, %v", record, err)
+	}
+
+	failed, err := service.RecordWakeEvidence(context.Background(), ref, record.ID, WakeEvidenceUpdate{
+		Result: "uncertain", Code: "uncertain", Failure: "response lost after scheduling",
+		Uncertain: true, RollbackAttemptedAt: now.Add(4 * time.Second),
+		RollbackResult: "uncertain", RollbackDetail: "exact cancel not proven",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.State != model.ScheduleUncertain || !failed.WakeUncertain ||
+		failed.WakeRollbackState != "uncertain" || failed.RecoveryCommand == "" {
+		t.Fatalf("uncertain recovery = %#v", failed)
 	}
 }
 

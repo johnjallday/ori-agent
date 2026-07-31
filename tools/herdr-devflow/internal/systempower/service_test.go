@@ -101,3 +101,29 @@ func TestSleepReportsAFailureRatherThanSwallowingIt(t *testing.T) {
 		t.Fatal("a failed sleep was reported as success")
 	}
 }
+
+func TestIdleSleepAssertionUsesOnlyInjectedLifecycleHooks(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("caffeinate assertions are implemented on macOS only")
+	}
+	var acquired, released string
+	service := &Service{
+		GOOS: "darwin",
+		AcquireAssertion: func(_ context.Context, runID string) (string, error) {
+			acquired = runID
+			return "4242", nil
+		},
+		CheckAssertion: func(_ context.Context, id string) bool { return id == "4242" },
+		ReleaseAssertion: func(_ context.Context, id string) error {
+			released = id
+			return nil
+		},
+	}
+	id, err := service.AcquireIdleSleepAssertion(context.Background(), "ovr-test")
+	if err != nil || id != "4242" || acquired != "ovr-test" || !service.IdleSleepAssertionActive(context.Background(), id) {
+		t.Fatalf("assertion acquire/verify failed: id=%q acquired=%q err=%v", id, acquired, err)
+	}
+	if err := service.ReleaseIdleSleepAssertion(context.Background(), id); err != nil || released != id {
+		t.Fatalf("assertion release failed: released=%q err=%v", released, err)
+	}
+}

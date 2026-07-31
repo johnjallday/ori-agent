@@ -59,6 +59,26 @@ type CreateRequest struct {
 	WakeRequired bool
 }
 
+// WakeEvidenceUpdate is the bounded standalone-daemon evidence persisted
+// alongside one wake-enabled continuation. It contains no prompt or process
+// output.
+type WakeEvidenceUpdate struct {
+	RegisteredAt        time.Time
+	ProgrammedAt        time.Time
+	VerifiedAt          time.Time
+	ProtocolVersion     int
+	DaemonBuild         string
+	HelperBuild         string
+	Result              string
+	Code                string
+	Failure             string
+	Uncertain           bool
+	RollbackAttemptedAt time.Time
+	RollbackVerifiedAt  time.Time
+	RollbackResult      string
+	RollbackDetail      string
+}
+
 type DispatchResult struct {
 	FeatureID string              `json:"feature_id"`
 	Feature   model.Feature       `json:"feature"`
@@ -200,6 +220,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (model.Sche
 	}
 	if request.WakeRequired {
 		schedule.WakeCandidateID = id
+		schedule.WakeSource = "herdr-continuation"
+		schedule.WakePurpose = "one_time_continuation"
+		schedule.WakeRequestedAt = request.DueAt.UTC()
 	}
 	featureState.Schedules[id] = schedule
 	featureState.UpdatedAt = now
@@ -214,6 +237,31 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (model.Sche
 // wake-required schedule before it can be delivered. Registration alone is
 // never treated as proof that macOS will wake the machine.
 func (s *Service) RecordWakeResult(ctx context.Context, ref ScheduleRef, id string, programmedAt time.Time, failure string) (model.Schedule, error) {
+	update := WakeEvidenceUpdate{
+		ProgrammedAt:    programmedAt,
+		VerifiedAt:      s.now(),
+		ProtocolVersion: 1,
+		DaemonBuild:     "legacy-evidence",
+		Result:          "success",
+		Code:            "ok",
+		Failure:         failure,
+	}
+	if failure != "" {
+		update.Result = "refusal"
+		update.Code = "verification_failed"
+		update.VerifiedAt = time.Time{}
+	}
+	return s.RecordWakeEvidence(ctx, ref, id, update)
+}
+
+// RecordWakeEvidence stores standalone protocol/build/read-back evidence or a
+// definite/uncertain rollback result before the continuation can be delivered.
+func (s *Service) RecordWakeEvidence(
+	ctx context.Context,
+	ref ScheduleRef,
+	id string,
+	update WakeEvidenceUpdate,
+) (model.Schedule, error) {
 	if !scheduleIDPattern.MatchString(id) {
 		return model.Schedule{}, stateError("schedule wake", "schedule id is invalid", "use wt herd schedule list", nil)
 	}
@@ -246,19 +294,40 @@ func (s *Service) RecordWakeResult(ctx context.Context, ref ScheduleRef, id stri
 	}
 
 	now := s.now()
-	failure = strings.TrimSpace(failure)
-	if failure != "" {
-		schedule.State = model.ScheduleFailed
-		schedule.WakeFailureReason = failure
+	update.Failure = strings.TrimSpace(update.Failure)
+	schedule.WakeRegisteredAt = update.RegisteredAt.UTC()
+	schedule.WakeProgrammedAt = update.ProgrammedAt.UTC()
+	schedule.WakeVerifiedAt = update.VerifiedAt.UTC()
+	schedule.WakeProtocol = update.ProtocolVersion
+	schedule.WakeDaemonBuild = update.DaemonBuild
+	schedule.WakeHelperBuild = update.HelperBuild
+	schedule.WakeResult = update.Result
+	schedule.WakeCode = update.Code
+	schedule.WakeUncertain = update.Uncertain
+	schedule.WakeRollbackAt = update.RollbackAttemptedAt.UTC()
+	schedule.WakeRollbackOKAt = update.RollbackVerifiedAt.UTC()
+	schedule.WakeRollbackState = update.RollbackResult
+	schedule.WakeRollbackInfo = strings.TrimSpace(update.RollbackDetail)
+	if update.Failure != "" {
+		if update.Uncertain {
+			schedule.State = model.ScheduleUncertain
+		} else {
+			schedule.State = model.ScheduleFailed
+		}
+		schedule.WakeFailureReason = update.Failure
 		schedule.FailureReason = "required system wake was not confirmed"
-		schedule.RecoveryCommand = "wt herd schedule show " + id
+		schedule.RecoveryCommand = "wt herd wake doctor; then wt herd schedule cancel " + id
 	} else {
-		if programmedAt.IsZero() || programmedAt.After(schedule.DueAt) {
+		if update.ProgrammedAt.IsZero() || update.ProgrammedAt.After(schedule.DueAt) ||
+			update.VerifiedAt.IsZero() {
 			return model.Schedule{}, stateError("schedule wake", "the confirmed wake time is missing or later than the continuation", "cancel and recreate the continuation", nil)
 		}
-		schedule.WakeProgrammedAt = programmedAt.UTC()
-		schedule.WakeVerifiedAt = now
+		if update.ProtocolVersion <= 0 || strings.TrimSpace(update.DaemonBuild) == "" {
+			return model.Schedule{}, stateError("schedule wake", "standalone daemon version evidence is missing", "run wt herd wake doctor, then recreate the continuation", nil)
+		}
 		schedule.WakeFailureReason = ""
+		schedule.FailureReason = ""
+		schedule.RecoveryCommand = ""
 	}
 	schedule.UpdatedAt = now
 	featureState.Schedules[id] = schedule
@@ -266,6 +335,64 @@ func (s *Service) RecordWakeResult(ctx context.Context, ref ScheduleRef, id stri
 	state.Features[key] = featureState
 	if err := s.Store.Save(state); err != nil {
 		return model.Schedule{}, stateError("schedule state", "could not save wake readiness", "check local state permissions, then retry", err)
+	}
+	return schedule, nil
+}
+
+// RecordWakeWithdrawal persists the exact-cancel proof after a continuation
+// becomes terminal. A failed withdrawal never reopens prompt delivery, but it
+// remains visible to recovery and lifecycle safety checks.
+func (s *Service) RecordWakeWithdrawal(
+	ctx context.Context,
+	ref ScheduleRef,
+	id string,
+	attemptedAt time.Time,
+	verifiedAt time.Time,
+	result string,
+	detail string,
+	uncertain bool,
+) (model.Schedule, error) {
+	if !scheduleIDPattern.MatchString(id) {
+		return model.Schedule{}, stateError("schedule wake", "schedule id is invalid", "use wt herd schedule list", nil)
+	}
+	if s.Store == nil {
+		return model.Schedule{}, stateError("schedule wake", "the local schedule store is unavailable", "wt herd doctor", nil)
+	}
+	unlock, err := s.Store.Lock(ctx)
+	if err != nil {
+		return model.Schedule{}, stateError("schedule lock", "could not acquire the local scheduler lock", "retry", err)
+	}
+	defer unlock()
+	state, err := s.Store.Load()
+	if err != nil {
+		return model.Schedule{}, stateError("schedule state", "could not load local schedules", "wt herd doctor", err)
+	}
+	key := ref.RepositoryID + ":" + ref.FeatureName
+	featureState, ok := state.Features[key]
+	if !ok {
+		return model.Schedule{}, stateError("schedule wake", "managed feature was not found", "run from a managed feature worktree", nil)
+	}
+	schedule, ok := featureState.Schedules[id]
+	if !ok || !schedule.WakeRequired {
+		return model.Schedule{}, stateError("schedule wake", "wake-enabled continuation was not found", "wt herd schedule list", nil)
+	}
+	schedule.WakeRollbackAt = attemptedAt.UTC()
+	schedule.WakeRollbackOKAt = verifiedAt.UTC()
+	schedule.WakeRollbackState = strings.TrimSpace(result)
+	schedule.WakeRollbackInfo = strings.TrimSpace(detail)
+	schedule.WakeUncertain = uncertain
+	if !uncertain {
+		schedule.WakeWithdrawnAt = verifiedAt.UTC()
+	} else {
+		schedule.WakeFailureReason = "exact standalone wake cancellation was not proven"
+		schedule.RecoveryCommand = "wt herd wake doctor; then wt herd schedule show " + id
+	}
+	schedule.UpdatedAt = s.now()
+	featureState.Schedules[id] = schedule
+	featureState.UpdatedAt = schedule.UpdatedAt
+	state.Features[key] = featureState
+	if err := s.Store.Save(state); err != nil {
+		return model.Schedule{}, stateError("schedule state", "could not persist wake withdrawal evidence", "check local state permissions, then run wt herd schedule show "+id, err)
 	}
 	return schedule, nil
 }

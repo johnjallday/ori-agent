@@ -207,6 +207,29 @@ func TestReadinessRefusesEverythingItCannotProve(t *testing.T) {
 	}
 }
 
+func TestPlanProofOutlivesWindowFreshnessButRejectsNewerContradictions(t *testing.T) {
+	adapter := newAdapter(t, "statusline-included-window.json", "")
+	proof, err := adapter.BuildPlanProof(fixtureSession, now, now.Add(8*time.Hour))
+	if err != nil || !proof.PlanBacked || proof.SessionID != fixtureSession {
+		t.Fatalf("BuildPlanProof() = %+v, %v", proof, err)
+	}
+	// The current five-hour sample has become stale, but no new record says
+	// that the confirmed session's billing posture changed.
+	if err := adapter.ValidatePlanProof(proof, fixtureSession, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("stale window invalidated otherwise valid plan proof: %v", err)
+	}
+	failure := Failure{
+		Version: RecordVersion, Source: SourceStopFailure, SessionID: fixtureSession,
+		Class: FailureBillingError, ObservedAt: proof.ObservedAt.Add(time.Minute), ClaudeVersion: proof.ClaudeVersion,
+	}
+	if err := adapter.Store.SaveFailure(failure); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.ValidatePlanProof(proof, fixtureSession, now.Add(2*time.Hour)); err == nil || !strings.Contains(err.Error(), "billing") {
+		t.Fatalf("new billing contradiction was accepted: %v", err)
+	}
+}
+
 func TestReadinessAcceptsAFreshPlanBackedSession(t *testing.T) {
 	readiness := newAdapter(t, "statusline-included-window.json", "").Readiness(fixtureSession, now)
 	if !readiness.Ready || readiness.Code != ReadyOK {

@@ -1,0 +1,3 @@
+Scheduled power events:
+ [0] wake at 07/31/2026 12:05:06 by 'com.ori.herdr-wake'
+ [1] wake at 07/31/2026 12:15:06 by 'com.ori.herdr-wake'

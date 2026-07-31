@@ -2,9 +2,11 @@ package claudeusage
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
 
 const (
@@ -50,6 +52,51 @@ func (a *Adapter) minimumVersion() string {
 		return a.MinimumVersion
 	}
 	return MinimumClaudeVersion
+}
+
+// BuildPlanProof snapshots only positive, fresh, supported Claude.ai plan
+// evidence for one exact session. It never contacts Claude or refreshes a
+// status line, so confirmation cannot consume credits.
+func (a *Adapter) BuildPlanProof(sessionID string, now, expiresAt time.Time) (model.PlanProof, error) {
+	readiness := a.Readiness(sessionID, now)
+	if !readiness.Ready || readiness.AuthMode != AuthPlanBacked {
+		return model.PlanProof{}, fmt.Errorf("cannot create included-plan proof: %s", readiness.Reason)
+	}
+	if expiresAt.IsZero() || !expiresAt.After(now) {
+		return model.PlanProof{}, errors.New("included-plan proof must expire at a future run deadline")
+	}
+	return model.PlanProof{
+		FormatVersion: PlanProofVersion, SessionID: sessionID, ClaudeVersion: readiness.ClaudeVersion,
+		ObservedAt: readiness.ObservedAt, ExpiresAt: expiresAt.UTC(), PlanBacked: true,
+	}, nil
+}
+
+// ValidatePlanProof permits a scheduled run to retain its confirmation-time
+// authorization when its current window sample has become stale. Only expiry,
+// identity drift, or newer contradictory billing/authentication evidence can
+// invalidate it; absence of a newer status line is not a contradiction.
+func (a *Adapter) ValidatePlanProof(proof model.PlanProof, sessionID string, now time.Time) error {
+	if proof.FormatVersion != PlanProofVersion || !proof.PlanBacked || proof.SessionID == "" || proof.SessionID != sessionID {
+		return errors.New("the stored included-plan proof does not match this exact native Claude session")
+	}
+	if proof.ExpiresAt.IsZero() || !now.Before(proof.ExpiresAt) {
+		return errors.New("the stored included-plan proof expired at the run deadline")
+	}
+	if a.Store == nil {
+		return nil
+	}
+	if sample, err := a.Store.Sample(sessionID); err == nil && sample.ObservedAt.After(proof.ObservedAt) {
+		if !a.supportedVersion(sample.ClaudeVersion) || !sample.PlanBacked() {
+			return errors.New("newer Claude usage evidence contradicts the stored included-plan proof")
+		}
+	}
+	if failure, err := a.Store.Failure(sessionID); err == nil && failure.ObservedAt.After(proof.ObservedAt) {
+		switch failure.Class {
+		case FailureBillingError, FailureAuthenticationFailed, FailureOAuthOrgNotAllowed:
+			return errors.New("newer Claude billing or authentication evidence contradicts the stored included-plan proof")
+		}
+	}
+	return nil
 }
 
 // Installed reports whether the Claude-side recorder has ever written a record.

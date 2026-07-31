@@ -1,0 +1,5 @@
+Repeating power events:
+  wakepoweron at 07:00:00 every day
+Scheduled power events:
+ [0] wake at 07/31/2026 10:44:24 by 'com.apple.alarm.user-visible-Weekly Usage Report'
+ [1] shutdown at 08/01/26 23:30:00 by 'com.example.maintenance'
