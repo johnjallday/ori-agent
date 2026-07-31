@@ -14,13 +14,31 @@
   'use strict';
 
   var CELL_W = 176;
-  var CELL_H = 150;
+  // Tiles measure ~155px tall (status flag, structure, name, ops mode, meta).
+  // CELL_H was 150, so every row's meta line collided with the status flag of
+  // the row below it. Keep a real gutter so each site reads as one unit and its
+  // operational signals are unambiguous (PRD FR30).
+  var CELL_H = 170;
   var PAD = 26;
   var MAX_COLS = 5;
   var HQ_SITE_ID = '__personal_hq_site__';
 
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
+
+  // Cockpit mode flags, set from the mount options on every mount() so the
+  // exported HTML builders (which keep their existing signatures for tests)
+  // can describe the semantics that are actually bound.
+  //
+  // selectOnlyMode  — PRD FR35/FR36: a pointer click selects and never opens,
+  //                   and there is no double-click opening rule. Home sets it;
+  //                   the legacy /workspaces launcher does not.
+  // hideChromeMode  — PRD FR15: the cockpit's persistent context rail owns the
+  //                   overview and the workspace-area header owns the title,
+  //                   stats, and New Workspace action, so the map must not
+  //                   render a second copy of either.
+  var selectOnlyMode = false;
+  var hideChromeMode = false;
 
   // Personal HQ status is owned by personal-hq-onboarding.js so the status,
   // setup actions, and existing modals all share one source of truth. The map
@@ -377,12 +395,18 @@
       ' · ' +
       openTasks +
       (openTasks === 1 ? ' task' : ' tasks');
-    // A single click selects; opening happens on double-click, or on a
-    // click/Enter when the tile is already selected — so the aria-label
-    // advertises the currently-available action.
-    var actionHint = isSel
-      ? '. Selected — activate to open'
-      : '. Activate to select, double-click to open';
+    // The action hint must describe the semantics actually bound (see
+    // bindTiles). In select-only mode (the Home cockpit, PRD FR35/FR36/FR125)
+    // a pointer click and Space never open — only Enter or the rail's explicit
+    // Open Workspace action do. The legacy launcher keeps its select-then-open
+    // behavior until /workspaces redirects to Home.
+    var actionHint = selectOnlyMode
+      ? isSel
+        ? '. Selected — press Enter to open'
+        : '. Activate to select, Enter to open'
+      : isSel
+        ? '. Selected — activate to open'
+        : '. Activate to select, double-click to open';
 
     return (
       '<button type="button" class="ws-map-tile' +
@@ -941,6 +965,21 @@
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show
         ? canvasHTML(workspaces, selectedId, maxCols).html
         : emptyCanvasHTML();
+    // Cockpit mode: the workspace-area header and the persistent context rail
+    // already own the title, the stat readout, New Workspace, and the selected
+    // workspace's overview (PRD FR15, FR17, FR29, FR62-FR69). Rendering the
+    // map's own topbar/overview here would duplicate all four.
+    if (hideChromeMode) {
+      return (
+        '<div class="ws-map-layout is-cockpit">' +
+        '<section class="ws-map-theatre">' +
+        '<div class="ws-map-compass">N<b>▲</b></div>' +
+        canvas +
+        '</section>' +
+        '</div>' +
+        selBarHTML()
+      );
+    }
     return (
       '<header class="ws-map-topbar">' +
       '<div class="ws-map-crest">' +
@@ -1008,8 +1047,11 @@
     var width = (container && container.clientWidth) || 0;
     if (width <= 0) return MAX_COLS;
     // Beside the theatre sits the 338px overview column + 18px grid gap,
-    // except in the stacked narrow layout where the theatre spans full width.
-    var theatre = isNarrowViewport() ? width : width - 338 - 18;
+    // except in the stacked narrow layout where the theatre spans full width —
+    // and except in cockpit mode, where the overview column does not exist at
+    // all (the persistent context rail replaces it), so reserving its width
+    // would cost the map a whole column for nothing.
+    var theatre = hideChromeMode || isNarrowViewport() ? width : width - 338 - 18;
     return computeMaxCols(theatre);
   }
 
@@ -1031,13 +1073,17 @@
     }, 150);
   }
 
-  // Reuse the hub's existing create flow for every create affordance.
+  // Reuse the page's existing create flow for every create affordance, rather
+  // than opening a second Create Workspace path (PRD FR105). The cockpit's
+  // button is checked first because the launcher's is absent on Home.
   function bindCreate(container) {
     var els = container.querySelectorAll('[data-ws-map-create]');
     Array.prototype.forEach.call(els, function (el) {
       el.addEventListener('click', function () {
-        var hubCreate = document.getElementById('launcherCreateWorkspaceBtn');
-        if (hubCreate) hubCreate.click();
+        var create =
+          document.getElementById('cockpitCreateWorkspaceBtn') ||
+          document.getElementById('launcherCreateWorkspaceBtn');
+        if (create) create.click();
       });
     });
   }
@@ -1204,12 +1250,21 @@
       el.classList.toggle('is-selected', sel);
       el.setAttribute('aria-pressed', sel ? 'true' : 'false');
     });
+    var districts = container.querySelectorAll('.ws-map-district-tag[data-ws-id]');
+    Array.prototype.forEach.call(districts, function (el) {
+      el.classList.toggle('is-selected', el.getAttribute('data-ws-id') === id);
+    });
+    var selected = findWs(workspaces, id);
+    // The map's own overview panel is absent in cockpit mode — the persistent
+    // context rail renders the selection instead, via onSelect.
     var body = container.querySelector('.ws-map-overview-body');
     if (body) {
-      var selected = findWs(workspaces, id);
       body.innerHTML = overviewBodyHTML(selected, options);
       bindOverviewActions(container, options);
       ensureSetupStatus(container, selected);
+    }
+    if (options && typeof options.onSelect === 'function') {
+      options.onSelect(id, selected || null);
     }
   }
 
@@ -1225,6 +1280,9 @@
     if (body) {
       body.innerHTML = hqOverviewHTML(view);
       bindOverviewActions(container, options);
+    }
+    if (options && typeof options.onSelectHQSite === 'function') {
+      options.onSelectHQSite(view);
     }
   }
 
@@ -1301,13 +1359,20 @@
     var selectables = container.querySelectorAll(
       '.ws-map-tile[data-ws-id], .ws-map-district-tag[data-ws-id]'
     );
+    var selectOnly = !!(options && options.selectOnly);
     Array.prototype.forEach.call(selectables, function (el) {
       var isTile = el.classList.contains('ws-map-tile');
-      // Single click selects; clicking (or Enter, which fires click on a
-      // button) an already-selected tile opens it. Double-click always opens.
       // The corner checkbox — or a Cmd/Ctrl/Shift-click anywhere on a tile —
-      // toggles the tile into the multi-select set instead (group districts
-      // can't be multi-selected).
+      // toggles the tile into the multi-select set (group districts can't be
+      // multi-selected). That is true in both modes.
+      //
+      // Otherwise:
+      //   select-only (cockpit): a click ALWAYS selects and never opens, no
+      //     matter how many times it is repeated, and there is no dblclick
+      //     rule (PRD FR35/FR36). Opening is Enter or the rail's explicit
+      //     Open Workspace action only.
+      //   legacy launcher: a click on an already-selected tile opens it, and
+      //     double-click always opens.
       el.addEventListener('click', function (e) {
         var id = el.getAttribute('data-ws-id');
         var onCheck = e.target && e.target.closest && e.target.closest('[data-ws-check]');
@@ -1316,12 +1381,30 @@
           toggleMulti(container, id);
           return;
         }
-        if (id && id === selectedId) {
+        if (!selectOnly && id && id === selectedId) {
           openWorkspace(id);
           return;
         }
         applySelection(container, workspaces, id, options);
       });
+      if (selectOnly) {
+        // A <button> fires click on BOTH Enter (keydown) and Space (keyup), so
+        // the click handler above already gives Space its select-only meaning.
+        // Enter is intercepted here and turned into the explicit open, with the
+        // default suppressed so it does not also fire a selecting click.
+        el.addEventListener('keydown', function (e) {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          var id = el.getAttribute('data-ws-id');
+          if (!id) return;
+          if (options && typeof options.onOpen === 'function') {
+            options.onOpen(id);
+            return;
+          }
+          openWorkspace(id);
+        });
+        return;
+      }
       el.addEventListener('dblclick', function () {
         openWorkspace(el.getAttribute('data-ws-id'));
       });
@@ -1343,6 +1426,10 @@
    */
   function mount(container, state) {
     if (!container) return;
+    // Read the cockpit mode flags before any HTML is built — the exported
+    // builders below consult them.
+    selectOnlyMode = !!(state && state.selectOnly);
+    hideChromeMode = !!(state && state.hideChrome);
     var workspaces = (state && state.workspaces) || [];
     var incoming = (state && state.selectedId) || '';
     var site = hqSiteView(hqStatus);
@@ -1357,6 +1444,15 @@
       selectedId = HQ_SITE_ID;
     } else if (selectedId === HQ_SITE_ID && findWs(workspaces, hqWorkspaceId)) {
       selectedId = hqWorkspaceId;
+    } else if (state && state.noAutoSelect) {
+      // Cockpit mode: a bare Home load must open on the Today rail with nothing
+      // selected (PRD FR74), so the map never invents a selection. It still
+      // honors a selection that already exists or was passed in.
+      selectedId = findWs(workspaces, selectedId)
+        ? selectedId
+        : findWs(workspaces, incoming)
+          ? incoming
+          : '';
     } else {
       // Keep the current selection if it still exists, else honor an incoming
       // selection, else fall back to a sensible default.
@@ -1410,6 +1506,28 @@
   window.OriWorkspaceMap = {
     mount: mount,
     unmount: unmount,
+    // The map resolves the effective selection during mount (an item may have
+    // been deleted since the caller's snapshot). The cockpit reads it back so
+    // its shared selection state and the context rail cannot drift (FR57, FR73).
+    getSelectedId: function () {
+      return selectedId;
+    },
+    // The reserved-HQ-site view derived from the current Personal HQ status.
+    // The cockpit needs it to render the site's build/repair/skip choices in
+    // the context rail, since cockpit mode has no map-owned overview panel.
+    getHQSiteView: function () {
+      return hqSiteView(hqStatus);
+    },
+    isHQSiteId: function (id) {
+      return id === HQ_SITE_ID;
+    },
+    setSelectedId: function (container, workspaces, id, options) {
+      if (!container) {
+        selectedId = id || '';
+        return;
+      }
+      applySelection(container, workspaces || [], id || '', options);
+    },
     computeLayout: computeMapLayout,
     computeStats: computeStats,
     computeMaxCols: computeMaxCols,

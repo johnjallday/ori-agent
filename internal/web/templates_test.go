@@ -363,3 +363,155 @@ func TestRenderAgentsCodexDetailPage(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderHomeCockpitShell confirms the Home page renders the Map-first
+// cockpit shell: one workspace area holding Map and Tree as peer views in the
+// same slot, one persistent context rail with a Today panel and a sibling
+// context panel, and the mounts the cockpit coordinator binds to.
+// PRD FR14-FR21, FR74.
+func TestRenderHomeCockpitShell(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	data := TemplateData{
+		Title: "Ori Agent",
+		Extra: map[string]any{
+			"HomeCommandBridge": true,
+			"WorkspaceCount":    3,
+			"IsFirstRun":        false,
+		},
+	}
+	html, err := r.RenderTemplate("index", data)
+	if err != nil {
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
+	}
+
+	for _, want := range []string{
+		// Cockpit shell.
+		`id="homeCockpit"`,
+		`id="cockpitWorkspaceArea"`,
+		`data-cockpit-area-title`,
+		`id="cockpitMap"`,
+		`id="cockpitTree"`,
+		`id="cockpitWorkspaceStatus"`,
+		`id="cockpitRail"`,
+		`id="cockpitRailToday"`,
+		`id="cockpitRailContext"`,
+		`id="cockpitRailLive"`,
+		// Mutually exclusive Map/Tree control (FR17, FR24).
+		`data-cockpit-view="map"`,
+		`data-cockpit-view="tree"`,
+		// Ask Ori stays above the cockpit in both views (FR14, FR92).
+		`id="homeAssistantCard"`,
+		`id="homeAssistantInput"`,
+		// Creation reuses the existing modal contract (FR105).
+		`id="cockpitCreateWorkspaceBtn"`,
+		`data-bs-target="#addFolderModal"`,
+		// Today's sources survive the migration (FR77, FR81, FR82, FR84, FR86).
+		`id="homeDailyBrief"`,
+		`id="homeCalendarOpsPortal"`,
+		`id="homeUpcomingTasks"`,
+		`id="homeRecentActivity"`,
+		`id="questLog"`,
+		// Optional Personal HQ mounts survive the migration (FR115).
+		`id="hqUpgradeMount"`,
+		`id="hqEmailMount"`,
+		`id="hqMailReviewMount"`,
+		`id="hqFollowUpMount"`,
+		`id="hqJournalMount"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered Home page missing %q", want)
+		}
+	}
+
+	// The retired Operations Board and its duplicate workspace overview must
+	// not render below or beside the cockpit (FR22).
+	for _, gone := range []string{
+		`id="homeDashboardSections"`,
+		`id="homeRecentWorkspaces"`,
+		`home-operations-board`,
+		`class="home-command-layout"`,
+		`aria-label="Operations board"`,
+	} {
+		if strings.Contains(html, gone) {
+			t.Errorf("rendered Home page still contains retired element %q", gone)
+		}
+	}
+}
+
+// TestHomeCockpitLoadsMapBeforeCoordinator pins the standing script-order
+// requirement: workspace-map.js defines window.OriWorkspaceMap, and the cockpit
+// coordinator calls OriWorkspaceMap.mount(...), so the map must load first
+// (PRD FR123). Classic deferred scripts run before non-async module scripts,
+// so source order here is the whole contract.
+func TestHomeCockpitLoadsMapBeforeCoordinator(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	data := TemplateData{
+		Title: "Ori Agent",
+		Extra: map[string]any{"HomeCommandBridge": true, "WorkspaceCount": 0, "IsFirstRun": true},
+	}
+	html, err := r.RenderTemplate("index", data)
+	if err != nil {
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
+	}
+
+	const (
+		mapJS     = `/js/modules/workspace-map.js`
+		cockpitJS = `/js/modules/home-workspace-cockpit.js`
+	)
+	mapAt := strings.Index(html, mapJS)
+	cockpitAt := strings.Index(html, cockpitJS)
+	if mapAt < 0 {
+		t.Fatalf("Home page does not load %s", mapJS)
+	}
+	if cockpitAt < 0 {
+		t.Fatalf("Home page does not load %s", cockpitJS)
+	}
+	if mapAt > cockpitAt {
+		t.Errorf("Home loads %s after %s; the map must be defined first", mapJS, cockpitJS)
+	}
+
+	// The map script must be a classic deferred script, not a module: module
+	// scripts execute after ALL deferred classics, which would invert the
+	// ordering this test just proved.
+	if !strings.Contains(html, `<script defer src="`+mapJS+`">`) {
+		t.Errorf("%s must load as a classic deferred script to keep the ordering guarantee", mapJS)
+	}
+}
+
+// TestHomeCockpitStylesheetLoadsOnHomeOnly confirms the cockpit stylesheet is
+// scoped to Home rather than shipped to every page.
+func TestHomeCockpitStylesheetLoadsOnHomeOnly(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	const sheet = `/css/home-workspace-cockpit.css`
+
+	home, err := r.RenderTemplate("index", TemplateData{
+		Title: "Ori Agent",
+		Extra: map[string]any{"HomeCommandBridge": true, "WorkspaceCount": 1},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
+	}
+	if !strings.Contains(home, sheet) {
+		t.Errorf("Home page does not load %s", sheet)
+	}
+
+	other, err := r.RenderTemplate("agents-roster", TemplateData{Title: "Agents - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(agents-roster) failed: %v", err)
+	}
+	if strings.Contains(other, sheet) {
+		t.Errorf("non-Home page should not load %s", sheet)
+	}
+}

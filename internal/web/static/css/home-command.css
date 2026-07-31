@@ -65,19 +65,18 @@ body.home-command-page .home-command-bridge * {
   box-sizing: border-box;
 }
 
+/* Row 1 is the Ask Ori command strip, row 2 is the cockpit (the flexible one —
+   it must absorb the available height so Map/Tree and the rail fill the
+   screen), and row 3 is the optional Personal HQ mount stack, which is
+   zero-height until one of those modules shows itself. */
 .home-command-bridge {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 12px;
   width: min(1680px, 100%);
   margin: 0 auto;
   color: var(--hc-ink);
   font-family: "Chakra Petch", system-ui, sans-serif;
-}
-
-.home-orientation-slot {
-  min-width: 0;
-  min-height: 0;
 }
 
 .home-command-strip,
@@ -291,13 +290,12 @@ body.home-command-page .home-command-bridge * {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--hc-signal) 16%, transparent);
 }
 
-.home-command-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(285px, 31%);
-  min-height: 0;
-  gap: 12px;
-}
-
+/* NOTE: the Operations Board markup was retired with the Map-first cockpit
+   (PRD FR22). Its styles below (.home-operations-*, .home-stat*,
+   .home-workspace-card*, .home-dashboard-row, .home-status-led/-text,
+   .home-section-link) are now dead and are removed in one careful pass at the
+   end of this feature, rather than piecemeal — several of them share selector
+   lists with rules that are still live. */
 .home-operations-board {
   display: grid;
   grid-template-rows: auto minmax(132px, 0.85fr) minmax(0, 1fr);
@@ -1146,10 +1144,6 @@ a.quest-title:focus-visible {
 
   .home-command-bridge {
     min-height: 0;
-  }
-
-  .home-command-layout {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .home-operations-board {

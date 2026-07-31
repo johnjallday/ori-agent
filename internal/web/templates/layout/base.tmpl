@@ -359,6 +359,14 @@
   <script defer src="/js/modules/dashboard.js"></script>
   <script type="module" src="/js/modules/relative-time.js"></script>
   <script defer src="/js/modules/home-dashboard.js"></script>
+  <!--
+    Home cockpit. workspace-map.js is a classic deferred script and MUST run
+    before the coordinator that calls OriWorkspaceMap.mount(...) (PRD FR123).
+    Deferred classic scripts execute before non-async module scripts, so the
+    ordering below satisfies that requirement.
+  -->
+  <script defer src="/js/modules/workspace-map.js"></script>
+  <script type="module" src="/js/modules/home-workspace-cockpit.js"></script>
   <script type="module" src="/js/modules/home-daily-brief.js"></script>
   <script type="module" src="/js/modules/home-calendar-ops-portal.js"></script>
   <script type="module" src="/js/modules/progression-widget.js"></script>

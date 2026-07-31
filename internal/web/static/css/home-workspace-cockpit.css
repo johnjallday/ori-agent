@@ -1,0 +1,490 @@
+/*
+ * home-workspace-cockpit.css — the Map-first Home cockpit.
+ *
+ * Layered on top of home-command.css, which owns the Home page's palette
+ * (--hc-*), typography, and panel treatment. This file adds only the cockpit
+ * shell: the workspace area / context rail split, the view toggle, and the
+ * rail's own surfaces. It reuses the existing tokens rather than introducing a
+ * second visual language (PRD §6).
+ *
+ * The wide/stacked boundary is a 1040px COCKPIT-CONTAINER width, with an
+ * ~1100px viewport fallback where container queries are unavailable (FR16,
+ * FR134). Both are declared below; the container query wins where supported.
+ */
+
+/* The container must be an ANCESTOR of what it styles — an element cannot
+   query its own size — so the query container is the bridge that wraps the
+   cockpit. Its inline size is the cockpit's available width, which is what
+   FR16/FR134 describe. */
+.home-command-bridge {
+  container-type: inline-size;
+  container-name: cockpit;
+}
+
+.home-cockpit {
+  display: grid;
+  /* Stacked by default: Ask Ori (above), workspace area, then context rail.
+     The side-by-side layout is opted into at the boundary below (FR134). */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* --------------------------------------------------------------------------
+ * Workspace area
+ * ----------------------------------------------------------------------- */
+
+.cockpit-workspace-area {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--hc-line);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--hc-panel-raised) 78%, transparent),
+    var(--hc-panel)
+  );
+  box-shadow: var(--hc-shadow);
+}
+
+.cockpit-area-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px 0;
+}
+
+.cockpit-area-eyebrow {
+  display: block;
+  color: var(--hc-signal);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cockpit-area-title {
+  margin: 2px 0 0;
+  color: var(--hc-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.95px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.cockpit-area-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cockpit-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+.cockpit-view-btn {
+  padding: 5px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cockpit-view-btn + .cockpit-view-btn {
+  border-left: 1px solid var(--hc-line);
+}
+
+/* The active view is carried by a filled chip AND its aria-pressed state, so
+   it never depends on color alone (FR131). */
+.cockpit-view-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--hc-signal) 18%, var(--hc-panel));
+  color: var(--hc-ink);
+  box-shadow: inset 0 -2px 0 var(--hc-signal);
+}
+
+.cockpit-view-btn:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: -2px;
+}
+
+.cockpit-area-body {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  /* Map/Tree own their internal scrolling; the page itself must never scroll
+     horizontally (FR135). */
+  overflow: hidden;
+}
+
+/* Map and Tree share the SAME layout slot — activating one hides the other,
+   never a drawer or overlay (FR18). */
+.cockpit-map,
+.cockpit-tree {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+/* Cockpit-mode Map. The map keeps its own visual language but drops the
+   single-column launcher framing: here the cockpit's workspace-area header
+   already carries the title and New Workspace, and the context rail carries
+   the overview, so the theatre gets the whole slot. */
+.cockpit-map {
+  padding: 0 14px 14px;
+  overflow: hidden;
+}
+
+.cockpit-map .ws-map-layout.is-cockpit {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+.cockpit-map .ws-map-layout.is-cockpit .ws-map-theatre {
+  height: 100%;
+  /* Every site stays reachable: the theatre pans/scrolls internally rather
+     than clipping tiles or pushing the page sideways (FR135, FR138). */
+  min-height: 320px;
+  overflow: auto;
+}
+
+.cockpit-tree {
+  overflow: auto;
+  padding: 0 14px 14px;
+}
+
+.cockpit-area-status:empty {
+  display: none;
+}
+
+.cockpit-area-message {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 18px 16px 20px;
+  color: var(--hc-ink-dim);
+  font-size: 13px;
+}
+
+.cockpit-area-message-text {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cockpit-area-message-detail {
+  margin: 0;
+  color: var(--hc-ink-faint);
+  font-size: 12px;
+}
+
+.cockpit-area-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* --------------------------------------------------------------------------
+ * Context rail
+ * ----------------------------------------------------------------------- */
+
+.cockpit-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--hc-line);
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--hc-panel-raised) 78%, transparent),
+    var(--hc-panel)
+  );
+  box-shadow: var(--hc-shadow);
+}
+
+/* The rail scrolls independently when Today has more content than fits
+   (FR76), so the workspace area is never pushed off-screen by it. */
+.cockpit-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.cockpit-rail-body[hidden] {
+  display: none;
+}
+
+.cockpit-rail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cockpit-rail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cockpit-rail-back {
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cockpit-rail-back:hover,
+.cockpit-rail-back:focus-visible {
+  color: var(--hc-signal);
+}
+
+.cockpit-rail-title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cockpit-rail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.cockpit-rail-status,
+.cockpit-rail-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--hc-line);
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cockpit-rail-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cockpit-rail-status.is-attention {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
+}
+
+.cockpit-rail-status.is-running,
+.cockpit-rail-status.is-active {
+  border-color: var(--hc-signal);
+  color: var(--hc-signal);
+}
+
+.cockpit-rail-status.is-unknown {
+  border-style: dashed;
+  color: var(--hc-ink-faint);
+}
+
+.cockpit-rail-mission {
+  margin: 0;
+  color: var(--hc-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cockpit-rail-next {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+.cockpit-rail-next-kicker {
+  color: var(--hc-signal);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.cockpit-rail-next-label {
+  margin: 0;
+  color: var(--hc-ink);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.cockpit-rail-next-detail {
+  margin: 0;
+  color: var(--hc-ink-faint);
+  font-size: 11.5px;
+}
+
+.cockpit-rail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cockpit-rail-open {
+  flex: 1 1 auto;
+  text-align: center;
+}
+
+.cockpit-rail-note {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--hc-ink-faint);
+  font-size: 11.5px;
+}
+
+.cockpit-rail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.cockpit-rail-metric {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+.cockpit-rail-metric-value {
+  color: var(--hc-ink);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* An unavailable metric is rendered as an em dash and dimmed — never as a
+   zero, which would be an invented authoritative value (FR44, FR121). */
+.cockpit-rail-metric-value[data-unavailable="true"] {
+  color: var(--hc-ink-faint);
+}
+
+.cockpit-rail-metric-label {
+  color: var(--hc-ink-faint);
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.cockpit-rail-section-title {
+  margin: 0 0 5px;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.cockpit-rail-roster {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cockpit-rail-roster-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+  font-size: 12px;
+}
+
+.cockpit-rail-roster-name {
+  color: var(--hc-ink);
+  font-weight: 600;
+}
+
+.cockpit-rail-roster-role,
+.cockpit-rail-roster-activity {
+  color: var(--hc-ink-faint);
+  font-size: 10.5px;
+}
+
+.cockpit-rail-empty {
+  margin: 0;
+  color: var(--hc-ink-faint);
+  font-size: 12px;
+}
+
+/* Personal HQ optional mounts sit below the cockpit and stay hidden until
+   their own module shows them (FR115). */
+.home-hq-mounts:empty {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+ * Wide layout — side by side, workspace area takes the majority (FR16)
+ * ----------------------------------------------------------------------- */
+
+@container cockpit (min-width: 1040px) {
+  .home-cockpit {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 30%);
+  }
+}
+
+/* Viewport fallback for engines without container queries. `@supports not`
+   keeps it from double-applying where the container query already won. */
+@supports not (container-type: inline-size) {
+  @media (min-width: 1100px) {
+    .home-cockpit {
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 30%);
+    }
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * Reduced motion (FR133)
+ * ----------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .home-cockpit *,
+  .home-cockpit *::before,
+  .home-cockpit *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
