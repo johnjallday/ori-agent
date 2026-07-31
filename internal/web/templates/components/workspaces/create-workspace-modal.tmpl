@@ -11,25 +11,32 @@
         <div class="workspace-create-layout">
           <div class="workspace-create-main-fields">
 
-            <!-- Wizard stepper: hidden in Import mode, which remains single-step. -->
+            <!-- Wizard stepper: hidden in Import mode, which remains single-step.
+                 Four steps, each answering one question — Blueprint: what
+                 starting point? Details: what is this workspace? Team: who works
+                 in it? Review: is this what I meant to create? -->
             <div id="wizardStepper" class="workspace-create-stepper" aria-label="Create Workspace progress">
               <span class="workspace-create-step is-active" data-step="1" aria-current="step">
-                <span class="workspace-create-step-num">1</span>Choose Blueprint
+                <span class="workspace-create-step-num">1</span>Blueprint
               </span>
               <span class="workspace-create-step-sep">→</span>
               <span class="workspace-create-step" data-step="2">
-                <span class="workspace-create-step-num">2</span>Workspace Details
+                <span class="workspace-create-step-num">2</span>Details
               </span>
               <span class="workspace-create-step-sep">→</span>
               <span class="workspace-create-step" data-step="3">
-                <span class="workspace-create-step-num">3</span>Review &amp; Create
+                <span class="workspace-create-step-num">3</span>Team
+              </span>
+              <span class="workspace-create-step-sep">→</span>
+              <span class="workspace-create-step" data-step="4">
+                <span class="workspace-create-step-num">4</span>Review
               </span>
             </div>
 
-            <!-- ===== STEP 1 · CHOOSE BLUEPRINT ===== -->
+            <!-- ===== STEP 1 · BLUEPRINT ===== -->
             <section id="wizardStep1" aria-labelledby="wizardStep1Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 1 of 3</span>
+                <span class="workspace-wizard-eyebrow">Step 1 of 4</span>
                 <h2 id="wizardStep1Title" tabindex="-1">Choose a blueprint</h2>
                 <p>Start with a proven workspace shape, or begin with a clean slate.</p>
               </div>
@@ -82,82 +89,25 @@
                 </div>
               </div>
 
-              <!-- A deliberately small team preview makes the
-                   primary-agent hierarchy tangible before the user reaches
-                   review. Its avatars are visual identities, not substitutes
-                   for the plainly stated lifecycle status below. -->
-              <section id="workspaceAgentMapPreview" class="workspace-agent-map-preview" aria-labelledby="workspaceAgentMapPreviewTitle">
-                <div class="workspace-agent-map-preview-head">
-                  <div>
-                    <span class="workspace-wizard-eyebrow">Workspace preview</span>
-                    <h3 id="workspaceAgentMapPreviewTitle">Primary workspace agent</h3>
-                  </div>
-                  <div class="workspace-agent-map-preview-actions">
-                    <button id="workspaceAgentMapCreateAll" type="button" class="workspace-agent-map-create-all" hidden></button>
-                    <span id="workspaceAgentMapState" class="workspace-agent-map-state">Checking</span>
-                  </div>
-                </div>
-                <div class="workspace-agent-map-canvas">
-                  <div id="workspaceAgentMapNode" class="workspace-agent-map-node is-loading">
-                    <button id="workspaceAgentMapAvatarAction" type="button" class="workspace-agent-map-avatar" disabled aria-label="Primary workspace agent is loading">
-                      <svg class="workspace-agent-map-avatar-figure" viewBox="0 0 96 96" focusable="false" aria-hidden="true">
-                        <path class="workspace-agent-map-avatar-antenna" d="M48 15V8m0 0 6-5" />
-                        <rect class="workspace-agent-map-avatar-head" x="25" y="19" width="46" height="37" rx="12" />
-                        <path class="workspace-agent-map-avatar-visor" d="M33 36h30" />
-                        <circle class="workspace-agent-map-avatar-eye" cx="40" cy="36" r="2.5" />
-                        <circle class="workspace-agent-map-avatar-eye" cx="56" cy="36" r="2.5" />
-                        <path class="workspace-agent-map-avatar-neck" d="M42 56v7h12v-7" />
-                        <path class="workspace-agent-map-avatar-body" d="M20 86c2-16 13-24 28-24s26 8 28 24" />
-                        <path class="workspace-agent-map-avatar-collar" d="M36 65l12 9 12-9" />
-                      </svg>
-                      <span class="workspace-agent-map-avatar-placeholder" aria-hidden="true">?</span>
-                      <span class="workspace-agent-map-avatar-create-badge" aria-hidden="true">+</span>
-                    </button>
-                    <span id="workspaceAgentMapNodeKicker" class="workspace-agent-map-node-kicker">AGENT SETUP</span>
-                    <strong id="workspaceAgentMapNodeName">Checking agent setup</strong>
-                    <span id="workspaceAgentMapNodeDetail">This workspace needs a primary agent.</span>
-                  </div>
-                  <div id="workspaceAgentMapSpecialists" class="workspace-agent-map-specialists"></div>
-                </div>
-                <p id="workspaceAgentMapStatus" class="workspace-agent-map-status" aria-live="polite">Checking the reusable agent for this workspace…</p>
-              </section>
-
-              <!-- The preview's + actions open this focused setup card before
-                   anything is saved globally. Keeping it in the wizard avoids
-                   a second modal stack while making the saved-agent boundary
-                   explicit. -->
-              <section id="workspaceTemplateAgentSetup" class="workspace-template-agent-setup" hidden aria-labelledby="workspaceTemplateAgentSetupTitle">
-                <div class="workspace-template-agent-setup-head">
-                  <div>
-                    <span class="workspace-wizard-eyebrow">Set up reusable agent</span>
-                    <h3 id="workspaceTemplateAgentSetupTitle">Create agent</h3>
-                  </div>
-                  <button id="workspaceTemplateAgentSetupCancel" type="button" class="workspace-template-agent-setup-cancel" aria-label="Close agent setup">×</button>
-                </div>
-                <p id="workspaceTemplateAgentSetupDescription" class="workspace-template-agent-setup-description">
-                  This will be saved in Your Agents and can be reused in future workspaces.
-                </p>
-                <form id="workspaceTemplateAgentSetupForm" class="workspace-template-agent-setup-form">
-                  <input id="workspaceTemplateAgentSetupIndex" type="hidden">
-                  <label for="workspaceTemplateAgentSetupName">Name</label>
-                  <input id="workspaceTemplateAgentSetupName" class="modern-input" type="text" autocomplete="off" maxlength="100" required>
-                  <label for="workspaceTemplateAgentSetupModel">Model</label>
-                  <select id="workspaceTemplateAgentSetupModel" class="modern-input"></select>
-                  <label for="workspaceTemplateAgentSetupPrompt">Instructions <span>optional</span></label>
-                  <textarea id="workspaceTemplateAgentSetupPrompt" class="modern-input" rows="4" placeholder="Use the blueprint instructions"></textarea>
-                  <p id="workspaceTemplateAgentSetupStatus" class="workspace-template-agent-setup-status" aria-live="polite"></p>
-                  <div class="workspace-template-agent-setup-actions">
-                    <button id="workspaceTemplateAgentSetupBack" type="button" class="workspace-wizard-inline-action">Cancel</button>
-                    <button id="workspaceTemplateAgentSetupSave" type="submit" class="workspace-template-agent-setup-save">Save reusable agent</button>
-                  </div>
-                </form>
+              <!-- Compact, read-only summary of the agents this blueprint will
+                   include, derived from the normalized template-agent plan.
+                   Deliberately carries NO agent action: choosing a primary,
+                   customizing an agent, and adding saved agents all happen on
+                   Team. Its four states — checking, ready, none, and
+                   unavailable — are visibly distinct so "still checking" can
+                   never be misread as "this blueprint has no agents". -->
+              <section id="blueprintAgentSummary" class="workspace-blueprint-agents" hidden aria-labelledby="blueprintAgentSummaryTitle">
+                <span class="workspace-wizard-eyebrow">Workspace team</span>
+                <h3 id="blueprintAgentSummaryTitle">Included agents</h3>
+                <p id="blueprintAgentSummaryText" class="workspace-blueprint-agents-text" aria-live="polite"></p>
+                <p id="blueprintAgentSummaryHint" class="workspace-blueprint-agents-hint">You'll confirm and adjust the team in step 3.</p>
               </section>
             </section>
 
-            <!-- ===== STEP 2 · WORKSPACE DETAILS ===== -->
+            <!-- ===== STEP 2 · DETAILS ===== -->
             <section id="wizardStep2" hidden aria-labelledby="wizardStep2Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 2 of 3</span>
+                <span class="workspace-wizard-eyebrow">Step 2 of 4</span>
                 <h2 id="wizardStep2Title" tabindex="-1">Workspace details</h2>
                 <p>Name the space and add the context Ori should carry into its review.</p>
               </div>
@@ -188,26 +138,6 @@
                     <span class="workspace-setup-help d-block">Uses your system's default app for this file type.</span>
                   </span>
                 </label>
-              </div>
-
-              <div id="templateAgentReview" class="workspace-template-agent-review mb-2" hidden>
-                <div class="workspace-template-agent-review-head">
-                  <div>
-                    <div class="workspace-template-agent-review-title">Blueprint agents</div>
-                    <div id="templateAgentReviewSummary" class="workspace-template-agent-review-summary" aria-live="polite"></div>
-                  </div>
-                </div>
-                <div id="templateAgentReviewStatus" class="workspace-template-agent-review-status" aria-live="polite"></div>
-                <div id="templateAgentReviewList" class="workspace-template-agent-list"></div>
-                <div id="templateAgentReviewWarnings" class="workspace-template-agent-warnings" hidden></div>
-                <details class="workspace-template-agent-advanced">
-                  <summary>Advanced team options</summary>
-                  <label class="workspace-template-agent-toggle" title="Clear this to create the workspace without the assistant included by this blueprint.">
-                    <input type="checkbox" id="templateAgentReviewToggle" checked>
-                    <span>Include blueprint assistant/team</span>
-                  </label>
-                  <span class="workspace-template-agent-advanced-help">Clear this to create without the included assistant/team. Starter tasks will remain unassigned unless you add an existing agent.</span>
-                </details>
               </div>
 
               <!-- REAPER Setup card: shown only when the Reaper Song template is
@@ -331,15 +261,96 @@
 
             </section>
 
-            <!-- ===== STEP 3 · REVIEW & CREATE ===== -->
+            <!-- ===== STEP 3 · TEAM ===== -->
+            <!-- The only step where the resulting roster is edited. Blueprint
+                 agents and manually added saved agents appear as ONE team here;
+                 Review (step 4) restates the result read-only. -->
             <section id="wizardStep3" hidden aria-labelledby="wizardStep3Title">
               <div class="workspace-wizard-step-heading">
-                <span class="workspace-wizard-eyebrow">Step 3 of 3</span>
-                <h2 id="wizardStep3Title" tabindex="-1">Review &amp; create</h2>
-                <p>Confirm the workspace, its assistant or team, and anything that needs attention first.</p>
+                <span class="workspace-wizard-eyebrow">Step 3 of 4</span>
+                <h2 id="wizardStep3Title" tabindex="-1">Build your workspace team</h2>
+                <p>Confirm who will work in this workspace, and add saved agents if you need more.</p>
               </div>
 
-              <div id="workspaceReviewSummary" class="workspace-review-summary" aria-live="polite"></div>
+              <div id="workspaceTeamLayout" class="workspace-team-layout">
+                <section id="workspaceTeamReview" class="workspace-team-review" aria-labelledby="workspaceTeamHeading">
+                  <div class="workspace-team-review-head">
+                    <div>
+                      <span class="workspace-wizard-eyebrow">Resulting workspace team</span>
+                      <h3 id="workspaceTeamHeading">Workspace Assistant</h3>
+                      <!-- Not a live region: this line re-renders on every draft
+                           change, so announcing it would repeat the whole team
+                           summary on each edit. Deliberate change messages go to
+                           #workspaceTeamLiveRegion instead. -->
+                      <p id="workspaceTeamSummary" class="workspace-team-review-summary"></p>
+                    </div>
+                  </div>
+
+                  <!-- Blockers first, then advisories. Rendered from the team
+                       draft's classified issues so Team and Review agree. -->
+                  <div id="workspaceTeamIssues" class="workspace-team-issues"></div>
+
+                  <!-- ONE roster: blueprint agents and manually added saved
+                       agents together, primary first. There is no separate
+                       nested "Blueprint agents" card. -->
+                  <ul id="workspaceTeamRoster" class="workspace-team-roster" aria-labelledby="workspaceTeamHeading"></ul>
+
+                  <p id="workspaceTeamModelNote" class="workspace-team-model-note"></p>
+
+                  <details id="workspaceTeamAdvanced" class="workspace-template-agent-advanced">
+                    <summary>Advanced team options</summary>
+                    <label class="workspace-template-agent-toggle" title="Clear this to create the workspace without the assistant included by this blueprint.">
+                      <input type="checkbox" id="templateAgentReviewToggle" checked>
+                      <span>Include blueprint assistant/team</span>
+                    </label>
+                    <span class="workspace-template-agent-advanced-help">Clear this to create without the included assistant/team. Starter tasks will remain unassigned unless you add an existing agent.</span>
+                  </details>
+                </section>
+
+                <!-- Inline picker: the same step, never a nested modal. On wide
+                     viewports it sits beside the resulting team; on narrow ones it
+                     stacks below it, so the team is understood before browsing. -->
+                <section id="existingAgentRosterPanel" class="workspace-existing-agent-roster" aria-labelledby="existingAgentRosterTitle">
+                  <div class="workspace-existing-agent-roster-head">
+                    <div>
+                      <span class="workspace-wizard-eyebrow">Your Agents</span>
+                      <h3 id="existingAgentRosterTitle">Add a saved agent</h3>
+                    </div>
+                    <button type="button" id="addExistingAgentBtn" class="modern-btn modern-btn-secondary">Refresh</button>
+                  </div>
+                  <label class="visually-hidden" for="existingAgentRosterSearch">Search your agents</label>
+                  <input type="search" id="existingAgentRosterSearch" class="modern-input w-100" placeholder="Search saved agents">
+                  <div id="existingAgentRosterStatus" class="workspace-existing-agent-roster-status" aria-live="polite"></div>
+                  <div id="existingAgentRosterList" class="workspace-existing-agent-roster-list" role="list" aria-labelledby="existingAgentRosterTitle"></div>
+                </section>
+              </div>
+
+              <div id="workspaceTeamLiveRegion" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+            </section>
+
+            <!-- ===== STEP 4 · REVIEW ===== -->
+            <!-- A receipt, not another configuration form: read-only summaries
+                 with Edit links back to the step that owns each value. -->
+            <section id="wizardStep4" hidden aria-labelledby="wizardStep4Title">
+              <div class="workspace-wizard-step-heading">
+                <span class="workspace-wizard-eyebrow">Step 4 of 4</span>
+                <h2 id="wizardStep4Title" tabindex="-1">Ready to create?</h2>
+                <p>Check the workspace, its team, and anything it will ask for after creation.</p>
+              </div>
+
+              <!-- Not a live region either: the receipt re-renders on every
+                   draft change, and Review is entered deliberately with focus
+                   moved to its heading, so its content is already discoverable. -->
+              <div id="workspaceReviewSummary" class="workspace-review-summary"></div>
+
+              <!-- The same classified issues Team shows, blockers first, so the
+                   receipt can never look calmer than the step it summarizes. -->
+              <div id="workspaceReviewIssues" class="workspace-team-issues"></div>
+
+              <!-- Authoritative server failure. A toast disappears and cannot be
+                   focused or acted on, so a failed create also lands here with
+                   the real message and a way back to the step that owns it. -->
+              <div id="workspaceReviewError" class="workspace-review-error" role="alert" tabindex="-1" hidden></div>
 
               <!-- Blueprint setup preview. Disclosure only: it lists what the
                    blueprint will ask for after creation and expands, opens,
@@ -353,40 +364,6 @@
                 <ul id="workspaceSetupPreviewList" class="workspace-setup-preview-list"></ul>
                 <p id="workspaceSetupPreviewNote" class="workspace-setup-preview-note"></p>
               </section>
-
-
-              <section id="workspaceTeamReview" class="workspace-team-review" aria-labelledby="workspaceTeamHeading">
-                <div class="workspace-team-review-head">
-                  <div>
-                    <span class="workspace-wizard-eyebrow">Your setup</span>
-                    <h3 id="workspaceTeamHeading">Workspace Assistant</h3>
-                    <p id="workspaceTeamSummary" class="workspace-team-review-summary" aria-live="polite"></p>
-                  </div>
-                  <button type="button" id="addExistingAgentBtn" class="modern-btn modern-btn-secondary">+ Add Existing Agent</button>
-                </div>
-                <div id="templateAgentReviewMount"></div>
-                <div id="existingAgentTeamList" class="workspace-existing-agent-team" aria-live="polite"></div>
-                <div id="workspaceTeamDropZone" class="workspace-team-drop-zone" tabindex="0" aria-label="Drop an existing agent here to attach it to this workspace">
-                  Drop an existing agent here to attach it — it stays in its other workspaces.
-                </div>
-                <div id="workspaceTeamLiveRegion" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
-              </section>
-
-              <section id="existingAgentRosterPanel" class="workspace-existing-agent-roster" hidden aria-labelledby="existingAgentRosterTitle">
-                <div class="workspace-existing-agent-roster-head">
-                  <div>
-                    <span class="workspace-wizard-eyebrow">Your Agents</span>
-                    <h3 id="existingAgentRosterTitle">Add a saved agent</h3>
-                  </div>
-                  <button type="button" id="closeExistingAgentRosterBtn" class="workspace-wizard-icon-action" aria-label="Close Your Agents">×</button>
-                </div>
-                <label class="visually-hidden" for="existingAgentRosterSearch">Search your agents</label>
-                <input type="search" id="existingAgentRosterSearch" class="modern-input w-100" placeholder="Search saved agents">
-                <div id="existingAgentRosterStatus" class="workspace-existing-agent-roster-status" aria-live="polite"></div>
-                <div id="existingAgentRosterList" class="workspace-existing-agent-roster-list"></div>
-              </section>
-
-              <div id="wizardStep3ReviewMount"></div>
             </section>
           </div>
         </div>

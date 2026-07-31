@@ -28,6 +28,9 @@
   --wc-ink: #d6d9de;
   --wc-ink-dim: #8b909a;
   --wc-ink-faint: #5a5f6a;
+  /* Headings were previously defined only in the light-theme block, so every
+     dark-mode `color: var(--wc-ink-heading)` silently fell back to inherit. */
+  --wc-ink-heading: #eef0f3;
   --wc-faction: #46d39a;
   --wc-faction-deep: #0f3b30;
   --wc-keeper: #e8b54b;
@@ -456,20 +459,6 @@
   border-color: var(--wc-faction);
 }
 
-.workspace-create-modal .workspace-template-agent-review {
-  background: rgba(70, 211, 154, 0.06);
-  border-color: var(--wc-faction-deep);
-}
-.workspace-create-modal .workspace-template-agent-review-title {
-  color: #f3f5f8;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-.workspace-create-modal .workspace-template-agent-review-summary,
-.workspace-create-modal .workspace-template-agent-review-status,
-.workspace-create-modal .workspace-template-agent-warnings {
-  color: var(--wc-ink-dim);
-}
 .workspace-create-modal .workspace-template-agent-advanced {
   margin-top: 9px;
   padding-top: 8px;
@@ -493,126 +482,14 @@
   font-size: 11px;
   line-height: 1.4;
 }
-.workspace-create-modal .workspace-template-agent-toggle,
-.workspace-create-modal .workspace-template-agent-row {
+.workspace-create-modal .workspace-template-agent-toggle {
   background: var(--wc-panel-2);
   border-color: var(--wc-line);
-}
-.workspace-create-modal .workspace-template-agent-toggle {
   color: var(--wc-faction);
-}
-.workspace-create-modal .workspace-template-agent-model strong {
-  color: #f3f5f8;
-}
-.workspace-create-modal .workspace-template-agent-model {
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-template-agent-field,
-.workspace-create-modal .workspace-template-agent-note,
-.workspace-create-modal .workspace-template-agent-prompt summary {
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-template-agent-control {
-  background: rgba(4, 8, 12, 0.48);
-  border-color: var(--wc-line);
-  color: #f3f5f8;
-}
-.workspace-create-modal .workspace-template-agent-control::placeholder {
-  color: rgba(198, 207, 216, 0.54);
-}
-.workspace-create-modal .workspace-template-agent-row.is-edited {
-  border-color: var(--wc-faction-deep);
-  box-shadow: 0 0 0 1px rgba(70, 211, 154, 0.22) inset;
-}
-.workspace-create-modal .workspace-template-agent-prompt {
-  border-top-color: var(--wc-line);
-}
-.workspace-create-modal .workspace-template-agent-chip {
-  border-color: var(--wc-line-bright);
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-template-agent-chip.create {
-  color: #9af2c5;
-  background: rgba(70, 211, 154, 0.1);
-  border-color: rgba(70, 211, 154, 0.26);
-}
-.workspace-create-modal .workspace-template-agent-chip.reuse {
-  color: #f7d27a;
-  background: rgba(232, 181, 75, 0.12);
-  border-color: rgba(232, 181, 75, 0.28);
-}
-.workspace-create-modal .workspace-template-agent-chip.entry {
-  color: #9be2f4;
-  background: rgba(78, 197, 230, 0.1);
-  border-color: rgba(78, 197, 230, 0.24);
 }
 
-/* Reused agent: a compact "already exists, will be linked" row. Its editable
-   view is hidden until "Make a workspace copy" forks a fresh agent. */
-.workspace-create-modal .workspace-template-agent-reuse {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.workspace-create-modal .workspace-template-agent-reuse-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 10px;
-}
-.workspace-create-modal .workspace-template-agent-reuse-head .workspace-template-agent-meta {
-  margin-top: 0;
-}
-.workspace-create-modal .workspace-template-agent-reuse-name {
-  font-weight: 650;
-  color: var(--wc-ink);
-}
-.workspace-create-modal .workspace-template-agent-reuse-sub {
-  font-family: var(--wc-font-mono);
-  font-size: 11px;
-  color: var(--wc-ink-dim);
-}
-/* A locked reuse row hides the right-hand model column (the sub-line already
-   names the saved model); forking reveals the full editable layout. */
-.workspace-create-modal
-  .workspace-template-agent-row.is-reuse:not([data-forked="true"])
-  .workspace-template-agent-model {
-  display: none;
-}
-.workspace-create-modal .workspace-template-agent-fork-btn {
-  align-self: flex-start;
-  margin-top: 2px;
-  font-family: var(--wc-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  padding: 3px 10px;
-  color: var(--wc-faction);
-  background: color-mix(in srgb, var(--wc-faction) 8%, transparent);
-  border: 1px solid var(--wc-faction-deep);
-  cursor: pointer;
-}
-.workspace-create-modal .workspace-template-agent-fork-btn:hover {
-  background: color-mix(in srgb, var(--wc-faction) 16%, transparent);
-}
-.workspace-create-modal .workspace-template-agent-fork-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.workspace-create-modal .workspace-template-agent-fork-note {
-  display: none;
-  margin-top: 0.35rem;
-  font-size: 11px;
-  color: var(--wc-faction);
-}
-.workspace-create-modal
-  .workspace-template-agent-row[data-forked="true"]
-  .workspace-template-agent-fork-note {
-  display: block;
-}
+/* Wizard chrome shared by every step. */
 
-/* Final review: plain-language assistant cards keep setup readable by default;
-   deeper configuration only appears after an intentional Customize action. */
 .workspace-create-modal .workspace-wizard-step-heading {
   margin: 2px 0 14px;
 }
@@ -665,29 +542,54 @@
 .workspace-create-modal .workspace-review-summary {
   padding: 0 12px;
 }
-.workspace-create-modal .workspace-review-summary-row {
+/* Receipt rows. Each states one thing and offers a way back to the step that
+   owns it; nothing here is editable in place. */
+.workspace-create-modal .workspace-review-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 0;
+  padding: 11px 0;
 }
-.workspace-create-modal .workspace-review-summary-row + .workspace-review-summary-row {
+.workspace-create-modal .workspace-review-card + .workspace-review-card {
   border-top: 1px solid var(--wc-line);
 }
-.workspace-create-modal .workspace-review-summary-row span,
-.workspace-create-modal .workspace-review-summary-row small {
+.workspace-create-modal .workspace-review-card-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+/* The workspace name is the primary value on this screen; the blueprint it came
+   from is metadata beneath it, not a second identity of equal weight. */
+.workspace-create-modal .workspace-review-identity-name {
   display: block;
+  overflow-wrap: anywhere;
+  color: var(--wc-ink-heading);
+  font-size: 17px;
+  line-height: 1.2;
+}
+.workspace-create-modal .workspace-review-card-label {
+  display: block;
+  color: var(--wc-ink-faint);
   font-family: var(--wc-font-mono);
   font-size: 10px;
   letter-spacing: 0.8px;
-  color: var(--wc-ink-faint);
+  text-transform: uppercase;
 }
-.workspace-create-modal .workspace-review-summary-row strong {
+.workspace-create-modal .workspace-review-card-meta {
   display: block;
-  margin: 2px 0;
-  color: var(--wc-ink);
-  font-size: 13px;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--wc-ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-review-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 .workspace-create-modal .workspace-team-review,
 .workspace-create-modal .workspace-existing-agent-roster {
@@ -715,8 +617,6 @@
   font-size: 10px;
   font-weight: 700;
 }
-.workspace-create-modal .workspace-template-agent-summary-card,
-.workspace-create-modal .workspace-team-agent-card,
 .workspace-create-modal .workspace-existing-agent-card {
   display: flex;
   align-items: center;
@@ -725,23 +625,21 @@
   border: 1px solid var(--wc-line);
   background: rgba(4, 8, 12, 0.24);
 }
-.workspace-create-modal .workspace-template-agent-summary-copy,
-.workspace-create-modal .workspace-team-agent-copy,
 .workspace-create-modal .workspace-existing-agent-card-copy {
   min-width: 0;
   flex: 1 1 auto;
 }
-.workspace-create-modal .workspace-template-agent-summary-copy strong,
-.workspace-create-modal .workspace-team-agent-copy strong,
+/* Keep the Add/Added/Unavailable button intact: without this the longest label
+   was clipped by the card edge inside the narrow picker column. */
+.workspace-create-modal .workspace-existing-agent-card > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .workspace-create-modal .workspace-existing-agent-card-copy strong {
   display: block;
   color: var(--wc-ink);
   font-size: 13px;
 }
-.workspace-create-modal .workspace-template-agent-summary-copy span,
-.workspace-create-modal .workspace-template-agent-summary-copy small,
-.workspace-create-modal .workspace-team-agent-copy span,
-.workspace-create-modal .workspace-team-agent-copy small,
 .workspace-create-modal .workspace-existing-agent-card-copy span,
 .workspace-create-modal .workspace-existing-agent-card-copy small {
   display: block;
@@ -750,32 +648,239 @@
   font-size: 11px;
   line-height: 1.4;
 }
-.workspace-create-modal .workspace-template-agent-summary-action,
-.workspace-create-modal .workspace-team-agent-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-}
-.workspace-create-modal .workspace-existing-agent-team,
 .workspace-create-modal .workspace-existing-agent-roster-list {
   display: grid;
   gap: 7px;
   margin-top: 9px;
 }
-.workspace-create-modal .workspace-team-drop-zone {
-  margin-top: 9px;
-  padding: 11px;
-  border: 1px dashed var(--wc-line-bright);
+
+/* ---- Team step: one unified roster ---- */
+
+/* Wide viewports put the resulting team beside the picker; narrow ones stack
+   them with the team FIRST, so the resulting team is understood before
+   browsing agents to add. */
+.workspace-create-modal .workspace-team-layout {
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 900px) {
+  .workspace-create-modal .workspace-team-layout {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.workspace-create-modal .workspace-team-roster {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-create-modal .workspace-team-row {
+  border: 1px solid var(--wc-line);
+  background: rgba(4, 8, 12, 0.24);
+}
+/* The primary is marked by a solid left rule AND by its Primary badge text. */
+.workspace-create-modal .workspace-team-row.is-primary {
+  border-left: 3px solid var(--wc-faction);
+}
+/* Avatar in its own column, name/status and actions stacked beside it. Actions
+   sit on their own line rather than competing with the name for width: side by
+   side, a label as long as "Customize for this workspace" squeezed agent names
+   into one word per line inside the two-column Team layout. */
+.workspace-create-modal .workspace-team-row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 9px;
+  padding: 9px;
+}
+.workspace-create-modal .workspace-team-row-main > .workspace-agent-avatar {
+  grid-row: 1 / span 2;
+  align-self: start;
+  margin-top: 1px;
+}
+.workspace-create-modal .workspace-team-row-copy {
+  min-width: 0;
+}
+.workspace-create-modal .workspace-team-row-copy strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  overflow-wrap: anywhere;
+  color: var(--wc-ink);
+  font-size: 13px;
+}
+.workspace-create-modal .workspace-team-row-copy span,
+.workspace-create-modal .workspace-team-row-copy small {
+  display: block;
+  overflow-wrap: anywhere;
   color: var(--wc-ink-dim);
   font-size: 11px;
   line-height: 1.4;
-  text-align: center;
 }
-.workspace-create-modal .workspace-team-drop-zone.is-drag-over {
-  border-color: var(--wc-faction);
-  background: color-mix(in srgb, var(--wc-faction) 10%, transparent);
+.workspace-create-modal .workspace-team-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--wc-line-bright);
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-badge.is-primary {
+  border-color: color-mix(in srgb, var(--wc-faction) 60%, var(--wc-line));
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-team-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+.workspace-create-modal .workspace-team-row-actions:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-team-model-note {
+  margin: 8px 0 0;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Staged customization editor */
+.workspace-create-modal .workspace-team-customize {
+  padding: 10px 9px 11px;
+  border-top: 1px dashed var(--wc-line-bright);
+}
+.workspace-create-modal .workspace-team-customize-note {
+  margin: 0 0 8px;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+/* Deliberately one column at every width. A viewport-width media query is the
+   wrong instrument here: once the Team layout goes two-column the editor's own
+   container is only ~360px wide, so a "wide viewport" two-column field grid
+   clipped both the agent name and the model name. */
+.workspace-create-modal .workspace-team-customize-fields {
+  display: grid;
+  gap: 8px;
+}
+.workspace-create-modal .workspace-team-customize-field {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+}
+.workspace-create-modal .workspace-team-customize-fields .workspace-team-customize-field {
+  margin-top: 0;
+}
+.workspace-create-modal .workspace-team-customize-field > span {
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-customize-field > span em {
+  color: var(--wc-ink-dim);
+  font-style: normal;
+  font-weight: 500;
+}
+.workspace-create-modal .workspace-team-customize-status:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-team-customize-status {
+  margin: 8px 0 0;
+  color: #f57b72;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.workspace-create-modal .workspace-team-customize-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+/* Authoritative create failure, shown on Review with a route back. */
+.workspace-create-modal .workspace-review-error {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid #f57b72;
+  border-left-width: 3px;
+  background: rgba(245, 123, 114, 0.08);
+}
+.workspace-create-modal .workspace-review-error-text {
+  margin: 0;
   color: var(--wc-ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-review-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* Classified issues: severity is carried by the label text and the rule
+   colour together, never by colour alone. */
+.workspace-create-modal .workspace-team-issues:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-team-issues {
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+}
+.workspace-create-modal .workspace-team-issue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 9px;
+  padding: 8px 9px;
+  border: 1px solid var(--wc-line);
+  border-left-width: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.workspace-create-modal .workspace-team-issue-label {
+  color: var(--wc-ink-dim);
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-team-issue-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-team-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.workspace-create-modal .workspace-team-issue.is-blocking {
+  border-left-color: #f57b72;
+}
+.workspace-create-modal .workspace-team-issue.is-blocking .workspace-team-issue-label {
+  color: #f57b72;
+}
+.workspace-create-modal .workspace-team-issue.is-advisory {
+  border-left-color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-team-issue.is-advisory .workspace-team-issue-label {
+  color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-team-issue.is-loading {
+  border-left-color: var(--wc-line-bright);
 }
 .workspace-create-modal .workspace-existing-agent-roster-status {
   margin-top: 7px;
@@ -791,556 +896,51 @@
   cursor: pointer;
 }
 
-/* Blueprint map preview: a compact visual promise of the workspace's primary
-   routing agent, intentionally distinct from the full interactive Map view. */
-.workspace-create-modal .workspace-agent-map-preview {
+/* Blueprint's read-only included-agent summary. Plain text on purpose: the
+   sentence itself carries the count, the names, and which agent is primary, so
+   nothing depends on a chip, colour, or icon being understood. Its state is
+   conveyed by a left rule whose colour differs per state AND by different
+   wording, never by colour alone. */
+.workspace-create-modal .workspace-blueprint-agents {
   margin-top: 14px;
-  overflow: hidden;
+  padding: 10px 12px;
   border: 1px solid var(--wc-line-bright);
+  border-left-width: 3px;
+  border-left-color: var(--wc-line-bright);
   background: var(--wc-panel-2);
 }
-.workspace-create-modal .workspace-agent-map-preview-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--wc-line);
-}
-.workspace-create-modal .workspace-agent-map-preview-head .workspace-wizard-eyebrow {
-  margin-bottom: 3px;
-}
-.workspace-create-modal .workspace-agent-map-preview h3 {
-  margin: 0;
+.workspace-create-modal .workspace-blueprint-agents h3 {
+  margin: 2px 0 0;
   color: var(--wc-ink-heading);
   font-size: 14px;
   line-height: 1.2;
 }
-.workspace-create-modal .workspace-agent-map-preview-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-}
-.workspace-create-modal .workspace-agent-map-create-all {
-  min-height: 22px;
-  padding: 2px 7px;
-  border: 1px solid rgba(232, 181, 75, 0.72);
-  background: rgba(72, 54, 19, 0.24);
-  color: #f7d27a;
-  font-family: var(--wc-font-mono);
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-.workspace-create-modal .workspace-agent-map-create-all:hover:not(:disabled) {
-  background: rgba(232, 181, 75, 0.16);
-}
-.workspace-create-modal .workspace-agent-map-create-all:focus-visible {
-  outline: 2px solid var(--wc-ink-heading);
-  outline-offset: 2px;
-}
-.workspace-create-modal .workspace-template-agent-setup {
-  margin-top: 12px;
-  border: 1px solid color-mix(in srgb, var(--wc-faction) 52%, var(--wc-line));
-  background:
-    linear-gradient(105deg, color-mix(in srgb, var(--wc-faction) 11%, transparent), transparent 52%),
-    var(--wc-panel-2);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--wc-faction) 68%, transparent);
-}
-.workspace-create-modal .workspace-template-agent-setup-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 13px 14px 9px;
-  border-bottom: 1px solid var(--wc-line);
-}
-.workspace-create-modal .workspace-template-agent-setup-head .workspace-wizard-eyebrow {
-  margin-bottom: 3px;
-}
-.workspace-create-modal .workspace-template-agent-setup-head h3 {
-  margin: 0;
-  color: var(--wc-ink-heading);
-  font-size: 16px;
-}
-.workspace-create-modal .workspace-template-agent-setup-cancel {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--wc-line-bright);
-  background: transparent;
-  color: var(--wc-ink-muted);
-  font-size: 22px;
-  line-height: 1;
-  cursor: pointer;
-}
-.workspace-create-modal .workspace-template-agent-setup-cancel:hover {
-  color: var(--wc-ink-heading);
-  border-color: var(--wc-faction);
-}
-.workspace-create-modal .workspace-template-agent-setup-description {
-  margin: 10px 14px 0;
-  color: var(--wc-ink-muted);
+.workspace-create-modal .workspace-blueprint-agents-text {
+  margin: 6px 0 0;
+  color: var(--wc-ink);
   font-size: 13px;
   line-height: 1.45;
 }
-.workspace-create-modal .workspace-template-agent-setup-form {
-  display: grid;
-  gap: 6px;
-  padding: 13px 14px 14px;
-}
-.workspace-create-modal .workspace-template-agent-setup-form label {
-  color: var(--wc-ink-heading);
-  font-family: var(--wc-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.9px;
-  text-transform: uppercase;
-}
-.workspace-create-modal .workspace-template-agent-setup-form label span {
-  color: var(--wc-ink-muted);
-  font-weight: 500;
-}
-.workspace-create-modal .workspace-template-agent-setup-form textarea {
-  min-height: 88px;
-  resize: vertical;
-}
-.workspace-create-modal .workspace-template-agent-setup-status {
-  min-height: 18px;
-  margin: 2px 0 0;
-  color: var(--wc-ink-muted);
+.workspace-create-modal .workspace-blueprint-agents-hint {
+  margin: 5px 0 0;
+  color: var(--wc-ink-dim);
   font-size: 12px;
+  line-height: 1.4;
 }
-.workspace-create-modal .workspace-template-agent-setup-status.is-error {
+.workspace-create-modal .workspace-blueprint-agents.is-loading {
+  border-left-color: var(--wc-line-bright);
+}
+.workspace-create-modal .workspace-blueprint-agents.is-loading .workspace-blueprint-agents-text {
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-agents.is-empty {
+  border-left-color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-blueprint-agents.is-error {
+  border-left-color: #f57b72;
+}
+.workspace-create-modal .workspace-blueprint-agents.is-error .workspace-blueprint-agents-text {
   color: #f57b72;
-}
-.workspace-create-modal .workspace-template-agent-setup-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
-  margin-top: 3px;
-}
-.workspace-create-modal .workspace-template-agent-setup-save {
-  min-height: 32px;
-  padding: 5px 11px;
-  border: 1px solid var(--wc-faction);
-  background: color-mix(in srgb, var(--wc-faction) 16%, transparent);
-  color: var(--wc-faction);
-  font-family: var(--wc-mono);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-.workspace-create-modal .workspace-template-agent-setup-save:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--wc-faction) 28%, transparent);
-}
-.workspace-create-modal .workspace-template-agent-setup-save:disabled {
-  cursor: wait;
-  opacity: 0.6;
-}
-.workspace-create-modal .workspace-agent-map-state {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 2px 7px;
-  border: 1px solid var(--wc-line-bright);
-  color: var(--wc-ink-faint);
-  font-family: var(--wc-font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-.workspace-create-modal .workspace-agent-map-state.is-ready {
-  border-color: color-mix(in srgb, var(--wc-faction) 60%, var(--wc-line));
-  color: var(--wc-faction);
-}
-.workspace-create-modal .workspace-agent-map-state.is-new {
-  border-color: rgba(232, 181, 75, 0.64);
-  color: #f7d27a;
-}
-.workspace-create-modal .workspace-agent-map-state.is-missing {
-  border-style: dashed;
-  color: var(--wc-ink-dim);
-}
-.workspace-create-modal .workspace-agent-map-canvas {
-  position: relative;
-  display: grid;
-  min-height: 242px;
-  place-items: center;
-  isolation: isolate;
-  overflow: hidden;
-  background:
-    linear-gradient(rgba(82, 196, 214, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(82, 196, 214, 0.08) 1px, transparent 1px),
-    radial-gradient(circle at 50% 45%, rgba(70, 211, 154, 0.14), transparent 50%),
-    var(--wc-panel-deep);
-  background-size:
-    28px 28px,
-    28px 28px,
-    auto,
-    auto;
-}
-.workspace-create-modal .workspace-agent-map-canvas::before,
-.workspace-create-modal .workspace-agent-map-canvas::after {
-  position: absolute;
-  content: "";
-  pointer-events: none;
-}
-.workspace-create-modal .workspace-agent-map-canvas::before {
-  inset: 50% 18% auto;
-  height: 1px;
-  background: color-mix(in srgb, var(--wc-faction) 48%, transparent);
-  box-shadow: 0 0 24px rgba(70, 211, 154, 0.34);
-}
-.workspace-create-modal .workspace-agent-map-canvas::after {
-  top: 18px;
-  left: 50%;
-  width: 156px;
-  height: 156px;
-  border: 1px solid color-mix(in srgb, var(--wc-faction) 25%, transparent);
-  border-radius: 50%;
-  transform: translateX(-50%);
-}
-.workspace-create-modal .workspace-agent-map-canvas.is-team {
-  min-height: 372px;
-  place-items: start center;
-}
-.workspace-create-modal .workspace-agent-map-canvas.is-team::before {
-  top: 205px;
-  right: 18%;
-  bottom: auto;
-  left: 18%;
-  background: color-mix(in srgb, var(--wc-faction) 38%, transparent);
-  box-shadow: 0 0 18px rgba(70, 211, 154, 0.22);
-}
-.workspace-create-modal .workspace-agent-map-canvas.is-team::after {
-  top: 12px;
-}
-.workspace-create-modal .workspace-agent-map-canvas.is-team.has-many-specialists {
-  min-height: 458px;
-}
-.workspace-create-modal .workspace-agent-map-node {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  width: min(300px, calc(100% - 32px));
-  place-items: center;
-  align-content: center;
-  gap: 4px;
-  padding: 14px 16px 12px;
-  color: var(--wc-faction);
-  text-align: center;
-}
-.workspace-create-modal .workspace-agent-map-canvas.is-team .workspace-agent-map-node {
-  align-self: start;
-  margin-top: 16px;
-}
-.workspace-create-modal .workspace-agent-map-avatar {
-  position: absolute;
-  top: -3px;
-  display: grid;
-  width: 106px;
-  height: 106px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  appearance: none;
-  background:
-    radial-gradient(
-      circle at 50% 30%,
-      color-mix(in srgb, currentColor 20%, transparent),
-      transparent 57%
-    ),
-    rgba(7, 16, 20, 0.82);
-  box-shadow:
-    0 0 0 6px color-mix(in srgb, currentColor 8%, transparent),
-    0 0 30px color-mix(in srgb, currentColor 24%, transparent);
-}
-.workspace-create-modal .workspace-agent-map-avatar:disabled {
-  cursor: default;
-}
-.workspace-create-modal .workspace-agent-map-node.is-actionable .workspace-agent-map-avatar {
-  cursor: pointer;
-}
-.workspace-create-modal .workspace-agent-map-node.is-actionable .workspace-agent-map-avatar:hover {
-  box-shadow:
-    0 0 0 8px color-mix(in srgb, currentColor 11%, transparent),
-    0 0 38px color-mix(in srgb, currentColor 36%, transparent);
-}
-.workspace-create-modal
-  .workspace-agent-map-node.is-actionable
-  .workspace-agent-map-avatar:focus-visible {
-  outline: 2px solid var(--wc-ink-heading);
-  outline-offset: 5px;
-}
-.workspace-create-modal .workspace-agent-map-avatar::before,
-.workspace-create-modal .workspace-agent-map-avatar::after {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border-color: currentColor;
-  content: "";
-}
-.workspace-create-modal .workspace-agent-map-avatar::before {
-  top: 10px;
-  left: 10px;
-  border-top: 1px solid;
-  border-left: 1px solid;
-}
-.workspace-create-modal .workspace-agent-map-avatar::after {
-  right: 10px;
-  bottom: 10px;
-  border-right: 1px solid;
-  border-bottom: 1px solid;
-}
-.workspace-create-modal .workspace-agent-map-avatar-figure {
-  width: 84px;
-  height: 84px;
-  overflow: visible;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-}
-.workspace-create-modal .workspace-agent-map-avatar-head {
-  fill: color-mix(in srgb, currentColor 10%, transparent);
-}
-.workspace-create-modal .workspace-agent-map-avatar-eye {
-  fill: currentColor;
-  stroke: none;
-}
-.workspace-create-modal .workspace-agent-map-avatar-placeholder,
-.workspace-create-modal .workspace-agent-map-avatar-create-badge {
-  display: none;
-}
-.workspace-create-modal .workspace-agent-map-avatar-create-badge {
-  position: absolute;
-  right: -5px;
-  bottom: 5px;
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--wc-panel-deep);
-  border-radius: 50%;
-  background: #f7d27a;
-  color: #2a210e;
-  font-family: var(--wc-font-mono);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 19px;
-}
-.workspace-create-modal .workspace-agent-map-node.is-new {
-  color: #f7d27a;
-}
-.workspace-create-modal .workspace-agent-map-node.is-new .workspace-agent-map-avatar-figure {
-  opacity: 0.68;
-}
-.workspace-create-modal .workspace-agent-map-node.is-new .workspace-agent-map-avatar-create-badge {
-  display: grid;
-  place-items: center;
-  opacity: 1;
-}
-.workspace-create-modal .workspace-agent-map-node.is-new .workspace-agent-map-node-kicker::after {
-  display: block;
-  margin-top: 5px;
-  color: var(--wc-ink-dim);
-  content: "CLICK + TO CREATE REUSABLE AGENT";
-  font-size: 8px;
-  letter-spacing: 0.7px;
-}
-.workspace-create-modal .workspace-agent-map-node.is-missing,
-.workspace-create-modal .workspace-agent-map-node.is-loading,
-.workspace-create-modal .workspace-agent-map-node.is-checking {
-  color: var(--wc-ink-faint);
-  opacity: 0.72;
-}
-.workspace-create-modal .workspace-agent-map-node.is-missing .workspace-agent-map-avatar,
-.workspace-create-modal .workspace-agent-map-node.is-loading .workspace-agent-map-avatar,
-.workspace-create-modal .workspace-agent-map-node.is-checking .workspace-agent-map-avatar {
-  border-style: dashed;
-  box-shadow: none;
-}
-.workspace-create-modal .workspace-agent-map-node.is-missing .workspace-agent-map-avatar-figure,
-.workspace-create-modal .workspace-agent-map-node.is-loading .workspace-agent-map-avatar-figure,
-.workspace-create-modal .workspace-agent-map-node.is-checking .workspace-agent-map-avatar-figure {
-  display: none;
-}
-.workspace-create-modal
-  .workspace-agent-map-node.is-missing
-  .workspace-agent-map-avatar-placeholder,
-.workspace-create-modal
-  .workspace-agent-map-node.is-loading
-  .workspace-agent-map-avatar-placeholder,
-.workspace-create-modal
-  .workspace-agent-map-node.is-checking
-  .workspace-agent-map-avatar-placeholder {
-  display: block;
-  color: var(--wc-ink-dim);
-  font-family: var(--wc-font-mono);
-  font-size: 34px;
-  font-weight: 700;
-}
-.workspace-create-modal .workspace-agent-map-node-kicker {
-  margin-top: 112px;
-  color: var(--wc-faction);
-  font-family: var(--wc-font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.4px;
-}
-.workspace-create-modal .workspace-agent-map-node.is-new .workspace-agent-map-node-kicker {
-  color: #f7d27a;
-}
-.workspace-create-modal .workspace-agent-map-node.is-missing .workspace-agent-map-node-kicker,
-.workspace-create-modal .workspace-agent-map-node.is-loading .workspace-agent-map-node-kicker,
-.workspace-create-modal .workspace-agent-map-node.is-checking .workspace-agent-map-node-kicker {
-  color: var(--wc-ink-faint);
-}
-.workspace-create-modal .workspace-agent-map-node strong {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  color: var(--wc-ink-heading);
-  font-size: 17px;
-  line-height: 1.15;
-}
-.workspace-create-modal .workspace-agent-map-node span:last-child {
-  color: var(--wc-ink-dim);
-  font-size: 11px;
-}
-.workspace-create-modal .workspace-agent-map-specialists {
-  position: absolute;
-  z-index: 1;
-  right: 8%;
-  bottom: 18px;
-  left: 8%;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
-  gap: 14px 22px;
-  align-items: start;
-  justify-items: center;
-}
-.workspace-create-modal .workspace-agent-map-specialist {
-  position: relative;
-  display: grid;
-  width: min(142px, 100%);
-  justify-items: center;
-  gap: 4px;
-  color: var(--wc-faction);
-  text-align: center;
-}
-.workspace-create-modal .workspace-agent-map-specialist::before {
-  position: absolute;
-  top: -30px;
-  left: 50%;
-  width: 1px;
-  height: 22px;
-  background: color-mix(in srgb, var(--wc-faction) 45%, transparent);
-  content: "";
-}
-.workspace-create-modal .workspace-agent-map-specialist-avatar {
-  position: relative;
-  display: grid;
-  width: 56px;
-  height: 56px;
-  place-items: center;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  background:
-    radial-gradient(
-      circle at 50% 31%,
-      color-mix(in srgb, currentColor 18%, transparent),
-      transparent 55%
-    ),
-    rgba(7, 16, 20, 0.78);
-  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 7%, transparent);
-  font-family: var(--wc-font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-}
-button.workspace-agent-map-specialist-avatar {
-  padding: 0;
-  appearance: none;
-  cursor: pointer;
-}
-button.workspace-agent-map-specialist-avatar:hover {
-  box-shadow:
-    0 0 0 6px color-mix(in srgb, currentColor 10%, transparent),
-    0 0 22px color-mix(in srgb, currentColor 34%, transparent);
-}
-button.workspace-agent-map-specialist-avatar:focus-visible {
-  outline: 2px solid var(--wc-ink-heading);
-  outline-offset: 4px;
-}
-.workspace-create-modal .workspace-agent-map-specialist-avatar::before,
-.workspace-create-modal .workspace-agent-map-specialist-avatar::after {
-  position: absolute;
-  width: 5px;
-  height: 5px;
-  content: "";
-}
-.workspace-create-modal .workspace-agent-map-specialist-avatar::before {
-  top: 6px;
-  left: 6px;
-  border-top: 1px solid currentColor;
-  border-left: 1px solid currentColor;
-}
-.workspace-create-modal .workspace-agent-map-specialist-avatar::after {
-  right: 6px;
-  bottom: 6px;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-}
-.workspace-create-modal .workspace-agent-map-specialist strong {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  color: var(--wc-ink-heading);
-  font-size: 12px;
-  line-height: 1.15;
-}
-.workspace-create-modal .workspace-agent-map-specialist small {
-  color: var(--wc-ink-dim);
-  font-size: 10px;
-  line-height: 1.25;
-}
-.workspace-create-modal .workspace-agent-map-specialist.is-new {
-  color: #f7d27a;
-}
-.workspace-create-modal
-  .workspace-agent-map-specialist.is-new
-  .workspace-agent-map-specialist-avatar {
-  opacity: 0.68;
-}
-.workspace-create-modal .workspace-agent-map-specialist-create-badge {
-  position: absolute;
-  right: -5px;
-  bottom: -3px;
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border: 2px solid var(--wc-panel-deep);
-  border-radius: 50%;
-  background: #f7d27a;
-  color: #2a210e;
-  font-family: var(--wc-font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-}
-.workspace-create-modal .workspace-agent-map-status {
-  margin: 0;
-  padding: 9px 12px 10px;
-  border-top: 1px solid var(--wc-line);
-  color: var(--wc-ink-dim);
-  font-size: 12px;
-  line-height: 1.45;
 }
 @media (max-width: 575.98px) {
   .workspace-create-modal .workspace-create-stepper {
@@ -1351,29 +951,8 @@ button.workspace-agent-map-specialist-avatar:focus-visible {
   .workspace-create-modal .workspace-create-step-sep {
     display: none;
   }
-  .workspace-create-modal .workspace-template-agent-summary-card,
-  .workspace-create-modal .workspace-team-agent-card,
   .workspace-create-modal .workspace-existing-agent-card {
     align-items: flex-start;
-  }
-  .workspace-create-modal .workspace-template-agent-summary-action,
-  .workspace-create-modal .workspace-team-agent-actions {
-    flex-direction: column;
-    align-items: flex-end;
-  }
-  .workspace-create-modal .workspace-agent-map-canvas {
-    min-height: 224px;
-  }
-  .workspace-create-modal .workspace-agent-map-canvas.is-team {
-    min-height: 422px;
-  }
-  .workspace-create-modal .workspace-agent-map-canvas.is-team.has-many-specialists {
-    min-height: 508px;
-  }
-  .workspace-create-modal .workspace-agent-map-specialists {
-    right: 5%;
-    left: 5%;
-    gap: 16px 10px;
   }
 }
 
@@ -1424,9 +1003,7 @@ button.workspace-agent-map-specialist-avatar:focus-visible {
 [data-bs-theme="light"] .workspace-create-modal .workspace-setup-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-advanced-summary-title,
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-card-label,
-[data-bs-theme="light"] .workspace-create-modal .workspace-create-recap-name,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-title,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model strong {
+[data-bs-theme="light"] .workspace-create-modal .workspace-create-recap-name {
   color: var(--wc-ink-heading);
 }
 
@@ -1439,15 +1016,13 @@ button.workspace-agent-map-specialist-avatar:focus-visible {
   opacity: 0.9;
 }
 
-[data-bs-theme="light"] .workspace-create-modal .modern-input,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-control {
+[data-bs-theme="light"] .workspace-create-modal .modern-input {
   background: var(--wc-field-bg);
   border-color: var(--wc-line-bright);
   color: var(--wc-ink);
 }
 
-[data-bs-theme="light"] .workspace-create-modal .modern-input::placeholder,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-control::placeholder {
+[data-bs-theme="light"] .workspace-create-modal .modern-input::placeholder {
   color: var(--wc-ink-faint);
 }
 
@@ -1462,8 +1037,7 @@ button.workspace-agent-map-specialist-avatar:focus-visible {
 
 [data-bs-theme="light"] .workspace-create-modal .workspace-setup-card,
 [data-bs-theme="light"] .workspace-create-modal .workspace-advanced-details,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-toggle,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-row {
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-toggle {
   background: var(--wc-field-bg);
   border-color: var(--wc-line);
 }
@@ -1475,42 +1049,15 @@ button.workspace-agent-map-specialist-avatar:focus-visible {
 }
 
 [data-bs-theme="light"] .workspace-create-modal .workspace-template-card.is-selected,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-row.is-selected,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review {
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-row.is-selected {
   background: rgba(31, 107, 78, 0.08);
 }
 
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-card-desc,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-summary,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-review-status,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-warnings,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-model,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-field,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-note,
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-prompt summary {
+[data-bs-theme="light"] .workspace-create-modal .workspace-template-card-desc {
   color: var(--wc-ink-dim);
 }
 
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-prompt {
-  border-top-color: var(--wc-line);
-}
-
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.create {
-  color: var(--wc-faction);
-  background: rgba(31, 107, 78, 0.1);
-  border-color: rgba(31, 107, 78, 0.26);
-}
-
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.reuse {
-  color: var(--wc-keeper);
-}
-
-[data-bs-theme="light"] .workspace-create-modal .workspace-template-agent-chip.entry {
-  color: var(--wc-idle);
-}
-
-[data-bs-theme="dark"] .workspace-create-modal .modern-input,
-[data-bs-theme="dark"] .workspace-create-modal .workspace-template-agent-control {
+[data-bs-theme="dark"] .workspace-create-modal .modern-input {
   background: var(--wc-bg-2) !important;
   border-color: var(--wc-line-bright) !important;
   color: var(--wc-ink) !important;
