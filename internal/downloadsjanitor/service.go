@@ -300,10 +300,18 @@ func readWorkspaceRecord(store WorkspaceStore, workspaceID string) (*workspace.W
 	return store.Get(workspaceID)
 }
 
-// AppliesTo reports whether a workspace is a Downloads Janitor workspace: one
-// created from the built-in template, or one already configured. The UI uses it
-// to mount the Janitor panel only where it belongs, and it is answered
-// server-side from provenance rather than trusted from the client.
+// AppliesTo reports whether File Janitor belongs to a workspace: one that has
+// the capability installed, one created from the built-in template, or one
+// already configured. Every UI surface — the Map station, the Details card, the
+// console — mounts on this answer, and it is decided server-side from what is
+// persisted rather than trusted from the client.
+//
+// The install record is checked FIRST because it is the only signal an in-place
+// install leaves. A workspace the user installed File Janitor into has no
+// template provenance, no settings until setup finishes, and no pending
+// directory requirement until the wizard runs — so without this, installing
+// succeeded and then nothing appeared anywhere, which is indistinguishable from
+// the install having failed (FR-93).
 func (s *Service) AppliesTo(workspaceID string) bool {
 	if settings, err := s.store.LoadSettings(workspaceID); err == nil && settings.IsSetUp() {
 		return true
@@ -311,6 +319,9 @@ func (s *Service) AppliesTo(workspaceID string) bool {
 	ws, err := s.readWorkspace(workspaceID)
 	if err != nil || ws == nil {
 		return false
+	}
+	if ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
+		return true
 	}
 	if ws.IsFromTemplate(TemplateID) {
 		return true

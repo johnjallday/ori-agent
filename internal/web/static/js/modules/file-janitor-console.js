@@ -412,6 +412,14 @@
   function candidateRow(candidate) {
     const row = el('tr', 'dj-row-item dj-row-state-' + (candidate.state || 'pending'));
     row.setAttribute('data-candidate-id', candidate.id);
+    // A deep link naming this candidate marks it, so the row a notification
+    // was about is findable in a batch of hundreds. The id is registered so
+    // focusRequestedItem can reach it without a selector engine.
+    if (consoleItem && candidate.id === consoleItem) {
+      row.className += ' is-linked';
+      row.id = 'fileJanitorLinkedRow';
+      row.setAttribute('tabindex', '-1');
+    }
 
     const selectCell = el('td', 'dj-cell dj-cell-select');
     const checkbox = document.createElement('input');
@@ -1452,35 +1460,310 @@
     }
   }
 
-  function renderConfiguredCard(host, status) {
-    const settings = status.settings || {};
-    const readiness = status.readiness || {};
+  // pauseControl is the real Pause/Resume, shared by every surface that offers
+  // it so the wording and the setup guard can never drift apart.
+  //
+  // Pausing stops the unattended work only. Saying so on the control itself
+  // saves the user wondering whether pausing loses their pending review.
+  function pauseControl(settings) {
+    const paused = Boolean(settings && settings.paused);
+    const control = button(
+      paused ? 'Resume watching' : 'Pause watching',
+      'dj-btn dj-btn-secondary',
+      () => void setPaused(!paused)
+    );
+    control.id = 'downloadsJanitorPause';
+    control.setAttribute(
+      'title',
+      paused
+        ? 'Start watching this folder again.'
+        : 'Stop automatic scanning. Your settings, pending review, and history are kept, and you can still scan on demand.'
+    );
+    // Before setup finishes, resuming here would start the unattended work the
+    // wizard has not yet disclosed — the one step the user is supposed to read
+    // first. The control stays visible and says where the decision lives
+    // (FR-56); scanning on demand is unaffected, because the user is the one
+    // asking for each scan.
+    if (paused && setupAwaitingAutomationApproval()) {
+      control.textContent = 'Approve in setup';
+      control.setAttribute(
+        'title',
+        'Setup explains what folder watching and the daily scan do before turning them on.'
+      );
+      control.onclick = () => window.SetupWizard?.open?.('automation');
+    }
+    return control;
+  }
 
-    const card = el('section', 'dj-card');
+  // renderCompactCard is all Workspace Details carries now: what state File
+  // Janitor is in, which folder it manages, what is waiting, when it looks
+  // next, and a way in. The review table, the settings form, and history are
+  // the console's and appear nowhere else on the page (FR-114, FR-115).
+  function renderCompactCard(host, status) {
+    const settings = status.settings || {};
+    const configured = isConfigured(status);
+
+    const card = el('section', 'fj-card');
     card.setAttribute('role', 'group');
     card.setAttribute('aria-labelledby', 'downloadsJanitorTitle');
 
-    const head = el('div', 'dj-head');
-    const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'Downloads Janitor');
+    const head = el('div', 'fj-card-head');
+    const heading = el('div', 'fj-card-heading');
+    const title = el('h2', 'fj-card-title', 'File Janitor');
     title.id = 'downloadsJanitorTitle';
     heading.appendChild(title);
-    const sub = el('p', 'dj-sub');
-    sub.textContent = 'Tidying ' + (settings.root_path || 'your chosen folder');
+    const sub = el('p', 'fj-card-sub');
+    sub.textContent = configured
+      ? 'Tidying ' + safeName(settings.root_path)
+      : 'No folder chosen yet. Nothing is scanned or moved until you choose one.';
     heading.appendChild(sub);
-    const stats = el('p', 'dj-stats');
+    const stats = el('p', 'fj-card-stats');
     stats.id = 'downloadsJanitorStats';
     stats.setAttribute('role', 'status');
     stats.setAttribute('aria-live', 'polite');
-    stats.textContent = statsLine();
+    stats.textContent = configured ? statsLine() : '';
+    stats.hidden = !configured;
     heading.appendChild(stats);
     head.appendChild(heading);
+
     const activity = activityState(status);
     const badge = el('span', 'dj-badge dj-badge-' + activity.id.replace(/_/g, '-'), activity.label);
     badge.id = 'downloadsJanitorActivity';
     head.appendChild(badge);
     card.appendChild(head);
 
+    const actions = el('div', 'fj-card-actions');
+    const openLabel = configured ? 'Open File Janitor' : 'Set up File Janitor';
+    const openButton = button('', 'dj-btn dj-btn-primary', event => {
+      open({ source: 'workspace-details', trigger: event && event.currentTarget });
+    });
+    openButton.textContent = openLabel;
+    openButton.id = 'fileJanitorCardOpen';
+    actions.appendChild(openButton);
+
+    // Scanning on demand is offered from the card only once there is a folder
+    // to scan; before that the single action is the one that sets it up.
+    if (configured) {
+      const scan = button('Scan now', 'dj-btn dj-btn-secondary', () => void scanNow());
+      scan.id = 'fileJanitorCardScan';
+      scan.disabled = scanning;
+      actions.appendChild(scan);
+    }
+    card.appendChild(actions);
+    // What Ori reads is stated on the card itself, not behind the Settings
+    // tab. A disclosure the user must go looking for is one they will not
+    // read, and this is the sentence that says whether their file contents are
+    // being opened.
+    if (configured) card.appendChild(privacyLine(status));
+    card.appendChild(cardErrorRegion());
+    host.appendChild(card);
+  }
+
+  // renderSetupPrompt re-opens the folder chooser for an already-configured
+  // workspace (relink/repair), reusing the same confirm path.
+  //
+  // It renders into the console body, which is where the repair action that
+  // calls it lives. The suggestion is the folder the user already approved and
+  // nothing else: a relink prompted by a folder that vanished must not quietly
+  // propose a different one to grant access to (FR-44, FR-50).
+  function renderSetupPrompt(status) {
+    const host = document.getElementById('fileJanitorConsoleBody') || mount();
+    if (!host) return;
+    clear(host);
+    const settings = status.settings || {};
+    renderSetupCard(host, {
+      settings,
+      suggestion: {
+        label: 'Folder to tidy',
+        suggested_path: settings.root_path || '',
+        filing_root_name: settings.filing_root_name,
+        daily_scan_local_time: settings.daily_scan_local_time
+      }
+    });
+  }
+
+  function errorRegion() {
+    const region = el('p', 'dj-error');
+    region.id = 'downloadsJanitorError';
+    region.setAttribute('role', 'status');
+    region.setAttribute('aria-live', 'polite');
+    region.hidden = true;
+    return region;
+  }
+
+  // The card gets its own error region under a different id. Two nodes sharing
+  // one id would make getElementById pick whichever came first in the document,
+  // so a failure inside the console could surface behind it on the card.
+  function cardErrorRegion() {
+    const region = errorRegion();
+    region.id = 'fileJanitorCardError';
+    return region;
+  }
+
+  // The message currently on screen, remembered so a repaint does not erase it.
+  //
+  // Status is re-read in the background — on open, after a scan, whenever setup
+  // changes — and every repaint builds a fresh error region. Without this, an
+  // error the user triggered a moment ago vanishes mid-read because an
+  // unrelated refresh happened to land. It is cleared explicitly by the actions
+  // that succeed, so nothing stale survives a working operation.
+  let lastErrorMessage = '';
+
+  // showError writes to whichever surface the user is actually looking at. The
+  // console is modal, so while it is open it is the only place an error can be
+  // read at all.
+  function showError(message) {
+    lastErrorMessage = message || '';
+    paintError();
+  }
+
+  function paintError() {
+    const region =
+      (consoleOpen && document.getElementById('downloadsJanitorError')) ||
+      document.getElementById('fileJanitorCardError') ||
+      document.getElementById('downloadsJanitorError');
+    if (!region) return;
+    region.textContent = lastErrorMessage;
+    region.hidden = !lastErrorMessage;
+  }
+
+  function render(status) {
+    // Marks and selections belong to the folder that was on screen. Changing
+    // the managed folder invalidates every one of them, so they are discarded
+    // here — but ONLY then.
+    //
+    // This used to clear them on every status repaint. Status is re-read
+    // constantly (on open, after a scan, whenever setup changes), and none of
+    // those touch the candidate set, so a background refresh landing mid-review
+    // silently emptied a selection the user had built up and disabled the
+    // approve button under their cursor. The batch's own reload owns the
+    // narrower rule — discard when the batch id actually changed (loadBatch).
+    if (managedFolderChanged(lastStatus, status)) {
+      trashMarked = new Set();
+      selected = new Set();
+      pendingPreview = null;
+    }
+    lastStatus = status;
+
+    // Workspace Details now shows a compact card only. The review table, the
+    // settings form, and history live in the console and nowhere else, so
+    // there is exactly one of each on the page (FR-100, FR-114).
+    const host = mount();
+    if (host) {
+      if (!status || !status.applies) {
+        host.hidden = true;
+        clear(host);
+      } else {
+        host.hidden = false;
+        clear(host);
+        renderCompactCard(host, status);
+      }
+    }
+
+    if (consoleOpen) renderConsole();
+    paintError();
+    notifySubscribers();
+  }
+
+  // managedFolderChanged reports whether the folder these decisions were made
+  // about is still the folder in effect. A different root, or a re-issued
+  // directory reference, means the pending selections describe files that are
+  // no longer the ones on screen.
+  function managedFolderChanged(before, after) {
+    const previous = (before && before.settings) || {};
+    const next = (after && after.settings) || {};
+    if (!before) return false;
+    return (
+      previous.root_path !== next.root_path ||
+      previous.directory_reference_id !== next.directory_reference_id
+    );
+  }
+
+  // isConfigured is the single question that decides which face every surface
+  // shows: a folder the user approved, and the directory reference that grants
+  // access to it. Either one missing means setup is unfinished.
+  function isConfigured(status) {
+    const settings = (status && status.settings) || {};
+    return Boolean(settings.root_path && settings.directory_reference_id);
+  }
+
+  // renderConsoleBody paints the console's active tab. It reuses the renderers
+  // the inline panel already had: they address their hosts by id, so moving
+  // those hosts into the console moves the surfaces with them.
+  function renderConsoleBody(host, status) {
+    if (!isConfigured(status)) {
+      // An unconfigured install opens straight into the real setup experience
+      // — the wizard when the blueprint declares one, the folder card
+      // otherwise. Never a placeholder, and never a second chooser beside the
+      // wizard (FR-104).
+      if (setupWizardOwnsSetup()) {
+        renderSetupEntry(host);
+      } else {
+        renderSetupCard(host, status);
+      }
+      return;
+    }
+    if (consoleTab === 'history') {
+      const historyHost = el('div', 'dj-history-host');
+      historyHost.id = 'downloadsJanitorHistoryHost';
+      host.appendChild(historyHost);
+      host.appendChild(errorRegion());
+      renderHistory();
+      if (!historyLoaded) void loadHistory();
+      return;
+    }
+    if (consoleTab === 'settings') {
+      const settingsHost = el('div', 'dj-settings-host');
+      settingsHost.id = 'downloadsJanitorSettingsHost';
+      host.appendChild(settingsHost);
+      host.appendChild(privacyLine(status));
+      host.appendChild(errorRegion());
+      settingsOpen = true;
+      renderSettings();
+      return;
+    }
+
+    // Review: readiness rows, then the batch, then — deliberately outside the
+    // batch — the confirmation step and the report of what just happened.
+    // Applying every file empties the batch; the account of the user's own
+    // files must not be swept away with the table it came from.
+    host.appendChild(readinessRows(status));
+    const repair = repairAction(status);
+    if (repair) host.appendChild(repair);
+    const batchHost = el('div', 'dj-batch');
+    batchHost.id = 'downloadsJanitorBatch';
+    host.appendChild(batchHost);
+    const confirmHost = el('div', 'dj-confirm-host');
+    confirmHost.id = 'downloadsJanitorConfirmHost';
+    host.appendChild(confirmHost);
+    host.appendChild(errorRegion());
+    renderBatch();
+  }
+
+  // repairAction offers "Choose the folder again" when readiness says the
+  // folder is the thing that broke — moved, renamed, or its permission
+  // withdrawn. Without it a workspace whose folder disappeared has a console
+  // that reports the problem and offers no way to fix it.
+  function repairAction(status) {
+    const checks = ((status && status.readiness) || {}).checks || [];
+    const repairable = checks.some(
+      check =>
+        check.status === 'failed' &&
+        (check.repair === 'relink_folder' ||
+          check.repair === 'choose_folder' ||
+          check.repair === 'grant_permission')
+    );
+    if (!repairable) return null;
+    const actions = el('div', 'dj-actions');
+    actions.appendChild(
+      button('Choose the folder again', 'dj-btn dj-btn-secondary', () => renderSetupPrompt(status))
+    );
+    actions.appendChild(button('Check again', 'dj-btn dj-btn-secondary', () => void refresh()));
+    return actions;
+  }
+
+  function readinessRows(status) {
+    const readiness = (status && status.readiness) || {};
     const rows = el('ul', 'dj-rows');
     (readiness.checks || []).forEach(check => {
       const li = el('li', 'dj-row dj-row-' + (check.status || 'pending'));
@@ -1501,164 +1784,395 @@
       li.appendChild(value);
       rows.appendChild(li);
     });
-    card.appendChild(rows);
+    return rows;
+  }
 
-    const actions = el('div', 'dj-actions');
-    const scan = button('Scan now', 'dj-btn dj-btn-primary', () => void scanNow());
-    scan.id = 'downloadsJanitorScan';
-    actions.appendChild(scan);
+  // ------------------------------------------------------------- the console
+  //
+  // One console, opened from every entry point (Map station, Details card,
+  // post-install offer, capability catalog, Action Center, deep link). There is
+  // deliberately no second copy and no hidden one: the surfaces below all call
+  // open(), so what the user sees can never depend on which door they used
+  // (FR-99, FR-100).
 
-    // Pausing stops the unattended work only. Saying so on the control itself
-    // saves the user wondering whether pausing loses their pending review.
-    const paused = Boolean(settings.paused);
-    const pauseControl = button(
-      paused ? 'Resume watching' : 'Pause watching',
-      'dj-btn dj-btn-secondary',
-      () => void setPaused(!paused)
-    );
-    pauseControl.id = 'downloadsJanitorPause';
-    pauseControl.setAttribute(
-      'title',
-      paused
-        ? 'Start watching this folder again.'
-        : 'Stop automatic scanning. Your settings, pending review, and history are kept, and you can still scan on demand.'
-    );
-    // Before setup finishes, resuming here would start the unattended work the
-    // wizard has not yet disclosed — the one step the user is supposed to read
-    // first. The control stays visible and says where the decision lives
-    // (FR-56); scanning on demand is unaffected, because the user is the one
-    // asking for each scan.
-    if (paused && setupAwaitingAutomationApproval()) {
-      pauseControl.textContent = 'Approve in setup';
-      pauseControl.setAttribute(
-        'title',
-        'Setup explains what folder watching and the daily scan do before turning them on.'
-      );
-      pauseControl.onclick = () => window.SetupWizard?.open?.('automation');
+  const CONSOLE_HOST_ID = 'fileJanitorConsole';
+  const CONSOLE_TITLE_ID = 'fileJanitorConsoleTitle';
+  const CONSOLE_TABS = ['review', 'history', 'settings'];
+  const CONSOLE_PANEL_PARAM = 'file-janitor';
+
+  let consoleOpen = false;
+  let consoleTab = 'review';
+  let consoleItem = '';
+  // The element focus returns to on close. Held rather than re-derived: by
+  // close time the Map may have repainted and the original button is the only
+  // thing that knows where the user was (FR-120).
+  let consoleTrigger = null;
+  let consoleOverlayId = '';
+  // The console's own close control, kept so focus can be placed on it without
+  // searching the tree for something focusable.
+  let consoleCloseButton = null;
+  // The tab last chosen in THIS workspace. Kept per workspace so opening a
+  // different one cannot restore a tab that belongs to another (FR-106).
+  const rememberedTab = new Map();
+  const subscribers = new Set();
+
+  function overlayCoordinator() {
+    if (typeof window === 'undefined') return null;
+    return window.workspaceOverlayCoordinator || null;
+  }
+
+  function consoleHost() {
+    if (typeof document === 'undefined') return null;
+    let host = document.getElementById(CONSOLE_HOST_ID);
+    if (host) return host;
+    if (!document.body) return null;
+    host = el('div', 'fj-console-host');
+    host.id = CONSOLE_HOST_ID;
+    host.hidden = true;
+    document.body.appendChild(host);
+    return host;
+  }
+
+  // validTab rejects anything not in the allowlist. An unknown tab falls back
+  // to Review rather than rendering nothing: a bad deep link must not be able
+  // to leave the user staring at an empty console (FR-117, FR-145).
+  function validTab(value) {
+    const tab = String(value || '').toLowerCase();
+    return CONSOLE_TABS.includes(tab) ? tab : '';
+  }
+
+  // chooseTab picks the tab a fresh open lands on. Work waiting for a decision
+  // wins over whatever was last looked at: the console exists to get files
+  // reviewed, and a restored Settings tab would hide the one thing that needs
+  // the user (FR-106).
+  function chooseTab(requested) {
+    const explicit = validTab(requested);
+    if (explicit) return explicit;
+    if (pendingCount() > 0) return 'review';
+    const remembered = validTab(rememberedTab.get(wsId()));
+    return remembered || 'review';
+  }
+
+  function pendingCount() {
+    return (lastBatch && lastBatch.summary && lastBatch.summary.proposed) || 0;
+  }
+
+  /**
+   * open — the one way any surface opens File Janitor.
+   *
+   * @param {object} [options]
+   * @param {string} [options.source] - which entry point asked (telemetry/debug)
+   * @param {string} [options.tab] - requested tab; validated, never trusted
+   * @param {string} [options.item] - candidate/action to focus; validated
+   * @param {*} [options.trigger] - element focus returns to on close
+   */
+  function open(options = {}) {
+    const id = wsId();
+    if (!id) return false;
+    // A workspace the capability is not installed in has no console to open.
+    // The check is against a status we have actually read: on a cold load
+    // lastStatus is still null, and refusing then would make the first press
+    // of a station do nothing (FR-93).
+    if (lastStatus && !lastStatus.applies) return false;
+    const host = consoleHost();
+    if (!host) return false;
+
+    consoleTrigger = options.trigger || consoleTrigger || activeElement();
+    consoleTab = chooseTab(options.tab);
+    consoleItem = String(options.item || '');
+    consoleOpen = true;
+
+    const coordinator = overlayCoordinator();
+    if (coordinator && typeof coordinator.open === 'function') {
+      consoleOverlayId = 'file-janitor-console';
+      coordinator.open({
+        id: consoleOverlayId,
+        kind: 'modal',
+        container: host,
+        trigger: consoleTrigger,
+        onClose: info => {
+          // The coordinator closes this for its own reasons too (Escape, a
+          // modal that must replace it). Mirror that into local state so the
+          // console never believes it is open while hidden.
+          if (info && info.reason === 'suspended') return;
+          if (consoleOpen) close({ viaCoordinator: true });
+        }
+      });
     }
-    actions.appendChild(pauseControl);
-    const failing = (readiness.checks || []).filter(c => c.status === 'failed');
-    if (
-      failing.some(
-        c =>
-          c.repair === 'relink_folder' ||
-          c.repair === 'choose_folder' ||
-          c.repair === 'grant_permission'
-      )
-    ) {
-      actions.appendChild(
-        button('Choose the folder again', 'dj-btn dj-btn-secondary', () => {
-          lastStatus = Object.assign({}, status, {
-            settings: Object.assign({}, settings, { root_path: '' })
-          });
-          renderSetupPrompt(status);
-        })
-      );
-    }
-    actions.appendChild(button('Check again', 'dj-btn dj-btn-secondary', () => void refresh()));
-    const settingsToggle = button('Settings', 'dj-btn dj-btn-secondary', () => {
-      settingsOpen = !settingsOpen;
-      settingsMessage = '';
-      revokeConfirmed = false;
-      settingsToggle.setAttribute('aria-expanded', settingsOpen ? 'true' : 'false');
-      renderSettings();
-    });
-    settingsToggle.id = 'downloadsJanitorSettingsToggle';
-    settingsToggle.setAttribute('aria-expanded', settingsOpen ? 'true' : 'false');
-    settingsToggle.setAttribute('aria-controls', 'downloadsJanitorSettingsHost');
-    actions.appendChild(settingsToggle);
-    card.appendChild(actions);
 
-    const settingsHost = el('div', 'dj-settings-host');
-    settingsHost.id = 'downloadsJanitorSettingsHost';
-    card.appendChild(settingsHost);
-
-    card.appendChild(privacyLine(status));
-
-    // The review batch mounts here and repaints on its own, so recording one
-    // decision does not rebuild (and re-focus) the whole card.
-    const batchHost = el('div', 'dj-batch');
-    batchHost.id = 'downloadsJanitorBatch';
-    card.appendChild(batchHost);
-
-    // The confirmation step and the per-item results render below the batch,
-    // deliberately *outside* it: applying every file empties the batch, and the
-    // report of what just happened to the user's files must not be swept away
-    // with the table it came from.
-    const confirmHost = el('div', 'dj-confirm-host');
-    confirmHost.id = 'downloadsJanitorConfirmHost';
-    card.appendChild(confirmHost);
-
-    const historyHost = el('div', 'dj-history-host');
-    historyHost.id = 'downloadsJanitorHistoryHost';
-    card.appendChild(historyHost);
-
-    card.appendChild(errorRegion());
-    host.appendChild(card);
-    renderBatch();
-    renderSettings();
+    renderConsole();
+    syncUrl();
+    // A console opened from the Map may be showing status read minutes ago.
+    void refresh();
+    notifySubscribers();
+    return true;
   }
 
-  // renderSetupPrompt re-opens the folder chooser for an already-configured
-  // workspace (relink/repair), reusing the same confirm path.
-  function renderSetupPrompt(status) {
-    const host = mount();
-    if (!host) return;
-    clear(host);
-    renderSetupCard(host, {
-      settings: status.settings || {},
-      suggestion: status.suggestion || {
-        label: 'Downloads folder',
-        suggested_path: (status.settings && status.settings.root_path) || '~/Downloads',
-        filing_root_name: status.settings && status.settings.filing_root_name,
-        daily_scan_local_time: status.settings && status.settings.daily_scan_local_time
-      }
-    });
-  }
-
-  function errorRegion() {
-    const region = el('p', 'dj-error');
-    region.id = 'downloadsJanitorError';
-    region.setAttribute('role', 'status');
-    region.setAttribute('aria-live', 'polite');
-    region.hidden = true;
-    return region;
-  }
-
-  function showError(message) {
-    const region = document.getElementById('downloadsJanitorError');
-    if (!region) return;
-    region.textContent = message || '';
-    region.hidden = !message;
-  }
-
-  function render(status) {
-    lastStatus = status;
-    // Marks and selections belong to the batch that was on screen. A repaint
-    // from a fresh status must not carry a removal mark into a different set
-    // of files.
-    trashMarked = new Set();
-    selected = new Set();
-    pendingPreview = null;
-    const host = mount();
-    if (!host) return;
-    if (!status || !status.applies) {
+  function close(options = {}) {
+    if (!consoleOpen) return false;
+    consoleOpen = false;
+    settingsOpen = false;
+    consoleCloseButton = null;
+    const host = document.getElementById(CONSOLE_HOST_ID);
+    if (host) {
       host.hidden = true;
       clear(host);
-      return;
     }
+    const coordinator = overlayCoordinator();
+    if (!options.viaCoordinator && coordinator && typeof coordinator.close === 'function') {
+      // The coordinator restores focus to the trigger it was given.
+      coordinator.close(consoleOverlayId);
+    } else {
+      restoreConsoleFocus();
+    }
+    consoleOverlayId = '';
+    if (!options.keepUrl) syncUrl();
+    notifySubscribers();
+    return true;
+  }
+
+  function activeElement() {
+    if (typeof document === 'undefined') return null;
+    return document.activeElement || null;
+  }
+
+  function restoreConsoleFocus() {
+    const trigger = consoleTrigger;
+    consoleTrigger = null;
+    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+  }
+
+  function renderConsole() {
+    const host = consoleHost();
+    if (!host) return;
+    const status = lastStatus;
     host.hidden = false;
     clear(host);
-    if (status.settings && status.settings.root_path && status.settings.directory_reference_id) {
-      renderConfiguredCard(host, status);
-    } else if (setupWizardOwnsSetup()) {
-      // The blueprint's Setup Wizard is the authoritative setup surface. The
-      // panel keeps a compact entry into it rather than a second folder
-      // chooser: two surfaces that both configure the same folder is exactly
-      // the duplication this migration removes.
-      renderSetupEntry(host);
+
+    const backdrop = el('div', 'fj-console-backdrop');
+    // Clicking the backdrop is a close, the same as the close button. It is a
+    // separate element rather than a handler on the host so the console body
+    // itself never swallows a click meant for a control inside it.
+    backdrop.addEventListener('click', () => close());
+    host.appendChild(backdrop);
+
+    const dialog = el('div', 'fj-console');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    // Labelled by the visible title, so the name a sighted user reads and the
+    // name a screen reader announces are the same string (FR-119).
+    dialog.setAttribute('aria-labelledby', CONSOLE_TITLE_ID);
+    dialog.appendChild(renderConsoleHeader(status));
+
+    const body = el('div', 'fj-console-body');
+    body.id = 'fileJanitorConsoleBody';
+    dialog.appendChild(body);
+    renderConsoleBody(body, status);
+
+    host.appendChild(dialog);
+    paintError();
+    focusRequestedItem() || focusConsole();
+  }
+
+  // focusRequestedItem puts the user on the exact row a notification named.
+  //
+  // It reports whether it found one. A link naming a candidate that has since
+  // been filed, skipped, or scanned away finds nothing — and that is a normal
+  // outcome, not an error: the tab is still correct and still useful, so focus
+  // falls back to the console itself rather than reporting a failure about a
+  // file the user has already dealt with (FR-116).
+  function focusRequestedItem() {
+    if (!consoleItem) return false;
+    const row = document.getElementById('fileJanitorLinkedRow');
+    if (!row) return false;
+    if (typeof row.focus === 'function') row.focus();
+    if (typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'center' });
+    }
+    return true;
+  }
+
+  // focusConsole moves the keyboard into the dialog, onto the close control.
+  //
+  // Close is the one control present in every state — setup, all three tabs,
+  // and an error — so focus lands somewhere real without having to guess at
+  // the first focusable child. Landing there also means Escape is not the only
+  // way out for someone who did not see the console open (FR-119).
+  function focusConsole() {
+    if (consoleCloseButton && typeof consoleCloseButton.focus === 'function') {
+      consoleCloseButton.focus();
+    }
+  }
+
+  function renderConsoleHeader(status) {
+    const configured = isConfigured(status);
+    const settings = (status && status.settings) || {};
+    const header = el('header', 'fj-console-head');
+
+    const heading = el('div', 'fj-console-heading');
+    const title = el('h2', 'fj-console-title', 'File Janitor');
+    title.id = CONSOLE_TITLE_ID;
+    heading.appendChild(title);
+    // The managed folder is shown by its display name, cleaned the same way a
+    // filename is: a folder can be named as adversarially as a file.
+    const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
+    const activity = activityState(status);
+    const statusLine = el('p', 'fj-console-status');
+    statusLine.id = 'fileJanitorConsoleStatus';
+    statusLine.setAttribute('role', 'status');
+    statusLine.setAttribute('aria-live', 'polite');
+    const pending = pendingCount();
+    statusLine.textContent =
+      activity.label + (pending > 0 ? ' · ' + reviewCountLabel(pending) : '');
+    heading.appendChild(statusLine);
+    header.appendChild(heading);
+
+    const actions = el('div', 'fj-console-actions');
+    if (configured) {
+      const scan = button('Scan now', 'dj-btn dj-btn-primary', () => void scanNow());
+      scan.id = 'downloadsJanitorScan';
+      scan.disabled = scanning;
+      actions.appendChild(scan);
+      actions.appendChild(pauseControl(settings));
+    }
+    const closeButton = button('Close', 'dj-btn dj-btn-secondary', () => close());
+    closeButton.setAttribute('data-fj-console-close', '');
+    closeButton.setAttribute('aria-label', 'Close File Janitor');
+    consoleCloseButton = closeButton;
+    actions.appendChild(closeButton);
+    header.appendChild(actions);
+
+    // Before setup finishes there are no tabs: there is nothing to review, no
+    // history, and no settings to change. Showing three empty tabs would
+    // suggest otherwise (FR-103, FR-104).
+    if (configured) header.appendChild(renderConsoleTabs());
+    return header;
+  }
+
+  function reviewCountLabel(count) {
+    return count + (count === 1 ? ' file ready for review' : ' files ready for review');
+  }
+
+  function renderConsoleTabs() {
+    const list = el('div', 'fj-console-tabs');
+    list.setAttribute('role', 'tablist');
+    const labels = { review: 'Review', history: 'History', settings: 'Settings' };
+    CONSOLE_TABS.forEach(tab => {
+      const active = tab === consoleTab;
+      const control = button(labels[tab], 'fj-console-tab' + (active ? ' is-active' : ''), () =>
+        selectTab(tab)
+      );
+      control.setAttribute('role', 'tab');
+      control.setAttribute('aria-selected', active ? 'true' : 'false');
+      control.setAttribute('data-fj-tab', tab);
+      if (tab === 'review') {
+        const pending = pendingCount();
+        if (pending > 0) control.appendChild(el('span', 'fj-console-tab-count', String(pending)));
+      }
+      list.appendChild(control);
+    });
+    return list;
+  }
+
+  function selectTab(tab) {
+    const next = validTab(tab);
+    if (!next) return;
+    consoleTab = next;
+    rememberedTab.set(wsId(), next);
+    // Moving tabs abandons any half-finished approval: an approval issued
+    // against the Review tab must not survive out of the user's sight.
+    pendingPreview = null;
+    consoleItem = '';
+    renderConsole();
+    syncUrl();
+  }
+
+  // ------------------------------------------------------------- URL state
+  //
+  // The console is addressable so a notification can point at it, and so Back
+  // behaves the way a modal should. Only File Janitor's own parameters are ever
+  // touched: unrelated workspace URL state is preserved on both open and close
+  // (FR-117, FR-124).
+
+  function syncUrl(options = {}) {
+    if (typeof window === 'undefined' || !window.history || !window.location) return;
+    const url = new URL(window.location.href);
+    const before = url.search;
+    if (consoleOpen) {
+      url.searchParams.set('panel', CONSOLE_PANEL_PARAM);
+      if (consoleTab && consoleTab !== 'review') {
+        url.searchParams.set('tab', consoleTab);
+      } else {
+        url.searchParams.delete('tab');
+      }
+      if (consoleItem) {
+        url.searchParams.set('item', consoleItem);
+      } else {
+        url.searchParams.delete('item');
+      }
     } else {
-      renderSetupCard(host, status);
+      url.searchParams.delete('panel');
+      url.searchParams.delete('tab');
+      url.searchParams.delete('item');
+    }
+    if (url.search === before) return;
+    const method = options.replace ? 'replaceState' : 'pushState';
+    if (typeof window.history[method] !== 'function') return;
+    window.history[method]({ fileJanitor: consoleOpen }, '', url.toString());
+  }
+
+  // applyUrlState opens or closes the console to match the URL. It runs on load
+  // and on popstate, which is what makes Back close a deep-linked console
+  // without leaving the workspace (FR-124).
+  function applyUrlState(options = {}) {
+    if (typeof window === 'undefined' || !window.location) return;
+    const params = new URLSearchParams(window.location.search || '');
+    const wants = params.get('panel') === CONSOLE_PANEL_PARAM;
+    if (!wants) {
+      if (consoleOpen) close({ keepUrl: true });
+      return;
+    }
+    const tab = validTab(params.get('tab'));
+    const item = String(params.get('item') || '');
+    if (consoleOpen) {
+      consoleTab = tab || consoleTab;
+      consoleItem = item;
+      renderConsole();
+      return;
+    }
+    open({ source: options.source || 'url', tab, item });
+    // The URL already says what it says; rewriting it here would push a
+    // duplicate entry and make one Back press appear to do nothing.
+    syncUrl({ replace: true });
+  }
+
+  // ------------------------------------------------------- subscriptions
+  //
+  // The Map station and the Details card show state this module owns. They
+  // subscribe rather than poll, so a scan finishing updates every surface at
+  // once instead of only whichever one happens to repaint next.
+
+  function subscribe(listener) {
+    if (typeof listener !== 'function') return () => {};
+    subscribers.add(listener);
+    return () => subscribers.delete(listener);
+  }
+
+  function notifySubscribers() {
+    const snapshot = stationState();
+    subscribers.forEach(listener => {
+      try {
+        listener(snapshot);
+      } catch (_) {
+        // A broken listener must not stop the others, and must never take the
+        // console down with it.
+      }
+    });
+    if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
+      document.dispatchEvent(
+        new CustomEvent('ori:file-janitor-changed', { detail: { state: snapshot } })
+      );
     }
   }
 
@@ -2001,8 +2515,13 @@
 
   function init(id) {
     workspaceId = id || wsId();
-    if (!mount()) return;
-    void refresh();
+    if (!workspaceId) return;
+    void refresh().then(() => {
+      // A deep link is honoured only after the first status is in: opening
+      // beforehand would show a console that does not yet know whether the
+      // workspace even has a folder (FR-117).
+      applyUrlState({ source: 'deep-link' });
+    });
   }
 
   if (typeof document !== 'undefined') {
@@ -2013,37 +2532,81 @@
     }
   }
 
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    // Back over a deep-linked console closes it and stays in the workspace,
+    // rather than navigating away from a page the user never left (FR-124).
+    window.addEventListener('popstate', () => applyUrlState({ source: 'popstate' }));
+    window.addEventListener('keydown', event => {
+      if (!consoleOpen || event.key !== 'Escape') return;
+      // A destructive confirmation owns Escape while it is on screen: the
+      // answer to "are you sure" must be given, not dismissed by closing the
+      // surface that asked (FR-120).
+      if (pendingPreview || revokeConfirmed) return;
+      event.preventDefault();
+      close();
+    });
+  }
+
   // stationState answers, for the Map view, "does this workspace need me?".
   // The Janitor's setup card lives in the page body; a user working on the map
   // surface has no way to know a folder is still needed, and a workspace
   // awaiting setup looks exactly like a finished one. This lets the map show a
   // station without knowing anything about the Janitor's internals.
+  // stationState answers, for the Map and the compact card, "does this
+  // workspace need me?".
+  //
+  // The order is fixed and is the order of urgency (FR-95):
+  //
+  //   Needs attention → Setup needed → <N> ready for review → Paused → Watching
+  //
+  // It is a priority rather than a lookup because these overlap constantly: a
+  // paused janitor can still have twelve files waiting, and a broken one can be
+  // both. Reporting the lower state in either case would hide the reason the
+  // user needs to come back.
   function stationState() {
     if (!lastStatus || !lastStatus.applies) return { applies: false };
     const readiness = lastStatus.readiness || {};
     const settings = lastStatus.settings || {};
-    if (readiness.state === 'setup_required') {
-      return {
-        applies: true,
-        value: 'Choose a folder',
-        description: 'waiting for you to choose a folder to tidy',
-        tone: 'attention'
-      };
-    }
+
     if (readiness.state === 'needs_attention') {
       return {
         applies: true,
         value: 'Needs attention',
-        description: firstProblem(readiness) || 'the Janitor needs attention',
+        description: firstProblem(readiness) || 'File Janitor needs attention',
         tone: 'degraded'
       };
     }
-    const folder = settings.root_path || '';
+    if (readiness.state === 'setup_required' || !isConfigured(lastStatus)) {
+      return {
+        applies: true,
+        value: 'Setup needed',
+        description: 'waiting for you to choose a folder to tidy',
+        tone: 'attention'
+      };
+    }
+    const pending = pendingCount();
+    if (pending > 0) {
+      return {
+        applies: true,
+        value: reviewCountLabel(pending),
+        description: 'files are waiting for your decision',
+        tone: 'attention'
+      };
+    }
+    const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (settings.paused) {
+      return {
+        applies: true,
+        value: 'Paused',
+        description: folder ? 'not watching ' + folder : 'automatic scanning paused',
+        tone: 'idle'
+      };
+    }
     return {
       applies: true,
-      value: settings.paused ? 'Paused' : 'Watching',
+      value: 'Watching',
       description: folder ? 'tidying ' + folder : 'ready',
-      tone: settings.paused ? 'idle' : 'clear'
+      tone: 'clear'
     };
   }
 
@@ -2053,20 +2616,15 @@
     return bad ? bad.message : '';
   }
 
-  // focusSetup brings the setup card into view and puts the cursor in the
-  // folder field, so a station press lands the user on the thing to do rather
-  // than merely near it.
-  function focusSetup() {
-    const mount = document.getElementById('downloadsJanitorMount');
-    if (mount && typeof mount.scrollIntoView === 'function') {
-      mount.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    const input = document.getElementById('downloadsJanitorPath');
-    if (input) {
-      input.focus?.();
-      return true;
-    }
-    return Boolean(mount);
+  // focusSetup opens the console on its setup face.
+  //
+  // It used to scroll the page to an inline card and focus the folder field.
+  // That worked only in Details mode: pressing the station from the Map
+  // scrolled a surface the user could not see, so the press appeared to do
+  // nothing at all. Opening in place over the Map is the whole point of the
+  // console (FR-97, FR-98).
+  function focusSetup(trigger) {
+    return open({ source: 'setup', trigger });
   }
 
   // ---------------------------------------------------- setup wizard steps
@@ -2202,30 +2760,47 @@
     });
   }
 
-  // Until File Janitor has its own console (Parent 5), the capability catalog's
-  // post-install "Set up File Janitor" action opens this panel's real setup
-  // renderer. Registering the handler here rather than in the catalog keeps the
-  // catalog capability-agnostic, and means the button is never a dead end.
+  // The capability catalog's post-install "Set up File Janitor" action opens
+  // this console. Registering the handler here rather than in the catalog keeps
+  // the catalog capability-agnostic, and means the button is never a dead end.
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     const registerOpen = () => {
       const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
       if (!catalog || typeof catalog.registerOpenHandler !== 'function') return;
-      catalog.registerOpenHandler('file-janitor', () => {
-        void refresh();
-        focusSetup();
-      });
+      catalog.registerOpenHandler('file-janitor', trigger =>
+        open({ source: 'capability-catalog', trigger })
+      );
     };
     document.addEventListener('DOMContentLoaded', registerOpen);
     registerOpen();
   }
 
-  window.DownloadsJanitorPanel = {
+  // Action Center findings reach this console the same way Backlog items reach
+  // theirs: the Action Center is a separate page, and it navigates to
+  // /workspaces/{id}?panel=… . So the deep-link contract above IS the routing,
+  // and applyUrlState validates the tab and the item on arrival — a
+  // notification is data, and a stale one naming a candidate that has since
+  // been filed must land the user on a working Review tab rather than on an
+  // empty focus target (FR-90, FR-116, FR-117).
+  //
+  // In-page surfaces call open() directly; there is no event indirection,
+  // because there is no in-page Action Center to dispatch one.
+
+  const controller = {
     init,
     refresh,
     render,
     renderBatch,
     stationState,
+    subscribe,
+    open,
+    close,
     focusSetup,
+    isOpen: () => consoleOpen,
+    activeTab: () => (consoleOpen ? consoleTab : ''),
+    focusedItem: () => (consoleOpen ? consoleItem : ''),
+    _applyUrlState: applyUrlState,
+    _selectTab: selectTab,
     _confirmSetup: confirmSetup,
     _setBatch: (batch, candidates, cats) => {
       lastBatch = batch;
@@ -2256,6 +2831,27 @@
       historyLoaded = true;
       renderHistory();
     },
+    // Returns the module to the state a freshly-loaded page starts in. The
+    // console is a singleton with memory — the tab it last showed per
+    // workspace — so a test that did not reset it would inherit the previous
+    // test's tab and assert against a surface it never opened.
+    _resetForTest: () => {
+      consoleOpen = false;
+      consoleTab = 'review';
+      consoleItem = '';
+      consoleTrigger = null;
+      consoleOverlayId = '';
+      consoleCloseButton = null;
+      rememberedTab.clear();
+      subscribers.clear();
+      historyActions = [];
+      historyLoaded = false;
+      settingsOpen = false;
+      scanning = false;
+      lastStatus = null;
+      lastBatch = null;
+      lastCandidates = [];
+    },
     _select: id => {
       selected.add(id);
       updateSelectionSummary();
@@ -2264,4 +2860,12 @@
     // without standing up the whole dialog.
     _setupSteps: { directory: directoryStepRenderer, automation: automationStepRenderer }
   };
+
+  window.FileJanitorConsole = controller;
+
+  // DownloadsJanitorPanel is a compatibility alias for the same controller, not
+  // a second one. It exists because setup callers still reach for the old name;
+  // pointing it at the identical object means there is no way for the two to
+  // diverge, and retiring it is a deletion rather than a migration.
+  window.DownloadsJanitorPanel = controller;
 })();

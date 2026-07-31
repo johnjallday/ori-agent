@@ -1,7 +1,7 @@
-// Tests for downloads-janitor.js — the workspace-detail Downloads Janitor
+// Tests for file-janitor-console.js — the File Janitor console and the
 // panel. Inline DOM stub, no jsdom.
 //
-// Run with: node --test internal/web/static/js/modules/downloads-janitor.test.js
+// Run with: node --test internal/web/static/js/modules/file-janitor-console.test.js
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -101,12 +101,33 @@ function setup() {
   globalThis.window = globalThis;
   globalThis.window.currentWorkspaceId = 'ws-1';
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: { applies: false } }) });
+  // A fresh document is a fresh page load; the module is a singleton that
+  // remembers the tab it last showed, so it is reset alongside it.
+  if (globalThis.window.FileJanitorConsole) globalThis.window.FileJanitorConsole._resetForTest();
   return doc;
+}
+
+// The review table, the setup card, history, and settings all live in the
+// console now; Workspace Details carries a compact card only. openConsole
+// drives the same path every entry point does — render the status, then open —
+// so these tests exercise the surface a user actually reaches rather than a
+// detached renderer.
+//
+// The fetch stub answers with the SAME status, because open() re-reads on the
+// way in: a console opened from the Map may be showing minutes-old state. An
+// answer that disagreed would repaint the assertions out from under the test.
+function openConsole(status, tab) {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status }) });
+  panel.render(status);
+  panel.open({ source: 'test', tab });
+  globalThis.fetch = previousFetch;
+  return globalThis.document.getElementById('fileJanitorConsoleBody');
 }
 
 const panel = await (async () => {
   setup();
-  await import('./downloads-janitor.js');
+  await import('./file-janitor-console.js');
   return globalThis.window.DownloadsJanitorPanel;
 })();
 
@@ -129,22 +150,49 @@ const setupRequiredStatus = {
   }
 };
 
+// surface is whichever host is showing File Janitor right now: the console
+// while it is open, the compact Workspace Details card otherwise.
+// surface is whichever host is showing File Janitor right now: the whole
+// console — header included, since the folder and the status live there —
+// while it is open, and the compact Workspace Details card otherwise.
+function surface(doc) {
+  return doc.getElementById('fileJanitorConsole') || doc.getElementById('downloadsJanitorMount');
+}
+
+// settle drains the status re-read that open() fires. Opening the console
+// re-reads status on the way in, so an async test that acts immediately is
+// racing that reload — in a browser the user cannot click inside the same tick,
+// but a test can. Await this before driving a flow that depends on the batch
+// staying put.
+function settle() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 function text(doc) {
+  return surface(doc).textContent;
+}
+
+// cardText reads only the compact Workspace Details card, for the assertions
+// about what Details does and does not contain.
+function cardText(doc) {
   return doc.getElementById('downloadsJanitorMount').textContent;
 }
 
-test('a workspace that is not a Downloads Janitor workspace renders nothing', () => {
+test('a workspace without the capability renders nothing and opens no console', () => {
   const doc = setup();
-  panel.render({ applies: false });
+  openConsole({ applies: false });
   const host = doc.getElementById('downloadsJanitorMount');
   assert.equal(host.hidden, true);
   assert.equal(host.children.length, 0);
+  // There is nothing to open: a console over a workspace that never installed
+  // File Janitor would offer controls for a folder it does not manage.
+  assert.equal(panel.isOpen(), false);
 });
 
 test('setup card pre-fills the suggested folder without selecting it', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
-  const host = doc.getElementById('downloadsJanitorMount');
+  openConsole(setupRequiredStatus);
+  const host = surface(doc);
   assert.equal(host.hidden, false);
   const input = doc.getElementById('downloadsJanitorPath');
   assert.ok(input, 'expected a folder input');
@@ -155,7 +203,7 @@ test('setup card pre-fills the suggested folder without selecting it', () => {
 
 test('setup card discloses moves, Trash, no permanent deletion, and the daily time', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   const body = text(doc);
   assert.match(body, /Filed/);
   assert.match(body, /system Trash/i);
@@ -166,7 +214,7 @@ test('setup card discloses moves, Trash, no permanent deletion, and the daily ti
 
 test('setup card states that content reading is off and separate', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   assert.match(text(doc), /Reading what is inside your files is off/i);
 });
 
@@ -174,7 +222,7 @@ test('setup card states that content reading is off and separate', () => {
 // it at a structured project tree and expect it to be reorganized.
 test('setup card explains it is for an inbox-style folder, top level only', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   const body = text(doc);
   assert.match(body, /inbox-style/i);
   assert.match(body, /directly in it/i);
@@ -186,7 +234,7 @@ test('setup card explains it is for an inbox-style folder, top level only', () =
 // explicit approval into a default.
 test('setup card proposes no folder when the server suggests none', () => {
   const doc = setup();
-  panel.render({
+  openConsole({
     ...setupRequiredStatus,
     suggestion: {
       key: 'file-janitor-root',
@@ -202,7 +250,7 @@ test('setup card proposes no folder when the server suggests none', () => {
 
 test('the confirm button enables once a folder is supplied', () => {
   const doc = setup();
-  panel.render({
+  openConsole({
     ...setupRequiredStatus,
     suggestion: {
       key: 'file-janitor-root',
@@ -225,7 +273,7 @@ test('the confirm button enables once a folder is supplied', () => {
 
 test('a preset suggestion still pre-fills and is immediately approvable', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   const input = doc.getElementById('downloadsJanitorPath');
   assert.equal(input.value, '~/Downloads', 'the Downloads preset still suggests its folder');
   const confirm = doc.getElementById('downloadsJanitorConfirm');
@@ -234,15 +282,15 @@ test('a preset suggestion still pre-fills and is immediately approvable', () => 
 
 test('the setup card is titled File Janitor, not Downloads Janitor', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   const title = doc.getElementById('downloadsJanitorTitle');
   assert.equal(title.textContent, 'File Janitor');
 });
 
 test('the folder input is labelled and described for screen readers', () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
-  const host = doc.getElementById('downloadsJanitorMount');
+  openConsole(setupRequiredStatus);
+  const host = surface(doc);
   const label = host.all(n => n.tagName === 'LABEL')[0];
   assert.ok(label, 'expected a label');
   assert.equal(label.getAttribute('for'), 'downloadsJanitorPath');
@@ -254,7 +302,7 @@ test('the folder input is labelled and described for screen readers', () => {
 
 test('confirming with an empty folder reports an error and calls no endpoint', async () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   let called = false;
   globalThis.fetch = async () => {
     called = true;
@@ -269,7 +317,7 @@ test('confirming with an empty folder reports an error and calls no endpoint', a
 
 test('confirming posts the confirmed path and renders the returned status', async () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   let sent = null;
   globalThis.fetch = async (url, opts) => {
     sent = { url, body: JSON.parse(opts.body) };
@@ -311,7 +359,7 @@ test('confirming posts the confirmed path and renders the returned status', asyn
 
 test('a setup failure shows the server message and re-enables the button', async () => {
   const doc = setup();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   globalThis.fetch = async () => ({
     ok: false,
     json: async () => ({
@@ -333,7 +381,7 @@ test('a setup failure shows the server message and re-enables the button', async
 
 test('readiness rows carry a non-color mark and a status word per component', () => {
   const doc = setup();
-  panel.render({
+  openConsole({
     applies: true,
     settings: { root_path: '/tmp/Inbox', directory_reference_id: 'ref-1' },
     readiness: {
@@ -350,7 +398,7 @@ test('readiness rows carry a non-color mark and a status word per component', ()
       ]
     }
   });
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   const marks = host.all(n => n.className === 'dj-row-mark');
   assert.equal(marks.length, 3);
   assert.deepEqual(
@@ -433,7 +481,7 @@ function candidatesFixture() {
 // renderReview paints the configured card with a batch already loaded.
 function renderReview(doc, batch = batchFixture(), candidates = candidatesFixture()) {
   panel._setBatch(batch, candidates, CATEGORIES);
-  panel.render({
+  openConsole({
     applies: true,
     settings: {
       root_path: '/tmp/Inbox',
@@ -445,7 +493,7 @@ function renderReview(doc, batch = batchFixture(), candidates = candidatesFixtur
       checks: [{ component: 'directory_access', status: 'ok' }]
     }
   });
-  return doc.getElementById('downloadsJanitorMount');
+  return surface(doc);
 }
 
 function rowsIn(host) {
@@ -554,13 +602,11 @@ test('filters narrow the table without losing the batch', () => {
 
   const needsReview = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Needs review')[0];
   needsReview.click();
-  assert.equal(rowsIn(doc.getElementById('downloadsJanitorMount')).length, 1);
+  assert.equal(rowsIn(surface(doc)).length, 1);
 
-  const all = doc
-    .getElementById('downloadsJanitorMount')
-    .all(n => n.tagName === 'BUTTON' && n.textContent === 'All')[0];
+  const all = surface(doc).all(n => n.tagName === 'BUTTON' && n.textContent === 'All')[0];
   all.click();
-  assert.equal(rowsIn(doc.getElementById('downloadsJanitorMount')).length, 3);
+  assert.equal(rowsIn(surface(doc)).length, 3);
 });
 
 test('a filter matching nothing says so rather than showing an empty table', () => {
@@ -598,14 +644,14 @@ test('an empty workspace explains what will appear rather than showing a bare ta
   const body = text(doc);
   assert.match(body, /Nothing to review/);
   assert.match(body, /Nothing is moved without your approval/);
-  assert.match(body, /No files waiting for review/);
+  assert.match(cardText(doc), /No files waiting for review/);
 });
 
 test('the status line reports the pending count and the last scan', () => {
   const doc = setup();
   renderReview(doc);
-  assert.match(text(doc), /2 files waiting for review/);
-  assert.match(text(doc), /last scan/);
+  assert.match(cardText(doc), /2 files waiting for review/);
+  assert.match(cardText(doc), /last scan/);
 });
 
 test('Scan now reports honestly when a scan finds nothing new', async () => {
@@ -870,7 +916,7 @@ test('cancelling abandons the approval and moves nothing', async () => {
   doc.getElementById('downloadsJanitorApprove').click();
   await new Promise(r => setTimeout(r, 0));
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   const cancel = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Cancel')[0];
   assert.ok(cancel, 'expected a Cancel control');
   cancel.click();
@@ -883,6 +929,11 @@ test('cancelling abandons the approval and moves nothing', async () => {
 test('a rejected approval is reported and nothing is left looking approved', async () => {
   const doc = setup();
   renderReview(doc);
+  // Let the status re-read that open() fires land before building a selection,
+  // so the batch under the selection is the one that stays on screen.
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
   panel._select('c1');
   globalThis.fetch = async url => {
     if (String(url).endsWith('/preview')) {
@@ -964,7 +1015,7 @@ test('results survive the batch they emptied', async () => {
 // ------------------------------------------------------------------- Trash
 
 function trashToggleFor(doc, name) {
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   return host.all(
     n => n.tagName === 'BUTTON' && String(n.getAttribute('aria-label') || '').includes(name)
   )[0];
@@ -995,7 +1046,7 @@ test('a file marked for Trash cannot also be selected for a move', () => {
 
   // The move selection released it, and its checkbox is no longer selectable.
   assert.deepEqual(panel._selected(), []);
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   const box = host.all(n => n.className === 'dj-select')[0];
   assert.equal(box.disabled, true, 'a file bound for Trash is not a move candidate');
 });
@@ -1194,6 +1245,7 @@ const HISTORY = [
 test('history lists what happened and names the reversal each entry offers', () => {
   const doc = setup();
   renderReview(doc);
+  panel._selectTab('history');
   panel._setHistory(HISTORY);
 
   const body = text(doc);
@@ -1208,6 +1260,7 @@ test('history lists what happened and names the reversal each entry offers', () 
 test('history explains entries that cannot be undone instead of hiding them', () => {
   const doc = setup();
   renderReview(doc);
+  panel._selectTab('history');
   panel._setHistory(HISTORY);
 
   const body = text(doc);
@@ -1222,6 +1275,7 @@ test('history explains entries that cannot be undone instead of hiding them', ()
 test('undoing calls the action-specific endpoint and reports the outcome', async () => {
   const doc = setup();
   renderReview(doc);
+  panel._selectTab('history');
   panel._setHistory(HISTORY);
 
   let undoUrl = null;
@@ -1243,7 +1297,7 @@ test('undoing calls the action-specific endpoint and reports the outcome', async
     };
   };
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Undo move')[0].click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
@@ -1254,6 +1308,7 @@ test('undoing calls the action-specific endpoint and reports the outcome', async
 test('a refused undo is reported with its reason, not as a failure of the app', async () => {
   const doc = setup();
   renderReview(doc);
+  panel._selectTab('history');
   panel._setHistory(HISTORY);
 
   globalThis.fetch = async (url, opts) => {
@@ -1277,7 +1332,7 @@ test('a refused undo is reported with its reason, not as a failure of the app', 
     };
   };
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Undo move')[0].click();
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
@@ -1291,9 +1346,10 @@ test('a refused undo is reported with its reason, not as a failure of the app', 
 test('history filters are exposed as pressed-state controls', () => {
   const doc = setup();
   renderReview(doc);
+  panel._selectTab('history');
   panel._setHistory(HISTORY);
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   const filters = host.all(
     n => n.tagName === 'BUTTON' && ['Filed', 'Trashed', 'Can undo'].includes(n.textContent)
   );
@@ -1304,6 +1360,7 @@ test('history filters are exposed as pressed-state controls', () => {
 test('an empty history explains what will appear there', () => {
   const doc = setup();
   renderReview(doc);
+  panel._selectTab('history');
   panel._setHistory([]);
   assert.match(text(doc), /Applied moves and Trash actions are listed here/);
 });
@@ -1334,24 +1391,24 @@ function badgeText(doc) {
 test('a configured, idle workspace reports that it is watching', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
+  openConsole(statusFixture());
   assert.equal(badgeText(doc), 'Watching');
-  assert.match(text(doc), /No files waiting for review/);
-  assert.match(text(doc), /next catch-up at 09:00/);
+  assert.match(cardText(doc), /No files waiting for review/);
+  assert.match(cardText(doc), /next catch-up at 09:00/);
 });
 
 test('files waiting outrank watching in the status', () => {
   const doc = setup();
   panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
-  panel.render(statusFixture());
+  openConsole(statusFixture());
   assert.equal(badgeText(doc), 'Review ready');
-  assert.match(text(doc), /2 files waiting for review/);
+  assert.match(cardText(doc), /2 files waiting for review/);
 });
 
 test('a problem outranks everything else', () => {
   const doc = setup();
   panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
-  panel.render(
+  openConsole(
     statusFixture({
       readiness: {
         state: 'needs_attention',
@@ -1367,10 +1424,10 @@ test('a problem outranks everything else', () => {
 test('a paused workspace says so, and says what pausing does not stop', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+  openConsole(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
 
   assert.equal(badgeText(doc), 'Paused');
-  assert.match(text(doc), /automatic scanning paused/);
+  assert.match(cardText(doc), /automatic scanning paused/);
   const control = doc.getElementById('downloadsJanitorPause');
   assert.match(control.textContent, /Resume watching/);
   // Scanning on demand is still available while paused.
@@ -1380,7 +1437,7 @@ test('a paused workspace says so, and says what pausing does not stop', () => {
 test('the pause control explains what is kept', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
+  openConsole(statusFixture());
   const control = doc.getElementById('downloadsJanitorPause');
   assert.match(control.textContent, /Pause watching/);
   assert.match(control.getAttribute('title'), /settings, pending review, and history are kept/);
@@ -1389,7 +1446,7 @@ test('the pause control explains what is kept', () => {
 test('pausing posts the new state and repaints from the server answer', async () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
+  openConsole(statusFixture());
 
   let sent = null;
   globalThis.fetch = async (url, opts) => {
@@ -1417,7 +1474,7 @@ test('pausing posts the new state and repaints from the server answer', async ()
 test('the header says Scanning while a scan the user started is running', async () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
+  openConsole(statusFixture());
 
   let observedDuringScan = '';
   globalThis.fetch = async url => {
@@ -1447,7 +1504,7 @@ function privacyStatus(privacy) {
 test('the card always states what Ori reads, without opening settings', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(
+  openConsole(
     privacyStatus({
       mode: 'metadata_only',
       headline: 'Ori reads file names, types, sizes, and dates only.',
@@ -1455,7 +1512,7 @@ test('the card always states what Ori reads, without opening settings', () => {
       leaves_device: false
     })
   );
-  const body = text(doc);
+  const body = cardText(doc);
   assert.match(body, /names, types, sizes, and dates only/);
   assert.match(body, /No file contents are opened or read/);
 });
@@ -1463,7 +1520,7 @@ test('the card always states what Ori reads, without opening settings', () => {
 test('a cloud provider is named, and the pending confirmation is the action', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(
+  openConsole(
     privacyStatus({
       mode: 'cloud_model',
       headline: 'Ori reads file names, types, sizes, and dates, and may read a short extract.',
@@ -1474,7 +1531,7 @@ test('a cloud provider is named, and the pending confirmation is the action', ()
       consent_required: true
     })
   );
-  const body = text(doc);
+  const body = cardText(doc);
   assert.match(body, /SomeCloud/);
   assert.match(body, /outside this device/);
   assert.match(body, /Nothing has been sent yet/);
@@ -1489,8 +1546,8 @@ test('a cloud provider is named, and the pending confirmation is the action', ()
 test('settings spell out the consequence of each content option', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
-  panel._openSettings();
+  openConsole(statusFixture());
+  panel._selectTab('settings');
 
   const body = text(doc);
   assert.match(body, /Names and file details only/);
@@ -1502,8 +1559,8 @@ test('settings spell out the consequence of each content option', () => {
 test('changing a setting patches only that field', async () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
-  panel._openSettings();
+  openConsole(statusFixture());
+  panel._selectTab('settings');
 
   let sent = null;
   globalThis.fetch = async (url, opts) => {
@@ -1527,15 +1584,15 @@ test('changing a setting patches only that field', async () => {
 test('a test scan reports what it would do and says nothing changed', async () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
-  panel._openSettings();
+  openConsole(statusFixture());
+  panel._selectTab('settings');
 
   globalThis.fetch = async url =>
     String(url).endsWith('/test-scan')
       ? { ok: true, json: async () => ({ report: { eligible_count: 3, ineligible_count: 2 } }) }
       : { ok: true, json: async () => ({ batch: null, candidates: [] }) };
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Run a test scan')[0].click();
   await new Promise(r => setTimeout(r, 0));
 
@@ -1549,8 +1606,8 @@ test('a test scan reports what it would do and says nothing changed', async () =
 test('stopping use of a folder confirms first and explains what is kept', async () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
-  panel._openSettings();
+  openConsole(statusFixture());
+  panel._selectTab('settings');
 
   let called = false;
   globalThis.fetch = async url => {
@@ -1558,7 +1615,7 @@ test('stopping use of a folder confirms first and explains what is kept', async 
     return { ok: true, json: async () => ({ status: statusFixture() }) };
   };
 
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   const stop = host.all(
     n => n.tagName === 'BUTTON' && /Stop using this folder/.test(n.textContent)
   )[0];
@@ -1578,15 +1635,22 @@ test('stopping use of a folder confirms first and explains what is kept', async 
   assert.equal(called, true, 'the second press confirms');
 });
 
-test('the settings toggle exposes its expanded state', () => {
+test('the Settings tab reports whether it is the selected tab', () => {
   const doc = setup();
   panel._setBatch(null, [], CATEGORIES);
-  panel.render(statusFixture());
-  const toggle = doc.getElementById('downloadsJanitorSettingsToggle');
-  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
-  assert.equal(toggle.getAttribute('aria-controls'), 'downloadsJanitorSettingsHost');
-  toggle.click();
-  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  openConsole(statusFixture());
+
+  const tabFor = name =>
+    surface(doc).all(n => n.getAttribute('data-fj-tab') === name)[0];
+
+  assert.equal(tabFor('settings').getAttribute('role'), 'tab');
+  assert.equal(tabFor('settings').getAttribute('aria-selected'), 'false');
+  assert.equal(tabFor('review').getAttribute('aria-selected'), 'true');
+
+  tabFor('settings').click();
+  assert.equal(tabFor('settings').getAttribute('aria-selected'), 'true');
+  assert.equal(tabFor('review').getAttribute('aria-selected'), 'false');
+  assert.ok(doc.getElementById('downloadsJanitorSettingsHost'), 'the settings form is on screen');
 });
 
 // --- Accessibility ------------------------------------------------------
@@ -1621,8 +1685,7 @@ test('the accessible name of a row control is the safe name, not the raw one', a
   hostile[0].display_name = undefined;
   renderReview(doc, batchFixture(), hostile);
 
-  const labels = doc
-    .getElementById('downloadsJanitorMount')
+  const labels = surface(doc)
     .all(node => (node.getAttribute('aria-label') || '').startsWith('Select '))
     .map(node => node.getAttribute('aria-label'));
   assert.ok(labels.length > 0, 'expected labelled selection controls');
@@ -1704,9 +1767,7 @@ test('cancelling the confirmation returns focus to the control that opened it', 
   approve.click();
   await new Promise(r => setTimeout(r, 0));
 
-  const cancel = doc
-    .getElementById('downloadsJanitorMount')
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Cancel')[0];
+  const cancel = surface(doc).all(node => node.tagName === 'BUTTON' && node.textContent === 'Cancel')[0];
   assert.ok(cancel, 'expected a cancel control');
   cancel.click();
 
@@ -1737,7 +1798,7 @@ test('the panel finds its workspace without window.currentWorkspaceId', async ()
     requested.some(url => url.includes('/api/workspaces/ws-42/file-janitor')),
     'the panel must derive its workspace from the URL, not give up: ' + JSON.stringify(requested)
   );
-  const host = doc.getElementById('downloadsJanitorMount');
+  const host = surface(doc);
   assert.equal(host.hidden, false, 'the setup card must actually be shown');
   assert.match(text(doc), /Setup required|Use this folder/);
 });
@@ -1858,7 +1919,7 @@ function withoutSetupWizard() {
 test('a wizard-enabled workspace shows a setup entry, not a second folder chooser', () => {
   const doc = setup();
   withSetupWizard({ applicable: true, state: 'in_progress' });
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
 
   // The retired card's controls are gone: one authoritative setup surface.
   assert.equal(doc.getElementById('downloadsJanitorPath'), null);
@@ -1871,7 +1932,7 @@ test('a wizard-enabled workspace shows a setup entry, not a second folder choose
 test('a regressed workspace is offered repair, in the wizard', () => {
   const doc = setup();
   withSetupWizard({ applicable: true, state: 'needs_attention' });
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   assert.match(text(doc), /Repair setup/);
   assert.match(text(doc), /stopped working/);
   withoutSetupWizard();
@@ -1880,7 +1941,7 @@ test('a regressed workspace is offered repair, in the wizard', () => {
 test('a workspace whose blueprint has no wizard keeps the original setup card', () => {
   const doc = setup();
   withoutSetupWizard();
-  panel.render(setupRequiredStatus);
+  openConsole(setupRequiredStatus);
   // Nobody loses their way to set up because their workspace predates the
   // wizard.
   assert.ok(doc.getElementById('downloadsJanitorPath'), 'the legacy card still renders');
@@ -1966,7 +2027,7 @@ test('another blueprint’s directory step is not drawn by this module', () => {
 test('unattended watching cannot be resumed from the panel before setup approves it', () => {
   const doc = setup();
   withSetupWizard({ applicable: true, state: 'in_progress' });
-  panel.render({
+  openConsole({
     applies: true,
     settings: {
       workspace_id: 'ws-1',
@@ -1992,7 +2053,7 @@ test('unattended watching cannot be resumed from the panel before setup approves
 test('once setup is ready the panel resumes watching normally', () => {
   const doc = setup();
   withSetupWizard({ applicable: true, state: 'ready' });
-  panel.render({
+  openConsole({
     applies: true,
     settings: {
       workspace_id: 'ws-1',
@@ -2007,4 +2068,372 @@ test('once setup is ready the panel resumes watching normally', () => {
   });
   assert.equal(doc.getElementById('downloadsJanitorPause').textContent, 'Resume watching');
   withoutSetupWizard();
+});
+
+// ---------------------------------------------------------------- the console
+//
+// One console, reached from every entry point. These cover the shell itself:
+// which face it opens on, that there is only ever one of it, how it is
+// addressed, and how it gives focus back.
+
+// withLocation gives the module a URL and a history to write to. The fake
+// records what was pushed so Back can be replayed, which is the only way to
+// test that Back closes the console instead of leaving the workspace.
+function withLocation(search = '') {
+  const entries = [{ search }];
+  let index = 0;
+  globalThis.window.location = {
+    get search() {
+      return entries[index].search;
+    },
+    get href() {
+      return 'https://ori.test/workspaces/ws-1' + entries[index].search;
+    },
+    pathname: '/workspaces/ws-1'
+  };
+  globalThis.window.history = {
+    pushState: (_state, _title, url) => {
+      entries.length = index + 1;
+      entries.push({ search: new URL(url).search });
+      index = entries.length - 1;
+    },
+    replaceState: (_state, _title, url) => {
+      entries[index] = { search: new URL(url).search };
+    }
+  };
+  return {
+    search: () => entries[index].search,
+    back: () => {
+      if (index > 0) index -= 1;
+      panel._applyUrlState({ source: 'popstate' });
+    }
+  };
+}
+
+function clearLocation() {
+  delete globalThis.window.location;
+  delete globalThis.window.history;
+}
+
+test('an unconfigured install opens straight into setup, with no empty tabs', () => {
+  const doc = setup();
+  openConsole(setupRequiredStatus);
+  assert.equal(panel.isOpen(), true);
+  // The real folder chooser, not a placeholder.
+  assert.ok(doc.getElementById('downloadsJanitorPath'), 'expected the real setup surface');
+  // Review/History/Settings would all be empty before there is a folder.
+  const tabs = surface(doc).all(n => n.getAttribute('role') === 'tab');
+  assert.equal(tabs.length, 0, 'tabs must not appear before setup finishes');
+});
+
+test('a configured install opens on Review when files are waiting', () => {
+  const doc = setup();
+  renderReview(doc);
+  assert.equal(panel.activeTab(), 'review');
+  const tabs = surface(doc).all(n => n.getAttribute('role') === 'tab');
+  assert.deepEqual(
+    tabs.map(t => t.getAttribute('data-fj-tab')),
+    ['review', 'history', 'settings']
+  );
+});
+
+// Work waiting for a decision outranks whatever was last looked at. A restored
+// Settings tab would hide the one thing that actually needs the user.
+test('pending files outrank a remembered tab', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._selectTab('settings');
+  assert.equal(panel.activeTab(), 'settings');
+
+  panel.close();
+  renderReview(doc);
+  assert.equal(panel.activeTab(), 'review');
+});
+
+test('with nothing waiting, the remembered tab is restored', () => {
+  setup();
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('history');
+  panel.close();
+
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  assert.equal(panel.activeTab(), 'history');
+});
+
+test('an unknown tab falls back to Review rather than rendering nothing', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel.open({ source: 'test', tab: 'billing' });
+  assert.equal(panel.activeTab(), 'review');
+  assert.ok(surface(doc).textContent.length > 0, 'a bad tab must not empty the console');
+});
+
+test('opening twice leaves exactly one console', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel.open({ source: 'map-station' });
+  panel.open({ source: 'workspace-details' });
+  const dialogs = doc.getElementById('fileJanitorConsole').all(n => n.getAttribute('role') === 'dialog');
+  assert.equal(dialogs.length, 1, 'every entry point shares one console');
+});
+
+test('the console is a labelled modal dialog', () => {
+  const doc = setup();
+  renderReview(doc);
+  const dialog = surface(doc).all(n => n.getAttribute('role') === 'dialog')[0];
+  assert.equal(dialog.getAttribute('aria-modal'), 'true');
+  // The accessible name is the visible title, not a separate string that could
+  // drift away from what is on screen.
+  const labelledBy = dialog.getAttribute('aria-labelledby');
+  assert.equal(doc.getElementById(labelledBy).textContent, 'File Janitor');
+});
+
+test('closing returns focus to the control that opened it', () => {
+  const doc = setup();
+  const station = new FakeElement('button');
+  station.id = 'the-map-station';
+  doc.body.appendChild(station);
+
+  renderReview(doc);
+  panel.open({ source: 'map-station', trigger: station });
+  panel.close();
+  assert.equal(doc.activeElement, station, 'focus must go back where the user left it');
+});
+
+test('opening puts focus inside the console', () => {
+  const doc = setup();
+  renderReview(doc);
+  assert.equal(doc.activeElement.getAttribute('data-fj-console-close'), '');
+});
+
+test('a deep link opens the console on the requested tab', () => {
+  setup();
+  withLocation('?panel=file-janitor&tab=history');
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel._applyUrlState({ source: 'deep-link' });
+
+  assert.equal(panel.isOpen(), true);
+  assert.equal(panel.activeTab(), 'history');
+  clearLocation();
+});
+
+test('a deep link with an unknown tab still opens the console', () => {
+  setup();
+  withLocation('?panel=file-janitor&tab=../../etc/passwd');
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  panel._applyUrlState({ source: 'deep-link' });
+
+  assert.equal(panel.isOpen(), true, 'a bad value must not stop the workspace loading');
+  assert.equal(panel.activeTab(), 'review');
+  assert.equal(panel.focusedItem(), '');
+  clearLocation();
+});
+
+test('opening and closing touch only File Janitor URL parameters', () => {
+  const doc = setup();
+  const url = withLocation('?view=map&task=t-9');
+  renderReview(doc);
+  panel.open({ source: 'map-station' });
+
+  assert.match(url.search(), /panel=file-janitor/);
+  assert.match(url.search(), /view=map/, 'unrelated state must survive opening');
+  assert.match(url.search(), /task=t-9/);
+
+  panel.close();
+  assert.doesNotMatch(url.search(), /panel=/);
+  assert.doesNotMatch(url.search(), /tab=/);
+  assert.match(url.search(), /view=map/, 'unrelated state must survive closing');
+  assert.match(url.search(), /task=t-9/);
+  clearLocation();
+});
+
+test('Back closes a deep-linked console without leaving the workspace', () => {
+  const doc = setup();
+  const url = withLocation('?view=map');
+  renderReview(doc);
+  panel.open({ source: 'map-station' });
+  assert.equal(panel.isOpen(), true);
+
+  url.back();
+  assert.equal(panel.isOpen(), false, 'Back must close the console');
+  assert.match(url.search(), /view=map/, 'and must not navigate out of the workspace');
+  clearLocation();
+});
+
+test('the console re-reads status on the way in', async () => {
+  setup();
+  panel.render(statusFixture());
+
+  let asked = 0;
+  globalThis.fetch = async url => {
+    if (String(url).endsWith('/file-janitor')) asked += 1;
+    return { ok: true, json: async () => ({ status: statusFixture(), batch: null, candidates: [] }) };
+  };
+  panel.open({ source: 'map-station' });
+  await settle();
+  assert.ok(asked > 0, 'a console opened from the Map may be showing minutes-old state');
+});
+
+test('subscribers hear about state changes', () => {
+  setup();
+  const seen = [];
+  const unsubscribe = panel.subscribe(state => seen.push(state));
+  panel.render(statusFixture());
+  assert.ok(seen.length > 0, 'the station and the card update from one signal');
+  assert.equal(seen[seen.length - 1].applies, true);
+
+  unsubscribe();
+  const before = seen.length;
+  panel.render(statusFixture());
+  assert.equal(seen.length, before, 'unsubscribing must actually detach');
+});
+
+// A listener that throws is a bug in that listener, not a reason for the
+// console to stop working.
+test('a broken subscriber cannot take the console down', () => {
+  setup();
+  let reached = 0;
+  panel.subscribe(() => {
+    throw new Error('boom');
+  });
+  panel.subscribe(() => {
+    reached += 1;
+  });
+  panel.render(statusFixture());
+  assert.equal(reached, 1);
+});
+
+test('station state follows the required priority order', () => {
+  setup();
+
+  // Needs attention outranks everything, including files waiting.
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(
+    statusFixture({
+      readiness: {
+        state: 'needs_attention',
+        checks: [{ component: 'directory_access', status: 'failed', message: 'Folder is missing.' }]
+      }
+    })
+  );
+  assert.equal(panel.stationState().value, 'Needs attention');
+
+  // Setup outranks a pending count, which can survive a folder being revoked.
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render({
+    applies: true,
+    settings: { filing_root_name: 'Filed' },
+    readiness: { state: 'setup_required', checks: [] }
+  });
+  assert.equal(panel.stationState().value, 'Setup needed');
+
+  // Files waiting outrank both Paused and Watching.
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+  assert.equal(panel.stationState().value, '2 files ready for review');
+
+  // Paused outranks Watching.
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+  assert.equal(panel.stationState().value, 'Paused');
+
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+  assert.equal(panel.stationState().value, 'Watching');
+});
+
+test('Workspace Details carries no review table and no settings form', () => {
+  const doc = setup();
+  renderReview(doc);
+  const card = doc.getElementById('downloadsJanitorMount');
+
+  // The compact card answers "is anything waiting?" and offers a way in.
+  assert.match(card.textContent, /File Janitor/);
+  assert.match(card.textContent, /2 files waiting for review/);
+  assert.ok(doc.getElementById('fileJanitorCardOpen'), 'expected a way into the console');
+
+  // And nothing else. A hidden second copy of the review table or the settings
+  // form is exactly what this split removes: two surfaces acting on the same
+  // files, one of them stale and unseen.
+  assert.equal(card.all(n => n.tagName === 'TABLE').length, 0);
+  assert.equal(card.all(n => String(n.className).startsWith('dj-row-item')).length, 0);
+  assert.equal(card.all(n => n.id === 'downloadsJanitorSettingsHost').length, 0);
+  assert.equal(card.all(n => n.id === 'downloadsJanitorBatch').length, 0);
+  assert.equal(card.all(n => n.id === 'downloadsJanitorHistoryHost').length, 0);
+});
+
+test('the console header carries the real scan and pause controls', () => {
+  const doc = setup();
+  renderReview(doc);
+  const header = surface(doc);
+  assert.ok(header.all(n => n.id === 'downloadsJanitorScan')[0], 'expected a real Scan now');
+  assert.ok(header.all(n => n.id === 'downloadsJanitorPause')[0], 'expected a real Pause');
+  assert.match(surface(doc).textContent, /2 files ready for review/);
+});
+
+test('before setup the header offers no scan or pause', () => {
+  const doc = setup();
+  openConsole(setupRequiredStatus);
+  // Neither applies to a folder that has not been chosen; offering them would
+  // suggest File Janitor is already doing something.
+  assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorScan').length, 0);
+  assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorPause').length, 0);
+  assert.ok(surface(doc).all(n => n.getAttribute('data-fj-console-close') === '')[0]);
+});
+
+test('Action Center findings open the same console on the requested tab', () => {
+  setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+
+  panel.open({ source: 'action-center', tab: 'history', item: 'act-7' });
+  assert.equal(panel.isOpen(), true);
+  assert.equal(panel.activeTab(), 'history');
+  assert.equal(panel.focusedItem(), 'act-7');
+});
+
+test('a stale Action Center item cannot open an invalid tab', () => {
+  setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel.render(statusFixture());
+
+  panel.open({ source: 'action-center', tab: 'nonsense', item: 'act-7' });
+  assert.equal(panel.activeTab(), 'review');
+});
+
+test('DownloadsJanitorPanel is the same object, not a second controller', () => {
+  assert.equal(globalThis.window.DownloadsJanitorPanel, globalThis.window.FileJanitorConsole);
+});
+
+test('a deep-linked candidate is focused in the review table', () => {
+  const doc = setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  panel.open({ source: 'action-center', tab: 'review', item: 'c1' });
+
+  const row = doc.getElementById('fileJanitorLinkedRow');
+  assert.ok(row, 'expected the named row to be marked');
+  assert.equal(row.getAttribute('data-candidate-id'), 'c1');
+  assert.equal(doc.activeElement, row, 'the row a notification named must be where focus lands');
+});
+
+// A finding can outlive the file it was about: it may have been filed,
+// skipped, or scanned away. That is a normal outcome, not an error.
+test('a deep link to a candidate that is gone still opens a working tab', () => {
+  const doc = setup();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.render(statusFixture());
+  panel.open({ source: 'action-center', tab: 'review', item: 'c-vanished' });
+
+  assert.equal(panel.isOpen(), true);
+  assert.equal(panel.activeTab(), 'review');
+  assert.equal(doc.getElementById('fileJanitorLinkedRow'), null);
+  // Focus still lands inside the console rather than being stranded.
+  assert.equal(doc.activeElement.getAttribute('data-fj-console-close'), '');
+  assert.equal(doc.getElementById('downloadsJanitorError').hidden, true, 'not an error');
 });

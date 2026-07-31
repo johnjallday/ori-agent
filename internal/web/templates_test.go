@@ -207,3 +207,66 @@ func TestRenderAgentsCodexDetailPage(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkspaceDetailFileJanitorContract pins the split between the compact
+// card and the console (FR-100, FR-114, FR-115).
+//
+// Workspace Details carries ONE mount, which JavaScript fills with a summary.
+// The review table, the settings form, and history belong to the console and
+// exist nowhere else on the page. A second copy in the template would be a
+// surface acting on the user's files while sitting stale and unseen behind the
+// modal — which is precisely what a template can reintroduce silently, because
+// no JavaScript test would notice markup it never rendered.
+func TestWorkspaceDetailFileJanitorContract(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	html, err := r.RenderTemplate("workspace-detail", TemplateData{
+		Title: "Workspace - Ori Agent",
+		Extra: map[string]any{"WorkspaceID": "ws-1"},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(workspace-detail) failed: %v", err)
+	}
+
+	if got := strings.Count(html, `id="downloadsJanitorMount"`); got != 1 {
+		t.Errorf("File Janitor mount count = %d, want exactly 1", got)
+	}
+
+	// The console builds itself on <body> at open time, so the template must
+	// not pre-place a host that could be styled, focused, or found while empty.
+	if strings.Contains(html, `id="fileJanitorConsole"`) {
+		t.Error("the console host must be created by the controller, not the template")
+	}
+
+	// Nothing in the template may pre-render the surfaces the console owns.
+	for _, forbidden := range []string{
+		`id="downloadsJanitorBatch"`,
+		`id="downloadsJanitorSettingsHost"`,
+		`id="downloadsJanitorHistoryHost"`,
+		`id="downloadsJanitorConfirmHost"`,
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("workspace-detail must not contain %s; it belongs to the console", forbidden)
+		}
+	}
+
+	// The controller and the one overlay coordinator are both loaded. Without
+	// the coordinator the console would open with no single-modal rule and no
+	// inert background.
+	for _, want := range []string{
+		`/js/modules/file-janitor-console.js`,
+		`/js/modules/workspace-overlay-coordinator.js`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("workspace-detail must load %s", want)
+		}
+	}
+
+	// The retired module name must not linger in a second script tag.
+	if strings.Contains(html, "downloads-janitor.js") {
+		t.Error("downloads-janitor.js was renamed; a stale script tag would 404")
+	}
+}

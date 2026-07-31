@@ -3878,10 +3878,45 @@ test('an install this build cannot resolve renders no station', () => {
   }
 });
 
-test('pressing the File Janitor station opens its registered surface', () => {
+test('pressing the File Janitor station opens the console in place', () => {
   const originalWindow = globalThis.window;
   try {
-    let opened = 0;
+    const opens = [];
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
+    });
+    const trigger = { id: 'the-station-button' };
+    globalThis.window = {
+      WorkspaceCapabilities: {
+        find: () => installedFileJanitor({ state: 'setup_needed', detail: 'Choose a folder.' }),
+        onOpen: () => false
+      },
+      FileJanitorConsole: {
+        open: options => opens.push(options)
+      }
+    };
+    commandView.runHQStationAction('file-janitor', trigger);
+    assert.equal(opens.length, 1, 'the station must lead somewhere, not just report state');
+    assert.equal(
+      opens[0].trigger,
+      trigger,
+      'the console must know which control opened it so focus can return there'
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// The station used to fall back to DownloadsJanitorPanel.focusSetup(), which
+// scrolled the page to an inline mount. From the Map that mount is not on
+// screen, so the press scrolled a surface the user could not see and appeared
+// to do nothing. The behavior is gone, not merely superseded.
+test('the File Janitor station never scrolls to an inline mount', () => {
+  const originalWindow = globalThis.window;
+  try {
+    let focusedInline = 0;
+    let openedViaCatalog = 0;
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, {
       page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
@@ -3890,42 +3925,72 @@ test('pressing the File Janitor station opens its registered surface', () => {
       WorkspaceCapabilities: {
         find: () => installedFileJanitor({ state: 'setup_needed', detail: 'Choose a folder.' }),
         onOpen: id => {
-          if (id === 'file-janitor') {
-            opened += 1;
-            return true;
-          }
-          return false;
+          if (id === 'file-janitor') openedViaCatalog += 1;
+          return true;
+        }
+      },
+      // The old inline panel, still present. It must not be reached.
+      DownloadsJanitorPanel: {
+        focusSetup: () => {
+          focusedInline += 1;
         }
       }
     };
     commandView.runHQStationAction('file-janitor', null);
-    assert.equal(opened, 1, 'the station must lead somewhere, not just report state');
+    assert.equal(focusedInline, 0, 'the scroll-to-inline behavior must be gone');
+    assert.equal(openedViaCatalog, 1, 'the station must never be a dead end');
   } finally {
     globalThis.window = originalWindow;
   }
 });
 
-test('the File Janitor station falls back to the setup panel when nothing is registered', () => {
+// The catalog is fetched once per page load. The console re-reads on every
+// scan, approval, and pause, so it — not the snapshot — is what can say "3
+// files ready for review" while the user is looking at the map.
+test('the File Janitor station shows live console state over the catalog snapshot', () => {
   const originalWindow = globalThis.window;
   try {
-    let focused = 0;
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, {
       page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
     });
     globalThis.window = {
       WorkspaceCapabilities: {
-        find: () => installedFileJanitor({ state: 'setup_needed', detail: 'Choose a folder.' }),
-        onOpen: () => false
+        find: () => installedFileJanitor({ state: 'ready', detail: 'Watching' })
       },
-      DownloadsJanitorPanel: {
-        focusSetup: () => {
-          focused += 1;
-        }
+      FileJanitorConsole: {
+        stationState: () => ({
+          applies: true,
+          value: '3 files ready for review',
+          description: 'files are waiting for your decision',
+          tone: 'attention'
+        })
       }
     };
-    commandView.runHQStationAction('file-janitor', null);
-    assert.equal(focused, 1, 'the station must never be a dead end');
+    const station = commandView.workspaceStationRegistry()[0];
+    assert.equal(station.state().value, '3 files ready for review');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// With the console module absent the snapshot is all there is; the station
+// still reports something rather than rendering blank.
+test('the File Janitor station falls back to the catalog snapshot', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
+    });
+    globalThis.window = {
+      WorkspaceCapabilities: {
+        find: () => installedFileJanitor({ state: 'needs_attention', detail: 'Folder missing.' })
+      }
+    };
+    const station = commandView.workspaceStationRegistry()[0];
+    assert.equal(station.state().value, 'Folder missing.');
+    assert.equal(station.state().tone, 'degraded');
   } finally {
     globalThis.window = originalWindow;
   }

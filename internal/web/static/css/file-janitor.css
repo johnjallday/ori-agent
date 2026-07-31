@@ -1,5 +1,5 @@
-/* downloads-janitor.css — the Downloads Janitor panel on the workspace detail
-   page (setup card, readiness readout).
+/* file-janitor.css — the File Janitor console and the compact card that opens
+   it from Workspace Details.
 
    State is never carried by color alone: every readiness row also renders a
    text mark and a status word. */
@@ -720,4 +720,239 @@
   margin: 0.6rem 0 0;
   font-size: 0.8rem;
   color: var(--text-primary, #e8e8e8);
+}
+
+/* ------------------------------------------------------------------ console
+
+   The console opens over whatever the user was looking at — usually the Map.
+   It is wide and near-full-screen because reviewing a batch is a table task,
+   but it deliberately stops short of the edges: the sliver of backdrop is what
+   tells the user the Map is still underneath and that closing returns there
+   (FR-101, FR-102). */
+
+.fj-console-host {
+  position: fixed;
+  inset: 0;
+  z-index: var(--wsx-layer-modal, 1010);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(0.75rem, 3vh, 2.5rem);
+}
+
+.fj-console-host[hidden] {
+  display: none;
+}
+
+.fj-console-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--wsx-layer-modal-backdrop, 1000);
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.fj-console {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #2f2f2f);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+/* The header carries the title, the folder, the status, and the actions that
+   apply everywhere (Scan now, Pause, Close). It stays put while the body
+   scrolls, so the way out is always reachable — including at the bottom of a
+   400-row batch (FR-103, FR-121). */
+.fj-console-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-start;
+  padding: 1rem 1.25rem 0.75rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border-bottom: 1px solid var(--border-color, #2f2f2f);
+}
+
+.fj-console-heading {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.fj-console-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+/* A folder path is long and arbitrary. It wraps at any character rather than
+   forcing the dialog wider than the viewport. */
+.fj-console-folder {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.fj-console-status {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.fj-console-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.fj-console-tab {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+}
+
+/* The selected tab is marked by weight and an underline as well as color, so
+   which one is active does not depend on seeing a hue difference. */
+.fj-console-tab.is-active {
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+  border-bottom-color: var(--accent-color, #6ea8fe);
+}
+
+.fj-console-tab-count {
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--bg-primary, #101010);
+  background: var(--accent-color, #6ea8fe);
+  border-radius: 999px;
+}
+
+/* Scrolling is contained here rather than on the page. overscroll-behavior
+   stops a flick at the end of the batch from scrolling the Map underneath
+   (FR-123). */
+.fj-console-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 1rem 1.25rem 1.25rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Keyboard focus is visible on every control in the console, including the
+   tabs, and is never removed in favour of the hover styling (FR-118). */
+.fj-console :focus-visible,
+.fj-card :focus-visible {
+  outline: 2px solid var(--accent-color, #6ea8fe);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .fj-console-host {
+    padding: 0;
+  }
+
+  .fj-console {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* On a small screen the actions need the full width rather than being
+     squeezed beside a wrapping title. */
+  .fj-console-actions {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fj-console,
+  .fj-console-backdrop {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------- compact card
+
+   Workspace Details carries a summary and a way in — never the review table.
+   Its job is to answer "is anything waiting?" at a glance (FR-114). */
+
+.fj-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #2f2f2f);
+  border-radius: 10px;
+}
+
+.fj-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.fj-card-heading {
+  min-width: 0;
+}
+
+.fj-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-card-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.fj-card-stats {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }

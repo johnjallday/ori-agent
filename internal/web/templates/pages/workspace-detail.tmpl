@@ -33,10 +33,16 @@
           .workspace-email-connect-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }
           .workspace-email-connect-sub { font-size: 0.8rem; margin: 0.15rem 0 0; color: var(--text-secondary, #9aa0a6); }
         </style>
-        <!-- Downloads Janitor panel. Populated by downloads-janitor.js, which
-             mounts it only when the server reports this workspace is a
-             Downloads Janitor workspace. Placed beside the follow-up mount so
-             a workspace still awaiting setup says so above the fold. -->
+        <!-- File Janitor compact card. Populated by file-janitor-console.js,
+             which mounts it only when the server reports the capability is
+             installed here. Placed beside the follow-up mount so a workspace
+             still awaiting setup says so above the fold.
+
+             This is a SUMMARY only: status, managed folder, what is waiting,
+             and a way in. The review table, the settings form, and history live
+             in the console this card opens and exist nowhere else on the page,
+             so there is no second copy to fall out of date or to act on
+             unnoticed (FR-100, FR-114). The console mounts itself on <body>. -->
         <div id="downloadsJanitorMount" class="downloads-janitor-mount" hidden></div>
         <!-- Shared blueprint Setup Wizard: status banner + dialog. Mounted here,
              outside #workspaceCommandView, so the banner is visible in both
@@ -8818,7 +8824,12 @@
   <script defer src="/js/modules/reaper-setup-card.js"></script>
   <script defer src="/js/modules/reaper-readiness-panel.js"></script>
   <script defer src="/js/modules/setup-wizard.js"></script>
-  <script defer src="/js/modules/downloads-janitor.js"></script>
+  <!-- The one overlay coordinator for this page. It is a module, so it runs
+       after the deferred classic scripts below; that is fine because they read
+       window.workspaceOverlayCoordinator lazily, when the user opens something,
+       never at load time. -->
+  <script type="module" src="/js/modules/workspace-overlay-coordinator.js"></script>
+  <script defer src="/js/modules/file-janitor-console.js"></script>
   <script defer src="/js/modules/workspace-capabilities.js"></script>
   <script defer src="/js/modules/calendar-ops-setup.js"></script>
   <script defer src="/js/modules/calendar-console.js"></script>

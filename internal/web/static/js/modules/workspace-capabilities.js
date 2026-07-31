@@ -286,19 +286,21 @@
     renderInto(catalogHost());
   }
 
-  function onOpen(capabilityId) {
+  // trigger is the element the user activated, forwarded so the capability's
+  // surface can return focus to it when it closes. The catalog does not know
+  // what a capability opens, only who asked (FR-120).
+  function onOpen(capabilityId, trigger) {
     const handler = openHandlers[String(capabilityId || '').toLowerCase()];
     if (typeof handler === 'function') {
-      handler();
+      handler(trigger);
       return true;
     }
     return false;
   }
 
   // Open handlers are registered by whichever surface owns a capability's
-  // primary experience. File Janitor registers the real setup renderer until
-  // its shared console exists, so the post-install action is never a dead
-  // button.
+  // primary experience. File Janitor registers its console, so the
+  // post-install action and the catalog's Open button are never dead buttons.
   const openHandlers = Object.create(null);
 
   function registerOpenHandler(capabilityId, handler) {
@@ -327,14 +329,14 @@
         }
         // Offer the capability's own surface immediately after a successful
         // install (FR-22) rather than leaving the user to find it.
-        onOpen(id);
+        onOpen(id, installBtn);
         return;
       }
 
       const openBtn = target.closest('[data-capability-open]');
       if (openBtn) {
         event.preventDefault();
-        onOpen(openBtn.getAttribute('data-capability-open'));
+        onOpen(openBtn.getAttribute('data-capability-open'), openBtn);
       }
     });
   }

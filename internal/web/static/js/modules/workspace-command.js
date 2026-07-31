@@ -5681,20 +5681,41 @@ export class WorkspaceCommandView {
 
     const status = item.status || {};
     const folder = status.folder_display_name || '';
+    const janitorConsole = typeof window === 'undefined' ? null : window.FileJanitorConsole;
+
+    // State prefers the console's live derivation over the catalog snapshot.
+    // The catalog is fetched once per page load; the console re-reads on every
+    // scan, approval, and pause, so it is the only source that can say "3 files
+    // ready for review" while the user is looking at the map (FR-95, FR-96).
+    const liveState = () => {
+      const derived =
+        janitorConsole && typeof janitorConsole.stationState === 'function'
+          ? janitorConsole.stationState()
+          : null;
+      if (derived && derived.applies) return derived;
+      return {
+        applies: true,
+        value: status.detail || '',
+        description: status.detail || '',
+        tone: status.state === 'needs_attention' ? 'degraded' : ''
+      };
+    };
+
     return [
       {
         key: 'file-janitor',
         label: folder ? 'File Janitor · ' + folder : 'File Janitor',
         icon: 'bi-folder-symlink',
-        state: () => ({
-          applies: true,
-          value: status.detail || '',
-          tone: status.state === 'needs_attention' ? 'warn' : ''
-        }),
-        action: () => {
-          if (typeof catalog.onOpen === 'function' && catalog.onOpen('file-janitor')) return;
-          const janitor = typeof window === 'undefined' ? null : window.DownloadsJanitorPanel;
-          if (janitor && typeof janitor.focusSetup === 'function') janitor.focusSetup();
+        state: liveState,
+        // Activation opens the console in place, over the map. It never
+        // scrolls to or focuses an inline mount: in Map mode that surface is
+        // not on screen, so the press looked like it did nothing (FR-97).
+        action: trigger => {
+          if (janitorConsole && typeof janitorConsole.open === 'function') {
+            janitorConsole.open({ source: 'map-station', trigger });
+            return;
+          }
+          if (typeof catalog.onOpen === 'function') catalog.onOpen('file-janitor', trigger);
         }
       }
     ];
