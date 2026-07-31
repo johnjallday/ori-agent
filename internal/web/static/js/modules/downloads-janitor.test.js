@@ -170,6 +170,75 @@ test('setup card states that content reading is off and separate', () => {
   assert.match(text(doc), /Reading what is inside your files is off/i);
 });
 
+// FR-45: the user is told what kind of folder this is for, so they do not point
+// it at a structured project tree and expect it to be reorganized.
+test('setup card explains it is for an inbox-style folder, top level only', () => {
+  const doc = setup();
+  panel.render(setupRequiredStatus);
+  const body = text(doc);
+  assert.match(body, /inbox-style/i);
+  assert.match(body, /directly in it/i);
+  assert.match(body, /never reorganizes folders inside it/i);
+});
+
+// FR-44/FR-50: only a preset may propose a path. Pre-filling a real folder the
+// user never chose, beside a button that grants access to it, would turn an
+// explicit approval into a default.
+test('setup card proposes no folder when the server suggests none', () => {
+  const doc = setup();
+  panel.render({
+    ...setupRequiredStatus,
+    suggestion: {
+      key: 'file-janitor-root',
+      filing_root_name: 'Filed',
+      daily_scan_local_time: '09:00'
+    }
+  });
+  const input = doc.getElementById('downloadsJanitorPath');
+  assert.equal(input.value, '', 'a generic install must not invent a folder');
+  const confirm = doc.getElementById('downloadsJanitorConfirm');
+  assert.equal(confirm.disabled, true, 'there is nothing to approve yet');
+});
+
+test('the confirm button enables once a folder is supplied', () => {
+  const doc = setup();
+  panel.render({
+    ...setupRequiredStatus,
+    suggestion: {
+      key: 'file-janitor-root',
+      filing_root_name: 'Filed',
+      daily_scan_local_time: '09:00'
+    }
+  });
+  const input = doc.getElementById('downloadsJanitorPath');
+  const confirm = doc.getElementById('downloadsJanitorConfirm');
+  assert.equal(confirm.disabled, true);
+
+  input.value = '/Users/someone/Scans';
+  input.dispatch('input');
+  assert.equal(confirm.disabled, false, 'a supplied folder can be approved');
+
+  input.value = '   ';
+  input.dispatch('input');
+  assert.equal(confirm.disabled, true, 'whitespace is not a folder');
+});
+
+test('a preset suggestion still pre-fills and is immediately approvable', () => {
+  const doc = setup();
+  panel.render(setupRequiredStatus);
+  const input = doc.getElementById('downloadsJanitorPath');
+  assert.equal(input.value, '~/Downloads', 'the Downloads preset still suggests its folder');
+  const confirm = doc.getElementById('downloadsJanitorConfirm');
+  assert.equal(confirm.disabled, false);
+});
+
+test('the setup card is titled File Janitor, not Downloads Janitor', () => {
+  const doc = setup();
+  panel.render(setupRequiredStatus);
+  const title = doc.getElementById('downloadsJanitorTitle');
+  assert.equal(title.textContent, 'File Janitor');
+});
+
 test('the folder input is labelled and described for screen readers', () => {
   const doc = setup();
   panel.render(setupRequiredStatus);

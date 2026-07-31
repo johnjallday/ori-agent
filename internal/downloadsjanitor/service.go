@@ -9,9 +9,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/johnjallday/ori-agent/internal/logger"
 
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
@@ -166,6 +169,17 @@ type Service struct {
 	// workspace out of Ready rather than overstating what is running.
 	automation AutomationStatus
 	now        func() time.Time
+	// claimMu serializes folder claims across workspaces.
+	//
+	// The conflict check reads every other workspace's settings and then writes
+	// this one's, so two setups running at once can both observe an unclaimed
+	// folder and both take it. The window is narrow but reachable — two browser
+	// tabs, or a blueprint setup racing an in-place one — and the result is two
+	// File Janitors proposing and acting on the same files.
+	//
+	// Setup is rare and user-initiated, so serializing the whole claim (check,
+	// grant, persist) costs nothing worth optimizing.
+	claimMu sync.Mutex
 }
 
 // NewService wires the Janitor service to its settings store and the workspace
@@ -412,6 +426,12 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, err
 	}
 
+	// Hold the claim lock across the conflict check AND the write that acts on
+	// its answer. Checking without it would let two concurrent setups each find
+	// the folder unclaimed and both take it.
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+
 	// Refuse a folder another workspace already manages, before anything is
 	// created or granted (FR-49). Checked against the canonical root, so an
 	// alternate spelling or a symlink cannot slip past it.
@@ -547,7 +567,10 @@ func ensureFilingRoot(path string) error {
 	info, err := os.Stat(path)
 	switch {
 	case err == nil && info.IsDir():
-		return nil
+		// Already there — which proves nothing about whether Ori may write into
+		// it. A pre-existing read-only Filed/ is precisely the case MkdirAll
+		// would never surface, so it is probed here too (FR-52).
+		return verifyFilingRootWritable(path)
 	case err == nil:
 		return setupErr(CodeDestinationBlocked, fmt.Sprintf("A file named %q already exists in that folder, so Ori cannot create the folder it files into. Rename or move it, then try again.", filepath.Base(path)), RepairRetry, nil)
 	case !os.IsNotExist(err):
@@ -561,6 +584,40 @@ func ensureFilingRoot(path string) error {
 			return setupErr(CodePermissionDenied, permissionGuidance("that folder"), RepairGrantPermission, err)
 		}
 		return setupErr(CodeDestinationBlocked, "Ori could not create the folder it files into.", RepairRetry, err)
+	}
+	return verifyFilingRootWritable(path)
+}
+
+// verifyFilingRootWritable proves an approved move will actually be able to
+// file something, at the moment the user grants access (FR-52).
+//
+// Existence is not enough: a Filed/ directory that exists but cannot be written
+// to would let setup report Ready and then fail on the user's first approved
+// move — the worst possible time to discover it. The probe writes and removes
+// a single file inside the destination, so it tests the real permission rather
+// than inferring it from mode bits (which say nothing useful when the folder is
+// owned by another user or governed by an ACL).
+//
+// It runs only at setup, not on every readiness poll: repeatedly creating and
+// deleting files in the user's folder to answer a status request would be a
+// side effect nobody asked for.
+func verifyFilingRootWritable(path string) error {
+	probe, err := os.CreateTemp(path, ".ori-write-check-*")
+	if err != nil {
+		if os.IsPermission(err) {
+			return setupErr(CodePermissionDenied, permissionGuidance("the folder Ori files into"), RepairGrantPermission, err)
+		}
+		return setupErr(CodeDestinationBlocked,
+			"Ori cannot write into the folder it files into, so approved moves would fail. Check the folder's permissions and try again.",
+			RepairRetry, err)
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	if err := os.Remove(name); err != nil {
+		// The probe wrote successfully, which is what was being tested. Failing
+		// setup because cleanup did not work would be worse than the stray
+		// zero-byte file it leaves behind, which is logged so it can be found.
+		logger.Warn("File Janitor could not remove its write-check file", logger.Fields{"error": err.Error()})
 	}
 	return nil
 }

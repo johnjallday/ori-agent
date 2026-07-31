@@ -192,8 +192,18 @@ func (s *Service) Relink(automation WatcherLifecycle, req RelinkRequest) (Status
 	//    relink onto a folder another workspace already manages must fail with
 	//    the old setup still intact and still running, rather than leaving this
 	//    workspace paused and unconfigured (FR-49, FR-56).
+	//
+	//    Relink has the same check-then-write shape as setup, so it takes the
+	//    same claim lock: without it a relink and a setup racing for the same
+	//    folder would both see it free. The lock is released before the final
+	//    ConfirmSetup below, which re-acquires it — the reservation is only
+	//    needed while deciding, and holding it across the teardown would block
+	//    unrelated workspaces for the duration.
 	if candidate, err := resolveSetupRoot(req.Path); err == nil {
-		if err := s.ensureRootAvailable(workspaceID, candidate); err != nil {
+		s.claimMu.Lock()
+		err := s.ensureRootAvailable(workspaceID, candidate)
+		s.claimMu.Unlock()
+		if err != nil {
 			return Status{}, err
 		}
 	}

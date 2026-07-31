@@ -315,8 +315,12 @@ func (a *Automation) runOnce(workspaceID string, source ScanSource) {
 
 	batch, created, err := a.scan(workspaceID, source)
 	if err != nil {
+		// "scan_source" rather than "source": this is what triggered the scan
+		// (watcher, daily catch-up, manual), never a file. The redaction guard
+		// bans the ambiguous spelling precisely so a future field holding an
+		// actual source path cannot slip in under it.
 		logger.Warn("File Janitor scan failed", logger.Fields{
-			"workspace_id": workspaceID, "source": source, "error": err,
+			"workspace_id": workspaceID, "scan_source": source, "error": err,
 		})
 		a.service.reportScanFailure(workspaceID, err)
 		return

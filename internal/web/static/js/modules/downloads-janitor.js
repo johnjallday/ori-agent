@@ -23,6 +23,10 @@
 
   const MOUNT_ID = 'downloadsJanitorMount';
 
+  // Set by renderSetupCard so the folder picker can re-enable the confirm
+  // button after writing a path straight into the input.
+  let syncSetupConfirmEnabled = null;
+
   let workspaceId = '';
   let busy = false;
   let lastStatus = null;
@@ -228,8 +232,12 @@
   function renderSetupCard(host, status) {
     const suggestion = status.suggestion || {};
     const settings = status.settings || {};
-    const label = suggestion.label || 'Downloads folder';
-    const suggestedPath = suggestion.suggested_path || '~/Downloads';
+    const label = suggestion.label || 'Folder to tidy';
+    // Only a preset may pre-fill a path. A generic in-place install starts
+    // empty rather than proposing ~/Downloads: pre-filling a real folder the
+    // user never chose, next to a button that grants access to it, turns an
+    // explicit approval into a default (FR-44, FR-50).
+    const suggestedPath = suggestion.suggested_path || '';
 
     const card = el('section', 'dj-card');
     card.setAttribute('role', 'group');
@@ -237,11 +245,19 @@
 
     const head = el('div', 'dj-head');
     const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'Downloads Janitor');
+    const title = el('h2', 'dj-title', 'File Janitor');
     title.id = 'downloadsJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
       el('p', 'dj-sub', 'Choose the folder to tidy. Nothing is scanned or moved until you do.')
+    );
+    heading.appendChild(
+      el(
+        'p',
+        'dj-sub dj-sub-muted',
+        'Best for an inbox-style folder whose loose files pile up — Downloads, Desktop, Scans, an upload drop. ' +
+          'Ori looks only at the files sitting directly in it, and never reorganizes folders inside it.'
+      )
     );
     head.appendChild(heading);
     head.appendChild(stateBadge('setup_required'));
@@ -256,6 +272,7 @@
     input.setAttribute('type', 'text');
     input.setAttribute('spellcheck', 'false');
     input.setAttribute('aria-describedby', 'downloadsJanitorDisclosure');
+    input.setAttribute('placeholder', 'Choose a folder, or type its path');
     input.value = suggestedPath;
     const row = el('div', 'dj-field-row');
     row.appendChild(input);
@@ -284,6 +301,18 @@
       void confirmSetup(chosen ? chosen.value : '');
     });
     confirm.id = 'downloadsJanitorConfirm';
+    // The grant needs a folder AND this explicit press. Browsing or typing a
+    // path selects nothing on its own (FR-50), and with no pre-filled path
+    // there is nothing to approve until the user supplies one.
+    const syncConfirmEnabled = () => {
+      confirm.disabled = String(input.value || '').trim() === '';
+    };
+    syncConfirmEnabled();
+    input.addEventListener('input', syncConfirmEnabled);
+    // The folder picker writes input.value directly, which fires no input
+    // event, so browse() re-syncs through this rather than leaving the button
+    // disabled after a successful pick.
+    syncSetupConfirmEnabled = syncConfirmEnabled;
     actions.appendChild(confirm);
     card.appendChild(actions);
 
@@ -1735,6 +1764,7 @@
       if (result.selected && result.path) {
         const input = document.getElementById('downloadsJanitorPath');
         if (input) input.value = result.path;
+        if (typeof syncSetupConfirmEnabled === 'function') syncSetupConfirmEnabled();
       }
     } catch (error) {
       showError(error.message || 'Could not open the folder picker.');
