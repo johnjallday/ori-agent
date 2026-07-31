@@ -383,7 +383,14 @@ func assertMode(t *testing.T, path string, want os.FileMode) {
 
 func shortSocketDir(t *testing.T) string {
 	t.Helper()
-	directory, err := os.MkdirTemp("/private/tmp", "hwi-")
+	// Darwin needs a short Unix-socket path, while Linux and Windows runners do
+	// not expose macOS's /private/tmp alias. Prefer it when present and fall
+	// back to the portable process temp directory for cross-platform tests.
+	parent := os.TempDir()
+	if _, err := os.Stat("/private/tmp"); err == nil {
+		parent = "/private/tmp"
+	}
+	directory, err := os.MkdirTemp(parent, "hwi-")
 	if err != nil {
 		t.Fatal(err)
 	}
