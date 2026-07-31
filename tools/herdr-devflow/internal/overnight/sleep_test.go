@@ -60,6 +60,7 @@ type fakePower struct {
 	assertionID     string
 	assertionActive bool
 	assertionErr    error
+	releaseErr      error
 	released        bool
 }
 
@@ -89,6 +90,9 @@ func (f *fakePower) IdleSleepAssertionActive(_ context.Context, id string) bool 
 func (f *fakePower) ReleaseIdleSleepAssertion(_ context.Context, id string) error {
 	if id != f.assertionID {
 		return errors.New("unknown assertion")
+	}
+	if f.releaseErr != nil {
+		return f.releaseErr
 	}
 	f.assertionActive = false
 	f.released = true
@@ -179,6 +183,29 @@ func TestStayAwakeVerifiesRunOwnedAssertionWithoutWakeOrSleep(t *testing.T) {
 	}
 	if _, err := h.supervisor.ReleaseStayAwake(context.Background(), run.ID); err != nil || !power.released {
 		t.Fatalf("release stay-awake assertion err=%v released=%v", err, power.released)
+	}
+}
+
+func TestStayAwakeReleaseFailureRemainsDurablyUncertain(t *testing.T) {
+	h, _, power, _ := limitedHarness(t)
+	updated, err := h.supervisor.updateRun(context.Background(), h.run.ID, func(run *model.OvernightRun, _ time.Time) {
+		run.WakeMode = model.WakeModeStayAwake
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.run = updated
+	run, err := h.supervisor.EnsureStayAwake(context.Background(), h.run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	power.releaseErr = errors.New("assertion process still present")
+	released, err := h.supervisor.ReleaseStayAwake(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !released.Assertion.Uncertain || !released.Assertion.ReleasedAt.IsZero() {
+		t.Fatalf("release result = %+v, want durable unresolved assertion", released.Assertion)
 	}
 }
 

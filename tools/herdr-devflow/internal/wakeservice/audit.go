@@ -82,6 +82,9 @@ func (s *rootStore) appendAudit(entry auditEntry) error {
 	if len(payload) > maxAuditEntryBytes {
 		return fmt.Errorf("wake audit entry exceeds %d bytes", maxAuditEntryBytes)
 	}
+	// #nosec G304 -- path is a fixed filename below a root-owned, mode-0700 state
+	// directory checked immediately above; the audit file itself is lstat-checked
+	// for regular-file and non-symlink safety before opening.
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open wake audit: %w", err)

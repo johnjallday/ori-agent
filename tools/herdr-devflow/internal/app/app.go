@@ -594,6 +594,15 @@ func (a *App) writeWakeStatus(asJSON bool, operation string, status wakeinstall.
 	if !status.LastSelfTestAt.IsZero() {
 		fmt.Fprintf(a.stdout, "  last_self_test=%s\n", status.LastSelfTestAt.Format(time.RFC3339))
 	}
+	if status.WakeState != nil {
+		state := status.WakeState
+		fmt.Fprintf(a.stdout, "  candidates=%d reconciled_at=%s\n", len(state.Candidates), state.ReconciledAt.Format(time.RFC3339))
+		if state.Programmed != nil {
+			fmt.Fprintf(a.stdout, "  programmed=%s/%s at %s\n", state.Programmed.Source, state.Programmed.Purpose, state.Programmed.WakeAt.Format(time.RFC3339))
+		}
+	} else if status.StateDetail != "" {
+		fmt.Fprintf(a.stdout, "  candidate_inventory=%s\n", status.StateDetail)
+	}
 }
 
 func (a *App) writeWakeDiagnostics(asJSON bool, diagnostics []wakeinstall.Diagnostic) {
@@ -3258,8 +3267,16 @@ func (a *App) advanceOvernightRun(ctx context.Context, supervisor *overnight.Sup
 				return supervisor.EnsureStayAwake(ctx, runID)
 			}
 			if run.Assertion.ID != "" {
-				if _, err := supervisor.ReleaseStayAwake(ctx, runID); err != nil {
+				released, err := supervisor.ReleaseStayAwake(ctx, runID)
+				if err != nil {
 					return model.OvernightRun{}, err
+				}
+				// A failed release is recorded as uncertain.  Do not continue the
+				// run until a later dispatcher pass can prove that this run's
+				// assertion is gone; otherwise the durable record would claim a
+				// completed lifecycle that the host still contradicts.
+				if released.Assertion.Uncertain {
+					return released, nil
 				}
 			}
 		}

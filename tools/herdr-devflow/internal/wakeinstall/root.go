@@ -552,6 +552,8 @@ func atomicWrite(destination string, data []byte, mode os.FileMode, config RootC
 	if err := os.Rename(temporaryPath, destination); err != nil {
 		return err
 	}
+	// #nosec G304 -- parent was derived from a fixed root-only destination and
+	// validated by ensureRootDirectory before the atomic replacement.
 	directory, err := os.Open(parent)
 	if err == nil {
 		_ = directory.Sync()

@@ -209,6 +209,40 @@ func TestInstallRootRefusesNonRootAndSymlinkTargetsBeforeLaunchctl(t *testing.T)
 	}
 }
 
+func TestDoctorReportsCandidateInventoryAndProgrammedWake(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	manager := &Manager{StatusCheck: func(context.Context) (Status, error) {
+		return Status{
+			Supported: true, Installed: true, Running: true, Compatible: true,
+			LastSelfTestAt: now,
+			WakeState: &wakeprotocol.State{
+				ReconciledAt: now,
+				Candidates: []wakeprotocol.Candidate{{
+					ID: "overnight-1", Source: wakeprotocol.SourceOvernight,
+					Purpose: wakeprotocol.PurposeClaudeReset, WakeAt: now.Add(time.Hour),
+				}},
+				Programmed: &wakeprotocol.Programmed{
+					Target: wakeprotocol.Target{ID: "overnight-1", Source: wakeprotocol.SourceOvernight, Purpose: wakeprotocol.PurposeClaudeReset},
+					WakeAt: now.Add(time.Hour), Owner: "com.ori.herdr-wake", EventType: "wakeorpoweron",
+				},
+			},
+		}, nil
+	}}
+	diagnostics, err := manager.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inventory, programmed bool
+	for _, diagnostic := range diagnostics {
+		inventory = inventory || diagnostic.Name == "candidate inventory" && diagnostic.Status == "PASS"
+		programmed = programmed || diagnostic.Name == "programmed wake" && diagnostic.Status == "PASS"
+	}
+	if !inventory || !programmed {
+		t.Fatalf("diagnostics = %#v, want candidate inventory and programmed wake", diagnostics)
+	}
+}
+
 func TestProtocolSelfTestRegistersVerifiesAndLeavesNoWake(t *testing.T) {
 	socket := filepath.Join(shortSocketDir(t), "wake.sock")
 	listener, err := net.Listen("unix", socket)

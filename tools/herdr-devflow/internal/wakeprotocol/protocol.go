@@ -495,7 +495,14 @@ func writeFrame(writer io.Writer, maximum int, value any) error {
 	if len(payload) == 0 || len(payload) > maximum {
 		return invalid(CodePayloadTooLarge, fmt.Sprintf("payload exceeds %d bytes", maximum))
 	}
+	// The wire header is an unsigned 32-bit byte count. Keep this guard
+	// separate from the configurable protocol maximum so a future caller cannot
+	// widen that maximum and silently truncate a frame length.
+	if uint64(len(payload)) > uint64(^uint32(0)) {
+		return invalid(CodePayloadTooLarge, "payload exceeds the protocol frame limit")
+	}
 	var header [4]byte
+	// #nosec G115 -- the explicit uint32 maximum guard above proves this conversion safe.
 	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
 	if _, err := writer.Write(header[:]); err != nil {
 		return fmt.Errorf("write protocol frame header: %w", err)

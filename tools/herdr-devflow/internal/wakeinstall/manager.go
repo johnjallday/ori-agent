@@ -48,16 +48,18 @@ func (p PreparedInstall) Cleanup() error {
 
 // Status is the bounded public lifecycle view.
 type Status struct {
-	Supported       bool      `json:"supported"`
-	Installed       bool      `json:"installed"`
-	Running         bool      `json:"running"`
-	Compatible      bool      `json:"compatible"`
-	AllowedUID      int       `json:"allowed_uid,omitempty"`
-	ProtocolVersion int       `json:"protocol_version,omitempty"`
-	StateVersion    int       `json:"state_version,omitempty"`
-	DaemonBuild     string    `json:"daemon_build,omitempty"`
-	LastSelfTestAt  time.Time `json:"last_self_test_at,omitempty"`
-	Detail          string    `json:"detail,omitempty"`
+	Supported       bool                `json:"supported"`
+	Installed       bool                `json:"installed"`
+	Running         bool                `json:"running"`
+	Compatible      bool                `json:"compatible"`
+	AllowedUID      int                 `json:"allowed_uid,omitempty"`
+	ProtocolVersion int                 `json:"protocol_version,omitempty"`
+	StateVersion    int                 `json:"state_version,omitempty"`
+	DaemonBuild     string              `json:"daemon_build,omitempty"`
+	LastSelfTestAt  time.Time           `json:"last_self_test_at,omitempty"`
+	WakeState       *wakeprotocol.State `json:"wake_state,omitempty"`
+	StateDetail     string              `json:"state_detail,omitempty"`
+	Detail          string              `json:"detail,omitempty"`
 }
 
 // Diagnostic is one stable doctor result.
@@ -130,6 +132,8 @@ func (m *Manager) PrepareInstall(
 	if err != nil {
 		return PreparedInstall{}, fmt.Errorf("create private wake staging directory: %w", err)
 	}
+	// #nosec G302 -- this is a private directory; 0700 is the least privilege
+	// mode that lets the current user build and inspect the staged binary.
 	if err := os.Chmod(staging, 0700); err != nil {
 		_ = os.RemoveAll(staging)
 		return PreparedInstall{}, fmt.Errorf("secure wake staging directory: %w", err)
@@ -269,6 +273,20 @@ func (m *Manager) Status(ctx context.Context) (Status, error) {
 		response.Health.StateVersion == wakeprotocol.StateVersion
 	if status.Compatible {
 		status.Detail = "standalone Herdr wake service is healthy"
+		stateResponse, stateErr := m.request(ctx, wakeprotocol.Request{
+			ProtocolVersion: wakeprotocol.Version,
+			RequestID:       "wake-status-state",
+			HelperBuild:     m.BuildVersion,
+			Operation:       wakeprotocol.OperationList,
+		})
+		if stateErr != nil {
+			status.StateDetail = "the daemon health check passed, but its candidate inventory could not be read"
+		} else if stateResponse.Result != wakeprotocol.ResultSuccess || stateResponse.State == nil {
+			status.StateDetail = "the daemon health check passed, but its candidate inventory was refused: " + boundedStatus(stateResponse.Message)
+		} else {
+			state := *stateResponse.State
+			status.WakeState = &state
+		}
 	} else {
 		status.Detail = "wake service protocol or state version is incompatible"
 	}
@@ -324,6 +342,24 @@ func (m *Manager) Doctor(ctx context.Context) ([]Diagnostic, error) {
 			Name: "self-test", Status: "WARN", Detail: "no successful installer self-test timestamp was reported",
 			Recovery: "wt herd wake install",
 		})
+	}
+	if status.WakeState == nil {
+		diagnostics = append(diagnostics, Diagnostic{
+			Name: "candidate inventory", Status: "WARN", Detail: status.StateDetail,
+			Recovery: "run wt herd wake doctor again; do not rely on an unverified wake while the daemon inventory is unavailable",
+		})
+	} else {
+		state := status.WakeState
+		diagnostics = append(diagnostics, Diagnostic{
+			Name: "candidate inventory", Status: "PASS",
+			Detail: fmt.Sprintf("%d candidates; reconciled %s", len(state.Candidates), state.ReconciledAt.Format(time.RFC3339)),
+		})
+		if state.Programmed != nil {
+			diagnostics = append(diagnostics, Diagnostic{
+				Name: "programmed wake", Status: "PASS",
+				Detail: fmt.Sprintf("%s %s at %s", state.Programmed.Source, state.Programmed.Purpose, state.Programmed.WakeAt.Format(time.RFC3339)),
+			})
+		}
 	}
 	return diagnostics, nil
 }
