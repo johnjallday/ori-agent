@@ -59,17 +59,50 @@ type Dependencies struct {
 	Getuid              func() int
 	LaunchctlRun        func(context.Context, string, ...string) error
 	NewContinuationWake func() (WakeCoordinator, error)
+	NewOvernightWake    func(wakeprotocol.Purpose) (WakeCoordinator, error)
 	IsInteractive       func() bool
 	WakeLifecycle       WakeLifecycle
 }
 
-// WakeCoordinator is the continuation helper's source-scoped view of Ori's
-// single macOS wake owner.
+// WakeCoordinator is the continuation helper's source-scoped view of the
+// standalone Herdr Wake Service.
 type WakeCoordinator interface {
 	RegisterCandidate(context.Context, string, time.Time, string) (wakeclient.Evidence, error)
 	VerifyCandidate(context.Context, string, time.Time) (wakeclient.Evidence, error)
 	CancelCandidate(context.Context, string) (wakeclient.Evidence, error)
 	Owner() wakeclient.OwnerReadiness
+}
+
+// overnightWakeAdapter keeps the Overnight supervisor's legacy-shaped wake
+// boundary while every operation still goes through the typed standalone
+// client. The source/purpose is fixed by NewOvernightWake at construction.
+type overnightWakeAdapter struct{ WakeCoordinator }
+
+func (w overnightWakeAdapter) Register(id string, wakeAt time.Time, detail string) error {
+	_, err := w.RegisterCandidate(context.Background(), id, wakeAt, detail)
+	return err
+}
+
+func (w overnightWakeAdapter) Verify(ctx context.Context, id string, wakeAt time.Time) (time.Time, error) {
+	evidence, err := w.VerifyCandidate(ctx, id, wakeAt)
+	return evidence.ProgrammedAt, err
+}
+
+func (w overnightWakeAdapter) Cancel(id string) error {
+	_, err := w.CancelCandidate(context.Background(), id)
+	return err
+}
+
+func (w overnightWakeAdapter) RegisterCandidate(ctx context.Context, id string, wakeAt time.Time, detail string) (wakeclient.Evidence, error) {
+	return w.WakeCoordinator.RegisterCandidate(ctx, id, wakeAt, detail)
+}
+
+func (w overnightWakeAdapter) VerifyCandidate(ctx context.Context, id string, wakeAt time.Time) (wakeclient.Evidence, error) {
+	return w.WakeCoordinator.VerifyCandidate(ctx, id, wakeAt)
+}
+
+func (w overnightWakeAdapter) CancelCandidate(ctx context.Context, id string) (wakeclient.Evidence, error) {
+	return w.WakeCoordinator.CancelCandidate(ctx, id)
 }
 
 // WakeLifecycle is injectable so CLI tests can prove that confirmation gates
@@ -96,6 +129,7 @@ type App struct {
 	getuid              func() int
 	launchctlRun        func(context.Context, string, ...string) error
 	newContinuationWake func() (WakeCoordinator, error)
+	newOvernightWake    func(wakeprotocol.Purpose) (WakeCoordinator, error)
 	isInteractive       func() bool
 	wakeLifecycle       WakeLifecycle
 	cleanupTimeout      time.Duration
@@ -140,6 +174,11 @@ func New(deps Dependencies) *App {
 			return wakeclient.DefaultForSource(wakeprotocol.SourceContinuation)
 		}
 	}
+	if deps.NewOvernightWake == nil {
+		deps.NewOvernightWake = func(purpose wakeprotocol.Purpose) (WakeCoordinator, error) {
+			return wakeclient.DefaultForPurpose(wakeprotocol.SourceOvernight, purpose)
+		}
+	}
 	if deps.IsInteractive == nil {
 		deps.IsInteractive = func() bool {
 			input, inputOK := deps.Stdin.(*os.File)
@@ -171,6 +210,7 @@ func New(deps Dependencies) *App {
 		getuid:              deps.Getuid,
 		launchctlRun:        deps.LaunchctlRun,
 		newContinuationWake: deps.NewContinuationWake,
+		newOvernightWake:    deps.NewOvernightWake,
 		isInteractive:       deps.IsInteractive,
 		wakeLifecycle:       deps.WakeLifecycle,
 		cleanupTimeout:      defaultCleanupTimeout,
@@ -316,7 +356,7 @@ func (a *App) wake(ctx context.Context, opts options, args []string) int {
 	case "install":
 		return a.wakeInstall(ctx, opts, parsed, asJSON)
 	case "uninstall":
-		return a.wakeUninstall(ctx, parsed, asJSON)
+		return a.wakeUninstall(ctx, opts, parsed, asJSON)
 	default:
 		return 2
 	}
@@ -384,11 +424,40 @@ func (a *App) wakeInstall(
 
 func (a *App) wakeUninstall(
 	ctx context.Context,
+	opts options,
 	parsed wakeCommandArgs,
 	asJSON bool,
 ) int {
 	if a.goos != "darwin" {
 		a.writeError(wakeservice.ErrUnsupported, asJSON)
+		return 1
+	}
+	// The standalone daemon is intentionally not removed while saved work
+	// still depends on one of its exact candidates. Refusing is safer than
+	// converting a future continuation or Overnight Run into an unowned wake.
+	runtime, runtimeErr := a.load(opts)
+	var dependents []string
+	if runtimeErr == nil {
+		bridgeState, stateErr := state.New(runtime.paths.StateDir).Load()
+		if stateErr != nil {
+			a.writeError(fmt.Errorf("read wake dependents before uninstall: %w", stateErr), asJSON)
+			return 1
+		}
+		for _, run := range bridgeState.Runs {
+			if !run.State.Terminal() && run.WakeMode != model.WakeModeStayAwake {
+				dependents = append(dependents, "Overnight Run "+run.ID)
+			}
+		}
+		for _, featureState := range bridgeState.Features {
+			for _, schedule := range featureState.Schedules {
+				if schedule.WakeRequired && schedule.State.IsUnresolved() {
+					dependents = append(dependents, "continuation "+schedule.ID)
+				}
+			}
+		}
+	}
+	if len(dependents) > 0 {
+		a.writeError(fmt.Errorf("cannot uninstall the standalone wake service while %s still depends on it; cancel the listed work first", strings.Join(dependents, ", ")), asJSON)
 		return 1
 	}
 	status, err := a.wakeLifecycle.Status(ctx)
@@ -2438,15 +2507,18 @@ func (a *App) dispatchOvernight(ctx context.Context, opts options, store *state.
 		Power:  &systempower.Service{GOOS: a.goos},
 		Git:    worktree.GitRunner,
 	}
-	// Without a reachable wake coordinator the supervisor still runs; it simply
+	// Without a reachable standalone wake service the supervisor still runs; it simply
 	// can never sleep, which is the correct degraded behavior rather than a
 	// reason to stop supervising.
 	approvalGranted := false
-	if wake, err := wakeclient.Default(); err == nil {
-		supervisor.Wake = wake
-		// Approval is the user's, recorded by Ori itself. The helper reads what
-		// the wake owner published and never grants it to itself.
+	if wake, err := a.newOvernightWake(wakeprotocol.PurposeClaudeReset); err == nil {
+		supervisor.Wake = overnightWakeAdapter{wake}
+		// Readiness comes from the independently installed standalone daemon;
+		// the dispatcher never grants this capability to itself.
 		approvalGranted = wake.Owner().Ready
+	}
+	if wake, err := a.newOvernightWake(wakeprotocol.PurposeOvernightStart); err == nil {
+		supervisor.StartWake = overnightWakeAdapter{wake}
 	}
 
 	advanced := make([]map[string]any, 0)
@@ -3046,7 +3118,7 @@ Usage:
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.
   wt herd overnight start --agent NAME[:ROLE] [--start HH:MM] [--deadline HH:MM]
-                          [--timezone ZONE] [--max-resumes N] [--dry-run] [--confirm] [--json]
+                          [--timezone ZONE] [--max-resumes N] [--stay-awake] [--dry-run] [--confirm] [--json]
                                 Plan an Overnight Run over explicitly selected Claude agents.
                                 Prints the full consequences and creates nothing until you agree.
   wt herd overnight list [--json]        List Overnight Runs, newest first
@@ -3167,13 +3239,30 @@ func (a *App) advanceOvernightRun(ctx context.Context, supervisor *overnight.Sup
 	if err != nil {
 		return model.OvernightRun{}, err
 	}
+	if run.State.Terminal() && run.WakeMode == model.WakeModeStayAwake && run.Assertion.ID != "" {
+		return supervisor.ReleaseStayAwake(ctx, runID)
+	}
 	switch run.State {
 	case model.RunLimitDetected, model.RunPreparingSleep:
+		if run.WakeMode == model.WakeModeStayAwake {
+			return supervisor.EnsureStayAwake(ctx, runID)
+		}
 		return supervisor.PrepareAndSleep(ctx, runID, overnight.SleepConfig{
 			WakeLead:        cfg.WakeLead(),
 			ApprovalGranted: approvalGranted,
+			StayAwake:       run.WakeMode == model.WakeModeStayAwake,
 		})
 	case model.RunSleeping, model.RunWaking, model.RunWaitingForReset:
+		if run.WakeMode == model.WakeModeStayAwake {
+			if participant, ok := run.Active(); ok && participant.Limit != nil && participant.Limit.ResetAt.After(time.Now().UTC()) {
+				return supervisor.EnsureStayAwake(ctx, runID)
+			}
+			if run.Assertion.ID != "" {
+				if _, err := supervisor.ReleaseStayAwake(ctx, runID); err != nil {
+					return model.OvernightRun{}, err
+				}
+			}
+		}
 		return supervisor.Resume(ctx, runID)
 	default:
 		return run, nil

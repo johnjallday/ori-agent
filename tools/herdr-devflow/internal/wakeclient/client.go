@@ -11,6 +11,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -101,6 +102,7 @@ type Client struct {
 	Now          func() time.Time
 	Timeout      time.Duration
 	Dial         func(context.Context, string) (net.Conn, error)
+	defaultsOnce sync.Once
 	sequence     atomic.Uint64
 }
 
@@ -159,30 +161,32 @@ func DefaultForPurpose(
 }
 
 func (c *Client) defaults() {
-	if c.SocketPath == "" {
-		c.SocketPath = wakeservice.SocketPath
-	}
-	if c.BuildVersion == "" {
-		c.BuildVersion = "dev"
-	}
-	if c.Source == "" {
-		c.Source = wakeprotocol.SourceOvernight
-	}
-	if c.Purpose == "" {
-		c.Purpose = wakeprotocol.PurposeClaudeReset
-	}
-	if c.Now == nil {
-		c.Now = func() time.Time { return time.Now().UTC() }
-	}
-	if c.Timeout <= 0 {
-		c.Timeout = DefaultTimeout
-	}
-	if c.Dial == nil {
-		c.Dial = func(ctx context.Context, path string) (net.Conn, error) {
-			dialer := &net.Dialer{Timeout: c.Timeout}
-			return dialer.DialContext(ctx, "unix", path)
+	c.defaultsOnce.Do(func() {
+		if c.SocketPath == "" {
+			c.SocketPath = wakeservice.SocketPath
 		}
-	}
+		if c.BuildVersion == "" {
+			c.BuildVersion = "dev"
+		}
+		if c.Source == "" {
+			c.Source = wakeprotocol.SourceOvernight
+		}
+		if c.Purpose == "" {
+			c.Purpose = wakeprotocol.PurposeClaudeReset
+		}
+		if c.Now == nil {
+			c.Now = func() time.Time { return time.Now().UTC() }
+		}
+		if c.Timeout <= 0 {
+			c.Timeout = DefaultTimeout
+		}
+		if c.Dial == nil {
+			c.Dial = func(ctx context.Context, path string) (net.Conn, error) {
+				dialer := &net.Dialer{Timeout: c.Timeout}
+				return dialer.DialContext(ctx, "unix", path)
+			}
+		}
+	})
 }
 
 func (c *Client) Health(ctx context.Context) (wakeprotocol.Health, error) {

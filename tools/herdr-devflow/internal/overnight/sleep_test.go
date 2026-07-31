@@ -53,10 +53,14 @@ func (f *fakeWake) Cancel(runID string) error {
 }
 
 type fakePower struct {
-	supported bool
-	source    systempower.Source
-	slept     int
-	sleepErr  error
+	supported       bool
+	source          systempower.Source
+	slept           int
+	sleepErr        error
+	assertionID     string
+	assertionActive bool
+	assertionErr    error
+	released        bool
 }
 
 func (f *fakePower) SupportsSleep() bool                            { return f.supported }
@@ -66,6 +70,28 @@ func (f *fakePower) Sleep(context.Context) error {
 		return f.sleepErr
 	}
 	f.slept++
+	return nil
+}
+
+func (f *fakePower) AcquireIdleSleepAssertion(_ context.Context, runID string) (string, error) {
+	if f.assertionErr != nil {
+		return "", f.assertionErr
+	}
+	if f.assertionID == "" {
+		f.assertionID = runID + "-assertion"
+	}
+	f.assertionActive = true
+	return f.assertionID, nil
+}
+func (f *fakePower) IdleSleepAssertionActive(_ context.Context, id string) bool {
+	return f.assertionActive && id == f.assertionID
+}
+func (f *fakePower) ReleaseIdleSleepAssertion(_ context.Context, id string) error {
+	if id != f.assertionID {
+		return errors.New("unknown assertion")
+	}
+	f.assertionActive = false
+	f.released = true
 	return nil
 }
 
@@ -132,6 +158,27 @@ func TestTheSleepSequenceVerifiesTheWakeBeforeSleeping(t *testing.T) {
 	}
 	if !reloaded.Wake.Verified || reloaded.State != model.RunSleeping {
 		t.Fatalf("reloaded = %+v, want the sleep durable", reloaded)
+	}
+}
+
+func TestStayAwakeVerifiesRunOwnedAssertionWithoutWakeOrSleep(t *testing.T) {
+	h, wake, power, _ := limitedHarness(t)
+	updated, err := h.supervisor.updateRun(context.Background(), h.run.ID, func(run *model.OvernightRun, _ time.Time) {
+		run.WakeMode = model.WakeModeStayAwake
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.run = updated
+	run, err := h.supervisor.EnsureStayAwake(context.Background(), h.run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != model.RunWaitingForReset || run.Assertion.ID == "" || run.Assertion.VerifiedAt.IsZero() || power.slept != 0 || len(wake.registered) != 0 {
+		t.Fatalf("stay-awake run=%+v slept=%d registered=%v", run, power.slept, wake.registered)
+	}
+	if _, err := h.supervisor.ReleaseStayAwake(context.Background(), run.ID); err != nil || !power.released {
+		t.Fatalf("release stay-awake assertion err=%v released=%v", err, power.released)
 	}
 }
 
