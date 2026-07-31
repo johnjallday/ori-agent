@@ -91,9 +91,19 @@ func serve(t *testing.T, h *Handler, method, target string, body string) (*httpt
 	return rec, decoded
 }
 
+// inboxFixture creates an isolated inbox folder and returns its CANONICAL path.
+//
+// Setup resolves symlinks when it canonicalizes the chosen folder (FR-47), and
+// on macOS the per-test temp dir lives under /var, which is a symlink to
+// /private/var. Returning the unresolved path would make assertions fail for
+// the right reason — the service correctly stored the real directory.
 func inboxFixture(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "Inbox")
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	dir := filepath.Join(base, "Inbox")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}

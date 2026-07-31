@@ -642,6 +642,17 @@ func (b *ServerBuilder) backfillLegacyCapabilities(registry *workspacecapability
 		return
 	}
 	workspacecapability.NewMigrator(registry, store, probe).Run()
+
+	// Cross-workspace folder conflicts are prevented at setup from this release
+	// on, but an existing install can already have two workspaces tidying the
+	// same folder — nothing stopped it before. Reconcile those once at startup:
+	// it preserves every folder and all state, keeps the earliest owner running,
+	// and pauses later conflicts with a repairable explanation.
+	if b.downloadsJanitorService != nil {
+		if ids, err := store.List(); err == nil {
+			b.downloadsJanitorService.ReconcileOverlappingRoots(ids)
+		}
+	}
 }
 
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled

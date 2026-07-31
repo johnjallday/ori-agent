@@ -42,7 +42,7 @@ func TestGoldenPath_WorksWithNoAgentInTheWorkspace(t *testing.T) {
 		t.Fatalf("precondition: the fixture workspace should have no entry agent, got %q", name)
 	}
 
-	root := filepath.Join(t.TempDir(), "Inbox")
+	root := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestGoldenPath_SurvivesAgentsBeingDeleted(t *testing.T) {
 		t.Fatalf("seed agent: %v", err)
 	}
 
-	root := filepath.Join(t.TempDir(), "Inbox")
+	root := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}

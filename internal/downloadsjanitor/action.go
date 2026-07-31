@@ -34,6 +34,20 @@ type FileAction struct {
 	BatchID     string `json:"batch_id,omitempty"`
 	CandidateID string `json:"candidate_id"`
 
+	// RootID identifies WHICH managed folder this action was performed against.
+	//
+	// Every path in this record is relative to the configured folder, which is
+	// what keeps absolute paths out of the journal (FR-143). The cost is that
+	// after a relink those same relative paths would read as if they belonged to
+	// the NEW folder, and undo would reverse them against it. RootID is the
+	// annotation that prevents both: it is stamped from the settings at approval
+	// time, and a relink issues a fresh one, so an action from a previous folder
+	// is identifiable as such forever (FR-57).
+	//
+	// Empty on actions journaled before this field existed; those are treated as
+	// belonging to the current root, which is what they did when written.
+	RootID string `json:"root_id,omitempty"`
+
 	// Operation is what was approved: a move into a category, or a send to the
 	// recoverable system Trash. There is no third option — version 1 has no
 	// permanent delete anywhere (FR-91).
@@ -159,10 +173,12 @@ func NewApprovedAction(
 	approvedBy string,
 	approvedAt time.Time,
 	idempotencyKey string,
+	rootID string,
 ) (FileAction, error) {
 	action := FileAction{
 		ID:                  strings.TrimSpace(id),
 		WorkspaceID:         strings.TrimSpace(workspaceID),
+		RootID:              strings.TrimSpace(rootID),
 		BatchID:             candidate.BatchID,
 		CandidateID:         candidate.ID,
 		Operation:           operation,
@@ -278,6 +294,22 @@ func DestinationRelativeFor(filingRootName string, category Category, finalName 
 		return "", err
 	}
 	return relative, nil
+}
+
+// BelongsToRoot reports whether this action was performed against the given
+// managed-folder generation.
+//
+// An action with no RootID predates the field; it is treated as belonging to
+// the current root, which is what it did when it was written. A workspace with
+// no RootID yet (never relinked) likewise matches everything, so introducing
+// this check cannot retroactively make existing history un-undoable.
+func (a FileAction) BelongsToRoot(currentRootID string) bool {
+	actionRoot := strings.TrimSpace(a.RootID)
+	current := strings.TrimSpace(currentRootID)
+	if actionRoot == "" || current == "" {
+		return true
+	}
+	return actionRoot == current
 }
 
 // Undoable reports whether this action is a candidate for undo. It is a

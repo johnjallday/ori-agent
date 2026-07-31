@@ -270,7 +270,7 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 	// here and the next line, the record says an action was in flight.
 	action, err := NewApprovedAction(
 		"action-"+uuid.New().String(), settings.WorkspaceID, candidate, OperationMove,
-		relative, approval.UserID, approval.ConsumedAt, approval.IdempotencyKey,
+		relative, approval.UserID, approval.ConsumedAt, approval.IdempotencyKey, settings.RootID,
 	)
 	if err != nil {
 		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it."}
@@ -362,6 +362,7 @@ func (s *Service) recordStale(candidate JanitorCandidate, item PlanItem, approva
 	action, err := NewApprovedAction(
 		"action-"+uuid.New().String(), candidate.WorkspaceID, candidate, OperationMove,
 		"Filed/Other/"+candidate.Name, approval.UserID, approval.ConsumedAt, approval.IdempotencyKey,
+		s.currentRootID(candidate.WorkspaceID),
 	)
 	if err == nil {
 		action = action.MarkStale(message, now)

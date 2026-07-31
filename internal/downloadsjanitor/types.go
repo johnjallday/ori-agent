@@ -101,6 +101,19 @@ type JanitorSettings struct {
 	// DirectoryReferenceID is the workspace directory reference created for the
 	// approved root. Empty until setup is confirmed.
 	DirectoryReferenceID string `json:"directory_reference_id,omitempty"`
+	// RootConflictWorkspaceID names the workspace that already manages an
+	// overlapping folder, when reconciliation found a pre-existing conflict.
+	//
+	// Set only by ReconcileOverlappingRoots, for overlaps that predate the
+	// cross-workspace check. It pauses unattended work and surfaces a repairable
+	// Needs-attention state; it never changes the folder, because choosing a
+	// different one is the user's decision (task 3.14).
+	RootConflictWorkspaceID string `json:"root_conflict_workspace_id,omitempty"`
+	// RootID identifies this generation of the managed folder. It is issued when
+	// a folder is first confirmed and RE-ISSUED whenever the folder changes, so
+	// journal entries can say which folder they belong to without storing an
+	// absolute path (FR-57, FR-143). Empty on records written before it existed.
+	RootID string `json:"root_id,omitempty"`
 	// RootPath is the normalized absolute path of the confirmed inbox folder.
 	// Empty until setup is confirmed; "~" is expanded server-side at that point
 	// and never before (FR-13).

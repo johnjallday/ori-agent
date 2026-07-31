@@ -28,6 +28,62 @@ const (
 	InstallSourceLegacyMigration = "legacy-migration"
 )
 
+// Resource kinds a capability can own. They are stable strings because they are
+// persisted; the set is closed and compiled.
+const (
+	ResourceDirectoryReference = "directory_reference"
+	ResourceMCPBinding         = "mcp_binding"
+	ResourceWatcher            = "watcher"
+	ResourceSchedule           = "schedule"
+	ResourceCompanionAgent     = "companion_agent"
+)
+
+// CapabilityResource records one resource a capability created or uses.
+//
+// It exists so removal and relink can answer "may I release this?" from
+// recorded fact rather than from a display name (PRD §9.5). Names are a
+// terrible ownership signal: a user can rename an agent, two features can pick
+// the same binding alias, and a directory reference called "Downloads" says
+// nothing about who created it.
+type CapabilityResource struct {
+	// Kind is one of the Resource* constants above.
+	Kind string `json:"kind"`
+	// ID is the resource's stable identifier within its own collection — a
+	// directory reference ID, an MCP binding ID, a trigger ID, an agent
+	// instance ID. Never a path, alias, or display name.
+	ID string `json:"id"`
+	// Shared marks a resource the capability uses but did not create
+	// exclusively for itself. Removal releases the ASSOCIATION with a shared
+	// resource and leaves the resource in place for its other owners; an
+	// exclusively-owned resource may be removed outright (FR-27).
+	Shared bool `json:"shared,omitempty"`
+}
+
+// Valid reports whether the resource record is usable.
+func (r CapabilityResource) Valid() bool {
+	return normalizeResourceKind(r.Kind) != "" && strings.TrimSpace(r.ID) != ""
+}
+
+func normalizeResourceKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case ResourceDirectoryReference:
+		return ResourceDirectoryReference
+	case ResourceMCPBinding:
+		return ResourceMCPBinding
+	case ResourceWatcher:
+		return ResourceWatcher
+	case ResourceSchedule:
+		return ResourceSchedule
+	case ResourceCompanionAgent:
+		return ResourceCompanionAgent
+	default:
+		// An unknown kind is dropped rather than preserved: acting on a
+		// resource class this build does not understand is exactly the kind of
+		// thing removal must not attempt.
+		return ""
+	}
+}
+
 // InstalledCapability is the persisted record that one built-in Workspace
 // Capability is installed on one workspace (PRD FR-4, FR-5).
 //
@@ -55,6 +111,11 @@ type InstalledCapability struct {
 	// Source records which flow performed the install (FR-5). See the
 	// InstallSource* constants.
 	Source string `json:"source,omitempty"`
+	// OwnedResources records the workspace resources this capability created or
+	// associated itself with, so removal and relink can release exactly the
+	// right ones (FR-27). Empty until setup grants something: installing alone
+	// creates no resources.
+	OwnedResources []CapabilityResource `json:"owned_resources,omitempty"`
 }
 
 // NormalizeCapabilityID trims and lower-cases a capability identifier. Callers
@@ -72,12 +133,92 @@ func normalizeInstallSource(source string) string {
 	return strings.ToLower(strings.TrimSpace(source))
 }
 
-// Clone returns a copy of the record. InstalledCapability holds no maps,
-// slices, or pointers today, so a value copy is a deep copy — the method
-// exists so later fields (e.g. companion-agent association metadata) can be
-// deep-copied without auditing every caller.
+// Clone returns a deep copy of the record, including its owned-resource list.
 func (c InstalledCapability) Clone() InstalledCapability {
-	return c
+	cp := c
+	if c.OwnedResources != nil {
+		cp.OwnedResources = append([]CapabilityResource(nil), c.OwnedResources...)
+	}
+	return cp
+}
+
+// Owns reports whether this capability records the given resource, and whether
+// it owns it exclusively.
+//
+// Exclusively-owned resources may be removed on uninstall; shared ones only
+// lose this capability's association (FR-27).
+func (c InstalledCapability) Owns(kind, id string) (exclusive bool, recorded bool) {
+	wantKind := normalizeResourceKind(kind)
+	wantID := strings.TrimSpace(id)
+	if wantKind == "" || wantID == "" {
+		return false, false
+	}
+	for _, resource := range c.OwnedResources {
+		if normalizeResourceKind(resource.Kind) == wantKind && strings.TrimSpace(resource.ID) == wantID {
+			return !resource.Shared, true
+		}
+	}
+	return false, false
+}
+
+// ResourcesOfKind returns every recorded resource of one kind.
+func (c InstalledCapability) ResourcesOfKind(kind string) []CapabilityResource {
+	wantKind := normalizeResourceKind(kind)
+	if wantKind == "" {
+		return nil
+	}
+	var out []CapabilityResource
+	for _, resource := range c.OwnedResources {
+		if normalizeResourceKind(resource.Kind) == wantKind {
+			out = append(out, resource)
+		}
+	}
+	return out
+}
+
+// withResource returns a copy of the record with the resource recorded,
+// replacing any existing entry for the same kind and ID.
+func (c InstalledCapability) withResource(resource CapabilityResource) InstalledCapability {
+	cp := c.Clone()
+	resource.Kind = normalizeResourceKind(resource.Kind)
+	resource.ID = strings.TrimSpace(resource.ID)
+	if !resource.Valid() {
+		return cp
+	}
+	for i, existing := range cp.OwnedResources {
+		if normalizeResourceKind(existing.Kind) == resource.Kind && strings.TrimSpace(existing.ID) == resource.ID {
+			cp.OwnedResources[i] = resource
+			return cp
+		}
+	}
+	cp.OwnedResources = append(cp.OwnedResources, resource)
+	return cp
+}
+
+// normalizeResources drops unusable entries and collapses duplicates.
+func normalizeResources(resources []CapabilityResource) []CapabilityResource {
+	if len(resources) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(resources))
+	out := make([]CapabilityResource, 0, len(resources))
+	for _, resource := range resources {
+		resource.Kind = normalizeResourceKind(resource.Kind)
+		resource.ID = strings.TrimSpace(resource.ID)
+		if !resource.Valid() {
+			continue
+		}
+		key := resource.Kind + "\x00" + resource.ID
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, resource)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // Validate reports whether the record is complete enough to be written as a new
@@ -112,6 +253,7 @@ func (c InstalledCapability) Validate() error {
 func normalizeInstalledCapability(c InstalledCapability) (InstalledCapability, bool) {
 	c.ID = NormalizeCapabilityID(c.ID)
 	c.Source = normalizeInstallSource(c.Source)
+	c.OwnedResources = normalizeResources(c.OwnedResources)
 	if c.ID == "" || c.Version < 1 {
 		return InstalledCapability{}, false
 	}
@@ -272,6 +414,87 @@ func (w *Workspace) AddInstalledCapability(c InstalledCapability) (bool, error) 
 	w.capabilitiesExplicit = true
 	w.UpdatedAt = time.Now()
 	return true, nil
+}
+
+// RecordCapabilityResource associates a workspace resource with an installed
+// capability, so a later relink or uninstall can release exactly the right
+// things (FR-27).
+//
+// Recording is idempotent: repeating it for the same kind and ID updates the
+// entry rather than adding a second. It is a no-op — reported as false — when
+// the capability is not installed, because a resource owned by nothing is a
+// record nobody would ever act on.
+func (w *Workspace) RecordCapabilityResource(capabilityID string, resource CapabilityResource) bool {
+	key := NormalizeCapabilityID(capabilityID)
+	resource.Kind = normalizeResourceKind(resource.Kind)
+	resource.ID = strings.TrimSpace(resource.ID)
+	if key == "" || !resource.Valid() {
+		return false
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i, record := range w.InstalledCapabilities {
+		if NormalizeCapabilityID(record.ID) != key {
+			continue
+		}
+		updated := record.withResource(resource)
+		if len(updated.OwnedResources) == len(record.OwnedResources) {
+			// Same count: either replaced in place or rejected. Compare the
+			// entry to decide whether anything actually changed.
+			if exclusive, ok := record.Owns(resource.Kind, resource.ID); ok && exclusive == !resource.Shared {
+				return false
+			}
+		}
+		w.InstalledCapabilities[i] = updated
+		w.capabilitiesExplicit = true
+		w.UpdatedAt = time.Now()
+		return true
+	}
+	return false
+}
+
+// ForgetCapabilityResource drops a resource association. Used when a relink
+// replaces a directory reference, or when removal releases a shared resource.
+func (w *Workspace) ForgetCapabilityResource(capabilityID, kind, id string) bool {
+	key := NormalizeCapabilityID(capabilityID)
+	wantKind := normalizeResourceKind(kind)
+	wantID := strings.TrimSpace(id)
+	if key == "" || wantKind == "" || wantID == "" {
+		return false
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i, record := range w.InstalledCapabilities {
+		if NormalizeCapabilityID(record.ID) != key {
+			continue
+		}
+		remaining := make([]CapabilityResource, 0, len(record.OwnedResources))
+		removed := false
+		for _, resource := range record.OwnedResources {
+			if normalizeResourceKind(resource.Kind) == wantKind && strings.TrimSpace(resource.ID) == wantID {
+				removed = true
+				continue
+			}
+			remaining = append(remaining, resource)
+		}
+		if !removed {
+			return false
+		}
+		updated := record.Clone()
+		if len(remaining) == 0 {
+			remaining = nil
+		}
+		updated.OwnedResources = remaining
+		w.InstalledCapabilities[i] = updated
+		w.capabilitiesExplicit = true
+		w.UpdatedAt = time.Now()
+		return true
+	}
+	return false
 }
 
 // RemoveInstalledCapability drops the record for id and reports whether

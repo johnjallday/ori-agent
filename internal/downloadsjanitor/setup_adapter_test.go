@@ -47,7 +47,7 @@ func newAdapterFixture(t *testing.T) (*SetupAdapter, *Service, string) {
 	t.Helper()
 	store, _ := newTestStore(t)
 	service := NewService(store, newFakeWorkspaceStore("ws-1"))
-	root := filepath.Join(t.TempDir(), "Inbox")
+	root := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}

@@ -75,7 +75,7 @@ func legacyFixture(t *testing.T) (*Service, *Store, listableWorkspaceStore, stri
 	service.SetMover(&realMover{})
 	service.SetTrash(newFakeTrash(t))
 
-	root := filepath.Join(t.TempDir(), "Downloads")
+	root := filepath.Join(tempDirCanonical(t), "Downloads")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestCapabilityRuntime_ProbeRequiresACompletedSetup(t *testing.T) {
 	}
 
 	// A completed setup does count.
-	root := filepath.Join(t.TempDir(), "Inbox")
+	root := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}

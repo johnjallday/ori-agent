@@ -17,7 +17,7 @@ func scannerFixture(t *testing.T) (*Scanner, *fakeWorkspaceStore, JanitorSetting
 	t.Helper()
 	store, _ := newTestStore(t)
 	workspaces := newFakeWorkspaceStore("ws-1", "ws-2")
-	root := filepath.Join(t.TempDir(), "Inbox")
+	root := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(filepath.Join(root, DefaultFilingRootName), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestScan_ProposesOnlySettledTopLevelRegularFiles(t *testing.T) {
 
 func TestScan_RejectsSymlinksWithoutFollowingThem(t *testing.T) {
 	scanner, _, settings, root := scannerFixture(t)
-	outside := filepath.Join(t.TempDir(), "secret.pdf")
+	outside := filepath.Join(tempDirCanonical(t), "secret.pdf")
 	writeFile(t, outside, 10)
 	if err := os.Symlink(outside, filepath.Join(root, "link.pdf")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)

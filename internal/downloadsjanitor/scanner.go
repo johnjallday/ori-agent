@@ -103,6 +103,30 @@ func (s *Scanner) ResolveRoot(settings JanitorSettings) (string, error) {
 		// would be acting on something the user did not confirm.
 		return "", fmt.Errorf("%w: the linked folder no longer matches the folder you approved", ErrRootUnavailable)
 	}
+
+	// Re-resolve at action time, every time (FR-142).
+	//
+	// Setup stored the canonical, symlink-resolved path, so re-resolving it is
+	// normally a no-op. It stops being one if the approved directory is later
+	// replaced by a symlink pointing somewhere else: both stored paths would
+	// still agree, the string comparison above would still pass, and os.ReadDir
+	// would happily follow the link — scanning, and then MOVING, files in a
+	// folder the user never approved. Checking here means a swap is caught by
+	// scan, apply, Trash, restore, and undo alike, since all of them come
+	// through this one resolver.
+	actual, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("%w: the folder no longer exists", ErrRootUnavailable)
+		}
+		if os.IsPermission(err) {
+			return "", fmt.Errorf("%w: permission denied", ErrRootUnavailable)
+		}
+		return "", fmt.Errorf("%w: the folder could not be opened", ErrRootUnavailable)
+	}
+	if filepath.Clean(actual) != resolved {
+		return "", fmt.Errorf("%w: the folder you approved now points somewhere else", ErrRootUnavailable)
+	}
 	return resolved, nil
 }
 

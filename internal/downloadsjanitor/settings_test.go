@@ -94,7 +94,7 @@ func TestRelink_StopsTheOldAutomationBeforeSwitching(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newRoot := filepath.Join(t.TempDir(), "NewInbox")
+	newRoot := filepath.Join(tempDirCanonical(t), "NewInbox")
 	if err := os.MkdirAll(newRoot, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRelink_StopsTheOldAutomationBeforeSwitching(t *testing.T) {
 // relink is worse than none.
 func TestRelink_DoesNotSwitchIfTheOldAutomationCannotStop(t *testing.T) {
 	service, oldRoot := configuredService(t)
-	newRoot := filepath.Join(t.TempDir(), "NewInbox")
+	newRoot := filepath.Join(tempDirCanonical(t), "NewInbox")
 	if err := os.MkdirAll(newRoot, 0o750); err != nil {
 		t.Fatal(err)
 	}

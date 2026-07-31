@@ -58,7 +58,7 @@ func newTestService(t *testing.T) (*Service, *fakeWorkspaceStore) {
 // never touch the developer's real one.
 func inboxFixture(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "Inbox")
+	dir := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestReadiness_DetectsAWidenedBinding(t *testing.T) {
 
 func TestConfirmSetup_RejectsUnusableSelections(t *testing.T) {
 	service, _ := newTestService(t)
-	file := filepath.Join(t.TempDir(), "not-a-folder.txt")
+	file := filepath.Join(tempDirCanonical(t), "not-a-folder.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestConfirmSetup_RejectsUnusableSelections(t *testing.T) {
 		code string
 	}{
 		"empty":     {"", CodeInvalidPath},
-		"missing":   {filepath.Join(t.TempDir(), "nope"), CodeRootMissing},
+		"missing":   {filepath.Join(tempDirCanonical(t), "nope"), CodeRootMissing},
 		"is a file": {file, CodeNotADirectory},
 	}
 	for name, tc := range cases {
@@ -364,7 +364,7 @@ func TestConfirmSetup_RejectsUnusableSelections(t *testing.T) {
 
 func TestConfirmSetup_FailureLeavesNoPartialSetup(t *testing.T) {
 	service, workspaces := newTestService(t)
-	_, err := service.ConfirmSetup(SetupRequest{WorkspaceID: "ws-1", Path: filepath.Join(t.TempDir(), "missing")})
+	_, err := service.ConfirmSetup(SetupRequest{WorkspaceID: "ws-1", Path: filepath.Join(tempDirCanonical(t), "missing")})
 	if err == nil {
 		t.Fatal("expected the setup to fail")
 	}
@@ -402,7 +402,7 @@ func TestConfirmSetup_RejectsBadScheduleValues(t *testing.T) {
 }
 
 func TestConfirmSetup_ExpandsHomeOnlyOnConfirmation(t *testing.T) {
-	home := t.TempDir()
+	home := tempDirCanonical(t)
 	t.Setenv("HOME", home)
 	if err := os.MkdirAll(filepath.Join(home, "Downloads"), 0o750); err != nil {
 		t.Fatal(err)

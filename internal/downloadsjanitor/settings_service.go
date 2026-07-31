@@ -188,6 +188,16 @@ func (s *Service) Relink(automation WatcherLifecycle, req RelinkRequest) (Status
 		return Status{}, err
 	}
 
+	// 0. Validate and reserve the new folder BEFORE anything is torn down. A
+	//    relink onto a folder another workspace already manages must fail with
+	//    the old setup still intact and still running, rather than leaving this
+	//    workspace paused and unconfigured (FR-49, FR-56).
+	if candidate, err := resolveSetupRoot(req.Path); err == nil {
+		if err := s.ensureRootAvailable(workspaceID, candidate); err != nil {
+			return Status{}, err
+		}
+	}
+
 	// 1. Stop the unattended work first. A watcher still firing on the old
 	//    folder during a relink would scan a folder the user is leaving.
 	if automation != nil {

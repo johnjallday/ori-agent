@@ -109,7 +109,7 @@ func (s *Service) trashOne(_ context.Context, settings JanitorSettings, root str
 
 	action, err := NewApprovedAction(
 		"action-"+uuid.New().String(), settings.WorkspaceID, candidate, OperationTrash,
-		"", approval.UserID, approval.ConsumedAt, approval.IdempotencyKey,
+		"", approval.UserID, approval.ConsumedAt, approval.IdempotencyKey, settings.RootID,
 	)
 	if err != nil {
 		return ItemOutcome{
@@ -166,7 +166,7 @@ func (s *Service) trashOne(_ context.Context, settings JanitorSettings, root str
 func (s *Service) recordTrashStale(candidate JanitorCandidate, approval ApprovalRecord, message string, now time.Time) ItemOutcome {
 	action, err := NewApprovedAction(
 		"action-"+uuid.New().String(), candidate.WorkspaceID, candidate, OperationTrash,
-		"", approval.UserID, approval.ConsumedAt, approval.IdempotencyKey,
+		"", approval.UserID, approval.ConsumedAt, approval.IdempotencyKey, s.currentRootID(candidate.WorkspaceID),
 	)
 	if err == nil {
 		action = action.MarkStale(message, now)
@@ -231,6 +231,12 @@ func (s *Service) Undo(ctx context.Context, workspaceID, actionID, userID string
 			return fmt.Errorf("%w: an undo is already running for this file", ErrUndoUnavailable)
 		case !stored.Undoable():
 			return fmt.Errorf("%w: only a completed action can be undone", ErrUndoUnavailable)
+		case !stored.BelongsToRoot(settings.RootID):
+			// The action was performed against a folder this workspace no longer
+			// manages. Its paths are relative, so reversing it now would write
+			// into the CURRENT folder — restoring a file into somewhere it never
+			// came from (FR-57).
+			return fmt.Errorf("%w: it was filed from a folder this workspace no longer manages", ErrUndoUnavailable)
 		}
 		state.Actions[index].Undo = UndoInProgress
 		action = state.Actions[index]

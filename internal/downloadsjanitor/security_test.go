@@ -29,7 +29,7 @@ func TestSecurity_SourceReplacedBySymlinkAfterApproval(t *testing.T) {
 	}
 
 	// Swap the approved file for a symlink pointing outside the folder.
-	outside := filepath.Join(t.TempDir(), "secret.pdf")
+	outside := filepath.Join(tempDirCanonical(t), "secret.pdf")
 	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
