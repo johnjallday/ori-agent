@@ -356,6 +356,14 @@ func (s *Supervisor) classifyLimit(run *model.OvernightRun, participant *model.R
 		})
 		return true, false
 	default:
+		// A valid confirmation-time plan proof authorizes the first scheduled
+		// continuation even when the current window sample is merely stale. A
+		// stale sample cannot classify a new reset/sleep cycle, but its absence
+		// is not billing, authentication, or identity contradiction.
+		if signal.Class == claudeusage.LimitUnknown && participant.PlanProof.PlanBacked &&
+			strings.Contains(strings.ToLower(signal.Reason), "too old") {
+			return false, false
+		}
 		participant.Limit = limitRecord(signal)
 		return false, s.stopParticipant(run, participant, now, model.ParticipantWaitingManual, model.ReasonBlocked,
 			signal.Reason, "wt herd overnight show "+run.ID)
