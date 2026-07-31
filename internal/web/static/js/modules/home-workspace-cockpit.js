@@ -956,6 +956,11 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // DOM wiring — no-ops without a document, so the exports above stay testable.
 // ---------------------------------------------------------------------------
 
+// Tree is a peer VIEW owned by this coordinator: it renders and handles local
+// interaction, and hands every mutation back here so shared state, refresh, and
+// rail context stay single-authority (FR117).
+import { mountTree, ancestorIds } from './home-workspace-tree.js';
+
 (function () {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
@@ -996,6 +1001,15 @@ export function renderWorkspaceAreaStatusHTML(status) {
     // The workspace/group context to restore when Summary or Ask Ori closes
     // (FR91, FR100).
     priorContext: null,
+    // Tree management state. Deliberately session-scoped and deliberately NOT
+    // cleared by selection changes or by returning to Today (FR55, FR61).
+    collapsedGroups: new Set(),
+    bulkSelection: new Set(),
+    activeTags: new Set(),
+    focusId: '',
+    draggingId: '',
+    workspaceRoot: { state: 'loading', path: '', custom: false },
+    undoStack: [],
     loading: true,
     error: null,
     inFlight: null
@@ -1105,6 +1119,88 @@ export function renderWorkspaceAreaStatusHTML(status) {
     renderRail({ announceChange: false });
   }
 
+  // ---- Tree peer view ----
+
+  function mountTreeView() {
+    if (!els.tree || state.view !== VIEW_TREE) return;
+    // Re-mounting replaces the rows, which would drop keyboard focus on the
+    // floor mid-navigation. Restore it afterwards when it was ours to begin
+    // with, and never steal it when it was not (FR129).
+    const hadFocus = !!(document.activeElement && els.tree.contains(document.activeElement));
+    mountTree(els.tree, state, {
+      onSelect: id => selectItem(id),
+      onOpen: id => openItem(id),
+      onRerender: () => mountTreeView(),
+      onAnnounce: message => announce(message),
+      onTrashed: (id, name) => {
+        state.undoStack.push({ id, name });
+      },
+      onUndo: () => undoLastDelete(),
+      onChanged: async () => {
+        await refreshQuietly();
+      }
+    });
+    if (hadFocus) {
+      const target =
+        els.tree.querySelector('[data-tree-row][tabindex="0"]') ||
+        els.tree.querySelector('[data-tree-row]');
+      if (target) target.focus();
+    }
+  }
+
+  /** Restore the most recent trashed item (FR52 session Undo). */
+  async function undoLastDelete() {
+    const entry = state.undoStack.pop();
+    if (!entry) {
+      announce('Nothing to undo.');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/workspaces/${encodeURIComponent(entry.id)}/restore`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      announce(`Restored ${entry.name}.`);
+    } catch (err) {
+      // Put it back so the user can retry rather than silently losing the undo.
+      state.undoStack.push(entry);
+      announce(`Could not restore ${entry.name}.`);
+      if (window.Toast) window.Toast.error(`Could not restore "${entry.name}".`);
+      console.error('home-workspace-cockpit: restore failed', err);
+    }
+    await refreshQuietly();
+  }
+
+  /**
+   * The configured workspace root, shown in the Tree toolbar (FR39).
+   *
+   * The endpoint reports `effective_workspace_root` (empty until the user has
+   * confirmed a location), `default_workspace_root`, and a `source` of
+   * `unconfirmed` / `default` / `custom`. Tree shows which of those it is
+   * rather than presenting the fallback as if it were a confirmed setting.
+   */
+  async function refreshWorkspaceRoot() {
+    try {
+      const res = await fetch('/api/settings/workspace-root');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const effective = String(data.effective_workspace_root || '').trim();
+      const fallback = String(data.default_workspace_root || '').trim();
+      const source = String(data.source || '').trim();
+      state.workspaceRoot = {
+        state: 'ready',
+        path: effective || fallback,
+        custom: source === 'custom',
+        confirmed: data.confirmed !== false,
+        source
+      };
+    } catch (_) {
+      // Honest unavailable state rather than an invented path (FR39/FR121).
+      state.workspaceRoot = { state: 'unavailable', path: '', custom: false };
+    }
+    if (state.view === VIEW_TREE) mountTreeView();
+  }
+
   // ---- view state ----
 
   function applyView(view, { pushUrl = true } = {}) {
@@ -1120,6 +1216,14 @@ export function renderWorkspaceAreaStatusHTML(status) {
     // Exactly one peer view is exposed at a time (FR18/FR19).
     if (els.tree) els.tree.hidden = state.view !== VIEW_TREE;
     root.dataset.view = state.view;
+    // Entering Tree with something selected on the Map must REVEAL that row by
+    // expanding its ancestors — without mutating stored hierarchy (FR59).
+    if (state.view === VIEW_TREE && state.selectedId) {
+      ancestorIds(state.flattened, state.selectedId).forEach(id =>
+        state.collapsedGroups.delete(id)
+      );
+      state.focusId = state.selectedId;
+    }
     if (pushUrl) {
       // replaceState, never pushState: a view toggle must not add a history
       // entry (FR13/FR26).
@@ -1129,6 +1233,7 @@ export function renderWorkspaceAreaStatusHTML(status) {
     renderAreaStatus();
     renderFilters();
     mountMap();
+    mountTreeView();
   }
 
   // ---- selection + rail ----
@@ -1151,6 +1256,10 @@ export function renderWorkspaceAreaStatusHTML(status) {
       });
     }
     renderRail({ announceChange: changed });
+    // Both peer views must show the same active item, whichever one changed it
+    // (FR57, FR58). The map is updated in place above; Tree re-renders so the
+    // active row's highlight and aria-selected follow.
+    if (state.view === VIEW_TREE) mountTreeView();
     subscribeRealtimeTo(next);
     if (changed && next) fireTTFA(state.view === VIEW_TREE ? 'tree-select' : 'map-select');
   }
@@ -1392,6 +1501,7 @@ export function renderWorkspaceAreaStatusHTML(status) {
         renderAreaStatus();
         renderFilters();
         mountMap();
+        mountTreeView();
         renderRail({ announceChange: false });
       }
     })();
@@ -1435,6 +1545,7 @@ export function renderWorkspaceAreaStatusHTML(status) {
         renderAreaStatus();
         renderFilters();
         mountMap();
+        mountTreeView();
         renderRail({ announceChange: false });
         if (els.railContext) els.railContext.scrollTop = railScroll;
         if (els.railToday) els.railToday.scrollTop = todayScroll;
@@ -1552,4 +1663,5 @@ export function renderWorkspaceAreaStatusHTML(status) {
 
   applyView(state.view, { pushUrl: false });
   refresh();
+  void refreshWorkspaceRoot();
 })();

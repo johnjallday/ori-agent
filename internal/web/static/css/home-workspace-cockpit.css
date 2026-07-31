@@ -237,11 +237,6 @@
   overflow: auto;
 }
 
-.cockpit-tree {
-  overflow: auto;
-  padding: 0 14px 14px;
-}
-
 .cockpit-area-status:empty {
   display: none;
 }
@@ -585,4 +580,419 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* --------------------------------------------------------------------------
+ * Tree — Map's peer view (FR38, FR41, FR136)
+ * ----------------------------------------------------------------------- */
+
+.cockpit-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+.cockpit-tree-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hc-line);
+}
+
+.cockpit-tree-root-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.cockpit-tree-root-badge {
+  padding: 2px 7px;
+  border: 1px solid var(--hc-line);
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cockpit-tree-root-badge.is-unavailable {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
+}
+
+.cockpit-tree-root-path {
+  overflow: hidden;
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-tree-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cockpit-tree-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 10%, var(--hc-panel));
+}
+
+.cockpit-tree-bulkbar[hidden] {
+  display: none;
+}
+
+.cockpit-tree-bulkcount {
+  color: var(--hc-ink);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+/* Tree may scroll internally — including horizontally on narrow layouts — but
+   the page itself never scrolls sideways (FR135, FR136). */
+.cockpit-tree-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cockpit-tree-root,
+.cockpit-tree-children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cockpit-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  padding-left: calc(8px + var(--tree-depth, 0) * 18px);
+  border-bottom: 1px solid color-mix(in srgb, var(--hc-line) 55%, transparent);
+  cursor: pointer;
+}
+
+.cockpit-tree-row:hover {
+  background: color-mix(in srgb, var(--hc-signal) 6%, transparent);
+}
+
+/* Active selection is a filled row plus aria-selected — visually and
+   semantically distinct from the bulk checkbox beside it (FR46). */
+.cockpit-tree-row.is-active {
+  background: color-mix(in srgb, var(--hc-signal) 15%, var(--hc-panel));
+  box-shadow: inset 3px 0 0 var(--hc-signal);
+}
+
+.cockpit-tree-row:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: -2px;
+}
+
+.cockpit-tree-row.is-drop-target {
+  background: color-mix(in srgb, var(--hc-signal) 22%, var(--hc-panel));
+  box-shadow: inset 0 -2px 0 var(--hc-signal);
+}
+
+.cockpit-tree-caret,
+.cockpit-tree-caret-space {
+  width: 18px;
+  flex: 0 0 18px;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim);
+  cursor: pointer;
+  text-align: center;
+}
+
+.cockpit-tree-name {
+  flex: 1 1 auto;
+  min-width: 120px;
+  overflow: hidden;
+  color: var(--hc-ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-tree-kind,
+.cockpit-tree-status,
+.cockpit-tree-next {
+  flex: 0 0 auto;
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cockpit-tree-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cockpit-tree-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cockpit-tree-status.is-attention {
+  color: var(--hc-alert);
+}
+
+.cockpit-tree-status.is-running,
+.cockpit-tree-status.is-active {
+  color: var(--hc-signal);
+}
+
+.cockpit-tree-next[data-unavailable="true"] {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.cockpit-tree-metrics {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.cockpit-tree-metric {
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.cockpit-tree-metric b {
+  color: var(--hc-ink);
+}
+
+.cockpit-tree-metric b[data-unavailable="true"] {
+  color: var(--hc-ink-faint);
+  font-weight: 400;
+}
+
+.cockpit-tree-tags {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.cockpit-tree-tag {
+  padding: 1px 5px;
+  border: 1px solid var(--hc-line);
+  color: var(--hc-ink-dim);
+  font-size: 9px;
+}
+
+.cockpit-tree-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.cockpit-tree-action {
+  padding: 2px 7px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cockpit-tree-action:hover,
+.cockpit-tree-action:focus-visible {
+  border-color: var(--hc-signal);
+  color: var(--hc-ink);
+}
+
+.cockpit-tree-action.is-danger:hover,
+.cockpit-tree-action.is-danger:focus-visible {
+  border-color: var(--hc-alert);
+  color: var(--hc-alert);
+}
+
+.cockpit-tree-empty-drop,
+.cockpit-tree-root-drop {
+  margin: 4px 0;
+  padding: 8px;
+  padding-left: calc(8px + var(--tree-depth, 0) * 18px);
+  border: 1px dashed var(--hc-line);
+  color: var(--hc-ink-faint);
+  font-size: 11px;
+}
+
+.cockpit-tree-empty-drop.is-drop-target,
+.cockpit-tree-root-drop.is-drop-target {
+  border-color: var(--hc-signal);
+  color: var(--hc-signal);
+}
+
+.cockpit-tree-empty {
+  padding: 20px 8px;
+  color: var(--hc-ink-faint);
+}
+
+/* Move dialog — the keyboard/touch parity path for drag-and-drop (FR51). */
+.cockpit-tree-move-dialog[hidden] {
+  display: none;
+}
+
+.cockpit-tree-move-panel {
+  padding: 10px;
+  border: 1px solid var(--hc-signal);
+  background: var(--hc-panel-raised);
+}
+
+.cockpit-tree-move-list {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cockpit-tree-move-option {
+  width: 100%;
+  padding: 5px 8px;
+  padding-left: calc(8px + var(--tree-depth, 0) * 14px);
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cockpit-tree-move-option:hover,
+.cockpit-tree-move-option:focus-visible {
+  border-color: var(--hc-signal);
+}
+
+/* On narrow layouts the row collapses to identity + essential actions; the
+   scan metrics move to their own line rather than forcing a horizontal
+   scrollbar over the whole page (FR136, FR140). */
+@container cockpit (max-width: 720px) {
+  .cockpit-tree-row {
+    flex-wrap: wrap;
+  }
+
+  .cockpit-tree-metrics,
+  .cockpit-tree-tags {
+    width: 100%;
+    padding-left: 26px;
+  }
+}
+
+/* A selected group district reads as selected the same way a site does. */
+.cockpit-map .ws-map-district-tag.is-selected {
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 22%, var(--hc-panel));
+  color: var(--hc-ink);
+}
+
+/* Positional drop feedback: a line at the row's leading or trailing edge means
+   "reorder here", a filled row means "drop into this group" (FR49). */
+.cockpit-tree-row.is-drop-before {
+  box-shadow: inset 0 3px 0 var(--hc-signal);
+}
+
+.cockpit-tree-row.is-drop-after {
+  box-shadow: inset 0 -3px 0 var(--hc-signal);
+}
+
+.cockpit-tree-row.is-drop-into {
+  background: color-mix(in srgb, var(--hc-signal) 22%, var(--hc-panel));
+  box-shadow: inset 0 0 0 2px var(--hc-signal);
+}
+
+/* Tag filter bar and per-row tag chips (FR54). */
+.cockpit-tree-tagbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.cockpit-tree-tagbar[hidden] {
+  display: none;
+}
+
+.cockpit-tree-tagbar-label {
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cockpit-tree-tagbar-chip,
+.cockpit-tree-tagbar-clear {
+  padding: 2px 8px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.cockpit-tree-tagbar-chip[aria-pressed="true"] {
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 16%, var(--hc-panel));
+  color: var(--hc-ink);
+}
+
+.cockpit-tree-tagbar-chip[aria-pressed="true"]::before {
+  content: "✓ ";
+}
+
+.cockpit-tree-tag {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--hc-line);
+}
+
+.cockpit-tree-tag.is-active {
+  border-color: var(--hc-signal);
+}
+
+.cockpit-tree-tag-filter,
+.cockpit-tree-tag-remove {
+  padding: 1px 5px;
+  border: 0;
+  background: none;
+  color: var(--hc-ink-dim);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.cockpit-tree-tag-remove {
+  border-left: 1px solid var(--hc-line);
+  color: var(--hc-ink-faint);
+}
+
+.cockpit-tree-tag-remove:hover,
+.cockpit-tree-tag-remove:focus-visible {
+  color: var(--hc-alert);
 }

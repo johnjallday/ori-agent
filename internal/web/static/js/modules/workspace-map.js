@@ -498,8 +498,11 @@
     );
   }
 
-  function districtHTML(d) {
+  function districtHTML(d, selectedId) {
     var ws = d.ws || {};
+    // A selected GROUP must keep its highlight across a re-mount, not only
+    // until the next applySelection call (PRD FR58).
+    var isSel = !!selectedId && ws.id === selectedId;
     var left = PAD + d.col * CELL_W - 12;
     var top = PAD + d.row * CELL_H - 6;
     var width = d.w * CELL_W - 8;
@@ -521,8 +524,13 @@
       'px;height:' +
       height +
       'px">' +
-      '<button type="button" class="ws-map-district-tag" data-ws-id="' +
+      '<button type="button" class="ws-map-district-tag' +
+      (isSel ? ' is-selected' : '') +
+      '" data-ws-id="' +
       escapeHtml(ws.id) +
+      '" ' +
+      'aria-pressed="' +
+      (isSel ? 'true' : 'false') +
       '" ' +
       'aria-label="' +
       escapeHtml('Open ' + label) +
@@ -577,7 +585,7 @@
     var layout = computeMapLayout(workspaces, { maxCols: cols });
     var parts = [];
     layout.districts.forEach(function (d) {
-      parts.push(districtHTML(d));
+      parts.push(districtHTML(d, selectedId));
     });
     layout.tiles.forEach(function (t, i) {
       parts.push(tileHTML(t, selectedId, i));
