@@ -30,7 +30,24 @@ import {
   renderWorkspaceRailHTML,
   workspaceAreaState,
   renderWorkspaceAreaStatusHTML,
-  escapeHtml
+  escapeHtml,
+  SIGNAL_ATTENTION,
+  SIGNAL_RUNNING,
+  SIGNAL_TODAY,
+  parseSignal,
+  buildScheduleIndex,
+  hasWorkTodayFor,
+  matchesSignal,
+  signalCounts,
+  filterWorkspaceIds,
+  filterResultMessage,
+  renderSignalFiltersHTML,
+  rosterState,
+  groupAggregates,
+  groupRailView,
+  renderGroupRailHTML,
+  summaryView,
+  renderSummaryRailHTML
 } from './home-workspace-cockpit.js';
 
 // ---------------------------------------------------------------------------
@@ -499,4 +516,383 @@ test('an error detail is escaped and bounded so a hostile message cannot inject 
   );
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+// ===========================================================================
+// Group 2 — signal filters, group context, and Summary
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Signal filters (FR31-FR34)
+// ---------------------------------------------------------------------------
+
+test('parseSignal accepts only the three real signals', () => {
+  assert.equal(parseSignal('attention'), SIGNAL_ATTENTION);
+  assert.equal(parseSignal('RUNNING'), SIGNAL_RUNNING);
+  assert.equal(parseSignal(' today '), SIGNAL_TODAY);
+  assert.equal(parseSignal('cards'), '');
+  assert.equal(parseSignal(''), '');
+  assert.equal(parseSignal(null), '');
+});
+
+test('buildScheduleIndex returns null for an unavailable source, {} for an empty one', () => {
+  // The distinction matters: null means "we do not know", {} means "nothing
+  // is scheduled" (FR120/FR121).
+  assert.equal(buildScheduleIndex(null), null);
+  assert.equal(buildScheduleIndex(undefined), null);
+  const empty = buildScheduleIndex([]);
+  assert.notEqual(empty, null);
+  assert.equal(Object.keys(empty).length, 0);
+});
+
+test('buildScheduleIndex groups rows by workspace and drops rows with no workspace', () => {
+  const index = buildScheduleIndex([
+    { workspace_id: 'a', next_run: '2026-07-31T10:00:00Z' },
+    { workspace_id: 'a', next_run: '2026-07-31T18:00:00Z' },
+    { workspace_id: 'b', next_run: '2026-08-05T10:00:00Z' },
+    { next_run: '2026-08-05T10:00:00Z' },
+    null
+  ]);
+  assert.equal(index.a.length, 2);
+  assert.equal(index.b.length, 1);
+  assert.equal(Object.keys(index).length, 2);
+});
+
+test('hasWorkTodayFor is null when the schedule source is unavailable', () => {
+  assert.equal(hasWorkTodayFor('a', null), null);
+});
+
+test('hasWorkTodayFor counts work due by end of the local day, not a 24h window', () => {
+  const now = new Date('2026-07-31T09:00:00');
+  const laterToday = new Date('2026-07-31T22:00:00');
+  const tomorrowMorning = new Date('2026-08-01T08:00:00');
+  const index = {
+    a: [{ next_run: laterToday.toISOString() }],
+    b: [{ next_run: tomorrowMorning.toISOString() }]
+  };
+  assert.equal(hasWorkTodayFor('a', index, now), true);
+  // Tomorrow morning is within 24h but is NOT today.
+  assert.equal(hasWorkTodayFor('b', index, now), false);
+  assert.equal(hasWorkTodayFor('missing', index, now), false);
+});
+
+test('hasWorkTodayFor treats overdue work as due today', () => {
+  const now = new Date('2026-07-31T09:00:00');
+  const index = { a: [{ next_run: new Date('2026-07-30T09:00:00').toISOString() }] };
+  assert.equal(hasWorkTodayFor('a', index, now), true);
+});
+
+test('hasWorkTodayFor ignores unparseable timestamps rather than throwing', () => {
+  const index = { a: [{ next_run: 'not a date' }, {}] };
+  assert.equal(hasWorkTodayFor('a', index, new Date('2026-07-31T09:00:00')), false);
+});
+
+test('matchesSignal returns null when the workspace cannot be classified (FR121)', () => {
+  // No attention field at all -> unknowable, not "does not match".
+  assert.equal(matchesSignal({ id: 'a' }, SIGNAL_ATTENTION, {}), null);
+  assert.equal(matchesSignal({ id: 'a' }, SIGNAL_RUNNING, {}), null);
+  assert.equal(matchesSignal({ id: 'a' }, SIGNAL_TODAY, null), null);
+});
+
+test('matchesSignal classifies attention and running from real fields', () => {
+  assert.equal(matchesSignal({ id: 'a', needs_attention_count: 2 }, SIGNAL_ATTENTION, {}), true);
+  assert.equal(matchesSignal({ id: 'a', needs_attention_count: 0 }, SIGNAL_ATTENTION, {}), false);
+  assert.equal(matchesSignal({ id: 'a', active: true }, SIGNAL_RUNNING, {}), true);
+  assert.equal(matchesSignal({ id: 'a', active: false }, SIGNAL_RUNNING, {}), false);
+});
+
+test('matchesSignal never matches a group — a group does not run work (FR71)', () => {
+  const group = { id: 'g', kind: 'group', needs_attention_count: 5, active: true };
+  assert.equal(matchesSignal(group, SIGNAL_ATTENTION, {}), false);
+  assert.equal(matchesSignal(group, SIGNAL_RUNNING, {}), false);
+});
+
+test('matchesSignal with no filter matches everything', () => {
+  assert.equal(matchesSignal({ id: 'a' }, '', {}), true);
+  assert.equal(matchesSignal({ id: 'g', kind: 'group' }, '', {}), true);
+});
+
+test('signalCounts derives counts from the same state, excluding groups (FR32)', () => {
+  const rows = [
+    { id: 'a', needs_attention_count: 2, active: false },
+    { id: 'b', needs_attention_count: 0, active: true },
+    { id: 'c', needs_attention_count: 0, active: false },
+    { id: 'g', kind: 'group', needs_attention_count: 9, active: true }
+  ];
+  const counts = signalCounts(rows, {});
+  assert.equal(counts[SIGNAL_ATTENTION], 1);
+  assert.equal(counts[SIGNAL_RUNNING], 1);
+  assert.equal(counts[SIGNAL_TODAY], 0);
+});
+
+test('signalCounts reports null — never 0 — when the source is unavailable (FR32/FR121)', () => {
+  const rows = [{ id: 'a', needs_attention_count: 0 }];
+  // Schedule source down entirely.
+  assert.equal(signalCounts(rows, null)[SIGNAL_TODAY], null);
+  // No workspace reported attention/active at all.
+  const blind = signalCounts([{ id: 'a' }, { id: 'b' }], null);
+  assert.equal(blind[SIGNAL_ATTENTION], null);
+  assert.equal(blind[SIGNAL_RUNNING], null);
+});
+
+test('signalCounts on an empty workspace list is an authoritative 0, not unknown', () => {
+  const counts = signalCounts([], {});
+  assert.equal(counts[SIGNAL_ATTENTION], 0);
+  assert.equal(counts[SIGNAL_RUNNING], 0);
+});
+
+test('filterWorkspaceIds returns null with no filter and only true matches otherwise', () => {
+  const rows = [
+    { id: 'a', needs_attention_count: 1 },
+    { id: 'b', needs_attention_count: 0 },
+    { id: 'c' } // unclassifiable
+  ];
+  assert.equal(filterWorkspaceIds(rows, '', {}), null);
+  assert.deepEqual(filterWorkspaceIds(rows, SIGNAL_ATTENTION, {}), ['a']);
+});
+
+test('filterResultMessage is honest about an unavailable filter source', () => {
+  assert.match(filterResultMessage('', null), /Filter cleared/);
+  assert.match(filterResultMessage(SIGNAL_ATTENTION, 1), /1 workspace matches/);
+  assert.match(filterResultMessage(SIGNAL_ATTENTION, 4), /4 workspaces match/);
+  assert.match(filterResultMessage(SIGNAL_TODAY, null), /unavailable/i);
+  assert.doesNotMatch(filterResultMessage(SIGNAL_TODAY, null), /0 workspaces/);
+});
+
+test('renderSignalFiltersHTML marks the active chip and flags unavailable counts', () => {
+  const html = renderSignalFiltersHTML({ attention: 2, running: 0, today: null }, SIGNAL_ATTENTION);
+  assert.match(html, /data-cockpit-signal="attention"[^>]*aria-pressed="true"/);
+  assert.match(html, /data-cockpit-signal="running"[^>]*aria-pressed="false"/);
+  assert.match(html, /data-unavailable="true"/);
+  assert.match(html, /—/);
+});
+
+// ---------------------------------------------------------------------------
+// Roster honesty (FR69, FR121)
+// ---------------------------------------------------------------------------
+
+test('rosterState distinguishes listed, count-only, empty, and unavailable', () => {
+  assert.equal(rosterState({ agents: [{ name: 'A' }], agent_count: 1 }).state, 'listed');
+  // The list payload carries agent_count but no agents array: saying "no
+  // agents" would contradict the count rendered beside it.
+  assert.equal(rosterState({ agent_count: 3 }).state, 'count-only');
+  assert.equal(rosterState({ agent_count: 0 }).state, 'empty');
+  assert.equal(rosterState({}).state, 'unavailable');
+});
+
+test('the rail never claims "no agents" for a workspace that reports agents', () => {
+  const html = renderWorkspaceRailHTML(workspaceRailView({ id: 'w', name: 'W', agent_count: 3 }));
+  assert.doesNotMatch(html, /No agents attached yet/);
+  assert.match(html, /3 agents attached/);
+});
+
+test('the rail says agent data is unavailable when the payload carries none', () => {
+  const html = renderWorkspaceRailHTML(workspaceRailView({ id: 'w', name: 'W' }));
+  assert.match(html, /Agent data unavailable/);
+});
+
+test('the rail reports an authoritative zero roster plainly', () => {
+  const html = renderWorkspaceRailHTML(workspaceRailView({ id: 'w', name: 'W', agent_count: 0 }));
+  assert.match(html, /No agents attached yet/);
+});
+
+// ---------------------------------------------------------------------------
+// Group aggregates and rail (FR70, FR71)
+// ---------------------------------------------------------------------------
+
+function groupFixture() {
+  return flattenWorkspaceTree([
+    {
+      id: 'g1',
+      name: 'Platform',
+      kind: 'group',
+      description: 'Everything platform.',
+      children: [
+        { id: 'w1', name: 'API', open_task_count: 3, agent_count: 2, needs_attention_count: 1 },
+        { id: 'w2', name: 'Web', open_task_count: 1, agent_count: 1, needs_attention_count: 0 },
+        {
+          id: 'g2',
+          name: 'Infra',
+          kind: 'group',
+          children: [
+            { id: 'w3', name: 'DB', open_task_count: 5, agent_count: 4, needs_attention_count: 2 }
+          ]
+        }
+      ]
+    },
+    { id: 'w4', name: 'Outside', open_task_count: 99, agent_count: 99 }
+  ]);
+}
+
+test('groupAggregates sums the whole subtree and excludes workspaces outside it', () => {
+  const rows = groupFixture();
+  const a = groupAggregates({ id: 'g1' }, rows);
+  assert.equal(a.childCount, 3); // w1, w2, g2
+  assert.equal(a.descendantWorkspaces, 3); // w1, w2, w3
+  assert.equal(a.descendantGroups, 1); // g2
+  assert.equal(a.openTasks.total, 9); // 3 + 1 + 5, NOT 108
+  assert.equal(a.agents.total, 7);
+  assert.equal(a.attention.total, 3);
+});
+
+test('groupAggregates reports null totals when NO descendant reported a metric', () => {
+  const rows = flattenWorkspaceTree([
+    { id: 'g', name: 'G', kind: 'group', children: [{ id: 'w', name: 'W' }] }
+  ]);
+  const a = groupAggregates({ id: 'g' }, rows);
+  assert.equal(a.openTasks.total, null);
+  assert.equal(a.agents.total, null);
+});
+
+test('groupAggregates counts partially-reported metrics and says how many are missing', () => {
+  const rows = flattenWorkspaceTree([
+    {
+      id: 'g',
+      name: 'G',
+      kind: 'group',
+      children: [
+        { id: 'w1', name: 'A', open_task_count: 4 },
+        { id: 'w2', name: 'B' }
+      ]
+    }
+  ]);
+  const a = groupAggregates({ id: 'g' }, rows);
+  assert.equal(a.openTasks.total, 4);
+  assert.equal(a.openTasks.missing, 1);
+});
+
+test('an empty group aggregates to an authoritative zero, not to unknown', () => {
+  // No workspaces inside means genuinely no tasks/agents/attention. Rendering
+  // "—" here would claim we could not find out, which is false.
+  const rows = flattenWorkspaceTree([{ id: 'g', name: 'G', kind: 'group', children: [] }]);
+  const a = groupAggregates({ id: 'g' }, rows);
+  assert.equal(a.childCount, 0);
+  assert.equal(a.descendantWorkspaces, 0);
+  assert.equal(a.openTasks.total, 0);
+  assert.equal(a.agents.total, 0);
+  assert.equal(a.attention.total, 0);
+
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, 'g'), rows));
+  assert.doesNotMatch(html, /data-unavailable="true"/);
+});
+
+test('the group rail offers Open Group and never a next move or Ask Commander (FR71)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, 'g1'), rows));
+  assert.match(html, /Open Group/);
+  assert.match(html, /data-rail-panel="group"/);
+  assert.doesNotMatch(html, /Next move/);
+  assert.doesNotMatch(html, /data-cockpit-rail-ask/);
+  // It must not read as an execution workspace.
+  assert.match(html, /does not run work itself/);
+});
+
+test('the group rail shows a missing-data note rather than a fake zero', () => {
+  const rows = flattenWorkspaceTree([
+    { id: 'g', name: 'G', kind: 'group', children: [{ id: 'w', name: 'W' }] }
+  ]);
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, 'g'), rows));
+  assert.match(html, /data-unavailable="true"/);
+});
+
+test('the group rail escapes hostile group content', () => {
+  const rows = flattenWorkspaceTree([
+    {
+      id: '<x>',
+      name: '<img src=x>',
+      kind: 'group',
+      description: '<script>y()</script>',
+      children: []
+    }
+  ]);
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, '<x>'), rows));
+  assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /<img/i);
+});
+
+// ---------------------------------------------------------------------------
+// Summary (FR89, FR90)
+// ---------------------------------------------------------------------------
+
+test('summaryView totals come from the same shared state, groups counted separately', () => {
+  const rows = groupFixture();
+  const view = summaryView(rows, {});
+  assert.equal(view.workspaces, 4); // w1..w4
+  assert.equal(view.groups, 2); // g1, g2
+  assert.equal(view.openTasks, 108); // 3 + 1 + 5 + 99
+  assert.equal(view.agents, 106);
+  assert.equal(view.attention, 3);
+});
+
+test('summaryView lists the workspaces that need attention and that are running', () => {
+  const rows = flattenWorkspaceTree([
+    { id: 'a', name: 'Alpha', needs_attention_count: 2 },
+    { id: 'b', name: 'Beta', active: true },
+    { id: 'c', name: 'Gamma' }
+  ]);
+  const view = summaryView(rows, {});
+  assert.deepEqual(
+    view.attentionWorkspaces.map(w => w.name),
+    ['Alpha']
+  );
+  assert.deepEqual(
+    view.runningWorkspaces.map(w => w.name),
+    ['Beta']
+  );
+});
+
+test('summaryView reports schedule figures as unavailable when the source is down', () => {
+  const view = summaryView(groupFixture(), null);
+  assert.equal(view.upcomingCount, null);
+  assert.equal(view.dueToday, null);
+});
+
+test('summaryView counts upcoming runs when the schedule source is present', () => {
+  const now = new Date('2026-07-31T09:00:00');
+  const index = {
+    w1: [{ next_run: new Date('2026-07-31T12:00:00').toISOString() }],
+    w4: [
+      { next_run: new Date('2026-08-09T12:00:00').toISOString() },
+      { next_run: new Date('2026-08-10T12:00:00').toISOString() }
+    ]
+  };
+  const view = summaryView(groupFixture(), index, now);
+  assert.equal(view.upcomingCount, 3);
+  assert.equal(view.dueToday, 1);
+});
+
+test('renderSummaryRailHTML shows totals, a Back action, and honest empty lists', () => {
+  const html = renderSummaryRailHTML(summaryView(groupFixture(), null));
+  assert.match(html, /data-rail-panel="summary"/);
+  assert.match(html, /data-cockpit-rail-back/);
+  assert.match(html, /Workspaces/);
+  assert.match(html, /Scheduled-work data is unavailable/);
+  // Due-today has no source, so it must render unavailable rather than 0.
+  assert.match(html, /data-unavailable="true"/);
+});
+
+test('the Summary attention list links back into selection, not to a URL', () => {
+  const rows = flattenWorkspaceTree([{ id: 'a', name: 'Alpha', needs_attention_count: 1 }]);
+  const html = renderSummaryRailHTML(summaryView(rows, {}));
+  assert.match(html, /data-cockpit-summary-select="a"/);
+});
+
+test('renderSummaryRailHTML caps long lists and says how many more there are', () => {
+  const rows = flattenWorkspaceTree(
+    Array.from({ length: 8 }, (_, i) => ({
+      id: `w${i}`,
+      name: `W${i}`,
+      needs_attention_count: 1
+    }))
+  );
+  const html = renderSummaryRailHTML(summaryView(rows, {}));
+  assert.match(html, /\+3 more/);
+});
+
+test('folderDisplayFor reads the real directory_references wire field', () => {
+  const linked = folderDisplayFor({
+    directory_references: [{ path: '/Users/me/Ori Workspaces/Alpha', is_primary: true }]
+  });
+  assert.equal(linked.linked, true);
+  assert.equal(linked.detail, 'Ori Workspaces/Alpha');
 });

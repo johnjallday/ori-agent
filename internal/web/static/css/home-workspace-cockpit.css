@@ -35,9 +35,13 @@
  * Workspace area
  * ----------------------------------------------------------------------- */
 
+/* Three explicit rows: header, signal filters, then the Map/Tree slot as the
+   only flexible one. Declaring two rows left the filters on an implicit track
+   that collapsed to 0px, so the chips overlapped the map and could not be
+   clicked. */
 .cockpit-workspace-area {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -119,6 +123,77 @@
 .cockpit-view-btn:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------------------
+ * Signal filters (FR31-FR34)
+ * ----------------------------------------------------------------------- */
+
+.cockpit-signal-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 14px;
+}
+
+.cockpit-signal-filters[hidden] {
+  display: none;
+}
+
+.cockpit-signal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+/* The active filter is marked by a filled chip AND a leading check glyph, so
+   it never depends on color alone (FR131). */
+.cockpit-signal-chip[aria-pressed="true"] {
+  border-color: var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 16%, var(--hc-panel));
+  color: var(--hc-ink);
+}
+
+.cockpit-signal-chip[aria-pressed="true"] .cockpit-signal-label::before {
+  content: "✓ ";
+}
+
+.cockpit-signal-chip:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 1px;
+}
+
+.cockpit-signal-count {
+  padding: 0 4px;
+  border: 1px solid var(--hc-line);
+  color: var(--hc-ink);
+  font-weight: 700;
+}
+
+.cockpit-signal-count[data-unavailable="true"] {
+  color: var(--hc-ink-faint);
+  font-weight: 400;
+}
+
+/* A filtered-out site is de-emphasized in place rather than removed, so the map
+   layout and the user's spatial memory of it stay stable (FR33). */
+.cockpit-map .ws-map-tile.is-filtered-out {
+  opacity: 0.22;
+  filter: saturate(0.25);
+}
+
+.cockpit-map .ws-map-tile.is-filtered-out:focus-visible {
+  opacity: 1;
+  filter: none;
 }
 
 .cockpit-area-body {
@@ -219,9 +294,12 @@
 }
 
 /* The rail scrolls independently when Today has more content than fits
-   (FR76), so the workspace area is never pushed off-screen by it. */
+   (FR76), so the workspace area is never pushed off-screen by it. It also
+   absorbs the leftover height, which keeps the footer pinned to the bottom of
+   the rail instead of floating under a short panel. */
 .cockpit-rail-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
@@ -233,10 +311,30 @@
   display: none;
 }
 
+/* The footer stays reachable from every rail state and must never sit past an
+   unreachable fixed edge on a short viewport (FR88, FR139) — it is a normal
+   flex row after the scrolling body, not a fixed overlay. */
+.cockpit-rail-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
 .cockpit-rail-panel {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.cockpit-rail-metric-note {
+  color: var(--hc-ink-faint);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
 
 .cockpit-rail-head {

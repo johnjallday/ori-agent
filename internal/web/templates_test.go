@@ -403,6 +403,9 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// Mutually exclusive Map/Tree control (FR17, FR24).
 		`data-cockpit-view="map"`,
 		`data-cockpit-view="tree"`,
+		// Map-only signal filters and the rail footer (FR31, FR88).
+		`id="cockpitSignalFilters"`,
+		`id="cockpitSummaryBtn"`,
 		// Ask Ori stays above the cockpit in both views (FR14, FR92).
 		`id="homeAssistantCard"`,
 		`id="homeAssistantInput"`,

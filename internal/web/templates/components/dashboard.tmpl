@@ -56,6 +56,12 @@
           </button>
         </div>
       </header>
+      <!-- Map-only signal filters. Single-select and keyboard-operable; counts
+           come from the same authoritative state Map and Summary read, and an
+           unavailable count renders as an em dash rather than a fake 0
+           (FR31-FR34). Populated by home-workspace-cockpit.js. -->
+      <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
+
       <div class="cockpit-area-body">
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the
              other, never a drawer or overlay (FR18). -->
@@ -191,10 +197,17 @@
         </div>
       </div>
 
-      <!-- Selected workspace/group context. A sibling panel rather than a
-           re-render of Today, so swapping rail states never destroys the DOM
-           the Daily Brief, Calendar, and progression modules own (FR72). -->
+      <!-- Selected workspace/group context, and the Summary rail state. A
+           sibling panel rather than a re-render of Today, so swapping rail
+           states never destroys the DOM the Daily Brief, Calendar, and
+           progression modules own (FR72). -->
       <div id="cockpitRailContext" class="cockpit-rail-body" data-rail-state="context" hidden></div>
+
+      <!-- Rail footer: reachable from every rail state (FR88). Quick Capture
+           joins it in the Today recomposition. -->
+      <div class="cockpit-rail-footer">
+        <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false">Summary</button>
+      </div>
     </aside>
   </div>
 

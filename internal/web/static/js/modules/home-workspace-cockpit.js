@@ -176,11 +176,20 @@ export function buildMapMetadata(flattened, tree) {
   return { folderDisplayById, tagsById, groupPreviewById };
 }
 
-/** Linked-folder badge data for a workspace, matching the Map's expectations. */
+/**
+ * Linked-folder badge data for a workspace, matching the Map's expectations.
+ *
+ * The wire field is `directory_references` (see `/api/workspaces?tree=true` and
+ * the launcher's collectWorkspaceLinkedDirectories). `directories` is accepted
+ * as a fallback because some callers pass an already-normalized shape.
+ */
 export function folderDisplayFor(workspace) {
-  const directories = Array.isArray(workspace && workspace.directories)
-    ? workspace.directories.filter(Boolean)
-    : [];
+  const refs = Array.isArray(workspace && workspace.directory_references)
+    ? workspace.directory_references
+    : Array.isArray(workspace && workspace.directories)
+      ? workspace.directories
+      : [];
+  const directories = refs.filter(Boolean);
   const primary = directories.find(dir => dir && dir.is_primary) || directories[0] || null;
   const path = String((primary && (primary.path || primary.name)) || '').trim();
   if (!path) {
@@ -245,6 +254,164 @@ export function workspaceSignals(workspace) {
   }[status];
 
   return { status, label, attention, openTasks, agents, active };
+}
+
+// ---------------------------------------------------------------------------
+// Signal filters (FR31, FR32, FR33, FR34)
+//
+// Field inventory behind these classifiers, taken from the real
+// `/api/workspaces?tree=true` payload (Task 2.1):
+//
+//   active: bool                 -> Running
+//   needs_attention_count: int   -> Attention
+//   open_task_count: int         -> workspace context + next move
+//   agent_count: int             -> roster size
+//   backlog_count / session_count / mcp_count / skill_count: int
+//   status / ops_mode / kind: string
+//   updated_at / created_at: RFC3339 string
+//
+// There is NO schedule field on a workspace. "Today" is therefore a JOIN
+// against `/api/orchestration/scheduled-tasks/upcoming`, which returns rows
+// carrying `workspace_id` and `next_run`. When that source has not loaded or
+// has failed, the Today filter reports an unavailable count rather than 0 —
+// a 0 there would be a fabricated authoritative value (FR32, FR121).
+// ---------------------------------------------------------------------------
+
+export const SIGNAL_ATTENTION = 'attention';
+export const SIGNAL_RUNNING = 'running';
+export const SIGNAL_TODAY = 'today';
+export const SIGNALS = [SIGNAL_ATTENTION, SIGNAL_RUNNING, SIGNAL_TODAY];
+
+export const SIGNAL_LABELS = {
+  [SIGNAL_ATTENTION]: 'Attention',
+  [SIGNAL_RUNNING]: 'Running',
+  [SIGNAL_TODAY]: 'Today'
+};
+
+/** Normalize a filter value; anything unrecognized means "no filter". */
+export function parseSignal(value) {
+  const signal = String(value || '')
+    .trim()
+    .toLowerCase();
+  return SIGNALS.includes(signal) ? signal : '';
+}
+
+/**
+ * Index upcoming scheduled work by workspace id.
+ *
+ * Returns `null` — not an empty index — when the schedule source is
+ * unavailable, so callers can tell "nothing scheduled" apart from "we don't
+ * know" (FR32, FR120, FR121).
+ */
+export function buildScheduleIndex(rows) {
+  if (!Array.isArray(rows)) return null;
+  const index = Object.create(null);
+  rows.forEach(row => {
+    const id = String((row && row.workspace_id) || '').trim();
+    if (!id) return;
+    (index[id] = index[id] || []).push(row);
+  });
+  return index;
+}
+
+/**
+ * Does this workspace have scheduled work due within the local calendar day?
+ *
+ * `null` means the schedule source is unavailable for this workspace.
+ */
+export function hasWorkTodayFor(workspaceId, scheduleIndex, now = new Date()) {
+  if (!scheduleIndex) return null;
+  const rows = scheduleIndex[workspaceId] || [];
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 59, 59, 999);
+  return rows.some(row => {
+    const at = new Date(String((row && (row.next_run || row.next_run_at)) || ''));
+    return !Number.isNaN(at.getTime()) && at <= endOfDay;
+  });
+}
+
+/**
+ * Does a workspace match a signal filter?
+ *
+ * `null` means "cannot tell from the data we have" — such a workspace is
+ * de-emphasized rather than claimed as a match or a non-match.
+ */
+export function matchesSignal(workspace, signal, scheduleIndex, now) {
+  if (!signal) return true;
+  const ws = workspace || {};
+  // Groups are containers, not execution workspaces; a signal filter is about
+  // where work is happening, so groups never match one (FR71).
+  if (isGroupWorkspace(ws)) return false;
+  const signals = workspaceSignals(ws);
+  if (signal === SIGNAL_ATTENTION) {
+    return signals.attention === null ? null : signals.attention > 0;
+  }
+  if (signal === SIGNAL_RUNNING) {
+    return 'active' in ws ? signals.active : null;
+  }
+  return hasWorkTodayFor(String(ws.id || ''), scheduleIndex, now);
+}
+
+/**
+ * Count how many workspaces match each signal.
+ *
+ * A count is `null` when the underlying source is unavailable, so the chip can
+ * render an honest em dash instead of a fabricated zero (FR32).
+ */
+export function signalCounts(workspaces, scheduleIndex, now) {
+  const rows = (Array.isArray(workspaces) ? workspaces : []).filter(
+    ws => ws && !isGroupWorkspace(ws)
+  );
+  const counts = {};
+  SIGNALS.forEach(signal => {
+    if (signal === SIGNAL_TODAY && !scheduleIndex) {
+      counts[signal] = null;
+      return;
+    }
+    const known = rows.map(ws => matchesSignal(ws, signal, scheduleIndex, now));
+    // If NOTHING could be classified, the count is unknown rather than zero.
+    counts[signal] =
+      known.every(v => v === null) && known.length > 0
+        ? null
+        : known.filter(v => v === true).length;
+  });
+  return counts;
+}
+
+/** Apply the active filter, returning the ids that should stay prominent. */
+export function filterWorkspaceIds(workspaces, signal, scheduleIndex, now) {
+  if (!signal) return null; // null = no filter, everything is prominent
+  return (Array.isArray(workspaces) ? workspaces : [])
+    .filter(ws => ws && matchesSignal(ws, signal, scheduleIndex, now) === true)
+    .map(ws => ws.id);
+}
+
+/** Accessible result announcement for a filter change (FR33). */
+export function filterResultMessage(signal, count) {
+  if (!signal) return 'Filter cleared. Showing all workspaces.';
+  const label = SIGNAL_LABELS[signal] || signal;
+  if (count === null || count === undefined) {
+    return `${label} filter applied. The data needed for this filter is unavailable.`;
+  }
+  return count === 1
+    ? `${label} filter applied. 1 workspace matches.`
+    : `${label} filter applied. ${count} workspaces match.`;
+}
+
+export function renderSignalFiltersHTML(counts, activeSignal) {
+  return SIGNALS.map(signal => {
+    const isActive = signal === activeSignal;
+    const count = counts ? counts[signal] : null;
+    const label = SIGNAL_LABELS[signal];
+    return (
+      `<button type="button" class="cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
+      `aria-pressed="${isActive ? 'true' : 'false'}">` +
+      `<span class="cockpit-signal-label">${escapeHtml(label)}</span>` +
+      `<span class="cockpit-signal-count"${count === null ? ' data-unavailable="true"' : ''}>` +
+      `${escapeHtml(formatCount(count))}</span>` +
+      '</button>'
+    );
+  }).join('');
 }
 
 /**
@@ -334,6 +501,132 @@ export function agentRoster(workspace) {
     .filter(row => row && row.name);
 }
 
+/**
+ * Decide what the roster section can honestly say.
+ *
+ * The workspace list payload carries `agent_count` but only sometimes carries
+ * the `agents` array. Rendering "No agents attached yet" for a workspace that
+ * reports 3 agents would be a flat lie, so the three cases are kept distinct
+ * (FR69, FR121).
+ */
+export function rosterState(workspace) {
+  const roster = agentRoster(workspace);
+  const count = workspaceSignals(workspace).agents;
+  if (roster.length > 0) return { state: 'listed', roster, count };
+  if (count === null) return { state: 'unavailable', roster: [], count: null };
+  if (count > 0) return { state: 'count-only', roster: [], count };
+  return { state: 'empty', roster: [], count: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Group aggregates (FR70, FR71)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sum a group's descendants.
+ *
+ * A metric is `null` when NO descendant reported it — summing absent values
+ * into 0 would present missing data as an authoritative total (FR121). A
+ * partially-reported metric returns the sum of what was reported plus the
+ * count of workspaces that did not report, so the rail can say so.
+ */
+export function groupAggregates(group, flattened) {
+  const rows = Array.isArray(flattened) ? flattened : [];
+  const groupId = String((group && group.id) || '');
+  const descendants = [];
+
+  const collect = parentId => {
+    rows.forEach(row => {
+      if (!row || row.parent_id !== parentId) return;
+      descendants.push(row);
+      collect(row.id);
+    });
+  };
+  collect(groupId);
+
+  const workspaces = descendants.filter(row => !isGroupWorkspace(row));
+  const groups = descendants.filter(isGroupWorkspace);
+
+  const sum = pick => {
+    const values = workspaces.map(pick);
+    // A group with no workspaces in it genuinely holds no tasks, agents, or
+    // attention — that is an authoritative zero, not missing data. Only a group
+    // whose workspaces exist but reported nothing is unknown (FR121).
+    if (values.length === 0) return { total: 0, missing: 0 };
+    const known = values.filter(v => v !== null);
+    if (known.length === 0) return { total: null, missing: values.length };
+    return {
+      total: known.reduce((a, b) => a + b, 0),
+      missing: values.length - known.length
+    };
+  };
+
+  return {
+    childCount: rows.filter(row => row && row.parent_id === groupId).length,
+    descendantWorkspaces: workspaces.length,
+    descendantGroups: groups.length,
+    agents: sum(ws => workspaceSignals(ws).agents),
+    openTasks: sum(ws => workspaceSignals(ws).openTasks),
+    attention: sum(ws => workspaceSignals(ws).attention)
+  };
+}
+
+export function groupRailView(group, flattened) {
+  const ws = group || {};
+  const aggregates = groupAggregates(ws, flattened);
+  return {
+    kind: RAIL_GROUP,
+    id: String(ws.id || ''),
+    name: String(ws.name || 'Untitled group'),
+    description: String(ws.description || '').trim(),
+    aggregates,
+    openHref: ws.id ? `/workspaces/${encodeURIComponent(ws.id)}` : ''
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cross-workspace Summary (FR89, FR90)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cross-workspace totals, computed from the SAME shared state Map and Tree
+ * render from — never from a second fetch (FR89).
+ */
+export function summaryView(flattened, scheduleIndex, now) {
+  const rows = Array.isArray(flattened) ? flattened : [];
+  const workspaces = rows.filter(ws => ws && !isGroupWorkspace(ws));
+  const groups = rows.filter(isGroupWorkspace);
+
+  const sum = pick => {
+    const values = workspaces.map(pick);
+    const known = values.filter(v => v !== null);
+    if (known.length === 0 && values.length > 0) return null;
+    return known.reduce((a, b) => a + b, 0);
+  };
+
+  const attentionWorkspaces = workspaces.filter(ws => (workspaceSignals(ws).attention || 0) > 0);
+  const runningWorkspaces = workspaces.filter(ws => workspaceSignals(ws).active);
+
+  const upcoming = scheduleIndex
+    ? Object.keys(scheduleIndex).reduce((total, id) => total + scheduleIndex[id].length, 0)
+    : null;
+
+  return {
+    workspaces: workspaces.length,
+    groups: groups.length,
+    agents: sum(ws => workspaceSignals(ws).agents),
+    openTasks: sum(ws => workspaceSignals(ws).openTasks),
+    attention: sum(ws => workspaceSignals(ws).attention),
+    attentionWorkspaces: attentionWorkspaces.map(ws => ({ id: ws.id, name: ws.name })),
+    runningWorkspaces: runningWorkspaces.map(ws => ({ id: ws.id, name: ws.name })),
+    upcomingCount: upcoming,
+    dueToday: scheduleIndex
+      ? workspaces.filter(ws => hasWorkTodayFor(String(ws.id || ''), scheduleIndex, now) === true)
+          .length
+      : null
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Rail view models + rendering
 // ---------------------------------------------------------------------------
@@ -341,6 +634,7 @@ export function agentRoster(workspace) {
 export const RAIL_TODAY = 'today';
 export const RAIL_WORKSPACE = 'workspace';
 export const RAIL_GROUP = 'group';
+export const RAIL_SUMMARY = 'summary';
 // The reserved Personal HQ site — a landmark for an HQ that has not been built
 // (or needs repair), not a workspace. Mirrors workspace-map.js's own id so the
 // two agree on what "the HQ site is selected" means.
@@ -374,7 +668,8 @@ export function workspaceRailView(workspace) {
     commanderUnavailableReason: commander
       ? ''
       : 'No entry agent is assigned, so there is no commander to ask.',
-    roster: agentRoster(ws)
+    roster: agentRoster(ws),
+    rosterState: rosterState(ws)
   };
 }
 
@@ -389,13 +684,30 @@ function metricHTML(label, value) {
   );
 }
 
-function rosterHTML(roster) {
-  if (!roster.length) {
+function rosterHTML(state) {
+  if (!state || state.state === 'unavailable') {
+    return '<p class="cockpit-rail-empty">Agent data unavailable for this workspace.</p>';
+  }
+  if (state.state === 'empty') {
     return '<p class="cockpit-rail-empty">No agents attached yet.</p>';
+  }
+  if (state.state === 'count-only') {
+    // The workspace reports agents but this view's payload does not include
+    // their names. Saying "no agents" here would contradict the count beside
+    // it, so the rail says what it actually knows (FR121).
+    return (
+      '<p class="cockpit-rail-empty">' +
+      escapeHtml(
+        state.count === 1
+          ? '1 agent attached. Open the workspace to see the roster.'
+          : `${state.count} agents attached. Open the workspace to see the roster.`
+      ) +
+      '</p>'
+    );
   }
   return (
     '<ul class="cockpit-rail-roster">' +
-    roster
+    state.roster
       .map(
         agent =>
           '<li class="cockpit-rail-roster-row">' +
@@ -410,6 +722,125 @@ function rosterHTML(roster) {
       )
       .join('') +
     '</ul>'
+  );
+}
+
+/** A group aggregate reads as "12" or "12 (3 unreported)" or "—" (FR121). */
+function aggregateHTML(label, aggregate) {
+  const unknown = !aggregate || aggregate.total === null;
+  const note =
+    !unknown && aggregate.missing > 0
+      ? `<span class="cockpit-rail-metric-note">${aggregate.missing} unreported</span>`
+      : '';
+  return (
+    '<div class="cockpit-rail-metric">' +
+    `<span class="cockpit-rail-metric-value"${unknown ? ' data-unavailable="true"' : ''}>` +
+    escapeHtml(formatCount(unknown ? null : aggregate.total)) +
+    '</span>' +
+    `<span class="cockpit-rail-metric-label">${escapeHtml(label)}</span>` +
+    note +
+    '</div>'
+  );
+}
+
+/**
+ * Render the group context rail.
+ *
+ * A group is a container, not an execution workspace: it gets Open Group and
+ * descendant aggregates, and deliberately NO next-move or Ask Commander action
+ * (FR70, FR71).
+ */
+export function renderGroupRailHTML(view) {
+  if (!view) return '';
+  const a = view.aggregates;
+  const childSummary =
+    a.descendantGroups > 0
+      ? `${a.childCount} direct · ${a.descendantWorkspaces} workspaces · ${a.descendantGroups} nested groups`
+      : `${a.childCount} direct · ${a.descendantWorkspaces} workspaces`;
+  return (
+    '<div class="cockpit-rail-panel" data-rail-panel="group">' +
+    '<header class="cockpit-rail-head">' +
+    '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
+    '<span aria-hidden="true">&#8592;</span> Today</button>' +
+    '<div class="cockpit-rail-identity">' +
+    `<h3 class="cockpit-rail-title">${escapeHtml(view.name)}</h3>` +
+    '<p class="cockpit-rail-badges">' +
+    '<span class="cockpit-rail-tag">Group</span>' +
+    `<span class="cockpit-rail-tag">${escapeHtml(childSummary)}</span>` +
+    '</p>' +
+    '</div>' +
+    '</header>' +
+    (view.description
+      ? `<p class="cockpit-rail-mission">${escapeHtml(view.description)}</p>`
+      : '') +
+    '<div class="cockpit-rail-actions">' +
+    `<a class="modern-btn modern-btn-primary cockpit-rail-open" href="${escapeHtml(view.openHref)}" data-cockpit-rail-open data-workspace-id="${escapeHtml(view.id)}">Open Group</a>` +
+    '</div>' +
+    '<div class="cockpit-rail-metrics" aria-label="Group totals">' +
+    aggregateHTML('Open tasks', a.openTasks) +
+    aggregateHTML('Agents', a.agents) +
+    aggregateHTML('Attention', a.attention) +
+    '</div>' +
+    '<p class="cockpit-rail-note">Totals cover every workspace inside this group. ' +
+    'A group holds workspaces; it does not run work itself.</p>' +
+    '</div>'
+  );
+}
+
+/** Render the cross-workspace Summary rail state (FR89, FR90). */
+export function renderSummaryRailHTML(view) {
+  if (!view) return '';
+  const listHTML = (title, rows, emptyCopy) =>
+    '<section class="cockpit-rail-section">' +
+    `<h4 class="cockpit-rail-section-title">${escapeHtml(title)}</h4>` +
+    (rows.length
+      ? '<ul class="cockpit-rail-roster">' +
+        rows
+          .slice(0, 5)
+          .map(
+            row =>
+              '<li class="cockpit-rail-roster-row">' +
+              `<a class="cockpit-rail-roster-name" href="#" data-cockpit-summary-select="${escapeHtml(row.id)}">${escapeHtml(row.name || 'Untitled workspace')}</a>` +
+              '</li>'
+          )
+          .join('') +
+        (rows.length > 5
+          ? `<li class="cockpit-rail-roster-row"><span class="cockpit-rail-roster-role">+${rows.length - 5} more</span></li>`
+          : '') +
+        '</ul>'
+      : `<p class="cockpit-rail-empty">${escapeHtml(emptyCopy)}</p>`) +
+    '</section>';
+
+  return (
+    '<div class="cockpit-rail-panel" data-rail-panel="summary">' +
+    '<header class="cockpit-rail-head">' +
+    '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
+    '<span aria-hidden="true">&#8592;</span> Back</button>' +
+    '<div class="cockpit-rail-identity">' +
+    '<h3 class="cockpit-rail-title">Summary</h3>' +
+    '<p class="cockpit-rail-badges"><span class="cockpit-rail-tag">All workspaces</span></p>' +
+    '</div>' +
+    '</header>' +
+    '<div class="cockpit-rail-metrics" aria-label="Cross-workspace totals">' +
+    metricHTML('Workspaces', view.workspaces) +
+    metricHTML('Groups', view.groups) +
+    metricHTML('Agents', view.agents) +
+    '</div>' +
+    '<div class="cockpit-rail-metrics" aria-label="Work totals">' +
+    metricHTML('Open tasks', view.openTasks) +
+    metricHTML('Attention', view.attention) +
+    metricHTML('Due today', view.dueToday) +
+    '</div>' +
+    listHTML('Needs attention', view.attentionWorkspaces, 'Nothing needs attention.') +
+    listHTML('Running now', view.runningWorkspaces, 'No workspace is running work.') +
+    (view.upcomingCount === null
+      ? '<p class="cockpit-rail-empty">Scheduled-work data is unavailable.</p>'
+      : `<p class="cockpit-rail-note">${escapeHtml(
+          view.upcomingCount === 1
+            ? '1 upcoming scheduled run.'
+            : `${view.upcomingCount} upcoming scheduled runs.`
+        )}</p>`) +
+    '</div>'
   );
 }
 
@@ -459,7 +890,7 @@ export function renderWorkspaceRailHTML(view) {
     '</div>' +
     '<section class="cockpit-rail-section" aria-label="Agent roster">' +
     '<h4 class="cockpit-rail-section-title">Roster</h4>' +
-    rosterHTML(view.roster) +
+    rosterHTML(view.rosterState) +
     '</section>' +
     '</div>'
   );
@@ -538,20 +969,33 @@ export function renderWorkspaceAreaStatusHTML(status) {
     areaTitle: document.querySelector('[data-cockpit-area-title]'),
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
     viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
+    filters: document.getElementById('cockpitSignalFilters'),
     railToday: document.getElementById('cockpitRailToday'),
     railContext: document.getElementById('cockpitRailContext'),
-    railLive: document.getElementById('cockpitRailLive')
+    railLive: document.getElementById('cockpitRailLive'),
+    summaryBtn: document.getElementById('cockpitSummaryBtn')
   };
 
   // ---- shared state (the single source of truth for every cockpit view) ----
+  //
+  // FR111/FR117: every view reads from here, and every mutation goes through
+  // applyRefresh() before dependent views rerender. No view fetches for itself.
   const state = {
     tree: [],
     flattened: [],
     metadata: { folderDisplayById: {}, tagsById: {}, groupPreviewById: {} },
+    // null (not {}) until the schedule source resolves, so "no scheduled work"
+    // and "we don't know" stay distinguishable (FR120, FR121).
+    scheduleIndex: null,
+    scheduleError: null,
     view: parseViewFromQuery(window.location.search),
+    signal: '',
     selectedId: '',
     railState: RAIL_TODAY,
     hqSiteView: null,
+    // The workspace/group context to restore when Summary or Ask Ori closes
+    // (FR91, FR100).
+    priorContext: null,
     loading: true,
     error: null,
     inFlight: null
@@ -578,7 +1022,51 @@ export function renderWorkspaceAreaStatusHTML(status) {
     root.dataset.state = status.state;
     // The map is only meaningful once there is something truthful to draw.
     if (els.map) els.map.hidden = state.view !== VIEW_MAP || status.state !== 'ready';
+    if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     return status;
+  }
+
+  // ---- signal filters (FR31-FR34) ----
+
+  function renderFilters() {
+    if (!els.filters) return;
+    const counts = signalCounts(state.flattened, state.scheduleIndex);
+    els.filters.innerHTML = renderSignalFiltersHTML(counts, state.signal);
+    els.filters.querySelectorAll('[data-cockpit-signal]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        // Single-select: clicking the active chip clears it (FR31, FR33).
+        const next = btn.getAttribute('data-cockpit-signal');
+        applySignal(next === state.signal ? '' : next);
+      });
+    });
+  }
+
+  function applySignal(signal) {
+    state.signal = parseSignal(signal);
+    renderFilters();
+    applyFilterToMap();
+    const counts = signalCounts(state.flattened, state.scheduleIndex);
+    announce(filterResultMessage(state.signal, state.signal ? counts[state.signal] : null));
+  }
+
+  /**
+   * De-emphasize non-matching map sites in place.
+   *
+   * The map is not re-mounted: filtering must not disturb selection, scroll, or
+   * the site layout, so a site keeps its position and simply dims (FR33).
+   */
+  function applyFilterToMap() {
+    if (!els.map) return;
+    const matching = filterWorkspaceIds(state.flattened, state.signal, state.scheduleIndex);
+    els.map.querySelectorAll('.ws-map-tile[data-ws-id]').forEach(tile => {
+      const id = tile.getAttribute('data-ws-id');
+      const dimmed = matching !== null && !matching.includes(id);
+      tile.classList.toggle('is-filtered-out', dimmed);
+      // Keep assistive technology in step with the visual de-emphasis.
+      if (dimmed) tile.setAttribute('data-filtered-out', 'true');
+      else tile.removeAttribute('data-filtered-out');
+    });
+    els.map.dataset.signal = state.signal || '';
   }
 
   function mountMap() {
@@ -594,10 +1082,12 @@ export function renderWorkspaceAreaStatusHTML(status) {
       selectOnly: true,
       hideChrome: true,
       noAutoSelect: true,
-      onSelect: id => selectWorkspace(id, { fromMap: true }),
-      onOpen: id => openWorkspace(id),
+      onSelect: id => selectItem(id, { fromMap: true }),
+      onOpen: id => openItem(id),
       onSelectHQSite: view => selectHQSite(view)
     });
+    // A re-mount rebuilds the tiles, so the active filter must be reapplied.
+    applyFilterToMap();
     // The map resolves the effective selection during mount: it may have
     // dropped one whose workspace no longer exists, or preselected the reserved
     // HQ site because the URL carried an explicit focus intent.
@@ -637,30 +1127,45 @@ export function renderWorkspaceAreaStatusHTML(status) {
       window.history.replaceState(window.history.state, '', next);
     }
     renderAreaStatus();
+    renderFilters();
     mountMap();
   }
 
   // ---- selection + rail ----
 
-  function selectWorkspace(id, { fromMap = false } = {}) {
+  /**
+   * Select a workspace OR a group — both share one active-item state, so Map,
+   * Tree, and the rail can never disagree about what is selected (FR57, FR58).
+   */
+  function selectItem(id, { fromMap = false } = {}) {
     const next = id || '';
     const changed = next !== state.selectedId;
+    const item = findWorkspace(state.flattened, next);
     state.selectedId = next;
-    state.railState = next ? RAIL_WORKSPACE : RAIL_TODAY;
+    state.railState = next ? (isGroupWorkspace(item) ? RAIL_GROUP : RAIL_WORKSPACE) : RAIL_TODAY;
     state.hqSiteView = null;
+    if (next) state.priorContext = { selectedId: next, railState: state.railState };
     if (!fromMap && els.map && window.OriWorkspaceMap && window.OriWorkspaceMap.setSelectedId) {
       window.OriWorkspaceMap.setSelectedId(els.map, state.flattened, next, {
         metadata: state.metadata
       });
     }
     renderRail({ announceChange: changed });
-    if (changed && next) fireTTFA('map-select');
+    subscribeRealtimeTo(next);
+    if (changed && next) fireTTFA(state.view === VIEW_TREE ? 'tree-select' : 'map-select');
   }
 
+  /**
+   * Return to Today.
+   *
+   * Clearing the active item must NOT clear Map signal filters or Tree
+   * management state — those are separate, deliberately sticky concerns (FR61).
+   */
   function clearSelection() {
     if (!state.selectedId && state.railState === RAIL_TODAY) return;
     state.hqSiteView = null;
-    selectWorkspace('');
+    state.priorContext = null;
+    selectItem('');
   }
 
   /**
@@ -680,17 +1185,55 @@ export function renderWorkspaceAreaStatusHTML(status) {
     renderRail({ announceChange: true });
   }
 
-  function renderHQSiteRail() {
-    if (!els.railContext || !window.OriWorkspaceMap) return false;
-    const html = window.OriWorkspaceMap.hqOverviewHTML(state.hqSiteView);
-    els.railContext.innerHTML =
-      '<div class="cockpit-rail-panel" data-rail-panel="personal-hq">' +
-      '<header class="cockpit-rail-head">' +
-      '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
-      '<span aria-hidden="true">&#8592;</span> Today</button>' +
-      '</header>' +
-      html +
-      '</div>';
+  /** Show the cross-workspace Summary, remembering what to come back to. */
+  function showSummary() {
+    if (state.railState !== RAIL_SUMMARY) {
+      state.priorContext =
+        state.selectedId && state.railState !== RAIL_TODAY
+          ? { selectedId: state.selectedId, railState: state.railState }
+          : null;
+    }
+    state.railState = RAIL_SUMMARY;
+    renderRail({ announceChange: true });
+  }
+
+  /**
+   * Leave Summary.
+   *
+   * Restores the prior workspace/group context when it is still valid, else
+   * Today — never a stale reference to something that has since been deleted
+   * (FR91).
+   */
+  function leaveSummary() {
+    const prior = state.priorContext;
+    if (prior && findWorkspace(state.flattened, prior.selectedId)) {
+      state.railState = prior.railState;
+      state.selectedId = prior.selectedId;
+      renderRail({ announceChange: true });
+      return;
+    }
+    state.selectedId = '';
+    state.railState = RAIL_TODAY;
+    state.priorContext = null;
+    renderRail({ announceChange: true });
+  }
+
+  function bindRailCommon() {
+    if (!els.railContext) return;
+    const back = els.railContext.querySelector('[data-cockpit-rail-back]');
+    if (back) {
+      back.addEventListener('click', () =>
+        state.railState === RAIL_SUMMARY ? leaveSummary() : clearSelection()
+      );
+    }
+    const open = els.railContext.querySelector('[data-cockpit-rail-open]');
+    if (open) open.addEventListener('click', () => fireTTFA('open-workspace'));
+    els.railContext.querySelectorAll('[data-cockpit-summary-select]').forEach(link =>
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        selectItem(link.getAttribute('data-cockpit-summary-select'));
+      })
+    );
     els.railContext.querySelectorAll('[data-hq-action]').forEach(el =>
       el.addEventListener('click', () =>
         window.dispatchEvent(
@@ -700,49 +1243,89 @@ export function renderWorkspaceAreaStatusHTML(status) {
         )
       )
     );
-    const back = els.railContext.querySelector('[data-cockpit-rail-back]');
-    if (back) back.addEventListener('click', () => clearSelection());
-    return true;
   }
 
   function renderRail({ announceChange = true } = {}) {
+    if (!els.railContext) return;
+
+    // Summary is a rail STATE, not a separate page or tab (FR89-FR91).
+    if (state.railState === RAIL_SUMMARY) {
+      showContextPanel(renderSummaryRailHTML(summaryView(state.flattened, state.scheduleIndex)));
+      if (announceChange) announce('Summary of all workspaces.');
+      return;
+    }
+
     // The reserved HQ site is a landmark, not a workspace, so it is resolved
     // before the workspace lookup.
     if (state.selectedId === HQ_SITE_ID && state.railState !== RAIL_TODAY) {
-      if (els.railToday) els.railToday.hidden = true;
-      if (els.railContext) els.railContext.hidden = false;
-      renderHQSiteRail();
+      showContextPanel(
+        '<div class="cockpit-rail-panel" data-rail-panel="personal-hq">' +
+          '<header class="cockpit-rail-head">' +
+          '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
+          '<span aria-hidden="true">&#8592;</span> Today</button>' +
+          '</header>' +
+          (window.OriWorkspaceMap ? window.OriWorkspaceMap.hqOverviewHTML(state.hqSiteView) : '') +
+          '</div>'
+      );
       if (announceChange) announce('Personal HQ site selected.');
       return;
     }
 
-    const workspace = findWorkspace(state.flattened, state.selectedId);
-    const showContext = state.railState !== RAIL_TODAY && workspace;
-    if (els.railToday) els.railToday.hidden = !!showContext;
-    if (els.railContext) {
-      els.railContext.hidden = !showContext;
-      els.railContext.innerHTML = showContext
-        ? renderWorkspaceRailHTML(workspaceRailView(workspace))
-        : '';
-      const back = els.railContext.querySelector('[data-cockpit-rail-back]');
-      if (back) back.addEventListener('click', () => clearSelection());
-      const open = els.railContext.querySelector('[data-cockpit-rail-open]');
-      if (open) open.addEventListener('click', () => fireTTFA('open-workspace'));
-    }
-    if (!showContext && state.selectedId) {
-      // The selected item vanished under us (deleted or now inaccessible):
-      // return to Today and say so rather than showing a stale rail (FR73).
-      state.selectedId = '';
-      state.railState = RAIL_TODAY;
-      announce('The selected workspace is no longer available. Showing Today.');
+    const item = findWorkspace(state.flattened, state.selectedId);
+    if (state.railState === RAIL_TODAY || !item) {
+      if (state.selectedId) {
+        // The selected item vanished under us (deleted or now inaccessible):
+        // return to Today and say so rather than showing a stale rail (FR73).
+        state.selectedId = '';
+        state.railState = RAIL_TODAY;
+        state.priorContext = null;
+        showTodayPanel();
+        announce('The selected workspace is no longer available. Showing Today.');
+        return;
+      }
+      showTodayPanel();
+      if (announceChange) announce('Showing Today.');
       return;
     }
-    if (announceChange) {
-      announce(showContext ? `${workspace.name} selected.` : 'Showing Today.');
-    }
+
+    showContextPanel(
+      isGroupWorkspace(item)
+        ? renderGroupRailHTML(groupRailView(item, state.flattened))
+        : renderWorkspaceRailHTML(workspaceRailView(item))
+    );
+    if (announceChange) announce(`${item.name} selected.`);
   }
 
-  function openWorkspace(id) {
+  /**
+   * Swap the rail to its context panel.
+   *
+   * Today is HIDDEN, never destroyed: the Daily Brief, Calendar, progression,
+   * and Personal HQ modules own DOM inside it, and re-rendering the rail must
+   * not tear their state down (FR72).
+   */
+  function showContextPanel(html) {
+    if (els.railToday) els.railToday.hidden = true;
+    els.railContext.hidden = false;
+    els.railContext.innerHTML = html;
+    bindRailCommon();
+    updateRailFooter();
+  }
+
+  function showTodayPanel() {
+    if (els.railToday) els.railToday.hidden = false;
+    els.railContext.hidden = true;
+    els.railContext.innerHTML = '';
+    updateRailFooter();
+  }
+
+  function updateRailFooter() {
+    if (!els.summaryBtn) return;
+    const inSummary = state.railState === RAIL_SUMMARY;
+    els.summaryBtn.setAttribute('aria-pressed', inSummary ? 'true' : 'false');
+    els.summaryBtn.textContent = inSummary ? 'Close summary' : 'Summary';
+  }
+
+  function openItem(id) {
     if (!id) return;
     fireTTFA('open-workspace');
     window.location.href = `/workspaces/${encodeURIComponent(id)}`;
@@ -760,6 +1343,26 @@ export function renderWorkspaceAreaStatusHTML(status) {
   }
 
   // ---- data ----
+
+  /**
+   * Load the schedule source that backs the Today filter and Summary.
+   *
+   * Independently degradable: a failure leaves scheduleIndex null, which makes
+   * the Today count render as unavailable rather than as a fabricated 0, and
+   * never blocks the workspace list (FR32, FR85, FR121).
+   */
+  async function refreshSchedule() {
+    try {
+      const res = await fetch('/api/orchestration/scheduled-tasks/upcoming?limit=200');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      state.scheduleIndex = buildScheduleIndex(Array.isArray(data.upcoming) ? data.upcoming : []);
+      state.scheduleError = null;
+    } catch (err) {
+      state.scheduleIndex = null;
+      state.scheduleError = err;
+    }
+  }
 
   async function refresh() {
     if (state.inFlight) return state.inFlight;
@@ -787,11 +1390,110 @@ export function renderWorkspaceAreaStatusHTML(status) {
         state.loading = false;
         state.inFlight = null;
         renderAreaStatus();
+        renderFilters();
         mountMap();
         renderRail({ announceChange: false });
       }
     })();
+    // The schedule rides alongside rather than inside, so a slow or failing
+    // schedule never delays the Map.
+    void refreshSchedule().then(() => {
+      renderFilters();
+      applyFilterToMap();
+      if (state.railState === RAIL_SUMMARY) renderRail({ announceChange: false });
+    });
     return state.inFlight;
+  }
+
+  /**
+   * Refresh WITHOUT tearing down view context.
+   *
+   * Used by realtime events and by post-mutation reloads: counts and statuses
+   * update, but the active view, selection, filter, and rail scroll survive
+   * (FR119). Also idempotent — repeated calls collapse onto one in-flight
+   * request rather than stacking (FR122).
+   */
+  async function refreshQuietly() {
+    if (state.inFlight) return state.inFlight;
+    const railScroll = els.railContext ? els.railContext.scrollTop : 0;
+    const todayScroll = els.railToday ? els.railToday.scrollTop : 0;
+    state.inFlight = (async () => {
+      try {
+        const response = await fetch('/api/workspaces?tree=true');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        state.tree = Array.isArray(data.folders) ? data.folders : [];
+        state.flattened = flattenWorkspaceTree(state.tree);
+        state.metadata = buildMapMetadata(state.flattened, state.tree);
+        state.error = null;
+      } catch (err) {
+        // A failed background refresh keeps the last good data on screen rather
+        // than blanking a working cockpit.
+        console.warn('home-workspace-cockpit: background refresh failed', err);
+      } finally {
+        state.inFlight = null;
+        renderAreaStatus();
+        renderFilters();
+        mountMap();
+        renderRail({ announceChange: false });
+        if (els.railContext) els.railContext.scrollTop = railScroll;
+        if (els.railToday) els.railToday.scrollTop = todayScroll;
+      }
+    })();
+    return state.inFlight;
+  }
+
+  // ---- realtime (FR119, FR122) ----
+
+  let realtimeTimer = null;
+  function scheduleRealtimeRefresh() {
+    // Coalesce bursts: a run that emits many task events must cause one
+    // refresh, not one per event.
+    if (realtimeTimer) return;
+    realtimeTimer = setTimeout(() => {
+      realtimeTimer = null;
+      void refreshQuietly();
+    }, 600);
+  }
+
+  // Realtime is a PER-WORKSPACE SSE stream (workspace-realtime.js exposes only
+  // subscribeToWorkspace); there is no cross-workspace feed. Opening one
+  // connection per site would mean N connections from Home, so the cockpit
+  // follows the launcher's existing precedent and keeps a live stream for the
+  // workspace the user is actually looking at, re-pointing it as the selection
+  // moves. Counts elsewhere refresh on the next mutation or reload.
+  let realtimeUnsub = null;
+  let realtimeWorkspaceId = '';
+
+  function subscribeRealtimeTo(workspaceId) {
+    const rt = window.workspaceRealtime;
+    if (!rt || typeof rt.subscribeToWorkspace !== 'function') return;
+    if (workspaceId === realtimeWorkspaceId) return;
+    // Idempotent: the previous subscription is always torn down first, so
+    // repeated selection changes cannot stack listeners (FR122).
+    if (realtimeUnsub) {
+      try {
+        realtimeUnsub();
+      } catch (_) {
+        /* ignore */
+      }
+      realtimeUnsub = null;
+    }
+    realtimeWorkspaceId = workspaceId || '';
+    if (!realtimeWorkspaceId || realtimeWorkspaceId === HQ_SITE_ID) return;
+    realtimeUnsub = rt.subscribeToWorkspace(realtimeWorkspaceId, event => {
+      const type = String((event && event.type) || '');
+      if (!type) return;
+      if (
+        type.startsWith('task.') ||
+        type.startsWith('workflow.') ||
+        type.startsWith('step.') ||
+        type === 'workspace.updated' ||
+        type === 'workspace.completed'
+      ) {
+        scheduleRealtimeRefresh();
+      }
+    });
   }
 
   // ---- wiring ----
@@ -802,6 +1504,12 @@ export function renderWorkspaceAreaStatusHTML(status) {
       fireTTFA('view-toggle');
     });
   });
+
+  if (els.summaryBtn) {
+    els.summaryBtn.addEventListener('click', () =>
+      state.railState === RAIL_SUMMARY ? leaveSummary() : showSummary()
+    );
+  }
 
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
@@ -814,17 +1522,32 @@ export function renderWorkspaceAreaStatusHTML(status) {
     ) {
       return;
     }
+    if (state.railState === RAIL_SUMMARY) {
+      leaveSummary();
+      return;
+    }
     clearSelection();
+  });
+
+  // Every create/import/delete/move/tag/undo path funnels through here, so one
+  // authoritative reload updates Map, Tree, Summary, and the rail together
+  // rather than each view refetching for itself (FR108, FR117).
+  window.addEventListener('ori:workspaces-changed', () => {
+    void refreshQuietly();
   });
 
   // Expose a narrow seam so later cockpit surfaces (Tree, Today, Ask Ori) and
   // realtime refreshes drive the SAME state rather than forking their own.
   window.OriHomeCockpit = {
     refresh,
+    refreshQuietly,
     getState: () => state,
     setView: applyView,
-    select: selectWorkspace,
-    clearSelection
+    setSignal: applySignal,
+    select: selectItem,
+    clearSelection,
+    showSummary,
+    leaveSummary
   };
 
   applyView(state.view, { pushUrl: false });
