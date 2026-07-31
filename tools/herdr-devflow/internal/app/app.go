@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/claudeusage"
@@ -35,6 +34,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeinstall"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeservice"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
@@ -66,9 +66,9 @@ type Dependencies struct {
 // WakeCoordinator is the continuation helper's source-scoped view of Ori's
 // single macOS wake owner.
 type WakeCoordinator interface {
-	Register(string, time.Time, string) error
-	Verify(context.Context, string, time.Time) (time.Time, error)
-	Cancel(string) error
+	RegisterCandidate(context.Context, string, time.Time, string) (wakeclient.Evidence, error)
+	VerifyCandidate(context.Context, string, time.Time) (wakeclient.Evidence, error)
+	CancelCandidate(context.Context, string) (wakeclient.Evidence, error)
 	Owner() wakeclient.OwnerReadiness
 }
 
@@ -137,7 +137,7 @@ func New(deps Dependencies) *App {
 	}
 	if deps.NewContinuationWake == nil {
 		deps.NewContinuationWake = func() (WakeCoordinator, error) {
-			return wakeclient.DefaultForSource(wakecoord.SourceHerdrContinuation)
+			return wakeclient.DefaultForSource(wakeprotocol.SourceContinuation)
 		}
 	}
 	if deps.IsInteractive == nil {
@@ -1582,7 +1582,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 		fmt.Fprintln(a.stdout, "Continuation preview (not saved yet):")
 		fmt.Fprintf(a.stdout, "  Feature: %s\n  Worktree: %s\n  Role: %s\n  Agent: %s (%s)\n  Due: %s (%s)\n  Retry until: %s\n  Prompt: %s\n", target.Feature.Name, target.Feature.Path, target.Agent.Role, target.Agent.Name, target.Agent.Kind, dueAt.Format(time.RFC3339), timezone, dueAt.Add(runtime.config.RetryWindow()).Format(time.RFC3339), promptSummary)
 		if parsed.wake {
-			fmt.Fprintln(a.stdout, "  Wake: required; Ori must confirm a macOS wake before this schedule is ready")
+			fmt.Fprintln(a.stdout, "  Wake: required; the standalone Herdr Wake Service must directly verify its macOS event")
 		}
 	}
 	// Register before saving so unsupported platforms cannot leave behind a
@@ -1596,7 +1596,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 	if parsed.wake {
 		wake, err = a.newContinuationWake()
 		if err != nil {
-			a.writeError(continuationWakeError("Ori's shared wake coordinator is unavailable", err), opts.json)
+			a.writeError(continuationWakeError("standalone Herdr wake service is unavailable", err), opts.json)
 			return 1
 		}
 		readiness := wake.Owner()
@@ -1621,11 +1621,55 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 	}
 	if parsed.wake {
 		ref := scheduler.ScheduleRef{RepositoryID: target.Feature.RepositoryID, FeatureName: target.Feature.Name}
-		failWake := func(message string, cause error) int {
-			_, markErr := scheduleService.RecordWakeResult(ctx, ref, record.ID, time.Time{}, message)
-			if cancelErr := wake.Cancel(record.ID); cancelErr != nil {
-				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: continuation wake %s was not confirmed withdrawn\n", record.ID)
+		registeredAt := time.Time{}
+		failWake := func(message string, cause error, evidence wakeclient.Evidence) int {
+			rollbackAt := time.Now().UTC()
+			rollback, cancelErr := wake.CancelCandidate(ctx, record.ID)
+			rollbackProven := cancelErr == nil || wakeNotFound(cancelErr)
+			uncertain := errors.Is(cause, wakeclient.ErrUncertain) || !rollbackProven
+			rollbackResult := string(rollback.Result)
+			rollbackDetail := rollback.Message
+			rollbackVerifiedAt := time.Time{}
+			if rollbackProven {
+				rollbackVerifiedAt = time.Now().UTC()
+				if rollbackResult == "" {
+					rollbackResult = string(wakeprotocol.ResultSuccess)
+				}
+			} else {
+				if rollbackResult == "" {
+					rollbackResult = string(wakeprotocol.ResultUncertain)
+				}
+				if rollbackDetail == "" && cancelErr != nil {
+					rollbackDetail = "exact standalone wake cancellation was not proven"
+				}
 			}
+			result := string(evidence.Result)
+			code := string(evidence.Code)
+			if result == "" {
+				if uncertain {
+					result = string(wakeprotocol.ResultUncertain)
+					code = string(wakeprotocol.CodeUncertain)
+				} else {
+					result = string(wakeprotocol.ResultRefusal)
+					code = string(wakeprotocol.CodeVerificationFailed)
+				}
+			}
+			_, markErr := scheduleService.RecordWakeEvidence(ctx, ref, record.ID, scheduler.WakeEvidenceUpdate{
+				RegisteredAt:        registeredAt,
+				ProgrammedAt:        evidence.ProgrammedAt,
+				VerifiedAt:          evidence.VerifiedAt,
+				ProtocolVersion:     evidence.ProtocolVersion,
+				DaemonBuild:         evidence.DaemonBuild,
+				HelperBuild:         evidence.HelperBuild,
+				Result:              result,
+				Code:                code,
+				Failure:             message,
+				Uncertain:           uncertain,
+				RollbackAttemptedAt: rollbackAt,
+				RollbackVerifiedAt:  rollbackVerifiedAt,
+				RollbackResult:      rollbackResult,
+				RollbackDetail:      rollbackDetail,
+			})
 			if markErr != nil {
 				a.writeError(markErr, opts.json)
 			} else {
@@ -1634,16 +1678,27 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 			return 1
 		}
 		detail := fmt.Sprintf("Herdr continuation for %s:%s", target.Feature.Name, target.Agent.Role)
-		if registerErr := wake.Register(record.ID, record.DueAt, detail); registerErr != nil {
-			return failWake("Ori's wake coordinator did not accept the continuation wake", registerErr)
+		registered, registerErr := wake.RegisterCandidate(ctx, record.ID, record.DueAt, detail)
+		if registerErr != nil {
+			return failWake("standalone wake service did not accept the continuation wake", registerErr, registered)
 		}
-		programmedAt, verifyErr := wake.Verify(ctx, record.ID, record.DueAt)
+		registeredAt = time.Now().UTC()
+		verified, verifyErr := wake.VerifyCandidate(ctx, record.ID, record.DueAt)
 		if verifyErr != nil {
-			return failWake("Ori did not confirm that macOS programmed the continuation wake", verifyErr)
+			return failWake("standalone wake service did not directly verify the continuation wake", verifyErr, verified)
 		}
-		updated, wakeResultErr := scheduleService.RecordWakeResult(ctx, ref, record.ID, programmedAt, "")
+		updated, wakeResultErr := scheduleService.RecordWakeEvidence(ctx, ref, record.ID, scheduler.WakeEvidenceUpdate{
+			RegisteredAt:    registeredAt,
+			ProgrammedAt:    verified.ProgrammedAt,
+			VerifiedAt:      verified.VerifiedAt,
+			ProtocolVersion: verified.ProtocolVersion,
+			DaemonBuild:     verified.DaemonBuild,
+			HelperBuild:     verified.HelperBuild,
+			Result:          string(verified.Result),
+			Code:            string(verified.Code),
+		})
 		if wakeResultErr != nil {
-			_ = wake.Cancel(record.ID)
+			_, _ = wake.CancelCandidate(ctx, record.ID)
 			a.writeError(wakeResultErr, opts.json)
 			return 1
 		}
@@ -1656,7 +1711,7 @@ func (a *App) continueAgent(ctx context.Context, opts options, args []string) in
 	} else {
 		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: scheduled %s for %s at %s (%s)\n", record.ID, target.Agent.Name, record.DueAt.Format(time.RFC3339), record.Timezone)
 		if record.WakeRequired {
-			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: macOS wake confirmed for %s\n", record.WakeProgrammedAt.Format(time.RFC3339))
+			fmt.Fprintf(a.stdout, "Ori Herdr Devflow: standalone macOS wake verified for %s\n", record.WakeProgrammedAt.Format(time.RFC3339))
 		}
 	}
 	return 0
@@ -1670,24 +1725,32 @@ func continuationWakeError(message string, cause error) *model.StageError {
 		Stage:    "schedule wake",
 		Code:     model.ErrWakeUnavailable,
 		Message:  message,
-		Recovery: "open Ori, enable Mac wake scheduling in Settings > Device Capabilities, grant approval, then recreate the continuation with --wake",
+		Recovery: "run wt herd wake doctor, repair with wt herd wake install if needed, then inspect or cancel this continuation",
 		Cause:    cause,
 	}
 }
 
-func (a *App) withdrawContinuationWake(record model.Schedule) error {
+func wakeNotFound(err error) bool {
+	var operationError *wakeclient.OperationError
+	return errors.As(err, &operationError) && operationError.Code == wakeprotocol.CodeNotFound
+}
+
+func (a *App) withdrawContinuationWake(
+	ctx context.Context,
+	record model.Schedule,
+) (wakeclient.Evidence, error) {
 	if !record.WakeRequired {
-		return nil
+		return wakeclient.Evidence{}, nil
 	}
 	wake, err := a.newContinuationWake()
 	if err != nil {
-		return err
+		return wakeclient.Evidence{}, err
 	}
 	id := record.WakeCandidateID
 	if id == "" {
 		id = record.ID
 	}
-	return wake.Cancel(id)
+	return wake.CancelCandidate(ctx, id)
 }
 
 func (a *App) schedule(ctx context.Context, opts options, args []string) int {
@@ -1750,7 +1813,19 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 			a.writeError(cancelErr, opts.json)
 			return 1
 		}
-		wakeErr := a.withdrawContinuationWake(record)
+		var wakeErr error
+		if record.WakeRequired {
+			withdrawal, withdrawalErr := a.withdrawContinuationWake(ctx, record)
+			wakeErr = withdrawalErr
+			withdrawnAt := time.Time{}
+			if wakeErr == nil {
+				withdrawnAt = time.Now().UTC()
+			}
+			if _, recordErr := scheduleService.RecordWakeWithdrawal(ctx, ref, record.ID, time.Now().UTC(), withdrawnAt, string(withdrawal.Result), withdrawal.Message, wakeErr != nil); recordErr != nil {
+				a.writeError(recordErr, opts.json)
+				return 1
+			}
+		}
 		a.refreshStatusDisplay(ctx, runtime)
 		a.recordAudit(runtime, audit.Event{Operation: "schedule", Feature: feature.Name, Role: record.Role, Stage: "cancel", Outcome: "canceled"})
 		if wakeErr != nil {
@@ -1758,7 +1833,7 @@ func (a *App) schedule(ctx context.Context, opts options, args []string) int {
 				Stage:    "schedule cancel",
 				Code:     model.ErrWakeUnavailable,
 				Message:  "the continuation prompt was canceled, but its macOS wake was not confirmed withdrawn",
-				Recovery: "open Ori and inspect Mac wake scheduling in Settings > Device Capabilities before allowing this Mac to sleep",
+				Recovery: "run wt herd wake doctor, then inspect this continuation with wt herd schedule show " + record.ID + " before allowing this Mac to sleep",
 				Cause:    wakeErr,
 			}, opts.json)
 			return 1
@@ -2284,9 +2359,21 @@ func (a *App) dispatch(ctx context.Context, opts options) int {
 		return 1
 	}
 	for _, result := range results {
+		if !result.Schedule.WakeRequired {
+			continue
+		}
 		switch result.Schedule.State {
 		case model.ScheduleDelivered, model.ScheduleFailed, model.ScheduleUncertain, model.ScheduleCanceled:
-			if wakeErr := a.withdrawContinuationWake(result.Schedule); wakeErr != nil {
+			withdrawal, wakeErr := a.withdrawContinuationWake(ctx, result.Schedule)
+			withdrawnAt := time.Time{}
+			if wakeErr == nil {
+				withdrawnAt = time.Now().UTC()
+			}
+			ref := scheduler.ScheduleRef{RepositoryID: result.Feature.RepositoryID, FeatureName: result.Feature.Name}
+			if _, recordErr := service.RecordWakeWithdrawal(ctx, ref, result.Schedule.ID, time.Now().UTC(), withdrawnAt, string(withdrawal.Result), withdrawal.Message, wakeErr != nil); recordErr != nil {
+				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: could not persist wake withdrawal evidence for %s\n", result.Schedule.ID)
+			}
+			if wakeErr != nil {
 				fmt.Fprintf(a.stderr, "Ori Herdr Devflow warning: continuation wake %s was not confirmed withdrawn\n", result.Schedule.ID)
 			}
 		}
@@ -2404,8 +2491,23 @@ func scheduleView(feature model.Feature, record model.Schedule) map[string]any {
 		"recovery":             record.RecoveryCommand,
 		"wake_required":        record.WakeRequired,
 		"wake_candidate_id":    record.WakeCandidateID,
+		"wake_source":          record.WakeSource,
+		"wake_purpose":         record.WakePurpose,
+		"wake_requested_at":    formatOptionalTime(record.WakeRequestedAt),
+		"wake_registered_at":   formatOptionalTime(record.WakeRegisteredAt),
 		"wake_programmed_at":   formatOptionalTime(record.WakeProgrammedAt),
 		"wake_verified_at":     formatOptionalTime(record.WakeVerifiedAt),
+		"wake_protocol":        record.WakeProtocol,
+		"wake_daemon_build":    record.WakeDaemonBuild,
+		"wake_helper_build":    record.WakeHelperBuild,
+		"wake_result":          record.WakeResult,
+		"wake_code":            record.WakeCode,
+		"wake_uncertain":       record.WakeUncertain,
+		"wake_rollback_at":     formatOptionalTime(record.WakeRollbackAt),
+		"wake_rollback_ok_at":  formatOptionalTime(record.WakeRollbackOKAt),
+		"wake_rollback_result": record.WakeRollbackState,
+		"wake_rollback_detail": record.WakeRollbackInfo,
+		"wake_withdrawn_at":    formatOptionalTime(record.WakeWithdrawnAt),
 		"wake_failure_reason":  record.WakeFailureReason,
 		"prompt_summary":       fmt.Sprintf("stored continuation prompt (%d characters)", len([]rune(record.Prompt))),
 	}

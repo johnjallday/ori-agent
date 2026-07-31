@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeinstall"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -750,22 +751,47 @@ type continuationWake struct {
 	readiness    wakeclient.OwnerReadiness
 }
 
-func (w *continuationWake) Register(id string, wakeAt time.Time, _ string) error {
+func (w *continuationWake) RegisterCandidate(
+	_ context.Context,
+	id string,
+	wakeAt time.Time,
+	_ string,
+) (wakeclient.Evidence, error) {
 	w.registeredID = id
 	w.registeredAt = wakeAt
-	return nil
+	return wakeclient.Evidence{
+		CandidateID: id, RequestedAt: wakeAt,
+		ProtocolVersion: wakeprotocol.Version, DaemonBuild: "test-daemon",
+		HelperBuild: "test-helper", Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+	}, nil
 }
 
-func (w *continuationWake) Verify(_ context.Context, id string, wakeAt time.Time) (time.Time, error) {
+func (w *continuationWake) VerifyCandidate(
+	_ context.Context,
+	id string,
+	wakeAt time.Time,
+) (wakeclient.Evidence, error) {
 	if id != w.registeredID || !wakeAt.Equal(w.registeredAt) {
-		return time.Time{}, errors.New("wake identity mismatch")
+		return wakeclient.Evidence{}, errors.New("wake identity mismatch")
 	}
-	return wakeAt.Add(-time.Minute), nil
+	return wakeclient.Evidence{
+		CandidateID: id, RequestedAt: wakeAt, ProgrammedAt: wakeAt.Add(-time.Minute),
+		VerifiedAt: time.Now().UTC(), ProtocolVersion: wakeprotocol.Version,
+		DaemonBuild: "test-daemon", HelperBuild: "test-helper",
+		Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+	}, nil
 }
 
-func (w *continuationWake) Cancel(id string) error {
+func (w *continuationWake) CancelCandidate(
+	_ context.Context,
+	id string,
+) (wakeclient.Evidence, error) {
 	w.canceledID = id
-	return nil
+	return wakeclient.Evidence{
+		CandidateID: id, ProtocolVersion: wakeprotocol.Version,
+		DaemonBuild: "test-daemon", HelperBuild: "test-helper",
+		Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+	}, nil
 }
 
 func (w *continuationWake) Owner() wakeclient.OwnerReadiness {
@@ -821,7 +847,7 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due, "--prompt", privatePrompt, "--wake"}); exit != 0 {
 		t.Fatalf("continue exit = %d; stderr=%s", exit, stderr.String())
 	}
-	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") || !strings.Contains(output.String(), "macOS wake confirmed") {
+	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") || !strings.Contains(output.String(), "standalone macOS wake verified") {
 		t.Fatalf("continue output = %q", output.String())
 	}
 	stateAfter, err := store.Load()
@@ -835,7 +861,11 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	scheduleID := ""
 	for _, record := range schedules {
 		scheduleID = record.ID
-		if record.AgentName != agent.Name || record.State != model.SchedulePending || record.Prompt != privatePrompt || !record.WakeRequired || record.WakeVerifiedAt.IsZero() {
+		if record.AgentName != agent.Name || record.State != model.SchedulePending ||
+			record.Prompt != privatePrompt || !record.WakeRequired ||
+			record.WakeVerifiedAt.IsZero() || record.WakeProtocol != wakeprotocol.Version ||
+			record.WakeDaemonBuild != "test-daemon" ||
+			record.WakePurpose != string(wakeprotocol.PurposeContinuation) {
 			t.Fatalf("schedule = %#v", record)
 		}
 	}
@@ -870,14 +900,14 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	if !strings.Contains(string(audit), "\"operation\":\"continue\"") || strings.Contains(string(audit), privatePrompt) || strings.Contains(string(audit), "OPENAI_API_KEY") || strings.Contains(string(audit), "sk-not-a-real-secret") {
 		t.Fatalf("continuation audit exposed prompt data: %q", audit)
 	}
-	wake.readiness = wakeclient.OwnerReadiness{Running: true, Detail: "Mac wake scheduling is turned off in Ori's settings"}
+	wake.readiness = wakeclient.OwnerReadiness{Running: true, Detail: "standalone Herdr wake service is not ready"}
 	output.Reset()
 	stderr.Reset()
 	nextDue := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
 	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", nextDue, "--wake"}); exit != 1 {
 		t.Fatalf("wake-disabled continue exit = %d; output=%s stderr=%s", exit, output.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "wake_unavailable") || !strings.Contains(stderr.String(), "turned off") {
+	if !strings.Contains(stderr.String(), "wake_unavailable") || !strings.Contains(stderr.String(), "standalone") {
 		t.Fatalf("wake-disabled error = %q", stderr.String())
 	}
 	stateAfter, err = store.Load()
