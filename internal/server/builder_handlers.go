@@ -605,17 +605,43 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 
 	// Runtimes are bound from code, never from configuration: a persisted
 	// capability ID is a key into this registry and nothing else (FR-14).
+	var legacyProbe workspacecapability.LegacyStateProbe
 	if b.downloadsJanitorService != nil {
 		runtime := downloadsjanitor.NewCapabilityRuntime(b.downloadsJanitorService)
 		if err := registry.BindRuntime(workspace.CapabilityFileJanitor, runtime); err != nil {
 			// The definition stays listed; its status reports unavailable.
 			logger.Warn("File Janitor capability runtime not bound", logger.Fields{"error": err})
 		}
+		legacyProbe = runtime
 	}
 
 	service := workspacecapability.NewService(registry, b.workspaceStore)
 	b.workspaceCapabilityService = service
 	b.workspaceCapabilityHandler = workspacecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+
+	b.backfillLegacyCapabilities(registry, legacyProbe)
+}
+
+// backfillLegacyCapabilities records the file-janitor install for workspaces
+// that were already using Downloads Janitor before capabilities existed
+// (FR-125).
+//
+// It runs on every startup and is idempotent: a workspace that already holds
+// the record is skipped, so repeated boots cannot duplicate anything. It writes
+// only the install record — no folder is granted, no watcher registered, and no
+// schedule enabled, so a workspace's automation is exactly as active after the
+// backfill as it was before (FR-130).
+//
+// A failure here degrades the backfill alone. Migration is a convenience that
+// makes an existing workspace's capability visible; it is not a precondition
+// for the server, the workspace, or the Janitor itself to work.
+func (b *ServerBuilder) backfillLegacyCapabilities(registry *workspacecapability.Registry, probe workspacecapability.LegacyStateProbe) {
+	store, ok := b.workspaceStore.(workspacecapability.MigrationWorkspaceStore)
+	if !ok {
+		logger.Warn("File Janitor backfill skipped: workspace store cannot list workspaces", logger.Fields{})
+		return
+	}
+	workspacecapability.NewMigrator(registry, store, probe).Run()
 }
 
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled

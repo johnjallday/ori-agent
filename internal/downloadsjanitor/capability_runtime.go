@@ -33,6 +33,28 @@ func NewCapabilityRuntime(service *Service) *CapabilityRuntime {
 	return &CapabilityRuntime{service: service}
 }
 
+// HasConfiguredJanitorState implements workspacecapability.LegacyStateProbe: it
+// reports whether this workspace completed Downloads Janitor setup before
+// capabilities existed, which is one of the three authoritative migration
+// signals (FR-126).
+//
+// It is deliberately strict. IsSetUp requires an approved root AND a directory
+// reference AND a completed-setup timestamp, so a state file that exists but
+// records no grant — a workspace that opened the panel and stopped — is not
+// treated as evidence the capability was in use.
+func (r *CapabilityRuntime) HasConfiguredJanitorState(workspaceID string) bool {
+	if r == nil || r.service == nil || r.service.store == nil {
+		return false
+	}
+	settings, err := r.service.store.LoadSettings(workspaceID)
+	if err != nil {
+		// Unreadable state is not evidence either way. Reporting true here would
+		// migrate a workspace on the strength of an I/O error.
+		return false
+	}
+	return settings.IsSetUp()
+}
+
 // CapabilityStatus derives the File Janitor station/card status for a workspace.
 //
 // The state is chosen by the required display priority (PRD design 8.4) through
@@ -140,5 +162,8 @@ func folderDisplayName(root string) string {
 	return filepath.Base(filepath.Clean(trimmed))
 }
 
-// Compile-time check that this adapter satisfies the registry's contract.
-var _ workspacecapability.Runtime = (*CapabilityRuntime)(nil)
+// Compile-time checks that this adapter satisfies the registry's contracts.
+var (
+	_ workspacecapability.Runtime          = (*CapabilityRuntime)(nil)
+	_ workspacecapability.LegacyStateProbe = (*CapabilityRuntime)(nil)
+)

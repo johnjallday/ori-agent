@@ -7,6 +7,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/logger"
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // Automation is the unattended half of the Janitor: a folder watcher and a
@@ -29,6 +30,15 @@ const DomainKey = "downloads_janitor"
 // WatchTriggerName is the name of the trigger the Janitor installs. It is
 // stable so setup can find and update its own trigger rather than creating a
 // second one.
+//
+// It deliberately keeps the legacy "Downloads Janitor" wording even though the
+// product is now File Janitor: this string is a LOOKUP KEY, not a label.
+// ensureWatcher matches an existing record on `Name == WatchTriggerName ||
+// Domain == DomainKey`, and both values are already persisted in the trigger
+// store for every configured workspace. Renaming either would make an upgraded
+// workspace fail to recognize its own watcher and install a second one —
+// exactly the duplicate event scan FR-138 forbids. It is not user-visible.
+// See tasks/compat-boundary-file-janitor.md §1.2.
 const WatchTriggerName = "Downloads Janitor folder watch"
 
 // DefaultWatchDebounce is the collection window for folder activity when the
@@ -176,7 +186,15 @@ func (a *Automation) watchRecipe(workspaceID string) workspace.WatchRecipe {
 	if err != nil || ws == nil {
 		return workspace.WatchRecipe{}
 	}
+	// Look the recipe up under every key File Janitor answers to. A workspace
+	// created from a blueprint declaring the canonical `file-janitor-root`
+	// would otherwise find nothing here and silently fall back to defaults,
+	// discarding the watch settings its blueprint actually asked for.
 	recipe, ok := ws.TemplateAutomationRecipeFor(DirectoryRequirementKey)
+	if !ok {
+		setup := workspacecapability.FileJanitorDefinition().Setup
+		recipe, ok = ws.TemplateAutomationRecipeFor(setup.DirectoryRequirementKey)
+	}
 	if !ok || recipe.Watch == nil {
 		return workspace.WatchRecipe{}
 	}
@@ -233,7 +251,7 @@ func (a *Automation) RemoveWatcher(workspaceID string) error {
 // folder itself, so a watcher event cannot smuggle in a file that would not
 // otherwise qualify (FR-53).
 func (a *Automation) HandleDomainScan(workspaceID, fireID string, eventCount int, summary string) error {
-	logger.Debug("Downloads Janitor watcher fire", logger.Fields{
+	logger.Debug("File Janitor watcher fire", logger.Fields{
 		"workspace_id": workspaceID, "fire_id": fireID, "events": eventCount,
 	})
 	a.RunCoalescedScan(workspaceID, ScanSourceWatcher)
@@ -297,7 +315,7 @@ func (a *Automation) runOnce(workspaceID string, source ScanSource) {
 
 	batch, created, err := a.scan(workspaceID, source)
 	if err != nil {
-		logger.Warn("Downloads Janitor scan failed", logger.Fields{
+		logger.Warn("File Janitor scan failed", logger.Fields{
 			"workspace_id": workspaceID, "source": source, "error": err,
 		})
 		a.service.reportScanFailure(workspaceID, err)

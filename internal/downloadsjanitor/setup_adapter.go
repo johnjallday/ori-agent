@@ -6,6 +6,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/setupwizard"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // SetupAdapterID is the registry key a blueprint manifest may name for this
@@ -58,7 +59,18 @@ func (a *SetupAdapter) SetAutomation(automation WatcherSync) {
 }
 
 // ID implements setupwizard.Adapter.
+//
+// It keeps returning the legacy key because that is what every shipped
+// blueprint manifest names and what every in-progress workspace persisted in
+// its wizard snapshot. Canonical callers reach the same adapter through the
+// alias below (FR-134).
 func (a *SetupAdapter) ID() string { return SetupAdapterID }
+
+// Aliases implements setupwizard.AliasAdapter: new blueprints and callers may
+// name the canonical `file_janitor` adapter and resolve to this same instance.
+func (a *SetupAdapter) Aliases() []string {
+	return []string{workspacecapability.FileJanitorSetupAdapterID}
+}
 
 // Evaluate reports where each step stands. It is strictly read-only: no folder
 // is chosen, no watcher registered, and no setting changed by looking.
@@ -66,7 +78,7 @@ func (a *SetupAdapter) Evaluate(_ context.Context, req setupwizard.StepRequest) 
 	if a == nil || a.service == nil {
 		return setupwizard.StepReadiness{
 			Blocked:       true,
-			Summary:       "Downloads Janitor is unavailable in this build.",
+			Summary:       "File Janitor is unavailable in this build.",
 			ErrorCategory: setupwizard.ErrorCategoryUnavailable,
 		}, nil
 	}
@@ -74,7 +86,7 @@ func (a *SetupAdapter) Evaluate(_ context.Context, req setupwizard.StepRequest) 
 	if err != nil {
 		return setupwizard.StepReadiness{
 			Blocked:       true,
-			Summary:       "Ori could not read this workspace's Downloads settings.",
+			Summary:       "Ori could not read this workspace's File Janitor settings.",
 			ErrorCategory: setupwizard.ErrorCategoryDomainError,
 		}, nil
 	}
@@ -248,7 +260,7 @@ func overallReadiness(status Status) setupwizard.StepReadiness {
 		}
 		return setupwizard.StepReadiness{
 			Ready:   true,
-			Summary: "Everything Downloads Janitor needs is working.",
+			Summary: "Everything File Janitor needs is working.",
 		}
 	case ReadinessNeedsAttention:
 		if failing := status.Readiness.Failing(); len(failing) > 0 {
@@ -260,7 +272,7 @@ func overallReadiness(status Status) setupwizard.StepReadiness {
 		}
 		return setupwizard.StepReadiness{
 			Blocked:       true,
-			Summary:       "Something Downloads Janitor needs stopped working.",
+			Summary:       "Something File Janitor needs stopped working.",
 			ErrorCategory: setupwizard.ErrorCategoryDomainError,
 		}
 	default:

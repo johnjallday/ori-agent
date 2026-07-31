@@ -299,7 +299,7 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		// The user-facing message stays short and non-technical, but the reason
 		// has to go somewhere: without this, a failed move left no trace at all
 		// on the server, and diagnosing one meant reproducing it by hand.
-		logger.Warn("Downloads Janitor move failed", logger.Fields{
+		logger.Warn("File Janitor move failed", logger.Fields{
 			"workspace_id": settings.WorkspaceID,
 			"name":         candidate.Display(),
 			"destination":  relative,

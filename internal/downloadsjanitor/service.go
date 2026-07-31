@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // JanitorBindingAlias is the alias of the workspace MCP binding scoped to the
@@ -195,9 +196,21 @@ type SetupSuggestion struct {
 	DailyScanLocalTime string `json:"daily_scan_local_time"`
 }
 
-// DirectoryRequirementKey is the directory key Downloads Janitor's built-in
-// template declares.
+// DirectoryRequirementKey is the directory key the built-in Downloads Janitor
+// preset declares, and the key already recorded in every existing workspace's
+// TemplateProvenance. New blueprints may declare the canonical
+// `file-janitor-root` instead; MatchesDirectoryRequirementKey accepts both
+// (FR-134).
 const DirectoryRequirementKey = "downloads-root"
+
+// matchesDirectoryRequirementKey reports whether a declared directory
+// requirement belongs to File Janitor, under either the legacy preset key or
+// the canonical one. Every lookup goes through this rather than comparing
+// against DirectoryRequirementKey directly, so a workspace created from a new
+// blueprint is not treated as having no folder requirement at all.
+func matchesDirectoryRequirementKey(key string) bool {
+	return workspacecapability.FileJanitorDefinition().Setup.MatchesDirectoryRequirementKey(key)
+}
 
 // ApproveAutomation records the user's explicit approval of unattended work and
 // resumes it.
@@ -279,7 +292,7 @@ func (s *Service) AppliesTo(workspaceID string) bool {
 		return true
 	}
 	for _, req := range ws.PendingDirectoryRequirements() {
-		if req.Key == DirectoryRequirementKey {
+		if matchesDirectoryRequirementKey(req.Key) {
 			return true
 		}
 	}
@@ -322,7 +335,7 @@ func (s *Service) suggestion(workspaceID string, settings JanitorSettings) *Setu
 		return out
 	}
 	for _, req := range ws.PendingDirectoryRequirements() {
-		if req.Key != DirectoryRequirementKey && len(ws.PendingDirectoryRequirements()) > 1 {
+		if !matchesDirectoryRequirementKey(req.Key) && len(ws.PendingDirectoryRequirements()) > 1 {
 			continue
 		}
 		out.Key = req.Key
@@ -434,7 +447,7 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		if errors.Is(err, ErrInvalidSettings) {
 			return Status{}, setupErr(CodeInvalidPath, "That folder configuration is not valid.", RepairRetry, err)
 		}
-		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's Downloads Janitor settings.", RepairRetry, err)
+		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's File Janitor settings.", RepairRetry, err)
 	}
 
 	// Return through Status so the response carries everything a status
@@ -821,11 +834,11 @@ func (s *Service) checkBinding(settings JanitorSettings) ComponentCheck {
 			return fail(CodeBindingFailed, "Folder access for this workspace is turned off.")
 		}
 		if !bindingToolsAreReadOnly(binding) {
-			return fail(CodeBindingFailed, "This workspace's folder access no longer matches what Downloads Janitor requires. Relink the folder to repair it.")
+			return fail(CodeBindingFailed, "This workspace's folder access no longer matches what File Janitor requires. Relink the folder to repair it.")
 		}
 		return check
 	}
-	return fail(CodeBindingFailed, "This workspace has no folder access for Downloads Janitor yet.")
+	return fail(CodeBindingFailed, "This workspace has no folder access for File Janitor yet.")
 }
 
 // bindingToolsAreReadOnly reports whether a binding exposes exactly the Janitor
@@ -929,14 +942,14 @@ func (s *Service) checkPersistence(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentPersistence, Status: ComponentOK}
 	dir, err := s.store.StateDir(settings.WorkspaceID)
 	if err != nil {
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori could not find where to store this workspace's Downloads Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori could not find where to store this workspace's File Janitor state.", Repair: RepairRetry}
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's Downloads Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's File Janitor state.", Repair: RepairRetry}
 	}
 	probe := filepath.Join(dir, ".write-probe")
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil { // #nosec G304 -- resolved state dir plus a fixed name
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's Downloads Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's File Janitor state.", Repair: RepairRetry}
 	}
 	_ = os.Remove(probe)
 	return check

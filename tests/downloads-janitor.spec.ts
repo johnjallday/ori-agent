@@ -44,6 +44,14 @@ import { join } from 'node:path';
  * click path from an unconfigured workspace to a moved file works.
  */
 
+// This suite deliberately drives the LEGACY `/downloads-janitor` routes.
+//
+// In-repo browser code has moved to the canonical `/file-janitor` prefix, so
+// without this suite the legacy alias would have no end-to-end coverage at all
+// and could be broken without any test noticing — which is exactly what FR-133
+// forbids while the alias is still published. The canonical prefix gets its own
+// suite (tests/file-janitor.spec.ts); the two together are what make retiring
+// the alias later a deliberate act.
 const TEMPLATE_ID = 'downloads-janitor';
 const RUN = Date.now().toString(36);
 
@@ -551,7 +559,9 @@ test.describe('Downloads Janitor', () => {
     });
     // And the map station carries the same signal, so it is visible from the
     // surface the user actually works on rather than only in the page body.
-    await expect(page.locator('[data-cmd-hq-station="downloads-janitor"]').first()).toContainText(
+    // The station is keyed by the capability id now that it is derived from the
+    // install record rather than hardcoded (FR-93).
+    await expect(page.locator('[data-cmd-hq-station="file-janitor"]').first()).toContainText(
       'Needs attention'
     );
   });

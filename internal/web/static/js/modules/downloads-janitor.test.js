@@ -233,7 +233,7 @@ test('confirming posts the confirmed path and renders the returned status', asyn
   doc.getElementById('downloadsJanitorConfirm').click();
   await new Promise(r => setTimeout(r, 0));
 
-  assert.match(sent.url, /\/api\/workspaces\/ws-1\/downloads-janitor\/setup$/);
+  assert.match(sent.url, /\/api\/workspaces\/ws-1\/file-janitor\/setup$/);
   assert.equal(sent.body.path, '/tmp/Inbox');
   const body = text(doc);
   assert.match(body, /\/tmp\/Inbox/);
@@ -440,7 +440,7 @@ test('changing a category records the decision immediately', async () => {
   select.dispatch('change');
   await new Promise(r => setTimeout(r, 0));
 
-  assert.match(sent.url, /\/downloads-janitor\/decisions$/);
+  assert.match(sent.url, /\/file-janitor\/decisions$/);
   assert.equal(sent.body.decisions[0].decision, 'move');
   assert.equal(sent.body.decisions[0].category, 'archives');
   // IDs only: the browser never names a path.
@@ -1179,7 +1179,7 @@ test('undoing calls the action-specific endpoint and reports the outcome', async
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
 
-  assert.match(undoUrl, /\/downloads-janitor\/history\/a1\/undo$/);
+  assert.match(undoUrl, /\/file-janitor\/history\/a1\/undo$/);
 });
 
 test('a refused undo is reported with its reason, not as a failure of the app', async () => {
@@ -1665,7 +1665,7 @@ test('the panel finds its workspace without window.currentWorkspaceId', async ()
   await new Promise(r => setTimeout(r, 0));
 
   assert.ok(
-    requested.some(url => url.includes('/api/workspaces/ws-42/downloads-janitor')),
+    requested.some(url => url.includes('/api/workspaces/ws-42/file-janitor')),
     'the panel must derive its workspace from the URL, not give up: ' + JSON.stringify(requested)
   );
   const host = doc.getElementById('downloadsJanitorMount');

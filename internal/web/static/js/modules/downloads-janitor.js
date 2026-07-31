@@ -1,8 +1,8 @@
 // downloads-janitor.js — the Downloads Janitor panel on the workspace detail
 // page.
 //
-// In this first slice it renders two states from one server response
-// (GET /api/workspaces/{id}/downloads-janitor):
+// It renders two states from one server response
+// (GET /api/workspaces/{id}/file-janitor):
 //
 //   • Setup required — a card that names the folder Ori will watch, states
 //     exactly what approving it allows (list + metadata, approved moves into
@@ -79,6 +79,21 @@
     const path = (window.location && window.location.pathname) || '';
     const parts = path.split('/').filter(Boolean);
     return parts[0] === 'workspaces' && parts[1] ? decodeURIComponent(parts[1]) : '';
+  }
+
+  // API_PREFIX is the canonical File Janitor route segment. Every request this
+  // module makes goes through apiBase, so the prefix is stated once.
+  //
+  // The server still serves the legacy `downloads-janitor` prefix, and will for
+  // this whole release — persisted deep links and any out-of-repo caller still
+  // use it, and Go route-parity tests cover it (see
+  // internal/downloadsjanitorhttp/route_parity_test.go). In-repo callers use the
+  // canonical prefix so the legacy alias can eventually be retired by deleting
+  // it rather than by hunting for stragglers (FR-132).
+  const API_PREFIX = 'file-janitor';
+
+  function apiBase(id) {
+    return '/api/workspaces/' + encodeURIComponent(id) + '/' + API_PREFIX;
   }
 
   function mount() {
@@ -932,14 +947,11 @@
     if (!id) return;
     setSettingsMessage('Saving…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/settings',
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch)
-        }
-      );
+      const response = await fetch(apiBase(id) + '/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -959,14 +971,11 @@
     const id = wsId();
     if (!id) return;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/content-consent',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/content-consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -983,10 +992,10 @@
     if (!id) return;
     setSettingsMessage('Checking…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/test-scan',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await fetch(apiBase(id) + '/test-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error('The test scan could not run.');
       const report = body.report || {};
@@ -1007,10 +1016,11 @@
     if (!id) return;
     setSettingsMessage('Resetting…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/skipped/reset',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-      );
+      const response = await fetch(apiBase(id) + '/skipped/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
       if (!response.ok) throw new Error('Ori could not reset those.');
       setSettingsMessage('Previously skipped files can be proposed again.');
       await loadBatch();
@@ -1042,14 +1052,11 @@
 
     setSettingsMessage('Switching folders…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/relink',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: picked })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/relink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: picked })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1083,10 +1090,10 @@
     revokeConfirmed = false;
     setSettingsMessage('Disconnecting…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/revoke',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await fetch(apiBase(id) + '/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1211,9 +1218,7 @@
     const option = HISTORY_FILTERS.find(entry => entry.id === historyFilter);
     const query = option && option.query ? '?' + option.query : '';
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/history' + query
-      );
+      const response = await fetch(apiBase(id) + '/history' + query);
       if (!response.ok) throw new Error('history failed');
       const body = await response.json();
       historyActions = Array.isArray(body.actions) ? body.actions : [];
@@ -1236,11 +1241,7 @@
     if (status) status.textContent = historyStatusMessage;
     try {
       const response = await fetch(
-        '/api/workspaces/' +
-          encodeURIComponent(id) +
-          '/downloads-janitor/history/' +
-          encodeURIComponent(actionID) +
-          '/undo',
+        apiBase(id) + '/history/' + encodeURIComponent(actionID) + '/undo',
         { method: 'POST', headers: { 'Content-Type': 'application/json' } }
       );
       const body = await response.json().catch(() => ({}));
@@ -1349,14 +1350,11 @@
       trashMarked.forEach(candidateId => {
         decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
       });
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/preview',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decisions })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1395,18 +1393,15 @@
       control.textContent = 'Moving…';
     }
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/apply',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            batch_id: active.preview.batch_id,
-            approval_token: active.preview.token,
-            decisions: active.decisions
-          })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch_id: active.preview.batch_id,
+          approval_token: active.preview.token,
+          decisions: active.decisions
+        })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1759,14 +1754,11 @@
     const confirm = document.getElementById('downloadsJanitorConfirm');
     if (confirm) confirm.disabled = true;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/setup',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: trimmed })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: trimmed })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -1796,10 +1788,10 @@
       control.textContent = 'Scanning…';
     }
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/scan',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await fetch(apiBase(id) + '/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -1843,14 +1835,11 @@
     const control = document.getElementById('downloadsJanitorPause');
     if (control) control.disabled = true;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/pause',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paused })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1877,14 +1866,11 @@
     if (!id || !decisions || decisions.length === 0) return;
     showError('');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/decisions',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decisions })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/decisions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -1902,9 +1888,7 @@
     const id = wsId();
     if (!id || categories.length) return;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/categories'
-      );
+      const response = await fetch(apiBase(id) + '/categories');
       if (!response.ok) return;
       const body = await response.json();
       categories = Array.isArray(body.categories) ? body.categories : [];
@@ -1927,9 +1911,7 @@
     // here ties it to the thing that needs it. It is a no-op once cached.
     await loadCategories();
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/batches/latest'
-      );
+      const response = await fetch(apiBase(id) + '/batches/latest');
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
       lastBatch = body.batch || null;
@@ -1968,9 +1950,7 @@
     const id = wsId();
     if (!id) return;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor'
-      );
+      const response = await fetch(apiBase(id));
       if (!response.ok) throw new Error('status failed');
       const body = await response.json();
       const status = body.status;
@@ -2097,14 +2077,11 @@
         ctx.setBusy(false, '');
         return;
       }
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/setup',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: chosen.path, paused: true })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: chosen.path, paused: true })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;

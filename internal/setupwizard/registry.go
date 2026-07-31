@@ -190,20 +190,46 @@ type Adapter interface {
 	Confirm(ctx context.Context, req StepRequest, action StepAction) (StepReadiness, error)
 }
 
+// AliasAdapter is an optional Adapter capability: additional registry keys that
+// resolve to the same adapter.
+//
+// It exists so a domain can be renamed without stranding workspaces mid-setup.
+// A persisted SetupWizardProgress records the adapter ID that was current when
+// the workspace was created, so dropping the old key would leave those
+// workspaces with a step no adapter serves — the wizard would report "unknown
+// adapter" for setup the user had already partly completed.
+//
+// Aliases are compiled values like the primary ID. A manifest still cannot
+// introduce one.
+type AliasAdapter interface {
+	Adapter
+	// Aliases are extra keys that resolve to this adapter. The primary ID does
+	// not need to be repeated.
+	Aliases() []string
+}
+
 // Registry is the compiled set of adapters this process can run. It is
 // populated at wiring time from code, never from configuration or a manifest —
 // an adapter name in a template is a lookup key into this map and nothing more.
 type Registry struct {
 	adapters map[string]Adapter
+	// primary records each adapter's canonical ID, so IDs() lists one entry per
+	// adapter rather than one per key.
+	primary map[string]bool
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{adapters: make(map[string]Adapter)}
+	return &Registry{adapters: make(map[string]Adapter), primary: make(map[string]bool)}
 }
 
-// Register adds an adapter under its own ID. Registering a second adapter for
-// the same ID is a wiring bug and is reported rather than silently accepted.
+// Register adds an adapter under its own ID, plus any aliases it declares.
+// Registering a second adapter for an already-claimed key is a wiring bug and
+// is reported rather than silently accepted.
+//
+// A conflicting alias fails the whole registration and leaves the registry
+// unchanged: a half-registered adapter, resolvable under some names but not
+// others, would be harder to diagnose than one that is simply absent.
 func (r *Registry) Register(adapter Adapter) error {
 	if r == nil {
 		return errors.New("setup adapter registry is not initialized")
@@ -215,10 +241,27 @@ func (r *Registry) Register(adapter Adapter) error {
 	if id == "" {
 		return errors.New("cannot register a setup adapter with a blank id")
 	}
-	if _, exists := r.adapters[id]; exists {
-		return fmt.Errorf("setup adapter %q is already registered", id)
+
+	keys := []string{id}
+	if aliased, ok := adapter.(AliasAdapter); ok {
+		for _, alias := range aliased.Aliases() {
+			normalized := normalizeAdapterID(alias)
+			if normalized == "" || normalized == id {
+				continue
+			}
+			keys = append(keys, normalized)
+		}
 	}
-	r.adapters[id] = adapter
+
+	for _, key := range keys {
+		if _, exists := r.adapters[key]; exists {
+			return fmt.Errorf("setup adapter %q is already registered", key)
+		}
+	}
+	for _, key := range keys {
+		r.adapters[key] = adapter
+	}
+	r.primary[id] = true
 	return nil
 }
 
@@ -237,14 +280,29 @@ func (r *Registry) Lookup(id string) (Adapter, bool) {
 	return adapter, ok
 }
 
-// IDs lists the registered adapter IDs in sorted order.
+// IDs lists the registered adapters' canonical IDs in sorted order. Aliases are
+// resolvable but not listed: they are compatibility keys, not separate adapters,
+// and the manifest-parity test compares this against the authoring allowlist.
 func (r *Registry) IDs() []string {
 	if r == nil {
 		return nil
 	}
-	out := make([]string, 0, len(r.adapters))
-	for id := range r.adapters {
+	out := make([]string, 0, len(r.primary))
+	for id := range r.primary {
 		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Keys lists every resolvable key, canonical and alias, in sorted order.
+func (r *Registry) Keys() []string {
+	if r == nil {
+		return nil
+	}
+	out := make([]string, 0, len(r.adapters))
+	for key := range r.adapters {
+		out = append(out, key)
 	}
 	sort.Strings(out)
 	return out

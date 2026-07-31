@@ -382,12 +382,20 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { servers: [] });
       return;
     }
-    // The Downloads Janitor panel mounts on every workspace page and asks
-    // whether it applies before it can know that it does not. The README
-    // fixture workspace is not a Janitor workspace, so it answers no and the
-    // panel stays hidden — which is what these screenshots should show.
-    if (/^\/api\/workspaces\/[^/]+\/downloads-janitor$/.test(url.pathname)) {
+    // The File Janitor panel mounts on every workspace page and asks whether it
+    // applies before it can know that it does not. The README fixture workspace
+    // is not a Janitor workspace, so it answers no and the panel stays hidden —
+    // which is what these screenshots should show.
+    //
+    // Both prefixes are matched: in-repo callers use the canonical one, and the
+    // legacy alias is still served for this release.
+    if (/^\/api\/workspaces\/[^/]+\/(file|downloads)-janitor$/.test(url.pathname)) {
       await json(route, { status: { applies: false } });
+      return;
+    }
+    // The capability catalog is likewise asked for on every workspace page.
+    if (/^\/api\/workspaces\/[^/]+\/capabilities$/.test(url.pathname)) {
+      await json(route, { capabilities: [] });
       return;
     }
     if (url.pathname === '/api/skills') {
