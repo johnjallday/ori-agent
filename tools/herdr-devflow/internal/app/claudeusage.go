@@ -13,7 +13,6 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
-	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
 )
 
 // This file is Ori's side of the Claude usage contract described in
@@ -230,51 +229,44 @@ func (a *App) claudeUsageInstall(opts options, args []string) int {
 // wakeDiagnostics reports what stands between a detected limit and a sleeping
 // Mac, as separate checks. They are the questions a person asks at midnight —
 // "would this actually sleep?" — and each has a different fix.
-func (a *App) wakeDiagnostics() []diagnostic {
+func (a *App) wakeDiagnostics(ctx context.Context) []diagnostic {
 	if a.goos != "darwin" {
 		return []diagnostic{{
 			Name:     "Overnight sleep",
 			Status:   "WARN",
 			Detail:   "system sleep and wake are supported on macOS only",
-			Recovery: "run Overnight Runs on macOS; every other command works here",
+			Recovery: "use --stay-awake or run wake-enabled Overnight Runs on supported macOS",
 		}}
 	}
-	client, err := wakeclient.Default()
+	status, err := a.wakeLifecycle.Status(ctx)
 	if err != nil {
 		return []diagnostic{{
-			Name:     "wake coordinator",
+			Name:     "standalone wake service",
 			Status:   "WARN",
-			Detail:   "Ori's shared wake coordinator could not be located",
-			Recovery: "start Ori, then run wt herd doctor",
+			Detail:   "standalone wake-service status could not be read",
+			Recovery: "run wt herd wake doctor; install with wt herd wake install or choose --stay-awake",
 		}}
 	}
 
 	diagnostics := []diagnostic{}
-	if client.Available() {
+	if status.Installed && status.Running && status.Compatible &&
+		status.AllowedUID == a.getuid() && !status.LastSelfTestAt.IsZero() {
 		diagnostics = append(diagnostics, diagnostic{
-			Name: "wake coordinator", Status: "PASS", Detail: "the shared wake store is readable",
+			Name: "standalone wake service", Status: "PASS",
+			Detail: fmt.Sprintf(
+				"healthy protocol %d daemon for uid %d; self-test %s",
+				status.ProtocolVersion, status.AllowedUID, status.LastSelfTestAt.Format(time.RFC3339),
+			),
 		})
 	} else {
-		diagnostics = append(diagnostics, diagnostic{
-			Name: "wake coordinator", Status: "WARN",
-			Detail:   "the shared wake store could not be read",
-			Recovery: "start Ori, then run wt herd doctor",
-		})
-	}
-
-	readiness := client.Owner()
-	switch {
-	case readiness.Ready:
-		diagnostics = append(diagnostics, diagnostic{
-			Name: "wake owner", Status: "PASS", Detail: "Ori is running and can program macOS wake events",
-		})
-	default:
-		recovery := "open Ori and enable Mac wake scheduling"
-		if !readiness.Running {
-			recovery = "start Ori; the Herdr helper never programs wake events itself"
+		detail := status.Detail
+		if detail == "" {
+			detail = "standalone wake support is not ready for this user"
 		}
 		diagnostics = append(diagnostics, diagnostic{
-			Name: "wake owner", Status: "WARN", Detail: readiness.Detail, Recovery: recovery,
+			Name: "standalone wake service", Status: "WARN",
+			Detail:   detail,
+			Recovery: "wt herd wake install; or create the Overnight Run with --stay-awake",
 		})
 	}
 

@@ -54,6 +54,7 @@ This directory contains detailed documentation for Ori Agent.
 - [System Home Context Routing Plan](./features/system-home-context-routing-plan.md) - Home context routing plan
 - [PRD-to-Task Coverage Audit](./PRD_TASK_COVERAGE_AUDIT.md) - Final planning-quality check before creating a feature worktree
 - [Open-Core Boundaries](./architecture/open-core-boundaries.md) - Separation of OSS core and private services
+- [Herdr Standalone Wake v1 Contract](./architecture/herdr-standalone-wake-v1-contract.md) - Fixed installer, platform, path, ownership, and compatibility decisions
 
 ### UI Documentation
 - [Form Styling Index](./ui/FORM_STYLING_INDEX.md) - Navigation guide for all form styling docs
@@ -103,6 +104,7 @@ docs/
 │   └── workspace-runs-harness-model.md
 │
 ├── architecture/
+│   ├── herdr-standalone-wake-v1-contract.md # Standalone wake privilege and compatibility contract
 │   └── open-core-boundaries.md         # Open-core vs private service boundaries
 │
 └── ui/

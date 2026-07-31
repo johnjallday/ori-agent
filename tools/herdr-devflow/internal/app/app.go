@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/status"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeinstall"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeservice"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -57,6 +60,7 @@ type Dependencies struct {
 	LaunchctlRun        func(context.Context, string, ...string) error
 	NewContinuationWake func() (WakeCoordinator, error)
 	IsInteractive       func() bool
+	WakeLifecycle       WakeLifecycle
 }
 
 // WakeCoordinator is the continuation helper's source-scoped view of Ori's
@@ -66,6 +70,16 @@ type WakeCoordinator interface {
 	Verify(context.Context, string, time.Time) (time.Time, error)
 	Cancel(string) error
 	Owner() wakeclient.OwnerReadiness
+}
+
+// WakeLifecycle is injectable so CLI tests can prove that confirmation gates
+// all administrator actions without invoking sudo or touching system paths.
+type WakeLifecycle interface {
+	PrepareInstall(context.Context, string, int) (wakeinstall.PreparedInstall, error)
+	Install(context.Context, wakeinstall.PreparedInstall) (wakeinstall.Status, error)
+	Status(context.Context) (wakeinstall.Status, error)
+	Doctor(context.Context) ([]wakeinstall.Diagnostic, error)
+	Uninstall(context.Context, int) (wakeinstall.Status, error)
 }
 
 type App struct {
@@ -83,6 +97,7 @@ type App struct {
 	launchctlRun        func(context.Context, string, ...string) error
 	newContinuationWake func() (WakeCoordinator, error)
 	isInteractive       func() bool
+	wakeLifecycle       WakeLifecycle
 	cleanupTimeout      time.Duration
 }
 
@@ -139,6 +154,9 @@ func New(deps Dependencies) *App {
 				outputInfo.Mode()&os.ModeCharDevice != 0
 		}
 	}
+	if deps.WakeLifecycle == nil {
+		deps.WakeLifecycle = wakeinstall.NewManager()
+	}
 	return &App{
 		stdout:              deps.Stdout,
 		stderr:              deps.Stderr,
@@ -154,6 +172,7 @@ func New(deps Dependencies) *App {
 		launchctlRun:        deps.LaunchctlRun,
 		newContinuationWake: deps.NewContinuationWake,
 		isInteractive:       deps.IsInteractive,
+		wakeLifecycle:       deps.WakeLifecycle,
 		cleanupTimeout:      defaultCleanupTimeout,
 	}
 }
@@ -222,9 +241,302 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.claudeUsage(ctx, opts, commandArgs)
 	case "overnight":
 		return a.overnight(ctx, opts, commandArgs)
+	case "wake":
+		return a.wake(ctx, opts, commandArgs)
 	default:
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
+	}
+}
+
+type wakeCommandArgs struct {
+	command string
+	yes     bool
+	json    bool
+}
+
+func parseWakeCommandArgs(args []string) (wakeCommandArgs, error) {
+	if len(args) == 0 {
+		return wakeCommandArgs{}, fmt.Errorf("wake requires install, status, doctor, or uninstall")
+	}
+	parsed := wakeCommandArgs{command: args[0]}
+	switch parsed.command {
+	case "install", "status", "doctor", "uninstall":
+	default:
+		return wakeCommandArgs{}, fmt.Errorf("unknown wake command %q", parsed.command)
+	}
+	for _, argument := range args[1:] {
+		switch argument {
+		case "--yes":
+			if parsed.command != "install" && parsed.command != "uninstall" {
+				return wakeCommandArgs{}, fmt.Errorf("--yes is only valid with wake install or uninstall")
+			}
+			parsed.yes = true
+		case "--json":
+			parsed.json = true
+		default:
+			return wakeCommandArgs{}, fmt.Errorf("unknown wake %s option %q", parsed.command, argument)
+		}
+	}
+	return parsed, nil
+}
+
+func (a *App) wake(ctx context.Context, opts options, args []string) int {
+	parsed, err := parseWakeCommandArgs(args)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	asJSON := opts.json || parsed.json
+	switch parsed.command {
+	case "status":
+		status, err := a.wakeLifecycle.Status(ctx)
+		if err != nil {
+			a.writeError(err, asJSON)
+			return 1
+		}
+		a.writeWakeStatus(asJSON, "status", status)
+		if status.Supported && status.Installed && status.Running && status.Compatible {
+			return 0
+		}
+		return 1
+	case "doctor":
+		diagnostics, err := a.wakeLifecycle.Doctor(ctx)
+		if err != nil {
+			a.writeError(err, asJSON)
+			return 1
+		}
+		a.writeWakeDiagnostics(asJSON, diagnostics)
+		for _, diagnostic := range diagnostics {
+			if diagnostic.Status == "FAIL" {
+				return 1
+			}
+		}
+		return 0
+	case "install":
+		return a.wakeInstall(ctx, opts, parsed, asJSON)
+	case "uninstall":
+		return a.wakeUninstall(ctx, parsed, asJSON)
+	default:
+		return 2
+	}
+}
+
+func (a *App) wakeInstall(
+	ctx context.Context,
+	opts options,
+	parsed wakeCommandArgs,
+	asJSON bool,
+) int {
+	if a.goos != "darwin" {
+		a.writeError(wakeservice.ErrUnsupported, asJSON)
+		return 1
+	}
+	repoRoot, err := a.wakeRepoRoot(opts)
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	prepared, err := a.wakeLifecycle.PrepareInstall(ctx, repoRoot, a.getuid())
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	defer prepared.Cleanup()
+
+	preview := wakeInstallPreview(prepared)
+	if asJSON {
+		if !parsed.yes {
+			a.writeResult(true, map[string]any{
+				"status":  "confirmation_required",
+				"install": preview,
+				"error":   "wake install requires --yes in JSON or other non-interactive use",
+			})
+			return 2
+		}
+	} else {
+		writeWakeInstallPreview(a.stdout, preview)
+	}
+	if !a.confirmWakeAction(parsed.yes, asJSON, "Install the standalone Herdr Wake Service?") {
+		if !parsed.yes && !a.isInteractive() {
+			a.writeError(fmt.Errorf("wake install requires an interactive confirmation or --yes"), asJSON)
+			return 2
+		}
+		if !asJSON {
+			fmt.Fprintln(a.stdout, "Installation canceled; no administrator action was requested.")
+		}
+		return 1
+	}
+	status, err := a.wakeLifecycle.Install(ctx, prepared)
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	if asJSON {
+		a.writeResult(true, map[string]any{
+			"status": "installed", "install": preview, "wake_service": status,
+		})
+	} else {
+		a.writeWakeStatus(false, "installed", status)
+	}
+	return 0
+}
+
+func (a *App) wakeUninstall(
+	ctx context.Context,
+	parsed wakeCommandArgs,
+	asJSON bool,
+) int {
+	if a.goos != "darwin" {
+		a.writeError(wakeservice.ErrUnsupported, asJSON)
+		return 1
+	}
+	status, err := a.wakeLifecycle.Status(ctx)
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	preview := map[string]any{
+		"label":           wakeservice.LaunchDaemonLabel,
+		"executable_path": wakeservice.ExecutablePath,
+		"plist_path":      wakeservice.PlistPath,
+		"socket_path":     wakeservice.SocketPath,
+		"state_path":      wakeservice.StateDir,
+		"installed":       status.Installed,
+	}
+	if asJSON {
+		if !parsed.yes {
+			a.writeResult(true, map[string]any{
+				"status":    "confirmation_required",
+				"uninstall": preview,
+				"error":     "wake uninstall requires --yes in JSON or other non-interactive use",
+			})
+			return 2
+		}
+	} else {
+		fmt.Fprintf(a.stdout, "Herdr Wake Service uninstall\n")
+		fmt.Fprintf(a.stdout, "  LaunchDaemon: %s\n", wakeservice.LaunchDaemonLabel)
+		fmt.Fprintf(a.stdout, "  Executable:   %s\n", wakeservice.ExecutablePath)
+		fmt.Fprintf(a.stdout, "  Plist:        %s\n", wakeservice.PlistPath)
+		fmt.Fprintf(a.stdout, "  Socket:       %s\n", wakeservice.SocketPath)
+		fmt.Fprintf(a.stdout, "  Private state:%s\n", wakeservice.StateDir)
+		fmt.Fprintln(a.stdout, "  The user-level Herdr dispatcher, agents, worktrees, and Ori files are not removed.")
+	}
+	if !a.confirmWakeAction(parsed.yes, asJSON, "Uninstall the standalone Herdr Wake Service?") {
+		if !parsed.yes && !a.isInteractive() {
+			a.writeError(fmt.Errorf("wake uninstall requires an interactive confirmation or --yes"), asJSON)
+			return 2
+		}
+		if !asJSON {
+			fmt.Fprintln(a.stdout, "Uninstall canceled; no administrator action was requested.")
+		}
+		return 1
+	}
+	removed, err := a.wakeLifecycle.Uninstall(ctx, a.getuid())
+	if err != nil {
+		a.writeError(err, asJSON)
+		return 1
+	}
+	if asJSON {
+		a.writeResult(true, map[string]any{
+			"status": "uninstalled", "uninstall": preview, "wake_service": removed,
+		})
+	} else {
+		a.writeWakeStatus(false, "uninstalled", removed)
+	}
+	return 0
+}
+
+func (a *App) wakeRepoRoot(opts options) (string, error) {
+	if opts.repoRoot != "" {
+		return worktree.FindRepoRoot(opts.repoRoot)
+	}
+	if value, ok := a.withOverrides(opts)(worktree.RepoOverrideEnv); ok &&
+		strings.TrimSpace(value) != "" {
+		return worktree.FindRepoRoot(value)
+	}
+	cwd, err := a.getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	return worktree.FindRepoRoot(cwd)
+}
+
+func (a *App) confirmWakeAction(yes, asJSON bool, question string) bool {
+	if yes {
+		return true
+	}
+	if asJSON || !a.isInteractive() {
+		return false
+	}
+	fmt.Fprintf(a.stdout, "%s [y/N] ", question)
+	answer, err := bufio.NewReader(a.stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes"
+}
+
+func wakeInstallPreview(prepared wakeinstall.PreparedInstall) map[string]any {
+	return map[string]any{
+		"label":           wakeservice.LaunchDaemonLabel,
+		"executable_path": wakeservice.ExecutablePath,
+		"plist_path":      wakeservice.PlistPath,
+		"socket_path":     wakeservice.SocketPath,
+		"state_path":      wakeservice.StateDir,
+		"pmset_owner":     wakeservice.PMSetOwner,
+		"pmset_type":      wakeservice.PMSetEventType,
+		"allowed_uid":     prepared.AllowedUID,
+		"artifact_digest": prepared.ArtifactDigest,
+		"build":           prepared.BuildVersion,
+		"capability":      "list, schedule, verify, reconcile, and exact-cancel only Herdr-owned macOS wake events",
+		"uninstall":       "wt herd wake uninstall",
+	}
+}
+
+func writeWakeInstallPreview(writer io.Writer, preview map[string]any) {
+	fmt.Fprintln(writer, "Herdr Wake Service installation")
+	fmt.Fprintf(writer, "  LaunchDaemon: %s\n", preview["label"])
+	fmt.Fprintf(writer, "  Executable:   %s\n", preview["executable_path"])
+	fmt.Fprintf(writer, "  Plist:        %s\n", preview["plist_path"])
+	fmt.Fprintf(writer, "  Socket:       %s\n", preview["socket_path"])
+	fmt.Fprintf(writer, "  Private state:%s\n", preview["state_path"])
+	fmt.Fprintf(writer, "  Allowed UID:  %v\n", preview["allowed_uid"])
+	fmt.Fprintf(writer, "  Artifact:     %s (%s)\n", preview["artifact_digest"], preview["build"])
+	fmt.Fprintf(writer, "  Capability:   %s\n", preview["capability"])
+	fmt.Fprintf(writer, "  Uninstall:    %s\n", preview["uninstall"])
+	fmt.Fprintln(writer, "  Authorization: normal macOS administrator approval via /usr/bin/sudo -k")
+	fmt.Fprintln(writer, "  No password, Keychain item, authorization cache, askpass program, or sudoers rule is stored.")
+}
+
+func (a *App) writeWakeStatus(asJSON bool, operation string, status wakeinstall.Status) {
+	if asJSON {
+		a.writeResult(true, map[string]any{"status": operation, "wake_service": status})
+		return
+	}
+	fmt.Fprintf(a.stdout, "Herdr Wake Service: %s\n", status.Detail)
+	fmt.Fprintf(a.stdout, "  supported=%t installed=%t running=%t compatible=%t\n",
+		status.Supported, status.Installed, status.Running, status.Compatible)
+	if status.DaemonBuild != "" {
+		fmt.Fprintf(a.stdout, "  protocol=%d state=%d build=%s allowed_uid=%d\n",
+			status.ProtocolVersion, status.StateVersion, status.DaemonBuild, status.AllowedUID)
+	}
+	if !status.LastSelfTestAt.IsZero() {
+		fmt.Fprintf(a.stdout, "  last_self_test=%s\n", status.LastSelfTestAt.Format(time.RFC3339))
+	}
+}
+
+func (a *App) writeWakeDiagnostics(asJSON bool, diagnostics []wakeinstall.Diagnostic) {
+	if asJSON {
+		a.writeResult(true, map[string]any{"status": "diagnostics", "diagnostics": diagnostics})
+		return
+	}
+	for _, diagnostic := range diagnostics {
+		fmt.Fprintf(a.stdout, "[%s] %s: %s\n", diagnostic.Status, diagnostic.Name, diagnostic.Detail)
+		if diagnostic.Recovery != "" {
+			fmt.Fprintf(a.stdout, "       recovery: %s\n", diagnostic.Recovery)
+		}
 	}
 }
 
@@ -827,6 +1139,29 @@ func (a *App) setup(ctx context.Context, opts options) int {
 	}
 	a.recordAudit(runtime, audit.Event{Operation: "setup", Stage: "runtime", Outcome: "ready"})
 
+	wakeStatus, wakeStatusErr := a.wakeLifecycle.Status(ctx)
+	wakeView := map[string]any{
+		"installed": false,
+		"ready":     false,
+		"install":   "wt herd wake install",
+		"fallback":  "use --stay-awake for an Overnight Run that must not depend on hardware wake",
+	}
+	warnings := []string{}
+	if wakeStatusErr == nil {
+		wakeView["installed"] = wakeStatus.Installed
+		wakeView["ready"] = wakeStatus.Installed && wakeStatus.Running &&
+			wakeStatus.Compatible && wakeStatus.AllowedUID == a.getuid() &&
+			!wakeStatus.LastSelfTestAt.IsZero()
+		wakeView["detail"] = wakeStatus.Detail
+	} else {
+		wakeView["detail"] = "wake-service status could not be read"
+	}
+	if ready, _ := wakeView["ready"].(bool); !ready {
+		warnings = append(
+			warnings,
+			"Standalone wake support is not ready. Run wt herd wake install, or use --stay-awake for an Overnight Run.",
+		)
+	}
 	a.writeResult(opts.json, map[string]any{
 		"status":        "ready",
 		"repository_id": runtime.paths.RepositoryID,
@@ -837,7 +1172,9 @@ func (a *App) setup(ctx context.Context, opts options) int {
 			"root":    plugin.PluginRoot,
 			"enabled": plugin.Enabled,
 		},
-		"scheduler": schedulerStatus,
+		"scheduler":    schedulerStatus,
+		"wake_service": wakeView,
+		"warnings":     warnings,
 		"integrations": map[string]string{
 			"policy": "not changed by setup",
 			"claude": "inspect with: herdr integration status; install manually with: herdr integration install claude",
@@ -2373,7 +2710,7 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 		diagnostics = append(diagnostics, diagnostic{Name: "scheduler", Status: "WARN", Detail: "one-time continuation scheduling is macOS-only", Recovery: "run scheduling commands on macOS"})
 	}
 	diagnostics = append(diagnostics, a.claudeUsageDiagnostics(runtime)...)
-	diagnostics = append(diagnostics, a.wakeDiagnostics()...)
+	diagnostics = append(diagnostics, a.wakeDiagnostics(ctx)...)
 	a.writeDiagnostics(opts.json, diagnostics)
 	for _, item := range diagnostics {
 		if item.Status == "FAIL" {
@@ -2568,6 +2905,11 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
+  wt herd wake install [--yes]  Stage, explain, authorize, install, and self-test the root wake service
+  wt herd wake status [--json]  Report fixed files, daemon health, compatibility, UID, and self-test
+  wt herd wake doctor [--json]  Diagnose standalone wake installation and health
+  wt herd wake uninstall [--yes]
+                                Remove only the standalone Herdr wake service after safety checks
   wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--no-prompt]
                                 Add a tab for an existing Git worktree in the focused workspace
                                 and launch its primary agent there. --no-prompt starts the agent

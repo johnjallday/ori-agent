@@ -21,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeinstall"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -45,6 +46,179 @@ enabled = true
 [status]
 watch_poll_interval = "2s"
 `
+
+type fakeWakeLifecycle struct {
+	prepared       wakeinstall.PreparedInstall
+	status         wakeinstall.Status
+	diagnostics    []wakeinstall.Diagnostic
+	prepareCalls   int
+	installCalls   int
+	uninstallCalls int
+}
+
+func (f *fakeWakeLifecycle) PrepareInstall(
+	context.Context,
+	string,
+	int,
+) (wakeinstall.PreparedInstall, error) {
+	f.prepareCalls++
+	return f.prepared, nil
+}
+
+func (f *fakeWakeLifecycle) Install(
+	_ context.Context,
+	_ wakeinstall.PreparedInstall,
+) (wakeinstall.Status, error) {
+	f.installCalls++
+	return f.status, nil
+}
+
+func (f *fakeWakeLifecycle) Status(context.Context) (wakeinstall.Status, error) {
+	return f.status, nil
+}
+
+func (f *fakeWakeLifecycle) Doctor(context.Context) ([]wakeinstall.Diagnostic, error) {
+	return append([]wakeinstall.Diagnostic(nil), f.diagnostics...), nil
+}
+
+func (f *fakeWakeLifecycle) Uninstall(context.Context, int) (wakeinstall.Status, error) {
+	f.uninstallCalls++
+	removed := f.status
+	removed.Installed = false
+	removed.Running = false
+	removed.Compatible = false
+	removed.Detail = "standalone Herdr wake service is not installed"
+	return removed, nil
+}
+
+func TestWakeLifecycleCommandsRequireConfirmationAndExposeFixedBoundary(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &fakeWakeLifecycle{
+		prepared: wakeinstall.PreparedInstall{
+			ArtifactPath:   filepath.Join(t.TempDir(), "herdr-wake"),
+			ArtifactDigest: strings.Repeat("a", 64),
+			BuildVersion:   "test-build",
+			AllowedUID:     501,
+		},
+		status: wakeinstall.Status{
+			Supported: true, Installed: true, Running: true, Compatible: true,
+			AllowedUID: 501, ProtocolVersion: 1, StateVersion: 1,
+			DaemonBuild: "test-build", Detail: "standalone Herdr wake service is healthy",
+		},
+		diagnostics: []wakeinstall.Diagnostic{{
+			Name: "health", Status: "PASS", Detail: "protocol 1",
+		}},
+	}
+
+	t.Run("non-interactive install stages but never elevates without yes", func(t *testing.T) {
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout: &output, Stderr: &stderr, Getwd: func() (string, error) { return repo, nil },
+			GOOS: "darwin", Getuid: func() int { return 501 },
+			IsInteractive: func() bool { return false }, WakeLifecycle: lifecycle,
+		})
+		exit := application.Run(context.Background(), []string{"wake", "install"})
+		if exit != 2 || lifecycle.installCalls != 0 {
+			t.Fatalf("exit=%d install calls=%d stderr=%q", exit, lifecycle.installCalls, stderr.String())
+		}
+		if !strings.Contains(output.String(), "/Library/PrivilegedHelperTools/com.ori.herdr-wake") ||
+			!strings.Contains(output.String(), "/usr/bin/sudo -k") ||
+			!strings.Contains(output.String(), "No password") {
+			t.Fatalf("install preview did not expose the fixed boundary: %q", output.String())
+		}
+	})
+
+	t.Run("explicit yes installs and status doctor are readable", func(t *testing.T) {
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout: &output, Stderr: &stderr, Getwd: func() (string, error) { return repo, nil },
+			GOOS: "darwin", Getuid: func() int { return 501 },
+			IsInteractive: func() bool { return false }, WakeLifecycle: lifecycle,
+		})
+		if exit := application.Run(context.Background(), []string{"wake", "install", "--yes"}); exit != 0 {
+			t.Fatalf("install exit=%d stderr=%q", exit, stderr.String())
+		}
+		if lifecycle.installCalls != 1 {
+			t.Fatalf("install calls = %d, want 1", lifecycle.installCalls)
+		}
+		output.Reset()
+		if exit := application.Run(context.Background(), []string{"wake", "status"}); exit != 0 ||
+			!strings.Contains(output.String(), "allowed_uid=501") {
+			t.Fatalf("status exit=%d output=%q", exit, output.String())
+		}
+		output.Reset()
+		if exit := application.Run(context.Background(), []string{"wake", "doctor"}); exit != 0 ||
+			!strings.Contains(output.String(), "[PASS] health") {
+			t.Fatalf("doctor exit=%d output=%q", exit, output.String())
+		}
+	})
+
+	t.Run("uninstall requires its own confirmation", func(t *testing.T) {
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout: &output, Stderr: &stderr, GOOS: "darwin",
+			Getuid: func() int { return 501 }, IsInteractive: func() bool { return false },
+			WakeLifecycle: lifecycle,
+		})
+		exit := application.Run(context.Background(), []string{"wake", "uninstall"})
+		if exit != 2 || lifecycle.uninstallCalls != 0 {
+			t.Fatalf("exit=%d uninstall calls=%d stderr=%q", exit, lifecycle.uninstallCalls, stderr.String())
+		}
+		if exit := application.Run(context.Background(), []string{"wake", "uninstall", "--yes"}); exit != 0 {
+			t.Fatalf("confirmed uninstall exit=%d stderr=%q", exit, stderr.String())
+		}
+		if lifecycle.uninstallCalls != 1 {
+			t.Fatalf("uninstall calls = %d, want 1", lifecycle.uninstallCalls)
+		}
+	})
+}
+
+func TestWakeJSONAndUnsupportedPlatformAreStableAndSideEffectFree(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &fakeWakeLifecycle{
+		prepared: wakeinstall.PreparedInstall{
+			ArtifactPath:   filepath.Join(t.TempDir(), "herdr-wake"),
+			ArtifactDigest: strings.Repeat("b", 64), BuildVersion: "test", AllowedUID: 501,
+		},
+		status: wakeinstall.Status{Supported: true, Installed: true, Running: true, Compatible: true},
+	}
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout: &output, Stderr: &stderr, Getwd: func() (string, error) { return repo, nil },
+		GOOS: "darwin", Getuid: func() int { return 501 },
+		IsInteractive: func() bool { return false }, WakeLifecycle: lifecycle,
+	})
+	if exit := application.Run(context.Background(), []string{"--json", "wake", "install"}); exit != 2 {
+		t.Fatalf("JSON confirmation exit = %d", exit)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatalf("JSON output is not one document: %v\n%s", err, output.String())
+	}
+	if payload["status"] != "confirmation_required" || lifecycle.installCalls != 0 {
+		t.Fatalf("payload=%v install calls=%d", payload, lifecycle.installCalls)
+	}
+
+	output.Reset()
+	unsupported := New(Dependencies{
+		Stdout: &output, Stderr: &stderr, GOOS: "linux", Getuid: func() int { return 501 },
+		WakeLifecycle: lifecycle,
+	})
+	if exit := unsupported.Run(context.Background(), []string{"wake", "install", "--yes"}); exit != 1 {
+		t.Fatalf("unsupported exit = %d", exit)
+	}
+	if lifecycle.prepareCalls != 1 {
+		t.Fatalf("unsupported host staged an artifact; prepare calls=%d", lifecycle.prepareCalls)
+	}
+}
 
 type setupRunner struct {
 	mu         sync.Mutex
@@ -122,6 +296,10 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	}
 
 	runner := &setupRunner{}
+	wakeLifecycle := &fakeWakeLifecycle{status: wakeinstall.Status{
+		Supported: true,
+		Detail:    "standalone Herdr wake service is not installed",
+	}}
 	var output, errors bytes.Buffer
 	builds := 0
 	launchHome := t.TempDir()
@@ -142,6 +320,7 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 		LaunchctlRun: func(context.Context, string, ...string) error {
 			return nil
 		},
+		WakeLifecycle: wakeLifecycle,
 	})
 	args := []string{"--repo-root", repo, "--home", home, "setup"}
 	if exit := application.Run(context.Background(), args); exit != 0 {
@@ -161,6 +340,16 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	}
 	if !strings.Contains(output.String(), "Ori Herdr Devflow: ready") {
 		t.Fatalf("setup output = %q", output.String())
+	}
+	if !strings.Contains(output.String(), "wt herd wake install") ||
+		!strings.Contains(output.String(), "--stay-awake") {
+		t.Fatalf("setup did not report explicit wake alternatives: %q", output.String())
+	}
+	if wakeLifecycle.prepareCalls != 0 || wakeLifecycle.installCalls != 0 {
+		t.Fatalf(
+			"setup crossed the wake install boundary: prepare=%d install=%d",
+			wakeLifecycle.prepareCalls, wakeLifecycle.installCalls,
+		)
 	}
 	if got, err := os.ReadFile(globalConfig); err != nil || !bytes.Equal(got, originalGlobalConfig) {
 		t.Fatalf("global config changed: %q, %v", got, err)
