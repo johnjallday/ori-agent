@@ -254,6 +254,7 @@ func cloneAgentForChat(src *agent.Agent) *agent.Agent {
 		evolutionCopy := *src.Evolution
 		copyAgent.Evolution = &evolutionCopy
 	}
+	copyAgent.DefaultToolbox = src.DefaultToolbox.Clone()
 
 	return &copyAgent
 }

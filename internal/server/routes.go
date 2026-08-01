@@ -217,6 +217,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			agentHandler.AssignWorkspaces(w, r)
 			return
 		}
+		// Global Default Toolbox — the agent's explicit skill selection for
+		// direct, non-workspace chat (PRD FR-24).
+		if strings.HasSuffix(r.URL.Path, "/default-toolbox") {
+			agentHandler.HandleDefaultToolbox(w, r)
+			return
+		}
 		// Regular agent requests - delegate to agentHandler
 		agentHandler.ServeHTTP(w, r)
 	})
@@ -996,6 +1002,16 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.UpdateSkillBinding)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.UpdateSkillBinding)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.DeleteSkillBinding)
+
+	// Named Toolbox routes — the explicit, versioned capability recipes a
+	// workspace owns, and the pinned assignment each stable agent instance
+	// carries (PRD FR-8, FR-15, FR-37). Read-only in V1 group 1; creation,
+	// versioning, preview, and the atomic use operation land with the Workshop
+	// surface.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes", s.Handlers.Workspace.ListToolboxes)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.GetToolboxByID)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes", s.Handlers.Workspace.ListAgentToolboxes)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}", s.Handlers.Workspace.GetAgentToolbox)
 
 	// Agent skill access routes
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-skill-access", s.Handlers.Workspace.ListAgentSkillAccess)

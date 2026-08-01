@@ -119,10 +119,29 @@ type Workspace struct {
 	AgentMCPAccess       []AgentMCPAccess            `json:"agent_mcp_access,omitempty"`
 	SkillBindings        []SkillBinding              `json:"skill_bindings,omitempty"`
 	AgentSkillAccess     []AgentSkillAccess          `json:"agent_skill_access,omitempty"`
-	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
-	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
-	Status               WorkspaceStatus             `json:"status"`
-	Version              int64                       `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
+	// Toolboxes are the workspace's named, versioned capability recipes, and
+	// ToolboxAssignments pin one version of one Toolbox to each stable agent
+	// instance (see toolbox.go). Together they are the SOURCE OF TRUTH for
+	// "what may this agent instance actually use" (FR-22).
+	//
+	// They live on the canonical workspace record rather than in a side store
+	// so they inherit Version and lost-write protection, which is what makes a
+	// Toolbox switch safe against a concurrent Workshop edit (FR-23).
+	//
+	// The older AgentSkillAccess / AgentMCPAccess entries above remain as a
+	// compatibility surface during the migration window; after migration they
+	// are derived from the assignment rather than consulted independently, so
+	// they can never become a second, invisible answer (FR-36).
+	Toolboxes          []ToolboxDefinition      `json:"toolboxes,omitempty"`
+	ToolboxAssignments []AgentToolboxAssignment `json:"toolbox_assignments,omitempty"`
+	// ToolboxMigration records that this workspace's legacy implicit capability
+	// state has been made explicit, so the migration is idempotent across
+	// restarts and cannot create a second `Workspace Default` (FR-34).
+	ToolboxMigration *ToolboxMigrationState `json:"toolbox_migration,omitempty"`
+	Workflows        map[string]Workflow    `json:"workflows,omitempty"`
+	Layout           *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
+	Status           WorkspaceStatus        `json:"status"`
+	Version          int64                  `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
 	// AllowNativeMCPCLI opts this workspace into letting CLI-provider agents
 	// (Claude Code / Codex) run the workspace's MCP + built-in tools natively,
 	// outside ori-agent's per-tool confirmation gate. Security-sensitive, so it

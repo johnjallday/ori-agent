@@ -394,6 +394,14 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
+	// Keep the explicit Toolbox authoritative: on a migrated workspace the
+	// runtime reads the pinned Toolbox and never this entry, so writing only
+	// the entry would silently change nothing (PRD FR-36).
+	assignment, bridged, err := ApplyLegacyAccessToToolbox(workspace, agentInstanceID, LegacyAccessSkills, req.EnabledBindingIDs, "legacy-skill-access-api")
+	if err != nil {
+		orihttp.BadRequest(w, fmt.Sprintf("Failed to update the agent's toolbox: %v", err))
+		return
+	}
 	if err := h.store.Save(workspace); err != nil {
 		orihttp.InternalError(w, fmt.Sprintf("Failed to save workspace: %v", err))
 		return
@@ -403,7 +411,11 @@ func (h *HTTPHandler) UpdateAgentSkillAccess(w http.ResponseWriter, r *http.Requ
 	if updated == nil {
 		updated = &entry
 	}
-	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_updated", map[string]any{"access": updated})
+	eventData := map[string]any{"access": updated}
+	if bridged {
+		eventData["toolbox_assignment"] = assignment
+	}
+	h.publishWorkspaceSkillEvent(workspaceID, "agent_skill_access_updated", eventData)
 
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{

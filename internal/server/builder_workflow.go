@@ -380,6 +380,19 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
+
+	// Make every existing agent's implicit capability set explicit before the
+	// resolver serves its first request (PRD FR-28–FR-35). This runs here
+	// because it is the first point where the agent store, the skills manager,
+	// and the workspace store all exist; both halves are idempotent and
+	// non-fatal, so a failure leaves pre-migration behavior intact.
+	var migrationSkillSource workspace.ToolboxMigrationSkillSource
+	if b.skillsManager != nil {
+		migrationSkillSource = newSkillResolverAdapter(b.skillsManager)
+	}
+	migrateAgentDefaultToolboxes(b.st, b.skillsManager)
+	migrateWorkspaceToolboxes(b.workspaceStore, migrationSkillSource, newLoadoutResolverAdapter(b.st))
+
 	// The Janitor's mover needs the runtime resolver, which only exists here.
 	b.wireDownloadsJanitorMover()
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)

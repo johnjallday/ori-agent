@@ -157,6 +157,18 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 	instance, _ := ws.FindAgentInstance(agentName, nodeID)
 	resolved.AgentInstance = instance
 
+	// An instance with an explicit Toolbox assignment resolves from that
+	// assignment alone (PRD §9.4). The legacy merge below runs only for
+	// instances that have not been migrated yet — a workspace mid-migration, or
+	// an instance attached in the same request that resolves it.
+	definition, recipe, assigned, err := toolboxAssignmentForInstance(ws, instance)
+	if err != nil {
+		return nil, err
+	}
+	if assigned {
+		return r.resolveRuntimeFromToolbox(ws, instance, agentName, resolved, definition, recipe)
+	}
+
 	// Resolve effective skills
 	resolved.EffectiveSkills = r.resolveEffectiveSkills(ws, instance, agentName)
 
@@ -497,6 +509,9 @@ func cloneRuntimeAgent(src *agent.Agent) *agent.Agent {
 	if len(src.Capabilities) > 0 {
 		cloned.Capabilities = append([]string{}, src.Capabilities...)
 	}
+	// Deep-copied so a workspace runtime can never write through a shared
+	// pointer into the reusable agent's direct-chat selection (FR-26, FR-156).
+	cloned.DefaultToolbox = src.DefaultToolbox.Clone()
 	return &cloned
 }
 
