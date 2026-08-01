@@ -66,6 +66,14 @@ func mergePortableWorkspaceState(target, source *agentworkspace.Workspace) {
 	if source.Tasks != nil {
 		target.Tasks = source.Tasks
 	}
+	// Capability installs follow the Tasks rule above for the same reason: a nil
+	// collection means the session row carried no capability data, not "this
+	// workspace has no capabilities". Assigning it unconditionally would let a
+	// partial session record uninstall File Janitor from workspace.json on an
+	// unrelated sync (PRD FR-144).
+	if source.InstalledCapabilities != nil {
+		target.InstalledCapabilities = source.InstalledCapabilities
+	}
 	target.Attachments = source.Attachments
 	target.ScheduledTasks = source.ScheduledTasks
 	target.StoreNodes = source.StoreNodes

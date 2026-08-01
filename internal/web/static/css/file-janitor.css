@@ -1,5 +1,5 @@
-/* downloads-janitor.css — the Downloads Janitor panel on the workspace detail
-   page (setup card, readiness readout).
+/* file-janitor.css — the File Janitor console and the compact card that opens
+   it from Workspace Details.
 
    State is never carried by color alone: every readiness row also renders a
    text mark and a status word. */
@@ -720,4 +720,359 @@
   margin: 0.6rem 0 0;
   font-size: 0.8rem;
   color: var(--text-primary, #e8e8e8);
+}
+
+/* ------------------------------------------------------------------ console
+
+   The console opens over whatever the user was looking at — usually the Map.
+   It is wide and near-full-screen because reviewing a batch is a table task,
+   but it deliberately stops short of the edges: the sliver of backdrop is what
+   tells the user the Map is still underneath and that closing returns there
+   (FR-101, FR-102). */
+
+/* Above the application's own fixed furniture, not just the workspace page's.
+   At the workspace-scoped modal layer (1010) the global nav (10002) clipped
+   this header — Scan now, Pause and Close were half-hidden behind it — and the
+   Workspace Assistant pill (20100) floated over the review table. See the
+   --app-modal-layer note in variables.css for the measured stack. */
+.fj-console-host {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-modal-layer, 20200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(0.75rem, 3vh, 2.5rem);
+}
+
+.fj-console-host[hidden] {
+  display: none;
+}
+
+/* The backdrop sits BEHIND the console, and its z-index is local to the host.
+ *
+ * It used to carry --wsx-layer-modal-backdrop (1000) while the console carried
+ * 1. Both are children of .fj-console-host, which already establishes a
+ * stacking context at the modal layer — so inside it, 1000 beat 1 and the
+ * backdrop covered the console. Every control rendered correctly and every
+ * click landed on the backdrop, which closed the console instead. The layer
+ * tokens order the host against OTHER surfaces; within the host, ordinary
+ * document order is what applies. */
+.fj-console-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.fj-console {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 100%);
+  /* max-width as well as width: without it a wide child can still stretch the
+     console past the viewport, which is what made the page scroll sideways. */
+  max-width: 100%;
+  min-width: 0;
+  max-height: 100%;
+  overflow: hidden;
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #2f2f2f);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+/* The header carries the title, the folder, the status, and the actions that
+   apply everywhere (Scan now, Pause, Close). It stays put while the body
+   scrolls, so the way out is always reachable — including at the bottom of a
+   400-row batch (FR-103, FR-121). */
+.fj-console-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-start;
+  padding: 1rem 1.25rem 0.75rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border-bottom: 1px solid var(--border-color, #2f2f2f);
+}
+
+.fj-console-heading {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.fj-console-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+/* A folder path is long and arbitrary. It wraps at any character rather than
+   forcing the dialog wider than the viewport. */
+.fj-console-folder {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.fj-console-status {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.fj-console-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.fj-console-tab {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+}
+
+/* The selected tab is marked by weight and an underline as well as color, so
+   which one is active does not depend on seeing a hue difference. */
+.fj-console-tab.is-active {
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+  border-bottom-color: var(--accent-color, #6ea8fe);
+}
+
+.fj-console-tab-count {
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--bg-primary, #101010);
+  background: var(--accent-color, #6ea8fe);
+  border-radius: 999px;
+}
+
+/* Scrolling is contained here rather than on the page. overscroll-behavior
+   stops a flick at the end of the batch from scrolling the Map underneath
+   (FR-123). */
+.fj-console-body {
+  flex: 1 1 auto;
+  /* min-width: 0 as well as min-height: 0.
+     A flex item's default min-width is auto, which is its CONTENT width — so a
+     review table wider than the screen pushed the body wider than the console,
+     the console wider than the viewport, and the whole page scrolled sideways
+     at phone width. Both axes have to be released for the overflow below to
+     take effect instead. */
+  min-width: 0;
+  min-height: 0;
+  padding: 1rem 1.25rem 1.25rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Keyboard focus is visible on every control in the console, including the
+   tabs, and is never removed in favour of the hover styling (FR-118). */
+.fj-console :focus-visible,
+.fj-card :focus-visible {
+  outline: 2px solid var(--accent-color, #6ea8fe);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .fj-console-host {
+    padding: 0;
+  }
+
+  .fj-console {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* On a small screen the actions need the full width rather than being
+     squeezed beside a wrapping title. */
+  .fj-console-actions {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fj-console,
+  .fj-console-backdrop {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------- compact card
+
+   Workspace Details carries a summary and a way in — never the review table.
+   Its job is to answer "is anything waiting?" at a glance (FR-114). */
+
+.fj-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--bg-secondary, #1a1a1a);
+  border: 1px solid var(--border-color, #2f2f2f);
+  border-radius: 10px;
+}
+
+.fj-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.fj-card-heading {
+  min-width: 0;
+}
+
+.fj-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-card-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #9aa0a6);
+  overflow-wrap: anywhere;
+}
+
+.fj-card-stats {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* ------------------------------------------------------------------- paging
+
+   Server-side paging keeps a 500-file batch from becoming 500 DOM rows. The
+   controls sit below the table and stay in the flow, so the count and the way
+   forward are read together. */
+
+.dj-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0;
+}
+
+.dj-pager-status {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+/* The count beside a filter describes the whole batch, so it must not be
+   mistaken for a badge on the current page. */
+.dj-filter-count {
+  margin-left: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.dj-setting-heading {
+  margin: 0 0 0.3rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-setting-health,
+.dj-setting-curator {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #2f2f2f);
+}
+
+/* The table scrolls inside its own box at any width, so a wide batch never
+   makes the page itself scroll sideways. */
+.dj-table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* ----------------------------------------------------------- narrow screens
+
+   The table drops its secondary columns — type, size, and modified date — and
+   keeps what a decision actually rests on: the file's name, where it would go,
+   and the controls that act on it.
+
+   Those columns are hidden rather than reflowed because the approval
+   consequence ("Filed/Documents") must stay visible at every width. A user who
+   cannot see the destination is being asked to approve a move they cannot
+   evaluate (FR-118). */
+
+@media (max-width: 720px) {
+  .dj-cell-type,
+  .dj-cell-size,
+  .dj-cell-modified,
+  .dj-table thead th:nth-child(3),
+  .dj-table thead th:nth-child(4),
+  .dj-table thead th:nth-child(5) {
+    display: none;
+  }
+
+  .dj-pager {
+    justify-content: center;
+  }
+
+  .dj-pager-status {
+    flex: 1 0 100%;
+    order: -1;
+  }
+
+  /* The footer holds the selected count and the approve control. It stays put
+     at the bottom of the console so the consequence of a long scroll through
+     the batch is always one press away, and never scrolled past. */
+  .dj-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding: 0.6rem 0;
+    background: var(--bg-secondary, #1a1a1a);
+    border-top: 1px solid var(--border-color, #2f2f2f);
+  }
 }

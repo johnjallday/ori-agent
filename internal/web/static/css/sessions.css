@@ -1451,6 +1451,115 @@ body.workspace-page .workspace-setup-card {
   flex: 0 0 auto;
 }
 
+/* Built-in Workspace Capabilities catalog. One card per capability, rendered by
+   workspace-capabilities.js into the shared node the Tools modal and the
+   Systems rail both mount. */
+.ws-capability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.ws-capability-card {
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 0.5rem);
+  padding: 0.9rem 1rem;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+}
+
+.ws-capability-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ws-capability-name {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.ws-capability-status {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
+  color: var(--text-secondary);
+}
+
+.ws-capability-status-needs_attention {
+  color: var(--warning-color, #b26a00);
+}
+
+.ws-capability-status-setup_needed {
+  color: var(--info-color, #2f6feb);
+}
+
+.ws-capability-status-watching,
+.ws-capability-status-review_ready {
+  color: var(--success-color, #2e7d32);
+}
+
+.ws-capability-tagline {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin: 0.35rem 0 0;
+}
+
+.ws-capability-summary {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0.25rem 0 0;
+  max-width: 62ch;
+}
+
+/* The pre-install facts (one folder, metadata only, approval required, fixed
+   Filed/ destination). Deliberately plain text, always visible — they are the
+   basis for the user's consent, not decoration. */
+.ws-capability-facts {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.ws-capability-facts li {
+  margin-bottom: 0.2rem;
+}
+
+.ws-capability-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.ws-capability-installed-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--success-color, #2e7d32);
+}
+
+.ws-capability-unavailable,
+.ws-capability-empty {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0.5rem 0 0;
+}
+
+.ws-capability-error {
+  font-size: 0.82rem;
+  color: var(--danger-color, #c62828);
+  margin: 0 0 0.6rem;
+}
+
 .workspace-tools-summary,
 .workspace-tools-meta {
   font-size: 0.82rem;

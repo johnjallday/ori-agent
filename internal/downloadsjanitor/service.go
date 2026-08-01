@@ -9,11 +9,15 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/johnjallday/ori-agent/internal/logger"
+
 	workspace "github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // JanitorBindingAlias is the alias of the workspace MCP binding scoped to the
@@ -69,6 +73,10 @@ const (
 	CodeWorkspaceMissing   = "workspace_missing"
 	CodeNotConfigured      = "not_configured"
 	CodePending            = "pending"
+	// CodeFolderConflict reports a folder already managed by another
+	// workspace's File Janitor, including one that merely contains or sits
+	// inside it (FR-49).
+	CodeFolderConflict = "folder_conflict"
 )
 
 // Repair actions the UI can offer for a failing component.
@@ -86,7 +94,13 @@ type SetupError struct {
 	Code    string
 	Message string
 	Repair  string
-	cause   error
+	// ConflictWorkspaceID names the workspace already managing the requested
+	// folder, for a folder_conflict. It lets the UI offer a route to that
+	// workspace instead of leaving the user to find it (FR-49). It is only ever
+	// returned to the authorized local owner, who is the only caller that
+	// reaches this code path at all.
+	ConflictWorkspaceID string
+	cause               error
 }
 
 func (e *SetupError) Error() string {
@@ -155,6 +169,17 @@ type Service struct {
 	// workspace out of Ready rather than overstating what is running.
 	automation AutomationStatus
 	now        func() time.Time
+	// claimMu serializes folder claims across workspaces.
+	//
+	// The conflict check reads every other workspace's settings and then writes
+	// this one's, so two setups running at once can both observe an unclaimed
+	// folder and both take it. The window is narrow but reachable — two browser
+	// tabs, or a blueprint setup racing an in-place one — and the result is two
+	// File Janitors proposing and acting on the same files.
+	//
+	// Setup is rare and user-initiated, so serializing the whole claim (check,
+	// grant, persist) costs nothing worth optimizing.
+	claimMu sync.Mutex
 }
 
 // NewService wires the Janitor service to its settings store and the workspace
@@ -195,9 +220,21 @@ type SetupSuggestion struct {
 	DailyScanLocalTime string `json:"daily_scan_local_time"`
 }
 
-// DirectoryRequirementKey is the directory key Downloads Janitor's built-in
-// template declares.
+// DirectoryRequirementKey is the directory key the built-in Downloads Janitor
+// preset declares, and the key already recorded in every existing workspace's
+// TemplateProvenance. New blueprints may declare the canonical
+// `file-janitor-root` instead; MatchesDirectoryRequirementKey accepts both
+// (FR-134).
 const DirectoryRequirementKey = "downloads-root"
+
+// matchesDirectoryRequirementKey reports whether a declared directory
+// requirement belongs to File Janitor, under either the legacy preset key or
+// the canonical one. Every lookup goes through this rather than comparing
+// against DirectoryRequirementKey directly, so a workspace created from a new
+// blueprint is not treated as having no folder requirement at all.
+func matchesDirectoryRequirementKey(key string) bool {
+	return workspacecapability.FileJanitorDefinition().Setup.MatchesDirectoryRequirementKey(key)
+}
 
 // ApproveAutomation records the user's explicit approval of unattended work and
 // resumes it.
@@ -263,10 +300,18 @@ func readWorkspaceRecord(store WorkspaceStore, workspaceID string) (*workspace.W
 	return store.Get(workspaceID)
 }
 
-// AppliesTo reports whether a workspace is a Downloads Janitor workspace: one
-// created from the built-in template, or one already configured. The UI uses it
-// to mount the Janitor panel only where it belongs, and it is answered
-// server-side from provenance rather than trusted from the client.
+// AppliesTo reports whether File Janitor belongs to a workspace: one that has
+// the capability installed, one created from the built-in template, or one
+// already configured. Every UI surface — the Map station, the Details card, the
+// console — mounts on this answer, and it is decided server-side from what is
+// persisted rather than trusted from the client.
+//
+// The install record is checked FIRST because it is the only signal an in-place
+// install leaves. A workspace the user installed File Janitor into has no
+// template provenance, no settings until setup finishes, and no pending
+// directory requirement until the wizard runs — so without this, installing
+// succeeded and then nothing appeared anywhere, which is indistinguishable from
+// the install having failed (FR-93).
 func (s *Service) AppliesTo(workspaceID string) bool {
 	if settings, err := s.store.LoadSettings(workspaceID); err == nil && settings.IsSetUp() {
 		return true
@@ -275,11 +320,14 @@ func (s *Service) AppliesTo(workspaceID string) bool {
 	if err != nil || ws == nil {
 		return false
 	}
+	if ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
+		return true
+	}
 	if ws.IsFromTemplate(TemplateID) {
 		return true
 	}
 	for _, req := range ws.PendingDirectoryRequirements() {
-		if req.Key == DirectoryRequirementKey {
+		if matchesDirectoryRequirementKey(req.Key) {
 			return true
 		}
 	}
@@ -322,7 +370,7 @@ func (s *Service) suggestion(workspaceID string, settings JanitorSettings) *Setu
 		return out
 	}
 	for _, req := range ws.PendingDirectoryRequirements() {
-		if req.Key != DirectoryRequirementKey && len(ws.PendingDirectoryRequirements()) > 1 {
+		if !matchesDirectoryRequirementKey(req.Key) && len(ws.PendingDirectoryRequirements()) > 1 {
 			continue
 		}
 		out.Key = req.Key
@@ -389,8 +437,28 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, err
 	}
 
+	// Hold the claim lock across the conflict check AND the write that acts on
+	// its answer. Checking without it would let two concurrent setups each find
+	// the folder unclaimed and both take it.
+	s.claimMu.Lock()
+	defer s.claimMu.Unlock()
+
+	// Refuse a folder another workspace already manages, before anything is
+	// created or granted (FR-49). Checked against the canonical root, so an
+	// alternate spelling or a symlink cannot slip past it.
+	if err := s.ensureRootAvailable(workspaceID, root); err != nil {
+		return Status{}, err
+	}
+
 	next := current
 	next.WorkspaceID = workspaceID
+	// Issue a fresh folder generation whenever the managed folder changes, so
+	// journal entries written against the old folder stay identifiable as such
+	// and can never be undone into the new one (FR-57). Re-confirming the SAME
+	// folder keeps the existing id, so history stays continuous.
+	if next.RootID == "" || filepath.Clean(next.RootPath) != filepath.Clean(root) {
+		next.RootID = uuid.New().String()
+	}
 	next.RootPath = root
 	if next.FilingRootName == "" {
 		next.FilingRootName = DefaultFilingRootName
@@ -434,7 +502,7 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		if errors.Is(err, ErrInvalidSettings) {
 			return Status{}, setupErr(CodeInvalidPath, "That folder configuration is not valid.", RepairRetry, err)
 		}
-		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's Downloads Janitor settings.", RepairRetry, err)
+		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's File Janitor settings.", RepairRetry, err)
 	}
 
 	// Return through Status so the response carries everything a status
@@ -455,25 +523,14 @@ func (s *Service) clock() time.Time {
 // only place "~" is expanded, and the only place a caller-supplied path is
 // accepted at all.
 func resolveSetupRoot(raw string) (string, error) {
-	path := strings.TrimSpace(raw)
-	if path == "" {
-		return "", setupErr(CodeInvalidPath, "Choose a folder to tidy.", RepairChooseFolder, nil)
-	}
-	if strings.ContainsRune(path, 0) {
-		return "", setupErr(CodeInvalidPath, "That folder path is not valid.", RepairChooseFolder, nil)
-	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", setupErr(CodeInvalidPath, "Ori could not locate your home folder. Choose the folder directly instead.", RepairChooseFolder, err)
-		}
-		path = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
-	}
-	abs, err := filepath.Abs(path)
+	// Canonicalize first: absolute, cleaned, and symlink-resolved. Everything
+	// below — and every ownership, overlap, and containment check afterwards —
+	// speaks about the real directory rather than whatever spelling or link the
+	// caller happened to submit (FR-47).
+	abs, err := canonicalizeRoot(raw)
 	if err != nil {
-		return "", setupErr(CodeInvalidPath, "That folder path is not valid.", RepairChooseFolder, err)
+		return "", err
 	}
-	abs = filepath.Clean(abs)
 
 	info, err := os.Stat(abs)
 	if err != nil {
@@ -487,7 +544,11 @@ func resolveSetupRoot(raw string) (string, error) {
 		}
 	}
 	if !info.IsDir() {
-		return "", setupErr(CodeNotADirectory, "That is a file, not a folder. Choose the folder that holds your downloads.", RepairChooseFolder, nil)
+		return "", setupErr(CodeNotADirectory, "That is a file, not a folder. Choose one inbox-style folder, such as Downloads or Desktop.", RepairChooseFolder, nil)
+	}
+	// Too-broad selections are refused before any grant is recorded (FR-48).
+	if err := rejectUnsafeRoot(abs, DefaultRootGuards()); err != nil {
+		return "", err
 	}
 	// Readability is part of validation, not a later surprise: a folder Ori
 	// cannot list is not a folder Ori can tidy.
@@ -517,7 +578,10 @@ func ensureFilingRoot(path string) error {
 	info, err := os.Stat(path)
 	switch {
 	case err == nil && info.IsDir():
-		return nil
+		// Already there — which proves nothing about whether Ori may write into
+		// it. A pre-existing read-only Filed/ is precisely the case MkdirAll
+		// would never surface, so it is probed here too (FR-52).
+		return verifyFilingRootWritable(path)
 	case err == nil:
 		return setupErr(CodeDestinationBlocked, fmt.Sprintf("A file named %q already exists in that folder, so Ori cannot create the folder it files into. Rename or move it, then try again.", filepath.Base(path)), RepairRetry, nil)
 	case !os.IsNotExist(err):
@@ -531,6 +595,40 @@ func ensureFilingRoot(path string) error {
 			return setupErr(CodePermissionDenied, permissionGuidance("that folder"), RepairGrantPermission, err)
 		}
 		return setupErr(CodeDestinationBlocked, "Ori could not create the folder it files into.", RepairRetry, err)
+	}
+	return verifyFilingRootWritable(path)
+}
+
+// verifyFilingRootWritable proves an approved move will actually be able to
+// file something, at the moment the user grants access (FR-52).
+//
+// Existence is not enough: a Filed/ directory that exists but cannot be written
+// to would let setup report Ready and then fail on the user's first approved
+// move — the worst possible time to discover it. The probe writes and removes
+// a single file inside the destination, so it tests the real permission rather
+// than inferring it from mode bits (which say nothing useful when the folder is
+// owned by another user or governed by an ACL).
+//
+// It runs only at setup, not on every readiness poll: repeatedly creating and
+// deleting files in the user's folder to answer a status request would be a
+// side effect nobody asked for.
+func verifyFilingRootWritable(path string) error {
+	probe, err := os.CreateTemp(path, ".ori-write-check-*")
+	if err != nil {
+		if os.IsPermission(err) {
+			return setupErr(CodePermissionDenied, permissionGuidance("the folder Ori files into"), RepairGrantPermission, err)
+		}
+		return setupErr(CodeDestinationBlocked,
+			"Ori cannot write into the folder it files into, so approved moves would fail. Check the folder's permissions and try again.",
+			RepairRetry, err)
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	if err := os.Remove(name); err != nil {
+		// The probe wrote successfully, which is what was being tested. Failing
+		// setup because cleanup did not work would be worse than the stray
+		// zero-byte file it leaves behind, which is logged so it can be found.
+		logger.Warn("File Janitor could not remove its write-check file", logger.Fields{"error": err.Error()})
 	}
 	return nil
 }
@@ -555,11 +653,34 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root string) (string, error
 		// the agent mutation tools over the Downloads root.
 		pinExistingFilesystemAccess(ws)
 
-		referenceID = ensureDirectoryReference(ws, root)
+		var createdReference bool
+		referenceID, createdReference = ensureDirectoryReference(ws, root)
 		if referenceID == "" {
 			return errors.New("directory reference was not recorded")
 		}
-		ensureJanitorBinding(ws, root)
+		bindingID := ensureJanitorBinding(ws, root)
+
+		// Record what this capability now owns, so relink and uninstall can
+		// release exactly the right resources without guessing from names
+		// (FR-27). A directory reference that already existed is marked shared:
+		// it belongs to whoever created it, and removal must leave it alone.
+		//
+		// No-ops when the capability is not installed — a workspace still using
+		// the legacy path has nothing to attach ownership to, and setup must
+		// keep working for it either way.
+		ws.RecordCapabilityResource(workspace.CapabilityFileJanitor, workspace.CapabilityResource{
+			Kind:   workspace.ResourceDirectoryReference,
+			ID:     referenceID,
+			Shared: !createdReference,
+		})
+		if bindingID != "" {
+			// The binding carries File Janitor's own alias and a tool allowlist
+			// no other feature grants, so it is always exclusively ours.
+			ws.RecordCapabilityResource(workspace.CapabilityFileJanitor, workspace.CapabilityResource{
+				Kind: workspace.ResourceMCPBinding,
+				ID:   bindingID,
+			})
+		}
 		return nil
 	})
 	if err != nil {
@@ -630,11 +751,16 @@ const (
 
 // ensureDirectoryReference returns the ID of the workspace's directory
 // reference for root, creating one only if no reference already points there.
-func ensureDirectoryReference(ws *workspace.Workspace, root string) string {
+// It also reports whether the reference was CREATED here. A reference that
+// already existed belongs to whatever added it — the user, or another feature —
+// so File Janitor records it as shared and, on removal, releases only its own
+// association rather than deleting a folder link someone else relies on
+// (FR-27).
+func ensureDirectoryReference(ws *workspace.Workspace, root string) (referenceID string, created bool) {
 	target := filepath.Clean(root)
 	for _, ref := range ws.DirectoryReferences {
 		if filepath.Clean(ref.Path) == target {
-			return ref.ID
+			return ref.ID, false
 		}
 	}
 	if err := ws.AddDirectoryReference(workspace.DirectoryReference{
@@ -646,21 +772,23 @@ func ensureDirectoryReference(ws *workspace.Workspace, root string) string {
 		X: defaultReferenceX,
 		Y: defaultReferenceY,
 	}); err != nil {
-		return ""
+		return "", false
 	}
 	for _, ref := range ws.DirectoryReferences {
 		if filepath.Clean(ref.Path) == target {
-			return ref.ID
+			return ref.ID, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // ensureJanitorBinding creates or updates the single filesystem binding scoped
 // to the approved root, always with the read-only allowlist. Rewriting the
 // allowlist on every setup is intentional: a binding that drifted (by an edit,
 // an import, or an older build) is repaired rather than trusted.
-func ensureJanitorBinding(ws *workspace.Workspace, root string) {
+// It returns the binding's stable ID so the caller can record the capability's
+// ownership of it (FR-27).
+func ensureJanitorBinding(ws *workspace.Workspace, root string) string {
 	root = filepath.Clean(root)
 	allowed := append([]string(nil), JanitorReadTools...)
 	for i := range ws.MCPBindings {
@@ -671,11 +799,12 @@ func ensureJanitorBinding(ws *workspace.Workspace, root string) {
 			ws.MCPBindings[i].AllowedTools = allowed
 			ws.MCPBindings[i].DefaultSideEffect = workspace.SideEffectRead
 			ws.MCPBindings[i].UpdatedAt = time.Now()
-			return
+			return ws.MCPBindings[i].ID
 		}
 	}
+	bindingID := uuid.New().String()
 	_ = ws.UpsertMCPBinding(workspace.MCPBinding{
-		ID:                uuid.New().String(),
+		ID:                bindingID,
 		ServerName:        filesystemServerName,
 		Alias:             JanitorBindingAlias,
 		Enabled:           true,
@@ -683,6 +812,7 @@ func ensureJanitorBinding(ws *workspace.Workspace, root string) {
 		AllowedTools:      allowed,
 		DefaultSideEffect: workspace.SideEffectRead,
 	})
+	return bindingID
 }
 
 // evaluateReadiness runs every component check and derives the workspace state.
@@ -694,7 +824,10 @@ func (s *Service) evaluateReadiness(settings JanitorSettings) Readiness {
 	}
 
 	checks := []ComponentCheck{
-		s.checkDirectoryAccess(settings),
+		// A recorded overlap with another workspace supersedes the plain
+		// directory-access check: the folder is reachable, but this workspace
+		// must not act on it (task 3.14).
+		conflictOrAccessCheck(s.checkRootConflict(settings), s.checkDirectoryAccess(settings)),
 		s.checkDestination(settings),
 		s.checkBinding(settings),
 		s.checkPersistence(settings),
@@ -821,11 +954,11 @@ func (s *Service) checkBinding(settings JanitorSettings) ComponentCheck {
 			return fail(CodeBindingFailed, "Folder access for this workspace is turned off.")
 		}
 		if !bindingToolsAreReadOnly(binding) {
-			return fail(CodeBindingFailed, "This workspace's folder access no longer matches what Downloads Janitor requires. Relink the folder to repair it.")
+			return fail(CodeBindingFailed, "This workspace's folder access no longer matches what File Janitor requires. Relink the folder to repair it.")
 		}
 		return check
 	}
-	return fail(CodeBindingFailed, "This workspace has no folder access for Downloads Janitor yet.")
+	return fail(CodeBindingFailed, "This workspace has no folder access for File Janitor yet.")
 }
 
 // bindingToolsAreReadOnly reports whether a binding exposes exactly the Janitor
@@ -929,14 +1062,14 @@ func (s *Service) checkPersistence(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentPersistence, Status: ComponentOK}
 	dir, err := s.store.StateDir(settings.WorkspaceID)
 	if err != nil {
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori could not find where to store this workspace's Downloads Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori could not find where to store this workspace's File Janitor state.", Repair: RepairRetry}
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's Downloads Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's File Janitor state.", Repair: RepairRetry}
 	}
 	probe := filepath.Join(dir, ".write-probe")
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil { // #nosec G304 -- resolved state dir plus a fixed name
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's Downloads Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's File Janitor state.", Repair: RepairRetry}
 	}
 	_ = os.Remove(probe)
 	return check

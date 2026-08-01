@@ -19,7 +19,7 @@ func newTestAction(t *testing.T, mutate ...func(*FileAction)) FileAction {
 	t.Helper()
 	action, err := NewApprovedAction(
 		"action-1", "ws-1", approvedCandidate(), OperationMove,
-		"Filed/Documents/report.pdf", "user-1", time.Now(), "idem-1",
+		"Filed/Documents/report.pdf", "user-1", time.Now(), "idem-1", "root-1",
 	)
 	if err != nil {
 		t.Fatalf("NewApprovedAction: %v", err)
@@ -34,7 +34,7 @@ func TestNewApprovedAction_RecordsWhoApprovedWhatAndAgainstWhichFileState(t *tes
 	candidate := approvedCandidate()
 	approvedAt := time.Now()
 
-	action, err := NewApprovedAction("action-1", "ws-1", candidate, OperationMove, "Filed/Documents/report.pdf", "user-1", approvedAt, "idem-1")
+	action, err := NewApprovedAction("action-1", "ws-1", candidate, OperationMove, "Filed/Documents/report.pdf", "user-1", approvedAt, "idem-1", "root-1")
 	if err != nil {
 		t.Fatalf("NewApprovedAction: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestFileAction_ValidateRejectsUnusableOperationsAndDestinations(t *testing.
 // what happened to the file.
 func TestFileAction_TrashCarriesNoDestination(t *testing.T) {
 	candidate := approvedCandidate()
-	action, err := NewApprovedAction("action-1", "ws-1", candidate, OperationTrash, "", "user-1", time.Now(), "idem-1")
+	action, err := NewApprovedAction("action-1", "ws-1", candidate, OperationTrash, "", "user-1", time.Now(), "idem-1", "root-1")
 	if err != nil {
 		t.Fatalf("NewApprovedAction: %v", err)
 	}

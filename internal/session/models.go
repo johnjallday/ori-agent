@@ -427,6 +427,12 @@ type Workspace struct {
 
 	// OpportunitiesJSON contains serialized mission findings (Action Center opportunities).
 	OpportunitiesJSON json.RawMessage `json:"opportunities,omitempty"`
+
+	// InstalledCapabilitiesJSON contains serialized built-in Workspace Capability
+	// install records (workspace.InstalledCapability). Mirrors workspace.json's
+	// installed_capabilities; workspace.json stays canonical, and SyncStore.Save
+	// restores this from disk when a stale record would otherwise clear it.
+	InstalledCapabilitiesJSON json.RawMessage `json:"installed_capabilities,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.

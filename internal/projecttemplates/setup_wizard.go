@@ -44,8 +44,14 @@ type SetupWizardStep = workspace.SetupWizardStep
 // server-side registry (internal/setupwizard) is what actually resolves an
 // adapter at runtime, and a parity test keeps the two lists identical. A name
 // here is a lookup key and nothing more — never a package, path, or command.
+// Both File Janitor keys are listed because both are authored today: the
+// Downloads preset still names the legacy `downloads_janitor` (and every
+// workspace mid-setup persisted it), while the generic File Janitor blueprint
+// names the canonical `file_janitor`. One compiled adapter serves both — see
+// downloadsjanitor.SetupAdapter.Aliases.
 var ValidSetupWizardAdapters = []string{
 	"downloads_janitor",
+	"file_janitor",
 	"calendar_ops",
 	"email_ops",
 	"reaper_song",

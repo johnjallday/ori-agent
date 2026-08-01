@@ -580,6 +580,14 @@ func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
 	if len(existing.AgentSkillAccess) > 0 {
 		target.AgentSkillAccess = append([]AgentSkillAccess(nil), existing.AgentSkillAccess...)
 	}
+	// Capability installs live on disk as well as in SQLite, and the caller
+	// rebinding a folder may be holding a record that predates the column or
+	// never loaded it. Only fill from disk when the incoming record says
+	// nothing AND did not mean to, so both a genuine install and a deliberate
+	// uninstall carried by the caller still win.
+	if capabilitiesMissing(target) && len(existing.InstalledCapabilities) > 0 {
+		target.InstalledCapabilities = CloneInstalledCapabilities(existing.InstalledCapabilities)
+	}
 }
 
 // BasePath returns the default workspace root directory.

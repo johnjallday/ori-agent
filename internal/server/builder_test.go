@@ -146,11 +146,18 @@ func TestSetupWizardRegistry_MatchesTheAuthorableAdapters(t *testing.T) {
 	for _, id := range projecttemplates.ValidSetupWizardAdapters {
 		authorable[id] = true
 	}
+
+	// Keys(), not IDs(): the question is whether a manifest naming an adapter
+	// can RESOLVE it, and an adapter reached through an alias resolves exactly
+	// as well as one reached by its own ID. IDs() lists primaries only, so it
+	// reported the canonical `file_janitor` key as unregistered even though the
+	// Downloads adapter declares it as an alias and serves it — a failure about
+	// the test's own question rather than about the build.
 	registered := map[string]bool{}
-	for _, id := range builder.setupWizardRegistry.IDs() {
+	for _, id := range builder.setupWizardRegistry.Keys() {
 		registered[id] = true
 		if !authorable[id] {
-			t.Errorf("adapter %q is registered but no manifest may name it", id)
+			t.Errorf("adapter key %q resolves but no manifest may name it", id)
 		}
 	}
 

@@ -3,6 +3,7 @@ package workspace
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -305,6 +306,64 @@ func TestAgentSnapshotStore_AgentWorkSurvivesSetupProgress(t *testing.T) {
 	}
 	if got.GetSetupWizardProgress().StepStatus("folder") != SetupStepStatusComplete {
 		t.Fatalf("per-step progress lost: %+v", got.GetSetupWizardProgress())
+	}
+	if len(got.Tasks) != 1 {
+		t.Fatalf("the unrelated task update was not written through: %+v", got.Tasks)
+	}
+}
+
+// TestAgentSnapshotStore_InstalledCapabilitySurvivesAgentWork exercises the
+// fully wrapped production chain (AgentSnapshotStore over SyncStore over a
+// SQLite-shaped primary + FileStore) against the FR-144 failure mode: an
+// ordinary agent/task update saving a stale copy and silently uninstalling a
+// capability. It also covers FR-11/FR-12 — the install stands whether or not the
+// workspace came from a template and whether or not any agent exists.
+func TestAgentSnapshotStore_InstalledCapabilitySurvivesAgentWork(t *testing.T) {
+	dir := t.TempDir()
+	fileStore, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	primary := NewInMemoryStore()
+	store := NewAgentSnapshotStore(NewSyncStore(primary, fileStore), &resolverAgentStoreStub{agents: map[string]*agent.Agent{}})
+
+	ws := &Workspace{ID: "ws-capability", Name: "Capability", Status: StatusActive}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		_, addErr := w.AddInstalledCapability(InstalledCapability{
+			ID:          CapabilityFileJanitor,
+			Version:     1,
+			InstalledAt: time.Now(),
+			Source:      InstallSourceInPlace,
+		})
+		return addErr
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// An ordinary task write from a primary-fetched copy — the shape of every
+	// unrelated update in the app (orchestrationhttp alone has ~40 of these).
+	if err := store.Update(ws.ID, func(w *Workspace) error {
+		w.Tasks = append(w.Tasks, Task{ID: "unrelated", Status: TaskStatusPending})
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, err := store.GetFolderWorkspace(ws.ID)
+	if err != nil {
+		t.Fatalf("GetFolderWorkspace: %v", err)
+	}
+	if !got.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatalf("capability install lost through the wrapped store: %+v", got.GetInstalledCapabilities())
+	}
+	if got.GetTemplateProvenance() != nil {
+		t.Fatal("precondition: this workspace was never created from a template (FR-11)")
+	}
+	if len(got.AgentInstances) != 0 {
+		t.Fatal("precondition: this workspace has no agents (FR-12)")
 	}
 	if len(got.Tasks) != 1 {
 		t.Fatalf("the unrelated task update was not written through: %+v", got.Tasks)

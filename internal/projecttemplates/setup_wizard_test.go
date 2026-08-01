@@ -479,9 +479,17 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 		t.Fatalf("EnsureLibrary: %v", err)
 	}
 
+	// Blueprints that existed before wizards and gained one by migration. They
+	// must carry builtin_version >= 2 so existing installs refresh.
 	migrated := []string{"downloads-janitor", "calendar-ops", "email-ops", "reaper-song"}
+	// Blueprints that shipped with a wizard from their first release. There are
+	// no pre-wizard installs of these to refresh, so version 1 is correct and
+	// requiring a bump would only invite a meaningless one.
+	shippedWithWizard := []string{"file-janitor"}
+
 	used := map[string]bool{}
-	for _, id := range migrated {
+	for _, id := range append(append([]string{}, migrated...), shippedWithWizard...) {
+		requiresVersionBump := slices.Contains(migrated, id)
 		tpl, err := FindLibraryTemplate(libDir, id)
 		if err != nil {
 			t.Fatalf("FindLibraryTemplate(%s): %v", id, err)
@@ -494,8 +502,11 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 			t.Errorf("%s wizard does not parse: %v", id, tpl.SetupWizardError)
 			continue
 		}
-		if tpl.BuiltinVersion < 2 {
+		if requiresVersionBump && tpl.BuiltinVersion < 2 {
 			t.Errorf("%s builtin_version = %d; a blueprint that gained a wizard must bump it so existing installs refresh", id, tpl.BuiltinVersion)
+		}
+		if tpl.BuiltinVersion < 1 {
+			t.Errorf("%s builtin_version = %d; a shipped blueprint must carry one", id, tpl.BuiltinVersion)
 		}
 		for _, step := range tpl.SetupWizard.Steps {
 			if step.Adapter == "" {

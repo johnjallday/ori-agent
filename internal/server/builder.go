@@ -74,6 +74,8 @@ import (
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
+	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -284,7 +286,10 @@ type ServerBuilder struct {
 	downloadsJanitorHandler    *downloadsjanitorhttp.Handler
 	downloadsJanitorService    *downloadsjanitor.Service
 	downloadsJanitorAutomation *downloadsjanitor.Automation
-	dailyBriefScheduler        *dailybrief.Scheduler
+	// fileJanitorCapabilityRuntime is held so a later wiring phase can give it
+	// the automation it needs for removal (see wireDownloadsJanitorAutomation).
+	fileJanitorCapabilityRuntime *downloadsjanitor.CapabilityRuntime
+	dailyBriefScheduler          *dailybrief.Scheduler
 
 	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
 	// adapter registry, plus its workspace-scoped HTTP handler. The registry is
@@ -298,6 +303,13 @@ type ServerBuilder struct {
 	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
 	// attached to it once the automation service exists (a later phase).
 	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter
+
+	// Built-in Workspace Capabilities: the compiled allowlist, the install
+	// lifecycle service over it, and its workspace-scoped HTTP handler. The
+	// registry is held so each capability can bind its runtime as it is wired.
+	workspaceCapabilityRegistry *workspacecapability.Registry
+	workspaceCapabilityService  *workspacecapability.Service
+	workspaceCapabilityHandler  *workspacecapabilityhttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -454,47 +466,48 @@ func (b *ServerBuilder) createDomainFacades() {
 	// that mistake impossible, and late-built handlers (CLI agents, plugin,
 	// triggers, ...) attach in the same place as everything else.
 	handlers := &HandlerFacade{
-		ActivityLogger:   b.activityLogger,
-		Settings:         b.settingsHandler,
-		Chat:             b.chatHandler,
-		Onboarding:       b.onboardingHandler,
-		Device:           b.deviceHandler,
-		Orchestration:    b.orchestrationHandler,
-		AutoTask:         b.autoTaskHandler,
-		Workspace:        b.workspaceHandler,
-		Usage:            b.usageHandler,
-		MCP:              b.mcpHandler,
-		CalendarOps:      b.calendarOpsHandler,
-		Location:         b.locationHandler,
-		Workflow:         b.workflowHandler,
-		ModelCategory:    b.modelCategoryHandler,
-		AutoCategorize:   b.autoCategorizeHandler,
-		Reset:            b.resetHandler,
-		AutoConfig:       b.autoConfigHandler,
-		SmartOnboarding:  b.smartOnboardingHandler,
-		Speech:           b.speechHandler,
-		Session:          b.sessionHandler,
-		AutoClassify:     b.autoClassifyHandler,
-		SmartInput:       b.smartInputHandler,
-		Note:             b.noteHandler,
-		Progression:      b.progressionHandler,
-		SessionFiles:     b.sessionFilesHandler,
-		Review:           b.reviewHandler,
-		Evolution:        b.evolutionHandler,
-		Vault:            b.vaultHandler,
-		Connections:      b.connectionsHandler,
-		ExternalAgents:   b.externalAgentsHandler,
-		Skills:           b.skillsHandler,
-		User:             b.userHandler,
-		PersonalHQ:       b.personalHQHandler,
-		DailyBrief:       b.dailyBriefHandler,
-		DownloadsJanitor: b.downloadsJanitorHandler,
-		SetupWizard:      b.setupWizardHandler,
-		CLIAgents:        b.cliAgentHandler,
-		CLIAgentRegistry: b.cliAgentRegistry,
-		WorkspaceRuns:    b.workspaceRunHandler,
-		ActionCenter:     b.actionCenterHandler,
-		Plugin:           b.pluginHandler,
+		ActivityLogger:        b.activityLogger,
+		Settings:              b.settingsHandler,
+		Chat:                  b.chatHandler,
+		Onboarding:            b.onboardingHandler,
+		Device:                b.deviceHandler,
+		Orchestration:         b.orchestrationHandler,
+		AutoTask:              b.autoTaskHandler,
+		Workspace:             b.workspaceHandler,
+		Usage:                 b.usageHandler,
+		MCP:                   b.mcpHandler,
+		CalendarOps:           b.calendarOpsHandler,
+		Location:              b.locationHandler,
+		Workflow:              b.workflowHandler,
+		ModelCategory:         b.modelCategoryHandler,
+		AutoCategorize:        b.autoCategorizeHandler,
+		Reset:                 b.resetHandler,
+		AutoConfig:            b.autoConfigHandler,
+		SmartOnboarding:       b.smartOnboardingHandler,
+		Speech:                b.speechHandler,
+		Session:               b.sessionHandler,
+		AutoClassify:          b.autoClassifyHandler,
+		SmartInput:            b.smartInputHandler,
+		Note:                  b.noteHandler,
+		Progression:           b.progressionHandler,
+		SessionFiles:          b.sessionFilesHandler,
+		Review:                b.reviewHandler,
+		Evolution:             b.evolutionHandler,
+		Vault:                 b.vaultHandler,
+		Connections:           b.connectionsHandler,
+		ExternalAgents:        b.externalAgentsHandler,
+		Skills:                b.skillsHandler,
+		User:                  b.userHandler,
+		PersonalHQ:            b.personalHQHandler,
+		DailyBrief:            b.dailyBriefHandler,
+		DownloadsJanitor:      b.downloadsJanitorHandler,
+		WorkspaceCapabilities: b.workspaceCapabilityHandler,
+		SetupWizard:           b.setupWizardHandler,
+		CLIAgents:             b.cliAgentHandler,
+		CLIAgentRegistry:      b.cliAgentRegistry,
+		WorkspaceRuns:         b.workspaceRunHandler,
+		ActionCenter:          b.actionCenterHandler,
+		Plugin:                b.pluginHandler,
 		// initializeMissionBridge (which builds the trigger handler) runs
 		// before this facade is rebuilt, so it must be attached here too.
 		Triggers: b.triggerHandler,

@@ -16,7 +16,7 @@ func configuredService(t *testing.T) (*Service, string) {
 	workspaces := newFakeWorkspaceStore("ws-1", "ws-2")
 	service := NewService(store, workspaces)
 
-	root := filepath.Join(t.TempDir(), "Inbox")
+	root := filepath.Join(tempDirCanonical(t), "Inbox")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +24,22 @@ func configuredService(t *testing.T) (*Service, string) {
 		t.Fatalf("ConfirmSetup: %v", err)
 	}
 	return service, root
+}
+
+// tempDirCanonical is t.TempDir() with symlinks resolved.
+//
+// Setup canonicalizes the folder the user picks (FR-47), and on macOS the
+// per-test temp dir lives under /var, which is a symlink to /private/var. A
+// fixture that compared against the unresolved path would fail for the right
+// reason — the service correctly stored the real directory — so fixtures speak
+// canonical paths, exactly as the stored settings do.
+func tempDirCanonical(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve temp dir: %v", err)
+	}
+	return resolved
 }
 
 // agedFile writes a file and backdates it past the settle interval, standing in

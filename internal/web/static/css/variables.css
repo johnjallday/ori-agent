@@ -10,6 +10,21 @@
   --sidebar-width: 300px;
   --navbar-offset: 76px;
 
+  /* Full-screen modal layer, above ALL application chrome.
+     Measured stack this has to clear:
+       global nav                10002
+       in-map window (legacy)    10010
+       chat backdrop / panel     10400 / 10500
+       keyboard-navigation hint  20050
+       workspace assistant pill  20100
+     A surface that takes over the whole screen uses these. The workspace
+     page's own --wsx-layer-* scale (workspace-command.css) orders surfaces
+     WITHIN that page and is scoped to .ws-cmd, so a modal mounted on <body>
+     cannot see it — and at its modal layer (1010) the nav clipped the File
+     Janitor console's header and the assistant pill floated over its table. */
+  --app-modal-layer: 20200;
+  --app-modal-backdrop-layer: 20190;
+
   /* Palette swatches (single source of truth) */
   --swatch-black: #0A0A0A;
   --swatch-charred: #0D140D;

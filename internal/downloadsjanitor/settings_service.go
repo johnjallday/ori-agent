@@ -188,6 +188,26 @@ func (s *Service) Relink(automation WatcherLifecycle, req RelinkRequest) (Status
 		return Status{}, err
 	}
 
+	// 0. Validate and reserve the new folder BEFORE anything is torn down. A
+	//    relink onto a folder another workspace already manages must fail with
+	//    the old setup still intact and still running, rather than leaving this
+	//    workspace paused and unconfigured (FR-49, FR-56).
+	//
+	//    Relink has the same check-then-write shape as setup, so it takes the
+	//    same claim lock: without it a relink and a setup racing for the same
+	//    folder would both see it free. The lock is released before the final
+	//    ConfirmSetup below, which re-acquires it — the reservation is only
+	//    needed while deciding, and holding it across the teardown would block
+	//    unrelated workspaces for the duration.
+	if candidate, err := resolveSetupRoot(req.Path); err == nil {
+		s.claimMu.Lock()
+		err := s.ensureRootAvailable(workspaceID, candidate)
+		s.claimMu.Unlock()
+		if err != nil {
+			return Status{}, err
+		}
+	}
+
 	// 1. Stop the unattended work first. A watcher still firing on the old
 	//    folder during a relink would scan a folder the user is leaving.
 	if automation != nil {
@@ -243,6 +263,29 @@ type WatcherLifecycle interface {
 	RemoveWatcher(workspaceID string) error
 }
 
+// exclusivelyOwns reports whether File Janitor is the sole recorded owner of a
+// resource, and may therefore delete it.
+//
+// A resource with no ownership record at all is treated as exclusively owned:
+// that is the pre-capability world, where File Janitor created its own
+// reference and binding and nothing else ever touched them. Refusing to clean
+// those up would leave every workspace that predates install records unable to
+// revoke access properly.
+func exclusivelyOwns(ws *workspace.Workspace, kind, id string) bool {
+	if ws == nil {
+		return false
+	}
+	record, ok := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
+	if !ok {
+		return true
+	}
+	exclusive, recorded := record.Owns(kind, id)
+	if !recorded {
+		return true
+	}
+	return exclusive
+}
+
 // RevokeAccess disconnects the workspace from its folder.
 //
 // The order matters: watching and scheduling stop before the access they run
@@ -262,24 +305,41 @@ func (s *Service) RevokeAccess(automation WatcherLifecycle, workspaceID string) 
 		return Status{}, err
 	}
 
-	// 2. Remove the binding and the directory reference.
+	// 2. Give up the binding and the directory reference — but only the ones
+	//    File Janitor owns exclusively.
+	//
+	//    A reference or binding it adopted rather than created belongs to
+	//    whatever else is using it; deleting it here would revoke a grant on
+	//    something else's behalf, and the user would experience that as an
+	//    unrelated feature breaking for no visible reason. For those, File
+	//    Janitor drops only its own association and leaves the resource
+	//    standing (FR-27).
 	if s.workspaces != nil && settings.DirectoryReferenceID != "" {
 		if err := s.workspaces.Update(workspaceID, func(ws *workspace.Workspace) error {
-			references := ws.DirectoryReferences[:0:0]
-			for _, ref := range ws.DirectoryReferences {
-				if ref.ID != settings.DirectoryReferenceID {
-					references = append(references, ref)
+			if exclusivelyOwns(ws, workspace.ResourceDirectoryReference, settings.DirectoryReferenceID) {
+				references := ws.DirectoryReferences[:0:0]
+				for _, ref := range ws.DirectoryReferences {
+					if ref.ID != settings.DirectoryReferenceID {
+						references = append(references, ref)
+					}
 				}
+				ws.DirectoryReferences = references
 			}
-			ws.DirectoryReferences = references
+			ws.ForgetCapabilityResource(workspace.CapabilityFileJanitor,
+				workspace.ResourceDirectoryReference, settings.DirectoryReferenceID)
 
 			for _, binding := range ws.MCPBindings {
-				if strings.EqualFold(strings.TrimSpace(binding.Alias), JanitorBindingAlias) {
+				if !strings.EqualFold(strings.TrimSpace(binding.Alias), JanitorBindingAlias) {
+					continue
+				}
+				if exclusivelyOwns(ws, workspace.ResourceMCPBinding, binding.ID) {
 					if err := ws.DeleteMCPBinding(binding.ID); err != nil {
 						return err
 					}
-					break
 				}
+				ws.ForgetCapabilityResource(workspace.CapabilityFileJanitor,
+					workspace.ResourceMCPBinding, binding.ID)
+				break
 			}
 			return nil
 		}); err != nil {

@@ -210,7 +210,121 @@ export class OverlayCoordinator {
   }
 }
 
+// ---------------------------------------------------------------- DOM effects
+//
+// The core above is deliberately DOM-free so the ordering and single-modal
+// rules can be unit-tested. These are the real browser side effects it drives.
+
+// setInert makes everything OUTSIDE `container` unreachable while a modal owns
+// the screen: not clickable, not tabbable, and not announced. Without it a
+// screen-reader user can walk straight out of a dialog into the page behind it,
+// and a stray click can act on a surface the dialog is covering.
+//
+// Only body-level siblings are marked, so the whole background goes inert in
+// one step and the container itself is untouched.
+function setInert(container) {
+  if (typeof document === 'undefined' || !container || !document.body) return;
+  const marked = [];
+  Array.from(document.body.children).forEach(child => {
+    if (child === container || child.contains?.(container)) return;
+    if (child.inert) return; // already inert for another reason; leave it be
+    child.inert = true;
+    child.setAttribute?.('data-overlay-inert', '');
+    marked.push(child);
+  });
+  inertByContainer.set(container, marked);
+}
+
+function releaseInert(container) {
+  const marked = inertByContainer.get(container);
+  if (!marked) return;
+  marked.forEach(child => {
+    child.inert = false;
+    child.removeAttribute?.('data-overlay-inert');
+  });
+  inertByContainer.delete(container);
+}
+
+const inertByContainer = new WeakMap();
+const trapByContainer = new WeakMap();
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]),' +
+  ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// trapFocus keeps Tab inside `container`.
+//
+// It deliberately does NOT move focus. The surface that opened knows where
+// focus belongs — for a console with tabs that is the close control, not
+// whatever element happens to come first in the markup — and it sets focus
+// after rendering its content. Moving focus here would fight that, and would
+// run against an empty container besides, since the coordinator is told about
+// the overlay before it is populated.
+function trapFocus(container) {
+  if (typeof document === 'undefined' || !container) return;
+  if (trapByContainer.has(container)) return;
+  const onKeydown = event => {
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(container.querySelectorAll?.(FOCUSABLE) || []).filter(
+      node => node.offsetParent !== null || node === document.activeElement
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    // Wrap at both ends, and pull focus back in if it has escaped entirely
+    // (which is what happens when the browser tabs into the address bar and
+    // back).
+    if (!container.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener('keydown', onKeydown, true);
+  trapByContainer.set(container, onKeydown);
+}
+
+function releaseFocusTrap(container) {
+  const onKeydown = trapByContainer.get(container);
+  if (!onKeydown) return;
+  document.removeEventListener('keydown', onKeydown, true);
+  trapByContainer.delete(container);
+}
+
+function restoreFocus(trigger) {
+  if (trigger && typeof trigger.focus === 'function') trigger.focus();
+}
+
+export const DOM_EFFECTS = Object.freeze({
+  setInert,
+  releaseInert: container => {
+    releaseInert(container);
+    releaseFocusTrap(container);
+  },
+  trapFocus,
+  restoreFocus
+});
+
+// One coordinator per page. Every overlay registers with this instance, which
+// is what makes the single-active-modal rule mean anything: two coordinators
+// would each believe their own modal is the only one.
+export function workspaceOverlayCoordinator() {
+  if (typeof window === 'undefined') return new OverlayCoordinator(DOM_EFFECTS);
+  if (!window.workspaceOverlayCoordinator) {
+    window.workspaceOverlayCoordinator = new OverlayCoordinator(DOM_EFFECTS);
+  }
+  return window.workspaceOverlayCoordinator;
+}
+
 if (typeof window !== 'undefined') {
   window.OverlayCoordinator = OverlayCoordinator;
   window.OVERLAY_LAYER = LAYER;
+  workspaceOverlayCoordinator();
 }

@@ -1051,11 +1051,42 @@ test('systems shared surface mounts config without cloning persistence logic', (
 
   assert.deepEqual(calls, [
     ['restore', 'tools'],
+    ['restore', 'capabilities'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
     ['tab', 'memory'],
     ['refresh', 'memory'],
     ['expand', 'config'],
     ['restore', 'members']
+  ]);
+});
+
+test('systems Capabilities tab mounts the shared capability catalog node', () => {
+  const calls = [];
+  const host = { innerHTML: '', appendChild() {} };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    active: true,
+    activeRailSection: 'systems',
+    activeSystemTab: 'capabilities',
+    statModalSection: '',
+    statModalEl: null,
+    container: { querySelector: selector => (selector === '[data-cmd-system-host]' ? host : null) },
+    mountSharedSurface(key, selector) {
+      calls.push(['mount', key, selector]);
+      return { key, style: {}, querySelector: () => null };
+    },
+    restoreSharedSurface(key) {
+      calls.push(['restore', key]);
+    }
+  });
+
+  commandView.syncSystemsSurface();
+
+  // The same node id the Tools modal mounts: one catalog, two entry points.
+  assert.deepEqual(calls, [
+    ['restore', 'config'],
+    ['restore', 'tools'],
+    ['mount', 'capabilities', '#workspace-detail-capabilities-card']
   ]);
 });
 
@@ -1098,7 +1129,25 @@ test('tools modal mounts the config surface for MCP/Skills/Plugins and the tools
   find.syncToolsModalSurface();
   assert.deepEqual(calls, [
     ['restore', 'config'],
+    ['restore', 'capabilities'],
     ['mount', 'tools', '#workspace-detail-tools-card']
+  ]);
+
+  // The Capabilities tab mounts the catalog node instead, releasing both other
+  // shared surfaces first (single-node arbitration).
+  const capabilities = Object.assign(Object.create(WorkspaceCommandView.prototype), base, {
+    activeToolsTab: 'capabilities',
+    mountSharedSurface(key, selector) {
+      calls.push(['mount', key, selector]);
+      return { key, style: {}, querySelector: () => null };
+    }
+  });
+  calls.length = 0;
+  capabilities.syncToolsModalSurface();
+  assert.deepEqual(calls, [
+    ['restore', 'config'],
+    ['restore', 'tools'],
+    ['mount', 'capabilities', '#workspace-detail-capabilities-card']
   ]);
 });
 
@@ -2138,7 +2187,8 @@ test('Operations Map inventory derives counts from existing page data', () => {
   assert.equal(counts.sessions, 1);
   assert.equal(counts.folders, 1);
   assert.equal(counts.files, 1);
-  assert.equal(counts.systems, 2);
+  // Memory, Triggers, Capabilities.
+  assert.equal(counts.systems, 3);
 });
 
 test('Operations Map controls expose accessible pressed and dialog state', () => {
@@ -3724,7 +3774,11 @@ test('the rail click delegation dispatches HQ station rows through the registry 
 // A Downloads Janitor workspace awaiting setup used to look identical to a
 // finished one on the map: the setup card lives in the page body, so a user
 // working on the map surface had no way to know a folder was still needed.
-function janitorCommandView(stationState) {
+// The File Janitor station is derived from the persisted install record in the
+// capability catalog — never from the workspace's name, template, folder, or
+// agents (FR-93, FR-94). `catalogItem` is the catalog entry this workspace
+// would get back from GET /api/workspaces/{id}/capabilities.
+function janitorCommandView(catalogItem) {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     selectedAgentKey: '',
@@ -3737,24 +3791,34 @@ function janitorCommandView(stationState) {
       buildAgentGroups: () => []
     }
   });
-  globalThis.window = { DownloadsJanitorPanel: { stationState: () => stationState } };
+  globalThis.window = {
+    WorkspaceCapabilities: {
+      find: id => (id === 'file-janitor' ? catalogItem : null)
+    }
+  };
   return commandView;
 }
 
-test('a Downloads Janitor workspace awaiting setup says so on the map', () => {
+function installedFileJanitor(status) {
+  return {
+    definition: { id: 'file-janitor', display: { name: 'File Janitor' } },
+    installed: true,
+    available: true,
+    status
+  };
+}
+
+test('an installed File Janitor awaiting setup says so on the map', () => {
   const originalWindow = globalThis.window;
   try {
-    const commandView = janitorCommandView({
-      applies: true,
-      value: 'Choose a folder',
-      description: 'waiting for you to choose a folder to tidy',
-      tone: 'attention'
-    });
+    const commandView = janitorCommandView(
+      installedFileJanitor({ state: 'setup_needed', detail: 'Choose a folder to manage.' })
+    );
     const html = commandView.renderOperationsMap();
-    assert.match(html, /data-cmd-hq-station="downloads-janitor"/);
-    assert.match(html, /Choose a folder/);
-    // The state is carried non-visually too, not only as a colour tone.
-    assert.match(html, /waiting for you to choose a folder to tidy/);
+    assert.match(html, /data-cmd-hq-station="file-janitor"/);
+    assert.match(html, /File Janitor/);
+    // The state is carried as text, not only as a colour tone (FR-96).
+    assert.match(html, /Choose a folder to manage\./);
     // It is not the HQ, and must not be styled as one.
     assert.doesNotMatch(html, /ws-cmd-map-shell is-hq/);
   } finally {
@@ -3762,36 +3826,175 @@ test('a Downloads Janitor workspace awaiting setup says so on the map', () => {
   }
 });
 
-test('a workspace with no Janitor gets no station, as before', () => {
+test('a configured File Janitor station shows its folder and derived status', () => {
   const originalWindow = globalThis.window;
   try {
-    const commandView = janitorCommandView({ applies: false });
+    const commandView = janitorCommandView(
+      installedFileJanitor({
+        state: 'review_ready',
+        detail: '12 ready for review',
+        folder_display_name: 'Downloads',
+        configured: true
+      })
+    );
     const html = commandView.renderOperationsMap();
-    assert.doesNotMatch(html, /ws-cmd-map-hq-station/);
-    assert.doesNotMatch(html, /downloads-janitor/);
+    assert.match(html, /data-cmd-hq-station="file-janitor"/);
+    assert.match(html, /File Janitor · Downloads/);
+    assert.match(html, /12 ready for review/);
   } finally {
     globalThis.window = originalWindow;
   }
 });
 
-test('pressing the Downloads station takes the user to the setup card', () => {
+test('a workspace without the capability installed gets no station', () => {
   const originalWindow = globalThis.window;
   try {
-    let focused = 0;
+    // Not installed: the catalog lists the capability, but there is no install
+    // record. A station here would be inferred rather than derived (FR-94).
+    const commandView = janitorCommandView({
+      definition: { id: 'file-janitor', display: { name: 'File Janitor' } },
+      installed: false,
+      available: true
+    });
+    const html = commandView.renderOperationsMap();
+    assert.doesNotMatch(html, /ws-cmd-map-hq-station/);
+    assert.doesNotMatch(html, /file-janitor/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('an install this build cannot resolve renders no station', () => {
+  const originalWindow = globalThis.window;
+  try {
+    // Installed but unavailable: visible in the catalog as metadata, but there
+    // is nothing to activate, so it must not offer a Map entry point (FR-14).
+    const commandView = janitorCommandView({
+      definition: { id: 'file-janitor', display: { name: 'File Janitor' } },
+      installed: true,
+      available: false,
+      unavailable: 'not available in this version'
+    });
+    const html = commandView.renderOperationsMap();
+    assert.doesNotMatch(html, /ws-cmd-map-hq-station/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('pressing the File Janitor station opens the console in place', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const opens = [];
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
+    });
+    const trigger = { id: 'the-station-button' };
+    globalThis.window = {
+      WorkspaceCapabilities: {
+        find: () => installedFileJanitor({ state: 'setup_needed', detail: 'Choose a folder.' }),
+        onOpen: () => false
+      },
+      FileJanitorConsole: {
+        open: options => opens.push(options)
+      }
+    };
+    commandView.runHQStationAction('file-janitor', trigger);
+    assert.equal(opens.length, 1, 'the station must lead somewhere, not just report state');
+    assert.equal(
+      opens[0].trigger,
+      trigger,
+      'the console must know which control opened it so focus can return there'
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// The station used to fall back to DownloadsJanitorPanel.focusSetup(), which
+// scrolled the page to an inline mount. From the Map that mount is not on
+// screen, so the press scrolled a surface the user could not see and appeared
+// to do nothing. The behavior is gone, not merely superseded.
+test('the File Janitor station never scrolls to an inline mount', () => {
+  const originalWindow = globalThis.window;
+  try {
+    let focusedInline = 0;
+    let openedViaCatalog = 0;
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, {
       page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
     });
     globalThis.window = {
+      WorkspaceCapabilities: {
+        find: () => installedFileJanitor({ state: 'setup_needed', detail: 'Choose a folder.' }),
+        onOpen: id => {
+          if (id === 'file-janitor') openedViaCatalog += 1;
+          return true;
+        }
+      },
+      // The old inline panel, still present. It must not be reached.
       DownloadsJanitorPanel: {
-        stationState: () => ({ applies: true, value: 'Choose a folder' }),
         focusSetup: () => {
-          focused += 1;
+          focusedInline += 1;
         }
       }
     };
-    commandView.runHQStationAction('downloads-janitor', null);
-    assert.equal(focused, 1, 'the station must lead somewhere, not just report state');
+    commandView.runHQStationAction('file-janitor', null);
+    assert.equal(focusedInline, 0, 'the scroll-to-inline behavior must be gone');
+    assert.equal(openedViaCatalog, 1, 'the station must never be a dead end');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// The catalog is fetched once per page load. The console re-reads on every
+// scan, approval, and pause, so it — not the snapshot — is what can say "3
+// files ready for review" while the user is looking at the map.
+test('the File Janitor station shows live console state over the catalog snapshot', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
+    });
+    globalThis.window = {
+      WorkspaceCapabilities: {
+        find: () => installedFileJanitor({ state: 'ready', detail: 'Watching' })
+      },
+      FileJanitorConsole: {
+        stationState: () => ({
+          applies: true,
+          value: '3 files ready for review',
+          description: 'files are waiting for your decision',
+          tone: 'attention'
+        })
+      }
+    };
+    const station = commandView.workspaceStationRegistry()[0];
+    assert.equal(station.state().value, '3 files ready for review');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// With the console module absent the snapshot is all there is; the station
+// still reports something rather than rendering blank.
+test('the File Janitor station falls back to the catalog snapshot', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: { workspace: { id: 'ws-1', mcp_bindings: [], skill_bindings: [] }, tasks: [] }
+    });
+    globalThis.window = {
+      WorkspaceCapabilities: {
+        find: () => installedFileJanitor({ state: 'needs_attention', detail: 'Folder missing.' })
+      }
+    };
+    const station = commandView.workspaceStationRegistry()[0];
+    assert.equal(station.state().value, 'Folder missing.');
+    assert.equal(station.state().tone, 'degraded');
   } finally {
     globalThis.window = originalWindow;
   }

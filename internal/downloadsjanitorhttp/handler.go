@@ -248,14 +248,23 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 			status = http.StatusForbidden
 		case downloadsjanitor.CodeWorkspaceMissing:
 			status = http.StatusNotFound
+		case downloadsjanitor.CodeFolderConflict:
+			status = http.StatusConflict
 		case downloadsjanitor.CodePersistenceFailed, downloadsjanitor.CodeBindingFailed:
 			status = http.StatusInternalServerError
 		}
-		logger.Warn("Downloads Janitor setup failed", logger.Fields{"code": setupError.Code, "error": setupError.Error()})
+		logger.Warn("File Janitor setup failed", logger.Fields{"code": setupError.Code, "error": setupError.Error()})
+		details := map[string]any{"repair": setupError.Repair}
+		// A folder conflict names the owning workspace so the UI can offer a
+		// route to it rather than leaving the user to find it (FR-49). Only the
+		// authorized owner reaches this handler at all.
+		if setupError.ConflictWorkspaceID != "" {
+			details["conflict_workspace_id"] = setupError.ConflictWorkspaceID
+		}
 		_ = orihttp.RespondAPIError(w, status, &orihttp.APIError{
 			Code:    setupError.Code,
 			Message: setupError.Message,
-			Details: map[string]any{"repair": setupError.Repair},
+			Details: details,
 		})
 		return
 	}

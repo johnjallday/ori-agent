@@ -270,7 +270,7 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 	// here and the next line, the record says an action was in flight.
 	action, err := NewApprovedAction(
 		"action-"+uuid.New().String(), settings.WorkspaceID, candidate, OperationMove,
-		relative, approval.UserID, approval.ConsumedAt, approval.IdempotencyKey,
+		relative, approval.UserID, approval.ConsumedAt, approval.IdempotencyKey, settings.RootID,
 	)
 	if err != nil {
 		return ItemOutcome{CandidateID: candidate.ID, Name: candidate.Display(), Operation: item.Operation, Result: ResultFailed, Message: "Ori could not record this action, so it did not perform it."}
@@ -299,10 +299,18 @@ func (s *Service) applyOne(ctx context.Context, settings JanitorSettings, root s
 		// The user-facing message stays short and non-technical, but the reason
 		// has to go somewhere: without this, a failed move left no trace at all
 		// on the server, and diagnosing one meant reproducing it by hand.
-		logger.Warn("Downloads Janitor move failed", logger.Fields{
+		//
+		// Identifiers only — no filename, no destination path. Logs are the one
+		// place this feature's data can leak somewhere the user never looks
+		// (a shared log file, a support bundle), and a filename is often the
+		// most sensitive thing about a file. The action journal already holds
+		// the name and destination for the user's own audit and undo, which is
+		// where FR-143 permits them.
+		logger.Warn("File Janitor move failed", logger.Fields{
 			"workspace_id": settings.WorkspaceID,
-			"name":         candidate.Display(),
-			"destination":  relative,
+			"action_id":    action.ID,
+			"candidate_id": candidate.ID,
+			"category":     string(item.Category),
 			"error":        moveErr.Error(),
 		})
 		summary := "Ori could not move this file."
@@ -362,6 +370,7 @@ func (s *Service) recordStale(candidate JanitorCandidate, item PlanItem, approva
 	action, err := NewApprovedAction(
 		"action-"+uuid.New().String(), candidate.WorkspaceID, candidate, OperationMove,
 		"Filed/Other/"+candidate.Name, approval.UserID, approval.ConsumedAt, approval.IdempotencyKey,
+		s.currentRootID(candidate.WorkspaceID),
 	)
 	if err == nil {
 		action = action.MarkStale(message, now)

@@ -66,6 +66,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/vaulthttp"
 	"github.com/johnjallday/ori-agent/internal/wakecoord"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
+	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -572,6 +574,93 @@ func (b *ServerBuilder) wireDownloadsJanitor() {
 	service := downloadsjanitor.NewService(downloadsjanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
 	b.downloadsJanitorService = service
 	b.downloadsJanitorHandler = downloadsjanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+}
+
+// wireWorkspaceCapabilities constructs the built-in Workspace Capability
+// registry, the install lifecycle service over it, and its HTTP handler, then
+// binds each capability's compiled runtime.
+//
+// Like wireDownloadsJanitor it runs in the workspace-store phase (18): the
+// lifecycle service reads and updates the composed workspace store, which does
+// not exist during initializeHandlers (17).
+//
+// Every failure here is contained (FR-145). A registry that will not build, or
+// a capability whose runtime cannot be bound, logs and leaves that capability
+// unavailable — it never aborts the wiring, and it never prevents the rest of
+// the workspace handlers or the server from starting. An unwired handler
+// answers 503, which is honest and visible, rather than crashing at request
+// time.
+func (b *ServerBuilder) wireWorkspaceCapabilities() {
+	if b.workspaceStore == nil {
+		return
+	}
+
+	registry, err := workspacecapability.NewBuiltinRegistry()
+	if err != nil {
+		// Only reachable if a compiled definition is malformed — a programming
+		// error. Capabilities stay unavailable; everything else still starts.
+		logger.Error("Workspace capabilities not wired: registry failed to build", logger.Fields{"error": err})
+		return
+	}
+	b.workspaceCapabilityRegistry = registry
+
+	// Runtimes are bound from code, never from configuration: a persisted
+	// capability ID is a key into this registry and nothing else (FR-14).
+	var legacyProbe workspacecapability.LegacyStateProbe
+	if b.downloadsJanitorService != nil {
+		runtime := downloadsjanitor.NewCapabilityRuntime(b.downloadsJanitorService)
+		if err := registry.BindRuntime(workspace.CapabilityFileJanitor, runtime); err != nil {
+			// The definition stays listed; its status reports unavailable.
+			logger.Warn("File Janitor capability runtime not bound", logger.Fields{"error": err})
+		}
+		legacyProbe = runtime
+		b.fileJanitorCapabilityRuntime = runtime
+	}
+
+	service := workspacecapability.NewService(registry, b.workspaceStore)
+	// Companion creation belongs to the layer that owns the agent store; the
+	// capability service only decides whether one is wanted. Without this the
+	// offer reports itself unavailable rather than failing obscurely.
+	if b.sessionHandler != nil {
+		service.SetCompanionProvisioner(sessionhttp.NewCapabilityCompanionProvisioner(b.sessionHandler))
+	}
+	b.workspaceCapabilityService = service
+	b.workspaceCapabilityHandler = workspacecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+
+	b.backfillLegacyCapabilities(registry, legacyProbe)
+}
+
+// backfillLegacyCapabilities records the file-janitor install for workspaces
+// that were already using Downloads Janitor before capabilities existed
+// (FR-125).
+//
+// It runs on every startup and is idempotent: a workspace that already holds
+// the record is skipped, so repeated boots cannot duplicate anything. It writes
+// only the install record — no folder is granted, no watcher registered, and no
+// schedule enabled, so a workspace's automation is exactly as active after the
+// backfill as it was before (FR-130).
+//
+// A failure here degrades the backfill alone. Migration is a convenience that
+// makes an existing workspace's capability visible; it is not a precondition
+// for the server, the workspace, or the Janitor itself to work.
+func (b *ServerBuilder) backfillLegacyCapabilities(registry *workspacecapability.Registry, probe workspacecapability.LegacyStateProbe) {
+	store, ok := b.workspaceStore.(workspacecapability.MigrationWorkspaceStore)
+	if !ok {
+		logger.Warn("File Janitor backfill skipped: workspace store cannot list workspaces", logger.Fields{})
+		return
+	}
+	workspacecapability.NewMigrator(registry, store, probe).Run()
+
+	// Cross-workspace folder conflicts are prevented at setup from this release
+	// on, but an existing install can already have two workspaces tidying the
+	// same folder — nothing stopped it before. Reconcile those once at startup:
+	// it preserves every folder and all state, keeps the earliest owner running,
+	// and pauses later conflicts with a repairable explanation.
+	if b.downloadsJanitorService != nil {
+		if ids, err := store.List(); err == nil {
+			b.downloadsJanitorService.ReconcileOverlappingRoots(ids)
+		}
+	}
 }
 
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled

@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 33
+const schemaVersion = 34
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -131,6 +131,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration032FollowUps(ctx)
 	case 33:
 		return db.migration033CalendarMeetingPreps(ctx)
+	case 34:
+		return db.migration034WorkspaceInstalledCapabilities(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -194,6 +196,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			agent_mcp_access_json TEXT DEFAULT '[]',
 			skill_bindings_json TEXT DEFAULT '[]',
 			agent_skill_access_json TEXT DEFAULT '[]',
+			installed_capabilities_json TEXT DEFAULT '[]',
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -1231,6 +1234,31 @@ func (db *DB) migration029WorkspaceNativeMCPOptIn(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN allow_native_mcp_cli INTEGER NOT NULL DEFAULT 0
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace allow_native_mcp_cli column: %w", err)
+	}
+	return nil
+}
+
+// migration034WorkspaceInstalledCapabilities adds the installed_capabilities_json
+// column so a workspace's built-in Workspace Capability installs (e.g.
+// file-janitor) round-trip through the primary store instead of living only in
+// workspace.json. Purely additive: existing rows default to an empty collection,
+// which reads back as "no capabilities installed" — never as a phantom install.
+//
+// The column mirrors workspace.json rather than replacing it. Both stores carry
+// the field, and SyncStore.Save restores it from the canonical folder record when
+// a stale or partial workspace would otherwise write it away (PRD FR-144).
+func (db *DB) migration034WorkspaceInstalledCapabilities(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN installed_capabilities_json TEXT DEFAULT '[]'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace installed_capabilities_json column: %w", err)
 	}
 	return nil
 }

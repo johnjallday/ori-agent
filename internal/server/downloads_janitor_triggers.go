@@ -126,6 +126,18 @@ func (b *ServerBuilder) wireDownloadsJanitorAutomation() {
 	if b.downloadsJanitorHandler != nil {
 		b.downloadsJanitorHandler.SetAutomation(automation)
 	}
+	if b.fileJanitorCapabilityRuntime != nil {
+		// Removal must stop the watcher before it releases the folder, so the
+		// capability runtime needs the automation too.
+		//
+		// This is set here rather than in wireWorkspaceCapabilities because
+		// capabilities are wired several phases earlier, when this automation
+		// does not exist yet. Reading it there would capture nil and leave
+		// removal silently unable to stop anything — releasing a folder out
+		// from under a live watcher, which is the one ordering that must not
+		// happen (FR-26).
+		b.fileJanitorCapabilityRuntime.SetAutomation(automation)
+	}
 
 	// The daily catch-up runs over every configured workspace. Listing is done
 	// per tick rather than cached, so a workspace configured after startup is

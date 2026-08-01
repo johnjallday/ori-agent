@@ -42,6 +42,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerDownloadsJanitorRoutes(mux, s)
+	registerWorkspaceCapabilityRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
@@ -894,6 +895,16 @@ func registerDownloadsJanitorRoutes(mux *http.ServeMux, s *Server) {
 	// Downloads Janitor Endpoints
 	// =============================================================================
 	s.Handlers.DownloadsJanitor.Register(mux)
+}
+
+// registerWorkspaceCapabilityRoutes registers the workspace-scoped built-in
+// capability catalog and install endpoints. A nil handler (capabilities failed
+// to wire) simply registers nothing, leaving the rest of the API intact.
+func registerWorkspaceCapabilityRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Workspace Capability Endpoints
+	// =============================================================================
+	s.Handlers.WorkspaceCapabilities.Register(mux)
 }
 
 // registerSetupWizardRoutes registers the workspace-scoped blueprint Setup

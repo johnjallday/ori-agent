@@ -28,10 +28,36 @@ type Notifier interface {
 
 // Fixed titles, because the title is the dedup key: one ready-batch item and
 // one needs-attention item per workspace, updated rather than multiplied.
+//
+// These are folder-neutral on purpose. The capability manages whichever folder
+// the user approved — Scans, Desktop, an upload drop — so a title naming
+// Downloads would be wrong everywhere except the preset.
+//
+// Changing a title orphans any entry created under the old one, because upsert
+// dedups by title. That is a one-time, per-workspace cosmetic leftover, and the
+// alternative — telling a user tidying ~/Scans that "Downloads" needs attention
+// — is worse.
 const (
-	readyBatchTitle    = "Downloads ready to review"
-	needsAttentionText = "Downloads Janitor needs attention"
+	readyBatchTitle    = "Files ready to review"
+	needsAttentionText = "File Janitor needs attention"
 )
+
+// folderLabel returns a short, safe name for the managed folder, for use in
+// notification text. It falls back to a neutral phrase rather than guessing:
+// before setup, and when settings cannot be read, there is no folder to name.
+func (s *Service) folderLabel(workspaceID string) string {
+	if s == nil || s.store == nil {
+		return "the folder Ori is tidying"
+	}
+	settings, err := s.store.LoadSettings(workspaceID)
+	if err != nil {
+		return "the folder Ori is tidying"
+	}
+	if name := folderDisplayName(settings.RootPath); name != "" {
+		return name
+	}
+	return "the folder Ori is tidying"
+}
 
 // SetNotifier injects the Action Center store. A nil notifier disables
 // notifications without affecting scanning.
@@ -54,7 +80,7 @@ func (s *Service) notifyBatchReady(workspaceID string, batch JanitorBatch) {
 		return
 	}
 
-	summary := fmt.Sprintf("%d file%s ready for review in your Downloads folder.", pending, plural(pending))
+	summary := fmt.Sprintf("%d file%s ready for review in %s.", pending, plural(pending), s.folderLabel(workspaceID))
 	if batch.Summary.NeedsReview > 0 {
 		summary += fmt.Sprintf(" %d need%s a closer look.", batch.Summary.NeedsReview, pluralVerb(batch.Summary.NeedsReview))
 	}
@@ -73,7 +99,7 @@ func (s *Service) notifyBatchReady(workspaceID string, batch JanitorBatch) {
 		UpdatedAt:         time.Now(),
 	}
 	if _, _, err := s.notifier.Upsert(opp); err != nil {
-		logger.Warn("Downloads Janitor could not record a ready-batch notification", logger.Fields{
+		logger.Warn("File Janitor could not record a ready-batch notification", logger.Fields{
 			"workspace_id": workspaceID, "error": err,
 		})
 	}
@@ -86,10 +112,11 @@ func (s *Service) reportScanFailure(workspaceID string, cause error) {
 	if s == nil || s.notifier == nil || cause == nil {
 		return
 	}
-	summary := "Ori could not scan your Downloads folder."
+	label := s.folderLabel(workspaceID)
+	summary := fmt.Sprintf("Ori could not scan %s.", label)
 	switch {
 	case strings.Contains(cause.Error(), "permission"):
-		summary = "Ori no longer has permission to read your Downloads folder."
+		summary = fmt.Sprintf("Ori no longer has permission to read %s.", label)
 	case strings.Contains(cause.Error(), "no longer exists"), strings.Contains(cause.Error(), "no longer linked"):
 		summary = "The folder Ori was tidying is no longer available."
 	}
@@ -101,12 +128,12 @@ func (s *Service) reportScanFailure(workspaceID string, cause error) {
 		Priority:          "medium",
 		Confidence:        "high",
 		Status:            workspace.OpportunityNew,
-		RecommendedAction: "Open Downloads Janitor settings to reconnect the folder",
+		RecommendedAction: "Open File Janitor settings to reconnect the folder",
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 	}
 	if _, _, err := s.notifier.Upsert(opp); err != nil {
-		logger.Warn("Downloads Janitor could not record a needs-attention notification", logger.Fields{
+		logger.Warn("File Janitor could not record a needs-attention notification", logger.Fields{
 			"workspace_id": workspaceID, "error": err,
 		})
 	}

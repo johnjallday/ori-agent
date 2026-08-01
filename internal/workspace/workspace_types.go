@@ -143,6 +143,21 @@ type Workspace struct {
 	// created without a template or before provenance was recorded.
 	TemplateProvenance *TemplateProvenance `json:"template_provenance,omitempty"`
 
+	// InstalledCapabilities records which built-in Workspace Capabilities are
+	// installed on this workspace (see installed_capabilities.go). It is the
+	// authoritative answer to "does this workspace have File Janitor?" —
+	// replacing inference from template provenance, workspace name, or
+	// capability-specific state. Runtime health is NOT stored here; it is always
+	// derived from the capability service (PRD FR-4, FR-6).
+	//
+	// Unrelated to the CapabilityMapping records on MCPBinding, which map
+	// semantic connector operations onto MCP tools (FR-7).
+	//
+	// Nil means "no data" and empty means "known to have none"; every merge and
+	// preservation site must guard with len()==0, never ==nil. Mirrored into
+	// SQLite as installed_capabilities_json.
+	InstalledCapabilities []InstalledCapability `json:"installed_capabilities,omitempty"`
+
 	// SetupWizardProgress is the authoritative record of how far the workspace
 	// has got through its blueprint's Setup Wizard (see setup_wizard.go). The
 	// server owns it: the browser never reports completion, and closing the
@@ -174,6 +189,21 @@ type Workspace struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	mu        sync.RWMutex   `json:"-"`
 	taskIndex map[string]int `json:"-"` // Index for O(1) task lookups by ID
+
+	// capabilitiesExplicit records that THIS in-memory value has had its
+	// InstalledCapabilities deliberately edited, as opposed to merely arriving
+	// without them.
+	//
+	// The two cases are otherwise indistinguishable — both leave the collection
+	// empty — but they must produce opposite behavior on save: a record that
+	// never loaded capabilities has to be refilled from the canonical
+	// workspace.json (FR-144), while an uninstall has to be allowed to write the
+	// collection away. See SyncStore.Save.
+	//
+	// Never persisted and never cloned: it is intent attached to one
+	// mutate-then-save cycle (the window CanonicalUpdate holds open), and a copy
+	// decoded from disk correctly carries no pending intent.
+	capabilitiesExplicit bool
 }
 
 // CanvasLayout stores positions of tasks and agents on the canvas

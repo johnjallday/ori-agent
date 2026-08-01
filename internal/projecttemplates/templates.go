@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // ManifestFileName is the optional per-template metadata file. It carries
@@ -140,6 +141,53 @@ func normalizeCapabilityRequirements(reqs []CapabilityRequirement) []CapabilityR
 		return nil
 	}
 	return out
+}
+
+// normalizeCapabilityInstalls validates a manifest's declared built-in
+// capability installs against the compiled registry (FR-2, FR-13, FR-32).
+//
+// It is stricter than the neighbouring normalizers, which quietly drop what
+// they cannot use. An unknown capability ID is reported as a warning rather
+// than silently discarded: a blueprint whose whole purpose is to create a
+// File Janitor workspace, that instead creates an ordinary one because a typo
+// went unnoticed, is a worse outcome than a visible complaint. Nothing is
+// executed either way — the ID can only ever select a compiled definition.
+//
+// Duplicates collapse (first-seen wins) rather than producing two install
+// records for one capability, which the workspace model forbids anyway (FR-8).
+func normalizeCapabilityInstalls(installs []CapabilityInstall) ([]CapabilityInstall, []string) {
+	if len(installs) == 0 {
+		return nil, nil
+	}
+	registry, registryErr := workspacecapability.NewBuiltinRegistry()
+
+	var warnings []string
+	out := make([]CapabilityInstall, 0, len(installs))
+	seen := make(map[string]struct{}, len(installs))
+	for _, install := range installs {
+		id := workspace.NormalizeCapabilityID(install.ID)
+		if id == "" {
+			warnings = append(warnings, "template.json declares a capability with no id; it was ignored")
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		if registryErr == nil && !registry.Has(id) {
+			warnings = append(warnings, fmt.Sprintf(
+				"template.json declares capability %q, which this version of Ori does not provide; it was ignored", id))
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, CapabilityInstall{
+			ID:     id,
+			Source: strings.ToLower(strings.TrimSpace(install.Source)),
+		})
+	}
+	if len(out) == 0 {
+		return nil, warnings
+	}
+	return out, warnings
 }
 
 func normalizeOperationNames(ops []string) []string {
@@ -289,6 +337,34 @@ type Template struct {
 	// workspace, because "some of the setup ran" is the one outcome a
 	// half-understood flow must never produce.
 	SetupWizardError string `json:"setup_wizard_error,omitempty"`
+	// Capabilities are the built-in Workspace Capabilities a workspace created
+	// from this template has installed (FR-31, FR-32).
+	//
+	// Deliberately separate from every neighbouring field:
+	//
+	//   - CapabilityRequirements maps abstract connector operations onto MCP
+	//     tools. Same word, unrelated concept — one describes what a connector
+	//     must be able to do, this one names a feature of Ori itself.
+	//   - Tools binds skills, MCP servers, and plugins the user connects.
+	//     Capabilities are compiled into Ori and carry an install lifecycle
+	//     those do not.
+	//
+	// An entry is a reference to compiled behavior and nothing more: an ID and
+	// an optional source label. There is no path, command, URL, or module here,
+	// so a manifest can select a capability but never supply one (FR-14).
+	Capabilities []CapabilityInstall `json:"capabilities,omitempty"`
+}
+
+// CapabilityInstall declares that a workspace created from this template has a
+// built-in capability installed.
+type CapabilityInstall struct {
+	// ID is the capability identifier, e.g. "file-janitor". It is a lookup key
+	// into the compiled registry; an unknown ID is rejected at load time rather
+	// than creating a workspace whose capability resolves to nothing.
+	ID string `json:"id"`
+	// Source records which flow to attribute the install to. Defaults to the
+	// blueprint source when empty.
+	Source string `json:"source,omitempty"`
 }
 
 // HasSetupWizard reports whether the template declares a usable setup wizard.
@@ -337,6 +413,7 @@ type manifest struct {
 	Tools                  *ToolDefaults           `json:"tools,omitempty"`
 	Agents                 []AgentSpec             `json:"agents,omitempty"`
 	CapabilityRequirements []CapabilityRequirement `json:"capability_requirements,omitempty"`
+	Capabilities           []CapabilityInstall     `json:"capabilities,omitempty"`
 	DirectoryRequirements  []DirectoryRequirement  `json:"directory_requirements,omitempty"`
 	AutomationRecipes      []AutomationRecipe      `json:"automation_recipes,omitempty"`
 	// SetupWizard is held raw so a malformed wizard fails only the wizard: were
@@ -392,6 +469,8 @@ func newTemplate(path string) Template {
 	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
 	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
+	capabilities, capabilityWarnings := normalizeCapabilityInstalls(m.Capabilities)
+	t.Capabilities = capabilities
 	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
 	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
 	// The wizard is resolved last: its steps may only reference requirements
@@ -399,7 +478,7 @@ func newTemplate(path string) Template {
 	// normalized first.
 	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins))
 	t.SetupWizard = setupWizard
-	t.Warnings = manifestWarnings(m, t.Agents)
+	t.Warnings = append(manifestWarnings(m, t.Agents), capabilityWarnings...)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
 	}

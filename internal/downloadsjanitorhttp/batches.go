@@ -157,8 +157,19 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !found {
-			// No pending work is a normal, empty state — not an error.
-			_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "batch": nil, "candidates": []candidateDTO{}})
+			// No pending work is a normal, empty state — not an error. The
+			// counts are still reported so a client never has to distinguish
+			// "empty batch" from "field missing".
+			_ = orihttp.RespondSuccess(w, map[string]any{
+				"success":        true,
+				"batch":          nil,
+				"candidates":     []candidateDTO{},
+				"total":          0,
+				"filtered_total": 0,
+				"counts":         candidateCounts(nil),
+				"limit":          defaultCandidateLimit,
+				"offset":         0,
+			})
 			return
 		}
 	} else {
@@ -173,11 +184,140 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	filter, ok := candidateFilterFrom(r)
+	if !ok {
+		_ = orihttp.RespondAPIError(w, http.StatusBadRequest,
+			orihttp.NewAPIError("invalid_filter", "That review filter is not one Ori offers."))
+		return
+	}
+	limit, offset, ok := candidatePagination(r)
+	if !ok {
+		_ = orihttp.RespondAPIError(w, http.StatusBadRequest,
+			orihttp.NewAPIError("invalid_pagination", "That page request is not valid."))
+		return
+	}
+
+	counts := candidateCounts(candidates)
+	matching := filterCandidates(candidates, filter)
+	filteredTotal := len(matching)
+	if offset > filteredTotal {
+		offset = filteredTotal
+	}
+	end := min(offset+limit, filteredTotal)
+	page := matching[offset:end]
+
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"success":    true,
 		"batch":      batch,
-		"candidates": candidateDTOs(candidates, settings.Settings.FilingRootName),
+		"candidates": candidateDTOs(page, settings.Settings.FilingRootName),
+		// The counts describe the WHOLE batch, not the page. A review surface
+		// that reported "3 files" because three fit on a page would be lying
+		// about how much work is waiting (FR-109).
+		"total":          len(candidates),
+		"filtered_total": filteredTotal,
+		"counts":         counts,
+		"filter":         filter,
+		"limit":          limit,
+		"offset":         offset,
 	})
+}
+
+// Candidate paging bounds. A batch can hold hundreds of files; the page size is
+// what keeps one open from serializing all of them and building a DOM row for
+// each (FR-150).
+const (
+	defaultCandidateLimit = 50
+	maxCandidateLimit     = 200
+)
+
+// candidateFilters is the allowlist. A filter is a fixed vocabulary rather than
+// a free expression: the server decides what a client may ask for, so no query
+// string can widen what the review surface reveals (FR-141).
+var candidateFilters = map[string]struct{}{
+	"":             {},
+	"needs_review": {},
+	"pending":      {},
+	"skipped":      {},
+}
+
+func candidateFilterFrom(r *http.Request) (string, bool) {
+	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	if filter == "all" {
+		filter = ""
+	}
+	_, ok := candidateFilters[filter]
+	return filter, ok
+}
+
+// candidatePagination reads limit/offset, rejecting anything malformed rather
+// than silently substituting a default. A page request the server quietly
+// reinterprets is one where the client and the server disagree about which
+// files were shown — and that disagreement ends in an approval built from the
+// wrong rows.
+func candidatePagination(r *http.Request) (limit, offset int, ok bool) {
+	limit = defaultCandidateLimit
+	query := r.URL.Query()
+	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return 0, 0, false
+		}
+		limit = min(parsed, maxCandidateLimit)
+	}
+	if raw := strings.TrimSpace(query.Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			return 0, 0, false
+		}
+		offset = parsed
+	}
+	return limit, offset, true
+}
+
+// filterCandidates applies the same rule the review surface does: Needs review
+// is a flag, the others are states. Both live here so the count beside a filter
+// and the rows behind it can never come from different definitions.
+func filterCandidates(candidates []downloadsjanitor.JanitorCandidate, filter string) []downloadsjanitor.JanitorCandidate {
+	if filter == "" {
+		return candidates
+	}
+	out := make([]downloadsjanitor.JanitorCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if matchesCandidateFilter(candidate, filter) {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func matchesCandidateFilter(candidate downloadsjanitor.JanitorCandidate, filter string) bool {
+	if filter == "needs_review" {
+		return candidate.NeedsReview
+	}
+	return string(candidate.State) == filter
+}
+
+// candidateCounts reports how many files each filter would show, so the filter
+// bar can label itself without a request per filter.
+func candidateCounts(candidates []downloadsjanitor.JanitorCandidate) map[string]int {
+	counts := map[string]int{"all": len(candidates)}
+	for filter := range candidateFilters {
+		if filter == "" {
+			continue
+		}
+		counts[filter] = 0
+	}
+	for _, candidate := range candidates {
+		for filter := range candidateFilters {
+			if filter == "" {
+				continue
+			}
+			if matchesCandidateFilter(candidate, filter) {
+				counts[filter]++
+			}
+		}
+	}
+	return counts
 }
 
 func candidateDTOs(candidates []downloadsjanitor.JanitorCandidate, filingRootName string) []candidateDTO {
@@ -536,6 +676,22 @@ func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) (string, b
 	return userID, true
 }
 
+// candidateExplanation extracts the human half of a wrapped candidate error.
+//
+// These errors are built as "<sentinel>: <explanation about the user's file>".
+// The sentinel exists for errors.Is, not for reading; the explanation names the
+// file and says what to do about it. If the error carries no explanation, a
+// plain sentence is used rather than exposing the sentinel.
+func candidateExplanation(err error) string {
+	message := err.Error()
+	if _, explanation, found := strings.Cut(message, ": "); found {
+		if trimmed := strings.TrimSpace(explanation); trimmed != "" {
+			return trimmed
+		}
+	}
+	return "That file changed since it was proposed. Rescan to review it again."
+}
+
 // respondReviewError maps approval and candidate errors onto stable statuses.
 // An approval problem is a 409: the request was well formed, but the state it
 // assumed no longer holds.
@@ -553,12 +709,24 @@ func (h *Handler) respondReviewError(w http.ResponseWriter, err error, fallback 
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
 			orihttp.NewAPIError("approval_invalid", "These files or categories changed since you approved them. Review them and approve again."))
 	case errors.Is(err, downloadsjanitor.ErrCandidateNotActionable):
+		// Only the explanation reaches the user, never the wrapped sentinel.
+		//
+		// err.Error() reads "downloads janitor candidate cannot be approved in
+		// its current state: <explanation>" — a sentence that names an internal
+		// error type, and the retired product name, in a message the console
+		// shows verbatim. The part after the sentinel is the part written for a
+		// person to read.
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
-			orihttp.NewAPIError("candidate_changed", err.Error()))
+			orihttp.NewAPIError("candidate_changed", candidateExplanation(err)))
 	case errors.Is(err, downloadsjanitor.ErrCandidateNotFound):
 		_ = orihttp.RespondNotFound(w, "candidate not found")
-	case errors.Is(err, downloadsjanitor.ErrUnknownCategory), errors.Is(err, downloadsjanitor.ErrInvalidAction):
-		_ = orihttp.RespondBadRequest(w, err.Error())
+	case errors.Is(err, downloadsjanitor.ErrUnknownCategory):
+		// Not err.Error(): that reads "unknown downloads janitor category: ..."
+		// — an internal sentinel naming the retired product, in a message the
+		// console shows verbatim.
+		_ = orihttp.RespondBadRequest(w, "That is not a category Ori files into.")
+	case errors.Is(err, downloadsjanitor.ErrInvalidAction):
+		_ = orihttp.RespondBadRequest(w, "Ori cannot carry out that action on this file.")
 	default:
 		h.respondError(w, err, fallback)
 	}

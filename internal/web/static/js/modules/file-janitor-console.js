@@ -1,8 +1,8 @@
 // downloads-janitor.js — the Downloads Janitor panel on the workspace detail
 // page.
 //
-// In this first slice it renders two states from one server response
-// (GET /api/workspaces/{id}/downloads-janitor):
+// It renders two states from one server response
+// (GET /api/workspaces/{id}/file-janitor):
 //
 //   • Setup required — a card that names the folder Ori will watch, states
 //     exactly what approving it allows (list + metadata, approved moves into
@@ -23,6 +23,10 @@
 
   const MOUNT_ID = 'downloadsJanitorMount';
 
+  // Set by renderSetupCard so the folder picker can re-enable the confirm
+  // button after writing a path straight into the input.
+  let syncSetupConfirmEnabled = null;
+
   let workspaceId = '';
   let busy = false;
   let lastStatus = null;
@@ -33,8 +37,20 @@
   // never pre-filled: opening the review surface must not be able to cause a
   // file mutation (FR-62).
   let selected = new Set();
-  // Active state filter: '' (all), 'needs_review', 'pending', 'skipped'.
+  // Active state filter: '' (all), 'needs_review', 'pending', 'skipped'. The
+  // server owns the filtering; this is only what to ask it for.
   let filter = '';
+  // Server-side paging. A batch can hold hundreds of files, and rendering one
+  // DOM row per candidate is what makes a large review unusable — so the page
+  // is bounded and only the page is requested (FR-109, FR-150).
+  const PAGE_SIZE = 50;
+  let pageOffset = 0;
+  // Counts for the WHOLE batch, from the server. The filter labels and the
+  // "showing X of Y" line come from these rather than from the rows on screen,
+  // which are only ever one page of them.
+  let batchTotal = 0;
+  let filteredTotal = 0;
+  let filterCounts = {};
   // The approval issued by a preview, held only until the user confirms or
   // cancels. It is never persisted: an abandoned approval simply expires.
   let pendingPreview = null;
@@ -79,6 +95,21 @@
     const path = (window.location && window.location.pathname) || '';
     const parts = path.split('/').filter(Boolean);
     return parts[0] === 'workspaces' && parts[1] ? decodeURIComponent(parts[1]) : '';
+  }
+
+  // API_PREFIX is the canonical File Janitor route segment. Every request this
+  // module makes goes through apiBase, so the prefix is stated once.
+  //
+  // The server still serves the legacy `downloads-janitor` prefix, and will for
+  // this whole release — persisted deep links and any out-of-repo caller still
+  // use it, and Go route-parity tests cover it (see
+  // internal/downloadsjanitorhttp/route_parity_test.go). In-repo callers use the
+  // canonical prefix so the legacy alias can eventually be retired by deleting
+  // it rather than by hunting for stragglers (FR-132).
+  const API_PREFIX = 'file-janitor';
+
+  function apiBase(id) {
+    return '/api/workspaces/' + encodeURIComponent(id) + '/' + API_PREFIX;
   }
 
   function mount() {
@@ -213,8 +244,12 @@
   function renderSetupCard(host, status) {
     const suggestion = status.suggestion || {};
     const settings = status.settings || {};
-    const label = suggestion.label || 'Downloads folder';
-    const suggestedPath = suggestion.suggested_path || '~/Downloads';
+    const label = suggestion.label || 'Folder to tidy';
+    // Only a preset may pre-fill a path. A generic in-place install starts
+    // empty rather than proposing ~/Downloads: pre-filling a real folder the
+    // user never chose, next to a button that grants access to it, turns an
+    // explicit approval into a default (FR-44, FR-50).
+    const suggestedPath = suggestion.suggested_path || '';
 
     const card = el('section', 'dj-card');
     card.setAttribute('role', 'group');
@@ -222,11 +257,19 @@
 
     const head = el('div', 'dj-head');
     const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'Downloads Janitor');
+    const title = el('h2', 'dj-title', 'File Janitor');
     title.id = 'downloadsJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
       el('p', 'dj-sub', 'Choose the folder to tidy. Nothing is scanned or moved until you do.')
+    );
+    heading.appendChild(
+      el(
+        'p',
+        'dj-sub dj-sub-muted',
+        'Best for an inbox-style folder whose loose files pile up — Downloads, Desktop, Scans, an upload drop. ' +
+          'Ori looks only at the files sitting directly in it, and never reorganizes folders inside it.'
+      )
     );
     head.appendChild(heading);
     head.appendChild(stateBadge('setup_required'));
@@ -241,6 +284,7 @@
     input.setAttribute('type', 'text');
     input.setAttribute('spellcheck', 'false');
     input.setAttribute('aria-describedby', 'downloadsJanitorDisclosure');
+    input.setAttribute('placeholder', 'Choose a folder, or type its path');
     input.value = suggestedPath;
     const row = el('div', 'dj-field-row');
     row.appendChild(input);
@@ -269,6 +313,18 @@
       void confirmSetup(chosen ? chosen.value : '');
     });
     confirm.id = 'downloadsJanitorConfirm';
+    // The grant needs a folder AND this explicit press. Browsing or typing a
+    // path selects nothing on its own (FR-50), and with no pre-filled path
+    // there is nothing to approve until the user supplies one.
+    const syncConfirmEnabled = () => {
+      confirm.disabled = String(input.value || '').trim() === '';
+    };
+    syncConfirmEnabled();
+    input.addEventListener('input', syncConfirmEnabled);
+    // The folder picker writes input.value directly, which fires no input
+    // event, so browse() re-syncs through this rather than leaving the button
+    // disabled after a successful pick.
+    syncSetupConfirmEnabled = syncConfirmEnabled;
     actions.appendChild(confirm);
     card.appendChild(actions);
 
@@ -368,6 +424,14 @@
   function candidateRow(candidate) {
     const row = el('tr', 'dj-row-item dj-row-state-' + (candidate.state || 'pending'));
     row.setAttribute('data-candidate-id', candidate.id);
+    // A deep link naming this candidate marks it, so the row a notification
+    // was about is findable in a batch of hundreds. The id is registered so
+    // focusRequestedItem can reach it without a selector engine.
+    if (consoleItem && candidate.id === consoleItem) {
+      row.className += ' is-linked';
+      row.id = 'fileJanitorLinkedRow';
+      row.setAttribute('tabindex', '-1');
+    }
 
     const selectCell = el('td', 'dj-cell dj-cell-select');
     const checkbox = document.createElement('input');
@@ -377,6 +441,17 @@
     checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
     checkbox.disabled = checkbox.disabled || trashMarked.has(candidate.id);
+    // A row Ori could not place confidently cannot be filed until the user
+    // says where it goes. Leaving it selectable meant "Needs review" was
+    // decoration: the row rode along in a bulk approval and was filed using
+    // the very guess that was flagged as untrustworthy (FR-63, FR-64).
+    if (unresolvedNeedsReview(candidate)) {
+      checkbox.disabled = true;
+      checkbox.setAttribute(
+        'title',
+        'Choose a category for this file first — Ori was not confident enough to guess.'
+      );
+    }
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) selected.add(candidate.id);
       else selected.delete(candidate.id);
@@ -469,11 +544,36 @@
     return row;
   }
 
+  // The page the server returned, already filtered. Filtering here as well
+  // would make the row count disagree with the counts beside the filters.
   function visibleCandidates() {
-    if (!filter) return lastCandidates;
-    if (filter === 'needs_review')
-      return lastCandidates.filter(candidate => candidate.needs_review);
-    return lastCandidates.filter(candidate => candidate.state === filter);
+    return lastCandidates;
+  }
+
+  // unresolvedNeedsReview reports a low-confidence row the user has not yet
+  // ruled on. Skipping or marking for Trash also resolves it; those are handled
+  // by the state and trash checks beside this one.
+  function unresolvedNeedsReview(candidate) {
+    return Boolean(candidate && candidate.needs_review && !candidate.decision_category);
+  }
+
+  // dropIneligibleSelections removes IDs that can no longer be acted on.
+  //
+  // Selection is deliberately kept across page changes and refreshes — a user
+  // reviewing 300 files should not lose their work by turning a page (FR-109).
+  // But a file that has since been filed, skipped, or gone stale must not stay
+  // silently selected: it would ride along into the next approval, and the user
+  // would be approving something they can no longer see. Only candidates ON
+  // THIS PAGE can be judged; ones on other pages are left alone and revalidated
+  // by the server at approval time (FR-82).
+  function dropIneligibleSelections() {
+    lastCandidates.forEach(candidate => {
+      const eligible = candidate.state === 'pending' || candidate.state === 'approved';
+      if (!eligible || unresolvedNeedsReview(candidate)) {
+        selected.delete(candidate.id);
+        trashMarked.delete(candidate.id);
+      }
+    });
   }
 
   const FILTERS = [
@@ -488,18 +588,77 @@
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter review items');
     FILTERS.forEach(option => {
+      const count = filterCounts[option.id || 'all'];
       const control = button(
         option.label,
         'dj-filter' + (filter === option.id ? ' dj-filter-active' : ''),
-        () => {
-          filter = option.id;
-          renderBatch();
-        }
+        () => selectFilter(option.id)
       );
+      // The count comes from the server's whole-batch tally, not from the rows
+      // on screen — those are one page of them.
+      if (typeof count === 'number') {
+        control.appendChild(el('span', 'dj-filter-count', String(count)));
+        control.setAttribute('aria-label', option.label + ', ' + count + ' files');
+      }
       control.setAttribute('aria-pressed', filter === option.id ? 'true' : 'false');
       bar.appendChild(control);
     });
     return bar;
+  }
+
+  function selectFilter(next) {
+    if (filter === next) return;
+    filter = next;
+    // A new filter is a new list; staying on page 4 of the old one would land
+    // the user somewhere arbitrary, or on nothing at all.
+    pageOffset = 0;
+    void loadBatch();
+  }
+
+  // pager renders the page controls, or nothing when the whole filtered set
+  // fits on one page. It states the range and the total in words, so "showing
+  // 51-100 of 500" is available to a screen reader as one sentence rather than
+  // as three numbers scattered across controls.
+  function pager() {
+    if (filteredTotal <= lastCandidates.length && pageOffset === 0) return null;
+    const nav = el('div', 'dj-pager');
+    nav.setAttribute('role', 'navigation');
+    nav.setAttribute('aria-label', 'Review pages');
+
+    const from = filteredTotal === 0 ? 0 : pageOffset + 1;
+    const to = pageOffset + lastCandidates.length;
+    // When a filter is on, the batch total is stated too, so the user can see
+    // how much they have filtered out rather than believing the batch is
+    // smaller than it is.
+    const filtered =
+      filter && batchTotal > filteredTotal ? ' (filtered from ' + batchTotal + ')' : '';
+    const status = el(
+      'p',
+      'dj-pager-status',
+      'Showing ' + from + '\u2013' + to + ' of ' + filteredTotal + ' files' + filtered
+    );
+    status.id = 'downloadsJanitorPagerStatus';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+
+    const previous = button('Previous', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset - PAGE_SIZE));
+    previous.id = 'downloadsJanitorPagePrev';
+    previous.disabled = pageOffset <= 0;
+    const next = button('Next', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset + PAGE_SIZE));
+    next.id = 'downloadsJanitorPageNext';
+    next.disabled = to >= filteredTotal;
+
+    nav.appendChild(previous);
+    nav.appendChild(status);
+    nav.appendChild(next);
+    return nav;
+  }
+
+  function goToPage(offset) {
+    const next = Math.max(0, Math.min(offset, Math.max(0, filteredTotal - 1)));
+    if (next === pageOffset) return;
+    pageOffset = next;
+    void loadBatch();
   }
 
   function reviewTable() {
@@ -605,6 +764,8 @@
       scroller.appendChild(reviewTable());
       container.appendChild(scroller);
     }
+    const pageControls = pager();
+    if (pageControls) container.appendChild(pageControls);
 
     const footer = el('div', 'dj-footer');
     const selection = el('p', 'dj-selection');
@@ -891,6 +1052,33 @@
     });
     panel.appendChild(contentRow);
 
+    // How it is working: the folder in use, whether the watcher is running, and
+    // every readiness check with its repair. Settings is where a user goes when
+    // something seems wrong, so the diagnosis belongs here and not only on the
+    // Review tab they may never reach (FR-58, FR-112).
+    const health = el('div', 'dj-setting dj-setting-health');
+    health.appendChild(el('h4', 'dj-setting-heading', 'How it is working'));
+    const folderLine = el('p', 'dj-setting-help');
+    folderLine.textContent = settings.root_path
+      ? 'Managing ' + safeName(settings.root_path)
+      : 'No folder chosen yet.';
+    health.appendChild(folderLine);
+    health.appendChild(
+      el(
+        'p',
+        'dj-setting-help',
+        settings.paused
+          ? 'Automatic scanning is paused. You can still scan on demand.'
+          : 'Watching this folder, with a daily catch-up.'
+      )
+    );
+    health.appendChild(readinessRows(lastStatus));
+    const repair = repairAction(lastStatus);
+    if (repair) health.appendChild(repair);
+    panel.appendChild(health);
+
+    panel.appendChild(curatorSection());
+
     // Folder actions. Relink and revoke are grouped away from the rest and
     // labelled by what they do to the user's access, not by verb.
     const actions = el('div', 'dj-settings-actions');
@@ -911,6 +1099,7 @@
       )
     );
     panel.appendChild(actions);
+    panel.appendChild(removalSection());
 
     const status = el('p', 'dj-settings-status', settingsMessage);
     status.id = 'downloadsJanitorSettingsStatus';
@@ -919,6 +1108,280 @@
     panel.appendChild(status);
 
     host.appendChild(panel);
+  }
+
+  // The removal confirmation, kept in state so the section can render either
+  // the entry point or the confirmation itself. It holds the server's summary,
+  // never a locally composed description of what removal will do.
+  let removalSummary = null;
+  let removalConfirming = false;
+  let removalCompanionChecked = false;
+
+  // removalSection renders **Remove File Janitor** and, once pressed, the
+  // confirmation built from the server's dry run.
+  //
+  // The confirmation is a step inside Settings rather than a second modal: the
+  // console is already the one active dialog, and a dialog on top of it would
+  // put the destructive question above the context that explains it (FR-112,
+  // FR-119).
+  function removalSection() {
+    const section = el('div', 'dj-setting dj-setting-removal');
+    section.appendChild(el('h4', 'dj-setting-heading', 'Remove File Janitor'));
+
+    if (!removalConfirming) {
+      section.appendChild(
+        el(
+          'p',
+          'dj-setting-help',
+          'Stops managing this folder and removes File Janitor from this workspace. ' +
+            'Your files are not moved or deleted.'
+        )
+      );
+      const start = button(
+        'Remove File Janitor',
+        'dj-btn dj-btn-secondary dj-btn-destructive',
+        () => void beginRemoval()
+      );
+      start.id = 'downloadsJanitorRemove';
+      section.appendChild(start);
+      return section;
+    }
+
+    const summary = removalSummary || {};
+    const confirmation = el('div', 'dj-removal-confirm');
+    confirmation.setAttribute('role', 'group');
+    confirmation.setAttribute('aria-label', 'Confirm removing File Janitor');
+
+    // Name the folder. A confirmation the user cannot evaluate is not one.
+    confirmation.appendChild(
+      el(
+        'p',
+        'dj-removal-lead',
+        summary.managed_folder
+          ? 'Ori will stop managing ' + safeName(summary.managed_folder) + '.'
+          : 'Ori will remove File Janitor from this workspace.'
+      )
+    );
+
+    const consequences = el('ul', 'dj-disclosure-list');
+    (summary.stops_automation || []).forEach(line =>
+      consequences.appendChild(el('li', 'dj-disclosure-item', 'Stops: ' + line))
+    );
+    consequences.appendChild(
+      el('li', 'dj-disclosure-item', 'Ori gives up its access to the folder.')
+    );
+    // The single most important sentence in the dialog.
+    consequences.appendChild(
+      el(
+        'li',
+        'dj-disclosure-item',
+        'No files are moved, renamed, deleted, or restored. Your folder is left exactly as it is.'
+      )
+    );
+    (summary.retained_audit || []).forEach(line =>
+      consequences.appendChild(el('li', 'dj-disclosure-item', 'Kept: ' + line))
+    );
+    if ((summary.kept_shared || summary.shared || []).length > 0) {
+      consequences.appendChild(
+        el(
+          'li',
+          'dj-disclosure-item',
+          'Anything shared with another feature stays available to it.'
+        )
+      );
+    }
+    confirmation.appendChild(consequences);
+
+    // The companion is a separate decision, presented as one.
+    if (summary.companion && summary.companion.removable) {
+      const label = el('label', 'dj-removal-companion');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.id = 'downloadsJanitorRemoveCompanion';
+      box.checked = removalCompanionChecked;
+      box.addEventListener('change', () => {
+        removalCompanionChecked = box.checked;
+      });
+      label.appendChild(box);
+      label.appendChild(el('span', '', ' Also remove the Curator agent from this workspace'));
+      confirmation.appendChild(label);
+    } else if (summary.companion) {
+      confirmation.appendChild(
+        el('p', 'dj-setting-help', summary.companion.reason || 'The Curator agent is left alone.')
+      );
+    }
+
+    const buttons = el('div', 'dj-settings-actions');
+    const confirm = button(
+      'Remove File Janitor',
+      'dj-btn dj-btn-destructive',
+      () => void completeRemoval()
+    );
+    confirm.id = 'downloadsJanitorRemoveConfirm';
+    const cancel = button('Keep File Janitor', 'dj-btn dj-btn-secondary', () => {
+      removalConfirming = false;
+      removalSummary = null;
+      removalCompanionChecked = false;
+      setSettingsMessage('');
+      renderSettings();
+    });
+    cancel.id = 'downloadsJanitorRemoveCancel';
+    buttons.appendChild(cancel);
+    buttons.appendChild(confirm);
+    confirmation.appendChild(buttons);
+
+    section.appendChild(confirmation);
+    return section;
+  }
+
+  // beginRemoval asks the server what removal would do, and shows that.
+  //
+  // The description is fetched rather than written here so it states what will
+  // happen to THIS workspace — which folder, what stops, what is kept. Copy
+  // composed in the browser cannot know, and would drift from the behavior it
+  // claims to describe (FR-24, FR-25).
+  async function beginRemoval() {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    setSettingsMessage('');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor/removal'
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || 'Ori could not describe what removing this would do.');
+      }
+      removalSummary = body.removal || {};
+      removalConfirming = true;
+      removalCompanionChecked = false;
+      renderSettings();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not describe what removing this would do.');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function completeRemoval() {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    setSettingsMessage('Removing File Janitor…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor',
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remove_companion: removalCompanionChecked })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || 'Ori could not remove File Janitor.');
+      }
+      removalConfirming = false;
+      removalSummary = null;
+      removalCompanionChecked = false;
+
+      // The console is showing a capability this workspace no longer has, so
+      // it closes rather than lingering over controls that would now fail. The
+      // catalog reload is what makes the station and the card disappear and the
+      // capability offer itself again as Available (FR-24, FR-10).
+      close();
+      lastStatus = { applies: false };
+      render(lastStatus);
+      const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+      if (catalog && typeof catalog.reload === 'function') await catalog.reload();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not remove File Janitor.');
+      renderSettings();
+    } finally {
+      busy = false;
+    }
+  }
+
+  // curatorSection reports whether the optional Curator is present and offers
+  // to add one if not.
+  //
+  // The Curator is optional by design: File Janitor works fully without it, so
+  // this states that plainly rather than presenting the agent as something
+  // missing. Presence is read from the install record's owned resources — the
+  // same association the server uses for idempotency — never from an agent's
+  // display name.
+  function curatorSection() {
+    const section = el('div', 'dj-setting dj-setting-curator');
+    section.appendChild(el('h4', 'dj-setting-heading', 'Curator'));
+
+    const record = capabilityRecord();
+    const companions = (record && record.owned_resources ? record.owned_resources : []).filter(
+      resource => resource && resource.kind === 'companion_agent'
+    );
+
+    if (companions.length > 0) {
+      section.appendChild(
+        el(
+          'p',
+          'dj-setting-help',
+          'A Curator is helping in this workspace. It explains proposals and answers questions; ' +
+            'it cannot approve, move, or delete anything.'
+        )
+      );
+      return section;
+    }
+
+    section.appendChild(
+      el(
+        'p',
+        'dj-setting-help',
+        'No Curator in this workspace. File Janitor works fully without one — a Curator only ' +
+          'helps you understand what is proposed, and can never act on your files.'
+      )
+    );
+    const add = button('Add a Curator', 'dj-btn dj-btn-secondary', () => void addCurator());
+    add.id = 'downloadsJanitorAddCurator';
+    section.appendChild(add);
+    return section;
+  }
+
+  // capabilityRecord reads this workspace's install record from the catalog the
+  // capabilities module already loaded, rather than issuing another request.
+  function capabilityRecord() {
+    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+    if (!catalog || typeof catalog.find !== 'function') return null;
+    const item = catalog.find('file-janitor');
+    return (item && item.record) || null;
+  }
+
+  async function addCurator() {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    setSettingsMessage('Adding a Curator\u2026');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor/companion',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error((body.message || (body.error && body.error.message)) || 'Ori could not add a Curator.');
+      }
+      setSettingsMessage(
+        body.already_present
+          ? 'A Curator is already helping here.'
+          : 'Added ' + safeName(body.display_name || 'a Curator') + '.'
+      );
+      const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+      if (catalog && typeof catalog.reload === 'function') await catalog.reload();
+      renderSettings();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not add a Curator.');
+    } finally {
+      busy = false;
+    }
   }
 
   function setSettingsMessage(message) {
@@ -932,14 +1395,11 @@
     if (!id) return;
     setSettingsMessage('Saving…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/settings',
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch)
-        }
-      );
+      const response = await fetch(apiBase(id) + '/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -959,14 +1419,11 @@
     const id = wsId();
     if (!id) return;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/content-consent',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/content-consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -983,10 +1440,10 @@
     if (!id) return;
     setSettingsMessage('Checking…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/test-scan',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await fetch(apiBase(id) + '/test-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error('The test scan could not run.');
       const report = body.report || {};
@@ -1007,10 +1464,11 @@
     if (!id) return;
     setSettingsMessage('Resetting…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/skipped/reset',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
-      );
+      const response = await fetch(apiBase(id) + '/skipped/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
       if (!response.ok) throw new Error('Ori could not reset those.');
       setSettingsMessage('Previously skipped files can be proposed again.');
       await loadBatch();
@@ -1042,14 +1500,11 @@
 
     setSettingsMessage('Switching folders…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/relink',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: picked })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/relink', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: picked })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1083,10 +1538,10 @@
     revokeConfirmed = false;
     setSettingsMessage('Disconnecting…');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/revoke',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await fetch(apiBase(id) + '/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1211,9 +1666,7 @@
     const option = HISTORY_FILTERS.find(entry => entry.id === historyFilter);
     const query = option && option.query ? '?' + option.query : '';
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/history' + query
-      );
+      const response = await fetch(apiBase(id) + '/history' + query);
       if (!response.ok) throw new Error('history failed');
       const body = await response.json();
       historyActions = Array.isArray(body.actions) ? body.actions : [];
@@ -1236,11 +1689,7 @@
     if (status) status.textContent = historyStatusMessage;
     try {
       const response = await fetch(
-        '/api/workspaces/' +
-          encodeURIComponent(id) +
-          '/downloads-janitor/history/' +
-          encodeURIComponent(actionID) +
-          '/undo',
+        apiBase(id) + '/history/' + encodeURIComponent(actionID) + '/undo',
         { method: 'POST', headers: { 'Content-Type': 'application/json' } }
       );
       const body = await response.json().catch(() => ({}));
@@ -1340,23 +1789,24 @@
     try {
       const decisions = Array.from(selected).map(candidateId => {
         const candidate = lastCandidates.find(item => item.id === candidateId) || {};
-        return {
-          candidate_id: candidateId,
-          operation: 'move',
-          category: candidate.decision_category || candidate.category || ''
-        };
+        // For a flagged row the user's own choice is the ONLY acceptable
+        // category. Falling back to candidate.category here would file it
+        // using the guess that was flagged as not trustworthy — the exact
+        // outcome the flag exists to prevent. Sending an empty category makes
+        // the server refuse it rather than this silently deciding.
+        const category = unresolvedNeedsReview(candidate)
+          ? ''
+          : candidate.decision_category || candidate.category || '';
+        return { candidate_id: candidateId, operation: 'move', category };
       });
       trashMarked.forEach(candidateId => {
         decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
       });
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/preview',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decisions })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1395,18 +1845,15 @@
       control.textContent = 'Moving…';
     }
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/apply',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            batch_id: active.preview.batch_id,
-            approval_token: active.preview.token,
-            decisions: active.decisions
-          })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch_id: active.preview.batch_id,
+          approval_token: active.preview.token,
+          decisions: active.decisions
+        })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1428,35 +1875,310 @@
     }
   }
 
-  function renderConfiguredCard(host, status) {
-    const settings = status.settings || {};
-    const readiness = status.readiness || {};
+  // pauseControl is the real Pause/Resume, shared by every surface that offers
+  // it so the wording and the setup guard can never drift apart.
+  //
+  // Pausing stops the unattended work only. Saying so on the control itself
+  // saves the user wondering whether pausing loses their pending review.
+  function pauseControl(settings) {
+    const paused = Boolean(settings && settings.paused);
+    const control = button(
+      paused ? 'Resume watching' : 'Pause watching',
+      'dj-btn dj-btn-secondary',
+      () => void setPaused(!paused)
+    );
+    control.id = 'downloadsJanitorPause';
+    control.setAttribute(
+      'title',
+      paused
+        ? 'Start watching this folder again.'
+        : 'Stop automatic scanning. Your settings, pending review, and history are kept, and you can still scan on demand.'
+    );
+    // Before setup finishes, resuming here would start the unattended work the
+    // wizard has not yet disclosed — the one step the user is supposed to read
+    // first. The control stays visible and says where the decision lives
+    // (FR-56); scanning on demand is unaffected, because the user is the one
+    // asking for each scan.
+    if (paused && setupAwaitingAutomationApproval()) {
+      control.textContent = 'Approve in setup';
+      control.setAttribute(
+        'title',
+        'Setup explains what folder watching and the daily scan do before turning them on.'
+      );
+      control.onclick = () => window.SetupWizard?.open?.('automation');
+    }
+    return control;
+  }
 
-    const card = el('section', 'dj-card');
+  // renderCompactCard is all Workspace Details carries now: what state File
+  // Janitor is in, which folder it manages, what is waiting, when it looks
+  // next, and a way in. The review table, the settings form, and history are
+  // the console's and appear nowhere else on the page (FR-114, FR-115).
+  function renderCompactCard(host, status) {
+    const settings = status.settings || {};
+    const configured = isConfigured(status);
+
+    const card = el('section', 'fj-card');
     card.setAttribute('role', 'group');
     card.setAttribute('aria-labelledby', 'downloadsJanitorTitle');
 
-    const head = el('div', 'dj-head');
-    const heading = el('div', 'dj-heading');
-    const title = el('h2', 'dj-title', 'Downloads Janitor');
+    const head = el('div', 'fj-card-head');
+    const heading = el('div', 'fj-card-heading');
+    const title = el('h2', 'fj-card-title', 'File Janitor');
     title.id = 'downloadsJanitorTitle';
     heading.appendChild(title);
-    const sub = el('p', 'dj-sub');
-    sub.textContent = 'Tidying ' + (settings.root_path || 'your chosen folder');
+    const sub = el('p', 'fj-card-sub');
+    sub.textContent = configured
+      ? 'Tidying ' + safeName(settings.root_path)
+      : 'No folder chosen yet. Nothing is scanned or moved until you choose one.';
     heading.appendChild(sub);
-    const stats = el('p', 'dj-stats');
+    const stats = el('p', 'fj-card-stats');
     stats.id = 'downloadsJanitorStats';
     stats.setAttribute('role', 'status');
     stats.setAttribute('aria-live', 'polite');
-    stats.textContent = statsLine();
+    stats.textContent = configured ? statsLine() : '';
+    stats.hidden = !configured;
     heading.appendChild(stats);
     head.appendChild(heading);
+
     const activity = activityState(status);
     const badge = el('span', 'dj-badge dj-badge-' + activity.id.replace(/_/g, '-'), activity.label);
     badge.id = 'downloadsJanitorActivity';
     head.appendChild(badge);
     card.appendChild(head);
 
+    const actions = el('div', 'fj-card-actions');
+    const openLabel = configured ? 'Open File Janitor' : 'Set up File Janitor';
+    const openButton = button('', 'dj-btn dj-btn-primary', event => {
+      open({ source: 'workspace-details', trigger: event && event.currentTarget });
+    });
+    openButton.textContent = openLabel;
+    openButton.id = 'fileJanitorCardOpen';
+    actions.appendChild(openButton);
+
+    // Scanning on demand is offered from the card only once there is a folder
+    // to scan; before that the single action is the one that sets it up.
+    if (configured) {
+      const scan = button('Scan now', 'dj-btn dj-btn-secondary', () => void scanNow());
+      scan.id = 'fileJanitorCardScan';
+      scan.disabled = scanning;
+      actions.appendChild(scan);
+    }
+    card.appendChild(actions);
+    // What Ori reads is stated on the card itself, not behind the Settings
+    // tab. A disclosure the user must go looking for is one they will not
+    // read, and this is the sentence that says whether their file contents are
+    // being opened.
+    if (configured) card.appendChild(privacyLine(status));
+    card.appendChild(cardErrorRegion());
+    host.appendChild(card);
+  }
+
+  // renderSetupPrompt re-opens the folder chooser for an already-configured
+  // workspace (relink/repair), reusing the same confirm path.
+  //
+  // It renders into the console body, which is where the repair action that
+  // calls it lives. The suggestion is the folder the user already approved and
+  // nothing else: a relink prompted by a folder that vanished must not quietly
+  // propose a different one to grant access to (FR-44, FR-50).
+  function renderSetupPrompt(status) {
+    const host = document.getElementById('fileJanitorConsoleBody') || mount();
+    if (!host) return;
+    clear(host);
+    const settings = status.settings || {};
+    renderSetupCard(host, {
+      settings,
+      suggestion: {
+        label: 'Folder to tidy',
+        suggested_path: settings.root_path || '',
+        filing_root_name: settings.filing_root_name,
+        daily_scan_local_time: settings.daily_scan_local_time
+      }
+    });
+  }
+
+  function errorRegion() {
+    const region = el('p', 'dj-error');
+    region.id = 'downloadsJanitorError';
+    region.setAttribute('role', 'status');
+    region.setAttribute('aria-live', 'polite');
+    region.hidden = true;
+    return region;
+  }
+
+  // The card gets its own error region under a different id. Two nodes sharing
+  // one id would make getElementById pick whichever came first in the document,
+  // so a failure inside the console could surface behind it on the card.
+  function cardErrorRegion() {
+    const region = errorRegion();
+    region.id = 'fileJanitorCardError';
+    return region;
+  }
+
+  // The message currently on screen, remembered so a repaint does not erase it.
+  //
+  // Status is re-read in the background — on open, after a scan, whenever setup
+  // changes — and every repaint builds a fresh error region. Without this, an
+  // error the user triggered a moment ago vanishes mid-read because an
+  // unrelated refresh happened to land. It is cleared explicitly by the actions
+  // that succeed, so nothing stale survives a working operation.
+  let lastErrorMessage = '';
+
+  // showError writes to whichever surface the user is actually looking at. The
+  // console is modal, so while it is open it is the only place an error can be
+  // read at all.
+  function showError(message) {
+    lastErrorMessage = message || '';
+    paintError();
+  }
+
+  function paintError() {
+    const region =
+      (consoleOpen && document.getElementById('downloadsJanitorError')) ||
+      document.getElementById('fileJanitorCardError') ||
+      document.getElementById('downloadsJanitorError');
+    if (!region) return;
+    region.textContent = lastErrorMessage;
+    region.hidden = !lastErrorMessage;
+  }
+
+  function render(status) {
+    // Marks and selections belong to the folder that was on screen. Changing
+    // the managed folder invalidates every one of them, so they are discarded
+    // here — but ONLY then.
+    //
+    // This used to clear them on every status repaint. Status is re-read
+    // constantly (on open, after a scan, whenever setup changes), and none of
+    // those touch the candidate set, so a background refresh landing mid-review
+    // silently emptied a selection the user had built up and disabled the
+    // approve button under their cursor. The batch's own reload owns the
+    // narrower rule — discard when the batch id actually changed (loadBatch).
+    if (managedFolderChanged(lastStatus, status)) {
+      trashMarked = new Set();
+      selected = new Set();
+      pendingPreview = null;
+    }
+    lastStatus = status;
+
+    // Workspace Details now shows a compact card only. The review table, the
+    // settings form, and history live in the console and nowhere else, so
+    // there is exactly one of each on the page (FR-100, FR-114).
+    const host = mount();
+    if (host) {
+      if (!status || !status.applies) {
+        host.hidden = true;
+        clear(host);
+      } else {
+        host.hidden = false;
+        clear(host);
+        renderCompactCard(host, status);
+      }
+    }
+
+    if (consoleOpen) renderConsole();
+    paintError();
+    notifySubscribers();
+  }
+
+  // managedFolderChanged reports whether the folder these decisions were made
+  // about is still the folder in effect. A different root, or a re-issued
+  // directory reference, means the pending selections describe files that are
+  // no longer the ones on screen.
+  function managedFolderChanged(before, after) {
+    const previous = (before && before.settings) || {};
+    const next = (after && after.settings) || {};
+    if (!before) return false;
+    return (
+      previous.root_path !== next.root_path ||
+      previous.directory_reference_id !== next.directory_reference_id
+    );
+  }
+
+  // isConfigured is the single question that decides which face every surface
+  // shows: a folder the user approved, and the directory reference that grants
+  // access to it. Either one missing means setup is unfinished.
+  function isConfigured(status) {
+    const settings = (status && status.settings) || {};
+    return Boolean(settings.root_path && settings.directory_reference_id);
+  }
+
+  // renderConsoleBody paints the console's active tab. It reuses the renderers
+  // the inline panel already had: they address their hosts by id, so moving
+  // those hosts into the console moves the surfaces with them.
+  function renderConsoleBody(host, status) {
+    if (!isConfigured(status)) {
+      // An unconfigured install opens straight into the real setup experience
+      // — the wizard when the blueprint declares one, the folder card
+      // otherwise. Never a placeholder, and never a second chooser beside the
+      // wizard (FR-104).
+      if (setupWizardOwnsSetup()) {
+        renderSetupEntry(host);
+      } else {
+        renderSetupCard(host, status);
+      }
+      return;
+    }
+    if (consoleTab === 'history') {
+      const historyHost = el('div', 'dj-history-host');
+      historyHost.id = 'downloadsJanitorHistoryHost';
+      host.appendChild(historyHost);
+      host.appendChild(errorRegion());
+      renderHistory();
+      if (!historyLoaded) void loadHistory();
+      return;
+    }
+    if (consoleTab === 'settings') {
+      const settingsHost = el('div', 'dj-settings-host');
+      settingsHost.id = 'downloadsJanitorSettingsHost';
+      host.appendChild(settingsHost);
+      host.appendChild(privacyLine(status));
+      host.appendChild(errorRegion());
+      settingsOpen = true;
+      renderSettings();
+      return;
+    }
+
+    // Review: readiness rows, then the batch, then — deliberately outside the
+    // batch — the confirmation step and the report of what just happened.
+    // Applying every file empties the batch; the account of the user's own
+    // files must not be swept away with the table it came from.
+    host.appendChild(readinessRows(status));
+    const repair = repairAction(status);
+    if (repair) host.appendChild(repair);
+    const batchHost = el('div', 'dj-batch');
+    batchHost.id = 'downloadsJanitorBatch';
+    host.appendChild(batchHost);
+    const confirmHost = el('div', 'dj-confirm-host');
+    confirmHost.id = 'downloadsJanitorConfirmHost';
+    host.appendChild(confirmHost);
+    host.appendChild(errorRegion());
+    renderBatch();
+  }
+
+  // repairAction offers "Choose the folder again" when readiness says the
+  // folder is the thing that broke — moved, renamed, or its permission
+  // withdrawn. Without it a workspace whose folder disappeared has a console
+  // that reports the problem and offers no way to fix it.
+  function repairAction(status) {
+    const checks = ((status && status.readiness) || {}).checks || [];
+    const repairable = checks.some(
+      check =>
+        check.status === 'failed' &&
+        (check.repair === 'relink_folder' ||
+          check.repair === 'choose_folder' ||
+          check.repair === 'grant_permission')
+    );
+    if (!repairable) return null;
+    const actions = el('div', 'dj-actions');
+    actions.appendChild(
+      button('Choose the folder again', 'dj-btn dj-btn-secondary', () => renderSetupPrompt(status))
+    );
+    actions.appendChild(button('Check again', 'dj-btn dj-btn-secondary', () => void refresh()));
+    return actions;
+  }
+
+  function readinessRows(status) {
+    const readiness = (status && status.readiness) || {};
     const rows = el('ul', 'dj-rows');
     (readiness.checks || []).forEach(check => {
       const li = el('li', 'dj-row dj-row-' + (check.status || 'pending'));
@@ -1477,164 +2199,471 @@
       li.appendChild(value);
       rows.appendChild(li);
     });
-    card.appendChild(rows);
+    return rows;
+  }
 
-    const actions = el('div', 'dj-actions');
-    const scan = button('Scan now', 'dj-btn dj-btn-primary', () => void scanNow());
-    scan.id = 'downloadsJanitorScan';
-    actions.appendChild(scan);
+  // ------------------------------------------------------------- the console
+  //
+  // One console, opened from every entry point (Map station, Details card,
+  // post-install offer, capability catalog, Action Center, deep link). There is
+  // deliberately no second copy and no hidden one: the surfaces below all call
+  // open(), so what the user sees can never depend on which door they used
+  // (FR-99, FR-100).
 
-    // Pausing stops the unattended work only. Saying so on the control itself
-    // saves the user wondering whether pausing loses their pending review.
-    const paused = Boolean(settings.paused);
-    const pauseControl = button(
-      paused ? 'Resume watching' : 'Pause watching',
-      'dj-btn dj-btn-secondary',
-      () => void setPaused(!paused)
-    );
-    pauseControl.id = 'downloadsJanitorPause';
-    pauseControl.setAttribute(
-      'title',
-      paused
-        ? 'Start watching this folder again.'
-        : 'Stop automatic scanning. Your settings, pending review, and history are kept, and you can still scan on demand.'
-    );
-    // Before setup finishes, resuming here would start the unattended work the
-    // wizard has not yet disclosed — the one step the user is supposed to read
-    // first. The control stays visible and says where the decision lives
-    // (FR-56); scanning on demand is unaffected, because the user is the one
-    // asking for each scan.
-    if (paused && setupAwaitingAutomationApproval()) {
-      pauseControl.textContent = 'Approve in setup';
-      pauseControl.setAttribute(
-        'title',
-        'Setup explains what folder watching and the daily scan do before turning them on.'
-      );
-      pauseControl.onclick = () => window.SetupWizard?.open?.('automation');
+  const CONSOLE_HOST_ID = 'fileJanitorConsole';
+  const CONSOLE_TITLE_ID = 'fileJanitorConsoleTitle';
+  const CONSOLE_TABS = ['review', 'history', 'settings'];
+  const CONSOLE_PANEL_PARAM = 'file-janitor';
+
+  let consoleOpen = false;
+  let consoleTab = 'review';
+  let consoleItem = '';
+  // The element focus returns to on close. Held rather than re-derived: by
+  // close time the Map may have repainted and the original button is the only
+  // thing that knows where the user was (FR-120).
+  let consoleTrigger = null;
+  let consoleOverlayId = '';
+  // The console's own close control, kept so focus can be placed on it without
+  // searching the tree for something focusable.
+  let consoleCloseButton = null;
+  // The tab last chosen in THIS workspace. Kept per workspace so opening a
+  // different one cannot restore a tab that belongs to another (FR-106).
+  const rememberedTab = new Map();
+  const subscribers = new Set();
+
+  function overlayCoordinator() {
+    if (typeof window === 'undefined') return null;
+    return window.workspaceOverlayCoordinator || null;
+  }
+
+  function consoleHost() {
+    if (typeof document === 'undefined') return null;
+    let host = document.getElementById(CONSOLE_HOST_ID);
+    if (host) return host;
+    if (!document.body) return null;
+    host = el('div', 'fj-console-host');
+    host.id = CONSOLE_HOST_ID;
+    host.hidden = true;
+    document.body.appendChild(host);
+    return host;
+  }
+
+  // validTab rejects anything not in the allowlist. An unknown tab falls back
+  // to Review rather than rendering nothing: a bad deep link must not be able
+  // to leave the user staring at an empty console (FR-117, FR-145).
+  function validTab(value) {
+    const tab = String(value || '').toLowerCase();
+    return CONSOLE_TABS.includes(tab) ? tab : '';
+  }
+
+  // chooseTab picks the tab a fresh open lands on. Work waiting for a decision
+  // wins over whatever was last looked at: the console exists to get files
+  // reviewed, and a restored Settings tab would hide the one thing that needs
+  // the user (FR-106).
+  function chooseTab(requested) {
+    const explicit = validTab(requested);
+    if (explicit) return explicit;
+    if (pendingCount() > 0) return 'review';
+    const remembered = validTab(rememberedTab.get(wsId()));
+    return remembered || 'review';
+  }
+
+  function pendingCount() {
+    return (lastBatch && lastBatch.summary && lastBatch.summary.proposed) || 0;
+  }
+
+  /**
+   * open — the one way any surface opens File Janitor.
+   *
+   * @param {object} [options]
+   * @param {string} [options.source] - which entry point asked (telemetry/debug)
+   * @param {string} [options.tab] - requested tab; validated, never trusted
+   * @param {string} [options.item] - candidate/action to focus; validated
+   * @param {*} [options.trigger] - element focus returns to on close
+   */
+  function open(options = {}) {
+    const id = wsId();
+    if (!id) return false;
+    // A workspace the capability is not installed in has no console to open.
+    // The check is against a status we have actually read: on a cold load
+    // lastStatus is still null, and refusing then would make the first press
+    // of a station do nothing (FR-93).
+    if (lastStatus && !lastStatus.applies) return false;
+    const host = consoleHost();
+    if (!host) return false;
+
+    consoleTrigger = options.trigger || consoleTrigger || activeElement();
+    consoleTab = chooseTab(options.tab);
+    consoleItem = String(options.item || '');
+    consoleOpen = true;
+
+    const coordinator = overlayCoordinator();
+    if (coordinator && typeof coordinator.open === 'function') {
+      consoleOverlayId = 'file-janitor-console';
+      coordinator.open({
+        id: consoleOverlayId,
+        kind: 'modal',
+        container: host,
+        trigger: consoleTrigger,
+        onClose: info => {
+          // The coordinator closes this for its own reasons too (Escape, a
+          // modal that must replace it). Mirror that into local state so the
+          // console never believes it is open while hidden.
+          if (info && info.reason === 'suspended') return;
+          if (consoleOpen) close({ viaCoordinator: true });
+        }
+      });
     }
-    actions.appendChild(pauseControl);
-    const failing = (readiness.checks || []).filter(c => c.status === 'failed');
-    if (
-      failing.some(
-        c =>
-          c.repair === 'relink_folder' ||
-          c.repair === 'choose_folder' ||
-          c.repair === 'grant_permission'
-      )
-    ) {
-      actions.appendChild(
-        button('Choose the folder again', 'dj-btn dj-btn-secondary', () => {
-          lastStatus = Object.assign({}, status, {
-            settings: Object.assign({}, settings, { root_path: '' })
-          });
-          renderSetupPrompt(status);
-        })
-      );
-    }
-    actions.appendChild(button('Check again', 'dj-btn dj-btn-secondary', () => void refresh()));
-    const settingsToggle = button('Settings', 'dj-btn dj-btn-secondary', () => {
-      settingsOpen = !settingsOpen;
-      settingsMessage = '';
-      revokeConfirmed = false;
-      settingsToggle.setAttribute('aria-expanded', settingsOpen ? 'true' : 'false');
-      renderSettings();
-    });
-    settingsToggle.id = 'downloadsJanitorSettingsToggle';
-    settingsToggle.setAttribute('aria-expanded', settingsOpen ? 'true' : 'false');
-    settingsToggle.setAttribute('aria-controls', 'downloadsJanitorSettingsHost');
-    actions.appendChild(settingsToggle);
-    card.appendChild(actions);
 
-    const settingsHost = el('div', 'dj-settings-host');
-    settingsHost.id = 'downloadsJanitorSettingsHost';
-    card.appendChild(settingsHost);
-
-    card.appendChild(privacyLine(status));
-
-    // The review batch mounts here and repaints on its own, so recording one
-    // decision does not rebuild (and re-focus) the whole card.
-    const batchHost = el('div', 'dj-batch');
-    batchHost.id = 'downloadsJanitorBatch';
-    card.appendChild(batchHost);
-
-    // The confirmation step and the per-item results render below the batch,
-    // deliberately *outside* it: applying every file empties the batch, and the
-    // report of what just happened to the user's files must not be swept away
-    // with the table it came from.
-    const confirmHost = el('div', 'dj-confirm-host');
-    confirmHost.id = 'downloadsJanitorConfirmHost';
-    card.appendChild(confirmHost);
-
-    const historyHost = el('div', 'dj-history-host');
-    historyHost.id = 'downloadsJanitorHistoryHost';
-    card.appendChild(historyHost);
-
-    card.appendChild(errorRegion());
-    host.appendChild(card);
-    renderBatch();
-    renderSettings();
+    renderConsole();
+    syncUrl();
+    // A console opened from the Map may be showing status read minutes ago.
+    void refresh();
+    notifySubscribers();
+    return true;
   }
 
-  // renderSetupPrompt re-opens the folder chooser for an already-configured
-  // workspace (relink/repair), reusing the same confirm path.
-  function renderSetupPrompt(status) {
-    const host = mount();
-    if (!host) return;
-    clear(host);
-    renderSetupCard(host, {
-      settings: status.settings || {},
-      suggestion: status.suggestion || {
-        label: 'Downloads folder',
-        suggested_path: (status.settings && status.settings.root_path) || '~/Downloads',
-        filing_root_name: status.settings && status.settings.filing_root_name,
-        daily_scan_local_time: status.settings && status.settings.daily_scan_local_time
-      }
-    });
-  }
-
-  function errorRegion() {
-    const region = el('p', 'dj-error');
-    region.id = 'downloadsJanitorError';
-    region.setAttribute('role', 'status');
-    region.setAttribute('aria-live', 'polite');
-    region.hidden = true;
-    return region;
-  }
-
-  function showError(message) {
-    const region = document.getElementById('downloadsJanitorError');
-    if (!region) return;
-    region.textContent = message || '';
-    region.hidden = !message;
-  }
-
-  function render(status) {
-    lastStatus = status;
-    // Marks and selections belong to the batch that was on screen. A repaint
-    // from a fresh status must not carry a removal mark into a different set
-    // of files.
-    trashMarked = new Set();
-    selected = new Set();
-    pendingPreview = null;
-    const host = mount();
-    if (!host) return;
-    if (!status || !status.applies) {
+  function close(options = {}) {
+    if (!consoleOpen) return false;
+    consoleOpen = false;
+    settingsOpen = false;
+    consoleCloseButton = null;
+    const host = document.getElementById(CONSOLE_HOST_ID);
+    if (host) {
       host.hidden = true;
       clear(host);
+    }
+    const coordinator = overlayCoordinator();
+    if (!options.viaCoordinator && coordinator && typeof coordinator.close === 'function') {
+      // The coordinator releases the background inert marking here, which has
+      // to happen BEFORE focus moves: an inert element cannot take focus, so
+      // restoring first would silently do nothing.
+      coordinator.close(consoleOverlayId);
+    }
+    // Restore focus ourselves either way. The coordinator holds the same
+    // element reference we were given, and it is just as likely to be stale —
+    // only this module knows how to find the control's live replacement.
+    restoreConsoleFocus();
+    consoleOverlayId = '';
+    if (!options.keepUrl) syncUrl();
+    notifySubscribers();
+    return true;
+  }
+
+  function activeElement() {
+    if (typeof document === 'undefined') return null;
+    return document.activeElement || null;
+  }
+
+  // restoreConsoleFocus puts the keyboard back on the control that opened the
+  // console.
+  //
+  // The held element is often GONE by now. Status is re-read while the console
+  // is open, and each repaint rebuilds the compact card — so the button the user
+  // pressed has been replaced by an identical one, and focusing the original
+  // does nothing at all: .focus() on a detached node is a silent no-op. The
+  // keyboard was left on <body>, behind a console that had just closed.
+  //
+  // So: use the held element only if it is still in the document, and otherwise
+  // find its live replacement. Both entry points are addressable — the card's
+  // button by id, the Map station by its registry key.
+  function restoreConsoleFocus() {
+    const trigger = consoleTrigger;
+    consoleTrigger = null;
+
+    if (trigger && typeof trigger.focus === 'function' && isInDocument(trigger)) {
+      trigger.focus();
       return;
     }
+
+    const replacement = liveTrigger(trigger);
+    if (replacement && typeof replacement.focus === 'function') replacement.focus();
+  }
+
+  function isInDocument(node) {
+    if (typeof document === 'undefined' || !node) return false;
+    if (typeof document.contains === 'function') return document.contains(node);
+    return Boolean(node.isConnected);
+  }
+
+  // liveTrigger finds the current instance of whatever opened the console.
+  // Preference order matches how the user got here: the same id if it had one,
+  // then the Map station, then the card.
+  function liveTrigger(trigger) {
+    if (typeof document === 'undefined') return null;
+    const id = trigger && trigger.id;
+    if (id) {
+      const byID = document.getElementById(id);
+      if (byID) return byID;
+    }
+    if (typeof document.querySelector === 'function') {
+      const station = document.querySelector('[data-cmd-hq-station="file-janitor"]');
+      if (station) return station;
+    }
+    return document.getElementById('fileJanitorCardOpen');
+  }
+
+  function renderConsole() {
+    const host = consoleHost();
+    if (!host) return;
+    const status = lastStatus;
     host.hidden = false;
     clear(host);
-    if (status.settings && status.settings.root_path && status.settings.directory_reference_id) {
-      renderConfiguredCard(host, status);
-    } else if (setupWizardOwnsSetup()) {
-      // The blueprint's Setup Wizard is the authoritative setup surface. The
-      // panel keeps a compact entry into it rather than a second folder
-      // chooser: two surfaces that both configure the same folder is exactly
-      // the duplication this migration removes.
-      renderSetupEntry(host);
+
+    const backdrop = el('div', 'fj-console-backdrop');
+    // Clicking the backdrop is a close, the same as the close button. It is a
+    // separate element rather than a handler on the host so the console body
+    // itself never swallows a click meant for a control inside it.
+    backdrop.addEventListener('click', () => close());
+    host.appendChild(backdrop);
+
+    const dialog = el('div', 'fj-console');
+    dialog.id = 'fileJanitorConsoleDialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    // Programmatically focusable so focus can land on the dialog itself, which
+    // is what puts a screen reader at its title rather than partway into its
+    // controls. -1 keeps it out of the Tab order.
+    dialog.setAttribute('tabindex', '-1');
+    // Labelled by the visible title, so the name a sighted user reads and the
+    // name a screen reader announces are the same string (FR-119).
+    dialog.setAttribute('aria-labelledby', CONSOLE_TITLE_ID);
+    dialog.appendChild(renderConsoleHeader(status));
+
+    const body = el('div', 'fj-console-body');
+    body.id = 'fileJanitorConsoleBody';
+    dialog.appendChild(body);
+
+    // Attach BEFORE filling the body.
+    //
+    // The tab renderers find their hosts with getElementById — renderSettings
+    // looks up downloadsJanitorSettingsHost, renderBatch looks up
+    // downloadsJanitorBatch. A node that has been appended to a detached
+    // subtree is not in the document yet, so those lookups returned null and
+    // each renderer bailed silently: Settings showed only its privacy line and
+    // Review showed only its readiness rows, on first paint, with no error
+    // anywhere. It corrected itself on the next repaint, which is why it looked
+    // intermittent.
+    host.appendChild(dialog);
+    renderConsoleBody(body, status);
+
+    paintError();
+    focusRequestedItem() || focusConsole();
+  }
+
+  // focusRequestedItem puts the user on the exact row a notification named.
+  //
+  // It reports whether it found one. A link naming a candidate that has since
+  // been filed, skipped, or scanned away finds nothing — and that is a normal
+  // outcome, not an error: the tab is still correct and still useful, so focus
+  // falls back to the console itself rather than reporting a failure about a
+  // file the user has already dealt with (FR-116).
+  function focusRequestedItem() {
+    if (!consoleItem) return false;
+    const row = document.getElementById('fileJanitorLinkedRow');
+    if (!row) return false;
+    if (typeof row.focus === 'function') row.focus();
+    if (typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'center' });
+    }
+    return true;
+  }
+
+  // focusConsole moves the keyboard into the dialog, onto the close control.
+  //
+  // Close is the one control present in every state — setup, all three tabs,
+  // and an error — so focus lands somewhere real without having to guess at
+  // the first focusable child. Landing there also means Escape is not the only
+  // way out for someone who did not see the console open (FR-119).
+  function focusConsole() {
+    // The dialog itself, looked up from the document rather than held from
+    // render time. A reference captured while the node was still detached
+    // focuses nothing — .focus() on an element outside the document is a no-op,
+    // silently — which left the keyboard back on the page behind an open modal.
+    const dialog = document.getElementById('fileJanitorConsoleDialog');
+    if (dialog && typeof dialog.focus === 'function') {
+      dialog.focus();
+      return;
+    }
+    if (consoleCloseButton && typeof consoleCloseButton.focus === 'function') {
+      consoleCloseButton.focus();
+    }
+  }
+
+  function renderConsoleHeader(status) {
+    const configured = isConfigured(status);
+    const settings = (status && status.settings) || {};
+    const header = el('header', 'fj-console-head');
+
+    const heading = el('div', 'fj-console-heading');
+    const title = el('h2', 'fj-console-title', 'File Janitor');
+    title.id = CONSOLE_TITLE_ID;
+    heading.appendChild(title);
+    // The managed folder is shown by its display name, cleaned the same way a
+    // filename is: a folder can be named as adversarially as a file.
+    const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
+    const activity = activityState(status);
+    const statusLine = el('p', 'fj-console-status');
+    statusLine.id = 'fileJanitorConsoleStatus';
+    statusLine.setAttribute('role', 'status');
+    statusLine.setAttribute('aria-live', 'polite');
+    const pending = pendingCount();
+    statusLine.textContent =
+      activity.label + (pending > 0 ? ' · ' + reviewCountLabel(pending) : '');
+    heading.appendChild(statusLine);
+    header.appendChild(heading);
+
+    const actions = el('div', 'fj-console-actions');
+    if (configured) {
+      const scan = button('Scan now', 'dj-btn dj-btn-primary', () => void scanNow());
+      scan.id = 'downloadsJanitorScan';
+      scan.disabled = scanning;
+      actions.appendChild(scan);
+      actions.appendChild(pauseControl(settings));
+    }
+    const closeButton = button('Close', 'dj-btn dj-btn-secondary', () => close());
+    closeButton.setAttribute('data-fj-console-close', '');
+    closeButton.setAttribute('aria-label', 'Close File Janitor');
+    consoleCloseButton = closeButton;
+    actions.appendChild(closeButton);
+    header.appendChild(actions);
+
+    // Before setup finishes there are no tabs: there is nothing to review, no
+    // history, and no settings to change. Showing three empty tabs would
+    // suggest otherwise (FR-103, FR-104).
+    if (configured) header.appendChild(renderConsoleTabs());
+    return header;
+  }
+
+  function reviewCountLabel(count) {
+    return count + (count === 1 ? ' file ready for review' : ' files ready for review');
+  }
+
+  function renderConsoleTabs() {
+    const list = el('div', 'fj-console-tabs');
+    list.setAttribute('role', 'tablist');
+    const labels = { review: 'Review', history: 'History', settings: 'Settings' };
+    CONSOLE_TABS.forEach(tab => {
+      const active = tab === consoleTab;
+      const control = button(labels[tab], 'fj-console-tab' + (active ? ' is-active' : ''), () =>
+        selectTab(tab)
+      );
+      control.setAttribute('role', 'tab');
+      control.setAttribute('aria-selected', active ? 'true' : 'false');
+      control.setAttribute('data-fj-tab', tab);
+      if (tab === 'review') {
+        const pending = pendingCount();
+        if (pending > 0) control.appendChild(el('span', 'fj-console-tab-count', String(pending)));
+      }
+      list.appendChild(control);
+    });
+    return list;
+  }
+
+  function selectTab(tab) {
+    const next = validTab(tab);
+    if (!next) return;
+    consoleTab = next;
+    rememberedTab.set(wsId(), next);
+    // Moving tabs abandons any half-finished approval: an approval issued
+    // against the Review tab must not survive out of the user's sight.
+    pendingPreview = null;
+    consoleItem = '';
+    renderConsole();
+    syncUrl();
+  }
+
+  // ------------------------------------------------------------- URL state
+  //
+  // The console is addressable so a notification can point at it, and so Back
+  // behaves the way a modal should. Only File Janitor's own parameters are ever
+  // touched: unrelated workspace URL state is preserved on both open and close
+  // (FR-117, FR-124).
+
+  function syncUrl(options = {}) {
+    if (typeof window === 'undefined' || !window.history || !window.location) return;
+    const url = new URL(window.location.href);
+    const before = url.search;
+    if (consoleOpen) {
+      url.searchParams.set('panel', CONSOLE_PANEL_PARAM);
+      if (consoleTab && consoleTab !== 'review') {
+        url.searchParams.set('tab', consoleTab);
+      } else {
+        url.searchParams.delete('tab');
+      }
+      if (consoleItem) {
+        url.searchParams.set('item', consoleItem);
+      } else {
+        url.searchParams.delete('item');
+      }
     } else {
-      renderSetupCard(host, status);
+      url.searchParams.delete('panel');
+      url.searchParams.delete('tab');
+      url.searchParams.delete('item');
+    }
+    if (url.search === before) return;
+    const method = options.replace ? 'replaceState' : 'pushState';
+    if (typeof window.history[method] !== 'function') return;
+    window.history[method]({ fileJanitor: consoleOpen }, '', url.toString());
+  }
+
+  // applyUrlState opens or closes the console to match the URL. It runs on load
+  // and on popstate, which is what makes Back close a deep-linked console
+  // without leaving the workspace (FR-124).
+  function applyUrlState(options = {}) {
+    if (typeof window === 'undefined' || !window.location) return;
+    const params = new URLSearchParams(window.location.search || '');
+    const wants = params.get('panel') === CONSOLE_PANEL_PARAM;
+    if (!wants) {
+      if (consoleOpen) close({ keepUrl: true });
+      return;
+    }
+    const tab = validTab(params.get('tab'));
+    const item = String(params.get('item') || '');
+    if (consoleOpen) {
+      // The URL is authoritative here, and an absent `tab` means Review — that
+      // is exactly how Review is encoded (it is the default, so it is omitted).
+      // Keeping the current tab instead made Back from Settings appear to do
+      // nothing: the entry it returned to said Review, and the console stayed
+      // on Settings (FR-124).
+      consoleTab = tab || 'review';
+      consoleItem = item;
+      renderConsole();
+      return;
+    }
+    open({ source: options.source || 'url', tab, item });
+    // The URL already says what it says; rewriting it here would push a
+    // duplicate entry and make one Back press appear to do nothing.
+    syncUrl({ replace: true });
+  }
+
+  // ------------------------------------------------------- subscriptions
+  //
+  // The Map station and the Details card show state this module owns. They
+  // subscribe rather than poll, so a scan finishing updates every surface at
+  // once instead of only whichever one happens to repaint next.
+
+  function subscribe(listener) {
+    if (typeof listener !== 'function') return () => {};
+    subscribers.add(listener);
+    return () => subscribers.delete(listener);
+  }
+
+  function notifySubscribers() {
+    const snapshot = stationState();
+    subscribers.forEach(listener => {
+      try {
+        listener(snapshot);
+      } catch (_) {
+        // A broken listener must not stop the others, and must never take the
+        // console down with it.
+      }
+    });
+    if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
+      document.dispatchEvent(
+        new CustomEvent('ori:file-janitor-changed', { detail: { state: snapshot } })
+      );
     }
   }
 
@@ -1740,6 +2769,7 @@
       if (result.selected && result.path) {
         const input = document.getElementById('downloadsJanitorPath');
         if (input) input.value = result.path;
+        if (typeof syncSetupConfirmEnabled === 'function') syncSetupConfirmEnabled();
       }
     } catch (error) {
       showError(error.message || 'Could not open the folder picker.');
@@ -1759,14 +2789,11 @@
     const confirm = document.getElementById('downloadsJanitorConfirm');
     if (confirm) confirm.disabled = true;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/setup',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: trimmed })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: trimmed })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -1796,10 +2823,10 @@
       control.textContent = 'Scanning…';
     }
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/scan',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      );
+      const response = await fetch(apiBase(id) + '/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -1843,14 +2870,11 @@
     const control = document.getElementById('downloadsJanitorPause');
     if (control) control.disabled = true;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/pause',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paused })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused })
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = body.error || body;
@@ -1877,14 +2901,11 @@
     if (!id || !decisions || decisions.length === 0) return;
     showError('');
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/decisions',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decisions })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/decisions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decisions })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -1902,9 +2923,7 @@
     const id = wsId();
     if (!id || categories.length) return;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/categories'
-      );
+      const response = await fetch(apiBase(id) + '/categories');
       if (!response.ok) return;
       const body = await response.json();
       categories = Array.isArray(body.categories) ? body.categories : [];
@@ -1926,18 +2945,41 @@
     // exactly the session in which the first batch gets reviewed. Loading it
     // here ties it to the thing that needs it. It is a no-op once cached.
     await loadCategories();
+    const previousBatchID = lastBatch && lastBatch.id;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/batches/latest'
-      );
+      const query =
+        '?limit=' +
+        PAGE_SIZE +
+        '&offset=' +
+        pageOffset +
+        (filter ? '&filter=' + encodeURIComponent(filter) : '');
+      const response = await fetch(apiBase(id) + '/batches/latest' + query);
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
       lastBatch = body.batch || null;
       lastCandidates = Array.isArray(body.candidates) ? body.candidates : [];
+      batchTotal = Number(body.total) || 0;
+      filteredTotal = Number(body.filtered_total) || 0;
+      filterCounts = body.counts || {};
+      // An offset the server clamped past the end leaves an empty page with
+      // rows still behind it. Snap back so the user is never stranded on
+      // nothing with no way to tell why.
+      if (lastCandidates.length === 0 && filteredTotal > 0 && pageOffset >= filteredTotal) {
+        pageOffset = Math.max(0, (Math.ceil(filteredTotal / PAGE_SIZE) - 1) * PAGE_SIZE);
+      }
     } catch (_) {
       lastBatch = null;
       lastCandidates = [];
+      batchTotal = 0;
+      filteredTotal = 0;
+      filterCounts = {};
     }
+    // A different batch invalidates every decision made against the old one.
+    if ((lastBatch && lastBatch.id) !== previousBatchID) {
+      selected = new Set();
+      trashMarked = new Set();
+    }
+    dropIneligibleSelections();
     // A confirmation already on screen must survive a batch reload that did not
     // change the batch.
     //
@@ -1956,11 +2998,16 @@
       pendingPreview.preview &&
       pendingPreview.preview.batch_id === lastBatch.id;
     if (!approvalStillApplies) {
-      selected = new Set();
-      trashMarked = new Set();
       pendingPreview = null;
-      renderBatch();
     }
+    // This used to clear `selected` and `trashMarked` here too. That was
+    // correct when a reload only ever meant "a new scan happened", but a reload
+    // is now also how the user turns a page — so it silently discarded the
+    // decisions of anyone reviewing more files than fit on one screen, which is
+    // exactly the case paging exists to serve. The narrower rules above own it:
+    // a changed batch clears everything, and a candidate that is no longer
+    // eligible is dropped individually.
+    renderBatch();
     refreshStats();
   }
 
@@ -1968,9 +3015,7 @@
     const id = wsId();
     if (!id) return;
     try {
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor'
-      );
+      const response = await fetch(apiBase(id));
       if (!response.ok) throw new Error('status failed');
       const body = await response.json();
       const status = body.status;
@@ -1991,8 +3036,13 @@
 
   function init(id) {
     workspaceId = id || wsId();
-    if (!mount()) return;
-    void refresh();
+    if (!workspaceId) return;
+    void refresh().then(() => {
+      // A deep link is honoured only after the first status is in: opening
+      // beforehand would show a console that does not yet know whether the
+      // workspace even has a folder (FR-117).
+      applyUrlState({ source: 'deep-link' });
+    });
   }
 
   if (typeof document !== 'undefined') {
@@ -2003,37 +3053,81 @@
     }
   }
 
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    // Back over a deep-linked console closes it and stays in the workspace,
+    // rather than navigating away from a page the user never left (FR-124).
+    window.addEventListener('popstate', () => applyUrlState({ source: 'popstate' }));
+    window.addEventListener('keydown', event => {
+      if (!consoleOpen || event.key !== 'Escape') return;
+      // A destructive confirmation owns Escape while it is on screen: the
+      // answer to "are you sure" must be given, not dismissed by closing the
+      // surface that asked (FR-120).
+      if (pendingPreview || revokeConfirmed) return;
+      event.preventDefault();
+      close();
+    });
+  }
+
   // stationState answers, for the Map view, "does this workspace need me?".
   // The Janitor's setup card lives in the page body; a user working on the map
   // surface has no way to know a folder is still needed, and a workspace
   // awaiting setup looks exactly like a finished one. This lets the map show a
   // station without knowing anything about the Janitor's internals.
+  // stationState answers, for the Map and the compact card, "does this
+  // workspace need me?".
+  //
+  // The order is fixed and is the order of urgency (FR-95):
+  //
+  //   Needs attention → Setup needed → <N> ready for review → Paused → Watching
+  //
+  // It is a priority rather than a lookup because these overlap constantly: a
+  // paused janitor can still have twelve files waiting, and a broken one can be
+  // both. Reporting the lower state in either case would hide the reason the
+  // user needs to come back.
   function stationState() {
     if (!lastStatus || !lastStatus.applies) return { applies: false };
     const readiness = lastStatus.readiness || {};
     const settings = lastStatus.settings || {};
-    if (readiness.state === 'setup_required') {
-      return {
-        applies: true,
-        value: 'Choose a folder',
-        description: 'waiting for you to choose a folder to tidy',
-        tone: 'attention'
-      };
-    }
+
     if (readiness.state === 'needs_attention') {
       return {
         applies: true,
         value: 'Needs attention',
-        description: firstProblem(readiness) || 'the Janitor needs attention',
+        description: firstProblem(readiness) || 'File Janitor needs attention',
         tone: 'degraded'
       };
     }
-    const folder = settings.root_path || '';
+    if (readiness.state === 'setup_required' || !isConfigured(lastStatus)) {
+      return {
+        applies: true,
+        value: 'Setup needed',
+        description: 'waiting for you to choose a folder to tidy',
+        tone: 'attention'
+      };
+    }
+    const pending = pendingCount();
+    if (pending > 0) {
+      return {
+        applies: true,
+        value: reviewCountLabel(pending),
+        description: 'files are waiting for your decision',
+        tone: 'attention'
+      };
+    }
+    const folder = settings.root_path ? safeName(settings.root_path) : '';
+    if (settings.paused) {
+      return {
+        applies: true,
+        value: 'Paused',
+        description: folder ? 'not watching ' + folder : 'automatic scanning paused',
+        tone: 'idle'
+      };
+    }
     return {
       applies: true,
-      value: settings.paused ? 'Paused' : 'Watching',
+      value: 'Watching',
       description: folder ? 'tidying ' + folder : 'ready',
-      tone: settings.paused ? 'idle' : 'clear'
+      tone: 'clear'
     };
   }
 
@@ -2043,20 +3137,15 @@
     return bad ? bad.message : '';
   }
 
-  // focusSetup brings the setup card into view and puts the cursor in the
-  // folder field, so a station press lands the user on the thing to do rather
-  // than merely near it.
-  function focusSetup() {
-    const mount = document.getElementById('downloadsJanitorMount');
-    if (mount && typeof mount.scrollIntoView === 'function') {
-      mount.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-    const input = document.getElementById('downloadsJanitorPath');
-    if (input) {
-      input.focus?.();
-      return true;
-    }
-    return Boolean(mount);
+  // focusSetup opens the console on its setup face.
+  //
+  // It used to scroll the page to an inline card and focus the folder field.
+  // That worked only in Details mode: pressing the station from the Map
+  // scrolled a surface the user could not see, so the press appeared to do
+  // nothing at all. Opening in place over the Map is the whole point of the
+  // console (FR-97, FR-98).
+  function focusSetup(trigger) {
+    return open({ source: 'setup', trigger });
   }
 
   // ---------------------------------------------------- setup wizard steps
@@ -2068,8 +3157,23 @@
   // ownsStep keeps these renderers scoped to this blueprint's steps: the
   // registry is keyed by step kind, and another blueprint's directory step is
   // not ours to draw.
+  // Both adapter ids, because both are live.
+  //
+  // The Downloads preset's manifest names `downloads_janitor` and every
+  // workspace already mid-setup persisted that in its wizard snapshot, so it
+  // can never be renamed. The generic blueprint names the canonical
+  // `file_janitor`. The server resolves either through the adapter alias, but
+  // the STEP carries whichever id its manifest declared — so a renderer that
+  // recognized only one silently drew nothing for the other.
+  //
+  // That is not a cosmetic failure. This step's renderer IS the folder picker:
+  // without it the wizard falls back to its own generic "Approve and continue",
+  // and a user creating a workspace from the generic blueprint has no way to
+  // choose a folder at all.
+  const SETUP_ADAPTER_IDS = ['file_janitor', 'downloads_janitor'];
+
   function ownsStep(step) {
-    return String(step?.adapter || '') === 'downloads_janitor';
+    return SETUP_ADAPTER_IDS.includes(String(step?.adapter || ''));
   }
 
   // chooseFolder runs the native picker and confirms the result.
@@ -2097,14 +3201,11 @@
         ctx.setBusy(false, '');
         return;
       }
-      const response = await fetch(
-        '/api/workspaces/' + encodeURIComponent(id) + '/downloads-janitor/setup',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: chosen.path, paused: true })
-        }
-      );
+      const response = await fetch(apiBase(id) + '/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: chosen.path, paused: true })
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const apiError = result.error || result;
@@ -2195,13 +3296,47 @@
     });
   }
 
-  window.DownloadsJanitorPanel = {
+  // The capability catalog's post-install "Set up File Janitor" action opens
+  // this console. Registering the handler here rather than in the catalog keeps
+  // the catalog capability-agnostic, and means the button is never a dead end.
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    const registerOpen = () => {
+      const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+      if (!catalog || typeof catalog.registerOpenHandler !== 'function') return;
+      catalog.registerOpenHandler('file-janitor', trigger =>
+        open({ source: 'capability-catalog', trigger })
+      );
+    };
+    document.addEventListener('DOMContentLoaded', registerOpen);
+    registerOpen();
+  }
+
+  // Action Center findings reach this console the same way Backlog items reach
+  // theirs: the Action Center is a separate page, and it navigates to
+  // /workspaces/{id}?panel=… . So the deep-link contract above IS the routing,
+  // and applyUrlState validates the tab and the item on arrival — a
+  // notification is data, and a stale one naming a candidate that has since
+  // been filed must land the user on a working Review tab rather than on an
+  // empty focus target (FR-90, FR-116, FR-117).
+  //
+  // In-page surfaces call open() directly; there is no event indirection,
+  // because there is no in-page Action Center to dispatch one.
+
+  const controller = {
     init,
     refresh,
     render,
     renderBatch,
     stationState,
+    subscribe,
+    open,
+    close,
     focusSetup,
+    isOpen: () => consoleOpen,
+    activeTab: () => (consoleOpen ? consoleTab : ''),
+    focusedItem: () => (consoleOpen ? consoleItem : ''),
+    _applyUrlState: applyUrlState,
+    _selectTab: selectTab,
     _confirmSetup: confirmSetup,
     _setBatch: (batch, candidates, cats) => {
       lastBatch = batch;
@@ -2213,6 +3348,7 @@
       filter = '';
     },
     _selected: () => Array.from(selected),
+    _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
     // Clears the remembered workspace so a test can exercise a cold load, the
     // state a real page visit starts from.
@@ -2232,6 +3368,36 @@
       historyLoaded = true;
       renderHistory();
     },
+    // Returns the module to the state a freshly-loaded page starts in. The
+    // console is a singleton with memory — the tab it last showed per
+    // workspace — so a test that did not reset it would inherit the previous
+    // test's tab and assert against a surface it never opened.
+    _resetForTest: () => {
+      consoleOpen = false;
+      consoleTab = 'review';
+      consoleItem = '';
+      consoleTrigger = null;
+      consoleOverlayId = '';
+      consoleCloseButton = null;
+      rememberedTab.clear();
+      subscribers.clear();
+      // The remembered workspace id too: a test that set one explicitly would
+      // otherwise leak it into every later test, which reads as a mysterious
+      // request to a workspace that test never mentioned.
+      workspaceId = '';
+      removalSummary = null;
+      removalConfirming = false;
+      removalCompanionChecked = false;
+      pageOffset = 0;
+      filter = '';
+      historyActions = [];
+      historyLoaded = false;
+      settingsOpen = false;
+      scanning = false;
+      lastStatus = null;
+      lastBatch = null;
+      lastCandidates = [];
+    },
     _select: id => {
       selected.add(id);
       updateSelectionSummary();
@@ -2240,4 +3406,12 @@
     // without standing up the whole dialog.
     _setupSteps: { directory: directoryStepRenderer, automation: automationStepRenderer }
   };
+
+  window.FileJanitorConsole = controller;
+
+  // DownloadsJanitorPanel is a compatibility alias for the same controller, not
+  // a second one. It exists because setup callers still reach for the old name;
+  // pointing it at the identical object means there is no way for the two to
+  // diverge, and retiring it is a deletion rather than a migration.
+  window.DownloadsJanitorPanel = controller;
 })();
