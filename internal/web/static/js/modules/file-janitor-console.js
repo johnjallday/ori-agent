@@ -2335,11 +2335,15 @@
     }
     const coordinator = overlayCoordinator();
     if (!options.viaCoordinator && coordinator && typeof coordinator.close === 'function') {
-      // The coordinator restores focus to the trigger it was given.
+      // The coordinator releases the background inert marking here, which has
+      // to happen BEFORE focus moves: an inert element cannot take focus, so
+      // restoring first would silently do nothing.
       coordinator.close(consoleOverlayId);
-    } else {
-      restoreConsoleFocus();
     }
+    // Restore focus ourselves either way. The coordinator holds the same
+    // element reference we were given, and it is just as likely to be stale —
+    // only this module knows how to find the control's live replacement.
+    restoreConsoleFocus();
     consoleOverlayId = '';
     if (!options.keepUrl) syncUrl();
     notifySubscribers();
@@ -2351,10 +2355,52 @@
     return document.activeElement || null;
   }
 
+  // restoreConsoleFocus puts the keyboard back on the control that opened the
+  // console.
+  //
+  // The held element is often GONE by now. Status is re-read while the console
+  // is open, and each repaint rebuilds the compact card — so the button the user
+  // pressed has been replaced by an identical one, and focusing the original
+  // does nothing at all: .focus() on a detached node is a silent no-op. The
+  // keyboard was left on <body>, behind a console that had just closed.
+  //
+  // So: use the held element only if it is still in the document, and otherwise
+  // find its live replacement. Both entry points are addressable — the card's
+  // button by id, the Map station by its registry key.
   function restoreConsoleFocus() {
     const trigger = consoleTrigger;
     consoleTrigger = null;
-    if (trigger && typeof trigger.focus === 'function') trigger.focus();
+
+    if (trigger && typeof trigger.focus === 'function' && isInDocument(trigger)) {
+      trigger.focus();
+      return;
+    }
+
+    const replacement = liveTrigger(trigger);
+    if (replacement && typeof replacement.focus === 'function') replacement.focus();
+  }
+
+  function isInDocument(node) {
+    if (typeof document === 'undefined' || !node) return false;
+    if (typeof document.contains === 'function') return document.contains(node);
+    return Boolean(node.isConnected);
+  }
+
+  // liveTrigger finds the current instance of whatever opened the console.
+  // Preference order matches how the user got here: the same id if it had one,
+  // then the Map station, then the card.
+  function liveTrigger(trigger) {
+    if (typeof document === 'undefined') return null;
+    const id = trigger && trigger.id;
+    if (id) {
+      const byID = document.getElementById(id);
+      if (byID) return byID;
+    }
+    if (typeof document.querySelector === 'function') {
+      const station = document.querySelector('[data-cmd-hq-station="file-janitor"]');
+      if (station) return station;
+    }
+    return document.getElementById('fileJanitorCardOpen');
   }
 
   function renderConsole() {
