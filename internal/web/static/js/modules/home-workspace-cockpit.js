@@ -635,6 +635,35 @@ export const RAIL_TODAY = 'today';
 export const RAIL_WORKSPACE = 'workspace';
 export const RAIL_GROUP = 'group';
 export const RAIL_SUMMARY = 'summary';
+export const RAIL_ASK = 'ask-ori';
+
+/**
+ * How the rail should describe Ask Ori's current target workspace (FR97).
+ *
+ * The wording distinguishes a workspace the USER selected, one Ori has merely
+ * RECOMMENDED, and one work was actually routed to. A recommendation must never
+ * read as routed work before the confirmation policy allows it, so the three
+ * cases get three different verbs.
+ */
+export function askTargetDescription({ selected, recommended, routed } = {}) {
+  const name = value => String((value && value.name) || '').trim();
+  if (routed && name(routed)) {
+    return { state: 'routed', text: `Working in ${name(routed)}.` };
+  }
+  if (recommended && name(recommended)) {
+    return {
+      state: 'recommended',
+      text: `Suggested workspace: ${name(recommended)}. Nothing has been sent yet.`
+    };
+  }
+  if (selected && name(selected)) {
+    return {
+      state: 'selected',
+      text: `${name(selected)} is selected and offered as context.`
+    };
+  }
+  return { state: 'none', text: '' };
+}
 // The reserved Personal HQ site — a landmark for an HQ that has not been built
 // (or needs repair), not a workspace. Mirrors workspace-map.js's own id so the
 // two agree on what "the HQ site is selected" means.
@@ -1132,7 +1161,9 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     captureDetails: document.getElementById('cockpitCaptureDetails'),
     captureSave: document.getElementById('cockpitCaptureSave'),
     captureCancel: document.getElementById('cockpitCaptureCancel'),
-    captureStatus: document.getElementById('cockpitCaptureStatus')
+    captureStatus: document.getElementById('cockpitCaptureStatus'),
+    askPanel: document.getElementById('homeAssistantThinkingModal'),
+    askTarget: document.getElementById('cockpitAskTarget')
   };
 
   // ---- shared state (the single source of truth for every cockpit view) ----
@@ -1420,6 +1451,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     // (FR57, FR58). The map is updated in place above; Tree re-renders so the
     // active row's highlight and aria-selected follow.
     if (state.view === VIEW_TREE) mountTreeView();
+    publishRouteContext();
     subscribeRealtimeTo(next);
     if (changed && next) fireTTFA(state.view === VIEW_TREE ? 'tree-select' : 'map-select');
   }
@@ -1603,6 +1635,84 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
         toTree ? 'Switch to Tree view' : 'Switch to Map view'
       );
     }
+  }
+
+  // ---- Ask Ori rail activity (FR92-FR100) ----
+  //
+  // dashboard.js owns the routing, planning, confirmation, and recovery logic
+  // and drives the panel's `show` class directly. The cockpit only reacts to
+  // that class: it hides the competing rail panels while activity is showing,
+  // restores the prior context afterwards, and keeps the target-workspace line
+  // honest. No routing decision is made here.
+
+  let askWasActive = false;
+
+  function isAskActive() {
+    return !!(els.askPanel && els.askPanel.classList.contains('show'));
+  }
+
+  function syncAskActivity() {
+    const active = isAskActive();
+    if (active === askWasActive) {
+      if (active) renderAskTarget();
+      return;
+    }
+    askWasActive = active;
+    if (active) {
+      // Remember what to come back to (FR100), then yield the rail.
+      if (state.railState !== RAIL_ASK) {
+        state.priorContext =
+          state.selectedId && state.railState !== RAIL_TODAY
+            ? { selectedId: state.selectedId, railState: state.railState }
+            : null;
+      }
+      state.railState = RAIL_ASK;
+      if (els.railToday) els.railToday.hidden = true;
+      if (els.railContext) els.railContext.hidden = true;
+      renderAskTarget();
+      announce('Ask Ori activity.');
+      return;
+    }
+    restoreFromAsk();
+  }
+
+  /** Leaving Ask Ori returns to the previous workspace/group context or Today. */
+  function restoreFromAsk() {
+    const prior = state.priorContext;
+    if (prior && findWorkspace(state.flattened, prior.selectedId)) {
+      state.selectedId = prior.selectedId;
+      state.railState = prior.railState;
+    } else {
+      state.railState = RAIL_TODAY;
+    }
+    renderRail({ announceChange: true });
+  }
+
+  function renderAskTarget() {
+    if (!els.askTarget) return;
+    const selected = findWorkspace(state.flattened, state.selectedId);
+    // Only the selected workspace is known here; a recommendation or a routed
+    // target is dashboard.js's to report through its own routing summary, which
+    // renders directly beneath this line.
+    const description = askTargetDescription({ selected });
+    els.askTarget.textContent = description.text;
+    els.askTarget.dataset.state = description.state;
+  }
+
+  /**
+   * Offer the selected workspace as route CONTEXT.
+   *
+   * dashboard.js reads window.oriHomeRouteContext when it builds a routing
+   * request. This only supplies context — it never overrides an explicit
+   * destination, a routing result, or a confirmation step (FR98).
+   */
+  function publishRouteContext() {
+    const selected = findWorkspace(state.flattened, state.selectedId);
+    window.oriHomeRouteContext = {
+      workspace_id: selected && !isGroupWorkspace(selected) ? selected.id : '',
+      workspace_name: selected ? selected.name : '',
+      origin: 'ask_ori'
+    };
   }
 
   // ---- Today: immediate work (FR75, FR87) ----
@@ -1958,6 +2068,23 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
   window.addEventListener('ori:personal-hq-changed', () => void refreshHQStatus());
 
   wireTodaySelection();
+
+  // dashboard.js toggles the panel's `show` class from many code paths
+  // (submit, reopen, timeout, close). Observing the class is the one seam that
+  // catches all of them without reaching into its internals.
+  if (els.askPanel && typeof MutationObserver === 'function') {
+    new MutationObserver(syncAskActivity).observe(els.askPanel, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+    const back = els.askPanel.querySelector('[data-cockpit-ask-back]');
+    if (back) {
+      back.addEventListener('click', () => {
+        els.askPanel.classList.remove('show');
+        syncAskActivity();
+      });
+    }
+  }
 
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;

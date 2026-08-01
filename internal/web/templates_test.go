@@ -403,9 +403,17 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// Mutually exclusive Map/Tree control (FR17, FR24).
 		`data-cockpit-view="map"`,
 		`data-cockpit-view="tree"`,
-		// Map-only signal filters and the rail footer (FR31, FR88).
+		// Map-only signal filters and the rail footer (FR31, FR88, FR101).
 		`id="cockpitSignalFilters"`,
 		`id="cockpitSummaryBtn"`,
+		`id="cockpitCaptureBtn"`,
+		`id="cockpitRailViewBtn"`,
+		`id="cockpitCapturePanel"`,
+		// Ask Ori activity lives in the rail as an embedded panel (FR96).
+		`data-home-assistant-surface="panel"`,
+		`id="homeAssistantThinkingModal"`,
+		`id="homeAssistantRoutingSummary"`,
+		`id="homeAssistantConversation"`,
 		// Ask Ori stays above the cockpit in both views (FR14, FR92).
 		`id="homeAssistantCard"`,
 		`id="homeAssistantInput"`,
@@ -442,6 +450,29 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Home page still contains retired element %q", gone)
 		}
+	}
+
+	// FR96: Ask Ori activity must NOT be a blocking modal over the cockpit.
+	// The panel keeps the historical element id (dashboard.js addresses it by
+	// that id), so the assertion is about the modal chrome, not the id.
+	askAt := strings.Index(html, `id="homeAssistantThinkingModal"`)
+	if askAt < 0 {
+		t.Fatalf("Home page no longer renders the Ask Ori activity surface")
+	}
+	// Look at the element's own tag, not the whole page.
+	tagStart := strings.LastIndex(html[:askAt], "<")
+	tagEnd := strings.Index(html[askAt:], ">") + askAt
+	askTag := html[tagStart:tagEnd]
+	for _, forbidden := range []string{`class="modal`, `modal fade`, `data-bs-backdrop`} {
+		if strings.Contains(askTag, forbidden) {
+			t.Errorf("Ask Ori activity is still a blocking modal: tag contains %q\ntag: %s", forbidden, askTag)
+		}
+	}
+	if !strings.Contains(askTag, `data-home-assistant-surface="panel"`) {
+		t.Errorf("Ask Ori activity must declare the embedded panel surface; tag: %s", askTag)
+	}
+	if strings.Contains(html, `home-thinking-modal-content`) {
+		t.Error("Home page still renders the thinking-modal dialog chrome")
 	}
 }
 

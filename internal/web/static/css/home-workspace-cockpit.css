@@ -1123,3 +1123,66 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* --------------------------------------------------------------------------
+ * Ask Ori activity in the rail (FR96)
+ *
+ * dashboard.js drives `.show` on this panel through its existing embedded-panel
+ * surface. Hidden unless shown, so it never covers the cockpit and Map/Tree
+ * stay interactive throughout.
+ * ----------------------------------------------------------------------- */
+
+.cockpit-ask-activity {
+  display: none;
+}
+
+.cockpit-ask-activity.show {
+  display: flex;
+}
+
+/* Idle with no activity to report: stay out of the way entirely rather than
+   showing an empty panel over Today. */
+.cockpit-ask-activity.is-idle:not(.show) {
+  display: none;
+}
+
+.cockpit-ask-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cockpit-ask-status {
+  display: flex;
+  align-items: center;
+  color: var(--hc-ink-dim);
+  font-size: 12px;
+}
+
+.cockpit-ask-target {
+  margin: 0;
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+.cockpit-ask-target:empty {
+  display: none;
+}
+
+/* A recommendation is styled as provisional, so it cannot be misread as work
+   that has already been routed (FR97). */
+.cockpit-ask-target[data-state="recommended"] {
+  color: var(--hc-amber);
+  font-style: italic;
+}
+
+.cockpit-ask-target[data-state="routed"] {
+  color: var(--hc-signal);
+}
+
+.cockpit-ask-activity .home-assistant-conversation {
+  max-height: 40vh;
+  overflow-y: auto;
+}

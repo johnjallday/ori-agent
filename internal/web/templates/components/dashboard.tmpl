@@ -229,6 +229,56 @@
            progression modules own (FR72). -->
       <div id="cockpitRailContext" class="cockpit-rail-body" data-rail-state="context" hidden></div>
 
+      <!--
+        Ask Ori activity, in the rail rather than a blocking modal (FR96).
+
+        dashboard.js already supports an embedded activity surface — the same
+        one the workspace hub's support chat uses — selected by
+        data-home-assistant-surface="panel". Keeping that contract and these
+        exact element ids means all existing routing, planning, confirmation,
+        automation-mode, timeout, error, and Task Activity reopen behavior is
+        preserved unchanged (FR95, FR99); only the presentation moves. In panel
+        mode dashboard.js shows/hides via a class instead of bootstrap.Modal,
+        so there is no backdrop and Map/Tree stay interactive (FR6, FR92).
+      -->
+      <section id="homeAssistantThinkingModal" class="cockpit-rail-body cockpit-ask-activity is-idle"
+               data-home-assistant-surface="panel" data-home-assistant-panel-scope="home"
+               data-rail-state="ask-ori"
+               aria-labelledby="homeAssistantThinkingModalLabel">
+        <header class="cockpit-ask-head">
+          <button type="button" class="cockpit-rail-back" data-cockpit-ask-back>
+            <span aria-hidden="true">&#8592;</span> Back</button>
+          <h3 id="homeAssistantThinkingModalLabel" class="cockpit-rail-title">Ask Ori</h3>
+          <div id="homeAssistantThinkingStatus" class="cockpit-ask-status" role="status" aria-live="polite">
+            <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+            <span>Analyzing your request…</span>
+          </div>
+          <p id="cockpitAskTarget" class="cockpit-ask-target" role="status" aria-live="polite"></p>
+        </header>
+        <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+        <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+        <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
+        <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+        <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
+          <div class="home-assistant-conversation-section-header">
+            <div>
+              <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
+              <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+                Progress updates and manager notes will appear here after you send a task.
+              </div>
+            </div>
+            <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+              Hide Conversation
+            </button>
+          </div>
+          <div id="homeAssistantConversation" class="home-assistant-conversation p-3">
+            <div class="home-assistant-thinking-placeholder">
+              Progress updates will appear here after you send a task.
+            </div>
+          </div>
+        </section>
+      </section>
+
       <!-- Rail footer: Quick Capture, Summary, and a Map/Tree shortcut kept in
            sync with the primary toggle. Reachable from EVERY rail state
            (FR88, FR101). A normal flex row after the scrolling body, so its
@@ -311,44 +361,3 @@
   </div>
 </div>
 
-<div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
-     aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content home-thinking-modal-content">
-      <div class="modal-header home-thinking-modal-header">
-        <div>
-          <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is thinking</h5>
-          <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
-            <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-            <span>Analyzing your request…</span>
-          </div>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-        <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
-        <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
-        <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
-        <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
-          <div class="home-assistant-conversation-section-header">
-            <div>
-              <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
-              <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
-                Progress updates and manager notes will appear here after you send a task.
-              </div>
-            </div>
-            <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
-              Hide Conversation
-            </button>
-          </div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a task.
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
-  </div>
-</div>

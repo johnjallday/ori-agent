@@ -54,7 +54,8 @@ import {
   renderScheduledSectionHTML,
   validateCapture,
   captureRequestBody,
-  captureAvailability
+  captureAvailability,
+  askTargetDescription
 } from './home-workspace-cockpit.js';
 
 // ---------------------------------------------------------------------------
@@ -1055,4 +1056,55 @@ test('captureAvailability explains the requirement rather than failing silently'
   const availability = captureAvailability(null);
   assert.match(availability.message, /Personal HQ/);
   assert.notEqual(availability.message, '');
+});
+
+// ===========================================================================
+// Group 5 — Ask Ori in the context rail
+// ===========================================================================
+
+test('askTargetDescription never presents a recommendation as routed work (FR97)', () => {
+  const recommended = askTargetDescription({ recommended: { name: 'Alpha' } });
+  assert.equal(recommended.state, 'recommended');
+  assert.match(recommended.text, /Suggested/);
+  // The crux: a suggestion must say nothing has been sent.
+  assert.match(recommended.text, /Nothing has been sent yet/);
+  assert.doesNotMatch(recommended.text, /Working in/);
+});
+
+test('askTargetDescription reports routed work distinctly from a suggestion', () => {
+  const routed = askTargetDescription({ routed: { name: 'Alpha' } });
+  assert.equal(routed.state, 'routed');
+  assert.match(routed.text, /Working in Alpha/);
+  assert.doesNotMatch(routed.text, /Suggested/);
+});
+
+test('askTargetDescription describes a selected workspace as context, not a destination', () => {
+  const selected = askTargetDescription({ selected: { name: 'Alpha' } });
+  assert.equal(selected.state, 'selected');
+  assert.match(selected.text, /offered as context/);
+  assert.doesNotMatch(selected.text, /Working in/);
+});
+
+test('askTargetDescription prefers routed over recommended over selected', () => {
+  const all = askTargetDescription({
+    selected: { name: 'Sel' },
+    recommended: { name: 'Rec' },
+    routed: { name: 'Routed' }
+  });
+  assert.equal(all.state, 'routed');
+  assert.match(all.text, /Routed/);
+
+  const noRoute = askTargetDescription({
+    selected: { name: 'Sel' },
+    recommended: { name: 'Rec' }
+  });
+  assert.equal(noRoute.state, 'recommended');
+  assert.match(noRoute.text, /Rec/);
+});
+
+test('askTargetDescription says nothing when there is no target at all', () => {
+  assert.deepEqual(askTargetDescription({}), { state: 'none', text: '' });
+  assert.deepEqual(askTargetDescription(), { state: 'none', text: '' });
+  // A nameless workspace is not a target worth announcing.
+  assert.equal(askTargetDescription({ selected: { name: '  ' } }).state, 'none');
 });
