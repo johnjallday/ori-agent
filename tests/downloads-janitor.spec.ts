@@ -5,7 +5,8 @@ import {
   writeFileSync,
   existsSync,
   utimesSync,
-  readdirSync
+  readdirSync,
+  realpathSync
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,7 +78,12 @@ function fixtureFolder(label: string, files: Record<string, string>): string {
     writeFileSync(path, contents);
     utimesSync(path, OLD, OLD);
   }
-  return root;
+  // The CANONICAL path, because setup resolves symlinks when it records the
+  // grant (FR-47). On macOS the temp dir lives under /var, which is a symlink
+  // to /private/var — so the unresolved path would never match what the server
+  // stored or what the UI shows, and asserting on it would be asserting that
+  // canonicalization is broken.
+  return realpathSync(root);
 }
 
 /**
@@ -152,7 +158,32 @@ async function completeSetup(page: Page, workspaceId: string, root: string) {
   });
   await page.locator('#setupWizardPrimary').click();
   await expect(dialog).toBeHidden({ timeout: 15000 });
-  await expect(page.locator('#downloadsJanitorScan')).toBeVisible({ timeout: 15000 });
+  // Scan now lives in the console header, not in Workspace Details. Details
+  // carries a compact card whose single action opens the console.
+  await openConsole(page);
+}
+
+/**
+ * Opens the File Janitor console from the compact Details card.
+ *
+ * A workspace whose setup is unfinished opens its Setup Wizard over the page,
+ * which covers the card. That is existing wizard behavior — the same
+ * "setup dialog lands on the surface it is about" pattern this codebase has hit
+ * before — so the helper dismisses it first, exactly as a user would have to.
+ */
+async function openConsole(page: Page) {
+  const scan = page.locator('#downloadsJanitorScan');
+  if (await scan.isVisible().catch(() => false)) return;
+
+  const wizard = page.locator('#setupWizardDialog');
+  if (await wizard.isVisible().catch(() => false)) {
+    await page.locator('#setupWizardClose').click();
+    await expect(wizard).toBeHidden({ timeout: 15000 });
+  }
+
+  await page.locator('#fileJanitorCardOpen').click();
+  await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
+  await expect(scan).toBeVisible({ timeout: 15000 });
 }
 
 async function scan(page: Page) {
@@ -211,9 +242,14 @@ test.describe('Downloads Janitor', () => {
     await expect(mount).toBeVisible({ timeout: 15000 });
     await expect(mount).not.toHaveAttribute('hidden', /.*/);
     await expect(page.locator('#downloadsJanitorMount')).toContainText('Setup required');
-    // The blueprint's wizard owns setup now, so the panel offers a way into it
+    // The blueprint's wizard owns setup, so this surface offers a way into it
     // rather than a second folder chooser (FR-82).
-    await expect(page.locator('#downloadsJanitorOpenSetup')).toBeVisible();
+    //
+    // The control moved: Workspace Details now carries a compact card whose
+    // single action opens the console, replacing the old inline panel's
+    // "Continue setup" button (#downloadsJanitorOpenSetup). The intent asserted
+    // here is unchanged — one way in, and no editable path field anywhere.
+    await expect(page.locator('#fileJanitorCardOpen')).toBeVisible();
     await expect(page.locator('#downloadsJanitorPath')).toHaveCount(0);
 
     // The wizard opens itself, and states what access it is asking for before
@@ -255,12 +291,16 @@ test.describe('Downloads Janitor', () => {
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Setup required');
 
-    // A reload does not ambush the user again, and the panel still offers a way in.
+    // A reload does not ambush the user again, and Details still offers a way in.
     await page.goto(`/workspaces/${id}`);
-    await expect(page.locator('#downloadsJanitorOpenSetup')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#fileJanitorCardOpen')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
 
-    // The panel's own entry opens the same wizard, at the step it left off on.
+    // Card opens the console; the console's own entry opens the same wizard, at
+    // the step it left off on. (The entry moved into the console with the rest
+    // of the surface; Details is a summary now.)
+    await page.locator('#fileJanitorCardOpen').click();
+    await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
     await page.locator('#downloadsJanitorOpenSetup').click();
     await expect(page.locator('#setupWizardDialog')).toBeVisible();
     await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy');
@@ -270,7 +310,7 @@ test.describe('Downloads Janitor', () => {
 
     // A workspace that is already set up is not asked again.
     await page.goto(`/workspaces/${id}`);
-    await expect(page.locator('#downloadsJanitorScan')).toBeVisible({ timeout: 15000 });
+    await openConsole(page);
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Ready');
   });
@@ -289,6 +329,8 @@ test.describe('Downloads Janitor', () => {
     expect(confirmed.ok(), await confirmed.text()).toBeTruthy();
 
     await page.goto(`/workspaces/${id}`);
+    // Pause and Scan live in the console header now, not in Workspace Details.
+    await openConsole(page);
     await expect(page.locator('#downloadsJanitorPause')).toBeVisible({ timeout: 15000 });
     // The control points at the step that discloses what it would start.
     await expect(page.locator('#downloadsJanitorPause')).toHaveText('Approve in setup');
@@ -307,7 +349,9 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
 
     // Every readiness row reports, and the folder is named back to the user.
-    await expect(page.locator('.dj-sub')).toContainText(root);
+    // The compact card carries that line now (.fj-card-sub), where the inline
+    // panel's .dj-sub used to.
+    await expect(page.locator('.fj-card-sub')).toContainText(root);
     await expect(page.locator('#downloadsJanitorActivity')).toHaveText('Watching');
     // The destination is created eagerly; category folders are not.
     expect(existsSync(join(root, 'Filed'))).toBeTruthy();
@@ -469,6 +513,11 @@ test.describe('Downloads Janitor', () => {
     await confirmApply(page);
     expect(existsSync(join(root, 'Filed', 'Documents', 'contract.pdf'))).toBeTruthy();
 
+    // History is a console tab now, not a section stacked under the review
+    // table. The entry and its undo control are unchanged; only where you go to
+    // find them moved.
+    await page.locator('#fileJanitorConsole [data-fj-tab="history"]').click();
+
     const entry = page.locator('.dj-history-item').filter({ hasText: 'contract.pdf' }).first();
     await expect(entry).toBeVisible({ timeout: 15000 });
     await entry.getByRole('button', { name: /Undo/ }).click();
@@ -553,8 +602,17 @@ test.describe('Downloads Janitor', () => {
     expect(body.code || body.error?.code).toBe('folder_unavailable');
 
     await page.reload();
-    // The panel itself explains it, in words that say what to do.
-    await expect(page.locator('#downloadsJanitorMount')).toContainText(/no longer linked/i, {
+    // Details says something is wrong; the console says what.
+    //
+    // That split is deliberate: the compact card is a summary, so it carries the
+    // state, and the readiness rows that name the specific failure live in the
+    // console the card opens. Both halves are asserted, because a card that
+    // reported trouble with no way to find out what would be worse than either.
+    await expect(page.locator('#downloadsJanitorMount')).toContainText('Needs attention', {
+      timeout: 15000
+    });
+    await openConsole(page);
+    await expect(page.locator('#fileJanitorConsoleBody')).toContainText(/no longer linked/i, {
       timeout: 15000
     });
     // And the map station carries the same signal, so it is visible from the

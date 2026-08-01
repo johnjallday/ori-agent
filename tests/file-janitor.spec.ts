@@ -191,6 +191,13 @@ async function openConsoleFromCard(page: Page) {
   await expect(console_(page)).toBeVisible({ timeout: 15000 });
 }
 
+// Serial, because these do real filesystem work against one shared server:
+// each test creates a workspace, grants a folder, and runs real scans and real
+// moves. Run fully parallel alongside the other janitor suites they simply
+// overload it and time out — which reads as a product failure and is not one.
+// CI already uses a single worker; this makes a local full-suite run match.
+test.describe.configure({ mode: 'serial' });
+
 test.describe('File Janitor capability', () => {
   test('installs into an ordinary workspace and shows a card that opens the console', async ({
     page,
@@ -305,8 +312,11 @@ test.describe('File Janitor capability', () => {
       .getByRole('button', { name: /Move|Apply|Confirm these/ })
       .first()
       .click();
+    // A generous window: on a cold server this is the first apply the process
+    // has ever done, and it flaked once at 15s against a brand-new sandbox.
+    // Waiting longer costs nothing when it passes.
     await expect
-      .poll(() => existsSync(join(root, 'Filed', 'Documents', 'report.pdf')), { timeout: 15000 })
+      .poll(() => existsSync(join(root, 'Filed', 'Documents', 'report.pdf')), { timeout: 30000 })
       .toBe(true);
 
     await console_(page).locator('[data-fj-tab="history"]').click();
@@ -443,5 +453,48 @@ test.describe('File Janitor capability', () => {
     await expect(card).toBeVisible({ timeout: 15000 });
     await expect(card).toContainText('No folder chosen yet');
     await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up File Janitor');
+  });
+
+  // The generic blueprint's Setup Wizard must offer a way to choose a folder.
+  //
+  // This is the gap that let a real blocker ship: every other test here grants
+  // the folder over HTTP, so none of them ever opened the wizard's folder step.
+  // The step's renderer IS the picker, and it was keyed to the Downloads
+  // preset's adapter id alone — so on the generic blueprint it drew nothing, the
+  // wizard fell back to its own "Approve and continue", and there was no way to
+  // choose a folder at all. Nothing errored; the button simply approved nothing.
+  test('the generic blueprint wizard offers a folder picker', async ({ page, request }) => {
+    const created = await request.post('/api/workspaces', {
+      data: {
+        name: `FJ Blueprint ${RUN}`,
+        description: '',
+        template_id: 'file-janitor',
+        create_template_agents: true
+      }
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    const body = await created.json();
+    const workspaceId = (body.folder?.id || body.workspace?.id) as string;
+
+    await skipOnboarding(page);
+    await page.goto(`/workspaces/${workspaceId}`);
+
+    const dialog = page.locator('#setupWizardDialog');
+    if (!(await dialog.isVisible().catch(() => false))) {
+      await page.locator('#setupWizardBannerAction').click();
+    }
+    await expect(dialog).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy', {
+      timeout: 15000
+    });
+
+    // The picker exists, and the primary button says a folder is still needed
+    // rather than offering to approve nothing.
+    await expect(page.locator('#downloadsJanitorWizardPick')).toBeVisible();
+    await expect(page.locator('#setupWizardPrimary')).toHaveText(/Choose a folder to continue/);
+    await expect(page.locator('#setupWizardPrimary')).toBeDisabled();
+
+    // And still no editable path field: the picker is the only way in (FR-52).
+    await expect(page.locator('#downloadsJanitorPath')).toHaveCount(0);
   });
 });

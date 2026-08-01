@@ -5,6 +5,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 class FakeElement {
   constructor(tag) {
@@ -2080,6 +2082,86 @@ test('the directory step shows the chosen folder once one is confirmed', () => {
     panel._setupSteps.directory.primaryLabel({ step: { adapter: 'downloads_janitor' } }),
     'Continue'
   );
+});
+
+// Every shipped blueprint's setup adapter must reach these renderers.
+//
+// This step's renderer IS the folder picker. When ownsStep did not recognize an
+// adapter id, render() drew nothing and primaryLabel() returned '' — so the
+// wizard fell back to its own generic "Approve and continue" and a user
+// creating a workspace from the generic blueprint had NO WAY to choose a
+// folder. Nothing failed; the button just approved nothing.
+//
+// The ids come from the manifests rather than a list here, so a new blueprint
+// with a new adapter fails in this test instead of in someone's wizard.
+function shippedFileJanitorAdapterIds() {
+  const starterDir = join(process.cwd(), 'internal/projecttemplates/starter');
+  if (!existsSync(starterDir)) return [];
+  const ids = new Set();
+  for (const entry of readdirSync(starterDir)) {
+    const manifestPath = join(starterDir, entry, 'template.json');
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const declaresFileJanitor = (manifest.capabilities || []).some(
+      capability => capability && capability.id === 'file-janitor'
+    );
+    if (!declaresFileJanitor) continue;
+    for (const step of manifest.setup_wizard?.steps || []) {
+      if (step && step.adapter) ids.add(step.adapter);
+    }
+  }
+  return Array.from(ids);
+}
+
+test('every shipped blueprint adapter reaches the folder picker', () => {
+  const adapters = shippedFileJanitorAdapterIds();
+  assert.ok(
+    adapters.length >= 2,
+    `expected the Downloads preset and the generic blueprint, got ${JSON.stringify(adapters)}`
+  );
+  assert.ok(adapters.includes('downloads_janitor'), 'the Downloads preset must be covered');
+  assert.ok(adapters.includes('file_janitor'), 'the generic blueprint must be covered');
+
+  for (const adapter of adapters) {
+    const doc = setup();
+    panel._setStatus({
+      ...setupRequiredStatus,
+      settings: { ...setupRequiredStatus.settings, root_path: '' }
+    });
+    const container = doc.createElement('div');
+    panel._setupSteps.directory.render(container, {
+      step: { id: 'folder', kind: 'directory', adapter }
+    });
+
+    assert.match(
+      container.textContent,
+      /Choose folder/,
+      `adapter ${adapter} rendered no folder picker`
+    );
+    assert.match(
+      panel._setupSteps.directory.primaryLabel({ step: { adapter } }),
+      /Choose a folder to continue/,
+      `adapter ${adapter} fell back to the wizard's generic button`
+    );
+    assert.equal(
+      panel._setupSteps.directory.disablePrimary({ step: { adapter } }),
+      true,
+      `adapter ${adapter} let the user continue without choosing a folder`
+    );
+  }
+});
+
+// The other half: a step belonging to some other capability's adapter must not
+// be hijacked into rendering File Janitor's picker.
+test('a step from another adapter is left alone', () => {
+  const doc = setup();
+  panel._setStatus(setupRequiredStatus);
+  const container = doc.createElement('div');
+  panel._setupSteps.directory.render(container, {
+    step: { id: 'folder', kind: 'directory', adapter: 'some_other_capability' }
+  });
+  assert.equal(container.textContent, '', 'File Janitor drew into another capability’s step');
+  assert.equal(panel._setupSteps.directory.primaryLabel({ step: { adapter: 'some_other' } }), '');
 });
 
 test('the automation step states what will run, in the workspace’s own terms', () => {

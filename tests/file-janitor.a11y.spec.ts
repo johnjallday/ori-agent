@@ -99,6 +99,11 @@ async function openConsole(page: Page, workspaceId: string) {
   await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
 }
 
+// Serial: see tests/file-janitor.spec.ts. These do real filesystem work against
+// one shared server, and running them fully parallel alongside the other
+// janitor suites overloads it.
+test.describe.configure({ mode: 'serial' });
+
 test.describe('File Janitor console accessibility', () => {
   test('is a dialog named by its visible title', async ({ page, request }) => {
     const root = inbox('name', ['a.pdf']);

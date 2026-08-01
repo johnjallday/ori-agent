@@ -3157,8 +3157,23 @@
   // ownsStep keeps these renderers scoped to this blueprint's steps: the
   // registry is keyed by step kind, and another blueprint's directory step is
   // not ours to draw.
+  // Both adapter ids, because both are live.
+  //
+  // The Downloads preset's manifest names `downloads_janitor` and every
+  // workspace already mid-setup persisted that in its wizard snapshot, so it
+  // can never be renamed. The generic blueprint names the canonical
+  // `file_janitor`. The server resolves either through the adapter alias, but
+  // the STEP carries whichever id its manifest declared — so a renderer that
+  // recognized only one silently drew nothing for the other.
+  //
+  // That is not a cosmetic failure. This step's renderer IS the folder picker:
+  // without it the wizard falls back to its own generic "Approve and continue",
+  // and a user creating a workspace from the generic blueprint has no way to
+  // choose a folder at all.
+  const SETUP_ADAPTER_IDS = ['file_janitor', 'downloads_janitor'];
+
   function ownsStep(step) {
-    return String(step?.adapter || '') === 'downloads_janitor';
+    return SETUP_ADAPTER_IDS.includes(String(step?.adapter || ''));
   }
 
   // chooseFolder runs the native picker and confirms the result.
