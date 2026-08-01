@@ -81,6 +81,54 @@ func (p *CapabilityCompanionProvisioner) EnsureCompanionAgent(workspaceID, displ
 	return instance.ID, !definitionExisted && attached, nil
 }
 
+// RemoveCompanionAgent implements workspacecapability.CompanionRemover: it
+// detaches a companion agent from the workspace's team.
+//
+// It removes the workspace ATTACHMENT, not the agent definition. The definition
+// may be shared with other workspaces, and the caller has already established
+// only that this capability created this instance here — not that the agent
+// exists nowhere else. Detaching is the reversible half; deleting a definition
+// on an uninstall's behalf is not something a capability gets to do.
+func (p *CapabilityCompanionProvisioner) RemoveCompanionAgent(workspaceID, agentInstanceID string) error {
+	if p == nil || p.handler == nil {
+		return fmt.Errorf("agent storage is unavailable")
+	}
+	instanceID := strings.TrimSpace(agentInstanceID)
+	if instanceID == "" {
+		return fmt.Errorf("companion id is required")
+	}
+
+	ctx := context.Background()
+	ws, err := p.handler.store.GetWorkspace(ctx, workspaceID)
+	if err != nil || ws == nil {
+		return fmt.Errorf("workspace is unavailable")
+	}
+
+	remaining := ws.AgentInstances[:0:0]
+	found := false
+	for _, instance := range ws.AgentInstances {
+		if instance.ID == instanceID {
+			found = true
+			continue
+		}
+		remaining = append(remaining, instance)
+	}
+	if !found {
+		// Already gone. A removal retry must be able to finish.
+		return nil
+	}
+	ws.AgentInstances = remaining
+
+	if err := p.handler.store.UpdateWorkspace(ctx, ws); err != nil {
+		return fmt.Errorf("could not detach the companion agent: %w", err)
+	}
+	if syncErr := p.handler.syncWorkspacePortableStateToFileStore(ws); syncErr != nil {
+		logger.Warn("Failed to sync workspace.json after removing a companion agent",
+			logger.Fields{"id": workspaceID, "error": syncErr})
+	}
+	return nil
+}
+
 // companionConfig is the agent definition a new Curator is created with.
 //
 // It is read-only by construction: the Curator's filesystem access comes from

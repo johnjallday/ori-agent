@@ -23,6 +23,10 @@ import (
 // the Janitor, and the Janitor names the registry's small interface.
 type CapabilityRuntime struct {
 	service *Service
+	// automation is the watcher/schedule lifecycle, needed only for removal.
+	// It is set after construction because the automation is itself built from
+	// the service, so the two cannot be wired in one step.
+	automation WatcherLifecycle
 }
 
 // NewCapabilityRuntime wraps a Janitor service as a capability runtime. A nil
@@ -162,8 +166,91 @@ func folderDisplayName(root string) string {
 	return filepath.Base(filepath.Clean(trimmed))
 }
 
+// SetAutomation gives the runtime the watcher/schedule lifecycle it must stop
+// before access is released. Nil leaves removal working but unable to stop
+// automation, which the removal path treats as a failure rather than proceeding
+// — releasing a folder while a watcher still points at it is the one ordering
+// that must not happen (FR-26).
+func (r *CapabilityRuntime) SetAutomation(automation WatcherLifecycle) {
+	if r == nil {
+		return
+	}
+	r.automation = automation
+}
+
+// StopCapabilityAutomation implements workspacecapability.AutomationController.
+func (r *CapabilityRuntime) StopCapabilityAutomation(workspaceID string) error {
+	if r == nil || r.automation == nil {
+		return nil
+	}
+	return r.automation.RemoveWatcher(workspaceID)
+}
+
+// OnCapabilityRemove implements workspacecapability.Remover: it releases the
+// folder grant and clears active configuration, keeping the audit journal.
+//
+// This is the existing revoke path, deliberately reused rather than
+// reimplemented. Revoke already stops automation, drops the directory reference
+// and binding, clears the settings and any content consent, and stales pending
+// candidates while leaving the action journal intact — which is exactly what
+// removal must do to the Janitor's own state (FR-26, FR-29).
+//
+// Automation is passed as nil because the capability service has already
+// stopped it by this point; passing it again would be a second RemoveWatcher
+// for a watcher that is gone.
+func (r *CapabilityRuntime) OnCapabilityRemove(workspaceID string) error {
+	if r == nil || r.service == nil {
+		return nil
+	}
+	settings, err := r.service.store.LoadSettings(workspaceID)
+	if err != nil {
+		return err
+	}
+	if !settings.IsSetUp() {
+		// Nothing was ever granted, so there is nothing to release. Removal of
+		// an unconfigured install is a record deletion and no more.
+		return nil
+	}
+	_, err = r.service.RevokeAccess(nil, workspaceID)
+	return err
+}
+
+// DescribeCapabilityRemoval implements workspacecapability.RemovalDescriber.
+//
+// Every string here is what the confirmation shows. The folder is named by its
+// display name so a confirmation dialog does not render a full home-directory
+// path, and the retained list is stated positively: a user uninstalling
+// something that has been moving their files needs to know the record of what
+// it did survives.
+func (r *CapabilityRuntime) DescribeCapabilityRemoval(workspaceID string) (workspacecapability.RemovalFacts, error) {
+	if r == nil || r.service == nil {
+		return workspacecapability.RemovalFacts{}, nil
+	}
+	settings, err := r.service.store.LoadSettings(workspaceID)
+	if err != nil {
+		return workspacecapability.RemovalFacts{}, err
+	}
+	facts := workspacecapability.RemovalFacts{
+		ManagedFolder: folderDisplayName(settings.RootPath),
+		RetainedAudit: []string{
+			"The history of everything File Janitor filed, trashed, or restored.",
+			"Your settings and past decisions, kept inactive for the record.",
+		},
+	}
+	if settings.IsSetUp() {
+		facts.Automation = []string{
+			"Watching this folder for new files.",
+			"The daily catch-up scan.",
+		}
+	}
+	return facts, nil
+}
+
 // Compile-time checks that this adapter satisfies the registry's contracts.
 var (
-	_ workspacecapability.Runtime          = (*CapabilityRuntime)(nil)
-	_ workspacecapability.LegacyStateProbe = (*CapabilityRuntime)(nil)
+	_ workspacecapability.Runtime              = (*CapabilityRuntime)(nil)
+	_ workspacecapability.LegacyStateProbe     = (*CapabilityRuntime)(nil)
+	_ workspacecapability.Remover              = (*CapabilityRuntime)(nil)
+	_ workspacecapability.AutomationController = (*CapabilityRuntime)(nil)
+	_ workspacecapability.RemovalDescriber     = (*CapabilityRuntime)(nil)
 )

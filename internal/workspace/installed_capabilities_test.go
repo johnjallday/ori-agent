@@ -208,9 +208,90 @@ func TestRemoveInstalledCapability_IsIdempotent(t *testing.T) {
 	if ws.RemoveInstalledCapability(CapabilityFileJanitor) {
 		t.Fatal("removing an absent capability reported a change")
 	}
-	// Nil rather than empty: see NormalizeInstalledCapabilities' contract.
-	if caps := ws.GetInstalledCapabilities(); caps != nil {
-		t.Fatalf("expected nil collection after removing the last record, got %+v", caps)
+
+	// Removal leaves a tombstone rather than deleting the record. "Removed" and
+	// "never installed" are different facts, and only the first should stop the
+	// startup migration from installing it again — a Downloads Janitor workspace
+	// keeps the template provenance that made it a migration candidate, so
+	// without this marker every restart would undo the user's uninstall.
+	if !ws.CapabilityWasRemoved(CapabilityFileJanitor) {
+		t.Fatal("the removal was not recorded")
+	}
+	// The tombstone must be invisible to everything that asks about installs.
+	if ws.HasInstalledCapability(CapabilityFileJanitor) {
+		t.Fatal("a tombstone must not read as installed")
+	}
+	if _, ok := ws.GetInstalledCapability(CapabilityFileJanitor); ok {
+		t.Fatal("a tombstone must not be returned as an install record")
+	}
+	// And it must not carry resources: they were released by the removal, and a
+	// stale list would make a later removal try to release them twice.
+	record, ok := FindCapabilityRecord(ws.InstalledCapabilities, CapabilityFileJanitor)
+	if !ok {
+		t.Fatal("expected the tombstone to be persisted")
+	}
+	if len(record.OwnedResources) != 0 {
+		t.Errorf("tombstone kept owned resources: %+v", record.OwnedResources)
+	}
+}
+
+// Reinstalling after a removal is a FRESH install, not a revival: it must not
+// inherit the old install's timestamp, source, or owned resources, because
+// those describe a grant the user has since taken away (FR-30).
+func TestAddInstalledCapability_ReplacesATombstoneWholesale(t *testing.T) {
+	ws := &Workspace{ID: "ws-1"}
+	original := testInstall(CapabilityFileJanitor)
+	original.Source = InstallSourceBlueprint
+	original.OwnedResources = []CapabilityResource{
+		{Kind: ResourceDirectoryReference, ID: "ref-old"},
+	}
+	if _, err := ws.AddInstalledCapability(original); err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+	if !ws.RemoveInstalledCapability(CapabilityFileJanitor) {
+		t.Fatal("remove reported no change")
+	}
+
+	fresh := testInstall(CapabilityFileJanitor)
+	fresh.Source = InstallSourceInPlace
+	fresh.InstalledAt = original.InstalledAt.Add(time.Hour)
+	added, err := ws.AddInstalledCapability(fresh)
+	if err != nil {
+		t.Fatalf("reinstall failed: %v", err)
+	}
+	if !added {
+		t.Fatal("reinstalling over a tombstone must report a new install")
+	}
+
+	got, ok := ws.GetInstalledCapability(CapabilityFileJanitor)
+	if !ok {
+		t.Fatal("the capability should be installed again")
+	}
+	if !got.Active() {
+		t.Fatal("the reinstalled record must not still be a tombstone")
+	}
+	if got.Source != InstallSourceInPlace {
+		t.Errorf("source = %q, want the new install's provenance", got.Source)
+	}
+	if !got.InstalledAt.Equal(fresh.InstalledAt) {
+		t.Errorf("installed_at = %v, want the new install's time", got.InstalledAt)
+	}
+	if len(got.OwnedResources) != 0 {
+		t.Errorf("the reinstall inherited the old grant's resources: %+v", got.OwnedResources)
+	}
+	if ws.CapabilityWasRemoved(CapabilityFileJanitor) {
+		t.Error("an explicit reinstall must clear the removal marker")
+	}
+
+	// Exactly one record for the capability, tombstone replaced not appended.
+	count := 0
+	for _, record := range ws.InstalledCapabilities {
+		if NormalizeCapabilityID(record.ID) == CapabilityFileJanitor {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("records for file-janitor = %d, want 1", count)
 	}
 }
 

@@ -325,7 +325,11 @@ func (s *Service) rollbackInstall(def Definition, workspaceID string, cause erro
 	}
 
 	removeErr := s.store.Update(workspaceID, func(w *workspace.Workspace) error {
-		w.RemoveInstalledCapability(def.ID)
+		// Discard, not remove: this install never happened, so it must leave
+		// nothing behind. A removal tombstone here would record that the user
+		// uninstalled something they never had — and would then suppress the
+		// migration that ought to install it.
+		w.DiscardInstalledCapability(def.ID)
 		return nil
 	})
 	if removeErr != nil {

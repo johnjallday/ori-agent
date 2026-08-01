@@ -283,7 +283,10 @@ type ServerBuilder struct {
 	downloadsJanitorHandler    *downloadsjanitorhttp.Handler
 	downloadsJanitorService    *downloadsjanitor.Service
 	downloadsJanitorAutomation *downloadsjanitor.Automation
-	dailyBriefScheduler        *dailybrief.Scheduler
+	// fileJanitorCapabilityRuntime is held so a later wiring phase can give it
+	// the automation it needs for removal (see wireDownloadsJanitorAutomation).
+	fileJanitorCapabilityRuntime *downloadsjanitor.CapabilityRuntime
+	dailyBriefScheduler          *dailybrief.Scheduler
 
 	// Shared blueprint Setup Wizard: one lifecycle service over a compiled
 	// adapter registry, plus its workspace-scoped HTTP handler. The registry is

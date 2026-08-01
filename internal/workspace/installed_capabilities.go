@@ -116,7 +116,24 @@ type InstalledCapability struct {
 	// right ones (FR-27). Empty until setup grants something: installing alone
 	// creates no resources.
 	OwnedResources []CapabilityResource `json:"owned_resources,omitempty"`
+	// RemovedAt turns this record into a TOMBSTONE: the capability is not
+	// installed, and was deliberately removed by the user.
+	//
+	// The record is kept rather than deleted because "removed" and "never
+	// installed" are different facts, and only one of them should stop the
+	// startup migration from installing it. Downloads Janitor's template
+	// provenance survives an uninstall, so without this marker the next boot
+	// would helpfully re-install the capability the user had just removed
+	// (FR-30, FR-126).
+	//
+	// It reuses the existing installed_capabilities column, so it needs no
+	// schema change. Every lookup below treats a tombstoned record as absent.
+	RemovedAt *time.Time `json:"removed_at,omitempty"`
 }
+
+// Active reports whether this record represents a live install, as opposed to
+// the tombstone left behind by a removal.
+func (c InstalledCapability) Active() bool { return c.RemovedAt == nil }
 
 // NormalizeCapabilityID trims and lower-cases a capability identifier. Callers
 // comparing a persisted ID against a registry key must route both sides through
@@ -315,6 +332,28 @@ func FindInstalledCapability(caps []InstalledCapability, id string) (InstalledCa
 		return InstalledCapability{}, false
 	}
 	for _, c := range caps {
+		if NormalizeCapabilityID(c.ID) != key {
+			continue
+		}
+		// A tombstone is a record of a removal, not an install. Everything that
+		// asks "is this installed?" must read it as no.
+		if !c.Active() {
+			return InstalledCapability{}, false
+		}
+		return c.Clone(), true
+	}
+	return InstalledCapability{}, false
+}
+
+// FindCapabilityRecord returns the raw record for id, tombstone included. It
+// exists for the removal/reinstall paths, which need to see a removal that
+// FindInstalledCapability deliberately hides.
+func FindCapabilityRecord(caps []InstalledCapability, id string) (InstalledCapability, bool) {
+	key := NormalizeCapabilityID(id)
+	if key == "" {
+		return InstalledCapability{}, false
+	}
+	for _, c := range caps {
 		if NormalizeCapabilityID(c.ID) == key {
 			return c.Clone(), true
 		}
@@ -332,12 +371,69 @@ func (w *Workspace) NormalizeInstalledCapabilities() {
 	w.InstalledCapabilities = NormalizeInstalledCapabilities(w.InstalledCapabilities)
 }
 
-// GetInstalledCapabilities returns a deep copy of the workspace's install
-// records. Callers may mutate the result freely.
+// GetInstalledCapabilities returns a deep copy of the workspace's ACTIVE
+// install records. Callers may mutate the result freely.
+//
+// Tombstones are excluded. Everything downstream of this — the catalog, the
+// registry resolution, the per-workspace install limit — is asking "what is
+// installed here?", and a removal is not an install. The tombstones stay on the
+// workspace for persistence and for CapabilityWasRemoved.
 func (w *Workspace) GetInstalledCapabilities() []InstalledCapability {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+	active := make([]InstalledCapability, 0, len(w.InstalledCapabilities))
+	for _, c := range w.InstalledCapabilities {
+		if c.Active() {
+			active = append(active, c)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return CloneInstalledCapabilities(active)
+}
+
+// AllCapabilityRecords returns every record including tombstones, for the
+// persistence layer and for code that needs to see removals.
+func (w *Workspace) AllCapabilityRecords() []InstalledCapability {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	return CloneInstalledCapabilities(w.InstalledCapabilities)
+}
+
+// DiscardInstalledCapability deletes a record outright, leaving no tombstone.
+//
+// This is for rolling back an install that failed partway: that install never
+// happened, so it must leave nothing behind — least of all a marker saying the
+// user removed something they never had, which would then suppress the very
+// migration that should install it.
+func (w *Workspace) DiscardInstalledCapability(id string) bool {
+	key := NormalizeCapabilityID(id)
+	if key == "" {
+		return false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	remaining := make([]InstalledCapability, 0, len(w.InstalledCapabilities))
+	discarded := false
+	for _, c := range w.InstalledCapabilities {
+		if NormalizeCapabilityID(c.ID) == key {
+			discarded = true
+			continue
+		}
+		remaining = append(remaining, c)
+	}
+	if !discarded {
+		return false
+	}
+	if len(remaining) == 0 {
+		remaining = nil
+	}
+	w.InstalledCapabilities = remaining
+	w.capabilitiesExplicit = true
+	w.UpdatedAt = time.Now()
+	return true
 }
 
 // SetInstalledCapabilities replaces the whole collection, normalizing it first.
@@ -408,6 +504,19 @@ func (w *Workspace) AddInstalledCapability(c InstalledCapability) (bool, error) 
 	w.InstalledCapabilities = NormalizeInstalledCapabilities(w.InstalledCapabilities)
 	if _, exists := FindInstalledCapability(w.InstalledCapabilities, c.ID); exists {
 		return false, nil
+	}
+
+	// A tombstone is replaced wholesale, not revived. Reinstalling is a fresh
+	// install: it must not inherit the old install's timestamp, source, or —
+	// above all — its owned resources, which were released when it was removed.
+	// Requiring a new folder choice is the point (FR-30).
+	for i, existing := range w.InstalledCapabilities {
+		if NormalizeCapabilityID(existing.ID) == c.ID {
+			w.InstalledCapabilities[i] = c
+			w.capabilitiesExplicit = true
+			w.UpdatedAt = time.Now()
+			return true, nil
+		}
 	}
 
 	w.InstalledCapabilities = append(w.InstalledCapabilities, c)
@@ -519,23 +628,37 @@ func (w *Workspace) RemoveInstalledCapability(id string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	remaining := make([]InstalledCapability, 0, len(w.InstalledCapabilities))
 	removed := false
-	for _, c := range w.InstalledCapabilities {
-		if NormalizeCapabilityID(c.ID) == key {
-			removed = true
+	now := time.Now()
+	for i, c := range w.InstalledCapabilities {
+		if NormalizeCapabilityID(c.ID) != key || !c.Active() {
 			continue
 		}
-		remaining = append(remaining, c)
+		removed = true
+		// Tombstone rather than delete. The owned resources go, because they
+		// have been released and a stale list would make a later removal try to
+		// release them twice; the fact of the removal stays.
+		w.InstalledCapabilities[i].RemovedAt = &now
+		w.InstalledCapabilities[i].OwnedResources = nil
 	}
 	if !removed {
 		return false
 	}
-	if len(remaining) == 0 {
-		remaining = nil
-	}
-	w.InstalledCapabilities = remaining
 	w.capabilitiesExplicit = true
-	w.UpdatedAt = time.Now()
+	w.UpdatedAt = now
 	return true
+}
+
+// CapabilityWasRemoved reports whether the user deliberately removed this
+// capability from this workspace.
+//
+// The startup migration consults it: a workspace can still carry the legacy
+// signals that made it a migration candidate — above all the built-in template
+// it was created from, which no uninstall can change — and re-installing on
+// that basis would undo the user's decision every time Ori restarts (FR-30).
+func (w *Workspace) CapabilityWasRemoved(id string) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	record, ok := FindCapabilityRecord(w.InstalledCapabilities, id)
+	return ok && !record.Active()
 }

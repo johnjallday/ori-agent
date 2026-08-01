@@ -24,7 +24,19 @@ class FakeElement {
   }
   set textContent(v) {
     this._text = v;
-    if (v === '') this.children = [];
+    if (v !== '') return;
+    // Clearing a node detaches its subtree, so the ids inside it stop
+    // resolving — exactly as in a browser. Without this the id map kept
+    // pointing at nodes that were no longer on screen, and a test could assert
+    // that a control still existed after the surface holding it was rebuilt.
+    this.children.forEach(child => child.forgetIDs());
+    this.children = [];
+  }
+  forgetIDs() {
+    if (this.id && globalThis.document.byId.get(this.id) === this) {
+      globalThis.document.byId.delete(this.id);
+    }
+    this.children.forEach(child => child.forgetIDs());
   }
   appendChild(el) {
     this.children.push(el);
@@ -2874,5 +2886,218 @@ test('a refused Curator request is reported, not swallowed', async () => {
     doc.getElementById('downloadsJanitorSettingsStatus').textContent,
     /Agents are unavailable/
   );
+  restore();
+});
+
+// ------------------------------------------------------------------ removal
+
+const REMOVAL_SUMMARY = {
+  capability_id: 'file-janitor',
+  display_name: 'File Janitor',
+  installed: true,
+  managed_folder: 'Inbox',
+  stops_automation: ['Watching this folder for new files.', 'The daily catch-up scan.'],
+  retained_audit: ['The history of everything File Janitor filed, trashed, or restored.'],
+  moves_files: false
+};
+
+function openSettings(catalogRecord = { id: 'file-janitor', owned_resources: [] }) {
+  const restore = withCatalog(catalogRecord);
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('settings');
+  return restore;
+}
+
+test('Settings offers removal and says plainly that files are not touched', () => {
+  const doc = setup();
+  const restore = openSettings();
+
+  assert.ok(doc.getElementById('downloadsJanitorRemove'), 'expected a Remove File Janitor control');
+  assert.match(text(doc), /Your files are not moved or deleted/);
+  restore();
+});
+
+// The confirmation must state what removal does to THIS workspace. Copy written
+// in the browser cannot name the folder, and a user who cannot see which folder
+// is losing access cannot evaluate the decision.
+test('the confirmation is built from the server dry run', async () => {
+  const doc = setup();
+  const restore = openSettings();
+
+  // Record only the removal request. Other reads (status, history) are in
+  // flight around it and would otherwise be what this ends up asserting on.
+  let asked = null;
+  globalThis.fetch = async url => {
+    const target = String(url);
+    if (target.endsWith('/removal')) asked = target;
+    return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
+  };
+
+  doc.getElementById('downloadsJanitorRemove').click();
+  await settle();
+
+  assert.ok(asked, 'expected the dry-run request');
+  assert.match(asked, /\/capabilities\/file-janitor\/removal$/);
+  const body = text(doc);
+  assert.match(body, /stop managing Inbox/);
+  assert.match(body, /Watching this folder for new files/);
+  assert.match(body, /gives up its access/);
+  assert.match(body, /No files are moved, renamed, deleted, or restored/);
+  assert.match(body, /history of everything File Janitor filed/);
+  restore();
+});
+
+test('cancelling removal changes nothing and returns to Settings', async () => {
+  const doc = setup();
+  const restore = openSettings();
+
+  let deleted = false;
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'DELETE') deleted = true;
+    return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
+  };
+
+  doc.getElementById('downloadsJanitorRemove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorRemoveCancel').click();
+
+  assert.equal(deleted, false, 'cancelling must not remove anything');
+  assert.ok(doc.getElementById('downloadsJanitorRemove'), 'back to the entry point');
+  assert.equal(doc.getElementById('downloadsJanitorRemoveConfirm'), null);
+  restore();
+});
+
+// Uninstalling a capability is not consent to delete an agent, so the request
+// carries the companion decision explicitly and it defaults to false.
+test('removal does not remove the Curator unless separately ticked', async () => {
+  const doc = setup();
+  const restore = openSettings({
+    id: 'file-janitor',
+    owned_resources: [{ kind: 'companion_agent', id: 'agent-1' }]
+  });
+
+  let sent = null;
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'DELETE') {
+      sent = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ removed: true }) };
+    }
+    if (String(url).endsWith('/removal')) {
+      return {
+        ok: true,
+        json: async () => ({
+          removal: {
+            ...REMOVAL_SUMMARY,
+            companion: { agent_instance_id: 'agent-1', removable: true }
+          }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ status: { applies: false } }) };
+  };
+
+  doc.getElementById('downloadsJanitorRemove').click();
+  await settle();
+  assert.ok(doc.getElementById('downloadsJanitorRemoveCompanion'), 'expected a separate choice');
+  assert.equal(
+    doc.getElementById('downloadsJanitorRemoveCompanion').checked,
+    false,
+    'the companion choice must default to off'
+  );
+
+  doc.getElementById('downloadsJanitorRemoveConfirm').click();
+  await settle();
+  assert.deepEqual(sent, { remove_companion: false });
+  restore();
+});
+
+test('an adopted Curator is described as left alone, with no checkbox', async () => {
+  const doc = setup();
+  const restore = openSettings();
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      removal: {
+        ...REMOVAL_SUMMARY,
+        companion: {
+          agent_instance_id: 'agent-1',
+          removable: false,
+          reason: 'This agent existed before File Janitor was installed, so removing it leaves it alone.'
+        }
+      }
+    })
+  });
+
+  doc.getElementById('downloadsJanitorRemove').click();
+  await settle();
+
+  assert.equal(doc.getElementById('downloadsJanitorRemoveCompanion'), null);
+  assert.match(text(doc), /existed before File Janitor was installed/);
+  restore();
+});
+
+// After a successful removal the console is showing a capability the workspace
+// no longer has, so it closes and the card goes with it.
+test('a successful removal closes the console and clears the card', async () => {
+  const doc = setup();
+  let reloaded = 0;
+  const restore = withCatalog({ id: 'file-janitor', owned_resources: [] });
+  globalThis.window.WorkspaceCapabilities.reload = async () => {
+    reloaded += 1;
+  };
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('settings');
+
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'DELETE') {
+      return { ok: true, json: async () => ({ removed: true }) };
+    }
+    if (String(url).endsWith('/removal')) {
+      return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
+    }
+    return { ok: true, json: async () => ({ status: { applies: false } }) };
+  };
+
+  doc.getElementById('downloadsJanitorRemove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorRemoveConfirm').click();
+  await settle();
+
+  assert.equal(panel.isOpen(), false, 'the console must not linger over a removed capability');
+  assert.equal(doc.getElementById('downloadsJanitorMount').hidden, true, 'the card goes too');
+  assert.equal(panel.stationState().applies, false, 'and so does the Map station');
+  assert.ok(reloaded > 0, 'the catalog must re-read so the capability offers itself again');
+  restore();
+});
+
+// A failed removal must say so and leave the capability usable, not strand the
+// user in a half-removed state with no way back.
+test('a failed removal is reported and leaves File Janitor in place', async () => {
+  const doc = setup();
+  const restore = openSettings();
+
+  globalThis.fetch = async (url, opts) => {
+    if (opts && opts.method === 'DELETE') {
+      return {
+        ok: false,
+        json: async () => ({ message: 'Ori could not stop the background work.' })
+      };
+    }
+    return { ok: true, json: async () => ({ removal: REMOVAL_SUMMARY }) };
+  };
+
+  doc.getElementById('downloadsJanitorRemove').click();
+  await settle();
+  doc.getElementById('downloadsJanitorRemoveConfirm').click();
+  await settle();
+
+  assert.match(
+    doc.getElementById('downloadsJanitorSettingsStatus').textContent,
+    /could not stop the background work/
+  );
+  assert.equal(panel.isOpen(), true, 'the console stays open after a failed removal');
   restore();
 });

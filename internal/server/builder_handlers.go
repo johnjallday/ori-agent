@@ -613,6 +613,7 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 			logger.Warn("File Janitor capability runtime not bound", logger.Fields{"error": err})
 		}
 		legacyProbe = runtime
+		b.fileJanitorCapabilityRuntime = runtime
 	}
 
 	service := workspacecapability.NewService(registry, b.workspaceStore)

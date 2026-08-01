@@ -7,9 +7,10 @@ import "net/http"
 // which is what keeps one workspace's capability state from being reachable
 // through another's (FR-140).
 //
-// Removal (DELETE .../capabilities/{capabilityID}) is deliberately absent until
-// the removal lifecycle exists: an uninstall that could not first stop watchers
-// and release folder access would be unsafe (FR-26).
+// Removal is two endpoints on purpose. The summary is a GET with no side
+// effects, so the confirmation a user reads is derived from the same resolution
+// the removal will perform — not from a description written alongside it that
+// could drift (FR-24, FR-25).
 func (h *Handler) Register(mux *http.ServeMux) {
 	if h == nil || mux == nil {
 		return
@@ -17,4 +18,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/capabilities", h.ListCapabilities)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/capabilities/{capabilityID}/install", h.InstallCapability)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/capabilities/{capabilityID}/companion", h.AddCompanion)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/capabilities/{capabilityID}/removal", h.RemovalSummary)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/capabilities/{capabilityID}", h.RemoveCapability)
 }

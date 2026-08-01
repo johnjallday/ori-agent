@@ -1099,6 +1099,7 @@
       )
     );
     panel.appendChild(actions);
+    panel.appendChild(removalSection());
 
     const status = el('p', 'dj-settings-status', settingsMessage);
     status.id = 'downloadsJanitorSettingsStatus';
@@ -1107,6 +1108,199 @@
     panel.appendChild(status);
 
     host.appendChild(panel);
+  }
+
+  // The removal confirmation, kept in state so the section can render either
+  // the entry point or the confirmation itself. It holds the server's summary,
+  // never a locally composed description of what removal will do.
+  let removalSummary = null;
+  let removalConfirming = false;
+  let removalCompanionChecked = false;
+
+  // removalSection renders **Remove File Janitor** and, once pressed, the
+  // confirmation built from the server's dry run.
+  //
+  // The confirmation is a step inside Settings rather than a second modal: the
+  // console is already the one active dialog, and a dialog on top of it would
+  // put the destructive question above the context that explains it (FR-112,
+  // FR-119).
+  function removalSection() {
+    const section = el('div', 'dj-setting dj-setting-removal');
+    section.appendChild(el('h4', 'dj-setting-heading', 'Remove File Janitor'));
+
+    if (!removalConfirming) {
+      section.appendChild(
+        el(
+          'p',
+          'dj-setting-help',
+          'Stops managing this folder and removes File Janitor from this workspace. ' +
+            'Your files are not moved or deleted.'
+        )
+      );
+      const start = button(
+        'Remove File Janitor',
+        'dj-btn dj-btn-secondary dj-btn-destructive',
+        () => void beginRemoval()
+      );
+      start.id = 'downloadsJanitorRemove';
+      section.appendChild(start);
+      return section;
+    }
+
+    const summary = removalSummary || {};
+    const confirmation = el('div', 'dj-removal-confirm');
+    confirmation.setAttribute('role', 'group');
+    confirmation.setAttribute('aria-label', 'Confirm removing File Janitor');
+
+    // Name the folder. A confirmation the user cannot evaluate is not one.
+    confirmation.appendChild(
+      el(
+        'p',
+        'dj-removal-lead',
+        summary.managed_folder
+          ? 'Ori will stop managing ' + safeName(summary.managed_folder) + '.'
+          : 'Ori will remove File Janitor from this workspace.'
+      )
+    );
+
+    const consequences = el('ul', 'dj-disclosure-list');
+    (summary.stops_automation || []).forEach(line =>
+      consequences.appendChild(el('li', 'dj-disclosure-item', 'Stops: ' + line))
+    );
+    consequences.appendChild(
+      el('li', 'dj-disclosure-item', 'Ori gives up its access to the folder.')
+    );
+    // The single most important sentence in the dialog.
+    consequences.appendChild(
+      el(
+        'li',
+        'dj-disclosure-item',
+        'No files are moved, renamed, deleted, or restored. Your folder is left exactly as it is.'
+      )
+    );
+    (summary.retained_audit || []).forEach(line =>
+      consequences.appendChild(el('li', 'dj-disclosure-item', 'Kept: ' + line))
+    );
+    if ((summary.kept_shared || summary.shared || []).length > 0) {
+      consequences.appendChild(
+        el(
+          'li',
+          'dj-disclosure-item',
+          'Anything shared with another feature stays available to it.'
+        )
+      );
+    }
+    confirmation.appendChild(consequences);
+
+    // The companion is a separate decision, presented as one.
+    if (summary.companion && summary.companion.removable) {
+      const label = el('label', 'dj-removal-companion');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.id = 'downloadsJanitorRemoveCompanion';
+      box.checked = removalCompanionChecked;
+      box.addEventListener('change', () => {
+        removalCompanionChecked = box.checked;
+      });
+      label.appendChild(box);
+      label.appendChild(el('span', '', ' Also remove the Curator agent from this workspace'));
+      confirmation.appendChild(label);
+    } else if (summary.companion) {
+      confirmation.appendChild(
+        el('p', 'dj-setting-help', summary.companion.reason || 'The Curator agent is left alone.')
+      );
+    }
+
+    const buttons = el('div', 'dj-settings-actions');
+    const confirm = button(
+      'Remove File Janitor',
+      'dj-btn dj-btn-destructive',
+      () => void completeRemoval()
+    );
+    confirm.id = 'downloadsJanitorRemoveConfirm';
+    const cancel = button('Keep File Janitor', 'dj-btn dj-btn-secondary', () => {
+      removalConfirming = false;
+      removalSummary = null;
+      removalCompanionChecked = false;
+      setSettingsMessage('');
+      renderSettings();
+    });
+    cancel.id = 'downloadsJanitorRemoveCancel';
+    buttons.appendChild(cancel);
+    buttons.appendChild(confirm);
+    confirmation.appendChild(buttons);
+
+    section.appendChild(confirmation);
+    return section;
+  }
+
+  // beginRemoval asks the server what removal would do, and shows that.
+  //
+  // The description is fetched rather than written here so it states what will
+  // happen to THIS workspace — which folder, what stops, what is kept. Copy
+  // composed in the browser cannot know, and would drift from the behavior it
+  // claims to describe (FR-24, FR-25).
+  async function beginRemoval() {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    setSettingsMessage('');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor/removal'
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || 'Ori could not describe what removing this would do.');
+      }
+      removalSummary = body.removal || {};
+      removalConfirming = true;
+      removalCompanionChecked = false;
+      renderSettings();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not describe what removing this would do.');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function completeRemoval() {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    setSettingsMessage('Removing File Janitor…');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor',
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remove_companion: removalCompanionChecked })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.message || 'Ori could not remove File Janitor.');
+      }
+      removalConfirming = false;
+      removalSummary = null;
+      removalCompanionChecked = false;
+
+      // The console is showing a capability this workspace no longer has, so
+      // it closes rather than lingering over controls that would now fail. The
+      // catalog reload is what makes the station and the card disappear and the
+      // capability offer itself again as Available (FR-24, FR-10).
+      close();
+      lastStatus = { applies: false };
+      render(lastStatus);
+      const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+      if (catalog && typeof catalog.reload === 'function') await catalog.reload();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not remove File Janitor.');
+      renderSettings();
+    } finally {
+      busy = false;
+    }
   }
 
   // curatorSection reports whether the optional Curator is present and offers
@@ -3096,6 +3290,15 @@
       consoleCloseButton = null;
       rememberedTab.clear();
       subscribers.clear();
+      // The remembered workspace id too: a test that set one explicitly would
+      // otherwise leak it into every later test, which reads as a mysterious
+      // request to a workspace that test never mentioned.
+      workspaceId = '';
+      removalSummary = null;
+      removalConfirming = false;
+      removalCompanionChecked = false;
+      pageOffset = 0;
+      filter = '';
       historyActions = [];
       historyLoaded = false;
       settingsOpen = false;

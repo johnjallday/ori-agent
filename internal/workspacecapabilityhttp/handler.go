@@ -156,6 +156,76 @@ func (h *Handler) AddCompanion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RemovalSummary handles
+// GET /api/workspaces/{workspaceID}/capabilities/{capabilityID}/removal.
+//
+// It changes nothing. The confirmation the user reads comes from here so it
+// states what removal will actually do to THIS workspace — which folder loses
+// access, what stops, what is kept — rather than generic copy that cannot know
+// (FR-24, FR-25).
+func (h *Handler) RemovalSummary(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	capabilityID := strings.TrimSpace(r.PathValue("capabilityID"))
+	if capabilityID == "" {
+		_ = orihttp.RespondBadRequest(w, "capability id is required")
+		return
+	}
+
+	summary, err := h.service.RemovalPlan(workspaceID, capabilityID)
+	if err != nil {
+		h.respondError(w, err, "Failed to describe this capability's removal")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "removal": summary})
+}
+
+// RemoveCapability handles
+// DELETE /api/workspaces/{workspaceID}/capabilities/{capabilityID}.
+//
+// Removing something already removed is success, not an error: a retry after a
+// partial failure has to be able to finish (FR-15).
+func (h *Handler) RemoveCapability(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	capabilityID := strings.TrimSpace(r.PathValue("capabilityID"))
+	if capabilityID == "" {
+		_ = orihttp.RespondBadRequest(w, "capability id is required")
+		return
+	}
+
+	// The companion is a separate decision, so it is a separate field the
+	// caller must set. Defaulting it to false means an uninstall never deletes
+	// an agent the user did not ask it to (FR-27).
+	var req struct {
+		RemoveCompanion bool `json:"remove_companion,omitempty"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+	}
+
+	result, err := h.service.Remove(workspaceID, capabilityID,
+		workspacecapability.RemoveOptions{RemoveCompanion: req.RemoveCompanion})
+	if err != nil {
+		h.respondError(w, err, "Failed to remove this capability")
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{
+		"success":           true,
+		"removed":           result.Removed,
+		"already_removed":   result.AlreadyRemoved,
+		"released":          result.Released,
+		"kept_shared":       result.KeptShared,
+		"companion_removed": result.CompanionRemoved,
+	})
+}
+
 // resolveWorkspace enforces the boundary shared by every endpoint: the service
 // is wired, the workspace exists, and it belongs to the current user. A
 // workspace owned by someone else is reported as not found rather than
@@ -227,6 +297,11 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 		case workspacecapability.CodeCompanionUnavailable:
 			status = http.StatusServiceUnavailable
 		case workspacecapability.CodeCompanionFailed:
+			status = http.StatusInternalServerError
+		case workspacecapability.CodeRemovalIncomplete, workspacecapability.CodeRemovalFailed:
+			// A partial teardown is a server-side condition the user retries,
+			// not a bad request. The capability stays installed and unhealthy
+			// meanwhile, which is visible and repairable.
 			status = http.StatusInternalServerError
 		case workspacecapability.CodeInstallFailed, workspacecapability.CodeInstallIncomplete:
 			status = http.StatusInternalServerError

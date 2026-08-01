@@ -188,6 +188,17 @@ func (m *Migrator) migrateOne(workspaceID string) migrationOutcome {
 // None of those mean the capability was installed; acting on them would put a
 // station on an unrelated workspace and claim access the user never granted.
 func (m *Migrator) hasAuthoritativeLegacySignal(ws *workspace.Workspace) bool {
+	// A removal the user performed outranks every signal below.
+	//
+	// Template provenance in particular survives an uninstall — nothing about
+	// removing a capability changes which blueprint a workspace was created
+	// from — so without this check the very next restart would re-install what
+	// the user had just removed, every time, with no way to make it stick
+	// (FR-30).
+	if ws.CapabilityWasRemoved(workspace.CapabilityFileJanitor) {
+		return false
+	}
+
 	// 1. Built-in Downloads Janitor template provenance.
 	if ws.IsFromTemplate(LegacyDownloadsTemplateID) {
 		return true
