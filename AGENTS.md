@@ -166,6 +166,8 @@ Example:
 
 Update the file after completing each sub-task, not just after completing an entire parent task.
 
+**Execution is continuous.** Work straight through **all** parent groups without pausing for approval between them: finish a group, tick its boxes, demo it, commit it, and start the next group in the same turn. A finished group is not a checkpoint — never end a turn with "Group 3 done, shall I continue?". The only human gate is the `Open PR` sub-task at the very end; stop there and nowhere else, unless you hit a real blocker (see "Interaction Model" in AGENTS.md).
+
 ## Delivery Checkpoints
 
 By default, one PRD and task list maps to one feature worktree, one branch, and one PR targeting `dev`. Keep commits conventional and focused. Include a `Commit: "<conventional message>"` sub-task after every parent group that is a tested, reviewable milestone. The final parent group must end with `Open PR → squash-merge to dev` (using `wt pr` when authorized) and `Run wt done [feature-name] after merge` to archive the completed checklist back to the dev worktree and clean up the feature worktree.
@@ -199,9 +201,18 @@ The problem to avoid is not "backend before frontend" — it's building one whol
 
 ## Interaction Model
 
-The process has exactly one pause: after generating parent tasks, wait for user confirmation ("Go") before generating the detailed sub-tasks. This ensures the high-level plan aligns with user expectations before diving into details.
+The pipeline has exactly **two** pauses:
 
-There is a second checkpoint, but it is **not** a pause: once the sub-tasks are generated and the task list is saved (step 8), immediately proceed to step 9 (`wt start [feature-name]`) without asking again. PRD generation and the full task list (parent + sub-tasks) both happen in the `ori-agent-dev` worktree, which is the single source of truth for planning docs (`tasks/` is gitignored, so it doesn't sync between worktrees on its own). Only after the complete task list is saved does a feature worktree get created — implementation never starts in dev.
+1. **After parent tasks are generated** — wait for "Go" before writing sub-tasks. This ensures the high-level plan aligns with user expectations before diving into details.
+2. **Before the PR is opened** — wait for explicit approval before `gh pr create` / `wt pr`.
+
+**Everything between them runs unattended.** Once implementation starts, work straight through every parent group in one continuous run: complete a group, tick its boxes, run its `Demo:`, commit, and immediately begin the next group in the same turn. A completed group is not an approval point — don't ask "ready for group 4?", don't present a demo screenshot for sign-off. The plan was approved when the task list was approved. Multi-PR epics gate per **PR**, not per group: run all groups belonging to one seam-PR continuously and stop only at that seam-PR's own open step.
+
+The `Demo:` checkpoint stays, but it is a **self**-check, not a review request: drive the new surface, screenshot it, fix what's broken, commit, keep going. Batch the screenshots into the final summary.
+
+Break the continuous run only for a **real blocker**, never for a check-in: a genuine ambiguity where guessing could produce the wrong feature; a plan whose premise turns out to be invalid; a destructive or outward-facing action the plan didn't cover; something only the user can supply (credential, interactive login, product decision); or the same step failing ~3 times with no new idea. Stop immediately in those cases with the specific question rather than burning the remaining groups first. Otherwise deliver one final summary — what each group shipped, the screenshots, real test results, any deviations — and then ask for PR approval.
+
+There is a third checkpoint, but it is **not** a pause: once the sub-tasks are generated and the task list is saved (step 8), immediately proceed to step 9 (`wt start [feature-name]`) without asking again. PRD generation and the full task list (parent + sub-tasks) both happen in the `ori-agent-dev` worktree, which is the single source of truth for planning docs (`tasks/` is gitignored, so it doesn't sync between worktrees on its own). Only after the complete task list is saved does a feature worktree get created — implementation never starts in dev.
 
 ## Target Audience
 
