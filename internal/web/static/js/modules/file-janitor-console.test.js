@@ -2300,7 +2300,9 @@ test('closing returns focus to the control that opened it', () => {
 test('opening puts focus inside the console', () => {
   const doc = setup();
   renderReview(doc);
-  assert.equal(doc.activeElement.getAttribute('data-fj-console-close'), '');
+  // Focus lands on the dialog itself, which puts a screen reader at the title
+  // rather than partway into the controls.
+  assert.equal(doc.activeElement.id, 'fileJanitorConsoleDialog');
 });
 
 test('a deep link opens the console on the requested tab', () => {
@@ -2528,7 +2530,9 @@ test('a deep link to a candidate that is gone still opens a working tab', () => 
   assert.equal(panel.activeTab(), 'review');
   assert.equal(doc.getElementById('fileJanitorLinkedRow'), null);
   // Focus still lands inside the console rather than being stranded.
-  assert.equal(doc.activeElement.getAttribute('data-fj-console-close'), '');
+  // Focus lands on the dialog itself, which puts a screen reader at the title
+  // rather than partway into the controls.
+  assert.equal(doc.activeElement.id, 'fileJanitorConsoleDialog');
   assert.equal(doc.getElementById('downloadsJanitorError').hidden, true, 'not an error');
 });
 

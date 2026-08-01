@@ -2372,8 +2372,13 @@
     host.appendChild(backdrop);
 
     const dialog = el('div', 'fj-console');
+    dialog.id = 'fileJanitorConsoleDialog';
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
+    // Programmatically focusable so focus can land on the dialog itself, which
+    // is what puts a screen reader at its title rather than partway into its
+    // controls. -1 keeps it out of the Tab order.
+    dialog.setAttribute('tabindex', '-1');
     // Labelled by the visible title, so the name a sighted user reads and the
     // name a screen reader announces are the same string (FR-119).
     dialog.setAttribute('aria-labelledby', CONSOLE_TITLE_ID);
@@ -2425,6 +2430,15 @@
   // the first focusable child. Landing there also means Escape is not the only
   // way out for someone who did not see the console open (FR-119).
   function focusConsole() {
+    // The dialog itself, looked up from the document rather than held from
+    // render time. A reference captured while the node was still detached
+    // focuses nothing — .focus() on an element outside the document is a no-op,
+    // silently — which left the keyboard back on the page behind an open modal.
+    const dialog = document.getElementById('fileJanitorConsoleDialog');
+    if (dialog && typeof dialog.focus === 'function') {
+      dialog.focus();
+      return;
+    }
     if (consoleCloseButton && typeof consoleCloseButton.focus === 'function') {
       consoleCloseButton.focus();
     }
