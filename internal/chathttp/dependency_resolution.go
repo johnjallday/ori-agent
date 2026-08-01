@@ -152,10 +152,10 @@ func buildSkillRequiredMCPActions(workspaceID, serverName, preferenceKey string)
 		return []dependencyResolutionAction{
 			{
 				Type:        dependencyActionTypeOpenURL,
-				Label:       "Open Workspaces",
+				Label:       "Open Workspace Map",
 				Description: "Choose a workspace first, then enable the required connector.",
 				Variant:     "primary",
-				URL:         "/workspaces",
+				URL:         "/",
 				ServerName:  strings.TrimSpace(serverName),
 			},
 			{

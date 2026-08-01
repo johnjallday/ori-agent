@@ -484,7 +484,12 @@ func TestBuiltinQuests_PersonalHQActionFocusesMapSite(t *testing.T) {
 		if q.ID != "t2-build-hq" {
 			continue
 		}
-		if q.ActionURL != "/workspaces?view=map&focus=personal-hq" {
+		// Home is now the canonical workspace Map, so the quest links there
+		// directly rather than through the retired /workspaces launcher
+		// (PRD FR11). `view=map` is gone because Map is the default view and
+		// is expressed by the parameter's ABSENCE (FR26); the `focus` intent
+		// that selects the Personal HQ site is what actually matters here.
+		if q.ActionURL != "/?focus=personal-hq" {
 			t.Fatalf("Personal HQ action URL = %q, want focused workspace Map route", q.ActionURL)
 		}
 		if q.Title != "Build My HQ" || q.ActionLabel != "Build My HQ" {

@@ -933,7 +933,7 @@ export class OnboardingManager {
       if (!response.ok) throw new Error('Failed to complete onboarding');
 
       if (this.modalInstance) this.modalInstance.hide();
-      window.location.href = '/workspaces?view=map&focus=personal-hq';
+      window.location.href = '/?focus=personal-hq';
     } catch (error) {
       console.error('Error completing onboarding:', error);
     }

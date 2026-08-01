@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -274,5 +276,150 @@ func TestFocusedNotePageRouteServesSingleNotePage(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected /notes/{noteId} response to contain %q", want)
 		}
+	}
+}
+
+// TestWorkspacesLauncherRedirectsToHome covers the compatibility contract for
+// the retired launcher route (PRD FR3, FR4, FR6, FR142). Every supported
+// query-driven entry point must survive the redirect with its intent intact,
+// and unrelated parameters must not be dropped on the floor.
+func TestWorkspacesLauncherRedirectsToHome(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	cases := []struct {
+		name string
+		from string
+		want string
+	}{
+		{"bare launcher", "/workspaces", "/"},
+		{"tree view survives", "/workspaces?view=tree", "/?view=tree"},
+		// Map is the default and is expressed by the parameter's ABSENCE, so an
+		// explicit view=map is normalized away rather than carried across.
+		{"map view normalizes to the default", "/workspaces?view=map", "/"},
+		// The retired Cards view must never resurrect; it lands on Map (FR6).
+		{"retired cards view normalizes to Map", "/workspaces?view=cards", "/"},
+		{"unknown view normalizes to Map", "/workspaces?view=nonsense", "/"},
+		{"create intent survives", "/workspaces?create=1", "/?create=1"},
+		{
+			"blueprint preselection survives",
+			"/workspaces?create=1&blueprint=email-ops",
+			"/?blueprint=email-ops&create=1",
+		},
+		{"personal HQ focus survives", "/workspaces?focus=personal-hq", "/?focus=personal-hq"},
+		{"hq onboarding state survives", "/workspaces?hq=setup", "/?hq=setup"},
+		// An unrelated parameter is not this route's business to discard.
+		{"unrelated parameters survive", "/workspaces?utm_source=email", "/?utm_source=email"},
+		{
+			"tree view plus unrelated parameters",
+			"/workspaces?view=tree&utm_source=email",
+			"/?utm_source=email&view=tree",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.from, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			// A TEMPORARY redirect for the first stable release, so rollback
+			// stays safe (PRD §9).
+			if rec.Code != http.StatusFound {
+				t.Fatalf("GET %s: expected 302, got %d", tc.from, rec.Code)
+			}
+			if got := rec.Header().Get("Location"); got != tc.want {
+				t.Errorf("GET %s: redirected to %q, want %q", tc.from, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceScopedRoutesSurviveTheMigration pins FR7: only the exact
+// /workspaces path redirects. Workspace-scoped routes and their descendants
+// keep working, and the API is untouched.
+func TestWorkspaceScopedRoutesSurviveTheMigration(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	for _, path := range []string{
+		"/workspaces/ws-1",
+		"/workspaces/ws-1/notes",
+		"/workspaces/ws-1/task/task-1",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusFound {
+			if loc := rec.Header().Get("Location"); loc == "/" {
+				t.Errorf("GET %s was redirected to Home; workspace-scoped routes must be untouched", path)
+			}
+		}
+	}
+
+	// The API namespace must not be caught by the page redirect either.
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code == http.StatusFound && rec.Header().Get("Location") == "/" {
+		t.Error("GET /api/workspaces was redirected to Home; the API must be untouched")
+	}
+}
+
+// TestNoInternalLinksTargetTheRetiredLauncher pins FR11/FR12: rendered pages
+// must link to Home directly rather than leaning on the compatibility redirect.
+func TestNoInternalLinksTargetTheRetiredLauncher(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	for _, path := range []string{"/", "/agents", "/action-center"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			continue
+		}
+		body := rec.Body.String()
+		if strings.Contains(body, `href="/workspaces"`) {
+			t.Errorf("page %s still links to the retired launcher (href=\"/workspaces\")", path)
+		}
+		if strings.Contains(body, `href="/workspaces?`) {
+			t.Errorf("page %s still links to the retired launcher with a query", path)
+		}
+	}
+}
+
+// TestNoStaticAssetLinksTargetTheRetiredLauncher scans the shipped JavaScript
+// for launcher links too.
+//
+// The rendered-page check above cannot see them: several surfaces build their
+// markup in JS at runtime, and two such links (the workspace-scoped page's
+// "Workspaces" back button and the Agents MCP note) survived the migration's
+// template audit precisely because nothing rendered them server-side.
+func TestNoStaticAssetLinksTargetTheRetiredLauncher(t *testing.T) {
+	root := filepath.Join("..", "web", "static", "js")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".js") {
+			return nil
+		}
+		// The launcher's own modules are exempt: /workspaces still serves them
+		// until that page is deleted outright.
+		if strings.Contains(d.Name(), "workspace-hub") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path) // #nosec G304 -- fixed repo-relative walk
+		if readErr != nil {
+			return readErr
+		}
+		for _, bad := range []string{`href="/workspaces"`, `href='/workspaces'`} {
+			if strings.Contains(string(data), bad) {
+				t.Errorf("%s links to the retired launcher (%s); point it at \"/\"", path, bad)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking static JS: %v", err)
 	}
 }

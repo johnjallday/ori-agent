@@ -1092,7 +1092,7 @@ async function closeTab(noteId, paneIndex) {
   if (!pane0?.activeId) {
     const wsId = currentWorkspaceId();
     window.NotePresence?.releaseOpenNote(currentNote?.id);
-    window.location.href = wsId ? workspaceNotesPath(wsId) : '/workspaces';
+    window.location.href = wsId ? workspaceNotesPath(wsId) : '/';
     return;
   }
   // If the editor pane's active note changed, load it.

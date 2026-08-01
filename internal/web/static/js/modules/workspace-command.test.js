@@ -224,7 +224,11 @@ test('rendered command copy uses detailed-view vocabulary', () => {
   assert.match(container.innerHTML, /Mission/);
   assert.match(container.innerHTML, /A focused production workspace/);
   assert.match(container.innerHTML, /launch/);
-  assert.match(container.innerHTML, /href="\/workspaces"/);
+  // The back action points at Home, the canonical workspace overview, and says
+  // "Home" rather than leaning on the /workspaces compatibility redirect
+  // (PRD FR11/FR12). Workspace-SCOPED links below are unchanged.
+  assert.match(container.innerHTML, /href="\/" aria-label="Back to the workspace map on Home">Home</);
+  assert.doesNotMatch(container.innerHTML, /href="\/workspaces"/);
   assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/canvas"/);
   assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/diagnostics"/);
   assert.match(container.innerHTML, /href="\/workflows"/);

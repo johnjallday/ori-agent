@@ -251,8 +251,13 @@ export function followUpView(f) {
 (function () {
   if (typeof document === 'undefined') return;
 
-  const hub = document.getElementById('workspaceHub');
-  if (!hub) return;
+  // Mount on either host surface: the legacy /workspaces launcher (#workspaceHub)
+  // or the Map-first Home cockpit (#homeCockpit). Gating on the launcher alone
+  // would silently drop the Personal HQ map site and every optional HQ mount
+  // once Home became the canonical launcher (PRD FR28, FR115).
+  const host =
+    document.getElementById('workspaceHub') || document.getElementById('homeCockpit');
+  if (!host) return;
 
   let statusPromise = null;
 
