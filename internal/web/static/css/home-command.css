@@ -680,9 +680,11 @@ body.home-command-page .home-command-bridge * {
   min-height: 0;
 }
 
+/* Same reason as .quest-log-restore below: `height: 100%` was sized against a
+   fixed Operations Board grid row. In the Today rail it must size to content,
+   or the quest log collapses to nothing at ordinary viewport heights. */
 .quest-log {
   position: relative;
-  height: 100%;
   overflow: hidden;
   padding: 13px;
   clip-path: polygon(
@@ -1053,9 +1055,13 @@ a.quest-title:focus-visible {
   line-height: 1.55;
 }
 
+/* The collapsed quest-log badge sized itself to 100% of its parent, which was a
+   fixed Operations Board grid row. Inside the Today rail's flex column that
+   resolves to 0 at common viewport heights, so the badge existed, reported
+   itself un-hidden, and drew nothing — the collapsed quest log became
+   unrestorable. Size to content instead. */
 .quest-log-restore {
   display: grid;
-  height: 100%;
   place-items: start stretch;
 }
 

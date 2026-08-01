@@ -121,16 +121,22 @@ test.describe('Onboarding', () => {
     });
   }
 
-  test('collects identity and explicit workspace-directory consent on the first step', async ({ page }) => {
+  test('collects identity and explicit workspace-directory consent on the first step', async ({
+    page
+  }) => {
     await installBaseOnboardingRoutes(page);
     await page.goto('/');
 
     await expect(page.locator('#onboardingModal')).toBeVisible();
     await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 1 of 3');
-    await expect(page.locator('#onboardingWorkspaceRootInput')).toHaveValue('/tmp/ori-test-workspaces');
+    await expect(page.locator('#onboardingWorkspaceRootInput')).toHaveValue(
+      '/tmp/ori-test-workspaces'
+    );
     await expect(page.locator('#onboardingVaultRoot')).toHaveCount(0);
     await expect(
-      page.getByText('Ori only scans the workspace directory you confirm. You can change it later in Settings.')
+      page.getByText(
+        'Ori only scans the workspace directory you confirm. You can change it later in Settings.'
+      )
     ).toBeVisible();
     await expect(page.locator('#onboardingWorkspaceRootStatus')).toContainText('will not scan');
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
@@ -497,20 +503,28 @@ test.describe('Home First Run', () => {
       element.hidden = false;
     });
 
+    // The Daily Brief used to sit in its own row between the command strip and
+    // the Operations Board. It now lives INSIDE the cockpit's Today rail, so
+    // "below the command strip and above Operations" is no longer the shape to
+    // assert. What still matters: it is a Today section, it sits below Ask Ori,
+    // and it never overlaps the workspace area (PRD FR75, FR15).
     const layout = await page.evaluate(() => {
       const command = document.getElementById('homeAssistantCard')?.getBoundingClientRect();
       const brief = document.getElementById('homeDailyBrief')?.getBoundingClientRect();
-      const operations = document.querySelector('.home-cockpit')?.getBoundingClientRect();
+      const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();
       return {
         commandBottom: command?.bottom || 0,
         briefTop: brief?.top || 0,
-        briefBottom: brief?.bottom || 0,
-        operationsTop: operations?.top || 0
+        briefLeft: brief?.left || 0,
+        areaRight: area?.right || 0,
+        inTodayRail: !!document.getElementById('homeDailyBrief')?.closest('#cockpitRailToday')
       };
     });
 
+    expect(layout.inTodayRail).toBe(true);
     expect(layout.briefTop).toBeGreaterThanOrEqual(layout.commandBottom);
-    expect(layout.operationsTop).toBeGreaterThanOrEqual(layout.briefBottom);
+    // Beside the workspace area, not on top of it.
+    expect(layout.briefLeft).toBeGreaterThanOrEqual(layout.areaRight - 1);
   });
 
   test('collapses the quest log to a progress badge and restores it', async ({ page }) => {
@@ -626,18 +640,31 @@ test.describe('Home First Run', () => {
     await expect(page.locator('#homeCockpit')).toBeVisible();
     await expect(page.locator('#questLog')).toBeVisible();
 
+    // Progression used to be a sibling stacked below the Operations Board. It
+    // is now a Today section inside the cockpit's rail, so "below the board" is
+    // no longer the shape. What still matters below desktop width: the page
+    // never scrolls horizontally, and the cockpit stacks workspace area above
+    // context rail (PRD FR134, FR135).
     const layout = await page.evaluate(() => {
-      const board = document.querySelector('.home-cockpit')?.getBoundingClientRect();
+      const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();
+      const rail = document.getElementById('cockpitRail')?.getBoundingClientRect();
       const progression = document.querySelector('.home-progression-zone')?.getBoundingClientRect();
       return {
         pageWidth: document.documentElement.scrollWidth,
         viewportWidth: window.innerWidth,
-        boardBottom: board?.bottom || 0,
-        progressionTop: progression?.top || 0
+        areaTop: area?.top || 0,
+        railTop: rail?.top || 0,
+        progressionInRail: !!document
+          .querySelector('.home-progression-zone')
+          ?.closest('#cockpitRailToday'),
+        progressionRendered: !!progression
       };
     });
     expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
-    expect(layout.progressionTop).toBeGreaterThanOrEqual(layout.boardBottom);
+    expect(layout.railTop).toBeGreaterThan(layout.areaTop);
+    if (layout.progressionRendered) {
+      expect(layout.progressionInRail).toBe(true);
+    }
   });
 });
 

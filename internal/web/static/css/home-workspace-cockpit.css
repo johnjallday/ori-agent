@@ -306,6 +306,31 @@
   display: none;
 }
 
+/* Today's sections must keep their natural height and let the RAIL scroll.
+   As flex children they defaulted to `flex: 0 1 auto`, so every section was
+   shrunk below its content — Daily Brief rendered 60px tall over 236px of
+   content — and each one's `overflow: hidden` then clipped the remainder, so
+   the sections visually overlapped each other. */
+.cockpit-rail-body > * {
+  flex: 0 0 auto;
+}
+
+/* These carry `min-height: 0` and `overflow: hidden` from the Operations
+   Board, where they were sized by a grid track. In the rail that combination
+   silently truncates them, so the rail must let them be their content height
+   and take the scrolling itself. */
+.cockpit-rail-body .home-section,
+.cockpit-rail-body .home-daily-brief,
+.cockpit-rail-body .quest-log {
+  min-height: auto;
+  overflow: visible;
+}
+
+.cockpit-rail-body .home-section-body,
+.cockpit-rail-body .quest-log-list {
+  overflow: visible;
+}
+
 /* The footer stays reachable from every rail state and must never sit past an
    unreachable fixed edge on a short viewport (FR88, FR139) — it is a normal
    flex row after the scrolling body, not a fixed overlay. */

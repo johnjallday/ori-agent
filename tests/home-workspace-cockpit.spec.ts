@@ -34,7 +34,8 @@ async function ensureWorkspace(page: Page): Promise<string> {
   const list = await (await page.request.get('/api/workspaces')).json();
   const rows = list.workspaces || list.folders || [];
   const existing = rows.find(
-    (ws: { id?: string; kind?: string }) => ws?.id && String(ws.kind || '').toLowerCase() !== 'group'
+    (ws: { id?: string; kind?: string }) =>
+      ws?.id && String(ws.kind || '').toLowerCase() !== 'group'
   );
   if (existing?.id) return existing.id;
   const res = await page.request.post('/api/workspaces', {

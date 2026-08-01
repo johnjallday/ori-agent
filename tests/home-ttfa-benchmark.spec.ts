@@ -69,7 +69,10 @@ type SeededWorkspace = { id: string; name: string };
 async function listWorkspaces(request: APIRequestContext): Promise<SeededWorkspace[]> {
   const res = await request.get('/api/workspaces');
   if (!res.ok()) throw new Error(`list workspaces failed (${res.status()})`);
-  const body = (await res.json()) as { workspaces?: SeededWorkspace[]; folders?: SeededWorkspace[] };
+  const body = (await res.json()) as {
+    workspaces?: SeededWorkspace[];
+    folders?: SeededWorkspace[];
+  };
   return body.workspaces ?? body.folders ?? [];
 }
 
@@ -101,7 +104,9 @@ async function ensureFixture(request: APIRequestContext): Promise<SeededWorkspac
   );
   const seeded = [...existing];
   for (let i = existing.length; i < FIXTURE_WORKSPACE_COUNT; i++) {
-    seeded.push(await createWorkspace(request, `${FIXTURE_PREFIX} ${String(i + 1).padStart(2, '0')}`));
+    seeded.push(
+      await createWorkspace(request, `${FIXTURE_PREFIX} ${String(i + 1).padStart(2, '0')}`)
+    );
   }
   return seeded.slice(0, FIXTURE_WORKSPACE_COUNT);
 }
@@ -110,11 +115,14 @@ async function ensureFixture(request: APIRequestContext): Promise<SeededWorkspac
 // page would otherwise raise a mandatory prompt that is not part of this
 // journey and would pollute the timing.
 async function suppressEntryAgentPrompts(page: Page, workspaces: SeededWorkspace[]) {
-  await page.addInitScript(ids => {
-    for (const id of ids as string[]) {
-      window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
-    }
-  }, workspaces.map(ws => ws.id));
+  await page.addInitScript(
+    ids => {
+      for (const id of ids as string[]) {
+        window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
+      }
+    },
+    workspaces.map(ws => ws.id)
+  );
 }
 
 /** Capture the structured `[home.ttfa]` console marker (FR141). */

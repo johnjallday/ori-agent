@@ -430,8 +430,14 @@ test('filterTreeByTags keeps a group whose descendant matches, so the path survi
     filtered.map(n => n.id),
     ['g1']
   );
-  assert.deepEqual(filtered[0].children.map(n => n.id), ['g2']);
-  assert.deepEqual(filtered[0].children[0].children.map(n => n.id), ['w3']);
+  assert.deepEqual(
+    filtered[0].children.map(n => n.id),
+    ['g2']
+  );
+  assert.deepEqual(
+    filtered[0].children[0].children.map(n => n.id),
+    ['w3']
+  );
 });
 
 test('filterTreeByTags with no active tags is a pass-through', () => {

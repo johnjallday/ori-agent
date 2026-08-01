@@ -1304,7 +1304,11 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
       return;
     }
     if (!resolved) {
-      state.selectedId = '';
+      // The map dropped our selection, which only happens when that workspace
+      // no longer exists. Clearing it silently here would rob renderRail of the
+      // chance to say so, leaving a screen-reader user with a stale "X
+      // selected" announcement and no explanation (FR73). Leave selectedId in
+      // place and let renderRail detect the missing item and announce it.
       renderRail({ announceChange: false });
       return;
     }
