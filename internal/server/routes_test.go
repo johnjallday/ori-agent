@@ -2,9 +2,11 @@ package server
 
 import (
 	"bytes"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -382,5 +384,42 @@ func TestNoInternalLinksTargetTheRetiredLauncher(t *testing.T) {
 		if strings.Contains(body, `href="/workspaces?`) {
 			t.Errorf("page %s still links to the retired launcher with a query", path)
 		}
+	}
+}
+
+// TestNoStaticAssetLinksTargetTheRetiredLauncher scans the shipped JavaScript
+// for launcher links too.
+//
+// The rendered-page check above cannot see them: several surfaces build their
+// markup in JS at runtime, and two such links (the workspace-scoped page's
+// "Workspaces" back button and the Agents MCP note) survived the migration's
+// template audit precisely because nothing rendered them server-side.
+func TestNoStaticAssetLinksTargetTheRetiredLauncher(t *testing.T) {
+	root := filepath.Join("..", "web", "static", "js")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".js") {
+			return nil
+		}
+		// The launcher's own modules are exempt: /workspaces still serves them
+		// until that page is deleted outright.
+		if strings.Contains(d.Name(), "workspace-hub") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path) // #nosec G304 -- fixed repo-relative walk
+		if readErr != nil {
+			return readErr
+		}
+		for _, bad := range []string{`href="/workspaces"`, `href='/workspaces'`} {
+			if strings.Contains(string(data), bad) {
+				t.Errorf("%s links to the retired launcher (%s); point it at \"/\"", path, bad)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking static JS: %v", err)
 	}
 }
