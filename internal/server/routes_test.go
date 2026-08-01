@@ -9,6 +9,12 @@ import (
 	"testing"
 )
 
+type discardDesktopOpener struct{}
+
+func (discardDesktopOpener) OpenFolder(string) error          { return nil }
+func (discardDesktopOpener) OpenFile(string) error            { return nil }
+func (discardDesktopOpener) RevealInFileManager(string) error { return nil }
+
 func newRoutesTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -34,6 +40,7 @@ func newRoutesTestHandler(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("NewServerBuilder failed: %v", err)
 	}
+	builder.WithDesktopOpener(discardDesktopOpener{})
 
 	srv, err := builder.Build()
 	if err != nil {

@@ -8833,6 +8833,10 @@
   <script defer src="/js/modules/workspace-capabilities.js"></script>
   <script defer src="/js/modules/calendar-ops-setup.js"></script>
   <script defer src="/js/modules/calendar-console.js"></script>
+  <!-- Must precede sessions.js: it reads window.CreateWorkspaceTeamDraft while
+       binding the Create Workspace wizard. Deferred scripts run in document
+       order, so this tag's position is the dependency contract. -->
+  <script defer src="/js/modules/create-workspace-team-draft.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/dashboard.js"></script>
   <script defer src="/js/modules/toast.js"></script>

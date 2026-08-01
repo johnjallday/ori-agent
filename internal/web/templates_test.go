@@ -129,39 +129,195 @@ func TestRenderCreateWorkspaceProjectOpenOption(t *testing.T) {
 	}
 }
 
+// createWorkspaceModalMarkup returns just the Create Workspace modal's markup
+// from a rendered page, so wizard assertions — especially absence checks — can't
+// be satisfied or broken by unrelated modals on the same page. The modal's footer
+// create button is its last element, which makes a reliable end boundary.
+func createWorkspaceModalMarkup(t *testing.T, page string) string {
+	t.Helper()
+
+	start := strings.Index(page, `id="addFolderModal"`)
+	if start < 0 {
+		t.Fatalf("rendered page does not contain the Create Workspace modal")
+	}
+	end := strings.Index(page[start:], `id="createFolderBtn"`)
+	if end < 0 {
+		t.Fatalf("Create Workspace modal is missing its create button; update this helper")
+	}
+	return page[start : start+end]
+}
+
+// TestRenderCreateWorkspaceWizardReviewContract pins the four-step Create mode
+// shell: Blueprint → Details → Team → Review, each step numbered "of 4", with
+// Team owning the roster surface and Review reading as a confirmation.
 func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
 
-	html, err := r.RenderTemplate("workspaces", TemplateData{Title: "Workspaces - Ori Agent"})
+	page, err := r.RenderTemplate("workspaces", TemplateData{Title: "Workspaces - Ori Agent"})
 	if err != nil {
 		t.Fatalf("RenderTemplate(workspaces) failed: %v", err)
 	}
+	// Scope every assertion to the Create Workspace modal. The page also renders
+	// unrelated modals (onboarding has its own "Step N of 3" label), so a
+	// page-wide absence check would couple this test to other components.
+	html := createWorkspaceModalMarkup(t, page)
+
 	for _, want := range []string{
+		// Four ordered step sections.
 		`id="wizardStep1"`,
 		`id="wizardStep2"`,
 		`id="wizardStep3"`,
+		`id="wizardStep4"`,
 		`aria-current="step"`,
-		`Choose Blueprint`,
-		`Workspace Details`,
-		`Review &amp; Create`,
-		`id="workspaceTeamLiveRegion"`,
-		`id="addExistingAgentBtn"`,
+		// Stepper labels and numbers.
+		`data-step="4"`,
+		`>Blueprint`,
+		`>Details`,
+		`>Team`,
+		`>Review`,
+		`Step 1 of 4`,
+		`Step 2 of 4`,
+		`Step 3 of 4`,
+		`Step 4 of 4`,
+		// Step headings: Team assembles, Review confirms.
+		`Build your workspace team`,
+		`Ready to create?`,
+		// Blueprint shows a read-only, plan-derived included-agent summary.
+		`id="blueprintAgentSummary"`,
+		`id="blueprintAgentSummaryText"`,
+		`Included agents`,
+		// Blueprint keeps selection, briefing, scaffold, add-ons, and Manage.
+		`id="templatePicker"`,
+		`id="projectTemplateManageLink"`,
+		`id="templateBriefing"`,
+		`id="templateBriefingScaffoldRow"`,
+		`id="templateBriefingAddonsRow"`,
+		// Details keeps the mutable pre-create readiness controls (FR29, FR30).
+		`id="projectTemplateOpenAfterCreate"`,
+		`id="reaperSetupCard"`,
+		// Team owns ONE roster plus the inline saved-agent picker, and the
+		// Advanced include-team disclosure now lives here rather than on Details.
+		`id="workspaceTeamLayout"`,
+		`id="workspaceTeamReview"`,
+		`id="workspaceTeamRoster"`,
+		`id="workspaceTeamIssues"`,
+		`id="workspaceTeamAdvanced"`,
+		`id="templateAgentReviewToggle"`,
 		`id="existingAgentRosterPanel"`,
-		`id="workspaceAgentMapPreview"`,
-		`id="workspaceAgentMapNode"`,
-		`id="workspaceAgentMapStatus"`,
+		`id="existingAgentRosterSearch"`,
+		`id="workspaceTeamLiveRegion"`,
+		`Resulting workspace team`,
+		`Advanced team options`,
+		// Review keeps the read-only post-create setup preview.
+		`id="workspaceSetupPreview"`,
 		`aria-label="Close create workspace"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("rendered Create Workspace wizard missing %q", want)
 		}
 	}
-	for _, gone := range []string{"Select Blueprint", "Construct", "Template Agents"} {
+	for _, gone := range []string{
+		"Select Blueprint",
+		"Construct",
+		"Template Agents",
+		// Three-step remnants.
+		"Step 1 of 3",
+		"Step 2 of 3",
+		"Step 3 of 3",
+		"Review &amp; Create",
+		"Choose Blueprint",
+		"Workspace Details",
+		// The Review mount that used to receive relocated Details controls: the
+		// mutable readiness cards now stay on Details (FR29-FR31).
+		`id="wizardStep3ReviewMount"`,
+		`id="wizardStep4ReviewMount"`,
+		// The picker is permanent inline markup on Team, so it has no close
+		// button and is never opened from a Review-step button.
+		`id="closeExistingAgentRosterBtn"`,
+		// Blueprint carries NO interactive agent surface (FR20): no map preview,
+		// no create-all shortcut, and no reusable-agent setup form.
+		`id="workspaceAgentMapPreview"`,
+		`id="workspaceAgentMapNode"`,
+		`id="workspaceAgentMapStatus"`,
+		`id="workspaceAgentMapAvatarAction"`,
+		`id="workspaceAgentMapCreateAll"`,
+		`id="workspaceAgentMapSpecialists"`,
+		`id="workspaceTemplateAgentSetup"`,
+		`id="workspaceTemplateAgentSetupForm"`,
+		`id="workspaceTemplateAgentSetupSave"`,
+		`Create all defaults`,
+		`Save reusable agent`,
+		// The roster is one list: no nested "Blueprint agents" card, no separate
+		// saved-agent list, and no drop zone (FR33, FR63).
+		`id="templateAgentReview"`,
+		`id="templateAgentReviewMount"`,
+		`id="templateAgentReviewList"`,
+		`id="existingAgentTeamList"`,
+		`id="workspaceTeamDropZone"`,
+		`Blueprint agents`,
+		`Make a workspace copy`,
+		`Drop an existing agent here`,
+	} {
 		if strings.Contains(html, gone) {
-			t.Errorf("rendered Create Workspace wizard contains stale copy %q", gone)
+			t.Errorf("rendered Create Workspace wizard contains stale markup/copy %q", gone)
+		}
+	}
+}
+
+// TestCreateWorkspaceTeamDraftLoadsBeforeSessions guards the script-order
+// dependency for the Create Workspace wizard: sessions.js reads
+// window.CreateWorkspaceTeamDraft while binding the modal, so the helper must be
+// deferred ahead of it on every page that renders the modal. Both tags are
+// `defer`, which executes in document order, making tag position the contract —
+// and a silent one, because a helper that loads too late leaves the wizard
+// bound to an undefined draft while every API call still succeeds.
+func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	// Every page whose layout includes session-modals.tmpl, which renders
+	// components/workspaces/create-workspace-modal.tmpl. "index" covers
+	// layout/base.tmpl, which owns its own script block.
+	pages := []string{"index", "workspaces", "workspace-detail", "workspace-canvas", "workspace-task"}
+	const (
+		helper   = `/js/modules/create-workspace-team-draft.js`
+		sessions = `/js/modules/sessions.js`
+	)
+
+	for _, page := range pages {
+		data := TemplateData{
+			Title: page + " - Ori Agent",
+			Extra: map[string]any{"WorkspaceID": "ws-1", "TaskID": "task-1"},
+		}
+		html, err := r.RenderTemplate(page, data)
+		if err != nil {
+			t.Fatalf("RenderTemplate(%s) failed: %v", page, err)
+		}
+
+		if !strings.Contains(html, `id="addFolderModal"`) {
+			// If a page stops rendering the modal this assertion is moot; fail
+			// loudly rather than silently passing a vacuous check.
+			t.Fatalf("page %s no longer renders the Create Workspace modal; update this test", page)
+		}
+
+		helperAt := strings.Index(html, helper)
+		sessionsAt := strings.Index(html, sessions)
+		if helperAt < 0 {
+			t.Errorf("page %s does not load %s", page, helper)
+			continue
+		}
+		if sessionsAt < 0 {
+			t.Errorf("page %s does not load %s", page, sessions)
+			continue
+		}
+		if helperAt > sessionsAt {
+			t.Errorf("page %s loads %s after %s; the team-draft helper must come first",
+				page, helper, sessions)
 		}
 	}
 }

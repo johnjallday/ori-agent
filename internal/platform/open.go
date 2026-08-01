@@ -8,6 +8,30 @@ import (
 	"strings"
 )
 
+// DesktopOpener is the injectable boundary for operations that launch native
+// desktop applications. Production uses NativeDesktopOpener; tests should
+// provide a recording or no-op implementation so automated runs never open
+// Finder, Explorer, or another GUI application.
+type DesktopOpener interface {
+	OpenFolder(path string) error
+	OpenFile(path string) error
+	RevealInFileManager(path string) error
+}
+
+// NativeDesktopOpener delegates desktop operations to the current platform.
+type NativeDesktopOpener struct{}
+
+// OpenFolder opens a folder in the native file manager.
+func (NativeDesktopOpener) OpenFolder(path string) error { return OpenFolder(path) }
+
+// OpenFile opens a file with its default application.
+func (NativeDesktopOpener) OpenFile(path string) error { return OpenFile(path) }
+
+// RevealInFileManager reveals a file in the native file manager.
+func (NativeDesktopOpener) RevealInFileManager(path string) error {
+	return RevealInFileManager(path)
+}
+
 // OpenFolder opens the specified folder in the native file manager.
 // Returns an error if the folder doesn't exist or cannot be opened.
 //

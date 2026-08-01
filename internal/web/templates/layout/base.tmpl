@@ -344,6 +344,10 @@
   <script type="module" src="/js/modules/search-palette.js"></script>
   <script defer src="/js/modules/reaper-plugin-install.js"></script>
   <script defer src="/js/modules/reaper-setup-card.js"></script>
+  <!-- Must precede sessions.js: it reads window.CreateWorkspaceTeamDraft while
+       binding the Create Workspace wizard. Deferred scripts run in document
+       order, so this tag's position is the dependency contract. -->
+  <script defer src="/js/modules/create-workspace-team-draft.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/project-templates-manage.js"></script>
   <script defer src="/js/modules/toast.js"></script>

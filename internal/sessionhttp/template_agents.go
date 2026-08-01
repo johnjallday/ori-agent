@@ -30,6 +30,13 @@ type seedAgentsResult struct {
 	// name-match reuse is visible rather than silent (PRD FR7).
 	ReuseNotices []string
 	EntrySet     bool
+	// OwnedNames lists every agent definition this request actually brought into
+	// existence, in creation order. It is deliberately narrower than Created —
+	// which only carries entries that also need tool binding — because rollback
+	// must delete exactly what the request made and nothing else. An agent that
+	// already existed is reused, not owned, and deleting it would destroy the
+	// user's own definition.
+	OwnedNames []string
 }
 
 type templateAgentPlan struct {
@@ -207,6 +214,51 @@ func validateTemplateAgentOverrideName(name string) error {
 	return nil
 }
 
+// validateRosterNameCollisions refuses a request whose CUSTOMIZED blueprint
+// agents would collide with the saved agents the same request selects (PRD FR45,
+// FR70). Both would resolve to one definition, silently turning two intended
+// roster members into one.
+//
+// Only overridden entries are checked. A blueprint agent that already shares a
+// name with a selected saved agent is the ordinary reuse case: the roster
+// attaches it once, on purpose, and legacy callers that send both rely on that.
+// It is renaming an agent ONTO another member that expresses two intentions the
+// server cannot satisfy at once.
+func validateRosterNameCollisions(tpl projecttemplates.Template, overrides []templateAgentOverride, existingNames []string) error {
+	if len(overrides) == 0 || len(existingNames) == 0 || !tpl.HasAgents() {
+		return nil
+	}
+
+	selected := make(map[string]string, len(existingNames))
+	for _, name := range existingNames {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		selected[strings.ToLower(trimmed)] = trimmed
+	}
+
+	for _, override := range overrides {
+		if override.Index == nil || override.Name == nil {
+			continue
+		}
+		idx := *override.Index
+		if idx < 0 || idx >= len(tpl.Agents) {
+			continue // index validity is reported by applyTemplateAgentOverrides
+		}
+		name := strings.TrimSpace(*override.Name)
+		if name == "" {
+			continue
+		}
+		if original, clash := selected[strings.ToLower(name)]; clash {
+			return fmt.Errorf(
+				"agent %q duplicates the selected saved agent %q; give the customized copy a different name",
+				name, original)
+		}
+	}
+	return nil
+}
+
 func validateTemplateAgentOverrideNames(specs []projecttemplates.AgentSpec) error {
 	seen := make(map[string]string, len(specs))
 	for _, spec := range specs {
@@ -274,6 +326,9 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 					fmt.Sprintf("Specialist agent %q could not be created and was skipped.", spec.Name))
 				continue
 			}
+			// Recorded immediately after the create succeeds, so a later failure
+			// can undo exactly this set.
+			result.OwnedNames = append(result.OwnedNames, spec.Name)
 		}
 
 		if exists {
@@ -298,6 +353,33 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 	}
 
 	return result
+}
+
+// rollbackSeededAgents deletes the agent definitions this request created, so a
+// workspace that never came into existence leaves nothing behind in Your Agents
+// (PRD FR71, FR72).
+//
+// It deletes only names recorded in OwnedNames — definitions the request itself
+// created. Reused agents are never touched (FR73), and neither is an agent some
+// concurrent operation happens to have created under the same name, because that
+// name was never added to OwnedNames in the first place.
+//
+// Best-effort: a delete that fails is logged rather than escalated. The create
+// has already failed and the user is being told so; turning cleanup trouble into
+// a second, different error would only obscure the real one.
+func (h *Handler) rollbackSeededAgents(seed seedAgentsResult) {
+	if h == nil || h.agentStore == nil || len(seed.OwnedNames) == 0 {
+		return
+	}
+	for _, name := range seed.OwnedNames {
+		if err := h.agentStore.DeleteAgent(name); err != nil {
+			logger.Warn("Failed to roll back a seeded agent after workspace creation failed",
+				logger.Fields{"agent": name, "error": err})
+			continue
+		}
+		logger.Info("Rolled back agent seeded for a workspace that was not created",
+			logger.Fields{"agent": name})
+	}
 }
 
 func (h *Handler) templateAgentModelDefaults(spec projecttemplates.AgentSpec) (model, provider, reasoningEffort, source string) {

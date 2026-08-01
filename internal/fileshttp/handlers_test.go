@@ -15,6 +15,17 @@ import (
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 )
 
+type recordingDesktopOpener struct {
+	openedFolder string
+}
+
+func (o *recordingDesktopOpener) OpenFolder(path string) error {
+	o.openedFolder = path
+	return nil
+}
+func (*recordingDesktopOpener) OpenFile(string) error            { return nil }
+func (*recordingDesktopOpener) RevealInFileManager(string) error { return nil }
+
 func setupTestHandler(t *testing.T) (*Handler, string) {
 	tmpDir, err := os.MkdirTemp("", "fileshttp-test-*")
 	if err != nil {
@@ -316,19 +327,21 @@ func TestHandler_ValidateLinks(t *testing.T) {
 func TestHandler_OpenFolder(t *testing.T) {
 	handler, tmpDir := setupTestHandler(t)
 	defer func() { _ = os.RemoveAll(tmpDir) }()
+	opener := &recordingDesktopOpener{}
+	handler.SetDesktopOpener(opener)
 
-	// Note: We can't fully test this without actually opening a folder
-	// but we can test the handler accepts the request
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/session-1/folder/open", nil)
 	req.SetPathValue("id", "session-1")
 
 	rr := httptest.NewRecorder()
 	handler.OpenFolder(rr, req)
 
-	// Should succeed (or fail to start command, depending on environment)
-	// We mainly want to ensure it doesn't panic
-	if rr.Code != http.StatusOK && rr.Code != http.StatusInternalServerError {
-		t.Errorf("unexpected status %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	want := handler.store.GetSessionFilesPath("session-1")
+	if opener.openedFolder != want {
+		t.Fatalf("opened folder = %q, want %q", opener.openedFolder, want)
 	}
 }
 

@@ -390,7 +390,7 @@ print_header "3. TESTS"
 
 # Run all tests with race detector
 # Note: -p 1 runs packages sequentially to avoid race conditions in shared state
-TEST_CMD="go test -p 1 -race -timeout 5m ./..."
+TEST_CMD="./scripts/run-test-command.sh go test -p 1 -race -timeout 5m ./..."
 
 if ! run_check "All Tests (unit + integration)" "$TEST_CMD"; then
   echo ""

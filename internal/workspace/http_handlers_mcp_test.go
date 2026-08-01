@@ -25,7 +25,7 @@ func newTestWorkspaceMCPHandler(t *testing.T) (*HTTPHandler, *InMemoryStore, *va
 
 	store := NewInMemoryStore()
 	handler := NewHTTPHandler(store, nil, nil)
-	vaultStore := vault.NewStore(db, vault.StoreOptions{})
+	vaultStore := vault.NewStore(db, vault.StoreOptions{VaultFilesBaseDir: t.TempDir()})
 	handler.SetEmailAccountStore(vaultStore)
 	return handler, store, vaultStore, db
 }

@@ -1,246 +1,501 @@
-// Package wakeclient is the helper's side of Ori's shared wake coordinator.
-//
-// The helper never programs a macOS wake. It writes a candidate to the shared
-// store and then waits to be told, by the one process that runs `pmset`, that
-// the wake actually exists. That distinction is the whole design: a helper may
-// only claim wake coverage on evidence it did not produce itself.
-//
-// If Ori's server is not running, nothing picks the candidate up, verification
-// never succeeds. An Overnight Run stays awake, and a wake-required one-time
-// continuation fails before it can claim readiness. Those are the correct
-// outcomes, reached by doing nothing rather than by guessing.
+// Package wakeclient is the unprivileged helper side of the standalone Herdr
+// Wake Service protocol. It has no Ori process, settings, heartbeat, API, or
+// shared-state fallback.
 package wakeclient
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/wakecoord"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeservice"
 )
 
 const (
-	// DefaultVerifyTimeout bounds how long the helper waits for Ori to program
-	// a registered candidate. The server's scheduler loop runs on its own
-	// cadence, so this is a wait, not a round trip.
-	DefaultVerifyTimeout = 90 * time.Second
-	// DefaultVerifyInterval is how often the shared record is re-read.
-	DefaultVerifyInterval = 2 * time.Second
-	// MaxSkew is how far the programmed wake may differ from the requested one
-	// and still count as the same wake. The owner applies its own lead time, so
-	// an earlier wake is expected; a later one is not the wake that was asked
-	// for.
-	MaxSkew = 30 * time.Minute
+	DefaultTimeout = 5 * time.Second
+	MaxSkew        = 30 * time.Minute
 )
 
-// ErrUnavailable means the shared coordinator could not be used at all.
-var ErrUnavailable = errors.New("Ori's wake coordinator is unavailable")
+var (
+	ErrUnavailable   = errors.New("standalone Herdr wake service is unavailable")
+	ErrNotProgrammed = errors.New("the requested Herdr wake is not programmed")
+	ErrUncertain     = errors.New("the standalone wake result is uncertain")
+)
 
-// ErrNotProgrammed means no wake matching the candidate has been programmed.
-var ErrNotProgrammed = errors.New("the requested wake has not been programmed")
+// OperationError retains the daemon's machine-readable result without
+// exposing arbitrary process or environment output.
+type OperationError struct {
+	Operation wakeprotocol.Operation
+	Result    wakeprotocol.Result
+	Code      wakeprotocol.Code
+	Message   string
+	Cause     error
+}
 
-// Client registers and verifies this helper's wake candidates.
+func (e *OperationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return string(e.Operation) + ": " + e.Message
+	}
+	return string(e.Operation) + ": standalone wake operation failed"
+}
+
+func (e *OperationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	if e.Cause != nil {
+		return e.Cause
+	}
+	if e.Result == wakeprotocol.ResultUncertain {
+		return ErrUncertain
+	}
+	return ErrUnavailable
+}
+
+// Evidence is the durable unprivileged proof returned to schedule/run state.
+type Evidence struct {
+	Source          wakeprotocol.Source
+	Purpose         wakeprotocol.Purpose
+	CandidateID     string
+	RequestedAt     time.Time
+	ProgrammedAt    time.Time
+	VerifiedAt      time.Time
+	ProtocolVersion int
+	DaemonBuild     string
+	HelperBuild     string
+	Result          wakeprotocol.Result
+	Code            wakeprotocol.Code
+	Message         string
+}
+
+// OwnerReadiness describes the standalone daemon, not an Ori heartbeat.
+type OwnerReadiness struct {
+	Installed       bool
+	Running         bool
+	Ready           bool
+	Compatible      bool
+	AllowedUID      int
+	ProtocolVersion int
+	StateVersion    int
+	DaemonBuild     string
+	LastSelfTestAt  time.Time
+	Detail          string
+}
+
+// Client sends one bounded request per authenticated Unix-socket connection.
 type Client struct {
-	// Store is the shared coordinator; nil resolves the default location.
-	Store *wakecoord.Store
-	// Source scopes registration, verification, and cancellation to one
-	// subsystem. Existing callers default to Overnight Runs.
-	Source string
-	// Now supplies the clock.
-	Now func() time.Time
-	// VerifyTimeout and VerifyInterval bound waiting for the owner.
-	VerifyTimeout  time.Duration
-	VerifyInterval time.Duration
+	SocketPath   string
+	BuildVersion string
+	Source       wakeprotocol.Source
+	Purpose      wakeprotocol.Purpose
+	Now          func() time.Time
+	Timeout      time.Duration
+	Dial         func(context.Context, string) (net.Conn, error)
+	defaultsOnce sync.Once
+	sequence     atomic.Uint64
 }
 
-// New builds a Client over an explicit coordinator directory.
-func New(dir string) *Client {
-	return NewForSource(dir, wakecoord.SourceOvernightRun)
+// New builds an Overnight reset client over an explicit socket path.
+func New(socketPath string) *Client {
+	return NewForPurpose(
+		socketPath,
+		wakeprotocol.SourceOvernight,
+		wakeprotocol.PurposeClaudeReset,
+	)
 }
 
-// NewForSource builds a client whose candidate operations are isolated to one
-// wake source.
-func NewForSource(dir, source string) *Client {
-	return &Client{Store: wakecoord.New(dir), Source: source}
+// NewForSource preserves the source-scoped constructor while deriving the only
+// valid v1 purpose for that source.
+func NewForSource(socketPath string, source wakeprotocol.Source) *Client {
+	purpose := wakeprotocol.PurposeClaudeReset
+	if source == wakeprotocol.SourceContinuation {
+		purpose = wakeprotocol.PurposeContinuation
+	}
+	return NewForPurpose(socketPath, source, purpose)
 }
 
-// Default builds a Client over the shared location both processes compute.
+// NewForPurpose builds a client for one fixed source/purpose pair.
+func NewForPurpose(
+	socketPath string,
+	source wakeprotocol.Source,
+	purpose wakeprotocol.Purpose,
+) *Client {
+	return &Client{
+		SocketPath: socketPath,
+		Source:     source,
+		Purpose:    purpose,
+	}
+}
+
 func Default() (*Client, error) {
-	return DefaultForSource(wakecoord.SourceOvernightRun)
+	return DefaultForPurpose(
+		wakeprotocol.SourceOvernight,
+		wakeprotocol.PurposeClaudeReset,
+	)
 }
 
-// DefaultForSource builds a source-scoped client over the shared location both
-// processes compute.
-func DefaultForSource(source string) (*Client, error) {
-	dir, err := wakecoord.DefaultDir()
+func DefaultForSource(source wakeprotocol.Source) (*Client, error) {
+	purpose := wakeprotocol.PurposeClaudeReset
+	if source == wakeprotocol.SourceContinuation {
+		purpose = wakeprotocol.PurposeContinuation
+	}
+	return DefaultForPurpose(source, purpose)
+}
+
+func DefaultForPurpose(
+	source wakeprotocol.Source,
+	purpose wakeprotocol.Purpose,
+) (*Client, error) {
+	return NewForPurpose(wakeservice.SocketPath, source, purpose), nil
+}
+
+func (c *Client) defaults() {
+	c.defaultsOnce.Do(func() {
+		if c.SocketPath == "" {
+			c.SocketPath = wakeservice.SocketPath
+		}
+		if c.BuildVersion == "" {
+			c.BuildVersion = "dev"
+		}
+		if c.Source == "" {
+			c.Source = wakeprotocol.SourceOvernight
+		}
+		if c.Purpose == "" {
+			c.Purpose = wakeprotocol.PurposeClaudeReset
+		}
+		if c.Now == nil {
+			c.Now = func() time.Time { return time.Now().UTC() }
+		}
+		if c.Timeout <= 0 {
+			c.Timeout = DefaultTimeout
+		}
+		if c.Dial == nil {
+			c.Dial = func(ctx context.Context, path string) (net.Conn, error) {
+				dialer := &net.Dialer{Timeout: c.Timeout}
+				return dialer.DialContext(ctx, "unix", path)
+			}
+		}
+	})
+}
+
+func (c *Client) Health(ctx context.Context) (wakeprotocol.Health, error) {
+	response, err := c.request(ctx, wakeprotocol.Request{
+		Operation: wakeprotocol.OperationHealth,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrUnavailable, err)
+		return wakeprotocol.Health{}, err
 	}
-	return NewForSource(dir, source), nil
-}
-
-func (c *Client) source() string {
-	if c.Source != "" {
-		return c.Source
+	if response.Health == nil {
+		return wakeprotocol.Health{}, c.responseError(response, "health response omitted service identity")
 	}
-	return wakecoord.SourceOvernightRun
-}
-
-func (c *Client) now() time.Time {
-	if c.Now != nil {
-		return c.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
-func (c *Client) timeout() time.Duration {
-	if c.VerifyTimeout > 0 {
-		return c.VerifyTimeout
-	}
-	return DefaultVerifyTimeout
-}
-
-func (c *Client) interval() time.Duration {
-	if c.VerifyInterval > 0 {
-		return c.VerifyInterval
-	}
-	return DefaultVerifyInterval
-}
-
-// Register asks Ori to program a wake at wakeAt for one run.
-//
-// Registering is not scheduling. It records a request; whether a wake exists is
-// a separate question, answered only by Verify.
-func (c *Client) Register(runID string, wakeAt time.Time, detail string) error {
-	if c.Store == nil {
-		return ErrUnavailable
-	}
-	now := c.now()
-	candidate := wakecoord.Candidate{
-		ID:     runID,
-		Source: c.source(),
-		WakeAt: wakeAt.UTC(),
-		Detail: detail,
-		// An unclaimed candidate expires shortly after the wake it asked for,
-		// so a helper that dies mid-run cannot leave the Mac waking up for a
-		// run nobody is supervising.
-		ExpiresAt: wakeAt.Add(time.Hour).UTC(),
-	}
-	if err := c.Store.Register(candidate, now); err != nil {
-		return fmt.Errorf("%w: %s", ErrUnavailable, err)
-	}
-	return nil
-}
-
-// Verify waits until Ori reports having programmed this run's wake.
-//
-// It returns the instant that was actually programmed, which may be earlier
-// than requested because the owner applies its own lead time. A wake programmed
-// later than requested is not this wake and is refused.
-func (c *Client) Verify(ctx context.Context, runID string, wakeAt time.Time) (time.Time, error) {
-	if c.Store == nil {
-		return time.Time{}, ErrUnavailable
-	}
-	// The wait is bounded by real elapsed time, not by the injected clock.
-	// c.Now exists to make decisions about wake times deterministic; using it
-	// here would mean a frozen test clock waits forever for another process.
-	expired := time.NewTimer(c.timeout())
-	defer expired.Stop()
-	ticker := time.NewTicker(c.interval())
-	defer ticker.Stop()
-
-	for {
-		programmed, found, err := c.Store.Programmed()
-		if err != nil {
-			return time.Time{}, fmt.Errorf("%w: %s", ErrUnavailable, err)
-		}
-		if found && matches(programmed, c.source(), runID, wakeAt) {
-			return programmed.WakeAt, nil
-		}
-		select {
-		case <-ctx.Done():
-			return time.Time{}, ctx.Err()
-		case <-expired.C:
-			return time.Time{}, ErrNotProgrammed
-		case <-ticker.C:
+	if response.Health.ProtocolVersion != wakeprotocol.Version ||
+		response.Health.StateVersion != wakeprotocol.StateVersion {
+		return wakeprotocol.Health{}, &OperationError{
+			Operation: wakeprotocol.OperationHealth,
+			Result:    wakeprotocol.ResultRefusal,
+			Code:      wakeprotocol.CodeIncompatibleProtocol,
+			Message:   "daemon protocol or state version is incompatible; run wt herd wake install",
 		}
 	}
+	return *response.Health, nil
 }
 
-// matches reports whether a programmed record describes this run's wake.
-func matches(programmed wakecoord.Programmed, source, runID string, wakeAt time.Time) bool {
-	if programmed.Source != source || programmed.CandidateID != runID {
-		return false
+// RegisterCandidate persists and programs the exact typed candidate.
+func (c *Client) RegisterCandidate(
+	ctx context.Context,
+	id string,
+	wakeAt time.Time,
+	detail string,
+) (Evidence, error) {
+	c.defaults()
+	wakeAt = wakeAt.UTC()
+	candidate := wakeprotocol.Candidate{
+		ID:        id,
+		Source:    c.Source,
+		Purpose:   c.Purpose,
+		WakeAt:    wakeAt,
+		ExpiresAt: wakeAt.Add(time.Hour),
+		Reason:    detail,
 	}
-	if programmed.WakeAt.After(wakeAt) {
-		// Programmed later than asked for: the machine would still be asleep
-		// when the reset arrives.
-		return false
+	request := wakeprotocol.Request{
+		Operation:      wakeprotocol.OperationRegisterOrReplace,
+		IdempotencyKey: mutationKey("register", candidateIdentity(candidate), wakeAt),
+		Candidate:      &candidate,
 	}
-	return !programmed.WakeAt.Before(wakeAt.Add(-MaxSkew))
+	response, err := c.request(ctx, request)
+	evidence := c.evidence(id, wakeAt, response)
+	if err != nil {
+		return evidence, err
+	}
+	if response.Result != wakeprotocol.ResultSuccess {
+		return evidence, c.responseError(response, "wake candidate was not accepted")
+	}
+	return evidence, nil
 }
 
-// Cancel withdraws this run's candidate and nothing else.
-func (c *Client) Cancel(runID string) error {
-	if c.Store == nil {
-		return ErrUnavailable
+// VerifyCandidate requires direct daemon pmset read-back evidence.
+func (c *Client) VerifyCandidate(
+	ctx context.Context,
+	id string,
+	wakeAt time.Time,
+) (Evidence, error) {
+	c.defaults()
+	target := &wakeprotocol.Target{
+		ID: id, Source: c.Source, Purpose: c.Purpose,
 	}
-	if err := c.Store.Cancel(c.source(), runID, c.now()); err != nil {
-		return fmt.Errorf("%w: %s", ErrUnavailable, err)
+	response, err := c.request(ctx, wakeprotocol.Request{
+		Operation: wakeprotocol.OperationVerify,
+		Target:    target,
+	})
+	evidence := c.evidence(id, wakeAt.UTC(), response)
+	if err != nil {
+		return evidence, err
 	}
-	return nil
+	if response.Result != wakeprotocol.ResultSuccess ||
+		response.Verification == nil ||
+		!response.Verification.Matched ||
+		response.Verification.ID != id ||
+		response.Verification.Source != c.Source ||
+		response.Verification.Purpose != c.Purpose {
+		return evidence, c.responseError(response, "matching fixed-owner pmset event was not verified")
+	}
+	programmed := response.Verification.ProgrammedWakeAt.UTC()
+	if programmed.After(wakeAt.UTC()) ||
+		programmed.Before(wakeAt.UTC().Add(-MaxSkew)) {
+		return evidence, &OperationError{
+			Operation: wakeprotocol.OperationVerify,
+			Result:    wakeprotocol.ResultRefusal,
+			Code:      wakeprotocol.CodeVerificationFailed,
+			Message:   "programmed wake is outside the safe lead-time window",
+			Cause:     ErrNotProgrammed,
+		}
+	}
+	evidence.RequestedAt = response.Verification.RequestedWakeAt.UTC()
+	evidence.ProgrammedAt = programmed
+	evidence.VerifiedAt = response.Verification.VerifiedAt.UTC()
+	return evidence, nil
 }
 
-// Available reports whether the coordinator can be read at all, which is what
-// doctor asks before claiming an Overnight Run could ever sleep.
+// CancelCandidate withdraws only the exact typed candidate.
+func (c *Client) CancelCandidate(ctx context.Context, id string) (Evidence, error) {
+	c.defaults()
+	target := &wakeprotocol.Target{
+		ID: id, Source: c.Source, Purpose: c.Purpose,
+	}
+	response, err := c.request(ctx, wakeprotocol.Request{
+		Operation:      wakeprotocol.OperationCancel,
+		IdempotencyKey: mutationKey("cancel", candidateIdentityTarget(*target), time.Time{}),
+		Target:         target,
+	})
+	evidence := c.evidence(id, time.Time{}, response)
+	if err != nil {
+		return evidence, err
+	}
+	if response.Result != wakeprotocol.ResultSuccess {
+		return evidence, c.responseError(response, "wake candidate cancellation was not confirmed")
+	}
+	evidence.VerifiedAt = c.Now().UTC()
+	return evidence, nil
+}
+
+func (c *Client) List(ctx context.Context) (wakeprotocol.State, error) {
+	response, err := c.request(ctx, wakeprotocol.Request{Operation: wakeprotocol.OperationList})
+	if err != nil {
+		return wakeprotocol.State{}, err
+	}
+	if response.Result != wakeprotocol.ResultSuccess || response.State == nil {
+		return wakeprotocol.State{}, c.responseError(response, "wake state was not returned")
+	}
+	return *response.State, nil
+}
+
+// Legacy-shaped methods keep Overnight call sites buildable while routing all
+// production operations through the standalone daemon.
+func (c *Client) Register(id string, wakeAt time.Time, detail string) error {
+	_, err := c.RegisterCandidate(context.Background(), id, wakeAt, detail)
+	return err
+}
+
+func (c *Client) Verify(ctx context.Context, id string, wakeAt time.Time) (time.Time, error) {
+	evidence, err := c.VerifyCandidate(ctx, id, wakeAt)
+	return evidence.ProgrammedAt, err
+}
+
+func (c *Client) Cancel(id string) error {
+	_, err := c.CancelCandidate(context.Background(), id)
+	return err
+}
+
 func (c *Client) Available() bool {
-	if c.Store == nil {
-		return false
-	}
-	_, err := c.Store.Candidates(c.now())
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout())
+	defer cancel()
+	_, err := c.List(ctx)
 	return err == nil
 }
 
-// OwnerReadiness is what the single pmset owner says it can do.
-type OwnerReadiness struct {
-	// Running is true when the owner published recently enough to be believed.
-	Running bool
-	// Ready is true when it could program a wake if asked.
-	Ready bool
-	// Detail explains a refusal in operator language.
-	Detail string
+func (c *Client) Owner() OwnerReadiness {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout())
+	defer cancel()
+	health, err := c.Health(ctx)
+	if err != nil {
+		return OwnerReadiness{
+			Detail: "standalone Herdr wake service is not healthy; run wt herd wake doctor",
+		}
+	}
+	return OwnerReadiness{
+		Installed:       health.Installed,
+		Running:         health.Running,
+		Ready:           health.Installed && health.Running,
+		Compatible:      true,
+		AllowedUID:      health.AllowedUID,
+		ProtocolVersion: health.ProtocolVersion,
+		StateVersion:    health.StateVersion,
+		DaemonBuild:     health.DaemonBuild,
+		LastSelfTestAt:  health.LastSelfTestAt,
+		Detail:          "standalone Herdr wake service is healthy",
+	}
 }
 
-// OwnerFreshness is how recently the owner must have reported to be believed.
-// The Ori server publishes on every scheduler pass, so a report older than this
-// means it is not running.
-const OwnerFreshness = 10 * time.Minute
+func (c *Client) request(
+	ctx context.Context,
+	partial wakeprotocol.Request,
+) (wakeprotocol.Response, error) {
+	c.defaults()
+	callContext, cancel := context.WithTimeout(ctx, c.Timeout)
+	defer cancel()
+	requestID := "wake-" + strconv.FormatUint(c.sequence.Add(1), 10)
+	partial.ProtocolVersion = wakeprotocol.Version
+	partial.RequestID = requestID
+	partial.HelperBuild = c.BuildVersion
+	if err := partial.Validate(c.Now().UTC()); err != nil {
+		return wakeprotocol.Response{}, err
+	}
+	connection, err := c.Dial(callContext, c.SocketPath)
+	if err != nil {
+		return wakeprotocol.Response{}, &OperationError{
+			Operation: partial.Operation,
+			Result:    wakeprotocol.ResultUncertain,
+			Code:      wakeprotocol.CodeNotInstalled,
+			Message:   "standalone Herdr wake service could not be reached; run wt herd wake doctor",
+			Cause:     ErrUnavailable,
+		}
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(c.Timeout))
+	if err := wakeprotocol.WriteRequest(connection, partial); err != nil {
+		return wakeprotocol.Response{}, &OperationError{
+			Operation: partial.Operation,
+			Result:    wakeprotocol.ResultUncertain,
+			Code:      wakeprotocol.CodeUncertain,
+			Message:   "wake request could not be sent completely",
+			Cause:     ErrUncertain,
+		}
+	}
+	response, err := wakeprotocol.ReadResponse(connection)
+	if err != nil {
+		return wakeprotocol.Response{}, &OperationError{
+			Operation: partial.Operation,
+			Result:    wakeprotocol.ResultUncertain,
+			Code:      wakeprotocol.CodeUncertain,
+			Message:   "wake daemon response was lost; inspect with wt herd wake doctor",
+			Cause:     ErrUncertain,
+		}
+	}
+	if err := response.Validate(); err != nil {
+		return response, &OperationError{
+			Operation: partial.Operation,
+			Result:    wakeprotocol.ResultUncertain,
+			Code:      wakeprotocol.CodeIncompatibleProtocol,
+			Message:   "wake daemon returned an invalid or incompatible response",
+			Cause:     ErrUncertain,
+		}
+	}
+	if response.RequestID != requestID || response.Operation != partial.Operation {
+		return response, &OperationError{
+			Operation: partial.Operation,
+			Result:    wakeprotocol.ResultUncertain,
+			Code:      wakeprotocol.CodeVerificationFailed,
+			Message:   "wake daemon response identity did not match the request",
+			Cause:     ErrUncertain,
+		}
+	}
+	if response.Result == wakeprotocol.ResultUncertain {
+		return response, c.responseError(response, "wake daemon reported an uncertain result")
+	}
+	return response, nil
+}
 
-// Owner reports whether Ori is running and able to program a wake.
-//
-// The helper does not go looking for Ori's settings file — it would have to
-// guess where that server keeps its state. The owner states its own capability
-// in the shared store, and silence is a complete answer.
-func (c *Client) Owner() OwnerReadiness {
-	if c.Store == nil {
-		return OwnerReadiness{Detail: "Ori's wake coordinator is unavailable"}
+func (c *Client) responseError(
+	response wakeprotocol.Response,
+	fallback string,
+) error {
+	message := strings.TrimSpace(response.Message)
+	if message == "" {
+		message = fallback
 	}
-	owner, found, err := c.Store.Owner()
-	if err != nil || !found {
-		return OwnerReadiness{Detail: "Ori has not reported that it can program wake events; it may not be running"}
+	cause := ErrUnavailable
+	if response.Result == wakeprotocol.ResultUncertain {
+		cause = ErrUncertain
+	} else if response.Code == wakeprotocol.CodeNotFound ||
+		response.Code == wakeprotocol.CodeVerificationFailed {
+		cause = ErrNotProgrammed
 	}
-	if !owner.Fresh(c.now(), OwnerFreshness) {
-		return OwnerReadiness{Detail: "Ori last reported its wake capability too long ago; it may not be running"}
+	return &OperationError{
+		Operation: response.Operation,
+		Result:    response.Result,
+		Code:      response.Code,
+		Message:   message,
+		Cause:     cause,
 	}
-	switch {
-	case !owner.Supported:
-		return OwnerReadiness{Running: true, Detail: "this platform cannot program macOS wake events"}
-	case !owner.Enabled:
-		return OwnerReadiness{Running: true, Detail: "Mac wake scheduling is turned off in Ori's settings"}
-	case !owner.ApprovalGranted:
-		return OwnerReadiness{Running: true, Detail: "Ori has not been granted macOS approval to program wake events"}
-	default:
-		return OwnerReadiness{Running: true, Ready: true}
+}
+
+func (c *Client) evidence(
+	id string,
+	requested time.Time,
+	response wakeprotocol.Response,
+) Evidence {
+	return Evidence{
+		Source:          c.Source,
+		Purpose:         c.Purpose,
+		CandidateID:     id,
+		RequestedAt:     requested.UTC(),
+		ProtocolVersion: response.ProtocolVersion,
+		DaemonBuild:     response.DaemonBuild,
+		HelperBuild:     c.BuildVersion,
+		Result:          response.Result,
+		Code:            response.Code,
+		Message:         response.Message,
 	}
+}
+
+func (c *Client) timeout() time.Duration {
+	c.defaults()
+	return c.Timeout
+}
+
+func candidateIdentity(candidate wakeprotocol.Candidate) string {
+	return candidateIdentityTarget(wakeprotocol.Target{
+		ID: candidate.ID, Source: candidate.Source, Purpose: candidate.Purpose,
+	})
+}
+
+func candidateIdentityTarget(target wakeprotocol.Target) string {
+	return string(target.Source) + ":" + string(target.Purpose) + ":" + target.ID
+}
+
+func mutationKey(operation, identity string, at time.Time) string {
+	material := operation + "\x00" + identity + "\x00" + at.UTC().Format(time.RFC3339Nano)
+	digest := sha256.Sum256([]byte(material))
+	return operation + "-" + fmt.Sprintf("%x", digest[:12])
 }

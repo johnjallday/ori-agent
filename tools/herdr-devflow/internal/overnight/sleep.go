@@ -7,6 +7,8 @@ import (
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/systempower"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 )
 
 // This file is the sleep sequence: the part that turns a recognized Claude
@@ -22,15 +24,27 @@ import (
 // what happened, because a Mac that stayed awake is a mild disappointment and a
 // Mac that slept without a wake is someone's morning.
 
-// WakeCoordinator is the helper's side of Ori's shared wake coordinator.
+// WakeCoordinator is the unprivileged side of the standalone Herdr wake
+// service. It has no Ori runtime dependency or system-sleep capability.
 type WakeCoordinator interface {
-	// Register asks Ori to program a wake. It is a request, not a schedule.
+	// Register asks the standalone daemon to program a wake. It is a request,
+	// not proof that the matching event exists.
 	Register(runID string, wakeAt time.Time, detail string) error
 	// Verify waits for evidence that the wake exists, returning what was
 	// actually programmed.
 	Verify(ctx context.Context, runID string, wakeAt time.Time) (time.Time, error)
 	// Cancel withdraws this run's candidate and nothing else.
 	Cancel(runID string) error
+}
+
+// EvidenceWakeCoordinator is implemented by production standalone clients.
+// The legacy-shaped methods remain for focused state-machine fakes, while the
+// production path persists protocol/build/read-back evidence before sleep.
+type EvidenceWakeCoordinator interface {
+	WakeCoordinator
+	RegisterCandidate(context.Context, string, time.Time, string) (wakeclient.Evidence, error)
+	VerifyCandidate(context.Context, string, time.Time) (wakeclient.Evidence, error)
+	CancelCandidate(context.Context, string) (wakeclient.Evidence, error)
 }
 
 // PowerService answers power questions and performs sleep.
@@ -40,14 +54,25 @@ type PowerService interface {
 	Sleep(ctx context.Context) error
 }
 
+// AssertionService is the unprivileged user-level capability used only by an
+// explicitly confirmed stay-awake run. The root daemon never implements it.
+type AssertionService interface {
+	AcquireIdleSleepAssertion(context.Context, string) (string, error)
+	IdleSleepAssertionActive(context.Context, string) bool
+	ReleaseIdleSleepAssertion(context.Context, string) error
+}
+
 // SleepConfig is what the sleep sequence needs beyond the run itself.
 type SleepConfig struct {
 	// WakeLead is how far before the reset the machine should wake, so macOS,
 	// the network, Ori, and Herdr are ready. It never permits an early prompt.
 	WakeLead time.Duration
-	// ApprovalGranted records that the user has authorized Ori to program wake
+	// ApprovalGranted records that the standalone service handshake authorizes
 	// events. Without it nothing sleeps.
 	ApprovalGranted bool
+	// StayAwake is the user-confirmed mode that explicitly refuses all
+	// deliberate sleep/reset-wake actions for this run.
+	StayAwake bool
 }
 
 // SleepGate is one precondition and its outcome.
@@ -92,7 +117,9 @@ func EvaluateSleep(run model.OvernightRun, participant model.RunParticipant,
 	add("macOS", platformOK, "system sleep is supported on macOS only")
 
 	add("wake approval", config.ApprovalGranted,
-		"Ori has not been authorized to program macOS wake events")
+		"the standalone Herdr wake service has not been authorized and verified as healthy")
+	add("sleep-enabled mode", !config.StayAwake,
+		"this Overnight Run was confirmed with --stay-awake, so it will wait without sleeping or scheduling a reset wake")
 
 	source := systempower.SourceUnknown
 	if power != nil {
@@ -210,6 +237,8 @@ func (s *Supervisor) PrepareAndSleep(ctx context.Context, runID string, config S
 		RequestedAt: decision.WakeAt,
 		ResetAt:     participant.Limit.ResetAt,
 		CandidateID: runID,
+		Source:      string(wakeprotocol.SourceOvernight),
+		Purpose:     string(wakeprotocol.PurposeClaudeReset),
 	}
 	run.Timeline = append(run.Timeline, model.RunEvent{
 		At: now, Kind: "preparing_sleep", Participant: participant.ID,
@@ -221,32 +250,108 @@ func (s *Supervisor) PrepareAndSleep(ctx context.Context, runID string, config S
 		release()
 		return model.OvernightRun{}, fmt.Errorf("persist the sleep intention: %w", err)
 	}
-	// The lock is released before waiting on the coordinator: verification can
+	// The lock is released before waiting on the standalone daemon: verification can
 	// take a minute, and holding the shared lock that long would block every
 	// other bridge command on this machine.
 	release()
 
 	if s.Wake == nil {
-		return s.recordSleepFailure(ctx, runID, "no wake coordinator is configured, so no wake could be requested")
+		return s.recordSleepFailure(ctx, runID, "no standalone wake service client is configured, so no wake could be requested")
 	}
-	if err := s.Wake.Register(runID, decision.WakeAt, "Claude included-session reset"); err != nil {
-		return s.recordSleepFailure(ctx, runID, "Ori's wake coordinator did not accept the wake request")
+	var evidence wakeclient.Evidence
+	var programmed time.Time
+	var verifyErr error
+	if wake, ok := s.Wake.(EvidenceWakeCoordinator); ok {
+		evidence, verifyErr = wake.RegisterCandidate(ctx, runID, decision.WakeAt, "Claude included-session reset")
+		if verifyErr == nil {
+			evidence, verifyErr = wake.VerifyCandidate(ctx, runID, decision.WakeAt)
+			programmed = evidence.ProgrammedAt
+		}
+	} else {
+		verifyErr = s.Wake.Register(runID, decision.WakeAt, "Claude included-session reset")
+		if verifyErr == nil {
+			programmed, verifyErr = s.Wake.Verify(ctx, runID, decision.WakeAt)
+		}
 	}
-	programmed, err := s.Wake.Verify(ctx, runID, decision.WakeAt)
-	if err != nil {
+	if verifyErr != nil {
 		// Registration is a request; only the owner's own record proves a wake
 		// exists. Without it, this Mac does not sleep.
 		_ = s.Wake.Cancel(runID)
-		return s.recordSleepFailure(ctx, runID, "the requested wake could not be verified as programmed")
+		return s.recordSleepFailure(ctx, runID, "the requested standalone wake could not be verified as programmed")
 	}
 
-	if err := s.recordVerifiedWake(ctx, runID, programmed); err != nil {
+	if err := s.recordVerifiedWake(ctx, runID, programmed, evidence); err != nil {
 		return model.OvernightRun{}, err
 	}
 	if err := s.Power.Sleep(ctx); err != nil {
 		return s.recordSleepFailure(ctx, runID, "macOS did not accept the sleep request")
 	}
 	return s.recordSlept(ctx, runID)
+}
+
+// EnsureStayAwake acquires and directly verifies the run-owned user-level
+// assertion. An unavailable, lost, or unverifiable assertion leaves the run
+// awake and visibly waiting; it never falls back to a reset wake or sleep.
+func (s *Supervisor) EnsureStayAwake(ctx context.Context, runID string) (model.OvernightRun, error) {
+	assertions, ok := s.Power.(AssertionService)
+	if !ok {
+		return s.recordSleepFailure(ctx, runID, "stay-awake mode is unavailable on this platform")
+	}
+	run, err := s.updateRun(ctx, runID, func(run *model.OvernightRun, now time.Time) {
+		if run.Assertion.ID == "" {
+			run.Assertion.ID = run.ID
+			run.Assertion.Detail = "idle-sleep assertion requested"
+		}
+	})
+	if err != nil || run.State.Terminal() {
+		return run, err
+	}
+	if run.Assertion.ID != "" && assertions.IdleSleepAssertionActive(ctx, run.Assertion.ID) {
+		return s.updateRun(ctx, runID, func(run *model.OvernightRun, now time.Time) {
+			run.Assertion.VerifiedAt = now
+			run.Assertion.Uncertain = false
+			run.Assertion.Detail = "run-owned idle-sleep assertion remains verified"
+			run.State = model.RunWaitingForReset
+		})
+	}
+	assertionID, acquireErr := assertions.AcquireIdleSleepAssertion(ctx, run.ID)
+	if acquireErr != nil || assertionID == "" || !assertions.IdleSleepAssertionActive(ctx, assertionID) {
+		detail := "stay-awake assertion could not be acquired and verified"
+		if acquireErr != nil {
+			detail = detail + "; " + acquireErr.Error()
+		}
+		return s.recordSleepFailure(ctx, runID, detail)
+	}
+	return s.updateRun(ctx, runID, func(run *model.OvernightRun, now time.Time) {
+		run.Assertion.ID = assertionID
+		run.Assertion.AcquiredAt = now
+		run.Assertion.VerifiedAt = now
+		run.Assertion.Uncertain = false
+		run.Assertion.Detail = "run-owned idle-sleep assertion verified"
+		run.State = model.RunWaitingForReset
+		run.Timeline = append(run.Timeline, model.RunEvent{At: now, Kind: "stay_awake_verified", Detail: run.Assertion.Detail})
+	})
+}
+
+// ReleaseStayAwake releases only this run's assertion. A lost assertion is
+// retained as uncertainty for recovery rather than claimed released.
+func (s *Supervisor) ReleaseStayAwake(ctx context.Context, runID string) (model.OvernightRun, error) {
+	run, err := s.updateRun(ctx, runID, func(run *model.OvernightRun, _ time.Time) {})
+	if err != nil || run.Assertion.ID == "" || !run.Assertion.ReleasedAt.IsZero() {
+		return run, err
+	}
+	assertions, ok := s.Power.(AssertionService)
+	if !ok || assertions.ReleaseIdleSleepAssertion(ctx, run.Assertion.ID) != nil {
+		return s.updateRun(ctx, runID, func(run *model.OvernightRun, _ time.Time) {
+			run.Assertion.Uncertain = true
+			run.Assertion.Detail = "run-owned idle-sleep assertion release was not proven"
+		})
+	}
+	return s.updateRun(ctx, runID, func(run *model.OvernightRun, now time.Time) {
+		run.Assertion.ReleasedAt = now
+		run.Assertion.Uncertain = false
+		run.Assertion.Detail = "run-owned idle-sleep assertion released"
+	})
 }
 
 // recordSleepFailure leaves the run awake and says why.
@@ -260,16 +365,20 @@ func (s *Supervisor) recordSleepFailure(ctx context.Context, runID, detail strin
 }
 
 // recordVerifiedWake stores the owner's evidence before the machine sleeps.
-func (s *Supervisor) recordVerifiedWake(ctx context.Context, runID string, programmed time.Time) error {
+func (s *Supervisor) recordVerifiedWake(ctx context.Context, runID string, programmed time.Time, evidence wakeclient.Evidence) error {
 	_, err := s.updateRun(ctx, runID, func(run *model.OvernightRun, now time.Time) {
 		run.Wake.Verified = true
 		run.Wake.VerifiedAt = now
 		run.Wake.RegisteredAt = now
 		run.Wake.RequestedAt = programmed
+		run.Wake.ProgrammedAt = programmed
+		run.Wake.ProtocolVersion = evidence.ProtocolVersion
+		run.Wake.DaemonBuild = evidence.DaemonBuild
+		run.Wake.HelperBuild = evidence.HelperBuild
 		run.Wake.Detail = ""
 		run.Timeline = append(run.Timeline, model.RunEvent{
 			At: now, Kind: "wake_verified",
-			Detail: "Ori programmed a wake at " + programmed.UTC().Format(time.RFC3339),
+			Detail: "standalone Herdr wake service verified a wake at " + programmed.UTC().Format(time.RFC3339),
 		})
 	})
 	return err
@@ -315,7 +424,7 @@ func (s *Supervisor) updateRun(ctx context.Context, runID string,
 // Resume is what runs after the machine wakes.
 //
 // The fact that the Mac is awake proves nothing: it may have been opened by
-// hand, woken for a different Ori wake, or woken by something else entirely.
+// hand, woken for a different system event, or woken by something else entirely.
 // Durable state, not wakefulness, decides whether anyone may be prompted.
 func (s *Supervisor) Resume(ctx context.Context, runID string) (model.OvernightRun, error) {
 	release, err := s.Store.Lock(ctx)
@@ -408,12 +517,22 @@ func (s *Supervisor) withdrawWake(run *model.OvernightRun, now time.Time) {
 	if run.Wake.CandidateID == "" || run.Wake.Canceled {
 		return
 	}
-	if s.Wake == nil {
+	wake := s.Wake
+	if run.Wake.Purpose == "overnight_scheduled_start" && s.StartWake != nil {
+		wake = s.StartWake
+	}
+	if wake == nil {
 		run.Wake.Uncertain = true
-		run.Wake.Detail = "no wake coordinator was available to withdraw this run's candidate"
+		run.Wake.Detail = "no standalone wake client was available to withdraw this run's candidate"
 		return
 	}
-	if err := s.Wake.Cancel(run.Wake.CandidateID); err != nil {
+	var cancelErr error
+	if evidenceWake, ok := wake.(EvidenceWakeCoordinator); ok {
+		_, cancelErr = evidenceWake.CancelCandidate(context.Background(), run.Wake.CandidateID)
+	} else {
+		cancelErr = wake.Cancel(run.Wake.CandidateID)
+	}
+	if cancelErr != nil {
 		run.Wake.Uncertain = true
 		run.Wake.Detail = "this run's wake candidate could not be confirmed withdrawn"
 		return

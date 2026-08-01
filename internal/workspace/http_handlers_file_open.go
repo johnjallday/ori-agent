@@ -8,7 +8,6 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 type openWorkspaceFileRequest struct {
@@ -55,12 +54,12 @@ func (h *HTTPHandler) osOpenWorkspaceFile(w http.ResponseWriter, r *http.Request
 	info, statErr := os.Stat(absPath)
 	switch {
 	case statErr == nil && info.IsDir():
-		err = platform.OpenFolder(absPath)
+		err = callDesktopOpener(h.openFolder, absPath)
 	case statErr == nil:
 		if reveal {
-			err = platform.RevealInFileManager(absPath)
+			err = callDesktopOpener(h.revealFile, absPath)
 		} else {
-			err = platform.OpenFile(absPath)
+			err = callDesktopOpener(h.openFile, absPath)
 		}
 	case os.IsNotExist(statErr) && reveal:
 		// Missing file: fall back to revealing the nearest existing ancestor
@@ -70,7 +69,7 @@ func (h *HTTPHandler) osOpenWorkspaceFile(w http.ResponseWriter, r *http.Request
 			orihttp.NotFound(w, "File not found")
 			return
 		}
-		err = platform.OpenFolder(ancestor)
+		err = callDesktopOpener(h.openFolder, ancestor)
 	case os.IsNotExist(statErr):
 		orihttp.NotFound(w, "File not found")
 		return
@@ -94,6 +93,13 @@ func (h *HTTPHandler) osOpenWorkspaceFile(w http.ResponseWriter, r *http.Request
 		"workspace": workspaceID,
 		"path":      cleanRel,
 	})
+}
+
+func callDesktopOpener(open func(string) error, path string) error {
+	if open == nil {
+		return fmt.Errorf("desktop opening is unavailable")
+	}
+	return open(path)
 }
 
 // nearestExistingDir walks up from dir until it finds an existing directory,

@@ -41,6 +41,12 @@ type LimitClassifier interface {
 	Classify(sessionID string, now, lastHandledReset time.Time) claudeusage.Signal
 }
 
+// PlanProofValidator is optional for historical records. New app-created runs
+// carry a proof; legacy records stay readable and are never silently upgraded.
+type PlanProofValidator interface {
+	ValidatePlanProof(model.PlanProof, string, time.Time) error
+}
+
 // PlanReader reads one task list.
 type PlanReader func(path string) tasklist.Plan
 
@@ -57,9 +63,11 @@ type Supervisor struct {
 	// Usage classifies Claude limits; nil means no limit can be recognized,
 	// so nothing ever sleeps.
 	Usage LimitClassifier
-	// Wake is the helper's side of Ori's shared wake coordinator. Nil means no
+	// Wake is the reset-purpose standalone wake client. Nil means no
 	// wake can be requested, so nothing sleeps.
 	Wake WakeCoordinator
+	// StartWake is the separately scoped scheduled-start wake client.
+	StartWake WakeCoordinator
 	// Power answers power questions and performs sleep. Nil means the same.
 	Power PowerService
 	// Git inspects a participant's worktree for the commit and cleanliness
@@ -145,6 +153,16 @@ func (s *Supervisor) advance(ctx context.Context, run *model.OvernightRun, now t
 		// it is a run that is waiting, and waiting is not a decision.
 		return false
 	}
+	if run.Wake.Purpose == "overnight_scheduled_start" && !run.Wake.Canceled {
+		s.withdrawWake(run, now)
+		if run.Wake.Uncertain {
+			run.State = model.RunWaitingManual
+			run.Uncertainty = "the served pre-start wake was not confirmed withdrawn; run wt herd wake doctor"
+			run.Timeline = append(run.Timeline, model.RunEvent{At: now, Kind: "pre_start_wake_uncertain", Detail: run.Uncertainty})
+			return true
+		}
+		run.Timeline = append(run.Timeline, model.RunEvent{At: now, Kind: "pre_start_wake_withdrawn", Detail: "verified scheduled-start wake was withdrawn before work began"})
+	}
 	// The deadline is absolute for new work. An agent already working is
 	// observed to a stop rather than interrupted.
 	if !now.Before(run.DeadlineAt) {
@@ -159,6 +177,14 @@ func (s *Supervisor) advance(ctx context.Context, run *model.OvernightRun, now t
 	participant, ok := s.activeParticipant(run, now)
 	if !ok {
 		return s.finishRun(run, now, model.RunCompleted, model.ReasonQueueComplete, "every participant reached a terminal outcome")
+	}
+	if participant.PlanProof.SessionID != "" {
+		if validator, ok := s.Usage.(PlanProofValidator); ok {
+			if err := validator.ValidatePlanProof(participant.PlanProof, participant.Binding.NativeSession.Value, now); err != nil {
+				return s.stopParticipant(run, participant, now, model.ParticipantWaitingManual, model.ReasonBlocked,
+					err.Error(), "wt herd overnight show "+run.ID)
+			}
+		}
 	}
 
 	live, observation := s.observe(ctx, *participant)
@@ -330,6 +356,14 @@ func (s *Supervisor) classifyLimit(run *model.OvernightRun, participant *model.R
 		})
 		return true, false
 	default:
+		// A valid confirmation-time plan proof authorizes the first scheduled
+		// continuation even when the current window sample is merely stale. A
+		// stale sample cannot classify a new reset/sleep cycle, but its absence
+		// is not billing, authentication, or identity contradiction.
+		if signal.Class == claudeusage.LimitUnknown && participant.PlanProof.PlanBacked &&
+			strings.Contains(strings.ToLower(signal.Reason), "too old") {
+			return false, false
+		}
 		participant.Limit = limitRecord(signal)
 		return false, s.stopParticipant(run, participant, now, model.ParticipantWaitingManual, model.ReasonBlocked,
 			signal.Reason, "wt herd overnight show "+run.ID)

@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 )
 
@@ -23,8 +22,9 @@ const (
 
 // Handler provides HTTP handlers for session file operations
 type Handler struct {
-	store   *sessionfiles.Store
-	watcher *filewatcher.Watcher
+	store      *sessionfiles.Store
+	watcher    *filewatcher.Watcher
+	openFolder func(string) error
 }
 
 // Watcher returns the file watcher
@@ -35,9 +35,20 @@ func (h *Handler) Watcher() *filewatcher.Watcher {
 // NewHandler creates a new file handler
 func NewHandler(store *sessionfiles.Store, watcher *filewatcher.Watcher) *Handler {
 	return &Handler{
-		store:   store,
-		watcher: watcher,
+		store:      store,
+		watcher:    watcher,
+		openFolder: platform.OpenFolder,
 	}
+}
+
+// SetDesktopOpener replaces native desktop side effects. Server construction
+// uses this to inject one shared opener, and tests use it to prevent Finder or
+// another GUI application from launching.
+func (h *Handler) SetDesktopOpener(opener platform.DesktopOpener) {
+	if h == nil || opener == nil {
+		return
+	}
+	h.openFolder = opener.OpenFolder
 }
 
 // UploadFile handles POST /api/sessions/{id}/files/upload
@@ -311,21 +322,11 @@ func (h *Handler) OpenFolder(w http.ResponseWriter, r *http.Request) {
 	// Get session files path
 	folderPath := h.store.GetSessionFilesPath(sessionID)
 
-	// Open folder in native file manager
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", folderPath)
-	case "windows":
-		cmd = exec.Command("explorer", folderPath)
-	case "linux":
-		cmd = exec.Command("xdg-open", folderPath)
-	default:
-		orihttp.BadRequest(w, "Unsupported operating system")
+	if h.openFolder == nil {
+		orihttp.InternalError(w, "Desktop folder opening is unavailable")
 		return
 	}
-
-	if err := cmd.Start(); err != nil {
+	if err := h.openFolder(folderPath); err != nil {
 		orihttp.InternalError(w, "Failed to open folder: "+err.Error())
 		return
 	}

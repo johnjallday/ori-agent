@@ -164,16 +164,16 @@ func TestClaudeUsageStatusReportsWhetherRecordsExist(t *testing.T) {
 	}
 }
 
-// TestRecordedUsageMakesAnAgentEligibleInStatus is the whole path in one test:
+// TestRecordedUsageMakesAnAgentEligibleInFeatureOverview is the whole path in one test:
 // Claude pushes a payload, the recorder persists it, the adapter reads it, and
-// the shared snapshot every surface renders changes its answer about whether
-// that agent may be run unattended.
-func TestRecordedUsageMakesAnAgentEligibleInStatus(t *testing.T) {
+// the feature overview changes its answer about whether that agent may be run
+// unattended. The live-agent roster deliberately does not include eligibility.
+func TestRecordedUsageMakesAnAgentEligibleInFeatureOverview(t *testing.T) {
 	primary, feature := createPrimaryCheckoutWithFeature(t)
 	home := filepath.Join(t.TempDir(), "runtime")
 	writePrimaryCheckoutBridgeState(t, home, feature)
 
-	status := func() string {
+	featureOverview := func() string {
 		t.Helper()
 		var output, stderr bytes.Buffer
 		application := New(Dependencies{
@@ -185,13 +185,13 @@ func TestRecordedUsageMakesAnAgentEligibleInStatus(t *testing.T) {
 		})
 		application.Run(context.Background(), []string{
 			"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr",
-			"status", "--current", "--no-color",
+			"feature-overview", "--feature", "bridge", "--no-color",
 		})
 		return output.String()
 	}
 
 	// Before any record exists the honest answer is a refusal, not a guess.
-	before := status()
+	before := featureOverview()
 	if !strings.Contains(before, "overnight: not eligible") {
 		t.Fatalf("status before recording:\n%s", before)
 	}
@@ -214,7 +214,7 @@ func TestRecordedUsageMakesAnAgentEligibleInStatus(t *testing.T) {
 		t.Fatalf("record exit = %d", exit)
 	}
 
-	after := status()
+	after := featureOverview()
 	if !strings.Contains(after, "overnight: eligible") {
 		t.Fatalf("status after recording a plan-backed window:\n%s", after)
 	}

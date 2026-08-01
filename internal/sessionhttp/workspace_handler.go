@@ -377,6 +377,17 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		req.EntryAgentName = composition.entryAgentName
 	}
 
+	// Validate the COMPLETE resulting roster before anything is persisted (FR70).
+	// validateTemplateAgentOverrideNames only compares blueprint specs with each
+	// other, so a customized copy renamed onto a selected saved agent would
+	// otherwise reach seeding and silently collapse two intended members into one.
+	if templateResolved && createTemplateAgentsEnabled(req) {
+		if err := validateRosterNameCollisions(resolvedTemplate, req.TemplateAgentOverrides, composition.existingAgentNames); err != nil {
+			_ = orihttp.RespondBadRequest(w, err.Error())
+			return
+		}
+	}
+
 	ws := buildCreateWorkspace(req, kind, requestedTags, resolvedTemplate, templateResolved)
 
 	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved)
@@ -386,6 +397,10 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {
 		logger.Error("Failed to create workspace", logger.Fields{"error": err})
+		// The roster was seeded before this point, so without cleanup the user
+		// is left with agents in Your Agents for a workspace that does not
+		// exist (FR71).
+		h.rollbackSeededAgents(seed)
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace")
 		return
 	}
@@ -395,7 +410,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		template:     resolvedTemplate,
 		resolved:     templateResolved,
 		resolveErr:   templateResolveErr,
-	}, seed.Created)
+	}, seed)
 	if responded {
 		return
 	}
@@ -692,7 +707,8 @@ type createProvisionOutcome struct {
 // already exists); the one exception is a folder-slug conflict, which rolls
 // the workspace back and writes the conflict response itself — signalled by
 // responded=true, in which case the caller must return immediately.
-func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.ResponseWriter, req createWorkspaceRequest, ws *session.Workspace, tc createTemplateContext, seededAgents []createdAgent) (out createProvisionOutcome, responded bool) {
+func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.ResponseWriter, req createWorkspaceRequest, ws *session.Workspace, tc createTemplateContext, seed seedAgentsResult) (out createProvisionOutcome, responded bool) {
+	seededAgents := seed.Created
 	if tc.wantsProject {
 		// Default for every path below that does not reach (or does not
 		// succeed in) template application: missing store, folder-creation
@@ -744,6 +760,10 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 				_ = orihttp.RespondInternalError(w, "Failed to rollback workspace after folder conflict")
 				return out, true
 			}
+			// The workspace record is gone, so the agents seeded for it must go
+			// too — otherwise retrying under a different name would find them
+			// already present and silently reuse them (FR72).
+			h.rollbackSeededAgents(seed)
 			writeWorkspaceCreateSlugConflict(w, req.Name, slugConflict)
 			return out, true
 		}

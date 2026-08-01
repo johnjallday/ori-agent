@@ -20,6 +20,10 @@ import "time"
 // A record written by a newer helper is not decoded on a guess.
 const RecordVersion = 1
 
+// PlanProofVersion is the durable schema for an affirmative confirmation-time
+// Claude.ai plan proof stored on an Overnight participant.
+const PlanProofVersion = 1
+
 // SourceStatusLine and SourceStopFailure name the two supported interfaces the
 // evidence can come from. They are recorded on every sample so a reader can
 // tell which contract produced a value.

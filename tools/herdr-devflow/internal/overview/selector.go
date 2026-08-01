@@ -21,9 +21,8 @@ const (
 )
 
 // Selector is the resolved narrowing for one render. Every surface resolves it
-// the same way, against the same snapshot, so `wt status`, `wt herd status
-// --current`, `--worktree`, JSON, and the board can never disagree about which
-// checkout the operator is standing in.
+// the same way, against the same snapshot, so `wt status`, JSON, and the board
+// can never disagree about which checkout the operator is standing in.
 type Selector struct {
 	Kind SelectorKind
 	// Feature is the exact slug when Kind is SelectorFeature.

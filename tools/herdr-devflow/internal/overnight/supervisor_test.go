@@ -178,6 +178,17 @@ func TestTickBeforeTheStartTimeDoesNothing(t *testing.T) {
 	}
 }
 
+func TestValidPlanProofDoesNotTurnAStaleWindowIntoAStop(t *testing.T) {
+	h := newHarness(t, "alpha")
+	participant := &h.run.Participants[0]
+	participant.PlanProof = model.PlanProof{FormatVersion: 1, SessionID: participant.Binding.NativeSession.Value, PlanBacked: true, ExpiresAt: h.clock.Add(8 * time.Hour)}
+	h.usage.signal = claudeusage.Signal{Class: claudeusage.LimitUnknown, Reason: "The newest Claude usage record for this session is too old to describe the current window."}
+	recognized, stopped := h.supervisor.classifyLimit(&h.run, participant, h.clock)
+	if recognized || stopped || participant.Limit != nil {
+		t.Fatalf("stale window became a reset or stop: recognized=%v stopped=%v participant=%+v", recognized, stopped, participant)
+	}
+}
+
 // TestFirstTickActivatesTheQueueHeadAndPromptsItOnce is the ordinary path.
 func TestFirstTickActivatesTheQueueHeadAndPromptsItOnce(t *testing.T) {
 	h := newHarness(t, "alpha", "beta")

@@ -70,8 +70,8 @@ type Config struct {
 	Now func() time.Time
 }
 
-// Service collects the shared read-only snapshot. It is the single collector
-// behind `wt status`, `wt herd status`, the JSON contract, and the Herdr board.
+// Service collects the shared read-only snapshot behind `wt status`, its JSON
+// contract, and the Herdr board.
 //
 // Collection is local-first: planning, backlog, worktree, and Git evidence are
 // gathered without a network. Remote enrichment is layered on top and is

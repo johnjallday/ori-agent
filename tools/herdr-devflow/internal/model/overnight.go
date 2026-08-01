@@ -16,7 +16,17 @@ import "time"
 // what it must be able to prove, and a summary of everything else.
 
 // RunVersion is the schema version of one persisted Overnight Run.
-const RunVersion = 1
+const RunVersion = 2
+
+// WakeMode states how an Overnight Run keeps the Mac available. Sleep is the
+// historical/default behavior; stay-awake deliberately never registers a
+// reset wake or asks macOS to sleep.
+type WakeMode string
+
+const (
+	WakeModeSleep     WakeMode = "sleep"
+	WakeModeStayAwake WakeMode = "stay_awake"
+)
 
 // RunState is the lifecycle position of a whole run.
 type RunState string
@@ -246,12 +256,13 @@ type DetectedLimit struct {
 
 // WakeOwnership records the wake candidate this run owns.
 //
-// Ori programs one system wake from several sources, so a run must be able to
-// say exactly which candidate is its own — cancelling someone else's wake would
-// silently break a scheduled workspace task.
+// The standalone daemon arbitrates multiple Herdr wake candidates, so a run
+// must retain exact source/purpose evidence before it can withdraw anything.
 type WakeOwnership struct {
-	// CandidateID is the identity the shared coordinator returned.
+	// CandidateID is the stable daemon candidate identity.
 	CandidateID string `json:"candidate_id,omitempty"`
+	Source      string `json:"source,omitempty"`
+	Purpose     string `json:"purpose,omitempty"`
 	// RequestedAt is the wake time this run asked for, normally a small lead
 	// before the reset.
 	RequestedAt time.Time `json:"requested_at,omitzero"`
@@ -261,14 +272,41 @@ type WakeOwnership struct {
 	// wake is programmed. Sleep requires this, never the registration alone.
 	Verified bool `json:"verified"`
 	// RegisteredAt and VerifiedAt record when each step succeeded.
-	RegisteredAt time.Time `json:"registered_at,omitzero"`
-	VerifiedAt   time.Time `json:"verified_at,omitzero"`
+	RegisteredAt    time.Time `json:"registered_at,omitzero"`
+	ProgrammedAt    time.Time `json:"programmed_at,omitzero"`
+	VerifiedAt      time.Time `json:"verified_at,omitzero"`
+	ProtocolVersion int       `json:"protocol_version,omitempty"`
+	DaemonBuild     string    `json:"daemon_build,omitempty"`
+	HelperBuild     string    `json:"helper_build,omitempty"`
 	// Canceled records that this run's candidate was withdrawn.
 	Canceled bool `json:"canceled"`
 	// Uncertain means cancellation could not be confirmed, which must be
 	// reported rather than assumed either way.
 	Uncertain bool   `json:"uncertain"`
 	Detail    string `json:"detail,omitempty"`
+}
+
+// PlanProof is the positive confirmation-time evidence that one exact native
+// Claude session uses included Claude.ai capacity. It is deliberately distinct
+// from fresh five-hour-window/reset evidence, which can become stale later.
+type PlanProof struct {
+	FormatVersion int       `json:"format_version,omitempty"`
+	SessionID     string    `json:"session_id,omitempty"`
+	ClaudeVersion string    `json:"claude_version,omitempty"`
+	ObservedAt    time.Time `json:"observed_at,omitzero"`
+	ExpiresAt     time.Time `json:"expires_at,omitzero"`
+	PlanBacked    bool      `json:"plan_backed"`
+}
+
+// StayAwakeAssertion records the user-level idle-sleep assertion that belongs
+// to one `--stay-awake` run. It is never created by the root wake daemon.
+type StayAwakeAssertion struct {
+	ID         string    `json:"id,omitempty"`
+	AcquiredAt time.Time `json:"acquired_at,omitzero"`
+	VerifiedAt time.Time `json:"verified_at,omitzero"`
+	ReleasedAt time.Time `json:"released_at,omitzero"`
+	Uncertain  bool      `json:"uncertain"`
+	Detail     string    `json:"detail,omitempty"`
 }
 
 // ValidationSummary is what a participant's own task list required and what was
@@ -299,6 +337,8 @@ type RunParticipant struct {
 	// Binding is the exact agent, pane, terminal, and native session approved
 	// at confirmation.
 	Binding AgentBinding `json:"binding"`
+	// PlanProof belongs only to this run's exact approved native session.
+	PlanProof PlanProof `json:"plan_proof,omitzero"`
 	// Checkpoint is the task-list position last observed.
 	Checkpoint TaskCheckpoint `json:"checkpoint,omitzero"`
 	// StartingCompleted is how many subtasks were already done when the user
@@ -416,6 +456,10 @@ type OvernightRun struct {
 	ActiveParticipant string `json:"active_participant,omitempty"`
 	// Wake is the wake candidate this run owns, if any.
 	Wake WakeOwnership `json:"wake,omitzero"`
+	// WakeMode is fixed when the run is confirmed; it is never inferred later
+	// from daemon availability or a transient power reading.
+	WakeMode  WakeMode           `json:"wake_mode,omitempty"`
+	Assertion StayAwakeAssertion `json:"assertion,omitzero"`
 	// Confirmation records how the user approved this run, so a run can never
 	// exist without evidence somebody agreed to it.
 	Confirmation string `json:"confirmation"`

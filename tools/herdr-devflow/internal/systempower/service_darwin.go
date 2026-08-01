@@ -4,9 +4,13 @@ package systempower
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -73,5 +77,70 @@ func (s *Service) Sleep(ctx context.Context) error {
 
 // SupportsSleep reports whether this build can sleep the machine.
 func (s *Service) SupportsSleep() bool { return s.platform() == "darwin" }
+
+// AcquireIdleSleepAssertion starts a user-owned caffeinate process. It is
+// deliberately separate from the root wake daemon; a dispatcher restart sees
+// an unknown assertion as absent and reacquires it before relying on it.
+func (s *Service) AcquireIdleSleepAssertion(ctx context.Context, runID string) (string, error) {
+	if s.platform() != "darwin" {
+		return "", ErrUnsupported
+	}
+	if s.AcquireAssertion != nil {
+		return s.AcquireAssertion(ctx, runID)
+	}
+	command := exec.Command("/usr/bin/caffeinate", "-dimsu") // #nosec G204 -- fixed binary and flags.
+	if err := command.Start(); err != nil {
+		return "", fmt.Errorf("start idle-sleep assertion: %w", err)
+	}
+	id := strconv.Itoa(command.Process.Pid)
+	s.assertions.Store(id, command)
+	return id, nil
+}
+
+func (s *Service) IdleSleepAssertionActive(ctx context.Context, id string) bool {
+	if s.platform() != "darwin" || id == "" {
+		return false
+	}
+	if s.CheckAssertion != nil {
+		return s.CheckAssertion(ctx, id)
+	}
+	value, ok := s.assertions.Load(id)
+	if ok {
+		command, commandOK := value.(*exec.Cmd)
+		return commandOK && command.Process != nil && command.Process.Signal(syscall.Signal(0)) == nil
+	}
+	pid, err := strconv.Atoi(id)
+	if err != nil || pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	return err == nil && process.Signal(syscall.Signal(0)) == nil
+}
+
+func (s *Service) ReleaseIdleSleepAssertion(ctx context.Context, id string) error {
+	if s.platform() != "darwin" {
+		return ErrUnsupported
+	}
+	if s.ReleaseAssertion != nil {
+		return s.ReleaseAssertion(ctx, id)
+	}
+	value, ok := s.assertions.LoadAndDelete(id)
+	if ok {
+		command, commandOK := value.(*exec.Cmd)
+		if !commandOK || command.Process == nil {
+			return fmt.Errorf("idle-sleep assertion %s has no process", id)
+		}
+		return command.Process.Kill()
+	}
+	pid, err := strconv.Atoi(id)
+	if err != nil || pid <= 0 {
+		return fmt.Errorf("idle-sleep assertion %s is not a process identity", id)
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(syscall.SIGTERM)
+}
 
 var _ = time.Second

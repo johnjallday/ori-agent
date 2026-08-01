@@ -1,5 +1,5 @@
-// Package overview defines the read-only, feature-first snapshot shared by
-// `wt status`, `wt herd status`, the JSON contract, and the Herdr board.
+// Package overview defines the read-only, feature-first snapshot used by
+// `wt status`, its JSON contract, and the Herdr board.
 //
 // Everything here is diagnostic. A snapshot records what was observed, when it
 // was observed, and how confident that observation is. It never repairs drift,
@@ -767,8 +767,8 @@ type Repository struct {
 }
 
 // Snapshot is one complete read-only observation of the repository. It is the
-// single value every surface renders: compact `wt status`, expanded
-// `wt herd status`, `--json`, and the Herdr board.
+// single value every feature surface renders: compact `wt status`, `--json`,
+// and the expanded Herdr board.
 type Snapshot struct {
 	// SchemaVersion is the JSON contract version of this payload.
 	SchemaVersion int `json:"schema_version"`

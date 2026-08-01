@@ -255,6 +255,7 @@ func (b *ServerBuilder) initializeHandlers() {
 
 		// Create files HTTP handler
 		b.sessionFilesHandler = fileshttp.NewHandler(sessionFilesStore, b.sessionFilesWatcher)
+		b.sessionFilesHandler.SetDesktopOpener(b.desktopOpener)
 		logger.Info("Session files management initialized", logger.Fields{"path": sessionFilesPath})
 	}
 

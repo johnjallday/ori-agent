@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +21,8 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeclient"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeinstall"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/wakeprotocol"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
@@ -46,6 +47,179 @@ enabled = true
 [status]
 watch_poll_interval = "2s"
 `
+
+type fakeWakeLifecycle struct {
+	prepared       wakeinstall.PreparedInstall
+	status         wakeinstall.Status
+	diagnostics    []wakeinstall.Diagnostic
+	prepareCalls   int
+	installCalls   int
+	uninstallCalls int
+}
+
+func (f *fakeWakeLifecycle) PrepareInstall(
+	context.Context,
+	string,
+	int,
+) (wakeinstall.PreparedInstall, error) {
+	f.prepareCalls++
+	return f.prepared, nil
+}
+
+func (f *fakeWakeLifecycle) Install(
+	_ context.Context,
+	_ wakeinstall.PreparedInstall,
+) (wakeinstall.Status, error) {
+	f.installCalls++
+	return f.status, nil
+}
+
+func (f *fakeWakeLifecycle) Status(context.Context) (wakeinstall.Status, error) {
+	return f.status, nil
+}
+
+func (f *fakeWakeLifecycle) Doctor(context.Context) ([]wakeinstall.Diagnostic, error) {
+	return append([]wakeinstall.Diagnostic(nil), f.diagnostics...), nil
+}
+
+func (f *fakeWakeLifecycle) Uninstall(context.Context, int) (wakeinstall.Status, error) {
+	f.uninstallCalls++
+	removed := f.status
+	removed.Installed = false
+	removed.Running = false
+	removed.Compatible = false
+	removed.Detail = "standalone Herdr wake service is not installed"
+	return removed, nil
+}
+
+func TestWakeLifecycleCommandsRequireConfirmationAndExposeFixedBoundary(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &fakeWakeLifecycle{
+		prepared: wakeinstall.PreparedInstall{
+			ArtifactPath:   filepath.Join(t.TempDir(), "herdr-wake"),
+			ArtifactDigest: strings.Repeat("a", 64),
+			BuildVersion:   "test-build",
+			AllowedUID:     501,
+		},
+		status: wakeinstall.Status{
+			Supported: true, Installed: true, Running: true, Compatible: true,
+			AllowedUID: 501, ProtocolVersion: 1, StateVersion: 1,
+			DaemonBuild: "test-build", Detail: "standalone Herdr wake service is healthy",
+		},
+		diagnostics: []wakeinstall.Diagnostic{{
+			Name: "health", Status: "PASS", Detail: "protocol 1",
+		}},
+	}
+
+	t.Run("non-interactive install stages but never elevates without yes", func(t *testing.T) {
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout: &output, Stderr: &stderr, Getwd: func() (string, error) { return repo, nil },
+			GOOS: "darwin", Getuid: func() int { return 501 },
+			IsInteractive: func() bool { return false }, WakeLifecycle: lifecycle,
+		})
+		exit := application.Run(context.Background(), []string{"wake", "install"})
+		if exit != 2 || lifecycle.installCalls != 0 {
+			t.Fatalf("exit=%d install calls=%d stderr=%q", exit, lifecycle.installCalls, stderr.String())
+		}
+		if !strings.Contains(output.String(), "/Library/PrivilegedHelperTools/com.ori.herdr-wake") ||
+			!strings.Contains(output.String(), "/usr/bin/sudo -k") ||
+			!strings.Contains(output.String(), "No password") {
+			t.Fatalf("install preview did not expose the fixed boundary: %q", output.String())
+		}
+	})
+
+	t.Run("explicit yes installs and status doctor are readable", func(t *testing.T) {
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout: &output, Stderr: &stderr, Getwd: func() (string, error) { return repo, nil },
+			GOOS: "darwin", Getuid: func() int { return 501 },
+			IsInteractive: func() bool { return false }, WakeLifecycle: lifecycle,
+		})
+		if exit := application.Run(context.Background(), []string{"wake", "install", "--yes"}); exit != 0 {
+			t.Fatalf("install exit=%d stderr=%q", exit, stderr.String())
+		}
+		if lifecycle.installCalls != 1 {
+			t.Fatalf("install calls = %d, want 1", lifecycle.installCalls)
+		}
+		output.Reset()
+		if exit := application.Run(context.Background(), []string{"wake", "status"}); exit != 0 ||
+			!strings.Contains(output.String(), "allowed_uid=501") {
+			t.Fatalf("status exit=%d output=%q", exit, output.String())
+		}
+		output.Reset()
+		if exit := application.Run(context.Background(), []string{"wake", "doctor"}); exit != 0 ||
+			!strings.Contains(output.String(), "[PASS] health") {
+			t.Fatalf("doctor exit=%d output=%q", exit, output.String())
+		}
+	})
+
+	t.Run("uninstall requires its own confirmation", func(t *testing.T) {
+		var output, stderr bytes.Buffer
+		application := New(Dependencies{
+			Stdout: &output, Stderr: &stderr, GOOS: "darwin",
+			Getuid: func() int { return 501 }, IsInteractive: func() bool { return false },
+			WakeLifecycle: lifecycle,
+		})
+		exit := application.Run(context.Background(), []string{"wake", "uninstall"})
+		if exit != 2 || lifecycle.uninstallCalls != 0 {
+			t.Fatalf("exit=%d uninstall calls=%d stderr=%q", exit, lifecycle.uninstallCalls, stderr.String())
+		}
+		if exit := application.Run(context.Background(), []string{"wake", "uninstall", "--yes"}); exit != 0 {
+			t.Fatalf("confirmed uninstall exit=%d stderr=%q", exit, stderr.String())
+		}
+		if lifecycle.uninstallCalls != 1 {
+			t.Fatalf("uninstall calls = %d, want 1", lifecycle.uninstallCalls)
+		}
+	})
+}
+
+func TestWakeJSONAndUnsupportedPlatformAreStableAndSideEffectFree(t *testing.T) {
+	t.Parallel()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &fakeWakeLifecycle{
+		prepared: wakeinstall.PreparedInstall{
+			ArtifactPath:   filepath.Join(t.TempDir(), "herdr-wake"),
+			ArtifactDigest: strings.Repeat("b", 64), BuildVersion: "test", AllowedUID: 501,
+		},
+		status: wakeinstall.Status{Supported: true, Installed: true, Running: true, Compatible: true},
+	}
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout: &output, Stderr: &stderr, Getwd: func() (string, error) { return repo, nil },
+		GOOS: "darwin", Getuid: func() int { return 501 },
+		IsInteractive: func() bool { return false }, WakeLifecycle: lifecycle,
+	})
+	if exit := application.Run(context.Background(), []string{"--json", "wake", "install"}); exit != 2 {
+		t.Fatalf("JSON confirmation exit = %d", exit)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatalf("JSON output is not one document: %v\n%s", err, output.String())
+	}
+	if payload["status"] != "confirmation_required" || lifecycle.installCalls != 0 {
+		t.Fatalf("payload=%v install calls=%d", payload, lifecycle.installCalls)
+	}
+
+	output.Reset()
+	unsupported := New(Dependencies{
+		Stdout: &output, Stderr: &stderr, GOOS: "linux", Getuid: func() int { return 501 },
+		WakeLifecycle: lifecycle,
+	})
+	if exit := unsupported.Run(context.Background(), []string{"wake", "install", "--yes"}); exit != 1 {
+		t.Fatalf("unsupported exit = %d", exit)
+	}
+	if lifecycle.prepareCalls != 1 {
+		t.Fatalf("unsupported host staged an artifact; prepare calls=%d", lifecycle.prepareCalls)
+	}
+}
 
 type setupRunner struct {
 	mu         sync.Mutex
@@ -123,6 +297,10 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	}
 
 	runner := &setupRunner{}
+	wakeLifecycle := &fakeWakeLifecycle{status: wakeinstall.Status{
+		Supported: true,
+		Detail:    "standalone Herdr wake service is not installed",
+	}}
 	var output, errors bytes.Buffer
 	builds := 0
 	launchHome := t.TempDir()
@@ -143,6 +321,7 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 		LaunchctlRun: func(context.Context, string, ...string) error {
 			return nil
 		},
+		WakeLifecycle: wakeLifecycle,
 	})
 	args := []string{"--repo-root", repo, "--home", home, "setup"}
 	if exit := application.Run(context.Background(), args); exit != 0 {
@@ -162,6 +341,16 @@ func TestSetupBuildsStableRuntimeLinksOnceAndLeavesGlobalConfigUntouched(t *test
 	}
 	if !strings.Contains(output.String(), "Ori Herdr Devflow: ready") {
 		t.Fatalf("setup output = %q", output.String())
+	}
+	if !strings.Contains(output.String(), "wt herd wake install") ||
+		!strings.Contains(output.String(), "--stay-awake") {
+		t.Fatalf("setup did not report explicit wake alternatives: %q", output.String())
+	}
+	if wakeLifecycle.prepareCalls != 0 || wakeLifecycle.installCalls != 0 {
+		t.Fatalf(
+			"setup crossed the wake install boundary: prepare=%d install=%d",
+			wakeLifecycle.prepareCalls, wakeLifecycle.installCalls,
+		)
 	}
 	if got, err := os.ReadFile(globalConfig); err != nil || !bytes.Equal(got, originalGlobalConfig) {
 		t.Fatalf("global config changed: %q, %v", got, err)
@@ -562,22 +751,47 @@ type continuationWake struct {
 	readiness    wakeclient.OwnerReadiness
 }
 
-func (w *continuationWake) Register(id string, wakeAt time.Time, _ string) error {
+func (w *continuationWake) RegisterCandidate(
+	_ context.Context,
+	id string,
+	wakeAt time.Time,
+	_ string,
+) (wakeclient.Evidence, error) {
 	w.registeredID = id
 	w.registeredAt = wakeAt
-	return nil
+	return wakeclient.Evidence{
+		CandidateID: id, RequestedAt: wakeAt,
+		ProtocolVersion: wakeprotocol.Version, DaemonBuild: "test-daemon",
+		HelperBuild: "test-helper", Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+	}, nil
 }
 
-func (w *continuationWake) Verify(_ context.Context, id string, wakeAt time.Time) (time.Time, error) {
+func (w *continuationWake) VerifyCandidate(
+	_ context.Context,
+	id string,
+	wakeAt time.Time,
+) (wakeclient.Evidence, error) {
 	if id != w.registeredID || !wakeAt.Equal(w.registeredAt) {
-		return time.Time{}, errors.New("wake identity mismatch")
+		return wakeclient.Evidence{}, errors.New("wake identity mismatch")
 	}
-	return wakeAt.Add(-time.Minute), nil
+	return wakeclient.Evidence{
+		CandidateID: id, RequestedAt: wakeAt, ProgrammedAt: wakeAt.Add(-time.Minute),
+		VerifiedAt: time.Now().UTC(), ProtocolVersion: wakeprotocol.Version,
+		DaemonBuild: "test-daemon", HelperBuild: "test-helper",
+		Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+	}, nil
 }
 
-func (w *continuationWake) Cancel(id string) error {
+func (w *continuationWake) CancelCandidate(
+	_ context.Context,
+	id string,
+) (wakeclient.Evidence, error) {
 	w.canceledID = id
-	return nil
+	return wakeclient.Evidence{
+		CandidateID: id, ProtocolVersion: wakeprotocol.Version,
+		DaemonBuild: "test-daemon", HelperBuild: "test-helper",
+		Result: wakeprotocol.ResultSuccess, Code: wakeprotocol.CodeOK,
+	}, nil
 }
 
 func (w *continuationWake) Owner() wakeclient.OwnerReadiness {
@@ -633,7 +847,7 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", due, "--prompt", privatePrompt, "--wake"}); exit != 0 {
 		t.Fatalf("continue exit = %d; stderr=%s", exit, stderr.String())
 	}
-	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") || !strings.Contains(output.String(), "macOS wake confirmed") {
+	if !strings.Contains(output.String(), "Continuation preview (not saved yet):") || !strings.Contains(output.String(), "scheduled sch-") || !strings.Contains(output.String(), "standalone macOS wake verified") {
 		t.Fatalf("continue output = %q", output.String())
 	}
 	stateAfter, err := store.Load()
@@ -647,7 +861,11 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	scheduleID := ""
 	for _, record := range schedules {
 		scheduleID = record.ID
-		if record.AgentName != agent.Name || record.State != model.SchedulePending || record.Prompt != privatePrompt || !record.WakeRequired || record.WakeVerifiedAt.IsZero() {
+		if record.AgentName != agent.Name || record.State != model.SchedulePending ||
+			record.Prompt != privatePrompt || !record.WakeRequired ||
+			record.WakeVerifiedAt.IsZero() || record.WakeProtocol != wakeprotocol.Version ||
+			record.WakeDaemonBuild != "test-daemon" ||
+			record.WakePurpose != string(wakeprotocol.PurposeContinuation) {
 			t.Fatalf("schedule = %#v", record)
 		}
 	}
@@ -682,14 +900,14 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	if !strings.Contains(string(audit), "\"operation\":\"continue\"") || strings.Contains(string(audit), privatePrompt) || strings.Contains(string(audit), "OPENAI_API_KEY") || strings.Contains(string(audit), "sk-not-a-real-secret") {
 		t.Fatalf("continuation audit exposed prompt data: %q", audit)
 	}
-	wake.readiness = wakeclient.OwnerReadiness{Running: true, Detail: "Mac wake scheduling is turned off in Ori's settings"}
+	wake.readiness = wakeclient.OwnerReadiness{Running: true, Detail: "standalone Herdr wake service is not ready"}
 	output.Reset()
 	stderr.Reset()
 	nextDue := time.Now().Add(2 * time.Hour).Format(time.RFC3339)
 	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "continue", "--at", nextDue, "--wake"}); exit != 1 {
 		t.Fatalf("wake-disabled continue exit = %d; output=%s stderr=%s", exit, output.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "wake_unavailable") || !strings.Contains(stderr.String(), "turned off") {
+	if !strings.Contains(stderr.String(), "wake_unavailable") || !strings.Contains(stderr.String(), "standalone") {
 		t.Fatalf("wake-disabled error = %q", stderr.String())
 	}
 	stateAfter, err = store.Load()
@@ -701,8 +919,8 @@ func TestContinueCreatesOneTimeScheduleAfterExactFeatureScopedResolution(t *test
 	}
 }
 
-func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testing.T) {
-	_, feature := createLinkedFeatureWorktree(t)
+func TestStatusUsesOnlyLiveAgentsAndFeatureOverviewStaysSeparate(t *testing.T) {
+	primary, feature := createLinkedFeatureWorktree(t)
 	home := filepath.Join(t.TempDir(), "runtime")
 	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
 		if key == worktree.HomeOverrideEnv {
@@ -719,8 +937,14 @@ func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testi
 	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
 		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
 		WorkspaceID: "w1",
-		Agents:      map[string]model.RoleAgent{"builder": agent},
-		Schedules:   map[string]model.Schedule{},
+		Agents: map[string]model.RoleAgent{
+			"builder": agent,
+			"ghost": {
+				Role: "ghost", Name: "saved-but-closed", Kind: "claude",
+				WorkspaceID: "w-old", PaneID: "w-old:p1", TerminalID: "term-old",
+			},
+		},
+		Schedules: map[string]model.Schedule{},
 	}
 	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
 		t.Fatal(err)
@@ -732,53 +956,75 @@ func TestStatusUsesAStableJSONSnapshotAndPluginRefreshUsesDetachedState(t *testi
 		Stderr:    &stderr,
 		Getwd:     func() (string, error) { return feature, nil },
 		LookupEnv: func(string) (string, bool) { return "", false },
-		Runner:    continuationRunner{},
+		Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
 	})
-	// `wt herd status` renders the shared overview snapshot. Without a reachable
-	// GitHub the snapshot is incomplete by design, so the command exits 1 while
-	// still emitting every local fact it did observe.
-	args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
-	if exit := application.Run(context.Background(), args); exit != 1 {
-		t.Fatalf("status exit=%d, want 1 for an incomplete snapshot; stderr=%s", exit, stderr.String())
+	args := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--json"}
+	if exit := application.Run(context.Background(), args); exit != 0 {
+		t.Fatalf("status exit=%d, want 0 for a successful live roster; stderr=%s", exit, stderr.String())
 	}
-	var snapshot overview.Snapshot
-	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+	var roster liveAgentRoster
+	if err := json.Unmarshal(output.Bytes(), &roster); err != nil {
 		t.Fatalf("status JSON = %q: %v", output.String(), err)
 	}
-	if snapshot.SchemaVersion != overview.SchemaVersion {
-		t.Fatalf("schema version = %d, want %d", snapshot.SchemaVersion, overview.SchemaVersion)
+	if len(roster.Agents) != 2 {
+		t.Fatalf("live roster = %#v, want exactly the two open agents", roster.Agents)
 	}
-	if snapshot.Complete {
-		t.Fatal("a snapshot without a fresh GitHub query called itself complete")
+	for _, agent := range roster.Agents {
+		if agent.Agent == "saved-but-closed" {
+			t.Fatalf("live roster included a closed saved bridge record: %#v", roster.Agents)
+		}
 	}
-	row, ok := snapshot.Feature("bridge")
-	if !ok {
-		t.Fatalf("status snapshot carried no bridge feature: %#v", snapshot.Features)
-	}
-	if row.Plan.Progress.NextActionable.Text != "Continue implementation" {
-		t.Fatalf("next actionable = %#v", row.Plan.Progress.NextActionable)
-	}
-	if len(row.Agents) != 1 || row.Agents[0].Role != "builder" {
-		t.Fatalf("agent rows = %#v, want the saved builder", row.Agents)
-	}
-	if row.Agents[0].Status != overview.AgentIdle {
-		t.Fatalf("observed status = %q, want idle", row.Agents[0].Status)
+	if strings.Contains(output.String(), "schema_version") || strings.Contains(output.String(), "features") {
+		t.Fatalf("status JSON leaked the feature overview contract: %s", output.String())
 	}
 
 	output.Reset()
-	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--no-color"}); exit != 1 {
-		t.Fatalf("human status exit=%d, want 1; stderr=%s", exit, stderr.String())
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "overview", "--json"}); exit != 0 {
+		t.Fatalf("overview alias exit=%d stderr=%s", exit, stderr.String())
+	}
+	var alias liveAgentRoster
+	if err := json.Unmarshal(output.Bytes(), &alias); err != nil || len(alias.Agents) != len(roster.Agents) {
+		t.Fatalf("overview alias = %#v, %v; want same live roster as status", alias, err)
+	}
+
+	// The full normalized snapshot remains available to the shell-only
+	// feature-overview command used by `wt status`.
+	output.Reset()
+	stderr.Reset()
+	featureArgs := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "feature-overview", "--feature", "bridge", "--json"}
+	if exit := application.Run(context.Background(), featureArgs); exit != 1 {
+		t.Fatalf("feature overview exit=%d, want 1 while GitHub is unavailable; stderr=%s", exit, stderr.String())
+	}
+	var snapshot overview.Snapshot
+	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+		t.Fatalf("feature overview JSON = %q: %v", output.String(), err)
+	}
+	row, ok := snapshot.Feature("bridge")
+	if !ok || row.Plan.Progress.NextActionable.Text != "Continue implementation" {
+		t.Fatalf("feature overview lost its plan snapshot: %#v", snapshot.Features)
+	}
+
+	output.Reset()
+	stderr.Reset()
+	if exit := application.Run(context.Background(), []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "status", "--no-color"}); exit != 0 {
+		t.Fatalf("human status exit=%d, want 0; stderr=%s", exit, stderr.String())
 	}
 	if strings.ContainsRune(output.String(), '\x1b') {
 		t.Fatalf("no-color output contained escape sequences: %q", output.String())
 	}
-	for _, want := range []string{"bridge", "builder", "idle", "INCOMPLETE"} {
+	for _, want := range []string{"Open agents: 2", "ori-repo-bridge-builder", "claude", "idle", "bridge"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("human status = %q, want it to contain %q", output.String(), want)
 		}
 	}
+	for _, unwanted := range []string{"saved-but-closed", "INCOMPLETE", "phase:", "overnight:"} {
+		if strings.Contains(output.String(), unwanted) {
+			t.Fatalf("human status included %q from the old feature snapshot:\n%s", unwanted, output.String())
+		}
+	}
 
 	output.Reset()
+	stderr.Reset()
 	if exit := application.Run(context.Background(), []string{"--home", home, "--herdr-bin", "fake-herdr", "plugin", "refresh"}); exit != 0 {
 		t.Fatalf("plugin refresh exit=%d stderr=%s", exit, stderr.String())
 	}
@@ -822,38 +1068,9 @@ func (r primaryCheckoutRunner) Run(_ context.Context, command herdr.Command) (he
 	}
 }
 
-// TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork is the reported
-// failure. `--current` derives a feature slug from the checkout's directory
-// name, so running it in `ori-agent-dev` asks the snapshot for a feature named
-// after the dev checkout and fails with `no feature named "ori-agent-dev"`
-// instead of showing the repository's active work. FR9, FR10, FR11.
-func TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork(t *testing.T) {
+func TestStatusCurrentListsOnlyAgentsInTheCurrentCheckout(t *testing.T) {
 	primary, feature := createPrimaryCheckoutWithFeature(t)
 	home := filepath.Join(t.TempDir(), "runtime")
-	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {
-		if key == worktree.HomeOverrideEnv {
-			return home, true
-		}
-		return "", false
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	native := model.NativeSession{Source: "herdr:claude", Agent: "claude", Kind: "id", Value: "native-123"}
-	bridgeState := model.NewBridgeState()
-	bridgeState.Features[paths.RepositoryID+":bridge"] = model.FeatureState{
-		Feature:     model.Feature{RepositoryID: paths.RepositoryID, Name: "bridge", Branch: "feature/bridge", Path: feature},
-		WorkspaceID: "w1",
-		Agents: map[string]model.RoleAgent{"builder": {
-			Role: "builder", Name: "ori-repo-bridge-builder", Kind: "claude",
-			WorkspaceID: "w1", PaneID: "w1:p2", TerminalID: "term-2", NativeSession: native,
-			UpdatedAt: time.Now().Add(-time.Minute),
-		}},
-		Schedules: map[string]model.Schedule{},
-	}
-	if err := state.New(paths.StateDir).Save(bridgeState); err != nil {
-		t.Fatal(err)
-	}
 
 	var output, stderr bytes.Buffer
 	application := New(Dependencies{
@@ -863,38 +1080,23 @@ func TestStatusCurrentFromThePrimaryCheckoutShowsRepositoryWork(t *testing.T) {
 		LookupEnv: func(string) (string, bool) { return "", false },
 		Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
 	})
-	// The snapshot is incomplete without a reachable GitHub, so exit 1 is
-	// expected; what must not happen is the selector rejecting the checkout.
 	args := []string{"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr", "status", "--current", "--json"}
-	application.Run(context.Background(), args)
-	if strings.Contains(output.String()+stderr.String(), "no feature named") {
-		t.Fatalf("--current invented a feature slug from the dev checkout name: %s%s", output.String(), stderr.String())
+	if exit := application.Run(context.Background(), args); exit != 0 {
+		t.Fatalf("status --current exit=%d stderr=%s", exit, stderr.String())
 	}
 
-	var snapshot overview.Snapshot
-	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil {
+	var roster liveAgentRoster
+	if err := json.Unmarshal(output.Bytes(), &roster); err != nil {
 		t.Fatalf("status JSON = %q: %v", output.String(), err)
 	}
-	if _, ok := snapshot.Feature("bridge"); !ok {
-		t.Fatalf("--current from the primary checkout hid the repository's active feature: %+v", snapshot.Features)
-	}
-	var panes []string
-	for _, agent := range snapshot.Agents {
-		panes = append(panes, agent.Live.Pane)
-	}
-	if !slices.Contains(panes, "w-dev:p1") || !slices.Contains(panes, "w1:p2") {
-		t.Fatalf("roster panes = %v, want both the feature agent and the agent in the primary checkout", panes)
+	if len(roster.Agents) != 1 || roster.Agents[0].Agent != "ori-dev-claude" || roster.Agents[0].Worktree != primary {
+		t.Fatalf("status --current roster = %#v, want only the primary-checkout agent", roster.Agents)
 	}
 }
 
-// TestStatusSelectorsResolveByPathNotByDirectoryName covers the human surface
-// of the same regression, plus the explicit `--worktree` form: standing in the
-// dev checkout lists the repository's work and its agents, and pointing at a
-// feature worktree narrows to that feature. FR9, FR10, FR11.
-func TestStatusSelectorsResolveByPathNotByDirectoryName(t *testing.T) {
+func TestStatusSelectorsFilterTheLiveRosterByCanonicalWorktree(t *testing.T) {
 	primary, feature := createPrimaryCheckoutWithFeature(t)
 	home := filepath.Join(t.TempDir(), "runtime")
-	writePrimaryCheckoutBridgeState(t, home, feature)
 
 	run := func(args ...string) string {
 		t.Helper()
@@ -907,33 +1109,30 @@ func TestStatusSelectorsResolveByPathNotByDirectoryName(t *testing.T) {
 			Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
 		})
 		base := []string{"--repo-root", primary, "--home", home, "--herdr-bin", "fake-herdr", "status", "--no-color"}
-		application.Run(context.Background(), append(base, args...))
-		if strings.Contains(stderr.String(), "no feature named") {
-			t.Fatalf("a selector invented a feature slug from a directory name: %s", stderr.String())
+		if exit := application.Run(context.Background(), append(base, args...)); exit != 0 {
+			t.Fatalf("status selector exit=%d stderr=%s", exit, stderr.String())
 		}
 		return output.String()
 	}
 
 	fromPrimary := run("--current")
-	for _, want := range []string{"bridge", "Agents outside a feature", "ori-dev-claude", "overnight:"} {
-		if !strings.Contains(fromPrimary, want) {
-			t.Fatalf("status --current from the dev checkout did not mention %q:\n%s", want, fromPrimary)
-		}
+	if !strings.Contains(fromPrimary, "ori-dev-claude") || strings.Contains(fromPrimary, "ori-repo-bridge-builder") {
+		t.Fatalf("status --current did not isolate the current checkout:\n%s", fromPrimary)
 	}
 
 	fromFeature := run("--worktree", feature)
-	if !strings.Contains(fromFeature, "bridge") {
+	if !strings.Contains(fromFeature, "ori-repo-bridge-builder") || strings.Contains(fromFeature, "ori-dev-claude") {
 		t.Fatalf("status --worktree did not select the feature:\n%s", fromFeature)
 	}
-	// A feature detail view is about that feature; the repository's other
-	// agents belong to the wider roster, not to this report.
-	if strings.Contains(fromFeature, "Agents outside a feature") {
-		t.Fatalf("the feature detail view included unrelated agents:\n%s", fromFeature)
+
+	fromSlug := run("--feature", "bridge")
+	if !strings.Contains(fromSlug, "ori-repo-bridge-builder") || strings.Contains(fromSlug, "ori-dev-claude") {
+		t.Fatalf("status --feature did not resolve the feature worktree:\n%s", fromSlug)
 	}
 }
 
-// writePrimaryCheckoutBridgeState saves the bridge record for the fixture's
-// feature worktree so status has a managed agent to resolve.
+// writePrimaryCheckoutBridgeState saves the bridge record used by tests of the
+// feature overview and unattended-run eligibility.
 func writePrimaryCheckoutBridgeState(t *testing.T, home, feature string) {
 	t.Helper()
 	paths, err := worktree.Resolve(feature, func(key string) (string, bool) {

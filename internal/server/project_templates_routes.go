@@ -10,7 +10,6 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
@@ -344,11 +343,12 @@ func (s *Server) handleProjectTemplateReveal(w http.ResponseWriter, r *http.Requ
 	}
 
 	root := resolveTemplatesRoot(s.Core.ConfigManager)
+	opener := s.resolvedDesktopOpener()
 	if strings.TrimSpace(req.ID) == "" {
 		if err := projecttemplates.EnsureLibrary(root); err != nil {
 			logger.Warn("Failed to prepare templates library for reveal", logger.Fields{"error": err})
 		}
-		if err := platform.OpenFolder(root); err != nil {
+		if err := opener.OpenFolder(root); err != nil {
 			_ = orihttp.RespondInternalError(w, "Failed to open templates folder")
 			return
 		}
@@ -361,7 +361,7 @@ func (s *Server) handleProjectTemplateReveal(w http.ResponseWriter, r *http.Requ
 		s.respondProjectTemplateError(w, err)
 		return
 	}
-	if err := platform.RevealInFileManager(tpl.Path); err != nil {
+	if err := opener.RevealInFileManager(tpl.Path); err != nil {
 		_ = orihttp.RespondInternalError(w, "Failed to reveal template")
 		return
 	}

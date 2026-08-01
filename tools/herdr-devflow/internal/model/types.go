@@ -123,8 +123,23 @@ type Schedule struct {
 	Prompt            string        `json:"prompt"`
 	WakeRequired      bool          `json:"wake_required,omitempty"`
 	WakeCandidateID   string        `json:"wake_candidate_id,omitempty"`
+	WakeSource        string        `json:"wake_source,omitempty"`
+	WakePurpose       string        `json:"wake_purpose,omitempty"`
+	WakeRequestedAt   time.Time     `json:"wake_requested_at,omitempty"`
+	WakeRegisteredAt  time.Time     `json:"wake_registered_at,omitempty"`
 	WakeProgrammedAt  time.Time     `json:"wake_programmed_at,omitempty"`
 	WakeVerifiedAt    time.Time     `json:"wake_verified_at,omitempty"`
+	WakeProtocol      int           `json:"wake_protocol_version,omitempty"`
+	WakeDaemonBuild   string        `json:"wake_daemon_build,omitempty"`
+	WakeHelperBuild   string        `json:"wake_helper_build,omitempty"`
+	WakeResult        string        `json:"wake_result,omitempty"`
+	WakeCode          string        `json:"wake_code,omitempty"`
+	WakeUncertain     bool          `json:"wake_uncertain,omitempty"`
+	WakeRollbackAt    time.Time     `json:"wake_rollback_attempted_at,omitempty"`
+	WakeRollbackOKAt  time.Time     `json:"wake_rollback_verified_at,omitempty"`
+	WakeRollbackState string        `json:"wake_rollback_result,omitempty"`
+	WakeRollbackInfo  string        `json:"wake_rollback_detail,omitempty"`
+	WakeWithdrawnAt   time.Time     `json:"wake_withdrawn_at,omitempty"`
 	WakeFailureReason string        `json:"wake_failure_reason,omitempty"`
 	State             ScheduleState `json:"state"`
 	Attempts          int           `json:"attempts"`

@@ -1,0 +1,2 @@
+Scheduled power events:
+ [0] wake whenever convenient by 'com.ori.herdr-wake'
