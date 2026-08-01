@@ -47,7 +47,14 @@ import {
   groupRailView,
   renderGroupRailHTML,
   summaryView,
-  renderSummaryRailHTML
+  renderSummaryRailHTML,
+  attentionItems,
+  scheduledTodayItems,
+  renderAttentionSectionHTML,
+  renderScheduledSectionHTML,
+  validateCapture,
+  captureRequestBody,
+  captureAvailability
 } from './home-workspace-cockpit.js';
 
 // ---------------------------------------------------------------------------
@@ -895,4 +902,157 @@ test('folderDisplayFor reads the real directory_references wire field', () => {
   });
   assert.equal(linked.linked, true);
   assert.equal(linked.detail, 'Ori Workspaces/Alpha');
+});
+
+// ===========================================================================
+// Group 4 — Today's immediate work and Quick Capture
+// ===========================================================================
+
+test('attentionItems lists only workspaces with attention, most urgent first', () => {
+  const rows = flattenWorkspaceTree([
+    { id: 'a', name: 'Alpha', needs_attention_count: 1 },
+    { id: 'b', name: 'Beta', needs_attention_count: 5 },
+    { id: 'c', name: 'Gamma', needs_attention_count: 0 },
+    { id: 'd', name: 'Delta' },
+    { id: 'g', name: 'Group', kind: 'group', needs_attention_count: 9 }
+  ]);
+  assert.deepEqual(
+    attentionItems(rows).map(i => i.name),
+    ['Beta', 'Alpha']
+  );
+  assert.equal(attentionItems(rows)[0].count, 5);
+});
+
+test('attentionItems is empty rather than throwing on missing input', () => {
+  assert.deepEqual(attentionItems(null), []);
+  assert.deepEqual(attentionItems([]), []);
+});
+
+test('scheduledTodayItems is null when the schedule source is unavailable (FR121)', () => {
+  const rows = flattenWorkspaceTree([{ id: 'a', name: 'Alpha' }]);
+  assert.equal(scheduledTodayItems(rows, null), null);
+});
+
+test('scheduledTodayItems returns only work due by end of day, earliest first', () => {
+  const now = new Date('2026-07-31T09:00:00');
+  const rows = flattenWorkspaceTree([
+    { id: 'a', name: 'Alpha' },
+    { id: 'b', name: 'Beta' }
+  ]);
+  const index = {
+    a: [
+      { next_run: new Date('2026-07-31T18:00:00').toISOString(), task_name: 'Evening' },
+      { next_run: new Date('2026-08-02T09:00:00').toISOString(), task_name: 'Later this week' }
+    ],
+    b: [{ next_run: new Date('2026-07-31T11:00:00').toISOString(), task_name: 'Late morning' }]
+  };
+  const items = scheduledTodayItems(rows, index, now);
+  assert.deepEqual(
+    items.map(i => i.taskName),
+    ['Late morning', 'Evening']
+  );
+  assert.equal(items[0].workspaceName, 'Beta');
+});
+
+test('scheduledTodayItems flags overdue work rather than hiding it', () => {
+  const now = new Date('2026-07-31T09:00:00');
+  const rows = flattenWorkspaceTree([{ id: 'a', name: 'Alpha' }]);
+  const items = scheduledTodayItems(
+    rows,
+    { a: [{ next_run: new Date('2026-07-31T07:00:00').toISOString(), task_name: 'Missed' }] },
+    now
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].overdue, true);
+});
+
+test('renderAttentionSectionHTML selects rather than navigates, and caps the list', () => {
+  const items = Array.from({ length: 9 }, (_, i) => ({
+    id: `w${i}`,
+    name: `W${i}`,
+    count: 9 - i
+  }));
+  const html = renderAttentionSectionHTML(items);
+  assert.match(html, /data-cockpit-select="w0"/);
+  assert.doesNotMatch(html, /<a /);
+  assert.match(html, /\+3 more/);
+});
+
+test('renderAttentionSectionHTML renders nothing when nothing needs attention', () => {
+  assert.equal(renderAttentionSectionHTML([]), '');
+});
+
+test('the scheduled section distinguishes "unavailable" from "nothing today"', () => {
+  assert.match(renderScheduledSectionHTML(null), /unavailable/i);
+  // Genuinely nothing scheduled renders no section at all rather than a
+  // misleading "unavailable" note.
+  assert.equal(renderScheduledSectionHTML([]), '');
+});
+
+test('the scheduled section names overdue work explicitly, not only by colour', () => {
+  const html = renderScheduledSectionHTML([
+    {
+      workspaceId: 'a',
+      workspaceName: 'Alpha',
+      taskName: 'Nightly',
+      at: new Date('2026-07-31T07:00:00'),
+      overdue: true
+    }
+  ]);
+  assert.match(html, /overdue/);
+  assert.match(html, /is-overdue/);
+});
+
+test('Today sections escape hostile workspace and task names', () => {
+  const attention = renderAttentionSectionHTML([
+    { id: '<x>', name: '<img src=x onerror=y>', count: 1 }
+  ]);
+  assert.doesNotMatch(attention, /<img/i);
+  const scheduled = renderScheduledSectionHTML([
+    {
+      workspaceId: '<x>',
+      workspaceName: '<script>a()</script>',
+      taskName: '<script>b()</script>',
+      at: new Date('2026-07-31T09:00:00'),
+      overdue: false
+    }
+  ]);
+  assert.doesNotMatch(scheduled, /<script/i);
+});
+
+// --- Quick Capture ---------------------------------------------------------
+
+test('validateCapture requires a title and allows optional details (FR103)', () => {
+  assert.equal(validateCapture({ title: '' }).ok, false);
+  assert.equal(validateCapture({ title: '   ' }).ok, false);
+  assert.match(validateCapture({}).message, /Add a title/);
+  const ok = validateCapture({ title: '  Ship it  ', details: '  later  ' });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.title, 'Ship it');
+  assert.equal(ok.details, 'later');
+});
+
+test('captureRequestBody uses the EXISTING backlog contract, not a new inbox (FR102)', () => {
+  const body = captureRequestBody('hq-1', { title: 'Idea', details: 'more' });
+  assert.deepEqual(body, {
+    workspace_id: 'hq-1',
+    description: 'Idea',
+    details: 'more',
+    source_type: 'home_quick_capture'
+  });
+});
+
+test('captureAvailability requires a VALID Personal HQ with a workspace id (FR104)', () => {
+  assert.equal(captureAvailability({ valid: true, workspace_id: 'hq-1' }).canSave, true);
+  assert.equal(captureAvailability({ valid: true, workspace_id: 'hq-1' }).hqWorkspaceId, 'hq-1');
+  // A "valid" flag with no workspace is not usable.
+  assert.equal(captureAvailability({ valid: true }).canSave, false);
+  assert.equal(captureAvailability({ valid: false, workspace_id: 'hq-1' }).canSave, false);
+  assert.equal(captureAvailability(null).canSave, false);
+});
+
+test('captureAvailability explains the requirement rather than failing silently', () => {
+  const availability = captureAvailability(null);
+  assert.match(availability.message, /Personal HQ/);
+  assert.notEqual(availability.message, '');
 });

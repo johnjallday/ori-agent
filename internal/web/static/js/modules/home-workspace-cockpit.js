@@ -897,6 +897,149 @@ export function renderWorkspaceRailHTML(view) {
 }
 
 // ---------------------------------------------------------------------------
+// Today: immediate work (FR75, FR87)
+// ---------------------------------------------------------------------------
+
+/**
+ * The workspaces that need attention, most-urgent first.
+ *
+ * Computed from the same shared state Map, Tree, and Summary read — Today does
+ * not fetch workspaces again (FR111).
+ */
+export function attentionItems(flattened) {
+  return (Array.isArray(flattened) ? flattened : [])
+    .filter(ws => ws && !isGroupWorkspace(ws))
+    .map(ws => ({ ws, count: workspaceSignals(ws).attention || 0 }))
+    .filter(row => row.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .map(row => ({ id: row.ws.id, name: row.ws.name || 'Untitled workspace', count: row.count }));
+}
+
+/**
+ * Scheduled work due by the end of today, grouped by workspace.
+ *
+ * Returns `null` when the schedule source is unavailable, so Today can say so
+ * rather than claim an empty schedule (FR121).
+ */
+export function scheduledTodayItems(flattened, scheduleIndex, now = new Date()) {
+  if (!scheduleIndex) return null;
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 59, 59, 999);
+  const out = [];
+  (Array.isArray(flattened) ? flattened : []).forEach(ws => {
+    if (!ws || isGroupWorkspace(ws)) return;
+    (scheduleIndex[ws.id] || []).forEach(row => {
+      const at = new Date(String((row && (row.next_run || row.next_run_at)) || ''));
+      if (Number.isNaN(at.getTime()) || at > endOfDay) return;
+      out.push({
+        workspaceId: ws.id,
+        workspaceName: ws.name || 'Untitled workspace',
+        taskName: String((row && row.task_name) || '').trim() || '(untitled task)',
+        at,
+        overdue: at < now
+      });
+    });
+  });
+  return out.sort((a, b) => a.at - b.at);
+}
+
+export function renderAttentionSectionHTML(items) {
+  if (!items.length) return '';
+  return (
+    '<h3 class="cockpit-today-title">Needs attention</h3>' +
+    '<ul class="cockpit-today-list">' +
+    items
+      .slice(0, 6)
+      .map(
+        item =>
+          '<li class="cockpit-today-row is-attention">' +
+          `<button type="button" class="cockpit-today-link" data-cockpit-select="${escapeHtml(item.id)}">` +
+          `<span class="cockpit-today-name">${escapeHtml(item.name)}</span>` +
+          `<span class="cockpit-today-count">${escapeHtml(String(item.count))} needing attention</span>` +
+          '</button></li>'
+      )
+      .join('') +
+    (items.length > 6 ? `<li class="cockpit-today-more">+${items.length - 6} more</li>` : '') +
+    '</ul>'
+  );
+}
+
+export function renderScheduledSectionHTML(items) {
+  // null = the schedule source is unavailable; [] = genuinely nothing today.
+  if (items === null) {
+    return (
+      '<h3 class="cockpit-today-title">Scheduled today</h3>' +
+      '<p class="cockpit-today-empty">Scheduled-work data is unavailable right now.</p>'
+    );
+  }
+  if (!items.length) return '';
+  const time = at => at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return (
+    '<h3 class="cockpit-today-title">Scheduled today</h3>' +
+    '<ul class="cockpit-today-list">' +
+    items
+      .slice(0, 6)
+      .map(
+        item =>
+          `<li class="cockpit-today-row${item.overdue ? ' is-overdue' : ''}">` +
+          `<button type="button" class="cockpit-today-link" data-cockpit-select="${escapeHtml(item.workspaceId)}">` +
+          `<span class="cockpit-today-name">${escapeHtml(item.taskName)}</span>` +
+          `<span class="cockpit-today-count">${escapeHtml(item.workspaceName)} · ` +
+          `${escapeHtml(item.overdue ? `overdue (${time(item.at)})` : time(item.at))}</span>` +
+          '</button></li>'
+      )
+      .join('') +
+    (items.length > 6 ? `<li class="cockpit-today-more">+${items.length - 6} more</li>` : '') +
+    '</ul>'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Quick Capture (FR102, FR103, FR104)
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a capture draft before it is sent.
+ *
+ * A title is required; details are optional. The draft itself is never
+ * discarded here — the caller keeps it so a failed save can be retried with the
+ * text intact (FR103).
+ */
+export function validateCapture(draft) {
+  const title = String((draft && draft.title) || '').trim();
+  if (!title) return { ok: false, message: 'Add a title before saving.' };
+  return { ok: true, title, details: String((draft && draft.details) || '').trim() };
+}
+
+/**
+ * The request body for a capture, using the EXISTING backlog contract:
+ * POST /api/orchestration/backlog { workspace_id, description, details }.
+ * There is no second inbox model (FR102).
+ */
+export function captureRequestBody(hqWorkspaceId, draft) {
+  const valid = validateCapture(draft);
+  return {
+    workspace_id: hqWorkspaceId,
+    description: valid.title || '',
+    details: valid.details || '',
+    source_type: 'home_quick_capture'
+  };
+}
+
+/** What Quick Capture can do right now, given the Personal HQ status. */
+export function captureAvailability(hqStatus) {
+  const valid = !!(hqStatus && hqStatus.valid && hqStatus.workspace_id);
+  if (valid) return { canSave: true, hqWorkspaceId: hqStatus.workspace_id, message: '' };
+  return {
+    canSave: false,
+    hqWorkspaceId: '',
+    // FR104: explain the requirement and offer the existing HQ path, without
+    // discarding whatever the user already typed.
+    message: 'Quick Capture saves to your Personal HQ backlog, and no Personal HQ is set up yet.'
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Workspace-area states (FR110, FR112, FR113, FR114, FR120)
 // ---------------------------------------------------------------------------
 
@@ -978,7 +1121,18 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     railToday: document.getElementById('cockpitRailToday'),
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
-    summaryBtn: document.getElementById('cockpitSummaryBtn')
+    summaryBtn: document.getElementById('cockpitSummaryBtn'),
+    railViewBtn: document.getElementById('cockpitRailViewBtn'),
+    todayAttention: document.getElementById('cockpitTodayAttention'),
+    todayScheduled: document.getElementById('cockpitTodayScheduled'),
+    captureBtn: document.getElementById('cockpitCaptureBtn'),
+    capturePanel: document.getElementById('cockpitCapturePanel'),
+    captureForm: document.getElementById('cockpitCaptureForm'),
+    captureTitle: document.getElementById('cockpitCaptureTitle'),
+    captureDetails: document.getElementById('cockpitCaptureDetails'),
+    captureSave: document.getElementById('cockpitCaptureSave'),
+    captureCancel: document.getElementById('cockpitCaptureCancel'),
+    captureStatus: document.getElementById('cockpitCaptureStatus')
   };
 
   // ---- shared state (the single source of truth for every cockpit view) ----
@@ -1010,6 +1164,9 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     draggingId: '',
     workspaceRoot: { state: 'loading', path: '', custom: false },
     undoStack: [],
+    // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
+    // needs it to know where a capture goes (FR102/FR104).
+    hqStatus: null,
     loading: true,
     error: null,
     inFlight: null
@@ -1234,6 +1391,9 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     renderFilters();
     mountMap();
     mountTreeView();
+    // The footer shortcut names the OTHER view, so it has to follow every view
+    // change — not just the ones that re-render the rail (FR88).
+    updateRailFooter();
   }
 
   // ---- selection + rail ----
@@ -1428,10 +1588,163 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
   }
 
   function updateRailFooter() {
-    if (!els.summaryBtn) return;
-    const inSummary = state.railState === RAIL_SUMMARY;
-    els.summaryBtn.setAttribute('aria-pressed', inSummary ? 'true' : 'false');
-    els.summaryBtn.textContent = inSummary ? 'Close summary' : 'Summary';
+    if (els.summaryBtn) {
+      const inSummary = state.railState === RAIL_SUMMARY;
+      els.summaryBtn.setAttribute('aria-pressed', inSummary ? 'true' : 'false');
+      els.summaryBtn.textContent = inSummary ? 'Close summary' : 'Summary';
+    }
+    // The footer shortcut names the view it switches TO, and stays in step with
+    // the primary toggle (FR88).
+    if (els.railViewBtn) {
+      const toTree = state.view !== VIEW_TREE;
+      els.railViewBtn.textContent = toTree ? 'Tree' : 'Map';
+      els.railViewBtn.setAttribute(
+        'aria-label',
+        toTree ? 'Switch to Tree view' : 'Switch to Map view'
+      );
+    }
+  }
+
+  // ---- Today: immediate work (FR75, FR87) ----
+
+  function renderToday() {
+    if (els.todayAttention) {
+      els.todayAttention.innerHTML = renderAttentionSectionHTML(attentionItems(state.flattened));
+    }
+    if (els.todayScheduled) {
+      els.todayScheduled.innerHTML = renderScheduledSectionHTML(
+        scheduledTodayItems(state.flattened, state.scheduleIndex)
+      );
+    }
+  }
+
+  /**
+   * A Today action that names a workspace selects it before any navigation, so
+   * the Map/Tree context follows what the user just acted on (FR80).
+   *
+   * One delegated listener on the rail covers every Today source, including the
+   * ones other modules render into it (Daily Brief, Calendar Ops, activity).
+   */
+  function wireTodaySelection() {
+    if (!els.railToday) return;
+    els.railToday.addEventListener('click', e => {
+      const target = e.target;
+      if (!target || !target.closest) return;
+      const selector = target.closest('[data-cockpit-select]');
+      if (selector) {
+        e.preventDefault();
+        selectItem(selector.getAttribute('data-cockpit-select'));
+        return;
+      }
+      // Links into a workspace that are NOT explicit task/note/detail deep
+      // links select first, then navigate (FR80).
+      const link = target.closest('a[href^="/workspaces/"]');
+      if (!link) return;
+      const path = link.getAttribute('href') || '';
+      const match = /^\/workspaces\/([^/?#]+)$/.exec(path);
+      if (!match) return; // a deeper link (task, note, detail) navigates as-is
+      const id = decodeURIComponent(match[1]);
+      if (!findWorkspace(state.flattened, id)) return;
+      e.preventDefault();
+      selectItem(id);
+    });
+  }
+
+  // ---- Quick Capture (FR101-FR104) ----
+
+  function setCaptureOpen(open) {
+    if (!els.capturePanel || !els.captureBtn) return;
+    els.capturePanel.hidden = !open;
+    els.captureBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      refreshCaptureAvailability();
+      if (els.captureTitle) els.captureTitle.focus();
+    } else if (els.captureBtn) {
+      els.captureBtn.focus();
+    }
+  }
+
+  function refreshCaptureAvailability() {
+    const availability = captureAvailability(state.hqStatus);
+    if (els.captureSave) els.captureSave.disabled = !availability.canSave;
+    if (!els.captureStatus) return;
+    if (availability.canSave) {
+      els.captureStatus.textContent = '';
+      els.captureStatus.innerHTML = '';
+      return;
+    }
+    // FR104: explain the requirement and offer the existing establish path.
+    // The draft above is untouched.
+    els.captureStatus.innerHTML =
+      `${escapeHtml(availability.message)} ` +
+      '<button type="button" class="cockpit-capture-hq" data-cockpit-capture-hq>Set up Personal HQ</button>';
+    const btn = els.captureStatus.querySelector('[data-cockpit-capture-hq]');
+    if (btn) {
+      btn.addEventListener('click', () =>
+        window.dispatchEvent(
+          new CustomEvent('ori:personal-hq-action', { detail: { action: 'build' } })
+        )
+      );
+    }
+  }
+
+  async function submitCapture(e) {
+    if (e) e.preventDefault();
+    const draft = {
+      title: els.captureTitle ? els.captureTitle.value : '',
+      details: els.captureDetails ? els.captureDetails.value : ''
+    };
+    const valid = validateCapture(draft);
+    if (!valid.ok) {
+      if (els.captureStatus) els.captureStatus.textContent = valid.message;
+      if (els.captureTitle) els.captureTitle.focus();
+      return;
+    }
+    const availability = captureAvailability(state.hqStatus);
+    if (!availability.canSave) {
+      refreshCaptureAvailability();
+      return;
+    }
+    // Prevent a duplicate submission while the first is in flight (FR103).
+    if (els.captureSave) els.captureSave.disabled = true;
+    if (els.captureStatus) els.captureStatus.textContent = 'Saving…';
+    try {
+      const res = await fetch('/api/orchestration/backlog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(captureRequestBody(availability.hqWorkspaceId, draft))
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Only clear the draft once it is genuinely saved.
+      if (els.captureTitle) els.captureTitle.value = '';
+      if (els.captureDetails) els.captureDetails.value = '';
+      if (els.captureStatus) els.captureStatus.textContent = 'Captured to your HQ backlog.';
+      announce('Captured to your Personal HQ backlog.');
+      fireTTFA('quick-capture');
+      void refreshQuietly();
+    } catch (err) {
+      // FR103: the draft survives a failure and the retry is obvious.
+      if (els.captureStatus) {
+        els.captureStatus.textContent = 'Could not save. Your text is still here — try again.';
+      }
+      announce('Quick Capture failed. Your text was kept.');
+      console.error('home-workspace-cockpit: capture failed', err);
+    } finally {
+      if (els.captureSave) els.captureSave.disabled = false;
+    }
+  }
+
+  /** Personal HQ status, used by Quick Capture. Additive and non-blocking. */
+  async function refreshHQStatus() {
+    try {
+      const res = await fetch('/api/personal-hq/status');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      state.hqStatus = data && data.status ? data.status : data;
+    } catch (_) {
+      state.hqStatus = null;
+    }
+    refreshCaptureAvailability();
   }
 
   function openItem(id) {
@@ -1502,6 +1815,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
         renderFilters();
         mountMap();
         mountTreeView();
+        renderToday();
         renderRail({ announceChange: false });
       }
     })();
@@ -1510,6 +1824,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     void refreshSchedule().then(() => {
       renderFilters();
       applyFilterToMap();
+      renderToday();
       if (state.railState === RAIL_SUMMARY) renderRail({ announceChange: false });
     });
     return state.inFlight;
@@ -1546,6 +1861,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
         renderFilters();
         mountMap();
         mountTreeView();
+        renderToday();
         renderRail({ announceChange: false });
         if (els.railContext) els.railContext.scrollTop = railScroll;
         if (els.railToday) els.railToday.scrollTop = todayScroll;
@@ -1622,15 +1938,49 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     );
   }
 
+  if (els.railViewBtn) {
+    els.railViewBtn.addEventListener('click', () => {
+      applyView(state.view === VIEW_TREE ? VIEW_MAP : VIEW_TREE);
+      fireTTFA('view-toggle');
+    });
+  }
+
+  if (els.captureBtn) {
+    els.captureBtn.addEventListener('click', () =>
+      setCaptureOpen(els.capturePanel ? els.capturePanel.hidden : true)
+    );
+  }
+  if (els.captureForm) els.captureForm.addEventListener('submit', submitCapture);
+  if (els.captureCancel) els.captureCancel.addEventListener('click', () => setCaptureOpen(false));
+
+  // Personal HQ provisioning can complete while Home is open; re-read the
+  // status so Quick Capture stops explaining a requirement already met.
+  window.addEventListener('ori:personal-hq-changed', () => void refreshHQStatus());
+
+  wireTodaySelection();
+
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     // Escape only reaches the rail when nothing higher-priority owns it (FR128).
     if (document.querySelector('.modal.show')) return;
     const target = e.target;
+    // Quick Capture owns Escape while it is open, INCLUDING while focus sits in
+    // its own fields — otherwise the editable-field guard below would swallow
+    // the key and leave the panel stuck open (FR128).
+    if (els.capturePanel && !els.capturePanel.hidden) {
+      if (!target || !target.closest || target.closest('#cockpitCapturePanel')) {
+        setCaptureOpen(false);
+        return;
+      }
+    }
     if (
       target &&
       (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
     ) {
+      return;
+    }
+    if (els.capturePanel && !els.capturePanel.hidden) {
+      setCaptureOpen(false);
       return;
     }
     if (state.railState === RAIL_SUMMARY) {
@@ -1658,10 +2008,12 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     select: selectItem,
     clearSelection,
     showSummary,
-    leaveSummary
+    leaveSummary,
+    openCapture: () => setCaptureOpen(true)
   };
 
   applyView(state.view, { pushUrl: false });
   refresh();
   void refreshWorkspaceRoot();
+  void refreshHQStatus();
 })();

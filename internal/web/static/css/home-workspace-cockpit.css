@@ -996,3 +996,130 @@
 .cockpit-tree-tag-remove:focus-visible {
   color: var(--hc-alert);
 }
+
+/* --------------------------------------------------------------------------
+ * Today: immediate work + Quick Capture (FR75, FR87, FR101-FR104)
+ * ----------------------------------------------------------------------- */
+
+.cockpit-today-section:empty {
+  display: none;
+}
+
+.cockpit-today-title {
+  margin: 0 0 5px;
+  color: var(--hc-signal);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.cockpit-today-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cockpit-today-row {
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+/* Attention and overdue carry a left rule AND their own wording, so neither
+   depends on colour alone (FR131). */
+.cockpit-today-row.is-attention {
+  border-left: 3px solid var(--hc-alert);
+}
+
+.cockpit-today-row.is-overdue {
+  border-left: 3px solid var(--hc-amber);
+}
+
+.cockpit-today-link {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cockpit-today-link:hover,
+.cockpit-today-link:focus-visible {
+  background: color-mix(in srgb, var(--hc-signal) 10%, transparent);
+}
+
+.cockpit-today-name {
+  color: var(--hc-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.cockpit-today-count {
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+}
+
+.cockpit-today-more,
+.cockpit-today-empty {
+  color: var(--hc-ink-faint);
+  font-size: 11px;
+}
+
+.cockpit-capture[hidden] {
+  display: none;
+}
+
+.cockpit-capture {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--hc-line);
+  background: var(--hc-panel-raised);
+}
+
+.cockpit-capture-form {
+  display: grid;
+  gap: 6px;
+}
+
+.cockpit-capture-label {
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cockpit-capture-details {
+  resize: vertical;
+}
+
+.cockpit-capture-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.cockpit-capture-status:empty {
+  display: none;
+}
+
+.cockpit-capture-status {
+  margin: 0;
+  color: var(--hc-ink-faint);
+  font-size: 11px;
+}
+
+.cockpit-capture-hq {
+  border: 0;
+  background: none;
+  color: var(--hc-signal);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}

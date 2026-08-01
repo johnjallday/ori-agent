@@ -80,6 +80,13 @@
            one failing source never blocks the others or the workspace area
            (FR75/FR85/FR113). -->
       <div id="cockpitRailToday" class="cockpit-rail-body" data-rail-state="today">
+        <!-- Immediate work first: what needs attention and what is scheduled
+             today outrank recent activity and optional onboarding (FR87).
+             Rendered by home-workspace-cockpit.js from the SAME shared state
+             Map, Tree, and Summary read — no extra fetch (FR111). -->
+        <section id="cockpitTodayAttention" class="cockpit-today-section" aria-label="Needs attention"></section>
+        <section id="cockpitTodayScheduled" class="cockpit-today-section" aria-label="Scheduled today"></section>
+
     <!-- Daily Brief: the primary Home orientation region once a valid Personal
          HQ is designated (PRD FR97). Hidden entirely with no HQ — no hidden
          brief store is created and no workspace is silently selected (FR69).
@@ -195,6 +202,25 @@
             </button>
           </div>
         </div>
+
+        <!-- Optional Personal HQ mounts. They live in Today because that is
+             the HQ context (FR115), and each is a separate mount so a failure
+             in one is isolated from the others, from Map/Tree, and from
+             creation (FR116). Below the cockpit they squeezed the workspace
+             area; in the rail they scroll with the rest of Today. -->
+        <div class="home-hq-mounts">
+          <!-- Shown by personal-hq-onboarding.js only when a valid designated
+               HQ is behind the current provisioning version. -->
+          <div id="hqUpgradeMount" class="hq-upgrade-mount" hidden></div>
+          <!-- Email connect/grant/repair card for a valid designated HQ. -->
+          <div id="hqEmailMount" class="hq-email-mount" hidden></div>
+          <!-- Confirm-gated reply review: drafts the Inbox agent prepared. -->
+          <div id="hqMailReviewMount" class="hq-reply-mount" hidden></div>
+          <!-- Bounded due/stale follow-ups with quick actions. -->
+          <div id="hqFollowUpMount" class="hq-followup-mount" hidden></div>
+          <!-- End-of-day journal launcher + editor. -->
+          <div id="hqJournalMount" class="hq-journal-mount" hidden></div>
+        </div>
       </div>
 
       <!-- Selected workspace/group context, and the Summary rail state. A
@@ -203,29 +229,34 @@
            progression modules own (FR72). -->
       <div id="cockpitRailContext" class="cockpit-rail-body" data-rail-state="context" hidden></div>
 
-      <!-- Rail footer: reachable from every rail state (FR88). Quick Capture
-           joins it in the Today recomposition. -->
+      <!-- Rail footer: Quick Capture, Summary, and a Map/Tree shortcut kept in
+           sync with the primary toggle. Reachable from EVERY rail state
+           (FR88, FR101). A normal flex row after the scrolling body, so its
+           actions stay reachable on a short viewport (FR139). -->
       <div class="cockpit-rail-footer">
+        <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-primary modern-btn-sm" aria-expanded="false" aria-controls="cockpitCapturePanel">Quick Capture</button>
         <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false">Summary</button>
+        <button type="button" id="cockpitRailViewBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Tree</button>
+      </div>
+
+      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
+           the existing backlog contract — never a second inbox (FR102). -->
+      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
+        <form id="cockpitCaptureForm" class="cockpit-capture-form">
+          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
+          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
+                 autocomplete="off" placeholder="What's on your mind?">
+          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
+          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
+                    maxlength="2000" placeholder="Optional details"></textarea>
+          <div class="cockpit-capture-actions">
+            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
+            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
+          </div>
+          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
+        </form>
       </div>
     </aside>
-  </div>
-
-  <!-- Personal HQ optional mounts. These stay outside the rail's swapping
-       panels so a failure in any one of them is isolated from Map, Tree,
-       creation, and the rest of Today (FR115/FR116). -->
-  <div class="home-hq-mounts">
-    <!-- Personal HQ upgrade card: shown by personal-hq-onboarding.js only when
-         a valid designated HQ is behind the current provisioning version. -->
-    <div id="hqUpgradeMount" class="hq-upgrade-mount" hidden></div>
-    <!-- Personal HQ email connect/grant/repair card for a valid designated HQ. -->
-    <div id="hqEmailMount" class="hq-email-mount" hidden></div>
-    <!-- Confirm-gated reply review: draft replies the Inbox agent prepared. -->
-    <div id="hqMailReviewMount" class="hq-reply-mount" hidden></div>
-    <!-- Bounded due/stale follow-ups with quick actions. -->
-    <div id="hqFollowUpMount" class="hq-followup-mount" hidden></div>
-    <!-- End-of-day journal launcher + editor. -->
-    <div id="hqJournalMount" class="hq-journal-mount" hidden></div>
   </div>
 
   <!-- Brief settings dialog: HQ-owned config + recent history, opened from

@@ -65,13 +65,14 @@ body.home-command-page .home-command-bridge * {
   box-sizing: border-box;
 }
 
-/* Row 1 is the Ask Ori command strip, row 2 is the cockpit (the flexible one —
-   it must absorb the available height so Map/Tree and the rail fill the
-   screen), and row 3 is the optional Personal HQ mount stack, which is
-   zero-height until one of those modules shows itself. */
+/* Row 1 is the Ask Ori command strip; row 2 is the cockpit, which absorbs all
+   remaining height so Map/Tree and the rail fill the screen. The optional
+   Personal HQ mounts live INSIDE the Today rail rather than as a third row —
+   below the cockpit they squeezed the workspace area whenever an HQ card
+   appeared. */
 .home-command-bridge {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   width: min(1680px, 100%);
   margin: 0 auto;
