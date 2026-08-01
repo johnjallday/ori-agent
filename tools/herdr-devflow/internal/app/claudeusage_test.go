@@ -87,8 +87,30 @@ func TestRecorderPersistsOnlyWindowStateAndKeepsTheUsersStatusLine(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var record map[string]any
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatalf("the record is not JSON: %v: %s", err, raw)
+	}
+	// The record's shape is the boundary, so assert on its keys rather than on
+	// the text: observed_at carries nanoseconds, whose digits can spell any
+	// short number a value search looks for.
+	permitted := map[string]bool{
+		"version": true, "source": true, "session_id": true, "claude_version": true,
+		"observed_at": true, "five_hour": true, "seven_day": true,
+		"context_used_percentage": true, "context_present": true,
+	}
+	for key := range record {
+		if !permitted[key] {
+			t.Fatalf("the record kept the payload's %q field: %s", key, raw)
+		}
+	}
+	delete(record, "observed_at")
+	rest, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, forbidden := range []string{"transcript", "cwd", "cost", "1.23", "/fixture"} {
-		if strings.Contains(string(raw), forbidden) {
+		if strings.Contains(string(rest), forbidden) {
 			t.Fatalf("the record kept %q from the payload: %s", forbidden, raw)
 		}
 	}
