@@ -37,8 +37,20 @@
   // never pre-filled: opening the review surface must not be able to cause a
   // file mutation (FR-62).
   let selected = new Set();
-  // Active state filter: '' (all), 'needs_review', 'pending', 'skipped'.
+  // Active state filter: '' (all), 'needs_review', 'pending', 'skipped'. The
+  // server owns the filtering; this is only what to ask it for.
   let filter = '';
+  // Server-side paging. A batch can hold hundreds of files, and rendering one
+  // DOM row per candidate is what makes a large review unusable — so the page
+  // is bounded and only the page is requested (FR-109, FR-150).
+  const PAGE_SIZE = 50;
+  let pageOffset = 0;
+  // Counts for the WHOLE batch, from the server. The filter labels and the
+  // "showing X of Y" line come from these rather than from the rows on screen,
+  // which are only ever one page of them.
+  let batchTotal = 0;
+  let filteredTotal = 0;
+  let filterCounts = {};
   // The approval issued by a preview, held only until the user confirms or
   // cancels. It is never persisted: an abandoned approval simply expires.
   let pendingPreview = null;
@@ -429,6 +441,17 @@
     checkbox.setAttribute('aria-label', 'Select ' + displayName(candidate));
     checkbox.disabled = candidate.state !== 'pending' && candidate.state !== 'approved';
     checkbox.disabled = checkbox.disabled || trashMarked.has(candidate.id);
+    // A row Ori could not place confidently cannot be filed until the user
+    // says where it goes. Leaving it selectable meant "Needs review" was
+    // decoration: the row rode along in a bulk approval and was filed using
+    // the very guess that was flagged as untrustworthy (FR-63, FR-64).
+    if (unresolvedNeedsReview(candidate)) {
+      checkbox.disabled = true;
+      checkbox.setAttribute(
+        'title',
+        'Choose a category for this file first — Ori was not confident enough to guess.'
+      );
+    }
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) selected.add(candidate.id);
       else selected.delete(candidate.id);
@@ -521,11 +544,36 @@
     return row;
   }
 
+  // The page the server returned, already filtered. Filtering here as well
+  // would make the row count disagree with the counts beside the filters.
   function visibleCandidates() {
-    if (!filter) return lastCandidates;
-    if (filter === 'needs_review')
-      return lastCandidates.filter(candidate => candidate.needs_review);
-    return lastCandidates.filter(candidate => candidate.state === filter);
+    return lastCandidates;
+  }
+
+  // unresolvedNeedsReview reports a low-confidence row the user has not yet
+  // ruled on. Skipping or marking for Trash also resolves it; those are handled
+  // by the state and trash checks beside this one.
+  function unresolvedNeedsReview(candidate) {
+    return Boolean(candidate && candidate.needs_review && !candidate.decision_category);
+  }
+
+  // dropIneligibleSelections removes IDs that can no longer be acted on.
+  //
+  // Selection is deliberately kept across page changes and refreshes — a user
+  // reviewing 300 files should not lose their work by turning a page (FR-109).
+  // But a file that has since been filed, skipped, or gone stale must not stay
+  // silently selected: it would ride along into the next approval, and the user
+  // would be approving something they can no longer see. Only candidates ON
+  // THIS PAGE can be judged; ones on other pages are left alone and revalidated
+  // by the server at approval time (FR-82).
+  function dropIneligibleSelections() {
+    lastCandidates.forEach(candidate => {
+      const eligible = candidate.state === 'pending' || candidate.state === 'approved';
+      if (!eligible || unresolvedNeedsReview(candidate)) {
+        selected.delete(candidate.id);
+        trashMarked.delete(candidate.id);
+      }
+    });
   }
 
   const FILTERS = [
@@ -540,18 +588,77 @@
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter review items');
     FILTERS.forEach(option => {
+      const count = filterCounts[option.id || 'all'];
       const control = button(
         option.label,
         'dj-filter' + (filter === option.id ? ' dj-filter-active' : ''),
-        () => {
-          filter = option.id;
-          renderBatch();
-        }
+        () => selectFilter(option.id)
       );
+      // The count comes from the server's whole-batch tally, not from the rows
+      // on screen — those are one page of them.
+      if (typeof count === 'number') {
+        control.appendChild(el('span', 'dj-filter-count', String(count)));
+        control.setAttribute('aria-label', option.label + ', ' + count + ' files');
+      }
       control.setAttribute('aria-pressed', filter === option.id ? 'true' : 'false');
       bar.appendChild(control);
     });
     return bar;
+  }
+
+  function selectFilter(next) {
+    if (filter === next) return;
+    filter = next;
+    // A new filter is a new list; staying on page 4 of the old one would land
+    // the user somewhere arbitrary, or on nothing at all.
+    pageOffset = 0;
+    void loadBatch();
+  }
+
+  // pager renders the page controls, or nothing when the whole filtered set
+  // fits on one page. It states the range and the total in words, so "showing
+  // 51-100 of 500" is available to a screen reader as one sentence rather than
+  // as three numbers scattered across controls.
+  function pager() {
+    if (filteredTotal <= lastCandidates.length && pageOffset === 0) return null;
+    const nav = el('div', 'dj-pager');
+    nav.setAttribute('role', 'navigation');
+    nav.setAttribute('aria-label', 'Review pages');
+
+    const from = filteredTotal === 0 ? 0 : pageOffset + 1;
+    const to = pageOffset + lastCandidates.length;
+    // When a filter is on, the batch total is stated too, so the user can see
+    // how much they have filtered out rather than believing the batch is
+    // smaller than it is.
+    const filtered =
+      filter && batchTotal > filteredTotal ? ' (filtered from ' + batchTotal + ')' : '';
+    const status = el(
+      'p',
+      'dj-pager-status',
+      'Showing ' + from + '\u2013' + to + ' of ' + filteredTotal + ' files' + filtered
+    );
+    status.id = 'downloadsJanitorPagerStatus';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+
+    const previous = button('Previous', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset - PAGE_SIZE));
+    previous.id = 'downloadsJanitorPagePrev';
+    previous.disabled = pageOffset <= 0;
+    const next = button('Next', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset + PAGE_SIZE));
+    next.id = 'downloadsJanitorPageNext';
+    next.disabled = to >= filteredTotal;
+
+    nav.appendChild(previous);
+    nav.appendChild(status);
+    nav.appendChild(next);
+    return nav;
+  }
+
+  function goToPage(offset) {
+    const next = Math.max(0, Math.min(offset, Math.max(0, filteredTotal - 1)));
+    if (next === pageOffset) return;
+    pageOffset = next;
+    void loadBatch();
   }
 
   function reviewTable() {
@@ -657,6 +764,8 @@
       scroller.appendChild(reviewTable());
       container.appendChild(scroller);
     }
+    const pageControls = pager();
+    if (pageControls) container.appendChild(pageControls);
 
     const footer = el('div', 'dj-footer');
     const selection = el('p', 'dj-selection');
@@ -943,6 +1052,33 @@
     });
     panel.appendChild(contentRow);
 
+    // How it is working: the folder in use, whether the watcher is running, and
+    // every readiness check with its repair. Settings is where a user goes when
+    // something seems wrong, so the diagnosis belongs here and not only on the
+    // Review tab they may never reach (FR-58, FR-112).
+    const health = el('div', 'dj-setting dj-setting-health');
+    health.appendChild(el('h4', 'dj-setting-heading', 'How it is working'));
+    const folderLine = el('p', 'dj-setting-help');
+    folderLine.textContent = settings.root_path
+      ? 'Managing ' + safeName(settings.root_path)
+      : 'No folder chosen yet.';
+    health.appendChild(folderLine);
+    health.appendChild(
+      el(
+        'p',
+        'dj-setting-help',
+        settings.paused
+          ? 'Automatic scanning is paused. You can still scan on demand.'
+          : 'Watching this folder, with a daily catch-up.'
+      )
+    );
+    health.appendChild(readinessRows(lastStatus));
+    const repair = repairAction(lastStatus);
+    if (repair) health.appendChild(repair);
+    panel.appendChild(health);
+
+    panel.appendChild(curatorSection());
+
     // Folder actions. Relink and revoke are grouped away from the rest and
     // labelled by what they do to the user's access, not by verb.
     const actions = el('div', 'dj-settings-actions');
@@ -971,6 +1107,87 @@
     panel.appendChild(status);
 
     host.appendChild(panel);
+  }
+
+  // curatorSection reports whether the optional Curator is present and offers
+  // to add one if not.
+  //
+  // The Curator is optional by design: File Janitor works fully without it, so
+  // this states that plainly rather than presenting the agent as something
+  // missing. Presence is read from the install record's owned resources — the
+  // same association the server uses for idempotency — never from an agent's
+  // display name.
+  function curatorSection() {
+    const section = el('div', 'dj-setting dj-setting-curator');
+    section.appendChild(el('h4', 'dj-setting-heading', 'Curator'));
+
+    const record = capabilityRecord();
+    const companions = (record && record.owned_resources ? record.owned_resources : []).filter(
+      resource => resource && resource.kind === 'companion_agent'
+    );
+
+    if (companions.length > 0) {
+      section.appendChild(
+        el(
+          'p',
+          'dj-setting-help',
+          'A Curator is helping in this workspace. It explains proposals and answers questions; ' +
+            'it cannot approve, move, or delete anything.'
+        )
+      );
+      return section;
+    }
+
+    section.appendChild(
+      el(
+        'p',
+        'dj-setting-help',
+        'No Curator in this workspace. File Janitor works fully without one — a Curator only ' +
+          'helps you understand what is proposed, and can never act on your files.'
+      )
+    );
+    const add = button('Add a Curator', 'dj-btn dj-btn-secondary', () => void addCurator());
+    add.id = 'downloadsJanitorAddCurator';
+    section.appendChild(add);
+    return section;
+  }
+
+  // capabilityRecord reads this workspace's install record from the catalog the
+  // capabilities module already loaded, rather than issuing another request.
+  function capabilityRecord() {
+    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+    if (!catalog || typeof catalog.find !== 'function') return null;
+    const item = catalog.find('file-janitor');
+    return (item && item.record) || null;
+  }
+
+  async function addCurator() {
+    const id = wsId();
+    if (!id || busy) return;
+    busy = true;
+    setSettingsMessage('Adding a Curator\u2026');
+    try {
+      const response = await fetch(
+        '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor/companion',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error((body.message || (body.error && body.error.message)) || 'Ori could not add a Curator.');
+      }
+      setSettingsMessage(
+        body.already_present
+          ? 'A Curator is already helping here.'
+          : 'Added ' + safeName(body.display_name || 'a Curator') + '.'
+      );
+      const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
+      if (catalog && typeof catalog.reload === 'function') await catalog.reload();
+      renderSettings();
+    } catch (error) {
+      setSettingsMessage(error.message || 'Ori could not add a Curator.');
+    } finally {
+      busy = false;
+    }
   }
 
   function setSettingsMessage(message) {
@@ -1378,11 +1595,15 @@
     try {
       const decisions = Array.from(selected).map(candidateId => {
         const candidate = lastCandidates.find(item => item.id === candidateId) || {};
-        return {
-          candidate_id: candidateId,
-          operation: 'move',
-          category: candidate.decision_category || candidate.category || ''
-        };
+        // For a flagged row the user's own choice is the ONLY acceptable
+        // category. Falling back to candidate.category here would file it
+        // using the guess that was flagged as not trustworthy — the exact
+        // outcome the flag exists to prevent. Sending an empty category makes
+        // the server refuse it rather than this silently deciding.
+        const category = unresolvedNeedsReview(candidate)
+          ? ''
+          : candidate.decision_category || candidate.category || '';
+        return { candidate_id: candidateId, operation: 'move', category };
       });
       trashMarked.forEach(candidateId => {
         decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
@@ -2454,16 +2675,41 @@
     // exactly the session in which the first batch gets reviewed. Loading it
     // here ties it to the thing that needs it. It is a no-op once cached.
     await loadCategories();
+    const previousBatchID = lastBatch && lastBatch.id;
     try {
-      const response = await fetch(apiBase(id) + '/batches/latest');
+      const query =
+        '?limit=' +
+        PAGE_SIZE +
+        '&offset=' +
+        pageOffset +
+        (filter ? '&filter=' + encodeURIComponent(filter) : '');
+      const response = await fetch(apiBase(id) + '/batches/latest' + query);
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
       lastBatch = body.batch || null;
       lastCandidates = Array.isArray(body.candidates) ? body.candidates : [];
+      batchTotal = Number(body.total) || 0;
+      filteredTotal = Number(body.filtered_total) || 0;
+      filterCounts = body.counts || {};
+      // An offset the server clamped past the end leaves an empty page with
+      // rows still behind it. Snap back so the user is never stranded on
+      // nothing with no way to tell why.
+      if (lastCandidates.length === 0 && filteredTotal > 0 && pageOffset >= filteredTotal) {
+        pageOffset = Math.max(0, (Math.ceil(filteredTotal / PAGE_SIZE) - 1) * PAGE_SIZE);
+      }
     } catch (_) {
       lastBatch = null;
       lastCandidates = [];
+      batchTotal = 0;
+      filteredTotal = 0;
+      filterCounts = {};
     }
+    // A different batch invalidates every decision made against the old one.
+    if ((lastBatch && lastBatch.id) !== previousBatchID) {
+      selected = new Set();
+      trashMarked = new Set();
+    }
+    dropIneligibleSelections();
     // A confirmation already on screen must survive a batch reload that did not
     // change the batch.
     //
@@ -2482,11 +2728,16 @@
       pendingPreview.preview &&
       pendingPreview.preview.batch_id === lastBatch.id;
     if (!approvalStillApplies) {
-      selected = new Set();
-      trashMarked = new Set();
       pendingPreview = null;
-      renderBatch();
     }
+    // This used to clear `selected` and `trashMarked` here too. That was
+    // correct when a reload only ever meant "a new scan happened", but a reload
+    // is now also how the user turns a page — so it silently discarded the
+    // decisions of anyone reviewing more files than fit on one screen, which is
+    // exactly the case paging exists to serve. The narrower rules above own it:
+    // a changed batch clears everything, and a candidate that is no longer
+    // eligible is dropped individually.
+    renderBatch();
     refreshStats();
   }
 
@@ -2812,6 +3063,7 @@
       filter = '';
     },
     _selected: () => Array.from(selected),
+    _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
     // Clears the remembered workspace so a test can exercise a cold load, the
     // state a real page visit starts from.

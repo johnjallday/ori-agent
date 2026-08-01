@@ -595,25 +595,78 @@ test('an already-skipped row offers no category control and no Skip', () => {
   assert.equal(box.disabled, true, 'a resolved row cannot be selected for action');
 });
 
-test('filters narrow the table without losing the batch', () => {
+// Filtering is the server's job now: it owns the vocabulary, and it returns
+// the page plus the whole-batch counts. The button's job is to ASK for the
+// right thing, which is what this pins — a client-side filter would make the
+// row count disagree with the counts beside the filters as soon as a batch
+// spanned more than one page.
+test('a filter asks the server for that filter, starting at the first page', async () => {
   const doc = setup();
-  const host = renderReview(doc);
-  assert.equal(rowsIn(host).length, 3);
+  renderReview(doc);
 
-  const needsReview = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Needs review')[0];
+  const asked = [];
+  globalThis.fetch = async url => {
+    const target = String(url);
+    if (target.includes('/batches/latest')) {
+      asked.push(target);
+      return {
+        ok: true,
+        json: async () => ({
+          batch: batchFixture(),
+          candidates: [candidatesFixture()[1]],
+          total: 3,
+          filtered_total: 1,
+          counts: { all: 3, needs_review: 1, pending: 2, skipped: 1 }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+  };
+  // Let the status re-read that open() fires land against this stub, then
+  // start counting from a settled surface.
+  await settle();
+  asked.length = 0;
+
+  const needsReview = surface(doc).all(
+    n => n.tagName === 'BUTTON' && n.textContent.startsWith('Needs review')
+  )[0];
   needsReview.click();
-  assert.equal(rowsIn(surface(doc)).length, 1);
+  await settle();
 
-  const all = surface(doc).all(n => n.tagName === 'BUTTON' && n.textContent === 'All')[0];
-  all.click();
-  assert.equal(rowsIn(surface(doc)).length, 3);
+  assert.equal(asked.length, 1, 'the filter must be applied server-side');
+  assert.match(asked[0], /filter=needs_review/);
+  assert.match(asked[0], /offset=0/, 'a new filter starts at the first page');
+  assert.equal(rowsIn(surface(doc)).length, 1);
+});
+
+test('filter labels carry whole-batch counts, not the page count', async () => {
+  const doc = setup();
+  renderReview(doc);
+
+  globalThis.fetch = async url =>
+    String(url).includes('/batches/latest')
+      ? {
+          ok: true,
+          json: async () => ({
+            batch: batchFixture(),
+            candidates: candidatesFixture(),
+            total: 500,
+            filtered_total: 500,
+            counts: { all: 500, needs_review: 12, pending: 480, skipped: 8 }
+          })
+        }
+      : { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+
+  await settle();
+  await panel._reloadBatch();
+  const body = surface(doc).textContent;
+  assert.match(body, /500/, 'the All filter must report the whole batch');
+  assert.match(body, /12/, 'Needs review must report the whole batch');
 });
 
 test('a filter matching nothing says so rather than showing an empty table', () => {
   const doc = setup();
-  const host = renderReview(doc, batchFixture(), [candidatesFixture()[2]]);
-  const pending = host.all(n => n.tagName === 'BUTTON' && n.textContent === 'Pending')[0];
-  pending.click();
+  renderReview(doc, batchFixture(), []);
   assert.match(text(doc), /No files match this filter/);
 });
 
@@ -2436,4 +2489,390 @@ test('a deep link to a candidate that is gone still opens a working tab', () => 
   // Focus still lands inside the console rather than being stranded.
   assert.equal(doc.activeElement.getAttribute('data-fj-console-close'), '');
   assert.equal(doc.getElementById('downloadsJanitorError').hidden, true, 'not an error');
+});
+
+// ------------------------------------------------------ paging and selection
+
+// pagedFetch answers /batches/latest from a deterministic pool of `total`
+// candidates, honouring limit/offset the way the server does. It is how these
+// tests exercise a 500-file batch without building 500 rows to assert against.
+function pagedFetch(total, pageSize = 50) {
+  const pool = Array.from({ length: total }, (_, i) => ({
+    id: 'c' + i,
+    name: 'file-' + String(i).padStart(3, '0') + '.pdf',
+    display_name: 'file-' + String(i).padStart(3, '0') + '.pdf',
+    extension: '.pdf',
+    size: 1024,
+    category: 'documents',
+    destination: 'Filed/Documents',
+    reason: 'pdf file',
+    confidence: 'high',
+    state: 'pending'
+  }));
+  return async url => {
+    const target = String(url);
+    if (!target.includes('/batches/latest')) {
+      return { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+    }
+    const params = new URLSearchParams(target.split('?')[1] || '');
+    const offset = Number(params.get('offset')) || 0;
+    const limit = Number(params.get('limit')) || pageSize;
+    return {
+      ok: true,
+      json: async () => ({
+        batch: batchFixture(),
+        candidates: pool.slice(offset, offset + limit),
+        total,
+        filtered_total: total,
+        counts: { all: total, needs_review: 0, pending: total, skipped: 0 }
+      })
+    };
+  };
+}
+
+// The point of server-side paging: a 500-file batch must never become 500 DOM
+// rows. This is the assertion that fails if anyone reintroduces client-side
+// rendering of the whole batch (FR-150).
+test('a 500-file batch renders one page of rows, not five hundred', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = pagedFetch(500);
+  await settle();
+  await panel._reloadBatch();
+
+  const rows = rowsIn(surface(doc));
+  assert.equal(rows.length, 50, 'only the requested page may be rendered');
+  // And the surface still tells the truth about how much work is waiting.
+  assert.match(surface(doc).textContent, /500/);
+});
+
+test('paging forward asks for the next page and keeps the counts', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = pagedFetch(500);
+  await settle();
+  await panel._reloadBatch();
+
+  const next = surface(doc).all(n => n.id === 'downloadsJanitorPageNext')[0];
+  assert.ok(next, 'expected a Next control');
+  assert.equal(
+    surface(doc).all(n => n.id === 'downloadsJanitorPagePrev')[0].disabled,
+    true,
+    'Previous is unavailable on the first page'
+  );
+
+  next.click();
+  await settle();
+
+  assert.match(surface(doc).textContent, /Showing 51/);
+  assert.equal(rowsIn(surface(doc)).length, 50);
+  assert.equal(surface(doc).all(n => n.id === 'downloadsJanitorPagePrev')[0].disabled, false);
+});
+
+// A user reviewing 300 files must not lose their work by turning a page.
+test('selections survive a page change', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = pagedFetch(200);
+  await settle();
+  await panel._reloadBatch();
+
+  panel._select('c0');
+  panel._select('c1');
+  assert.deepEqual(panel._selected().sort(), ['c0', 'c1']);
+
+  surface(doc).all(n => n.id === 'downloadsJanitorPageNext')[0].click();
+  await settle();
+
+  assert.deepEqual(
+    panel._selected().sort(),
+    ['c0', 'c1'],
+    'turning a page must not discard decisions already made'
+  );
+  // And the approve control still reflects them, from the new page.
+  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, false);
+});
+
+// The other half of the rule: a file that has since been filed, skipped, or
+// gone stale must not stay silently selected and ride along into an approval
+// the user can no longer see.
+test('a selection that is no longer eligible is dropped on refresh', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+
+  const resolved = candidatesFixture().map(c => ({ ...c, state: 'skipped' }));
+  globalThis.fetch = async url =>
+    String(url).includes('/batches/latest')
+      ? {
+          ok: true,
+          json: async () => ({
+            batch: batchFixture(),
+            candidates: resolved,
+            total: resolved.length,
+            filtered_total: resolved.length,
+            counts: { all: resolved.length, needs_review: 0, pending: 0, skipped: resolved.length }
+          })
+        }
+      : { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+
+  panel._select('c1');
+  await panel._reloadBatch();
+
+  assert.deepEqual(panel._selected(), [], 'a resolved file must not stay selected');
+  assert.equal(doc.getElementById('downloadsJanitorApprove').disabled, true);
+});
+
+// A different batch invalidates every decision made against the old one.
+test('a new batch clears selections from the old one', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._select('c1');
+
+  globalThis.fetch = async url =>
+    String(url).includes('/batches/latest')
+      ? {
+          ok: true,
+          json: async () => ({
+            batch: { ...batchFixture(), id: 'batch-different' },
+            candidates: candidatesFixture(),
+            total: 3,
+            filtered_total: 3,
+            counts: { all: 3, needs_review: 1, pending: 2, skipped: 1 }
+          })
+        }
+      : { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+
+  await panel._reloadBatch();
+  assert.deepEqual(panel._selected(), [], 'decisions belong to the batch they were made in');
+});
+
+test('the pager states how much a filter hides', async () => {
+  const doc = setup();
+  renderReview(doc);
+  globalThis.fetch = async url =>
+    String(url).includes('/batches/latest')
+      ? {
+          ok: true,
+          json: async () => ({
+            batch: batchFixture(),
+            candidates: Array.from({ length: 50 }, (_, i) => ({
+              id: 'n' + i,
+              name: 'x.pdf',
+              display_name: 'x.pdf',
+              state: 'pending',
+              category: 'documents',
+              needs_review: true
+            })),
+            total: 500,
+            filtered_total: 120,
+            counts: { all: 500, needs_review: 120, pending: 380, skipped: 0 }
+          })
+        }
+      : { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+  await settle();
+  panel._setFilter('needs_review');
+  await settle();
+
+  assert.match(surface(doc).textContent, /Showing 1–50 of 120 files \(filtered from 500\)/);
+});
+
+// ------------------------------------------- unresolved "Needs review" rows
+
+// "Needs review" says Ori's proposal is not trustworthy. If the row stays
+// selectable, the flag is decoration: it rides along in a bulk approval and is
+// filed using the very guess that was flagged (FR-63, FR-64).
+test('a flagged row cannot be selected until the user chooses a category', () => {
+  const doc = setup();
+  const host = renderReview(doc);
+
+  const rows = rowsIn(host);
+  const flaggedRow = rows.find(r => r.textContent.includes('payload.bin'));
+  assert.ok(flaggedRow, 'expected the low-confidence fixture row');
+
+  const box = flaggedRow.all(n => n.className === 'dj-select')[0];
+  assert.equal(box.disabled, true, 'a flagged row must not be selectable on the guess');
+  assert.match(box.getAttribute('title') || '', /Choose a category/i);
+
+  // A confident row beside it is unaffected.
+  const confidentRow = rows.find(r => r.textContent.includes('invoice-2026-07.pdf'));
+  assert.equal(confidentRow.all(n => n.className === 'dj-select')[0].disabled, false);
+});
+
+test('choosing a category makes a flagged row selectable', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+
+  const resolved = candidatesFixture().map(c =>
+    c.id === 'c2' ? { ...c, decision_category: 'documents' } : c
+  );
+  panel._setBatch(batchFixture(), resolved, CATEGORIES);
+  panel.renderBatch();
+
+  const flaggedRow = rowsIn(surface(doc)).find(r => r.textContent.includes('payload.bin'));
+  assert.equal(
+    flaggedRow.all(n => n.className === 'dj-select')[0].disabled,
+    false,
+    'the user has now said where it goes'
+  );
+});
+
+// The confirmation is a step inside the console, not a modal on top of it.
+// Stacking a second dialog is what the single-active-modal rule exists to
+// prevent, and it would put the destructive confirmation above its own context.
+test('the confirmation renders inside the console, not as a second dialog', async () => {
+  const doc = setup();
+  renderReview(doc);
+  await settle();
+  panel._setBatch(batchFixture(), candidatesFixture(), CATEGORIES);
+  panel.renderBatch();
+  panel._select('c1');
+
+  globalThis.fetch = async url =>
+    String(url).endsWith('/preview')
+      ? { ok: true, json: async () => ({ preview: PREVIEW }) }
+      : { ok: true, json: async () => ({ status: statusFixture(), categories: CATEGORIES }) };
+
+  doc.getElementById('downloadsJanitorApprove').click();
+  await settle();
+
+  const dialogs = surface(doc).all(n => n.getAttribute('role') === 'dialog');
+  assert.equal(dialogs.length, 1, 'the console must remain the only dialog');
+  const confirmHost = doc.getElementById('downloadsJanitorConfirmHost');
+  assert.ok(confirmHost.textContent.length > 0, 'the confirmation belongs in the console body');
+});
+
+// ------------------------------------------------------------ settings tab
+
+function withCatalog(record) {
+  globalThis.window.WorkspaceCapabilities = {
+    find: id => (id === 'file-janitor' ? { installed: true, available: true, record } : null),
+    reload: async () => {}
+  };
+  return () => delete globalThis.window.WorkspaceCapabilities;
+}
+
+// Settings is where someone goes when something seems wrong, so the diagnosis
+// belongs there and not only on a Review tab they may never open.
+test('Settings states the folder, the watching state, and every readiness check', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(
+    statusFixture({
+      readiness: {
+        state: 'needs_attention',
+        checks: [
+          { component: 'directory_access', status: 'failed', message: 'Folder is missing.', repair: 'relink_folder' },
+          { component: 'watcher', status: 'ok' }
+        ]
+      }
+    })
+  );
+  panel._selectTab('settings');
+
+  const body = text(doc);
+  assert.match(body, /Managing/);
+  assert.match(body, /Inbox/);
+  assert.match(body, /Watching this folder/);
+  assert.match(body, /Folder access/);
+  assert.match(body, /Folder is missing/);
+  // And a way to fix it, not just a report that it is broken.
+  assert.match(body, /Choose the folder again/);
+});
+
+test('a paused workspace says so in Settings, and says what still works', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture({ settings: { ...statusFixture().settings, paused: true } }));
+  panel._selectTab('settings');
+  assert.match(text(doc), /paused\. You can still scan on demand/i);
+});
+
+// The Curator is optional by design, so its absence is stated as a choice
+// rather than presented as something missing.
+test('Settings offers a Curator when there is none', () => {
+  const doc = setup();
+  const restore = withCatalog({ id: 'file-janitor', owned_resources: [] });
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('settings');
+
+  const body = text(doc);
+  assert.match(body, /No Curator in this workspace/);
+  assert.match(body, /works fully without one/);
+  assert.match(body, /can never act on your files/);
+  assert.ok(doc.getElementById('downloadsJanitorAddCurator'), 'expected an add control');
+  restore();
+});
+
+// Presence comes from the install record's owned resources — the same
+// association the server uses for idempotency — never from an agent's name.
+test('Settings reports an existing Curator from the install record', () => {
+  const doc = setup();
+  const restore = withCatalog({
+    id: 'file-janitor',
+    owned_resources: [{ kind: 'companion_agent', id: 'agent-1' }]
+  });
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('settings');
+
+  const body = text(doc);
+  assert.match(body, /A Curator is helping in this workspace/);
+  assert.match(body, /cannot approve, move, or delete/);
+  assert.equal(doc.getElementById('downloadsJanitorAddCurator'), null, 'no second Curator offer');
+  restore();
+});
+
+test('adding a Curator posts to the companion endpoint and reports the result', async () => {
+  const doc = setup();
+  const restore = withCatalog({ id: 'file-janitor', owned_resources: [] });
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('settings');
+
+  let posted = null;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/companion')) {
+      posted = { url: String(url), method: opts.method };
+      return {
+        ok: true,
+        json: async () => ({ success: true, display_name: 'File Curator', already_present: false })
+      };
+    }
+    return { ok: true, json: async () => ({ status: statusFixture() }) };
+  };
+
+  doc.getElementById('downloadsJanitorAddCurator').click();
+  await settle();
+
+  assert.ok(posted, 'expected a request');
+  assert.equal(posted.method, 'POST');
+  assert.match(posted.url, /\/capabilities\/file-janitor\/companion$/);
+  assert.match(doc.getElementById('downloadsJanitorSettingsStatus').textContent, /File Curator/);
+  restore();
+});
+
+test('a refused Curator request is reported, not swallowed', async () => {
+  const doc = setup();
+  const restore = withCatalog({ id: 'file-janitor', owned_resources: [] });
+  panel._setBatch(null, [], CATEGORIES);
+  openConsole(statusFixture());
+  panel._selectTab('settings');
+
+  globalThis.fetch = async url =>
+    String(url).endsWith('/companion')
+      ? { ok: false, json: async () => ({ message: 'Agents are unavailable right now.' }) }
+      : { ok: true, json: async () => ({ status: statusFixture() }) };
+
+  doc.getElementById('downloadsJanitorAddCurator').click();
+  await settle();
+
+  assert.match(
+    doc.getElementById('downloadsJanitorSettingsStatus').textContent,
+    /Agents are unavailable/
+  );
+  restore();
 });

@@ -155,12 +155,25 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 			}
 
 			category := candidate.EffectiveCategory()
-			if requested := strings.TrimSpace(requested.Category); requested != "" {
-				definition, err := LookupCategory(requested)
+			requestedCategory := strings.TrimSpace(requested.Category)
+			if requestedCategory != "" {
+				definition, err := LookupCategory(requestedCategory)
 				if err != nil {
 					return err
 				}
 				category = definition.ID
+			}
+			// A flagged file needs the user's own answer, not a fallback.
+			//
+			// An empty category otherwise means "keep what Ori proposed", which
+			// is right for a confident classification and wrong for this one:
+			// NeedsReview says the proposal is not trustworthy, so filing on it
+			// is filing on the guess the flag exists to reject. Refusing here
+			// rather than only in the browser matters because the client is not
+			// what makes this safe (FR-63, FR-64).
+			if candidate.NeedsReview && requestedCategory == "" && candidate.DecisionCategory == "" {
+				return fmt.Errorf("%w: %s needs a category you choose before it can be filed",
+					ErrCandidateNotActionable, candidate.Display())
 			}
 			if !ValidCategory(category) {
 				return fmt.Errorf("%w: %q", ErrUnknownCategory, category)

@@ -391,6 +391,11 @@
     statusFor,
     registerOpenHandler,
     onOpen,
+    // reload re-reads the catalog from the server. A capability's own surface
+    // calls it after changing something the catalog reports — adding a
+    // companion, for instance — so the record it renders from is the one the
+    // server now holds rather than the snapshot from page load.
+    reload: () => load({ force: true }),
     // Test hooks.
     _reset: () => {
       workspaceId = '';

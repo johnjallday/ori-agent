@@ -956,3 +956,98 @@
   flex-wrap: wrap;
   gap: 0.4rem;
 }
+
+/* ------------------------------------------------------------------- paging
+
+   Server-side paging keeps a 500-file batch from becoming 500 DOM rows. The
+   controls sit below the table and stay in the flow, so the count and the way
+   forward are read together. */
+
+.dj-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0;
+}
+
+.dj-pager-status {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--text-secondary, #9aa0a6);
+}
+
+/* The count beside a filter describes the whole batch, so it must not be
+   mistaken for a badge on the current page. */
+.dj-filter-count {
+  margin-left: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.dj-setting-heading {
+  margin: 0 0 0.3rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.dj-setting-health,
+.dj-setting-curator {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #2f2f2f);
+}
+
+/* The table scrolls inside its own box at any width, so a wide batch never
+   makes the page itself scroll sideways. */
+.dj-table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* ----------------------------------------------------------- narrow screens
+
+   The table drops its secondary columns — type, size, and modified date — and
+   keeps what a decision actually rests on: the file's name, where it would go,
+   and the controls that act on it.
+
+   Those columns are hidden rather than reflowed because the approval
+   consequence ("Filed/Documents") must stay visible at every width. A user who
+   cannot see the destination is being asked to approve a move they cannot
+   evaluate (FR-118). */
+
+@media (max-width: 720px) {
+  .dj-cell-type,
+  .dj-cell-size,
+  .dj-cell-modified,
+  .dj-table thead th:nth-child(3),
+  .dj-table thead th:nth-child(4),
+  .dj-table thead th:nth-child(5) {
+    display: none;
+  }
+
+  .dj-pager {
+    justify-content: center;
+  }
+
+  .dj-pager-status {
+    flex: 1 0 100%;
+    order: -1;
+  }
+
+  /* The footer holds the selected count and the approve control. It stays put
+     at the bottom of the console so the consequence of a long scroll through
+     the batch is always one press away, and never scrolled past. */
+  .dj-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    padding: 0.6rem 0;
+    background: var(--bg-secondary, #1a1a1a);
+    border-top: 1px solid var(--border-color, #2f2f2f);
+  }
+}
