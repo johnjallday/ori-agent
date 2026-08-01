@@ -401,10 +401,10 @@ func buildWorkspaceRequiredDependencyResolution(requirement *mcpAutoRequirement,
 				Actions: []dependencyResolutionAction{
 					{
 						Type:        dependencyActionTypeOpenURL,
-						Label:       "Open Workspaces",
+						Label:       "Open Workspace Map",
 						Description: "Choose a workspace, then retry this request.",
 						Variant:     "primary",
-						URL:         "/workspaces",
+						URL:         "/",
 						ServerName:  serverName,
 					},
 				},

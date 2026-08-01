@@ -41,9 +41,11 @@
       <!-- Center: Navigation Links (optional) -->
       {{if ne .ShowNavLinks false}}
       <div class="ori-navbar-links">
-        <a href="/agents" class="nav-link-item {{if eq .CurrentPage "agents"}}active{{end}}"{{if eq .CurrentPage "agents"}} aria-current="page"{{end}}>Agents</a>
+        <!-- Home is the single canonical workspace-overview destination; the
+             separate Workspaces launcher item is retired (PRD FR8, FR9). -->
+        <a href="/" class="nav-link-item {{if eq .CurrentPage "index"}}active{{end}}"{{if eq .CurrentPage "index"}} aria-current="page"{{end}}>Home</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
-        <a href="/workspaces" class="nav-link-item {{if eq .CurrentPage "workspaces"}}active{{end}}"{{if eq .CurrentPage "workspaces"}} aria-current="page"{{end}}>Workspaces</a>
+        <a href="/agents" class="nav-link-item {{if eq .CurrentPage "agents"}}active{{end}}"{{if eq .CurrentPage "agents"}} aria-current="page"{{end}}>Agents</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>
         <a href="/action-center" class="nav-link-item {{if eq .CurrentPage "action-center"}}active{{end}}"{{if eq .CurrentPage "action-center"}} aria-current="page"{{end}}>Action Center</a>
         <span class="ori-navbar-divider" aria-hidden="true">|</span>

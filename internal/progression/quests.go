@@ -126,7 +126,7 @@ func BuiltinQuests() []Quest {
 			Why:         "A workspace is home base — where your projects, notes, and agents live.",
 			Match:       onEvent(ws.EventWorkspaceCreated),
 			Satisfied:   func(s Snapshot) bool { return s.Workspaces > 0 },
-			ActionURL:   "/workspaces?create=1",
+			ActionURL:   "/?create=1",
 			ActionLabel: "Create a workspace",
 		},
 		{
@@ -138,7 +138,7 @@ func BuiltinQuests() []Quest {
 			// Mission 01 is featured from the Home progression panel even before
 			// Tier 2 unlocks. Route to the Map's unbuilt HQ landmark so setup stays
 			// grounded in the user's actual workspace landscape.
-			ActionURL:   "/workspaces?view=map&focus=personal-hq",
+			ActionURL:   "/?focus=personal-hq",
 			ActionLabel: "Build My HQ",
 		},
 		{

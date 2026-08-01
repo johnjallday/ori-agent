@@ -420,10 +420,11 @@ async function installFixtureRoutes(page: Page) {
   return { consoleErrors, unexpectedRequests };
 }
 
-async function captureScene(page: Page, id: string, route: string, selector: string, definingText: string) {
+async function captureScene(page: Page, id: string, route: string, selector: string, definingText: string, prepare?: (page: Page) => Promise<void>) {
   const fixture = await installFixtureRoutes(page);
   try {
     await page.goto(route, { waitUntil: 'networkidle' });
+    if (prepare) await prepare(page);
     await page.addStyleTag({
       content: '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;}',
     });
@@ -436,7 +437,7 @@ async function captureScene(page: Page, id: string, route: string, selector: str
         : id === 'action-center'
           ? '#action-center-list'
           : id === 'workspace-map'
-            ? '#launcherMap'
+            ? '#cockpitMap'
             : '#workspaceCommandView',
     );
     await expect(
@@ -476,7 +477,17 @@ test('captures exactly three Action Center findings', async ({ page }) => {
 });
 
 test('captures the Workspace Map with Personal HQ and fictional workspaces', async ({ page }) => {
-  await captureScene(page, 'workspace-map', '/workspaces', '#launcherMap', 'Northstar Personal HQ');
+  // The Workspace Map is Home's default view now, not a separate launcher page,
+  // so this scene captures the canonical route rather than photographing a
+  // redirect. It selects a site first: with nothing selected this is the same
+  // picture as `hero`, and the selected-workspace rail is what makes the Map's
+  // select-then-open contract legible in a still image. Selecting also settles
+  // the rail, which made the capture deterministic — capturing Today here was
+  // flaky roughly one run in three on a sub-pixel Calendar Ops shift.
+  await captureScene(page, 'workspace-map', '/', '#cockpitMap', 'Northstar Personal HQ', async (scenePage) => {
+    await scenePage.locator('.ws-map-tile[data-ws-id]').first().click();
+    await expect(scenePage.locator('[data-cockpit-rail-open]')).toBeVisible();
+  });
   await expect(page.locator('.ws-map-tile.is-hq')).toHaveCount(1);
   await expect(page.locator('.ws-map-tile')).toHaveCount(3);
 });

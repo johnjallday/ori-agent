@@ -31,10 +31,62 @@
     </div>
   </section>
 
-  <!-- The orientation slot is always the bridge's second grid row. Keeping a
-       stable wrapper here prevents the optional Daily Brief from creating an
-       implicit grid row that can collide with the Operations board. -->
-  <div class="home-orientation-slot">
+  <!-- The Map-first workspace cockpit: one primary workspace area (Map or Tree
+       as mutually exclusive peer views) plus one persistent context rail
+       (PRD FR15-FR21). The Ask Ori command bridge above stays visible in both
+       views (FR14/FR92). -->
+  <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading">
+    <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
+      <header class="cockpit-area-header">
+        <div class="cockpit-area-heading">
+          <span class="cockpit-area-eyebrow">Workspaces</span>
+          <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
+        </div>
+        <div class="cockpit-area-controls">
+          <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
+               active view; the visible labels carry it without color (FR24). -->
+          <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
+            <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
+            <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
+          </div>
+          <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button"
+                  data-bs-toggle="modal" data-bs-target="#addFolderModal"
+                  data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">
+            New Workspace
+          </button>
+        </div>
+      </header>
+      <!-- Map-only signal filters. Single-select and keyboard-operable; counts
+           come from the same authoritative state Map and Summary read, and an
+           unavailable count renders as an em dash rather than a fake 0
+           (FR31-FR34). Populated by home-workspace-cockpit.js. -->
+      <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
+
+      <div class="cockpit-area-body">
+        <!-- Map and Tree occupy the SAME layout slot; activating one hides the
+             other, never a drawer or overlay (FR18). -->
+        <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" hidden></div>
+        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" hidden></div>
+        <div id="cockpitWorkspaceStatus" class="cockpit-area-status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <aside class="cockpit-rail" id="cockpitRail" aria-label="Context">
+      <!-- Polite rail announcements; never re-reads the whole rail (FR130). -->
+      <div id="cockpitRailLive" class="visually-hidden" role="status" aria-live="polite"></div>
+
+      <!-- Today: the default rail state on a bare Home load (FR74). Its
+           sections are independently mounted and independently degradable, so
+           one failing source never blocks the others or the workspace area
+           (FR75/FR85/FR113). -->
+      <div id="cockpitRailToday" class="cockpit-rail-body" data-rail-state="today">
+        <!-- Immediate work first: what needs attention and what is scheduled
+             today outrank recent activity and optional onboarding (FR87).
+             Rendered by home-workspace-cockpit.js from the SAME shared state
+             Map, Tree, and Summary read — no extra fetch (FR111). -->
+        <section id="cockpitTodayAttention" class="cockpit-today-section" aria-label="Needs attention"></section>
+        <section id="cockpitTodayScheduled" class="cockpit-today-section" aria-label="Scheduled today"></section>
+
     <!-- Daily Brief: the primary Home orientation region once a valid Personal
          HQ is designated (PRD FR97). Hidden entirely with no HQ — no hidden
          brief store is created and no workspace is silently selected (FR69).
@@ -47,7 +99,7 @@
           <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
         </div>
         <div class="home-daily-brief-actions">
-          <a id="homeDailyBriefOpenHQ" href="/workspaces" class="modern-btn modern-btn-secondary modern-btn-sm">Open My HQ</a>
+          <a id="homeDailyBriefOpenHQ" href="/" class="modern-btn modern-btn-secondary modern-btn-sm">Open My HQ</a>
           <button type="button" id="homeDailyBriefSettingsBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Brief settings</button>
           <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
         </div>
@@ -71,7 +123,7 @@
           <h2 id="homeCalendarOpsPortalTitle" class="home-daily-brief-title">Today</h2>
         </div>
         <div class="home-daily-brief-actions">
-          <a id="homeCalendarOpsPortalOpen" href="/workspaces" class="modern-btn modern-btn-primary modern-btn-sm" hidden>Open Calendar Ops</a>
+          <a id="homeCalendarOpsPortalOpen" href="/" class="modern-btn modern-btn-primary modern-btn-sm" hidden>Open Calendar Ops</a>
         </div>
       </header>
       <div id="homeCalendarOpsPortalBody" class="home-daily-brief-body" aria-live="polite">
@@ -79,10 +131,189 @@
       </div>
     </section>
 
-    <!-- Brief settings dialog: HQ-owned config + recent history, opened from
-         Home's "Brief settings" action but scoped to the designated HQ
-         workspace's own data (PRD FR99/task 7.7). -->
-    <div class="modal fade" id="homeDailyBriefSettingsModal" tabindex="-1" aria-labelledby="homeDailyBriefSettingsModalLabel" aria-hidden="true">
+        <!-- Upcoming scheduled work and recent activity move out of the retired
+             Operations Board row into Today, keeping their existing endpoints
+             and lifecycle (FR81/FR84). -->
+        <section id="homeUpcomingTasks" class="home-section home-section-upcoming" aria-labelledby="homeUpcomingTasksTitle">
+          <header class="home-section-header">
+            <h2 id="homeUpcomingTasksTitle" class="home-section-title">Upcoming</h2>
+          </header>
+          <div class="home-section-body" data-role="content" aria-live="polite">
+            <div class="home-section-placeholder" data-role="placeholder">Loading schedule…</div>
+          </div>
+        </section>
+
+        <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
+          <header class="home-section-header">
+            <h2 id="homeRecentActivityTitle" class="home-section-title">Activity</h2>
+          </header>
+          <div class="home-section-body" data-role="content" aria-live="polite">
+            <div class="home-section-placeholder" data-role="placeholder">Loading activity…</div>
+          </div>
+        </section>
+
+        <!-- Onboarding progression stays a compact Today section and keeps its
+             existing state and actions (FR86). Optional guidance must never
+             outrank immediate work, so it renders last (FR87). -->
+        <div class="home-progression-zone" aria-label="Onboarding progression">
+          <!-- Populated by progression-widget.js from GET /api/progression. -->
+          <div id="questLog" class="quest-log" hidden aria-live="polite">
+            <div class="quest-log-inner">
+              <header class="quest-log-header">
+                <span class="quest-log-insignia" data-role="tier-insignia" aria-hidden="true">01</span>
+                <div class="quest-log-heading">
+                  <span class="quest-log-eyebrow">Progression</span>
+                  <h2 class="quest-log-tier" data-role="tier-name">Quest log</h2>
+                </div>
+                <div class="quest-log-progress">
+                  <span class="quest-log-progress-label" data-role="progress-label"></span>
+                  <span class="quest-log-progress-count" data-role="progress-count"></span>
+                  <button type="button" class="quest-log-dismiss" data-role="dismiss" aria-label="Collapse quest log" title="Collapse quest log">Collapse</button>
+                </div>
+              </header>
+              <div class="quest-log-meter" role="progressbar" aria-label="Current tier progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span class="quest-log-meter-fill" data-role="progress-bar"></span>
+              </div>
+              <section class="quest-log-first-mission" data-role="first-mission" aria-labelledby="questFirstMissionTitle" hidden>
+                <div class="quest-log-first-mission-meta">
+                  <span class="quest-log-first-mission-kicker"><span class="quest-log-first-mission-signal" aria-hidden="true"></span>Mission 01</span>
+                  <span class="quest-log-first-mission-status" data-role="first-mission-status">Ready</span>
+                </div>
+                <div class="quest-log-first-mission-body">
+                  <div class="quest-log-first-mission-copy">
+                    <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build My HQ</h3>
+                    <p class="quest-log-first-mission-why" data-role="first-mission-why"></p>
+                  </div>
+                  <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/?focus=personal-hq">
+                    <span data-role="first-mission-action-label">Build My HQ</span>
+                    <span aria-hidden="true">&#8594;</span>
+                  </a>
+                </div>
+              </section>
+              <ul class="quest-log-list" data-role="quests"></ul>
+              <p class="quest-log-why" data-role="why"></p>
+            </div>
+          </div>
+          <div id="questLogRestore" class="quest-log-restore" hidden>
+            <button type="button" class="quest-log-restore-btn" data-role="restore" aria-label="Expand quest log">
+              <span class="quest-log-restore-insignia" data-role="restore-insignia" aria-hidden="true">01</span>
+              <span class="quest-log-restore-copy"><span data-role="restore-tier">Tier 1</span><span data-role="restore-progress">0/0</span></span>
+              <span class="quest-log-restore-meter" aria-hidden="true"><span data-role="restore-meter"></span></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Optional Personal HQ mounts. They live in Today because that is
+             the HQ context (FR115), and each is a separate mount so a failure
+             in one is isolated from the others, from Map/Tree, and from
+             creation (FR116). Below the cockpit they squeezed the workspace
+             area; in the rail they scroll with the rest of Today. -->
+        <div class="home-hq-mounts">
+          <!-- Shown by personal-hq-onboarding.js only when a valid designated
+               HQ is behind the current provisioning version. -->
+          <div id="hqUpgradeMount" class="hq-upgrade-mount" hidden></div>
+          <!-- Email connect/grant/repair card for a valid designated HQ. -->
+          <div id="hqEmailMount" class="hq-email-mount" hidden></div>
+          <!-- Confirm-gated reply review: drafts the Inbox agent prepared. -->
+          <div id="hqMailReviewMount" class="hq-reply-mount" hidden></div>
+          <!-- Bounded due/stale follow-ups with quick actions. -->
+          <div id="hqFollowUpMount" class="hq-followup-mount" hidden></div>
+          <!-- End-of-day journal launcher + editor. -->
+          <div id="hqJournalMount" class="hq-journal-mount" hidden></div>
+        </div>
+      </div>
+
+      <!-- Selected workspace/group context, and the Summary rail state. A
+           sibling panel rather than a re-render of Today, so swapping rail
+           states never destroys the DOM the Daily Brief, Calendar, and
+           progression modules own (FR72). -->
+      <div id="cockpitRailContext" class="cockpit-rail-body" data-rail-state="context" hidden></div>
+
+      <!--
+        Ask Ori activity, in the rail rather than a blocking modal (FR96).
+
+        dashboard.js already supports an embedded activity surface — the same
+        one the workspace hub's support chat uses — selected by
+        data-home-assistant-surface="panel". Keeping that contract and these
+        exact element ids means all existing routing, planning, confirmation,
+        automation-mode, timeout, error, and Task Activity reopen behavior is
+        preserved unchanged (FR95, FR99); only the presentation moves. In panel
+        mode dashboard.js shows/hides via a class instead of bootstrap.Modal,
+        so there is no backdrop and Map/Tree stay interactive (FR6, FR92).
+      -->
+      <section id="homeAssistantThinkingModal" class="cockpit-rail-body cockpit-ask-activity is-idle"
+               data-home-assistant-surface="panel" data-home-assistant-panel-scope="home"
+               data-rail-state="ask-ori"
+               aria-labelledby="homeAssistantThinkingModalLabel">
+        <header class="cockpit-ask-head">
+          <button type="button" class="cockpit-rail-back" data-cockpit-ask-back>
+            <span aria-hidden="true">&#8592;</span> Back</button>
+          <h3 id="homeAssistantThinkingModalLabel" class="cockpit-rail-title">Ask Ori</h3>
+          <div id="homeAssistantThinkingStatus" class="cockpit-ask-status" role="status" aria-live="polite">
+            <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+            <span>Analyzing your request…</span>
+          </div>
+          <p id="cockpitAskTarget" class="cockpit-ask-target" role="status" aria-live="polite"></p>
+        </header>
+        <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+        <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+        <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
+        <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+        <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
+          <div class="home-assistant-conversation-section-header">
+            <div>
+              <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
+              <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+                Progress updates and manager notes will appear here after you send a task.
+              </div>
+            </div>
+            <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+              Hide Conversation
+            </button>
+          </div>
+          <div id="homeAssistantConversation" class="home-assistant-conversation p-3">
+            <div class="home-assistant-thinking-placeholder">
+              Progress updates will appear here after you send a task.
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <!-- Rail footer: Quick Capture, Summary, and a Map/Tree shortcut kept in
+           sync with the primary toggle. Reachable from EVERY rail state
+           (FR88, FR101). A normal flex row after the scrolling body, so its
+           actions stay reachable on a short viewport (FR139). -->
+      <div class="cockpit-rail-footer">
+        <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-primary modern-btn-sm" aria-expanded="false" aria-controls="cockpitCapturePanel">Quick Capture</button>
+        <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false">Summary</button>
+        <button type="button" id="cockpitRailViewBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Tree</button>
+      </div>
+
+      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
+           the existing backlog contract — never a second inbox (FR102). -->
+      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
+        <form id="cockpitCaptureForm" class="cockpit-capture-form">
+          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
+          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
+                 autocomplete="off" placeholder="What's on your mind?">
+          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
+          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
+                    maxlength="2000" placeholder="Optional details"></textarea>
+          <div class="cockpit-capture-actions">
+            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
+            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
+          </div>
+          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Brief settings dialog: HQ-owned config + recent history, opened from
+       Home's "Brief settings" action but scoped to the designated HQ
+       workspace's own data (PRD FR99/task 7.7). Kept outside the scrolling
+       rail so the dialog is never clipped by it. -->
+  <div class="modal fade" id="homeDailyBriefSettingsModal" tabindex="-1" aria-labelledby="homeDailyBriefSettingsModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
@@ -127,141 +358,6 @@
         </div>
       </div>
     </div>
-    </div>
-  </div>
-
-  <div class="home-command-layout">
-    <section id="homeDashboardSections" class="home-dashboard-sections home-operations-board" data-workspace-count="{{.Extra.WorkspaceCount}}" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Operations board">
-      <header class="home-operations-header">
-        <div>
-          <span class="home-operations-eyebrow">System overview</span>
-          <p class="home-operations-title">Operations board</p>
-        </div>
-        <div class="home-stat-readout" data-role="stat-readout" role="status" aria-live="polite" aria-label="Workspace statistics">
-          <span class="home-stat"><strong data-role="stat-workspaces">—</strong><span>Workspaces</span></span>
-          <span class="home-stat"><strong data-role="stat-agents">—</strong><span>Agents</span></span>
-          <span class="home-stat"><strong data-role="stat-open-tasks">—</strong><span>Open tasks</span></span>
-        </div>
-      </header>
-
-      <section id="homeRecentWorkspaces" class="home-section home-section-workspaces" aria-labelledby="homeRecentWorkspacesTitle">
-        <header class="home-section-header">
-          <h2 id="homeRecentWorkspacesTitle" class="home-section-title">Workspaces</h2>
-          <a href="/workspaces" class="home-section-link" data-role="view-all" hidden>All workspaces <span aria-hidden="true">▸</span></a>
-        </header>
-        <div class="home-section-body" data-role="content" aria-live="polite">
-          <div class="home-section-placeholder" data-role="placeholder">Loading workspaces…</div>
-        </div>
-      </section>
-
-      <div class="home-dashboard-row">
-        <section id="homeUpcomingTasks" class="home-section home-section-upcoming" aria-labelledby="homeUpcomingTasksTitle">
-          <header class="home-section-header">
-            <h2 id="homeUpcomingTasksTitle" class="home-section-title">Upcoming</h2>
-          </header>
-          <div class="home-section-body" data-role="content" aria-live="polite">
-            <div class="home-section-placeholder" data-role="placeholder">Loading schedule…</div>
-          </div>
-        </section>
-        <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
-          <header class="home-section-header">
-            <h2 id="homeRecentActivityTitle" class="home-section-title">Activity</h2>
-          </header>
-          <div class="home-section-body" data-role="content" aria-live="polite">
-            <div class="home-section-placeholder" data-role="placeholder">Loading activity…</div>
-          </div>
-        </section>
-      </div>
-    </section>
-
-    <aside class="home-progression-zone" aria-label="Onboarding progression">
-      <!-- Populated by progression-widget.js from GET /api/progression. -->
-      <div id="questLog" class="quest-log" hidden aria-live="polite">
-        <div class="quest-log-inner">
-          <header class="quest-log-header">
-            <span class="quest-log-insignia" data-role="tier-insignia" aria-hidden="true">01</span>
-            <div class="quest-log-heading">
-              <span class="quest-log-eyebrow">Progression</span>
-              <h2 class="quest-log-tier" data-role="tier-name">Quest log</h2>
-            </div>
-            <div class="quest-log-progress">
-              <span class="quest-log-progress-label" data-role="progress-label"></span>
-              <span class="quest-log-progress-count" data-role="progress-count"></span>
-              <button type="button" class="quest-log-dismiss" data-role="dismiss" aria-label="Collapse quest log" title="Collapse quest log">Collapse</button>
-            </div>
-          </header>
-          <div class="quest-log-meter" role="progressbar" aria-label="Current tier progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <span class="quest-log-meter-fill" data-role="progress-bar"></span>
-          </div>
-          <section class="quest-log-first-mission" data-role="first-mission" aria-labelledby="questFirstMissionTitle" hidden>
-            <div class="quest-log-first-mission-meta">
-              <span class="quest-log-first-mission-kicker"><span class="quest-log-first-mission-signal" aria-hidden="true"></span>Mission 01</span>
-              <span class="quest-log-first-mission-status" data-role="first-mission-status">Ready</span>
-            </div>
-            <div class="quest-log-first-mission-body">
-              <div class="quest-log-first-mission-copy">
-                <h3 id="questFirstMissionTitle" class="quest-log-first-mission-title" data-role="first-mission-title">Build My HQ</h3>
-                <p class="quest-log-first-mission-why" data-role="first-mission-why"></p>
-              </div>
-              <a class="quest-log-first-mission-action" data-role="first-mission-action" href="/workspaces?view=map&amp;focus=personal-hq">
-                <span data-role="first-mission-action-label">Build My HQ</span>
-                <span aria-hidden="true">&#8594;</span>
-              </a>
-            </div>
-          </section>
-          <ul class="quest-log-list" data-role="quests"></ul>
-          <p class="quest-log-why" data-role="why"></p>
-        </div>
-      </div>
-      <div id="questLogRestore" class="quest-log-restore" hidden>
-        <button type="button" class="quest-log-restore-btn" data-role="restore" aria-label="Expand quest log">
-          <span class="quest-log-restore-insignia" data-role="restore-insignia" aria-hidden="true">01</span>
-          <span class="quest-log-restore-copy"><span data-role="restore-tier">Tier 1</span><span data-role="restore-progress">0/0</span></span>
-          <span class="quest-log-restore-meter" aria-hidden="true"><span data-role="restore-meter"></span></span>
-        </button>
-      </div>
-    </aside>
   </div>
 </div>
 
-<div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
-     aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-    <div class="modal-content home-thinking-modal-content">
-      <div class="modal-header home-thinking-modal-header">
-        <div>
-          <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Ori is thinking</h5>
-          <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
-            <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-            <span>Analyzing your request…</span>
-          </div>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-        <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
-        <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
-        <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
-        <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
-          <div class="home-assistant-conversation-section-header">
-            <div>
-              <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
-              <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
-                Progress updates and manager notes will appear here after you send a task.
-              </div>
-            </div>
-            <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
-              Hide Conversation
-            </button>
-          </div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a task.
-            </div>
-          </div>
-        </section>
-      </div>
-    </div>
-  </div>
-</div>

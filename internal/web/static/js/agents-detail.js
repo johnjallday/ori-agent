@@ -1712,7 +1712,7 @@ function renderCapabilitiesCard() {
       `;
     } else {
       actionButton = `
-        <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/workspaces">Bind in Workspace</a>
+        <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/">Bind in Workspace</a>
       `;
     }
 

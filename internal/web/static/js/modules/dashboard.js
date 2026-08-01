@@ -1045,6 +1045,17 @@
     return Boolean(els.thinkingModal && els.thinkingModal.getAttribute('data-home-assistant-surface') === 'panel');
   }
 
+  // Both the workspace hub's support chat and the Home cockpit's context rail
+  // use the embedded-panel surface, but only the hub's is scoped to a single
+  // workspace. Copy that names a "workspace assistant" applies to that one.
+  function isHomeAssistantWorkspaceScopedPanel() {
+    var els = getHomeAssistantElements();
+    return Boolean(
+      els.thinkingModal &&
+        els.thinkingModal.getAttribute('data-home-assistant-panel-scope') !== 'home'
+    );
+  }
+
   function hasVisibleHomeAssistantActions() {
     var els = getHomeAssistantElements();
     return Boolean(els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0);
@@ -1317,7 +1328,13 @@
 
     var label = button.querySelector('[data-home-assistant-launcher-label]');
     if (label) {
-      label.textContent = embeddedPanel
+      // The "Workspace Assistant" wording belongs to the workspace hub's
+      // support-chat panel. The Home cockpit uses the same embedded-panel
+      // surface but is NOT a workspace assistant, so it keeps the Task
+      // Activity / Live Activity labels the reopen control has always used
+      // (PRD FR99).
+      var homeScopedPanel = embeddedPanel && !isHomeAssistantWorkspaceScopedPanel();
+      label.textContent = (embeddedPanel && !homeScopedPanel)
         ? (homeAssistantState.busy ? 'Assistant Working' : 'Workspace Assistant')
         : (homeAssistantState.busy ? 'Live Activity' : 'Task Activity');
     }
@@ -6678,6 +6695,14 @@
     var workspaceId = extractWorkspaceIdFromPath(pathname);
     var taskId = extractTaskIdFromPath(pathname);
     var sessionId = getCurrentHomeSessionId();
+
+    // On the Home cockpit the path carries no workspace, but the user may have
+    // one selected on the Map or in the Tree. Offer it as ROUTE CONTEXT only:
+    // it fills a gap the path cannot, and never overrides a workspace the path
+    // already names, the routing result, or any confirmation step (PRD FR98).
+    if (!workspaceId && window.oriHomeRouteContext && window.oriHomeRouteContext.workspace_id) {
+      workspaceId = String(window.oriHomeRouteContext.workspace_id).trim();
+    }
 
     return {
       surface: inferHomeRouteSurface(pathname),

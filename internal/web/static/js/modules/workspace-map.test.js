@@ -533,3 +533,253 @@ test('the setup row states its workspace and action for a screen reader', () => 
   const html = map.overviewBodyHTML({ id: 'ws-1', name: 'Downloads Janitor' }, {});
   assert.match(html, /aria-label="Setup required — Continue setup for Downloads Janitor"/);
 });
+
+// ---------------------------------------------------------------------------
+// Cockpit mount contract (PRD FR15, FR29, FR35, FR36, FR125)
+//
+// The Home cockpit mounts this same production Map with select-only pointer
+// semantics and without the map's own topbar/overview chrome, because the
+// workspace-area header and the persistent context rail own those. The legacy
+// /workspaces launcher keeps its original behavior until it redirects to Home.
+// ---------------------------------------------------------------------------
+
+// A DOM stub just rich enough for mount(): it captures the rendered HTML and
+// the listeners bound to each selectable site, so click/keyboard semantics can
+// be exercised without a real browser.
+function createMapHarness({ tiles = [] } = {}) {
+  const bound = new Map();
+
+  function makeEl(attrs = {}, classes = []) {
+    const classSet = new Set(classes);
+    const listeners = {};
+    const el = {
+      attrs: { ...attrs },
+      listeners,
+      classList: {
+        contains: c => classSet.has(c),
+        toggle: (c, on) => (on ? classSet.add(c) : classSet.delete(c)),
+        add: c => classSet.add(c),
+        remove: c => classSet.delete(c)
+      },
+      dataset: {},
+      getAttribute: name => (name in el.attrs ? el.attrs[name] : null),
+      setAttribute: (name, value) => {
+        el.attrs[name] = String(value);
+      },
+      hasAttribute: name => name in el.attrs,
+      addEventListener: (type, fn) => {
+        (listeners[type] = listeners[type] || []).push(fn);
+      },
+      fire: (type, event = {}) => (listeners[type] || []).forEach(fn => fn(event)),
+      querySelectorAll: () => [],
+      querySelector: () => null
+    };
+    return el;
+  }
+
+  const siteEls = tiles.map(id => {
+    const el = makeEl({ 'data-ws-id': id }, ['ws-map-tile']);
+    bound.set(id, el);
+    return el;
+  });
+
+  const container = {
+    innerHTML: '',
+    clientWidth: 1200,
+    hidden: false,
+    isConnected: true,
+    querySelectorAll: selector => {
+      if (selector.includes('data-ws-id')) return siteEls;
+      if (selector.includes('.ws-map-tile')) return siteEls;
+      return [];
+    },
+    querySelector: () => null
+  };
+
+  return { container, site: id => bound.get(id) };
+}
+
+function loadMapForMount() {
+  const window = { addEventListener() {} };
+  // A selection lazily reads the workspace's setup status. Stub it to a never-
+  // settling promise: these tests assert the synchronous mount contract, and a
+  // real fetch is neither available nor relevant here.
+  const fetch = () => new Promise(() => {});
+  vm.runInNewContext(
+    source,
+    { window, document: { getElementById: () => null }, setTimeout, clearTimeout, fetch },
+    { filename: 'workspace-map.js' }
+  );
+  return window.OriWorkspaceMap;
+}
+
+test('cockpit mode renders no second topbar or overview panel (FR15)', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.doesNotMatch(container.innerHTML, /ws-map-topbar/);
+  assert.doesNotMatch(container.innerHTML, /ws-map-overview/);
+  // Only the TOPBAR's create button is suppressed (the cockpit header carries
+  // it). The in-canvas New Workspace pad stays — FR29 requires the Map itself
+  // to offer an obvious New Workspace site.
+  assert.doesNotMatch(container.innerHTML, /class="ws-map-create"/);
+  assert.match(container.innerHTML, /ws-map-pad[^>]*data-ws-map-create/);
+  // The theatre — the part that actually draws the sites — is still there.
+  assert.match(container.innerHTML, /ws-map-theatre/);
+  assert.match(container.innerHTML, /is-cockpit/);
+});
+
+test('the launcher keeps its topbar and overview when chrome is not suppressed', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, { workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  assert.match(container.innerHTML, /ws-map-topbar/);
+  assert.match(container.innerHTML, /ws-map-overview/);
+});
+
+test('cockpit mode makes no selection on a bare load (FR74)', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1', 'ws-2'] });
+  map.mount(container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }, { id: 'ws-2', name: 'Beta' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.equal(map.getSelectedId(), '');
+});
+
+test('the launcher still picks a default selection when auto-select is not suppressed', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, { workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  assert.equal(map.getSelectedId(), 'ws-1');
+});
+
+test('select-only: a pointer click selects and reports, and NEVER opens (FR35)', () => {
+  const map = loadMapForMount();
+  const harness = createMapHarness({ tiles: ['ws-1'] });
+  const selected = [];
+  const opened = [];
+  map.mount(harness.container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onSelect: id => selected.push(id),
+    onOpen: id => opened.push(id)
+  });
+  harness.site('ws-1').fire('click', { target: null });
+  assert.deepEqual(selected, ['ws-1']);
+  assert.deepEqual(opened, []);
+  assert.equal(map.getSelectedId(), 'ws-1');
+});
+
+test('select-only: repeated clicks on the SAME site still only select (FR36)', () => {
+  const map = loadMapForMount();
+  const harness = createMapHarness({ tiles: ['ws-1'] });
+  const selected = [];
+  const opened = [];
+  map.mount(harness.container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onSelect: id => selected.push(id),
+    onOpen: id => opened.push(id)
+  });
+  harness.site('ws-1').fire('click', { target: null });
+  harness.site('ws-1').fire('click', { target: null });
+  harness.site('ws-1').fire('click', { target: null });
+  assert.deepEqual(selected, ['ws-1', 'ws-1', 'ws-1']);
+  assert.deepEqual(opened, [], 'a repeat click must not become a hidden open');
+});
+
+test('select-only: no double-click opening rule is bound at all (FR36)', () => {
+  const map = loadMapForMount();
+  const harness = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(harness.container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.equal(harness.site('ws-1').listeners.dblclick, undefined);
+});
+
+test('select-only: Enter on a focused site opens it explicitly (FR125)', () => {
+  const map = loadMapForMount();
+  const harness = createMapHarness({ tiles: ['ws-1'] });
+  const opened = [];
+  let defaultPrevented = false;
+  map.mount(harness.container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onOpen: id => opened.push(id)
+  });
+  harness.site('ws-1').fire('keydown', {
+    key: 'Enter',
+    preventDefault: () => {
+      defaultPrevented = true;
+    }
+  });
+  assert.deepEqual(opened, ['ws-1']);
+  // The default must be suppressed, or the button would ALSO fire a selecting
+  // click and the rail would fight the navigation.
+  assert.equal(defaultPrevented, true);
+});
+
+test('select-only: keys other than Enter do not open (Space stays a select)', () => {
+  const map = loadMapForMount();
+  const harness = createMapHarness({ tiles: ['ws-1'] });
+  const opened = [];
+  map.mount(harness.container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onOpen: id => opened.push(id)
+  });
+  ['a', 'Escape', 'Tab', ' '].forEach(key => {
+    harness.site('ws-1').fire('keydown', { key, preventDefault: () => {} });
+  });
+  assert.deepEqual(opened, []);
+});
+
+test('the select-only tile label advertises Enter-to-open, not double-click', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.match(container.innerHTML, /Enter to open/);
+  assert.doesNotMatch(container.innerHTML, /double-click to open/);
+});
+
+test('tiles are spaced so a row cannot collide with the row below it', () => {
+  // Tiles measure ~155px tall; the row pitch must exceed that or every meta
+  // line is overlapped by the next row's status flag.
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1', 'ws-2'] });
+  map.mount(container, {
+    workspaces: [{ id: 'ws-1', name: 'A' }, { id: 'ws-2', name: 'B' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  const tops = [...container.innerHTML.matchAll(/top:(\d+)px/g)].map(m => Number(m[1]));
+  const pitch = Math.min(...tops.filter(t => t > Math.min(...tops))) - Math.min(...tops);
+  if (Number.isFinite(pitch) && pitch > 0) {
+    assert.ok(pitch >= 160, `row pitch ${pitch}px must clear the ~155px tile height`);
+  }
+});

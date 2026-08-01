@@ -2,10 +2,16 @@
 //
 // Wires the suggested prompt chips (populate-and-focus the Ask Ori input,
 // no auto-submit), the global Cmd+J / Ctrl+J shortcut that focuses the
-// hero input, and the three dashboard sections (Recent Workspaces,
-// Upcoming Scheduled Tasks, Recent Activity) populated from their
-// respective API endpoints. Also instruments time-to-first-action (TTfA)
-// for the home dashboard — the primary success metric from the PRD.
+// hero input, and the Today rail's Upcoming Scheduled Tasks and Recent
+// Activity sections from their respective API endpoints. Also instruments
+// time-to-first-action (TTfA) for Home — the primary success metric from
+// the PRD.
+//
+// The Recent Workspaces card strip and its stat readout used to live here.
+// They were retired with the Operations Board: the Map is now Home's single
+// workspace overview, and home-workspace-cockpit.js owns the one shared
+// /api/workspaces fetch that Map, Tree, Summary, and the context rail all
+// read from (PRD FR22, FR111). This module must not fetch workspaces again.
 //
 // Loaded globally via base.tmpl. All listeners and fetches early-return
 // when the home page's elements aren't present, so this module is a no-op
@@ -30,12 +36,30 @@
       typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     const ms = Math.round(now - TTFA_START);
     // Structured console marker — easy to grep, easy to swap for a real
-    // analytics beacon (navigator.sendBeacon) once an endpoint exists.
+    // analytics beacon (navigator.sendBeacon) once an endpoint exists. The PRD
+    // is explicit that this feature adds NO network telemetry endpoint (FR141).
     try {
       console.info('[home.ttfa]', { source, ms });
     } catch (_) {
       /* ignore */
     }
+    // Test-visible event, so a browser test can assert the marker without
+    // scraping console output (FR141).
+    try {
+      window.dispatchEvent(new CustomEvent('ori:home-ttfa-fired', { detail: { source, ms } }));
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  // The cockpit reports its own distinct action sources (Map select, Tree
+  // select, Open Workspace, view toggle, Quick Capture, Create Workspace)
+  // through one event so every Home surface shares a single TTfA contract.
+  function wireCockpitTTFA() {
+    window.addEventListener('ori:home-ttfa', e => {
+      const source = (e && e.detail && e.detail.source) || 'cockpit';
+      fireTTFA(source);
+    });
   }
 
   // ----- HTML utilities -----
@@ -114,210 +138,20 @@
     });
   }
 
-  // ----- Section: Recent Workspaces -----
+  // ----- Delegated Today actions (TTfA) -----
 
-  async function loadRecentWorkspaces() {
-    const section = document.getElementById('homeRecentWorkspaces');
-    if (!section) return;
-    const body = section.querySelector('[data-role="content"]');
-    if (!body) return;
-
-    try {
-      const resp = await fetch('/api/workspaces');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const all = Array.isArray(data.workspaces) ? data.workspaces : [];
-      all.sort(
-        (a, b) =>
-          new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
-      );
-      const visible = all.slice(0, 6);
-      const isFirstRun = section.closest('#homeDashboardSections')?.dataset.firstRun === 'true';
-
-      const viewAll = section.querySelector('[data-role="view-all"]');
-      if (viewAll) viewAll.hidden = all.length <= 6;
-
-      renderStatReadout(section, all);
-      body.innerHTML = renderWorkspaceCards(visible, isFirstRun);
-      wireWorkspaceCardClicks(body);
-    } catch (err) {
-      console.error('home-dashboard: failed to load workspaces', err);
-      body.innerHTML = '<div class="home-section-placeholder">Workspace data unavailable.</div>';
-    }
-  }
-
-  function count(value) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-  }
-
-  function workspaceAgentCount(workspace) {
-    if (workspace && workspace.agent_count !== undefined) return count(workspace.agent_count);
-    return Array.isArray(workspace?.agents) ? workspace.agents.length : 0;
-  }
-
-  function workspaceOpenTaskCount(workspace) {
-    return count(workspace?.open_task_count);
-  }
-
-  function workspaceStatus(workspace) {
-    if (count(workspace?.needs_attention_count) > 0) {
-      return { className: 'is-attention', label: 'Attention' };
-    }
-    if (workspaceOpenTaskCount(workspace) > 0) {
-      return { className: 'is-working', label: 'Active' };
-    }
-    return { className: 'is-idle', label: 'Idle' };
-  }
-
-  function renderStatReadout(section, workspaces) {
-    const readout = section
-      .closest('#homeDashboardSections')
-      ?.querySelector('[data-role="stat-readout"]');
-    if (!readout) return;
-
-    const values = {
-      'stat-workspaces': workspaces.length,
-      'stat-agents': workspaces.reduce(
-        (total, workspace) => total + workspaceAgentCount(workspace),
-        0
-      ),
-      'stat-open-tasks': workspaces.reduce(
-        (total, workspace) => total + workspaceOpenTaskCount(workspace),
-        0
-      )
-    };
-
-    Object.entries(values).forEach(([role, value]) => {
-      const target = readout.querySelector(`[data-role="${role}"]`);
-      if (target) target.textContent = String(value);
-    });
-  }
-
-  // Deterministic accent hue (0–359) derived from a workspace's id/name, so
-  // each card gets a stable, recognizable color chip without persisting one.
-  function wsHue(seed) {
-    const s = String(seed || '');
-    let h = 0;
-    for (let i = 0; i < s.length; i++) {
-      h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    }
-    return h % 360;
-  }
-
-  // 1–2 letter monogram from a workspace name for the card avatar.
-  function wsInitials(name) {
-    const parts = String(name || '')
-      .trim()
-      .split(/[\s._-]+/)
-      .filter(Boolean);
-    if (parts.length === 0) return '?';
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-
-  function renderWorkspaceCards(workspaces, isFirstRun) {
-    const cards = workspaces
-      .map(ws => {
-        const id = escapeHtml(ws.id || '');
-        const name = escapeHtml(ws.name || 'Untitled workspace');
-        const agentCount = workspaceAgentCount(ws);
-        const openTaskCount = workspaceOpenTaskCount(ws);
-        const status = workspaceStatus(ws);
-        const hue = wsHue(ws.id || ws.name || '');
-        const initials = escapeHtml(wsInitials(ws.name || ''));
-        return `
-        <a href="/workspaces/${id}" class="home-workspace-card home-workspace-status-chip" data-role="workspace-card" data-status="${status.label.toLowerCase()}" style="--ws-hue: ${hue};" aria-label="${name}: ${agentCount} agents, ${openTaskCount} open tasks, ${status.label}">
-          <div class="home-workspace-card-head">
-            <span class="home-workspace-card-avatar" aria-hidden="true">${initials}</span>
-            <div class="home-workspace-card-name">${name}</div>
-          </div>
-          <div class="home-workspace-card-meta">
-            <span class="home-workspace-signal"><span class="home-status-led ${status.className}" aria-hidden="true"></span><span class="home-status-text">${status.label}</span></span>
-            <span class="home-workspace-card-agents">${agentCount} AG</span>
-            <span class="home-workspace-card-tasks">${openTaskCount} OPEN</span>
-          </div>
-        </a>
-      `;
-      })
-      .join('');
-
-    const newTile = `
-      <a href="/workspaces?create=1"${isFirstRun ? ' id="homeFirstRunStart"' : ''} class="home-workspace-card home-workspace-card-new" data-role="new-workspace">
-        <div class="home-workspace-card-new-icon" aria-hidden="true">${isFirstRun ? '⊕' : '+'}</div>
-        <div class="home-workspace-card-new-label">${isFirstRun ? 'Establish first workspace' : 'New workspace'}</div>
-      </a>
-    `;
-
-    if (workspaces.length === 0) {
-      return `<div class="home-workspace-empty">${newTile}</div>`;
-    }
-
-    // Advertise the Email Ops blueprint (Mail spin-off, open-Q4) once the user
-    // is past first-run and does not already have an Email Ops workspace. The
-    // CTA deep-links the Construct wizard with the blueprint preselected.
-    const emailOpsTile =
-      !isFirstRun && !hasEmailOpsWorkspace(workspaces)
-        ? `
-      <a href="/workspaces?create=1&blueprint=email-ops" class="home-workspace-card home-workspace-card-new home-workspace-card-suggested" data-role="new-email-ops" aria-label="Set up an Email Ops workspace for inbox triage and reply drafting">
-        <div class="home-workspace-card-new-icon" aria-hidden="true">📬</div>
-        <div class="home-workspace-card-new-label">Set up Email Ops</div>
-      </a>
-    `
-        : '';
-
-    return `<div class="home-workspace-strip">${cards}${newTile}${emailOpsTile}</div>`;
-  }
-
-  // hasEmailOpsWorkspace reports whether any of the user's workspaces is an Email
-  // Ops workspace, by template provenance when available or name as a fallback.
-  function hasEmailOpsWorkspace(workspaces) {
-    return (workspaces || []).some(ws => {
-      const prov = ws.template_provenance || {};
-      const templateId = String(ws.template_id || prov.template_id || '').trim();
-      if (templateId === 'email-ops') return true;
-      return String(ws.name || '').trim().toLowerCase() === 'email ops';
-    });
-  }
-
-  function wireWorkspaceCardClicks(_body) {
-    // Cards are anchor elements — native navigation already works. The
-    // hook stays here so future enhancements (e.g. middle-click hint)
-    // have a clean attach point. TTfA is fired via the delegated
-    // listener on #homeDashboardSections (see wireDashboardActions).
-  }
-
-  // wireDashboardActions installs a single delegated click listener on the
-  // sections container that fires the TTfA beacon for any qualifying user
-  // action (workspace card, new-workspace tile, view-all link, upcoming row,
-  // activity row, view-all link). One listener instead of N keeps the JS
-  // small and survives re-renders.
-  function wireDashboardActions() {
-    const sections = document.getElementById('homeDashboardSections');
-    if (!sections) return;
-    sections.addEventListener('click', e => {
+  // One delegated click listener on the context rail fires the TTfA marker for
+  // any qualifying Today action (an upcoming row, an activity row). One
+  // listener instead of N keeps the JS small and survives re-renders.
+  function wireTodayActions() {
+    const rail = document.getElementById('cockpitRailToday');
+    if (!rail) return;
+    rail.addEventListener('click', e => {
       const t = e.target;
       if (!t) return;
-      const card = t.closest('[data-role="workspace-card"]');
-      if (card) {
-        fireTTFA('workspace-card');
-        return;
-      }
-      const newTile = t.closest('[data-role="new-workspace"]');
-      if (newTile) {
-        fireTTFA(newTile.id === 'homeFirstRunStart' ? 'first-run-start' : 'new-workspace');
-        return;
-      }
-      const viewAll = t.closest('[data-role="view-all"]');
-      if (viewAll) {
-        fireTTFA('view-all');
-        return;
-      }
-      const rowLink = t.closest('.home-row-link');
-      if (rowLink) {
-        const inUpcoming = rowLink.closest('#homeUpcomingTasks');
-        fireTTFA(inUpcoming ? 'upcoming-row' : 'activity-row');
-      }
+      const rowLink = t.closest && t.closest('.home-row-link');
+      if (!rowLink) return;
+      fireTTFA(rowLink.closest('#homeUpcomingTasks') ? 'upcoming-row' : 'activity-row');
     });
   }
 
@@ -433,30 +267,19 @@
     `;
   }
 
-  // ----- First-run actions -----
-
-  function wireFirstRunActions() {
-    // First run now has a single secondary CTA (Create a workspace); the Ask
-    // box itself is the "describe a project" path, so there's no separate
-    // ask button to wire anymore.
-    const startBtn = document.getElementById('homeFirstRunStart');
-    if (startBtn) {
-      startBtn.addEventListener('click', () => fireTTFA('first-run-start'));
-    }
-  }
-
   // ----- Init -----
 
   function init() {
+    // Ask Ori chips and the ⌘J shortcut live above the cockpit and are wired on
+    // every Home render.
     wireChips();
     wireFocusShortcut();
-    wireFirstRunActions();
+    wireCockpitTTFA();
 
-    const sections = document.getElementById('homeDashboardSections');
-    if (!sections) return;
-
-    wireDashboardActions();
-    loadRecentWorkspaces();
+    // Today's sections. Each loads independently, so one failing source leaves
+    // the others — and Map, Tree, and Ask Ori — usable (FR85, FR113).
+    if (!document.getElementById('cockpitRailToday')) return;
+    wireTodayActions();
     loadUpcoming();
     loadRecentActivity();
   }

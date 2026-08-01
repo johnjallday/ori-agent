@@ -11,13 +11,7 @@
     "chromium_version": "Google Chrome for Testing 143.0.7499.4",
     "encoder_version": "sharp@0.34.5"
   },
-  "sensitive_patterns": [
-    "/Users/",
-    "/home/",
-    "sk-",
-    "AKIA",
-    "BEGIN PRIVATE KEY"
-  ],
+  "sensitive_patterns": ["/Users/", "/home/", "sk-", "AKIA", "BEGIN PRIVATE KEY"],
   "screenshots": [
     {
       "id": "hero",
@@ -44,7 +38,9 @@
         "internal/web/templates/components/dashboard.tmpl",
         "internal/web/static/js/modules/home-daily-brief.js",
         "internal/web/static/js/modules/dashboard.js",
-        "internal/web/static/css/home-command.css"
+        "internal/web/static/js/modules/home-workspace-cockpit.js",
+        "internal/web/static/css/home-command.css",
+        "internal/web/static/css/home-workspace-cockpit.css"
       ],
       "accepted_sha256": "c6e5d474ee2799ac8b9055e0d0b024df84b5e2e93e9f3061f487b19420ca4379",
       "accepted_bytes": 76874
@@ -62,10 +58,7 @@
       "theme": "dark",
       "locale": "en-US",
       "timezone": "UTC",
-      "required_visible_selectors": [
-        "#action-center-list",
-        ".action-center-row"
-      ],
+      "required_visible_selectors": ["#action-center-list", ".action-center-row"],
       "caption": "Action Center gathers mission findings from every workspace for quick triage.",
       "alt_text": "Ori Agent Action Center in dark mode with three fictional workspace findings and their priorities.",
       "display_width": 820,
@@ -80,7 +73,7 @@
     {
       "id": "workspace-map",
       "output_path": "docs/images/workspace-map.webp",
-      "route": "/workspaces?view=map",
+      "route": "/",
       "scenario_id": "readme-product-launch",
       "viewport": {
         "width": 1440,
@@ -90,17 +83,14 @@
       "theme": "dark",
       "locale": "en-US",
       "timezone": "UTC",
-      "required_visible_selectors": [
-        ".ws-map-tile.is-hq",
-        ".ws-map-tile"
-      ],
+      "required_visible_selectors": [".ws-map-tile.is-hq", ".ws-map-tile"],
       "caption": "Workspace Map shows Personal HQ and the wider operating landscape at a glance.",
       "alt_text": "Ori Agent Workspace Map in dark mode showing a Personal HQ landmark and multiple fictional workspaces.",
       "display_width": 420,
       "owner_paths": [
-        "internal/web/templates/pages/workspaces.tmpl",
+        "internal/web/templates/components/dashboard.tmpl",
         "internal/web/static/js/modules/workspace-map.js",
-        "internal/web/static/js/modules/workspace-hub.js",
+        "internal/web/static/js/modules/home-workspace-cockpit.js",
         "internal/web/static/js/modules/personal-hq-onboarding.js"
       ],
       "accepted_sha256": "3645b9b6f671761cadbaeb18022747a9455d78636a9b8d23c9990a0ca9a85fcb",

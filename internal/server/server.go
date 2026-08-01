@@ -404,11 +404,36 @@ func (s *Server) serveWorkflows(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "workflows", data)
 }
 
+// serveWorkspaces is the permanent compatibility route for the retired
+// workspace launcher. Home (`/`) is now the canonical workspace overview, so
+// the exact `/workspaces` path redirects there rather than rendering a second
+// launcher (PRD FR3).
+//
+// The whole query string is carried across verbatim (FR4): `view`, `create`,
+// `blueprint`, `focus`, and `hq` all keep their meaning on Home, and unrelated
+// parameters are preserved rather than silently dropped. The one rewrite is
+// the retired `view=cards`, which normalizes to Map here so the redirect
+// target is already correct and the client never has to bounce again (FR6).
+//
+// This is a TEMPORARY redirect (302) for the first stable release so rollback
+// stays safe; it becomes permanent after validation. `/workspaces/{id}` and
+// every descendant route are untouched — they are handled by
+// handleWorkspacesRoutes, which this function never sees (FR7).
 func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
-	data := s.prepareBasePageData("workspaces")
-	data.Title = "Workspaces - Ori Agent"
-	data.BrandText = "Ori Agent"
-	s.renderAndWritePage(w, "workspaces", data)
+	target := url.URL{Path: "/"}
+	query := r.URL.Query()
+	if view := strings.TrimSpace(strings.ToLower(query.Get("view"))); view != "" {
+		// Only `tree` survives as an explicit view; Map is the default and is
+		// expressed by the parameter's absence, matching the cockpit's own URL
+		// contract (FR26).
+		if view == "tree" {
+			query.Set("view", "tree")
+		} else {
+			query.Del("view")
+		}
+	}
+	target.RawQuery = query.Encode()
+	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
 // handleWorkspacesRoutes handles all /workspaces/* routes
@@ -416,8 +441,9 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	// Extract path after /workspaces/
 	path := strings.TrimPrefix(r.URL.Path, "/workspaces/")
 	if path == "" || path == r.URL.Path {
-		// No ID provided, redirect to workspaces page
-		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
+		// No ID provided. Go straight to Home, the canonical overview — routing
+		// via /workspaces would only add a second hop to the same place (FR13).
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
@@ -501,13 +527,13 @@ func (s *Server) serveWorkspaceNotesPage(w http.ResponseWriter, workspaceID, not
 func (s *Server) handleNotesPageRoute(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/notes/")
 	if path == "" || path == r.URL.Path {
-		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 	parts := strings.Split(path, "/")
 	noteID := strings.TrimSpace(parts[0])
 	if noteID == "" {
-		http.Redirect(w, r, "/workspaces", http.StatusSeeOther)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 	s.serveFocusedNotePage(w, noteID)
