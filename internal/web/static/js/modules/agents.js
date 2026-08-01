@@ -2587,7 +2587,7 @@ async function loadAgentMCPServers(agentName, accordionId) {
     <div class="small" style="color: var(--text-secondary); line-height: 1.5;">
       MCP is now configured per workspace instead of per agent.
       <div style="margin-top: 8px;">
-        <a href="/workspaces" style="color: var(--primary-color); text-decoration: none;">Open Workspaces</a>
+        <a href="/" style="color: var(--primary-color); text-decoration: none;">Open Workspace Map</a>
         <span style="margin: 0 6px; color: var(--text-muted);">|</span>
         <a href="/mcp" style="color: var(--primary-color); text-decoration: none;">Manage Global MCP</a>
       </div>

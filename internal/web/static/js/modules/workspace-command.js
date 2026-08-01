@@ -812,7 +812,10 @@ export class WorkspaceCommandView {
       this.groupAccentStyle(ws) +
       '>' +
       '<div class="ws-cmd-nav">' +
-      '<a class="ws-cmd-nav-btn" href="/workspaces" aria-label="Back to workspaces">Workspaces</a>' +
+      // Back action from a workspace-scoped page points at Home, the canonical
+      // workspace overview, and says so (PRD FR11/FR12). It used to say
+      // "Workspaces" and rely on the /workspaces compatibility redirect.
+      '<a class="ws-cmd-nav-btn" href="/" aria-label="Back to the workspace map on Home">Home</a>' +
       '<a class="ws-cmd-nav-btn" href="' +
       escapeHtml(this.workspaceRoute('/canvas')) +
       '">Canvas</a>' +
