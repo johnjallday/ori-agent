@@ -744,10 +744,19 @@
   display: none;
 }
 
+/* The backdrop sits BEHIND the console, and its z-index is local to the host.
+ *
+ * It used to carry --wsx-layer-modal-backdrop (1000) while the console carried
+ * 1. Both are children of .fj-console-host, which already establishes a
+ * stacking context at the modal layer — so inside it, 1000 beat 1 and the
+ * backdrop covered the console. Every control rendered correctly and every
+ * click landed on the backdrop, which closed the console instead. The layer
+ * tokens order the host against OTHER surfaces; within the host, ordinary
+ * document order is what applies. */
 .fj-console-backdrop {
   position: fixed;
   inset: 0;
-  z-index: var(--wsx-layer-modal-backdrop, 1000);
+  z-index: 0;
   background: rgba(0, 0, 0, 0.62);
 }
 

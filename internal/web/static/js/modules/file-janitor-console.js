@@ -2382,9 +2382,20 @@
     const body = el('div', 'fj-console-body');
     body.id = 'fileJanitorConsoleBody';
     dialog.appendChild(body);
+
+    // Attach BEFORE filling the body.
+    //
+    // The tab renderers find their hosts with getElementById — renderSettings
+    // looks up downloadsJanitorSettingsHost, renderBatch looks up
+    // downloadsJanitorBatch. A node that has been appended to a detached
+    // subtree is not in the document yet, so those lookups returned null and
+    // each renderer bailed silently: Settings showed only its privacy line and
+    // Review showed only its readiness rows, on first paint, with no error
+    // anywhere. It corrected itself on the next repaint, which is why it looked
+    // intermittent.
+    host.appendChild(dialog);
     renderConsoleBody(body, status);
 
-    host.appendChild(dialog);
     paintError();
     focusRequestedItem() || focusConsole();
   }
@@ -2551,7 +2562,12 @@
     const tab = validTab(params.get('tab'));
     const item = String(params.get('item') || '');
     if (consoleOpen) {
-      consoleTab = tab || consoleTab;
+      // The URL is authoritative here, and an absent `tab` means Review — that
+      // is exactly how Review is encoded (it is the default, so it is omitted).
+      // Keeping the current tab instead made Back from Settings appear to do
+      // nothing: the entry it returned to said Review, and the console stayed
+      // on Settings (FR-124).
+      consoleTab = tab || 'review';
       consoleItem = item;
       renderConsole();
       return;

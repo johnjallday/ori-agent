@@ -720,8 +720,13 @@ func (h *Handler) respondReviewError(w http.ResponseWriter, err error, fallback 
 			orihttp.NewAPIError("candidate_changed", candidateExplanation(err)))
 	case errors.Is(err, downloadsjanitor.ErrCandidateNotFound):
 		_ = orihttp.RespondNotFound(w, "candidate not found")
-	case errors.Is(err, downloadsjanitor.ErrUnknownCategory), errors.Is(err, downloadsjanitor.ErrInvalidAction):
-		_ = orihttp.RespondBadRequest(w, err.Error())
+	case errors.Is(err, downloadsjanitor.ErrUnknownCategory):
+		// Not err.Error(): that reads "unknown downloads janitor category: ..."
+		// — an internal sentinel naming the retired product, in a message the
+		// console shows verbatim.
+		_ = orihttp.RespondBadRequest(w, "That is not a category Ori files into.")
+	case errors.Is(err, downloadsjanitor.ErrInvalidAction):
+		_ = orihttp.RespondBadRequest(w, "Ori cannot carry out that action on this file.")
 	default:
 		h.respondError(w, err, fallback)
 	}

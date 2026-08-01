@@ -40,8 +40,24 @@ class FakeElement {
   }
   appendChild(el) {
     this.children.push(el);
-    if (el.id) globalThis.document.byId.set(el.id, el);
+    el.parent = this;
+    // Register the whole subtree: attaching a populated node puts every id
+    // inside it into the document at once, which is what a browser does.
+    el.registerIDs();
     return el;
+  }
+  registerIDs() {
+    if (this.id) globalThis.document.byId.set(this.id, this);
+    this.children.forEach(child => child.registerIDs());
+  }
+  // Reachable from <body>, i.e. actually in the document.
+  get attached() {
+    let node = this;
+    while (node) {
+      if (node === globalThis.document.body) return true;
+      node = node.parent;
+    }
+    return false;
   }
   addEventListener(ev, fn) {
     (this._listeners[ev] ||= []).push(fn);
@@ -94,11 +110,22 @@ class FakeDocument {
   register(id) {
     const el = new FakeElement('div');
     el.id = id;
-    this.byId.set(id, el);
+    // Attached to <body>, like the real template's mount point. A detached
+    // fixture would be resolvable here and not in a browser.
+    this.body.appendChild(el);
     return el;
   }
+  // Only nodes actually in the document resolve.
+  //
+  // A flat id map resolved detached nodes too, which let real code pass here
+  // and fail in a browser: the console populated its body BEFORE attaching the
+  // dialog, so every getElementById inside the tab renderers returned null and
+  // Settings and Review rendered empty on first paint. Nothing in this harness
+  // could see it until attachment mattered.
   getElementById(id) {
-    return this.byId.get(id) || null;
+    const el = this.byId.get(id);
+    if (!el) return null;
+    return el.attached ? el : null;
   }
   createElement(tag) {
     return new FakeElement(tag);
@@ -108,8 +135,10 @@ class FakeDocument {
 
 function setup() {
   const doc = new FakeDocument();
-  doc.register('downloadsJanitorMount');
+  // The global goes first: registering a node attaches it, and attachment
+  // records ids against globalThis.document.
   globalThis.document = doc;
+  doc.register('downloadsJanitorMount');
   globalThis.window = globalThis;
   globalThis.window.currentWorkspaceId = 'ws-1';
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: { applies: false } }) });

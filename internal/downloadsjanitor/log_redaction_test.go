@@ -43,19 +43,39 @@ func TestLogs_CarryNoFilenamesOrPaths(t *testing.T) {
 		"display_name": true,
 	}
 
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package dir: %v", err)
+	// Every package that handles File Janitor data, not just this one.
+	//
+	// The capability lifecycle and the HTTP layer log about the same workspaces
+	// and the same folders; a filename leaking from the handler is exactly as
+	// bad as one leaking from the service, and the guard living in only one
+	// package is how the other three quietly drift.
+	packages := []string{
+		".",
+		"../downloadsjanitorhttp",
+		"../workspacecapability",
+		"../workspacecapabilityhttp",
 	}
 
 	fset := token.NewFileSet()
 	checked := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
+	var sources []string
+	for _, pkg := range packages {
+		entries, err := os.ReadDir(pkg)
+		if err != nil {
+			t.Fatalf("read %s: %v", pkg, err)
 		}
-		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, parser.ParseComments)
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") ||
+				strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			sources = append(sources, filepath.Join(pkg, entry.Name()))
+		}
+	}
+
+	for _, source := range sources {
+		name := source
+		file, err := parser.ParseFile(fset, source, nil, parser.ParseComments)
 		if err != nil {
 			t.Fatalf("parse %s: %v", name, err)
 		}
