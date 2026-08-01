@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "acceptance_state": "accepted",
-  "last_accepted_capture_commit": "c05fd44bba51d2e4a9340ce4d5e9bbe2cef600e1",
+  "last_accepted_capture_commit": "fa8f086c737d30b63f2b6a61d5ef738260d8b4a0",
   "accepted_readme_sha256": "09bcf6dbda181869b377f5ddcf843994e1372a2fecae1c261ca85a32519cc390",
   "accepted_environment": {
     "platform": "darwin",
@@ -9,7 +9,7 @@
     "node_version": "v25.9.0",
     "playwright_version": "1.57.0",
     "chromium_version": "Google Chrome for Testing 143.0.7499.4",
-    "encoder_version": "sharp@0.34.5"
+    "encoder_version": "sharp@0.35.3"
   },
   "sensitive_patterns": ["/Users/", "/home/", "sk-", "AKIA", "BEGIN PRIVATE KEY"],
   "screenshots": [
@@ -42,8 +42,8 @@
         "internal/web/static/css/home-command.css",
         "internal/web/static/css/home-workspace-cockpit.css"
       ],
-      "accepted_sha256": "c6e5d474ee2799ac8b9055e0d0b024df84b5e2e93e9f3061f487b19420ca4379",
-      "accepted_bytes": 76874
+      "accepted_sha256": "22c487f0803156ce24c0ada03c0fc2da627b63403a7d96cfe840f3550b66458e",
+      "accepted_bytes": 103074
     },
     {
       "id": "action-center",
@@ -67,8 +67,8 @@
         "internal/web/static/js/modules/action-center.js",
         "internal/workspace/opportunities.go"
       ],
-      "accepted_sha256": "d90bd7fbc3f44019b23317c873f819f085b424bbc33bce067d6f10d3e8e1b0e2",
-      "accepted_bytes": 81278
+      "accepted_sha256": "86e6b820dccf537e7004ecbe7c6fa057d61d60a6aeec038e95fabea28ad5d2e2",
+      "accepted_bytes": 85720
     },
     {
       "id": "workspace-map",
@@ -93,8 +93,8 @@
         "internal/web/static/js/modules/home-workspace-cockpit.js",
         "internal/web/static/js/modules/personal-hq-onboarding.js"
       ],
-      "accepted_sha256": "3645b9b6f671761cadbaeb18022747a9455d78636a9b8d23c9990a0ca9a85fcb",
-      "accepted_bytes": 96296
+      "accepted_sha256": "8bb28cb76dcf6283e148eb455f28fdf90537fddc3f5112bc57e8074f05e345fa",
+      "accepted_bytes": 85590
     },
     {
       "id": "workspace",
@@ -123,8 +123,8 @@
         "internal/web/static/js/modules/workspace-detail.js",
         "internal/web/static/js/modules/workspace-mission.js"
       ],
-      "accepted_sha256": "18e55567152fd236b71d49d5a41d3600deef0ff38817681d09f11243d5af8e98",
-      "accepted_bytes": 114188
+      "accepted_sha256": "97427b626ce74f0925ed5e1924288811f5e271557eb5ef882d912e1f8ec5bcdf",
+      "accepted_bytes": 115016
     }
   ]
 }
