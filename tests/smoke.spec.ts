@@ -208,7 +208,7 @@ test.describe('Home First Run', () => {
     await page.goto('/');
     await expect(page.locator('body.home-command-page')).toBeVisible();
     await expect(page.locator('#homeAssistantCard')).toHaveAttribute('data-first-run', 'true');
-    await expect(page.locator('#homeDashboardSections')).toHaveAttribute('data-first-run', 'true');
+    await expect(page.locator('#homeCockpit')).toBeVisible();
     await expect(page.locator('#homeFirstRunStart')).toContainText('Establish first workspace');
     await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
       'placeholder',
@@ -231,7 +231,7 @@ test.describe('Home First Run', () => {
     await expect(page.locator('#homeAssistantInput')).toBeVisible();
     await expect(page.locator('#homeAssistantSendBtn')).toBeVisible();
     await expect(page.locator('.home-prompt-chip')).toHaveCount(3);
-    await expect(page.locator('#homeDashboardSections')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toBeVisible();
   });
 
   test('preserves quick-order chips, the command shortcut, and submit flow', async ({ page }) => {
@@ -451,10 +451,10 @@ test.describe('Home First Run', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('[data-role="workspace-card"]')).toHaveCount(6);
-    await expect(page.locator('.home-row')).toHaveCount(10);
-    await expect(page.locator('.home-status-led.is-attention')).toHaveCount(1);
-    await expect(page.locator('.home-status-led.is-working')).toHaveCount(1);
+    // The Operations Board's workspace cards are retired; the Map is Home's
+    // single workspace overview now (PRD FR22).
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    await expect(page.locator('[data-role="workspace-card"]')).toHaveCount(0);
     await expect(page.locator('#questLog')).toBeVisible();
 
     for (const [width, height] of [
@@ -500,7 +500,7 @@ test.describe('Home First Run', () => {
     const layout = await page.evaluate(() => {
       const command = document.getElementById('homeAssistantCard')?.getBoundingClientRect();
       const brief = document.getElementById('homeDailyBrief')?.getBoundingClientRect();
-      const operations = document.querySelector('.home-command-layout')?.getBoundingClientRect();
+      const operations = document.querySelector('.home-cockpit')?.getBoundingClientRect();
       return {
         commandBottom: command?.bottom || 0,
         briefTop: brief?.top || 0,
@@ -623,11 +623,11 @@ test.describe('Home First Run', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('#homeDashboardSections')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toBeVisible();
     await expect(page.locator('#questLog')).toBeVisible();
 
     const layout = await page.evaluate(() => {
-      const board = document.getElementById('homeDashboardSections')?.getBoundingClientRect();
+      const board = document.querySelector('.home-cockpit')?.getBoundingClientRect();
       const progression = document.querySelector('.home-progression-zone')?.getBoundingClientRect();
       return {
         pageWidth: document.documentElement.scrollWidth,

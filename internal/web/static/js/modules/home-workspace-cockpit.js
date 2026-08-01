@@ -1303,8 +1303,16 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
       );
       return;
     }
-    state.selectedId = resolved || '';
-    renderRail({ announceChange: false });
+    if (!resolved) {
+      state.selectedId = '';
+      renderRail({ announceChange: false });
+      return;
+    }
+    // The map resolved a selection we did not ask for — the only way that
+    // happens is an explicit focus intent in the URL (`?focus=personal-hq`).
+    // Route it through the normal selection path so the rail actually shows
+    // that workspace's context instead of staying on Today (FR107).
+    selectItem(resolved, { fromMap: true });
   }
 
   // ---- Tree peer view ----

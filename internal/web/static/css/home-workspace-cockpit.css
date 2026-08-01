@@ -569,8 +569,50 @@
 }
 
 /* --------------------------------------------------------------------------
- * Reduced motion (FR133)
+ * Accessibility and responsive guarantees (FR131, FR132, FR133, FR135, FR139)
  * ----------------------------------------------------------------------- */
+
+/* The page itself never scrolls sideways; Map and Tree scroll internally
+   instead (FR135). */
+body.home-command-page {
+  overflow-x: hidden;
+}
+
+/* Every interactive cockpit control keeps a visible focus ring and a target
+   large enough to hit (FR124, FR132). */
+.home-cockpit button:focus-visible,
+.home-cockpit a:focus-visible,
+.home-cockpit input:focus-visible,
+.home-cockpit textarea:focus-visible,
+.home-cockpit [tabindex]:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+.cockpit-view-btn,
+.cockpit-signal-chip,
+.cockpit-rail-footer button,
+.cockpit-tree-action,
+.cockpit-tree-caret {
+  min-height: 24px;
+}
+
+.cockpit-rail-footer button,
+.cockpit-area-controls button {
+  min-height: 28px;
+}
+
+/* A short viewport must not push the rail's actions past an unreachable edge:
+   the body scrolls, the footer never becomes a fixed overlay (FR139). */
+@media (max-height: 620px) {
+  .cockpit-rail {
+    max-height: none;
+  }
+
+  .cockpit-rail-body {
+    overflow-y: visible;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .home-cockpit *,
@@ -579,6 +621,7 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

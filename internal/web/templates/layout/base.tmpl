@@ -348,6 +348,14 @@
        binding the Create Workspace wizard. Deferred scripts run in document
        order, so this tag's position is the dependency contract. -->
   <script defer src="/js/modules/create-workspace-team-draft.js"></script>
+  <!--
+    Also must precede sessions.js: Create Workspace renders its parent-group
+    picker through workspace-group-options.js. That helper used to load only on
+    the /workspaces launcher; now that `?create=1` lands on Home the modal is
+    reachable here too, and its absence threw "Cannot read properties of
+    undefined (reading 'collectWorkspaceGroupOptions')".
+  -->
+  <script defer src="/js/modules/workspace-group-options.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/project-templates-manage.js"></script>
   <script defer src="/js/modules/toast.js"></script>

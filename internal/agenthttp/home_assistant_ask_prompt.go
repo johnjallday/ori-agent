@@ -82,7 +82,7 @@ func (h *HomeAssistantAskHandler) buildNextStepActions(intent, prompt string, sn
 
 	// Empty state: guide first-run users to create a workspace.
 	if snapshot.Meta.WorkspaceCount == 0 {
-		add(HomeAction{ID: "nav-create-first-ws", Type: HomeActionNavigate, Label: "Create your first workspace", Href: "/workspaces"})
+		add(HomeAction{ID: "nav-create-first-ws", Type: HomeActionNavigate, Label: "Create your first workspace", Href: "/?create=1"})
 		return actions
 	}
 

@@ -5582,10 +5582,19 @@ const sessionManager = {
         return;
       }
 
-      // Refresh folders
+      // Refresh folders. When the post-create contract did NOT navigate away
+      // (the branch above), both Map and Tree must still pick the new workspace
+      // up, and it becomes the selected item so its context is in the rail
+      // (PRD FR108). The cockpit owns that refresh; the launcher keeps its own.
       await this.loadFolders();
       if (window.WorkspaceHub && typeof window.WorkspaceHub.loadWorkspaces === 'function') {
         await window.WorkspaceHub.loadWorkspaces();
+      }
+      if (window.OriHomeCockpit && typeof window.OriHomeCockpit.refreshQuietly === 'function') {
+        await window.OriHomeCockpit.refreshQuietly();
+        if (createdWorkspaceId && typeof window.OriHomeCockpit.select === 'function') {
+          window.OriHomeCockpit.select(createdWorkspaceId);
+        }
       }
     } catch (error) {
       console.error('Failed to create folder:', error);
@@ -10387,13 +10396,14 @@ document.addEventListener('DOMContentLoaded', () => {
     /* non-fatal */
   }
 
-  // ?create=1 opens the Create Workspace modal after navigation (home-page
-  // first-run CTA links to /workspaces?create=1). One-shot: scrubbed from
-  // history so a refresh doesn't re-open. Previously handled by the now-removed
-  // workspace-create.js on a different (unrouted) page.
-  // Optional blueprint preselection: /workspaces?create=1&blueprint=email-ops
-  // (the HQ email station CTA, the Home Email Ops CTA, and the Home Calendar
-  // Ops portal's absent-workspace CTA all link here).
+  // ?create=1 opens the Create Workspace modal after navigation. The canonical
+  // destination is now Home (`/?create=1`); the legacy `/workspaces?create=1`
+  // still works because that route redirects to `/` preserving its query
+  // (PRD FR4, FR106). One-shot: scrubbed from history so a refresh doesn't
+  // re-open.
+  // Optional blueprint preselection: /?create=1&blueprint=email-ops (the HQ
+  // email station CTA, the Home Email Ops CTA, and the Home Calendar Ops
+  // portal's absent-workspace CTA all link here).
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get('create') === '1') {

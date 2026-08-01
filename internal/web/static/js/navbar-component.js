@@ -29,7 +29,7 @@ function createNavbar(activePage = '') {
                     <span style="color: var(--text-muted);">|</span>
                     <a href="/marketplace" class="nav-link-item ${activePage === 'marketplace' ? 'active' : ''}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
                     <span style="color: var(--text-muted);">|</span>
-                    <a href="/workspaces" class="nav-link-item ${activePage === 'workspaces' ? 'active' : ''}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Workspaces</a>
+                    <a href="/" class="nav-link-item ${activePage === 'home' ? 'active' : ''}" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Home</a>
                 </div>
 
                 <div class="d-flex align-items-center gap-3 ms-auto">
@@ -57,8 +57,10 @@ function initNavbar() {
     activePage = 'agents';
   } else if (path.includes('/marketplace')) {
     activePage = 'marketplace';
-  } else if (path.includes('/workspaces')) {
-    activePage = 'workspaces';
+  } else if (path === '/' || path.includes('/workspaces')) {
+    // Home is the canonical workspace-overview destination, so workspace-scoped
+    // paths mark Home active rather than a retired Workspaces item (FR9).
+    activePage = 'home';
   }
 
   return createNavbar(activePage);
