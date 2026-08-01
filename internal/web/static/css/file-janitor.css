@@ -730,10 +730,15 @@
    tells the user the Map is still underneath and that closing returns there
    (FR-101, FR-102). */
 
+/* Above the application's own fixed furniture, not just the workspace page's.
+   At the workspace-scoped modal layer (1010) the global nav (10002) clipped
+   this header — Scan now, Pause and Close were half-hidden behind it — and the
+   Workspace Assistant pill (20100) floated over the review table. See the
+   --app-modal-layer note in variables.css for the measured stack. */
 .fj-console-host {
   position: fixed;
   inset: 0;
-  z-index: var(--wsx-layer-modal, 1010);
+  z-index: var(--app-modal-layer, 20200);
   display: flex;
   align-items: center;
   justify-content: center;

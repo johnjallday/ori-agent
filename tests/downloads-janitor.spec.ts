@@ -172,8 +172,18 @@ async function completeSetup(page: Page, workspaceId: string, root: string) {
  * before — so the helper dismisses it first, exactly as a user would have to.
  */
 async function openConsole(page: Page) {
-  const scan = page.locator('#downloadsJanitorScan');
-  if (await scan.isVisible().catch(() => false)) return;
+  // Short-circuit on the CONSOLE, not on Scan: Scan is absent whenever the
+  // folder is unavailable, so keying off it made an already-open console look
+  // closed, and the helper then clicked the card behind it — which the
+  // console's own header intercepted.
+  //
+  // The brief wait matters too. Once the console has been opened, the URL
+  // carries ?panel=file-janitor, so a reload re-opens it — correctly, but
+  // asynchronously. Checking immediately after a reload sees it closed and
+  // races the deep link.
+  const consoleHost = page.locator('#fileJanitorConsole');
+  await consoleHost.waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+  if (await consoleHost.isVisible().catch(() => false)) return;
 
   const wizard = page.locator('#setupWizardDialog');
   if (await wizard.isVisible().catch(() => false)) {
@@ -183,7 +193,6 @@ async function openConsole(page: Page) {
 
   await page.locator('#fileJanitorCardOpen').click();
   await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
-  await expect(scan).toBeVisible({ timeout: 15000 });
 }
 
 async function scan(page: Page) {

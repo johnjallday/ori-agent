@@ -191,13 +191,6 @@ async function openConsoleFromCard(page: Page) {
   await expect(console_(page)).toBeVisible({ timeout: 15000 });
 }
 
-// Serial, because these do real filesystem work against one shared server:
-// each test creates a workspace, grants a folder, and runs real scans and real
-// moves. Run fully parallel alongside the other janitor suites they simply
-// overload it and time out — which reads as a product failure and is not one.
-// CI already uses a single worker; this makes a local full-suite run match.
-test.describe.configure({ mode: 'serial' });
-
 test.describe('File Janitor capability', () => {
   test('installs into an ordinary workspace and shows a card that opens the console', async ({
     page,
@@ -281,8 +274,11 @@ test.describe('File Janitor capability', () => {
       .first()
       .click();
 
+    // 30s, matching the History test: on a cold server this may be the first
+    // apply the process has ever done, and it flaked at 15s. Waiting longer
+    // costs nothing when it passes.
     await expect
-      .poll(() => existsSync(join(root, 'Filed', 'Documents', 'invoice.pdf')), { timeout: 15000 })
+      .poll(() => existsSync(join(root, 'Filed', 'Documents', 'invoice.pdf')), { timeout: 30000 })
       .toBe(true);
     expect(existsSync(join(root, 'invoice.pdf'))).toBe(false);
     // The file nobody approved is untouched.

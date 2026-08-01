@@ -40,6 +40,12 @@
   --wsx-layer-legacy-map-window: 10010;
   --wsx-layer-legacy-stat-modal: 1050;
 
+  /* NOTE: this scale orders surfaces WITHIN the workspace page, and it is
+     scoped to `.ws-cmd` — so anything mounted on <body> cannot read it. A
+     full-screen modal must also clear the application's own fixed furniture
+     (nav 10002, chat panel 10500, assistant pill 20100), which this scale
+     never accounted for. Those live in variables.css as --app-modal-layer. */
+
   /* ink */
   --ws-ink: #d6d9de;
   --ws-ink-dim: #8b909a;

@@ -99,12 +99,74 @@ async function openConsole(page: Page, workspaceId: string) {
   await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
 }
 
-// Serial: see tests/file-janitor.spec.ts. These do real filesystem work against
-// one shared server, and running them fully parallel alongside the other
-// janitor suites overloads it.
-test.describe.configure({ mode: 'serial' });
-
 test.describe('File Janitor console accessibility', () => {
+  // Nothing may paint over the console.
+  //
+  // At the workspace-scoped modal layer the global nav (z 10002) clipped the
+  // console's own header — Scan now, Pause and Close were half-hidden behind it
+  // — and the Workspace Assistant pill (z 20100) floated over the review table.
+  // Both are application furniture that the workspace page's layer scale never
+  // accounted for.
+  //
+  // This asserts by hit-testing rather than by comparing z-index numbers: what
+  // matters is what the user's click actually lands on.
+  test('no app chrome paints over the console', async ({ page, request }) => {
+    const root = inbox('stack', ['a.pdf', 'b.pdf']);
+    const workspaceId = await workspaceWithFolder(request, `FJ A11y Stack ${RUN}`, root);
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await openConsole(page, workspaceId);
+    await page.locator('#downloadsJanitorScan').click();
+    await expect(page.locator('.dj-row-item').first()).toBeVisible({ timeout: 15000 });
+
+    // Compare the stacking directly rather than hit-testing a few points.
+    //
+    // A point test is too easy to pass by luck: the Close button's centre sits
+    // one pixel below the nav's bottom edge, so elementFromPoint missed the
+    // overlap entirely while the nav really was clipping the header. What
+    // matters is whether anything that OVERLAPS the console is painted above it.
+    const above = await page.evaluate(() => {
+      const host = document.getElementById('fileJanitorConsole');
+      if (!host) return [{ tag: 'MISSING', id: '', z: 0 }];
+      const hostZ = Number(getComputedStyle(host).zIndex) || 0;
+      const hostRect = host.getBoundingClientRect();
+      const dialogRect = document
+        .getElementById('fileJanitorConsoleDialog')
+        ?.getBoundingClientRect();
+
+      const offenders: Array<{ tag: string; id: string; cls: string; z: number }> = [];
+      document.querySelectorAll('*').forEach(el => {
+        if (host.contains(el) || el.contains(host)) return;
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'fixed' && cs.position !== 'sticky') return;
+        if (cs.zIndex === 'auto') return;
+        const z = Number(cs.zIndex);
+        if (!Number.isFinite(z) || z <= hostZ) return;
+        if (cs.visibility === 'hidden' || cs.display === 'none') return;
+
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return;
+        // Only things that actually overlap the console matter.
+        const target = dialogRect ?? hostRect;
+        const overlaps =
+          r.right > target.left &&
+          r.left < target.right &&
+          r.bottom > target.top &&
+          r.top < target.bottom;
+        if (!overlaps) return;
+
+        offenders.push({
+          tag: el.tagName,
+          id: (el as HTMLElement).id,
+          cls: (el.className || '').toString().slice(0, 40),
+          z
+        });
+      });
+      return offenders;
+    });
+
+    expect(above, 'app chrome is painted above the console').toEqual([]);
+  });
+
   test('is a dialog named by its visible title', async ({ page, request }) => {
     const root = inbox('name', ['a.pdf']);
     const workspaceId = await workspaceWithFolder(request, `FJ A11y Name ${RUN}`, root);
