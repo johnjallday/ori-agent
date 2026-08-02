@@ -48,9 +48,18 @@ test.describe('Workshop accessibility', () => {
     const count = await controls.count();
     expect(count).toBeGreaterThan(0);
 
+    // Tab to each control rather than calling .focus() directly: Chromium's
+    // :focus-visible heuristic only shows the ring for real keyboard-driven
+    // focus, so a scripted .focus() call produces a false "no ring" reading
+    // even though the CSS rule (button:focus-visible) is correct.
+    await page.keyboard.press('Tab');
     for (let i = 0; i < Math.min(count, 12); i++) {
       const control = controls.nth(i);
-      await control.focus();
+      for (let attempts = 0; attempts < 40; attempts++) {
+        const isControl = await control.evaluate(node => node === document.activeElement);
+        if (isControl) break;
+        await page.keyboard.press('Tab');
+      }
       await expect(control).toBeFocused();
 
       // A focused control must be visually distinguishable. Checking the
@@ -68,6 +77,7 @@ test.describe('Workshop accessibility', () => {
         (outline.style !== 'none' && outline.width !== '0px') ||
         (outline.shadow && outline.shadow !== 'none');
       expect(visible, `control ${i} has no visible focus indicator`).toBeTruthy();
+      await page.keyboard.press('Tab');
     }
   });
 
@@ -103,21 +113,26 @@ test.describe('Workshop accessibility', () => {
     const panel = await openToolbox(page);
 
     // emulateMedia set prefers-reduced-motion: reduce in openToolbox. No card
-    // or control may animate under it.
-    const animated = await panel.evaluate(host => {
+    // or control may animate under it. The site-wide reduced-motion reset
+    // (common.css) collapses every transition/animation to 0.01ms rather than
+    // 0s — a deliberate near-zero, not truly zero, so that transitionend /
+    // animationend listeners still fire — so the threshold here is "well
+    // under one visible frame," not "exactly zero."
+    const NEAR_INSTANT_SECONDS = 0.05;
+    const animated = await panel.evaluate((host, threshold) => {
       const offenders: string[] = [];
       for (const node of Array.from(host.querySelectorAll('*'))) {
         const style = window.getComputedStyle(node);
         const hasTransition =
           style.transitionDuration &&
-          style.transitionDuration.split(',').some(value => parseFloat(value) > 0);
+          style.transitionDuration.split(',').some(value => parseFloat(value) > threshold);
         const hasAnimation =
           style.animationDuration &&
-          style.animationDuration.split(',').some(value => parseFloat(value) > 0);
+          style.animationDuration.split(',').some(value => parseFloat(value) > threshold);
         if (hasTransition || hasAnimation) offenders.push(node.className || node.tagName);
       }
       return offenders;
-    });
+    }, NEAR_INSTANT_SECONDS);
     expect(animated, `these animate under reduced motion: ${animated.join(', ')}`).toEqual([]);
   });
 

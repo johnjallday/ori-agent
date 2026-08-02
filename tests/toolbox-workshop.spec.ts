@@ -195,6 +195,14 @@ test.describe('Workshop', () => {
     const id = await workspaceID(page);
     await page.goto(`/workspaces/${id}`);
 
+    // Goal Prepare mounts inside the Command view's Mission stat-modal, reached
+    // via Set goal -> Advanced settings. The config surface (which hosts it) is
+    // a single shared DOM node relocated on demand rather than duplicated, so
+    // this is the only path that actually renders it (FR-92, FR-94).
+    await page.locator('[data-cmd-mission-action="edit"]').click();
+    await page.locator('#workspace-detail-goal-modal.show').waitFor({ timeout: 10000 });
+    await page.locator('#workspace-detail-goal-modal-advanced').click();
+
     const prepare = page.locator('#workspace-goal-prepare');
     await expect(prepare).toBeAttached({ timeout: 20000 });
     // The brief section always renders — either the accepted brief, or the
