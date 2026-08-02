@@ -398,6 +398,61 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { capabilities: [] });
       return;
     }
+    // The Workshop panel (agent Toolbox tab) mounts for every agent tab that
+    // renders, not just the one the user has open, so it loads on every
+    // workspace page too. The fixture workspace has no saved Toolboxes.
+    if (/^\/api\/workspaces\/[^/]+\/toolboxes$/.test(url.pathname)) {
+      await json(route, { toolboxes: [], workspace_version: 0 });
+      return;
+    }
+    if (/^\/api\/workspaces\/[^/]+\/toolbox-workshop$/.test(url.pathname)) {
+      await json(route, {
+        workshop: {
+          workspace_id: README_SCENES.workspace_command.workspace_id,
+          core: [],
+          agent_learned: [],
+          workspace_provided: [],
+          global_library: [],
+          capacity: { used: 0, capacity: 0, full: false },
+        },
+        workspace: README_SCENES.workspace_command.workspace_id,
+        workspace_version: 0,
+      });
+      return;
+    }
+    // The Workshop checks for an available Undo right after it loads (its own
+    // repaint, separate from the initial render). Nothing has been switched in
+    // this fixture, so the real handler's own "nothing to undo" shape applies.
+    if (/^\/api\/workspaces\/[^/]+\/agent-toolboxes\/[^/]+\/undo$/.test(url.pathname)) {
+      await json(route, {
+        available: false,
+        message: 'There is nothing to undo for this agent.',
+        workspace: README_SCENES.workspace_command.workspace_id,
+      });
+      return;
+    }
+    // Goal Prepare loads unconditionally wherever its host exists in the DOM
+    // (the shared config surface, relocated on demand into a stat-modal) --
+    // see workspace-goal-prepare.js. Nothing has been accepted or recommended
+    // yet in this fixture workspace.
+    if (/^\/api\/workspaces\/[^/]+\/goal\/brief$/.test(url.pathname)) {
+      await json(route, {
+        accepted: null,
+        proposed: null,
+        policy: null,
+        goal: README_SCENES.workspace_command.mission.title,
+        workspace: README_SCENES.workspace_command.workspace_id,
+        workspace_version: 0,
+      });
+      return;
+    }
+    if (/^\/api\/workspaces\/[^/]+\/goal\/recommendations$/.test(url.pathname)) {
+      await json(route, {
+        recommendations: { message: 'Choose the agent that will carry out this goal to see recommendations.' },
+        workspace: README_SCENES.workspace_command.workspace_id,
+      });
+      return;
+    }
     if (url.pathname === '/api/skills') {
       await json(route, { skills: [] });
       return;
