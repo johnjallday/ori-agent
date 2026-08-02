@@ -48,6 +48,9 @@
     detailCache: {},
     query: '',
     sort: 'name-asc',
+    // Presentation mode for the one collection. Gallery is the default whenever
+    // no valid preference is present (PRD FR11).
+    view: 'gallery',
     focusIndex: -1,
     dirty: { overview: false, prompt: false, workspaces: false },
     allWorkspaces: null,
@@ -56,7 +59,15 @@
     // Metadata-driven filters. Categories combine with AND; `health` is a
     // multi-value set combining with OR (PRD FR73). None are ever persisted to
     // the checked set — only to the URL (PRD FR77/FR80).
-    filters: { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false },
+    filters: {
+      health: new Set(),
+      role: '',
+      source: '',
+      assignment: '',
+      tag: '',
+      workspace: '',
+      favorite: false
+    },
     // Checked agents: the session-only bulk-selection set, kept entirely separate
     // from `selected` (the focused agent driving the stage). Never persisted to
     // URL or localStorage; a reload starts empty (PRD FR1/FR12/FR13).
@@ -133,7 +144,9 @@
       filterSource: document.getElementById('filterSource'),
       filterAssignment: document.getElementById('filterAssignment'),
       filterTag: document.getElementById('filterTag'),
-      filterFavorite: document.getElementById('filterFavorite'),
+      filterWorkspace: document.getElementById('filterWorkspace'),
+      quickFilters: document.querySelector('.quick-filters'),
+      viewToggle: document.querySelector('.view-toggle'),
       clearFilters: document.getElementById('clearFilters'),
       emptyMsg: document.getElementById('rosterEmptyMsg'),
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
@@ -179,12 +192,12 @@
       state.filters.tag = els.filterTag.value;
       onFilterChange();
     });
-    els.filterFavorite.addEventListener('click', function () {
-      state.filters.favorite = !state.filters.favorite;
-      els.filterFavorite.setAttribute('aria-pressed', state.filters.favorite ? 'true' : 'false');
-      els.filterFavorite.classList.toggle('is-active', state.filters.favorite);
+    els.filterWorkspace.addEventListener('change', function () {
+      state.filters.workspace = els.filterWorkspace.value;
       onFilterChange();
     });
+    els.quickFilters.addEventListener('click', onQuickFilterClick);
+    els.viewToggle.addEventListener('click', onViewToggleClick);
     els.clearFilters.addEventListener('click', clearFilters);
     els.emptyClearFilters.addEventListener('click', clearFilters);
     els.emptyCreate.addEventListener('click', openCreate);
@@ -543,6 +556,14 @@
     if (f.assignment === 'library' && (a.workspace_count || 0) > 0) return false;
     if (f.assignment === 'assigned' && (a.workspace_count || 0) === 0) return false;
     if (f.favorite && !(a.metadata && a.metadata.favorite)) return false;
+    // Workspace membership comes from the list response's own refs, so this
+    // filter needs no extra request and can only offer real workspaces.
+    if (f.workspace) {
+      var inWorkspace = viewFor(a).workspaces.some(function (w) {
+        return w.id === f.workspace;
+      });
+      if (!inWorkspace) return false;
+    }
     if (f.tag) {
       var tags = a.metadata && Array.isArray(a.metadata.tags) ? a.metadata.tags : [];
       var has = tags.some(function (t) {
@@ -567,11 +588,22 @@
 
   function filtersActive() {
     var f = state.filters;
-    return f.health.size > 0 || !!f.role || !!f.source || !!f.assignment || !!f.tag || f.favorite;
+    return (
+      f.health.size > 0 ||
+      !!f.role ||
+      !!f.source ||
+      !!f.assignment ||
+      !!f.tag ||
+      !!f.workspace ||
+      f.favorite
+    );
   }
 
   function onFilterChange() {
     els.clearFilters.hidden = !filtersActive();
+    // Quick-chip pressed state is derived, so it has to be recomputed on every
+    // filter change however it was made — including from the selects (FR26).
+    reflectQuickFilters();
     applyFilterSort();
     syncUrl(state.selected, false);
   }
@@ -583,15 +615,93 @@
       source: '',
       assignment: '',
       tag: '',
+      workspace: '',
       favorite: false
     };
-    els.filterRole.value = '';
-    els.filterSource.value = '';
-    els.filterAssignment.value = '';
-    els.filterTag.value = '';
-    els.filterFavorite.setAttribute('aria-pressed', 'false');
-    els.filterFavorite.classList.remove('is-active');
+    reflectFiltersInControls();
     onFilterChange();
+  }
+
+  /* ---- quick collections --------------------------------------------------- */
+
+  // The four quick collections are shortcuts over the canonical filter model,
+  // never a parallel one (PRD FR26). "All" clears the filters they can set;
+  // each other chip toggles exactly the filter it stands for, so setting the
+  // same thing through a select lights the matching chip.
+  function onQuickFilterClick(e) {
+    var btn = e.target.closest('[data-quick]');
+    if (!btn) return;
+    var f = state.filters;
+    switch (btn.dataset.quick) {
+      case 'favorite':
+        f.favorite = !f.favorite;
+        break;
+      case 'attention':
+        if (f.health.has('needs')) f.health.delete('needs');
+        else f.health.add('needs');
+        break;
+      case 'builtin':
+        f.source = f.source === 'cli' ? '' : 'cli';
+        break;
+      default:
+        // All: reset only what the quick chips express, leaving role, tag,
+        // workspace, and assignment choices the user made deliberately.
+        f.favorite = false;
+        f.health.clear();
+        f.source = '';
+    }
+    reflectFiltersInControls();
+    onFilterChange();
+  }
+
+  // Pressed state is derived from the filter model rather than stored, so the
+  // chips cannot disagree with the selects (PRD FR7/FR26).
+  function reflectQuickFilters() {
+    if (!els.quickFilters) return;
+    var f = state.filters;
+    var active = {
+      favorite: f.favorite,
+      attention: f.health.has('needs'),
+      builtin: f.source === 'cli'
+    };
+    active.all = !active.favorite && !active.attention && !active.builtin;
+    els.quickFilters.querySelectorAll('[data-quick]').forEach(function (btn) {
+      var on = !!active[btn.dataset.quick];
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.classList.toggle('is-active', on);
+    });
+  }
+
+  /* ---- view mode ----------------------------------------------------------- */
+
+  var VIEWS = { gallery: 1, list: 1 };
+
+  function onViewToggleClick(e) {
+    var btn = e.target.closest('[data-view]');
+    if (!btn) return;
+    setView(btn.dataset.view, true);
+  }
+
+  // Switching view re-renders the same filtered collection into the same host;
+  // focused agent, checked set, tab, search, filters, and sort are untouched
+  // because none of them live in the view (PRD FR12/FR14/FR15).
+  function setView(view, sync) {
+    var next = VIEWS[view] ? view : 'gallery';
+    if (state.view === next && sync) return;
+    state.view = next;
+    reflectViewToggle();
+    renderRoster();
+    if (sync) syncUrl(state.selected, false);
+  }
+
+  function reflectViewToggle() {
+    if (els.list) els.list.classList.toggle('is-list', state.view === 'list');
+    if (!els.viewToggle) return;
+    els.viewToggle.querySelectorAll('[data-view]').forEach(function (btn) {
+      var on = btn.dataset.view === state.view;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.classList.toggle('is-active', on);
+    });
   }
 
   function onStatTileClick(e) {
@@ -643,6 +753,46 @@
       state.filters.tag = '';
       els.filterTag.value = '';
     }
+
+    populateWorkspaceFilter();
+  }
+
+  // The workspace picker offers exactly the workspaces the roster actually
+  // references. When no agent is attached to anything there is nothing honest
+  // to offer, so the control is hidden rather than shown empty (PRD FR27).
+  function populateWorkspaceFilter() {
+    if (!els.filterWorkspace) return;
+    var byId = {};
+    state.agents.forEach(function (a) {
+      viewFor(a).workspaces.forEach(function (w) {
+        if (w.id) byId[w.id] = w.name;
+      });
+    });
+    var ids = Object.keys(byId).sort(function (a, b) {
+      return byId[a].localeCompare(byId[b]);
+    });
+
+    var html = '<option value="">All workspaces</option>';
+    ids.forEach(function (id) {
+      html += '<option value="' + esc(id) + '">' + esc(byId[id]) + '</option>';
+    });
+    els.filterWorkspace.innerHTML = html;
+
+    // A stale workspace from a URL or an earlier load is dropped on its own,
+    // without disturbing the rest of the filter state (PRD FR33).
+    if (state.filters.workspace && !byId[state.filters.workspace]) state.filters.workspace = '';
+    els.filterWorkspace.value = state.filters.workspace;
+
+    var host = els.filterWorkspace.closest('.collection-select');
+    if (host) host.hidden = ids.length === 0;
+  }
+
+  // #rosterCount is the collection's live region. Writing it only when the text
+  // actually changes keeps re-renders from re-announcing the same count, which
+  // is the difference between "specific" and "chatty" (PRD FR30/FR89).
+  function setResultCount(text) {
+    if (!els.count || els.count.textContent === text) return;
+    els.count.textContent = text;
   }
 
   function fillSelect(sel, allLabel, valueMap, current, labeler) {
@@ -666,20 +816,22 @@
     var shown = state.filtered.length;
 
     renderStatusTiles();
+    reflectViewToggle();
 
     if (shown === 0) {
       renderEmptyState(total);
       els.list.hidden = true;
-      els.count.textContent = total === 0 ? 'No agents yet.' : '0 of ' + total + ' agents';
+      setResultCount(total === 0 ? 'No agents yet.' : '0 of ' + total + ' agents');
       updateBulkBar();
       return;
     }
     els.empty.hidden = true;
     els.list.hidden = false;
-    els.count.textContent =
+    setResultCount(
       shown === total
         ? total + ' agent' + (total === 1 ? '' : 's')
-        : shown + ' of ' + total + ' agents';
+        : shown + ' of ' + total + ' agents'
+    );
 
     var frag = document.createDocumentFragment();
     state.filtered.forEach(function (agent, idx) {
@@ -3371,11 +3523,14 @@
     var tab = currentTab();
     if (tab && tab !== 'overview') params.set('tab', tab);
     var f = state.filters;
+    // Gallery is the default, so only List is worth carrying in the URL.
+    if (state.view && state.view !== 'gallery') params.set('view', state.view);
     if (f.role) params.set('role', f.role);
     if (f.source) params.set('source', f.source);
     if (f.assignment) params.set('assign', f.assignment);
     if (f.favorite) params.set('fav', '1');
     if (f.tag) params.append('tag', f.tag);
+    if (f.workspace) params.set('ws', f.workspace);
     f.health.forEach(function (h) {
       params.append('health', h);
     });
@@ -3405,7 +3560,20 @@
     state.sort = validSorts[sort] ? sort : 'name-asc';
     if (els.sort) els.sort.value = state.sort;
 
-    var f = { health: new Set(), role: '', source: '', assignment: '', tag: '', favorite: false };
+    // An unknown view falls back to Gallery without disturbing anything else
+    // (PRD FR11/FR33).
+    state.view = VIEWS[p.get('view')] ? p.get('view') : 'gallery';
+    reflectViewToggle();
+
+    var f = {
+      health: new Set(),
+      role: '',
+      source: '',
+      assignment: '',
+      tag: '',
+      workspace: '',
+      favorite: false
+    };
     var role = p.get('role');
     if (role) f.role = role;
     var source = p.get('source');
@@ -3415,6 +3583,10 @@
     if (p.get('fav') === '1') f.favorite = true;
     var tag = p.get('tag');
     if (tag) f.tag = tag;
+    // Validated against real membership in populateWorkspaceFilter(), which
+    // runs after the roster loads.
+    var ws = p.get('ws');
+    if (ws) f.workspace = ws;
     p.getAll('health').forEach(function (h) {
       if (h === 'needs' || h === 'ready' || h === 'disabled') f.health.add(h);
     });
@@ -3429,10 +3601,8 @@
     if (els.filterSource) els.filterSource.value = f.source;
     if (els.filterAssignment) els.filterAssignment.value = f.assignment;
     if (els.filterTag) els.filterTag.value = f.tag;
-    if (els.filterFavorite) {
-      els.filterFavorite.setAttribute('aria-pressed', f.favorite ? 'true' : 'false');
-      els.filterFavorite.classList.toggle('is-active', f.favorite);
-    }
+    if (els.filterWorkspace) els.filterWorkspace.value = f.workspace;
+    reflectQuickFilters();
     if (els.clearFilters) els.clearFilters.hidden = !filtersActive();
   }
 

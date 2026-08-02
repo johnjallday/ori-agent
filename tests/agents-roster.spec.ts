@@ -887,3 +887,392 @@ test.describe('Agents gallery', () => {
     expect(detailCalls.length).toBeLessThanOrEqual(1);
   });
 });
+
+// Collection slice: Gallery/List parity, discovery, sorting, and restorable URL
+// state (PRD FR11–FR36, FR99–FR101).
+test.describe('Agents collection controls', () => {
+  async function openAgents(page, query = '') {
+    await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.goto(`${baseUrl}/agents${query}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+  }
+
+  const names = page =>
+    page.locator('.roster-card').evaluateAll(cards => cards.map(c => c.dataset.name));
+
+  test('Gallery is the default view and switching to List keeps the same results', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWView${Date.now()}`;
+    const created = [`${prefix} Cee`, `${prefix} Aay`, `${prefix} Bee`];
+    for (const n of created) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await expect(page.locator('#viewGallery')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#viewList')).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.locator('#rosterList')).not.toHaveClass(/is-list/);
+
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(3);
+      const galleryOrder = await names(page);
+
+      await page.locator('#viewList').click();
+      await expect(page.locator('#rosterList')).toHaveClass(/is-list/);
+      await expect(page.locator('#viewList')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#viewGallery')).toHaveAttribute('aria-pressed', 'false');
+
+      // Same collection, same order, same search — only the presentation moved.
+      expect(await names(page)).toEqual(galleryOrder);
+      await expect(page.locator('#rosterSearch')).toHaveValue(prefix);
+
+      // A List row still exposes both controls and the same identity (FR17).
+      const row = page.locator(`.roster-card[data-name="${created[1]}"]`);
+      await expect(row.locator('.roster-card__check')).toBeAttached();
+      await expect(row.locator('.roster-card__open')).toBeVisible();
+      await expect(row.locator('.agent-card__name')).toHaveText(created[1]);
+      await expect(row.locator('.agent-avatar')).toBeVisible();
+    } finally {
+      for (const n of created) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('view switching preserves focused agent, checked agents, and tab', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWKeep${Date.now()}`;
+    const a = `${prefix} Alpha`;
+    const b = `${prefix} Bravo`;
+    for (const n of [a, b]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(a);
+      await page.locator(`.roster-card[data-name="${b}"] .roster-card__check`).check();
+      await page.locator('#tab-workspaces').click();
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      await page.locator('#viewList').click();
+
+      // Focus, selection, and the open tab all survive the switch (FR15).
+      await expect(page.locator('#stageName')).toHaveText(a);
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+      await expect(page.locator(`.roster-card[data-name="${b}"]`)).toHaveClass(/is-checked/);
+      await expect(page.locator(`.roster-card[data-name="${a}"]`)).toHaveClass(/is-focused/);
+      await expect(page.locator('#tab-workspaces')).toHaveAttribute('aria-selected', 'true');
+    } finally {
+      for (const n of [a, b]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('search matches model and workspace name, not just name and tags', async ({
+    page,
+    request
+  }) => {
+    const stamp = Date.now();
+    const modelAgent = `PWSrchModel${stamp}`;
+    const wsAgent = `PWSrchWs${stamp}`;
+    const wsName = `PWSrchSpace${stamp}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: modelAgent, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: wsAgent, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    let wsId = '';
+    const ws = await request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: wsName, entry_agent_name: wsAgent }
+    });
+    if (ws.ok()) {
+      const j = await ws.json();
+      wsId = j?.folder?.id || j?.id || '';
+    }
+
+    try {
+      await openAgents(page);
+
+      // Workspace name (FR25) — matches the attached agent only.
+      await page.locator('#rosterSearch').fill(wsName);
+      await expect(page.locator('.roster-card')).toHaveCount(1);
+      await expect(page.locator('.roster-card').first()).toHaveAttribute('data-name', wsAgent);
+
+      // Model (FR25), case-insensitively.
+      await page.locator('#rosterSearch').fill('GPT-4O-MINI');
+      const matched = await names(page);
+      expect(matched).toContain(modelAgent);
+      expect(matched.length).toBeGreaterThan(1);
+    } finally {
+      if (wsId)
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`)
+          .catch(() => undefined);
+      for (const n of [modelAgent, wsAgent]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('quick collections drive the same filter model as the selects', async ({ page }) => {
+    await openAgents(page);
+    const chip = (q: string) => page.locator(`[data-quick="${q}"]`);
+
+    await expect(chip('all')).toHaveAttribute('aria-pressed', 'true');
+
+    // Built-in narrows to CLI agents and lights the matching source select.
+    await chip('builtin').click();
+    await expect(chip('builtin')).toHaveAttribute('aria-pressed', 'true');
+    await expect(chip('all')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('#filterSource')).toHaveValue('cli');
+    for (const n of await names(page)) {
+      expect(['Claude Code', 'Codex', 'Gemini CLI']).toContain(n);
+    }
+
+    // Setting the same thing through the select lights the chip (one model).
+    await chip('all').click();
+    await expect(page.locator('#filterSource')).toHaveValue('');
+    await page.locator('#filterSource').selectOption('cli');
+    await expect(chip('builtin')).toHaveAttribute('aria-pressed', 'true');
+
+    await chip('all').click();
+    await expect(chip('all')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.roster-card').first()).toBeVisible();
+  });
+
+  test('the workspace picker filters by real membership and survives a reload', async ({
+    page,
+    request
+  }) => {
+    const stamp = Date.now();
+    const inside = `PWWsIn${stamp}`;
+    const outside = `PWWsOut${stamp}`;
+    const wsName = `PWWsPick${stamp}`;
+    for (const n of [inside, outside]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+    let wsId = '';
+    const ws = await request.post(`${baseUrl}/api/workspaces`, {
+      data: { name: wsName, entry_agent_name: inside }
+    });
+    if (ws.ok()) {
+      const j = await ws.json();
+      wsId = j?.folder?.id || j?.id || '';
+    }
+    expect(wsId).toBeTruthy();
+
+    try {
+      await openAgents(page);
+      // The picker offers the real workspace by name.
+      await expect(page.locator(`#filterWorkspace option[value="${wsId}"]`)).toHaveText(wsName);
+
+      await page.locator('#filterWorkspace').selectOption(wsId);
+      const shown = await names(page);
+      expect(shown).toContain(inside);
+      expect(shown).not.toContain(outside);
+
+      // Represented in the URL and restored on reload (FR32).
+      await expect.poll(() => new URL(page.url()).searchParams.get('ws')).toBe(wsId);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#filterWorkspace')).toHaveValue(wsId);
+      expect(await names(page)).toContain(inside);
+    } finally {
+      if (wsId)
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`)
+          .catch(() => undefined);
+      for (const n of [inside, outside]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('sorts are deterministic and break ties by name', async ({ page, request }) => {
+    const prefix = `PWSort${Date.now()}`;
+    // Same level and same workspace count: only the name can order them.
+    const created = [`${prefix} Charlie`, `${prefix} Alpha`, `${prefix} Bravo`];
+    for (const n of created) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(3);
+
+      const sorted = created.slice().sort();
+      await expect(page.locator('#rosterSort')).toHaveValue('name-asc');
+      expect(await names(page)).toEqual(sorted);
+
+      await page.locator('#rosterSort').selectOption('name-desc');
+      expect(await names(page)).toEqual(sorted.slice().reverse());
+
+      // Level and workspace-count sorts tie for all three, so name decides.
+      for (const mode of ['level-desc', 'workspaces-desc']) {
+        await page.locator('#rosterSort').selectOption(mode);
+        expect(await names(page), `${mode} must break ties by name`).toEqual(sorted);
+      }
+    } finally {
+      for (const n of created) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('view, search, sort and filters are shareable and restored from the URL', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWUrl${Date.now()}`;
+    const tag = `${prefix.toLowerCase()}tag`;
+    const name = `${prefix} Tagged`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini', tags: [tag] }
+    });
+
+    try {
+      await openAgents(
+        page,
+        `?view=list&q=${encodeURIComponent(prefix)}&sort=name-desc&tag=${tag}&fav=0`
+      );
+      // Every represented value is applied on first paint (FR32).
+      await expect(page.locator('#rosterList')).toHaveClass(/is-list/);
+      await expect(page.locator('#viewList')).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('#rosterSearch')).toHaveValue(prefix);
+      await expect(page.locator('#rosterSort')).toHaveValue('name-desc');
+      await expect(page.locator('#filterTag')).toHaveValue(tag);
+      await expect(page.locator('.roster-card')).toHaveCount(1);
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('invalid URL values fail safely one at a time', async ({ page }) => {
+    // A bad view, sort, source, health, and workspace all at once: each is
+    // discarded on its own and the roster still loads (FR33).
+    await openAgents(
+      page,
+      '?view=hologram&sort=chaos&source=aliens&health=melting&ws=not-a-workspace&tab=nope'
+    );
+    await expect(page.locator('.roster-card').first()).toBeVisible();
+    await expect(page.locator('#rosterList')).not.toHaveClass(/is-list/);
+    await expect(page.locator('#viewGallery')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#rosterSort')).toHaveValue('name-asc');
+    await expect(page.locator('#filterSource')).toHaveValue('');
+    await expect(page.locator('#filterWorkspace')).toHaveValue('');
+    await expect(page.locator('#tab-overview')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('Back and Forward restore view and focused agent', async ({ page, request }) => {
+    const prefix = `PWHist${Date.now()}`;
+    const a = `${prefix} Alpha`;
+    const b = `${prefix} Bravo`;
+    for (const n of [a, b]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(a);
+      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(b);
+
+      await page.goBack();
+      await expect(page.locator('#stageName')).toHaveText(a);
+      await page.goForward();
+      await expect(page.locator('#stageName')).toHaveText(b);
+    } finally {
+      for (const n of [a, b]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('Select visible binds to the current filtered result in either view', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWVis${Date.now()}`;
+    const names3 = [`${prefix} Alpha`, `${prefix} Bravo`, `${prefix} Charlie`];
+    for (const n of names3) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#viewList').click();
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(3);
+
+      // Select visible means the post-search result, in List exactly as in
+      // Gallery (FR31).
+      await page.locator('#rosterSelectAll').click();
+      await expect(page.locator('#bulkCount')).toHaveText('3 selected');
+
+      // Narrowing hides two of them but keeps them selected, with an accurate
+      // hidden count (FR43).
+      await page.locator('#rosterSearch').fill(`${prefix} Alpha`);
+      await expect(page.locator('.roster-card')).toHaveCount(1);
+      await expect(page.locator('#bulkCount')).toHaveText('3 selected · 2 hidden by filters');
+
+      // Switching back to Gallery changes none of that (FR15).
+      await page.locator('#viewGallery').click();
+      await expect(page.locator('#bulkCount')).toHaveText('3 selected · 2 hidden by filters');
+    } finally {
+      for (const n of names3) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+});

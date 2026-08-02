@@ -52,10 +52,37 @@
                   autocomplete="off" spellcheck="false">
               </label>
 
+              <!-- Quick collections are shortcuts over the same canonical filter
+                   model as the selects below, so their pressed state stays
+                   truthful however the filters were set. -->
+              <div class="quick-filters" role="group" aria-label="Quick collections">
+                <button type="button" class="collection-chip" data-quick="all" aria-pressed="true">All</button>
+                <button type="button" class="collection-chip" id="filterFavorite" data-quick="favorite" aria-pressed="false">★ Favorites</button>
+                <button type="button" class="collection-chip" data-quick="attention" aria-pressed="false">Needs attention</button>
+                <button type="button" class="collection-chip" data-quick="builtin" aria-pressed="false">Built-in</button>
+              </div>
+
+              <div class="view-toggle" role="group" aria-label="Collection view">
+                <button type="button" class="view-button" id="viewGallery" data-view="gallery"
+                  aria-pressed="true" title="Gallery view">
+                  <i class="bi bi-grid-3x3-gap-fill" aria-hidden="true"></i>
+                  <span class="visually-hidden">Gallery view</span>
+                </button>
+                <button type="button" class="view-button" id="viewList" data-view="list"
+                  aria-pressed="false" title="List view">
+                  <i class="bi bi-list-ul" aria-hidden="true"></i>
+                  <span class="visually-hidden">List view</span>
+                </button>
+              </div>
+
               <div class="collection-selects" role="group" aria-label="Filter and sort agents">
                 <label class="collection-select">
                   <span class="visually-hidden">Filter by role</span>
                   <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
+                </label>
+                <label class="collection-select">
+                  <span class="visually-hidden">Filter by workspace</span>
+                  <select id="filterWorkspace" aria-label="Filter by workspace"><option value="">All workspaces</option></select>
                 </label>
                 <label class="collection-select">
                   <span class="visually-hidden">Filter by source</span>
@@ -87,7 +114,6 @@
                     <option value="active-desc">Recently active</option>
                   </select>
                 </label>
-                <button type="button" id="filterFavorite" class="collection-chip" aria-pressed="false">★ Favorites</button>
                 <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
               </div>
             </div>

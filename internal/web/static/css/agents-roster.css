@@ -288,6 +288,52 @@
   font-weight: 600;
 }
 
+.quick-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.view-toggle {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-soft);
+}
+
+.view-button {
+  display: grid;
+  width: 34px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--card-muted);
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.view-button:hover {
+  color: var(--text-primary, #111827);
+}
+
+/* The active view is carried by weight and a filled chip, not hue alone. */
+.view-button[aria-pressed="true"] {
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
+}
+
+.view-button:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
 .collection-meta {
   display: flex;
   flex-wrap: wrap;
@@ -736,6 +782,106 @@
   background: #fca5a5;
 }
 
+/* ---- List view ------------------------------------------------------------ */
+
+/* List is a presentation mode over the same card DOM, not a second renderer:
+   one row states exactly what its Gallery card states, more densely
+   (PRD FR14/FR17). */
+.agent-grid.is-list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.agent-grid.is-list .roster-card__open {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 14px 12px 44px;
+}
+
+.agent-grid.is-list .agent-card__visual {
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.agent-grid.is-list .agent-avatar--md {
+  --aa-size: 54px;
+}
+
+.agent-grid.is-list .agent-card__name {
+  font-size: 15px;
+}
+
+.agent-grid.is-list .agent-card__purpose {
+  min-height: 0;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.agent-grid.is-list .agent-card__footer {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-top: 0;
+  white-space: nowrap;
+}
+
+.agent-grid.is-list .roster-card__checkwrap {
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+}
+
+/* Below the Gallery's own column width there is no room for five columns;
+   drop the least load-bearing ones rather than letting the row overflow. */
+@media (max-width: 1180px) {
+  .agent-grid.is-list .roster-card__open {
+    grid-template-columns: minmax(200px, 1.3fr) minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  }
+  .agent-grid.is-list .agent-card__toolbox {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .agent-grid.is-list .roster-card__open {
+    grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) auto;
+  }
+  .agent-grid.is-list .agent-card__section {
+    display: none;
+  }
+}
+
+/* At mobile widths a "row" is just the card again — five columns cannot fit in
+   320px without losing information (PRD FR81/FR93). */
+@media (max-width: 640px) {
+  .agent-grid.is-list .roster-card__open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 58px 15px 15px;
+  }
+  .agent-grid.is-list .agent-card__visual {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .agent-grid.is-list .agent-avatar--md {
+    --aa-size: 72px;
+  }
+  .agent-grid.is-list .agent-card__section,
+  .agent-grid.is-list .agent-card__toolbox {
+    display: block;
+  }
+  .agent-grid.is-list .agent-card__footer {
+    flex-direction: row;
+    align-items: center;
+  }
+  .agent-grid.is-list .roster-card__checkwrap {
+    top: 8px;
+    transform: none;
+  }
+}
+
 /* ---- Avatar Identity v1 --------------------------------------------------- */
 
 /* Geometry is fixed per size so the grid never reflows while a custom image
@@ -757,6 +903,20 @@
   overflow: hidden;
   border-radius: 12px;
   isolation: isolate;
+}
+
+/* Named sizes, so a denser view or a narrow breakpoint can resize the portrait
+   without the renderer having to re-emit it. */
+.agent-avatar--sm {
+  --aa-size: 54px;
+}
+
+.agent-avatar--md {
+  --aa-size: 72px;
+}
+
+.agent-avatar--lg {
+  --aa-size: 88px;
 }
 
 .agent-avatar--fallback {

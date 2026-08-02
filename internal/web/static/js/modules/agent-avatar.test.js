@@ -359,8 +359,8 @@ test("a failed image is replaced in place by that agent's own fallback", () => {
   const attrs = {};
   const host = {
     dataset: { aaName: 'Atlas', aaSource: 'user', aaColor: '#7c3aed' },
-    className: 'agent-avatar agent-avatar--image roster-card__avatar',
-    style: { getPropertyValue: () => '72px' },
+    className: 'agent-avatar agent-avatar--image agent-avatar--md roster-card__avatar',
+    style: { getPropertyValue: () => '' },
     innerHTML: '<img class="agent-avatar__img">',
     setAttribute(k, v) {
       attrs[k] = v;
@@ -379,9 +379,23 @@ test("a failed image is replaced in place by that agent's own fallback", () => {
   assert.ok(host.innerHTML.includes(expected.initials));
   assert.equal(attrs['data-aa-motif'], expected.motif);
   assert.equal(attrs['data-aa-tone'], String(expected.toneIndex));
-  // The reserved box survives the swap, so the grid does not reflow.
-  assert.ok(attrs.style.includes('--aa-size:72px'));
+  // The size class survives, so the replacement fills exactly the box the
+  // image reserved and the collection does not reflow.
+  assert.ok(host.className.includes('agent-avatar--md'));
   assert.ok(attrs.style.includes('--aa-base:#7c3aed'));
+});
+
+test('size is expressed as a class so CSS can resize a portrait per view', () => {
+  assert.match(AgentAvatar.markup(agent(), { size: 54 }), /agent-avatar--sm/);
+  assert.match(AgentAvatar.markup(agent(), { size: 72 }), /agent-avatar--md/);
+  assert.match(AgentAvatar.markup(agent(), { size: 88 }), /agent-avatar--lg/);
+  // Default when a caller passes nothing.
+  assert.match(AgentAvatar.markup(agent()), /agent-avatar--md/);
+  // An inline --aa-size would beat any stylesheet rule, so it must not appear.
+  for (const size of [54, 72, 88]) {
+    assert.ok(!AgentAvatar.markup(agent(), { size }).includes('--aa-size'));
+    assert.ok(!AgentAvatar.markup(agent({ avatarImage: 'a.png' }), { size }).includes('--aa-size'));
+  }
 });
 
 test('replacing an already-replaced avatar is a no-op', () => {
@@ -452,7 +466,7 @@ test('only tokens this module owns reach the style attribute', () => {
   for (const decl of style.split(';')) {
     assert.match(
       decl,
-      /^--aa-(base|deep|ink|accent):#[0-9a-f]{6}$|^--aa-angle:\d+deg$|^--aa-motif-alpha:[\d.]+$|^--aa-size:\d+px$/,
+      /^--aa-(base|deep|ink|accent):#[0-9a-f]{6}$|^--aa-angle:\d+deg$|^--aa-motif-alpha:[\d.]+$/,
       `unexpected style declaration: ${decl}`
     );
   }
@@ -471,7 +485,13 @@ test('motif, turn, and tone are emitted as bounded tokens', () => {
 });
 
 test('optional id and className are applied without breaking the base classes', () => {
-  const html = AgentAvatar.markup(agent(), { id: 'stageAvatar', className: 'stage__avatar' });
+  const html = AgentAvatar.markup(agent(), {
+    id: 'stageAvatar',
+    className: 'stage__avatar',
+    size: 88
+  });
   assert.ok(html.includes('id="stageAvatar"'));
-  assert.ok(html.includes('class="agent-avatar agent-avatar--fallback stage__avatar"'));
+  assert.ok(
+    html.includes('class="agent-avatar agent-avatar--fallback agent-avatar--lg stage__avatar"')
+  );
 });
