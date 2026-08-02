@@ -1771,3 +1771,196 @@ test.describe('Agents collection controls', () => {
     }
   });
 });
+
+// Selection/bulk management slice: independent checked state and guarded bulk
+// actions across Gallery, List, and the Inspector (PRD FR31, FR36-FR48,
+// FR82-FR90, FR101).
+test.describe('Agents selection and bulk management', () => {
+  async function openAgents(page, query = '') {
+    await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.goto(`${baseUrl}/agents${query}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+  }
+
+  test('checked selection survives opening and closing the Inspector', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWCheckInsp${Date.now()}`;
+    const a = `${prefix} Alpha`;
+    const b = `${prefix} Bravo`;
+    for (const n of [a, b]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__check`).check();
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      // Opening the Inspector on a DIFFERENT agent must not touch the checked
+      // set, and closing it again must not clear it either (FR37/FR51).
+      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(b);
+      await expect(page.locator(`.roster-card[data-name="${a}"]`)).toHaveClass(/is-checked/);
+      await expect(page.locator(`.roster-card[data-name="${b}"]`)).not.toHaveClass(/is-checked/);
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      await page.locator('#inspectorClose').click();
+      await expect(page.locator('#inspector')).toBeHidden();
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+      await expect(page.locator(`.roster-card[data-name="${a}"]`)).toHaveClass(/is-checked/);
+    } finally {
+      for (const n of [a, b]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('Shift-click range selection works in List view using result order', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWRangeList${Date.now()}`;
+    const names = [`${prefix} Alpha`, `${prefix} Bravo`, `${prefix} Charlie`, `${prefix} Delta`];
+    for (const n of names) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#viewList').click();
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(4);
+
+      await page.locator(`.roster-card[data-name="${names[0]}"] .roster-card__check`).check();
+      await page
+        .locator(`.roster-card[data-name="${names[2]}"] .roster-card__check`)
+        .click({ modifiers: ['Shift'] });
+
+      // Alpha, Bravo, and Charlie are checked; Delta is not (FR42).
+      for (const n of names.slice(0, 3)) {
+        await expect(page.locator(`.roster-card[data-name="${n}"]`)).toHaveClass(/is-checked/);
+      }
+      await expect(page.locator(`.roster-card[data-name="${names[3]}"]`)).not.toHaveClass(
+        /is-checked/
+      );
+      await expect(page.locator('#bulkCount')).toHaveText('3 selected');
+    } finally {
+      for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('bulk-deleting the agent open in the Inspector leaves it on a valid fallback', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWBulkFocus${Date.now()}`;
+    const target = `${prefix} Target`;
+    const survivor = `${prefix} Survivor`;
+    for (const n of [target, survivor]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      // Focus Target (opens the Inspector), then check and bulk-delete it —
+      // deletion happens through the collection's checkbox/bulk bar, not
+      // through the Inspector itself.
+      await page.locator(`.roster-card[data-name="${target}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(target);
+      await page.locator(`.roster-card[data-name="${target}"] .roster-card__check`).check();
+      await page.locator('#bulkDelete').click();
+      await expect(page.locator('#bulkDeleteConfirm')).toHaveText(/Delete 1 agent/);
+      await page.locator('#bulkDeleteConfirm').click();
+
+      await expect(page.locator('#bulkResult')).toBeVisible();
+      await expect
+        .poll(async () =>
+          (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(target)}/detail`)).status()
+        )
+        .toBe(404);
+
+      // The Inspector reflects a valid next state: it must not keep showing
+      // the now-deleted agent, and it must not be left broken/blank while the
+      // collection is still usable (FR48/FR101).
+      await expect(page.locator('#stageName')).not.toHaveText(target);
+      await expect(page.locator('.roster-card').first()).toBeVisible();
+    } finally {
+      for (const n of [target, survivor]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('bulk result stays inspectable after the checked set clears and survives a Gallery/List switch', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWResultPersist${Date.now()}`;
+    const names = [`${prefix} One`, `${prefix} Two`];
+    for (const n of names) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+      await page.locator('#rosterSelectAll').click();
+      await page.locator('#bulkFavorite').click();
+      await expect
+        .poll(async () => {
+          const r = await request.get(
+            `${baseUrl}/api/agents/${encodeURIComponent(names[0])}/detail`
+          );
+          return (await r.json()).metadata?.favorite;
+        })
+        .toBe(true);
+
+      // The result surface remains after the checked set is gone (a
+      // successful metadata action clears checked selection) and after a
+      // view switch (FR46/FR48).
+      await expect(page.locator('#bulkResult')).toBeVisible();
+      await page.locator('#viewList').click();
+      await expect(page.locator('#bulkResultSummary')).toBeVisible();
+      await page.locator('#viewGallery').click();
+      await expect(page.locator('#bulkResultSummary')).toBeVisible();
+    } finally {
+      for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+});
