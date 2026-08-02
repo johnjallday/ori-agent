@@ -630,6 +630,10 @@ type ToolboxSourceCollision struct {
 // runtime silently preferred the agent-learned source, which meant binding a
 // same-named skill to a workspace produced no visible effect and no explanation
 // (FR-6, FR-44).
+//
+// Capacity is unaffected by a collision: NormalizeToolboxContent has already
+// pinned one winning source per normalized identity, so the same skill reached
+// from two places still consumes exactly one skill space (FR-57).
 func DetectToolboxSourceCollisions(skills []ToolboxSkillRef) []ToolboxSourceCollision {
 	byIdentity := make(map[string][]ToolboxSkillRef, len(skills))
 	order := make([]string, 0, len(skills))
@@ -702,6 +706,12 @@ type ToolboxCapacity struct {
 // capabilities the agent had yesterday, which is the opposite of what migration
 // promises. It may remove skills or switch Toolboxes freely; what it may not do
 // is add another one (FR-33).
+//
+// Expert mode lifts the ceiling and nothing else. It reports the position
+// without a limit; it never selects anything on the user's behalf, because a
+// mode that quietly switched on every learned and workspace capability would
+// hand someone a maximally unfocused agent as a side effect of asking for more
+// room (FR-61).
 func EvaluateToolboxCapacity(skills []ToolboxSkillRef, capacity int, expertMode bool) ToolboxCapacity {
 	used := countToolboxSkillSpaces(skills)
 	position := ToolboxCapacity{Used: used, Capacity: capacity, ExpertMode: expertMode}
