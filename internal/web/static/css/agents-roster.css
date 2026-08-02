@@ -1444,7 +1444,153 @@
 
 .inspector {
   min-width: 0;
-  min-height: 420px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: var(--roster-radius);
+  background: var(--bg-primary, #fff);
+  overflow: hidden;
+}
+
+[data-bs-theme="dark"] .inspector {
+  background: var(--bg-primary, #1f2430);
+}
+
+/* Its own scroll region, so a long agent scrolls inside the Inspector instead
+   of scrolling the collection away (PRD FR50). */
+.inspector-scroll {
+  max-height: calc(100vh - 190px);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.inspector-topline {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 8px 16px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-primary, #fff);
+}
+
+[data-bs-theme="dark"] .inspector-topline {
+  background: var(--bg-primary, #1f2430);
+}
+
+.inspector-kicker {
+  color: var(--card-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.inspector-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--card-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--card-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.inspector-close:hover {
+  border-color: var(--primary-color, #4f46e5);
+  color: var(--text-primary, #111827);
+}
+
+.inspector-close:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+/* Closed: the column collapses and the Gallery re-columns into the space.
+   Nothing about the focused agent or the checked set changes (PRD FR51). */
+.collection-shell.is-inspector-closed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.collection-shell.is-inspector-closed .inspector {
+  display: none;
+}
+
+/* Above the application's own fixed furniture, not just this page's — a
+   plain z-index in the tens or hundreds loses to the global nav alone
+   (measured at 10002; see the --app-modal-layer note in variables.css). The
+   File Janitor console hit the identical bug for the same reason. */
+.inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-modal-backdrop-layer, 20190);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* Sheet mode: the Inspector covers the collection, which stays underneath as
+   context but must not be interactive behind the sheet (PRD FR52). */
+.collection-shell.is-inspector-sheet .inspector {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-modal-layer, 20200);
+  border: 0;
+  border-radius: 0;
+  max-width: none;
+}
+
+.collection-shell.is-inspector-sheet .inspector-scroll {
+  max-height: 100vh;
+  height: 100vh;
+}
+
+body.inspector-sheet-open {
+  overflow: hidden;
+}
+
+/* ---- Toolbox tab ---------------------------------------------------------- */
+
+.stage-subhead {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--card-muted);
+}
+
+.stage-subhead + * {
+  margin-bottom: 18px;
+}
+
+.toolbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toolbox-item {
+  padding: 4px 10px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
+  font-size: 12px;
+  color: var(--text-primary, #111827);
+}
+
+.stage-hint--aside {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #eee);
+  font-size: 12px;
 }
 
 .stage-placeholder {
@@ -2111,8 +2257,9 @@
 
 /* ---- Responsive ----------------------------------------------------------- */
 
-/* Tablet: the Inspector no longer earns a column of its own, so the collection
-   takes the full width and the Inspector stacks beneath it (FR52/FR79). */
+/* Below this width there is no useful collection width left beside a 360px
+   Inspector, so it becomes an overlay sheet instead of a column. Keep in sync
+   with INSPECTOR_SHEET_MAX_WIDTH in agents-roster.js (FR52/FR79). */
 @media (max-width: 1100px) {
   .collection-shell {
     grid-template-columns: minmax(0, 1fr);

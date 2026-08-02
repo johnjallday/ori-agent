@@ -155,64 +155,80 @@
             </div>
           </section>
 
-          <!-- Selected-agent host. The focused agent's detail lives beside the
-               collection on wide screens and becomes a modal sheet when narrow. -->
-          <aside class="inspector" id="inspector" aria-label="Selected agent" aria-live="polite">
-            <div class="stage-placeholder" id="stagePlaceholder">
-              <div class="stage-placeholder__art" aria-hidden="true">◈</div>
-              <p>Open an agent card to inspect it here.</p>
-            </div>
-
-            <article class="stage" id="stage" hidden>
-              <header class="stage__hero">
-                <div class="stage__avatar" id="stageAvatar" aria-hidden="true"></div>
-                <div class="stage__ident">
-                  <h2 class="stage__name" id="stageName"></h2>
-                  <div class="stage__class" id="stageClass"></div>
-                </div>
-                <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
-                  <!-- vitals chips injected -->
-                </div>
-                <div class="stage__actions">
-                  <a id="stageFullPage" class="stage__fullpage" href="#" title="Open the full agent detail page">Open full page ↗</a>
-                  <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>
-                </div>
-              </header>
-
-              <div class="stage__progression" id="stageProgression" aria-live="polite">
-                <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
+          <!-- Selected-agent Inspector. Beside the collection on wide screens;
+               a modal sheet over it when narrow. The backdrop is a sibling so
+               it only participates in the mobile presentation. -->
+          <div class="inspector-backdrop" id="inspectorBackdrop" hidden></div>
+          <aside class="inspector" id="inspector" aria-label="Selected agent">
+            <div class="inspector-scroll" id="inspectorScroll">
+              <div class="inspector-topline">
+                <span class="inspector-kicker">Selected agent</span>
+                <button type="button" class="inspector-close" id="inspectorClose"
+                  aria-label="Close inspector" title="Close inspector">
+                  <span aria-hidden="true">×</span>
+                </button>
               </div>
 
-              <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
-                <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
-                <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
-                <button class="stage__tab" role="tab" id="tab-workspaces" aria-controls="panel-workspaces" aria-selected="false" data-tab="workspaces" type="button" tabindex="-1">Workspaces</button>
-              </nav>
+              <div class="stage-placeholder" id="stagePlaceholder">
+                <div class="stage-placeholder__art" aria-hidden="true">◈</div>
+                <p>Open an agent card to inspect it here.</p>
+              </div>
 
-              <div class="stage__panels">
-                <section class="stage__panel is-active" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabindex="0">
-                  <div class="stage-editwrap" id="overviewFacts"></div>
-                  <div class="stage-desc" id="overviewDesc"></div>
-                </section>
-                <section class="stage__panel" role="tabpanel" id="panel-prompt" aria-labelledby="tab-prompt" tabindex="0" hidden>
-                  <div class="stage-prompt" id="promptBody">
-                    <p class="stage-hint">Loading system prompt…</p>
+              <article class="stage" id="stage" hidden>
+                <header class="stage__hero">
+                  <div class="stage__avatar" id="stageAvatar" aria-hidden="true"></div>
+                  <div class="stage__ident">
+                    <h2 class="stage__name" id="stageName"></h2>
+                    <div class="stage__class" id="stageClass"></div>
                   </div>
-                </section>
-                <section class="stage__panel" role="tabpanel" id="panel-workspaces" aria-labelledby="tab-workspaces" tabindex="0" hidden>
-                  <div class="stage-workspaces" id="workspacesBody"></div>
-                </section>
-              </div>
-            </article>
+                  <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
+                    <!-- vitals chips injected -->
+                  </div>
+                  <div class="stage__actions">
+                    <a id="stageFullPage" class="stage__fullpage" href="#" title="Open the full agent detail page">Open full page ↗</a>
+                    <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>
+                  </div>
+                </header>
 
-            <!-- Create-agent panel (toggled from the header "New Agent" button) -->
-            <article class="create-panel" id="createPanel" hidden aria-label="Create a new agent">
-              <header class="create-panel__head">
-                <h2>New agent</h2>
-                <button type="button" id="createCancel" class="btn-ghost">Cancel</button>
-              </header>
-              <div class="create-panel__body" id="createBody"></div>
-            </article>
+                <div class="stage__progression" id="stageProgression" aria-live="polite">
+                  <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
+                </div>
+
+                <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
+                  <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
+                  <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
+                  <button class="stage__tab" role="tab" id="tab-workspaces" aria-controls="panel-workspaces" aria-selected="false" data-tab="workspaces" type="button" tabindex="-1">Workspaces</button>
+                  <button class="stage__tab" role="tab" id="tab-toolbox" aria-controls="panel-toolbox" aria-selected="false" data-tab="toolbox" type="button" tabindex="-1">Toolbox</button>
+                </nav>
+
+                <div class="stage__panels">
+                  <section class="stage__panel is-active" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabindex="0">
+                    <div class="stage-editwrap" id="overviewFacts"></div>
+                    <div class="stage-desc" id="overviewDesc"></div>
+                  </section>
+                  <section class="stage__panel" role="tabpanel" id="panel-prompt" aria-labelledby="tab-prompt" tabindex="0" hidden>
+                    <div class="stage-prompt" id="promptBody">
+                      <p class="stage-hint">Loading system prompt…</p>
+                    </div>
+                  </section>
+                  <section class="stage__panel" role="tabpanel" id="panel-workspaces" aria-labelledby="tab-workspaces" tabindex="0" hidden>
+                    <div class="stage-workspaces" id="workspacesBody"></div>
+                  </section>
+                  <section class="stage__panel" role="tabpanel" id="panel-toolbox" aria-labelledby="tab-toolbox" tabindex="0" hidden>
+                    <div class="stage-toolbox" id="toolboxBody"></div>
+                  </section>
+                </div>
+              </article>
+
+              <!-- Create-agent panel (toggled from the header "New Agent" button) -->
+              <article class="create-panel" id="createPanel" hidden aria-label="Create a new agent">
+                <header class="create-panel__head">
+                  <h2>New agent</h2>
+                  <button type="button" id="createCancel" class="btn-ghost">Cancel</button>
+                </header>
+                <div class="create-panel__body" id="createBody"></div>
+              </article>
+            </div>
           </aside>
         </div>
 

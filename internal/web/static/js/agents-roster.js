@@ -20,7 +20,11 @@
   'use strict';
 
   var STORAGE_KEY = 'ori.roster.selectedAgent';
-  var TAB_ORDER = ['overview', 'prompt', 'workspaces'];
+  var TAB_ORDER = ['overview', 'prompt', 'workspaces', 'toolbox'];
+  // Below this width the Inspector stops being a column beside the collection
+  // and becomes a modal sheet over it. Kept in sync with the same breakpoint in
+  // agents-roster.css.
+  var INSPECTOR_SHEET_MAX_WIDTH = 1100;
   var ROLES = [
     'general',
     'orchestrator',
@@ -56,6 +60,13 @@
     allWorkspaces: null,
     creating: false,
     providers: null,
+    // Whether the Inspector is showing. Closing it is a presentation change:
+    // the focused agent, its history, and the checked set all survive
+    // (PRD FR49/FR51).
+    inspectorOpen: false,
+    // The card control that last opened the Inspector, so a mobile close can
+    // hand focus back to it when it still exists (PRD FR53).
+    inspectorOpener: null,
     // Metadata-driven filters. Categories combine with AND; `health` is a
     // multi-value set combining with OR (PRD FR73). None are ever persisted to
     // the checked set — only to the URL (PRD FR77/FR80).
@@ -95,6 +106,12 @@
       search: document.getElementById('rosterSearch'),
       sort: document.getElementById('rosterSort'),
       empty: document.getElementById('rosterEmpty'),
+      inspector: document.getElementById('inspector'),
+      inspectorScroll: document.getElementById('inspectorScroll'),
+      inspectorClose: document.getElementById('inspectorClose'),
+      inspectorBackdrop: document.getElementById('inspectorBackdrop'),
+      shell: document.getElementById('collectionShell'),
+      toolboxBody: document.getElementById('toolboxBody'),
       loading: document.getElementById('rosterLoading'),
       error: document.getElementById('rosterError'),
       retry: document.getElementById('rosterRetry'),
@@ -198,6 +215,27 @@
     });
     els.quickFilters.addEventListener('click', onQuickFilterClick);
     els.viewToggle.addEventListener('click', onViewToggleClick);
+
+    els.inspectorClose.addEventListener('click', function () {
+      closeInspector({ restoreFocus: true });
+    });
+    els.inspectorBackdrop.addEventListener('click', function () {
+      closeInspector({ restoreFocus: true });
+    });
+    // Escape closes the modal sheet before anything else can act on it, but
+    // only while the sheet is actually presented, so it never steals Escape
+    // from a dialog or from the desktop layout (PRD FR87).
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!isSheetMode() || !state.inspectorOpen) return;
+      if (document.querySelector('dialog[open]')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeInspector({ restoreFocus: true });
+    });
+    // Crossing the breakpoint changes which presentation is correct; the open
+    // agent and every other piece of state stay exactly as they were.
+    window.addEventListener('resize', reflectInspectorPresentation);
     els.clearFilters.addEventListener('click', clearFilters);
     els.emptyClearFilters.addEventListener('click', clearFilters);
     els.emptyCreate.addEventListener('click', openCreate);
@@ -253,7 +291,10 @@
       populateFilterOptions();
       applyFilterSort();
       var name = new URLSearchParams(window.location.search).get('agent');
-      if (name && state.byName[name]) selectAgent(name, { push: false });
+      // A history entry naming an agent was created by an explicit open (see
+      // selectAgent's push default), so restoring it reopens the Inspector to
+      // match what was actually on screen at that point (PRD FR34/FR52).
+      if (name && state.byName[name]) selectAgent(name, { push: false, openInspector: true });
       restoreTabFromUrl();
     });
 
@@ -263,6 +304,13 @@
         e.returnValue = '';
       }
     });
+
+    // On a wide screen the Inspector starts open on its placeholder, so the
+    // relationship between collection and detail is visible before anything is
+    // focused. In sheet mode it stays closed until a card is opened, because a
+    // modal sheet over an untouched collection would be in the way.
+    state.inspectorOpen = !isSheetMode();
+    reflectInspectorPresentation();
 
     loadProviders();
     // Wait for the role catalog (emblem/accent-color lookup) so the first
@@ -1129,13 +1177,20 @@
 
   function restoreSelection() {
     var fromUrl = new URLSearchParams(window.location.search).get('agent');
+    var explicit = !!(fromUrl && state.byName[fromUrl]);
     var fromStore = safeStorageGet();
     var pick =
-      (fromUrl && state.byName[fromUrl] && fromUrl) ||
+      (explicit && fromUrl) ||
       (fromStore && state.byName[fromStore] && fromStore) ||
       (state.filtered[0] && state.filtered[0].name) ||
       null;
-    if (pick) selectAgent(pick, { push: false });
+    if (!pick) return;
+    // A shareable `?agent=` link is a deliberate request to view that agent, so
+    // it opens the (mobile) sheet. The localStorage fallback and "just pick the
+    // first agent" default are this page's own bookkeeping, not a click anyone
+    // made, so on a narrow screen they must NOT force the sheet over a
+    // collection nobody asked to leave (PRD FR52).
+    selectAgent(pick, { push: false, openInspector: explicit && pick === fromUrl });
   }
 
   function selectAgent(name, opts) {
@@ -1151,6 +1206,76 @@
     syncUrl(name, opts.push !== false);
     highlightSelected();
     renderStage(name);
+    // Opening the Inspector is a deliberate step, not a side effect of every
+    // reason the collection might reselect an agent — a background reselect
+    // after a bulk mutation must not yank a closed mobile sheet open. Callers
+    // opt in explicitly; when the Inspector was already open, rendering the
+    // new agent into it above is already enough (PRD FR49/FR52).
+    if (opts.openInspector) openInspector(opts.opener || null);
+  }
+
+  /* ---- inspector shell ----------------------------------------------------- */
+
+  // Sheet mode is a property of the viewport, not of state: the same open
+  // Inspector is a side column when there is room for one and a modal sheet
+  // when there is not (PRD FR50/FR52).
+  function isSheetMode() {
+    return window.innerWidth <= INSPECTOR_SHEET_MAX_WIDTH;
+  }
+
+  function openInspector(opener) {
+    state.inspectorOpen = true;
+    if (opener) state.inspectorOpener = opener;
+    reflectInspectorPresentation();
+    if (isSheetMode() && els.inspectorClose) els.inspectorClose.focus();
+  }
+
+  // Closing hands the reclaimed width back to the collection. It deliberately
+  // does not clear the focused agent, its history entry, or the checked set —
+  // reopening restores the same context (PRD FR51).
+  function closeInspector(opts) {
+    opts = opts || {};
+    if (!guardUnsaved()) return false;
+    state.inspectorOpen = false;
+    reflectInspectorPresentation();
+    if (opts.restoreFocus) {
+      // Prefer the control that opened it; fall back to the focused agent's
+      // card, then to the collection itself, so focus is never lost to <body>.
+      var target =
+        (state.inspectorOpener && document.contains(state.inspectorOpener)
+          ? state.inspectorOpener
+          : null) ||
+        els.list.querySelector('.roster-card.is-focused .roster-card__open') ||
+        els.list.querySelector('.roster-card__open') ||
+        els.search;
+      if (target) target.focus();
+    }
+    state.inspectorOpener = null;
+    return true;
+  }
+
+  function reflectInspectorPresentation() {
+    var sheet = isSheetMode();
+    var open = state.inspectorOpen;
+    if (els.shell) {
+      els.shell.classList.toggle('is-inspector-closed', !open);
+      els.shell.classList.toggle('is-inspector-sheet', sheet);
+    }
+    if (els.inspector) {
+      els.inspector.classList.toggle('is-open', open);
+      // As a modal sheet the Inspector owns the screen and the collection
+      // behind it must not be reachable; as a column it is just another region.
+      if (sheet && open) {
+        els.inspector.setAttribute('role', 'dialog');
+        els.inspector.setAttribute('aria-modal', 'true');
+      } else {
+        els.inspector.removeAttribute('role');
+        els.inspector.removeAttribute('aria-modal');
+      }
+      els.inspector.hidden = !open;
+    }
+    if (els.inspectorBackdrop) els.inspectorBackdrop.hidden = !(sheet && open);
+    document.body.classList.toggle('inspector-sheet-open', sheet && open);
   }
 
   /* ---- stage --------------------------------------------------------------- */
@@ -1669,18 +1794,29 @@
   }
 
   function afterAvatarChange(name, status, msg) {
-    fetchDetail(name, true).then(function (detail) {
-      if (status) status.textContent = msg;
-      if (state.selected !== name) return;
-      // Re-render avatar + card from the fresh metadata.
-      var item = state.byName[name];
-      if (item && detail.metadata)
-        item.metadata = Object.assign({}, item.metadata, detail.metadata);
-      els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
-      els.avatar = document.getElementById('stageAvatar');
-      refreshRosterMeta(name, detail);
-      wireAvatarControl(name, detail.metadata || {});
-    });
+    fetchDetail(name, true)
+      .then(function (detail) {
+        if (state.selected !== name) {
+          if (status) status.textContent = msg;
+          return;
+        }
+        applyDetailToCollection(name, detail);
+        // wireAvatarControl rebuilds the control, status element included, so
+        // the outcome has to be written to the element that survives — writing
+        // it first left the user with no confirmation at all (PRD FR75/FR96).
+        wireAvatarControl(name, detail.metadata || {});
+        setAvatarStatus(msg);
+      })
+      .catch(function () {
+        // The change landed on the server; only the refresh failed, so say that
+        // rather than implying the upload itself did not work (PRD FR101).
+        setAvatarStatus(msg + ' Reload to see it everywhere.');
+      });
+  }
+
+  function setAvatarStatus(msg) {
+    var status = document.getElementById('ov-avatar-status');
+    if (status) status.textContent = msg;
   }
 
   // Read-only created / updated / last-active timestamps below the editable form.
@@ -2063,6 +2199,9 @@
     els.stage.hidden = true;
     els.placeholder.hidden = true;
     els.createPanel.hidden = false;
+    // The create panel lives in the Inspector, so creating has to open it —
+    // otherwise the New Agent button appears to do nothing (PRD FR4/FR65).
+    openInspector(els.newAgentBtn);
     els.createBody.innerHTML =
       '<form class="stage-form" id="createForm" novalidate>' +
       field('Name', textInput('cr-name', '', 'Unique agent name'), 'cr-name') +
@@ -2244,24 +2383,44 @@
       });
   }
 
-  function refreshRosterMeta(name, detail) {
+  // One place where a fresh detail response is folded back into the collection
+  // (PRD FR96/FR16). Every mutation path — metadata save, avatar change,
+  // favorite, workspace assignment — goes through here so the raw record, its
+  // projection, the card, and the Inspector hero can never disagree. Unrelated
+  // collection state (filters, sort, checked set, focus) is untouched.
+  function applyDetailToCollection(name, detail) {
     var item = state.byName[name];
-    if (!item) return;
+    if (!item || !detail) return;
     if (detail.model) item.model = detail.model;
     // Merge the full metadata snapshot (description, tags, favorite, avatar) so
     // the rebuilt card reflects every edit, not just the description.
     if (detail.metadata) item.metadata = Object.assign({}, item.metadata, detail.metadata);
     if (detail.role) item.role = detail.role;
-    // The record changed, so its projection is stale: rebuild before re-rendering
-    // the card so name/model/role/tags/favorite/avatar all agree.
+
+    // Rebuild the projection FIRST: everything below reads through viewFor(),
+    // and a stale projection is how an updated card ends up beside an
+    // unchanged hero.
     state.viewByName[name] = buildViewModel(item);
+
     var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(name) + '"]');
     if (card) {
       var idx = Number(card.dataset.index);
       var rebuilt = buildCard(item, isNaN(idx) ? 0 : idx);
       if (card.classList.contains('is-focused')) rebuilt.classList.add('is-focused');
       card.replaceWith(rebuilt);
+      highlightSelected();
     }
+
+    if (state.selected === name && els.avatar) {
+      els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
+      els.avatar = document.getElementById('stageAvatar');
+    }
+  }
+
+  // Retained name for the metadata-save path; the behaviour now lives in one
+  // shared invalidation.
+  function refreshRosterMeta(name, detail) {
+    applyDetailToCollection(name, detail);
   }
 
   /* ---- tabs ---------------------------------------------------------------- */
@@ -2273,8 +2432,89 @@
     }
     setActiveTab(tabName);
     if (tabName === 'prompt' && state.selected) renderPrompt(state.selected);
+    if (tabName === 'toolbox' && state.selected) renderToolbox(state.selected);
     if (focus) document.getElementById('tab-' + tabName).focus();
     syncUrl(state.selected, false);
+  }
+
+  /* ---- toolbox tab --------------------------------------------------------- */
+
+  // The Toolbox tab reports the capabilities the current agent detail contract
+  // actually exposes, and nothing else.
+  //
+  // Named Default Toolboxes, Focus assessment, readiness, versions, and
+  // connection state belong to prd-agent-toolboxes-focus-memory.md, which had
+  // not merged into dev when this shipped (checked at implementation time), so
+  // none of those claims appear here. When that read model lands, this is the
+  // one function that has to consume it — the tab, its URL state, and its
+  // placement are already in place (PRD FR60–FR63).
+  function renderToolbox(name) {
+    var host = els.toolboxBody;
+    if (!host) return;
+    var listItem = state.byName[name];
+    var vm = listItem ? viewFor(listItem) : null;
+    host.innerHTML = '<p class="stage-hint">Loading capabilities…</p>';
+
+    fetchDetail(name)
+      .then(function (detail) {
+        if (state.selected !== name) return;
+        host.innerHTML = toolboxHTML(vm, detail);
+      })
+      .catch(function () {
+        if (state.selected !== name) return;
+        // A failed detail request genuinely means we do not know, which is a
+        // different statement from "this agent has none" (PRD FR20/FR100).
+        host.innerHTML =
+          '<p class="stage-hint">Capabilities unavailable — the agent detail could not be loaded.</p>' +
+          '<button type="button" class="roster-linkbtn" id="toolboxRetry">Try again</button>';
+        var retry = document.getElementById('toolboxRetry');
+        if (retry)
+          retry.addEventListener('click', function () {
+            renderToolbox(name);
+          });
+      });
+  }
+
+  function toolboxHTML(vm, detail) {
+    var caps = Array.isArray(detail && detail.capabilities) ? detail.capabilities : [];
+    var html = '<h3 class="stage-subhead">Global capabilities</h3>';
+
+    if (caps.length === 0) {
+      html +=
+        '<p class="stage-hint">' +
+        (vm && vm.builtIn
+          ? 'This built-in agent declares no additional capabilities.'
+          : 'No capabilities are declared for this agent.') +
+        '</p>';
+    } else {
+      html +=
+        '<ul class="toolbox-list">' +
+        caps
+          .map(function (c) {
+            return '<li class="toolbox-item">' + esc(titleCase(String(c))) + '</li>';
+          })
+          .join('') +
+        '</ul>';
+    }
+
+    // Web search is a real per-agent switch on the detail contract, so it can
+    // be stated plainly.
+    html +=
+      '<h3 class="stage-subhead">Configuration</h3>' +
+      '<dl class="stage-meta">' +
+      '<dt>Web search</dt><dd>' +
+      (detail && detail.allow_web_search ? 'Allowed' : 'Not allowed') +
+      '</dd>' +
+      '<dt>Provider</dt><dd>' +
+      esc(detail && detail.provider ? titleCase(detail.provider) : 'Not set') +
+      '</dd>' +
+      '<dt>Model</dt><dd>' +
+      esc((detail && detail.model) || 'Model needed') +
+      '</dd>' +
+      '</dl>' +
+      '<p class="stage-hint stage-hint--aside">Workspace-specific tool permissions are managed on ' +
+      'each workspace, not here.</p>';
+    return html;
   }
 
   function setActiveTab(tabName) {
@@ -2436,7 +2676,9 @@
   function onListClick(e) {
     var open = e.target.closest('.roster-card__open');
     if (open && open.dataset.open) {
-      selectAgent(open.dataset.open);
+      // Remember which control opened it so a mobile close can return focus
+      // there rather than dropping it on the document (PRD FR53).
+      selectAgent(open.dataset.open, { opener: open, openInspector: true });
       return;
     }
 
@@ -3592,6 +3834,13 @@
     });
     state.filters = f;
     reflectFiltersInControls();
+
+    // Captured now, not re-read later: the selectAgent() call that follows
+    // (restoreSelection() or a popstate handler) runs syncUrl() before
+    // renderStage() has reset the active tab, so it can replaceState() a URL
+    // with the tab param already stripped. restoreTabFromUrl() must work from
+    // this snapshot instead of window.location.search (FR32/FR34/FR56).
+    state.pendingUrlTab = p.get('tab');
   }
 
   // Push current filter state onto the controls (after a URL restore / popstate).
@@ -3607,7 +3856,7 @@
   }
 
   function restoreTabFromUrl() {
-    var tab = new URLSearchParams(window.location.search).get('tab');
+    var tab = state.pendingUrlTab;
     if (tab && TAB_ORDER.indexOf(tab) !== -1 && tab !== 'overview') requestTab(tab, false);
   }
 

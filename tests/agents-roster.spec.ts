@@ -888,6 +888,464 @@ test.describe('Agents gallery', () => {
   });
 });
 
+// Characterization of the single-agent editing paths, pinned before the stage
+// becomes the Inspector so the reshape cannot quietly drop one
+// (PRD FR57–FR59, FR64–FR65, FR75, FR96, FR101).
+test.describe('Agents single-agent editing', () => {
+  async function openAgent(page, name: string) {
+    await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await expect(page.locator('#stageName')).toHaveText(name);
+  }
+
+  test('uploading an avatar from Overview updates the card and the hero together', async ({
+    page,
+    request
+  }) => {
+    const name = `PWAvUp${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64'
+    );
+
+    try {
+      await openAgent(page, name);
+      const card = page.locator(`.roster-card[data-name="${name}"]`);
+      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--fallback/);
+
+      await page.locator('#ov-avatar-file').setInputFiles({
+        name: 'a.png',
+        mimeType: 'image/png',
+        buffer: png
+      });
+      await expect(page.locator('#ov-avatar-status')).toHaveText('Uploaded.');
+
+      // Both surfaces must move together; a stale projection would leave the
+      // hero on the old identity while the card updated.
+      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--image/);
+      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--image/);
+
+      await page.locator('#ov-avatar-remove').click();
+      await expect(page.locator('#ov-avatar-status')).toHaveText('Removed.');
+      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--fallback/);
+      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--fallback/);
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('a stale save offers reload-latest recovery and keeps the roster usable', async ({
+    page,
+    request
+  }) => {
+    const name = `PWStale${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await openAgent(page, name);
+      // Force the version-conflict response the server returns when the agent
+      // changed underneath the open form.
+      await page.route(`**/api/agents/${encodeURIComponent(name)}`, route => {
+        if (route.request().method() !== 'PATCH') return route.continue();
+        return route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'stale_agent_edit', current_version: 'abc123' })
+        });
+      });
+
+      await page.locator('#ov-description').fill('Edited against a stale version.');
+      await page.locator('#savebar-overview [data-role="save"]').click();
+
+      const banner = page.locator('#panel-overview .conflict-banner');
+      await expect(banner).toBeVisible();
+      await expect(banner).toContainText('changed elsewhere');
+      await expect(banner.locator('.conflict-banner__action')).toHaveText('Reload latest');
+      // The collection stays usable while the conflict is unresolved (FR101).
+      await expect(page.locator('.roster-card').first()).toBeVisible();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('an unsaved edit guards a focus change and cancelling leaves it intact', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWGuard${Date.now()}`;
+    const a = `${prefix} Alpha`;
+    const b = `${prefix} Bravo`;
+    for (const n of [a, b]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await openAgent(page, a);
+      await page.locator('#ov-description').fill('Half-written thought.');
+
+      // Decline the guard: focus must stay put and the edit must survive.
+      page.once('dialog', d => d.dismiss());
+      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(a);
+      await expect(page.locator('#ov-description')).toHaveValue('Half-written thought.');
+
+      // Accept it: focus moves and the edit is abandoned.
+      page.once('dialog', d => d.accept());
+      await page.locator(`.roster-card[data-name="${b}"] .roster-card__open`).click();
+      await expect(page.locator('#stageName')).toHaveText(b);
+    } finally {
+      for (const n of [a, b]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('the New Agent panel creates an agent and focuses the new definition', async ({
+    page,
+    request
+  }) => {
+    const name = `PWCreate${Date.now()}`;
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
+        })
+      );
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+
+      // Cancelling leaves the collection untouched.
+      await page.locator('#newAgentBtn').click();
+      await expect(page.locator('#createPanel')).toBeVisible();
+      await page.locator('#createCancel').click();
+      await expect(page.locator('#createPanel')).toBeHidden();
+
+      await page.locator('#newAgentBtn').click();
+      await page.locator('#cr-name').fill(name);
+      await page.locator('#cr-description').fill('Made by the create panel.');
+      await page.locator('#createSubmit').click();
+
+      // The created definition is focused and present in the collection (FR65).
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await expect(page.locator(`.roster-card[data-name="${name}"]`)).toBeVisible();
+      await expect
+        .poll(async () =>
+          (await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`)).status()
+        )
+        .toBe(200);
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('a failed detail request is reported without breaking the collection', async ({
+    page,
+    request
+  }) => {
+    const name = `PWDetailErr${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
+        })
+      );
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/detail`, route =>
+        route.fulfill({ status: 500, body: 'boom' })
+      );
+
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+      await page.locator(`.roster-card[data-name="${name}"] .roster-card__open`).click();
+
+      // The collection keeps working even though this agent's detail failed.
+      await expect(page.locator('.roster-card').first()).toBeVisible();
+      await page.locator('#rosterSearch').fill(name);
+      await expect(page.locator('.roster-card')).toHaveCount(1);
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+});
+
+// Inspector slice: responsive open/close, the four-tab contract, and truthful
+// Toolbox content (PRD FR49–FR65, FR79–FR96).
+test.describe('Agents inspector', () => {
+  async function open(page, query = '') {
+    await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.goto(`${baseUrl}/agents${query}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+  }
+
+  test('desktop: closing reclaims collection width and keeps focus and selection', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWInsp${Date.now()}`;
+    const a = `${prefix} Alpha`;
+    const b = `${prefix} Bravo`;
+    for (const n of [a, b]) {
+      await request.post(`${baseUrl}/api/agents`, {
+        data: { name: n, type: 'tool-calling', model: 'gpt-4o-mini' }
+      });
+    }
+
+    try {
+      await page.setViewportSize({ width: 1440, height: 950 });
+      await open(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(2);
+
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__open`).click();
+      await page.locator(`.roster-card[data-name="${b}"] .roster-card__check`).check();
+      await expect(page.locator('#inspector')).toBeVisible();
+      const openWidth = (await page.locator('#rosterList').boundingBox())!.width;
+
+      await page.locator('#inspectorClose').click();
+      await expect(page.locator('#inspector')).toBeHidden();
+
+      // The collection genuinely gets the space back (FR51)…
+      const closedWidth = (await page.locator('#rosterList').boundingBox())!.width;
+      expect(closedWidth).toBeGreaterThan(openWidth);
+      // …and neither the focused agent nor the checked set is disturbed.
+      await expect(page.locator(`.roster-card[data-name="${a}"]`)).toHaveClass(/is-focused/);
+      await expect(page.locator('#bulkCount')).toHaveText('1 selected');
+
+      // Reopening restores the same agent's context.
+      await page.locator(`.roster-card[data-name="${a}"] .roster-card__open`).click();
+      await expect(page.locator('#inspector')).toBeVisible();
+      await expect(page.locator('#stageName')).toHaveText(a);
+    } finally {
+      for (const n of [a, b]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('mobile: the Inspector is a modal sheet that Escape closes and returns focus', async ({
+    page,
+    request
+  }) => {
+    const name = `PWSheet${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await page.setViewportSize({ width: 640, height: 900 });
+      await open(page);
+      // Nothing focused yet, so the sheet must not be covering the collection.
+      await expect(page.locator('#inspector')).toBeHidden();
+
+      await page.locator('#rosterSearch').fill(name);
+      const opener = page.locator(`.roster-card[data-name="${name}"] .roster-card__open`);
+      await opener.click();
+
+      const inspector = page.locator('#inspector');
+      await expect(inspector).toBeVisible();
+      await expect(inspector).toHaveAttribute('role', 'dialog');
+      await expect(inspector).toHaveAttribute('aria-modal', 'true');
+      await expect(page.locator('#inspectorBackdrop')).toBeVisible();
+      // The collection behind the sheet must not scroll (FR52).
+      await expect(page.locator('body')).toHaveClass(/inspector-sheet-open/);
+
+      await page.keyboard.press('Escape');
+      await expect(inspector).toBeHidden();
+      await expect(page.locator('#inspectorBackdrop')).toBeHidden();
+      await expect(page.locator('body')).not.toHaveClass(/inspector-sheet-open/);
+      // Focus goes back to the control that opened it (FR53).
+      await expect(opener).toBeFocused();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('four tabs follow the ARIA tabs pattern and survive a reload', async ({ page, request }) => {
+    const name = `PWTabs${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await open(page, `?agent=${encodeURIComponent(name)}`);
+      await expect(page.locator('#stageName')).toHaveText(name);
+
+      const ids = ['tab-overview', 'tab-prompt', 'tab-workspaces', 'tab-toolbox'];
+      const panels = ['panel-overview', 'panel-prompt', 'panel-workspaces', 'panel-toolbox'];
+      for (let i = 0; i < ids.length; i++) {
+        await expect(page.locator(`#${ids[i]}`)).toHaveAttribute('aria-controls', panels[i]);
+      }
+
+      // Roving tab stop: only the selected tab is reachable by Tab.
+      await expect(page.locator('#tab-overview')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#tab-toolbox')).toHaveAttribute('tabindex', '-1');
+
+      // Arrow keys move selection; Home/End jump to the ends.
+      await page.locator('#tab-overview').focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(page.locator('#tab-prompt')).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('End');
+      await expect(page.locator('#tab-toolbox')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#panel-toolbox')).toBeVisible();
+      await page.keyboard.press('Home');
+      await expect(page.locator('#tab-overview')).toHaveAttribute('aria-selected', 'true');
+
+      // The active tab is represented in the URL and restored (FR56).
+      await page.locator('#tab-toolbox').click();
+      await expect.poll(() => new URL(page.url()).searchParams.get('tab')).toBe('toolbox');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#tab-toolbox')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#panel-toolbox')).toBeVisible();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('Toolbox reports real capabilities and claims nothing it cannot know', async ({
+    page,
+    request
+  }) => {
+    const plain = `PWTbox${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: plain, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      // A built-in agent has real capabilities from the detail contract.
+      await open(page, '?agent=Claude%20Code&tab=toolbox');
+      await expect(page.locator('#panel-toolbox')).toBeVisible();
+      const builtInText = await page.locator('#toolboxBody').innerText();
+      expect(builtInText).toContain('File Operations');
+      expect(builtInText).toContain('Code Generation');
+
+      // A plain agent declares none, and says so — not "unavailable", which
+      // would mean we failed to find out (FR20/FR62).
+      await open(page, `?agent=${encodeURIComponent(plain)}&tab=toolbox`);
+      await expect(page.locator('#panel-toolbox')).toBeVisible();
+      const plainText = await page.locator('#toolboxBody').innerText();
+      expect(plainText).toContain('No capabilities are declared');
+      expect(plainText).toContain('Web search');
+
+      // None of the prototype's unbacked toolbox claims may appear (FR62).
+      for (const banned of ['Focus', 'Readiness', 'Connected', 'Version', 'Operations Lead']) {
+        expect(plainText, `Toolbox must not claim "${banned}"`).not.toContain(banned);
+      }
+      // Workspace-scoped permissions stay on the workspace surfaces (FR63).
+      expect(plainText).toContain('managed on each workspace');
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(plain)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('Toolbox reports honestly when the detail request fails, and retries', async ({
+    page,
+    request
+  }) => {
+    const name = `PWTboxErr${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
+        })
+      );
+      let fail = true;
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/detail`, route =>
+        fail ? route.fulfill({ status: 500, body: 'boom' }) : route.continue()
+      );
+
+      await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}&tab=toolbox`, {
+        waitUntil: 'domcontentloaded'
+      });
+      await expect(page.locator('#toolboxBody')).toContainText('Capabilities unavailable');
+
+      fail = false;
+      await page.locator('#toolboxRetry').click();
+      await expect(page.locator('#toolboxBody')).toContainText('Web search');
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('a built-in agent Inspector exposes no editable or destructive control', async ({
+    page
+  }) => {
+    await open(page, '?agent=Claude%20Code');
+    await expect(page.locator('#stageName')).toHaveText('Claude Code');
+
+    // No delete affordance and no editable Overview form for a built-in (FR18).
+    await expect(page.locator('#stageDelete')).toBeHidden();
+    await expect(page.locator('#ov-description')).toHaveCount(0);
+    await expect(page.locator('#savebar-overview')).toHaveCount(0);
+
+    // Prompt states its read-only reality instead of offering an editor.
+    await page.locator('#tab-prompt').click();
+    await expect(page.locator('#pr-prompt')).toHaveCount(0);
+
+    // The other tabs still report their real data.
+    await page.locator('#tab-toolbox').click();
+    await expect(page.locator('#toolboxBody')).toContainText('File Operations');
+  });
+});
+
 // Collection slice: Gallery/List parity, discovery, sorting, and restorable URL
 // state (PRD FR11–FR36, FR99–FR101).
 test.describe('Agents collection controls', () => {
@@ -991,6 +1449,43 @@ test.describe('Agents collection controls', () => {
           .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
           .catch(() => undefined);
       }
+    }
+  });
+
+  test('an unsaved Overview edit survives a Gallery/List view switch (FR64)', async ({
+    page,
+    request
+  }) => {
+    const name = `PWViewGuard${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await openAgents(page, `?agent=${encodeURIComponent(name)}`);
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await page.locator('#ov-description').fill('Not yet saved.');
+
+      // The view switch renders only the collection grid; it must not touch
+      // the Inspector's form or silently discard the edit.
+      await page.locator('#viewList').click();
+      await expect(page.locator('#ov-description')).toHaveValue('Not yet saved.');
+      await page.locator('#viewGallery').click();
+      await expect(page.locator('#ov-description')).toHaveValue('Not yet saved.');
+
+      const save = page.locator('#savebar-overview [data-role="save"]');
+      await expect(save).toBeEnabled();
+      await save.click();
+      await expect
+        .poll(async () => {
+          const r = await request.get(`${baseUrl}/api/agents/${encodeURIComponent(name)}/detail`);
+          return (await r.json()).metadata?.description;
+        })
+        .toBe('Not yet saved.');
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
     }
   });
 

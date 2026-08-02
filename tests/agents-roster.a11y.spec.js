@@ -1,10 +1,20 @@
 import { test, expect } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
-// Accessibility regression for the Agents roster/stage, in both themes.
+// Accessibility regression for the Agents Gallery/Inspector, in both themes.
 // Mirrors tests/workspace-detail.a11y.spec.js: axe-core is loaded from a CDN and
 // scoped to the roster layout so pre-existing chrome (navbar/sidebar) doesn't
 // mask regressions in this component.
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
+
+async function runAxe(page, target) {
+  return page.evaluate(async selector => {
+    const root = selector ? document.querySelector(selector) : document;
+    return await window.axe.run(root, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+    });
+  }, target);
+}
 
 for (const theme of ['light', 'dark']) {
   test(`agents roster accessibility (${theme})`, async ({ page, request }) => {
@@ -15,6 +25,7 @@ for (const theme of ['light', 'dark']) {
     expect(create.ok()).toBeTruthy();
 
     try {
+      await installLocalCdn(page);
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await page.addInitScript(selectedTheme => {
         window.localStorage.setItem('ori-theme', selectedTheme);
@@ -27,6 +38,7 @@ for (const theme of ['light', 'dark']) {
         })
       );
 
+      await page.setViewportSize({ width: 1440, height: 950 });
       await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}`, {
         waitUntil: 'domcontentloaded'
       });
@@ -39,25 +51,106 @@ for (const theme of ['light', 'dark']) {
       await expect(page.locator('#bulkBar')).toBeVisible();
 
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
-      const results = await page.evaluate(async () => {
-        const root = document.querySelector('.roster-layout');
-        return await window.axe.run(root, {
-          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
-        });
-      });
+
+      const results = await runAxe(page, '.roster-layout');
       expect(results.violations, JSON.stringify(results.violations, null, 2)).toEqual([]);
+
+      // Walk all four Inspector tabs; each panel becomes visible and gets its
+      // own axe pass, catching a violation confined to one tab's content.
+      const tabs = ['tab-overview', 'tab-prompt', 'tab-workspaces', 'tab-toolbox'];
+      for (const tabId of tabs) {
+        await page.locator(`#${tabId}`).click();
+        await expect(page.locator(`#${tabId}`)).toHaveAttribute('aria-selected', 'true');
+        const panelId = await page.locator(`#${tabId}`).getAttribute('aria-controls');
+        await expect(page.locator(`#${panelId}`)).toBeVisible();
+        const tabResults = await runAxe(page, '#inspector');
+        expect(
+          tabResults.violations,
+          `${tabId}: ` + JSON.stringify(tabResults.violations, null, 2)
+        ).toEqual([]);
+      }
+
+      // Roving tab stop: only the selected tab is in the Tab order.
+      for (const tabId of tabs) {
+        const expectedTi =
+          (await page.locator(`#${tabId}`).getAttribute('aria-selected')) === 'true' ? '0' : '-1';
+        await expect(page.locator(`#${tabId}`)).toHaveAttribute('tabindex', expectedTi);
+      }
+
+      // Left/Right/Home/End keyboard navigation over the tablist.
+      await page.locator('#tab-toolbox').focus();
+      await page.keyboard.press('ArrowLeft');
+      await expect(page.locator('#tab-workspaces')).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('Home');
+      await expect(page.locator('#tab-overview')).toHaveAttribute('aria-selected', 'true');
+      await page.keyboard.press('End');
+      await expect(page.locator('#tab-toolbox')).toHaveAttribute('aria-selected', 'true');
 
       // Also scan the bulk-delete confirmation dialog (focus-trapped modal).
       await page.locator('#bulkDelete').click();
       await expect(page.locator('#bulkDeleteDialog')).toBeVisible();
-      const dialogResults = await page.evaluate(async () => {
-        return await window.axe.run(document.querySelector('#bulkDeleteDialog'), {
-          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
-        });
-      });
+      const dialogResults = await runAxe(page, '#bulkDeleteDialog');
       expect(dialogResults.violations, JSON.stringify(dialogResults.violations, null, 2)).toEqual(
         []
       );
+      await page.locator('#bulkDeleteCancel').click();
+      await expect(page.locator('#bulkDeleteDialog')).toBeHidden();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test(`agents mobile inspector sheet accessibility (${theme})`, async ({ page, request }) => {
+    const name = `PW A11y Sheet ${theme} ${Date.now()}`;
+    const create = await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    expect(create.ok()).toBeTruthy();
+
+    try {
+      await installLocalCdn(page);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.addInitScript(selectedTheme => {
+        window.localStorage.setItem('ori-theme', selectedTheme);
+      }, theme);
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
+        })
+      );
+
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+      // Nothing opened yet: the sheet must not be covering the collection at
+      // rest, and it is the resting collection that gets scanned first.
+      await expect(page.locator('#inspector')).toBeHidden();
+
+      await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+      const restResults = await runAxe(page, '.roster-layout');
+      expect(restResults.violations, JSON.stringify(restResults.violations, null, 2)).toEqual([]);
+
+      await page.locator('#rosterSearch').fill(name);
+      const opener = page.locator(`.roster-card[data-name="${name}"] .roster-card__open`);
+      await opener.click();
+
+      const inspector = page.locator('#inspector');
+      await expect(inspector).toBeVisible();
+      await expect(inspector).toHaveAttribute('role', 'dialog');
+      await expect(inspector).toHaveAttribute('aria-modal', 'true');
+
+      const sheetResults = await runAxe(page, '#inspector');
+      expect(sheetResults.violations, JSON.stringify(sheetResults.violations, null, 2)).toEqual([]);
+
+      // Escape closes the sheet before anything else can act on it, and focus
+      // returns to the exact control that opened it.
+      await page.keyboard.press('Escape');
+      await expect(inspector).toBeHidden();
+      await expect(opener).toBeFocused();
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
