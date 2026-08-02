@@ -53,6 +53,18 @@ func CloneRun(run *Run) *Run {
 		}
 		out.Report = &report
 	}
+	// The snapshot is immutable by contract; deep-copying is how that survives
+	// a caller that does not know it (PRD FR-110).
+	out.ToolboxSnapshot = run.ToolboxSnapshot.Clone()
+	if run.ToolboxWrapUp != nil {
+		wrapUp := *run.ToolboxWrapUp
+		wrapUp.UnusedOperations = cloneStrings(run.ToolboxWrapUp.UnusedOperations)
+		wrapUp.ConnectionFailures = cloneStrings(run.ToolboxWrapUp.ConnectionFailures)
+		wrapUp.Operations = append([]WrapUpOperation(nil), run.ToolboxWrapUp.Operations...)
+		wrapUp.SkillObservations = append([]WrapUpSkillObservation(nil), run.ToolboxWrapUp.SkillObservations...)
+		wrapUp.Suggestions = append([]WrapUpSuggestion(nil), run.ToolboxWrapUp.Suggestions...)
+		out.ToolboxWrapUp = &wrapUp
+	}
 	return &out
 }
 

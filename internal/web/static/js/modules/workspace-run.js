@@ -1,4 +1,10 @@
-const ACTIVE_STATUSES = new Set(['pending', 'preparing', 'preparing_context', 'executing', 'validating']);
+const ACTIVE_STATUSES = new Set([
+  'pending',
+  'preparing',
+  'preparing_context',
+  'executing',
+  'validating'
+]);
 const TRACE_PAGE_SIZE = 200;
 
 function escapeHtml(value) {
@@ -21,29 +27,38 @@ function formatDateTime(value) {
 }
 
 function formatStatus(value) {
-  const normalized = String(value || '').trim().replace(/_/g, ' ');
+  const normalized = String(value || '')
+    .trim()
+    .replace(/_/g, ' ');
   if (!normalized) return 'Recorded';
-  return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+  return normalized.replace(/\b\w/g, char => char.toUpperCase());
 }
 
 function formatKind(value) {
-  const normalized = String(value || '').trim().toLowerCase();
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
   const labels = {
     task_raw_result: 'Task Raw Result',
     task_normalized_row: 'Task Normalized Row',
     task_output_validation: 'Task Output Validation',
     task_output_repair: 'Task Output Repair',
-    task_storage_receipt: 'Task Storage Receipt',
+    task_storage_receipt: 'Task Storage Receipt'
   };
   if (labels[normalized]) return labels[normalized];
   return formatStatus(value);
 }
 
 export function formatTaskOutputStatus(output) {
-  const validation = String(output?.validation_status || '').trim().toLowerCase();
-  const storage = String(output?.storage_status || '').trim().toLowerCase();
+  const validation = String(output?.validation_status || '')
+    .trim()
+    .toLowerCase();
+  const storage = String(output?.storage_status || '')
+    .trim()
+    .toLowerCase();
   if (validation === 'dismissed') return 'Dismissed';
-  if (validation === 'manually_approved' || storage === 'manually_appended') return 'Manually Approved';
+  if (validation === 'manually_approved' || storage === 'manually_appended')
+    return 'Manually Approved';
   if (validation === 'needs_review' || storage === 'skipped_invalid') return 'Needs Review';
   if (validation === 'passed' && (storage === 'saved' || storage === 'appended')) return 'Saved';
   if (validation === 'passed') return 'Validated';
@@ -52,7 +67,9 @@ export function formatTaskOutputStatus(output) {
 }
 
 function compactText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export class WorkspaceRunPage {
@@ -122,7 +139,7 @@ export class WorkspaceRunPage {
     this.elements.traceMoreBtn?.addEventListener('click', () => {
       this.loadMoreTrace();
     });
-    this.elements.actions?.addEventListener('click', (event) => {
+    this.elements.actions?.addEventListener('click', event => {
       const button = event.target.closest('[data-run-action]');
       if (!button) return;
       this.handleRunAction(button.dataset.runAction);
@@ -159,7 +176,8 @@ export class WorkspaceRunPage {
       }
       console.error('Failed to load workspace run page:', error);
       this.setAlert(error?.message || 'Failed to load this workspace run.');
-      if (this.elements.empty) this.elements.empty.textContent = 'Workspace run could not be loaded.';
+      if (this.elements.empty)
+        this.elements.empty.textContent = 'Workspace run could not be loaded.';
       this.setState('empty');
     }
   }
@@ -168,10 +186,7 @@ export class WorkspaceRunPage {
     if (!this.run) return this.loadData();
 
     try {
-      const [run, artifacts] = await Promise.all([
-        this.fetchRun(),
-        this.fetchArtifacts()
-      ]);
+      const [run, artifacts] = await Promise.all([this.fetchRun(), this.fetchArtifacts()]);
 
       this.run = run;
       this.artifacts = artifacts;
@@ -208,9 +223,13 @@ export class WorkspaceRunPage {
   }
 
   async fetchRun() {
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(this.runId)}`);
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(this.runId)}`
+    );
     if (!response.ok) {
-      const error = new Error(response.status === 404 ? 'Workspace run not found.' : 'Failed to load workspace run.');
+      const error = new Error(
+        response.status === 404 ? 'Workspace run not found.' : 'Failed to load workspace run.'
+      );
       error.status = response.status;
       throw error;
     }
@@ -218,7 +237,9 @@ export class WorkspaceRunPage {
   }
 
   async fetchArtifacts() {
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(this.runId)}/artifacts`);
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(this.runId)}/artifacts`
+    );
     if (!response.ok) {
       throw new Error('Failed to load workspace run artifacts.');
     }
@@ -231,7 +252,9 @@ export class WorkspaceRunPage {
       since: String(Number(since) || 0),
       limit: String(TRACE_PAGE_SIZE)
     });
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(this.runId)}/trace?${params.toString()}`);
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(this.runId)}/trace?${params.toString()}`
+    );
     if (!response.ok) {
       throw new Error('Failed to load workspace run trace.');
     }
@@ -240,11 +263,13 @@ export class WorkspaceRunPage {
 
   mergeTraceEvents(existing, incoming) {
     const merged = new Map();
-    [...existing, ...incoming].forEach((event) => {
+    [...existing, ...incoming].forEach(event => {
       const key = String(event?.id || event?.sequence || '');
       if (key) merged.set(key, event);
     });
-    return [...merged.values()].sort((left, right) => Number(left?.sequence || 0) - Number(right?.sequence || 0));
+    return [...merged.values()].sort(
+      (left, right) => Number(left?.sequence || 0) - Number(right?.sequence || 0)
+    );
   }
 
   schedulePolling() {
@@ -278,6 +303,7 @@ export class WorkspaceRunPage {
     this.renderOverview();
     this.renderContext();
     this.renderReport();
+    this.renderToolbox();
     this.renderValidation();
     this.renderMemoryLearned();
     this.renderArtifacts();
@@ -291,7 +317,7 @@ export class WorkspaceRunPage {
   renderMemoryLearned() {
     if (!this.elements.memoryCard || !this.elements.memory) return;
     const artifacts = Array.isArray(this.artifacts) ? this.artifacts : [];
-    const diff = artifacts.find((a) => a?.metadata && a.metadata.role === 'memory_diff');
+    const diff = artifacts.find(a => a?.metadata && a.metadata.role === 'memory_diff');
     const added = Array.isArray(diff?.metadata?.added) ? diff.metadata.added : [];
     const removed = Array.isArray(diff?.metadata?.removed) ? diff.metadata.removed : [];
 
@@ -304,7 +330,9 @@ export class WorkspaceRunPage {
     const renderGroup = (label, entries, cls) => {
       if (!entries.length) return '';
       const items = entries
-        .map((line) => `<li class="workspace-run-memory-entry ${cls}">${escapeHtml(String(line))}</li>`)
+        .map(
+          line => `<li class="workspace-run-memory-entry ${cls}">${escapeHtml(String(line))}</li>`
+        )
         .join('');
       return `
         <div class="workspace-run-memory-group">
@@ -370,36 +398,66 @@ export class WorkspaceRunPage {
     if (this.run?.cost) {
       summaryItems.push({
         label: 'Cost',
-        value: [
-          Number.isFinite(Number(this.run.cost.total_tokens)) ? `${Number(this.run.cost.total_tokens)} tokens` : '',
-          Number.isFinite(Number(this.run.cost.usd)) ? `$${Number(this.run.cost.usd).toFixed(4)}` : ''
-        ].filter(Boolean).join(' / ') || 'Tracked'
+        value:
+          [
+            Number.isFinite(Number(this.run.cost.total_tokens))
+              ? `${Number(this.run.cost.total_tokens)} tokens`
+              : '',
+            Number.isFinite(Number(this.run.cost.usd))
+              ? `$${Number(this.run.cost.usd).toFixed(4)}`
+              : ''
+          ]
+            .filter(Boolean)
+            .join(' / ') || 'Tracked'
       });
     }
     if (taskID) summaryItems.push({ label: 'Task', value: taskID, href: this.taskHref(taskID) });
-    if (referenceURL) summaryItems.push({ label: 'Reference URL', value: referenceURL, href: referenceURL, external: true, full: true });
+    if (referenceURL)
+      summaryItems.push({
+        label: 'Reference URL',
+        value: referenceURL,
+        href: referenceURL,
+        external: true,
+        full: true
+      });
     if (this.run?.error) summaryItems.push({ label: 'Error', value: this.run.error, full: true });
 
     // Developer-facing run internals, tucked into a collapsed disclosure so
     // they don't dominate the page for non-technical users.
     const technicalItems = [
       { label: 'Run ID', value: this.run.id, full: true },
-      { label: 'Profile', value: this.run?.profile_snapshot?.id || this.run?.profile_id || 'general' },
-      { label: 'Executor', value: [this.run?.executor?.kind, this.run?.executor?.ref].filter(Boolean).join(' / ') || 'Unknown' },
+      {
+        label: 'Profile',
+        value: this.run?.profile_snapshot?.id || this.run?.profile_id || 'general'
+      },
+      {
+        label: 'Executor',
+        value:
+          [this.run?.executor?.kind, this.run?.executor?.ref].filter(Boolean).join(' / ') ||
+          'Unknown'
+      },
       { label: 'Approval', value: this.run?.policy?.approval || 'none' },
       { label: 'Mutation', value: this.run?.policy?.mutation || 'unknown' }
     ];
     if (targetNoteID) technicalItems.push({ label: 'Target Note', value: targetNoteID });
     if (repoPath) technicalItems.push({ label: 'Repo Path', value: repoPath, full: true });
-    if (parentRunID) technicalItems.push({ label: 'Parent Run', value: parentRunID, href: this.runHref(parentRunID), full: true });
+    if (parentRunID)
+      technicalItems.push({
+        label: 'Parent Run',
+        value: parentRunID,
+        href: this.runHref(parentRunID),
+        full: true
+      });
 
-    const renderItem = (item) => `
+    const renderItem = item => `
       <article class="workspace-run-overview-item${item.full ? ' full' : ''}">
         <div class="workspace-run-overview-label">${escapeHtml(item.label)}</div>
         <div class="workspace-run-overview-value">
-          ${item.href
-            ? `<a href="${escapeHtml(item.href)}" class="workspace-run-inline-link"${item.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${escapeHtml(item.value)}</a>`
-            : escapeHtml(item.value)}
+          ${
+            item.href
+              ? `<a href="${escapeHtml(item.href)}" class="workspace-run-inline-link"${item.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${escapeHtml(item.value)}</a>`
+              : escapeHtml(item.value)
+          }
         </div>
       </article>
     `;
@@ -412,6 +470,177 @@ export class WorkspaceRunPage {
       : '';
 
     this.elements.overview.innerHTML = summaryItems.map(renderItem).join('') + technicalHtml;
+  }
+
+  // The immutable Toolbox this run was given, and what it did with it
+  // (PRD FR-107–FR-120).
+  //
+  // The section is deliberately explicit about MEASURED versus INFERRED. Tool
+  // calls are counted from the trace; a skill's contribution is not observable
+  // at all, so it is reported as "no direct evidence either way" rather than as
+  // unused — presenting a guess as a measurement would lead someone to delete a
+  // skill that was doing its job (FR-116, FR-117).
+  renderToolbox() {
+    const card = document.getElementById('workspace-run-toolbox-card');
+    const host = document.getElementById('workspace-run-toolbox');
+    if (!card || !host) return;
+
+    const snapshot = this.run?.toolbox_snapshot;
+    if (!snapshot) {
+      // A run from before snapshots existed. Saying so beats an empty section
+      // that would read as "this run had no capabilities".
+      card.hidden = true;
+      host.innerHTML = '';
+      return;
+    }
+    card.hidden = false;
+
+    const wrapUp = this.run?.toolbox_wrap_up;
+    const skills = Array.isArray(snapshot.skills) ? snapshot.skills : [];
+    const bindings = Array.isArray(snapshot.mcp_bindings) ? snapshot.mcp_bindings : [];
+    const operations = wrapUp && Array.isArray(wrapUp.operations) ? wrapUp.operations : [];
+    const unused =
+      wrapUp && Array.isArray(wrapUp.unused_operations) ? wrapUp.unused_operations : [];
+    const observations =
+      wrapUp && Array.isArray(wrapUp.skill_observations) ? wrapUp.skill_observations : [];
+    const suggestions = wrapUp && Array.isArray(wrapUp.suggestions) ? wrapUp.suggestions : [];
+
+    const blocks = [
+      `<div class="workspace-run-list-block">
+        <div class="workspace-run-list-title">Toolbox</div>
+        <div>${escapeHtml(snapshot.toolbox_name || 'Unnamed')} v${escapeHtml(String(snapshot.toolbox_version ?? ''))}${
+          snapshot.pinned_by_goal ? ' &middot; pinned by this goal' : ''
+        }</div>
+        <div class="workspace-run-muted">Focus: ${escapeHtml(snapshot.focus_state || 'unknown')} &middot; ${
+          skills.length
+        } skills &middot; ${bindings.reduce(
+          (total, binding) => total + (binding.allowed_tools || []).length,
+          0
+        )} operations</div>
+        ${
+          snapshot.hash
+            ? `<div class="workspace-run-muted">Snapshot ${escapeHtml(String(snapshot.hash).slice(0, 12))}</div>`
+            : ''
+        }
+      </div>`
+    ];
+
+    if (bindings.length) {
+      blocks.push(`
+        <div class="workspace-run-list-block">
+          <div class="workspace-run-list-title">Exactly what it could call</div>
+          <ul class="workspace-run-list">
+            ${bindings
+              .map(
+                binding =>
+                  `<li>${escapeHtml(binding.alias || binding.server_name || binding.binding_id)}: ${
+                    (binding.allowed_tools || []).length
+                      ? escapeHtml((binding.allowed_tools || []).join(', '))
+                      : 'no operations'
+                  }</li>`
+              )
+              .join('')}
+          </ul>
+        </div>
+      `);
+    }
+
+    if (!wrapUp) {
+      host.innerHTML = blocks.join('');
+      return;
+    }
+
+    if (operations.length) {
+      blocks.push(`
+        <div class="workspace-run-list-block">
+          <div class="workspace-run-list-title">Used (measured)</div>
+          <ul class="workspace-run-list">
+            ${operations
+              .map(
+                operation =>
+                  `<li>${escapeHtml(operation.tool)} &times;${operation.calls}${
+                    operation.side_effect ? ` &middot; ${escapeHtml(operation.side_effect)}` : ''
+                  }${operation.failures ? ` &middot; ${operation.failures} failed` : ''}</li>`
+              )
+              .join('')}
+          </ul>
+        </div>
+      `);
+    }
+
+    if (unused.length) {
+      blocks.push(`
+        <div class="workspace-run-list-block">
+          <div class="workspace-run-list-title">Available but never used</div>
+          <div>${escapeHtml(unused.join(', '))}</div>
+        </div>
+      `);
+    }
+
+    blocks.push(`
+      <div class="workspace-run-list-block">
+        <div class="workspace-run-list-title">Blocks and retries</div>
+        <div>${wrapUp.blocked_calls || 0} blocked &middot; ${wrapUp.retries || 0} retries &middot; ${
+          wrapUp.approval_requests || 0
+        } approval requests</div>
+        ${
+          (wrapUp.connection_failures || []).length
+            ? `<div class="workspace-run-muted">Connection failures: ${escapeHtml(
+                (wrapUp.connection_failures || []).join(', ')
+              )}</div>`
+            : ''
+        }
+      </div>
+    `);
+
+    if (observations.length) {
+      blocks.push(`
+        <div class="workspace-run-list-block">
+          <div class="workspace-run-list-title">Skills</div>
+          <ul class="workspace-run-list">
+            ${observations
+              .map(
+                observation =>
+                  `<li>${escapeHtml(observation.display_name || observation.capability_id)} &mdash; ${
+                    observation.evidence === 'measured' ? 'measured' : 'no direct evidence'
+                  }${observation.note ? `: ${escapeHtml(observation.note)}` : ''}</li>`
+              )
+              .join('')}
+          </ul>
+        </div>
+      `);
+    }
+
+    if (suggestions.length) {
+      // Suggestions describe an edit; they never make one. Create variant
+      // prefills a draft that goes through the normal preview flow rather than
+      // rewriting the toolbox this completed run used (FR-119, FR-120).
+      blocks.push(`
+        <div class="workspace-run-list-block">
+          <div class="workspace-run-list-title">Ideas from this run</div>
+          <ul class="workspace-run-list">
+            ${suggestions
+              .map(
+                suggestion =>
+                  `<li>${escapeHtml(suggestion.message)}${
+                    suggestion.evidence
+                      ? ` <span class="workspace-run-muted">(${escapeHtml(suggestion.evidence)})</span>`
+                      : ''
+                  }</li>`
+              )
+              .join('')}
+          </ul>
+          <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm"
+            data-run-create-variant="${escapeHtml(snapshot.toolbox_id || '')}"
+            aria-label="Create a variant of ${escapeHtml(snapshot.toolbox_name || 'this toolbox')}">
+            Create variant
+          </button>
+          <div class="workspace-run-muted">Nothing changes until you review and use it.</div>
+        </div>
+      `);
+    }
+
+    host.innerHTML = blocks.join('');
   }
 
   renderReport() {
@@ -432,34 +661,42 @@ export class WorkspaceRunPage {
         <div class="workspace-run-list-title">Validation</div>
         <div>${escapeHtml(report.validation_status || 'unknown')}</div>
       </div>`,
-      inspection ? `
+      inspection
+        ? `
         <div class="workspace-run-list-block">
           <div class="workspace-run-list-title">Reference URL Inspection</div>
           <div>${escapeHtml(inspection.status || 'unknown')}${inspection.detail ? ` - ${escapeHtml(inspection.detail)}` : ''}</div>
         </div>
-      ` : '',
-      changedFiles.length ? `
+      `
+        : '',
+      changedFiles.length
+        ? `
         <div class="workspace-run-list-block">
           <div class="workspace-run-list-title">Changed Files</div>
           <ul class="workspace-run-list">
-            ${changedFiles.map((file) => `<li>${escapeHtml(file)}</li>`).join('')}
+            ${changedFiles.map(file => `<li>${escapeHtml(file)}</li>`).join('')}
           </ul>
         </div>
-      ` : '',
-      followUps.length ? `
+      `
+        : '',
+      followUps.length
+        ? `
         <div class="workspace-run-list-block">
           <div class="workspace-run-list-title">Follow Ups</div>
           <ul class="workspace-run-list">
-            ${followUps.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}
+            ${followUps.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
           </ul>
         </div>
-      ` : '',
-      report.human_review_needed ? `
+      `
+        : '',
+      report.human_review_needed
+        ? `
         <div class="workspace-run-list-block">
           <div class="workspace-run-list-title">Review</div>
           <div>Human review needed.</div>
         </div>
-      ` : ''
+      `
+        : ''
     ].filter(Boolean);
 
     this.elements.reportCard.hidden = false;
@@ -480,38 +717,51 @@ export class WorkspaceRunPage {
       return;
     }
 
-    const planRows = hasPlan ? [
-      ['Strategy', plan.strategy || 'unspecified'],
-      ['Workspace snapshot', plan.include_workspace_snapshot ? 'included' : 'not requested'],
-      ['Attached files', plan.include_attached_files ? 'included' : 'not requested'],
-      ['Workspace tools', plan.expose_workspace_tools ? 'available' : 'not requested']
-    ] : [];
+    const planRows = hasPlan
+      ? [
+          ['Strategy', plan.strategy || 'unspecified'],
+          ['Workspace snapshot', plan.include_workspace_snapshot ? 'included' : 'not requested'],
+          ['Attached files', plan.include_attached_files ? 'included' : 'not requested'],
+          ['Workspace tools', plan.expose_workspace_tools ? 'available' : 'not requested']
+        ]
+      : [];
 
-    const planBlock = planRows.length ? `
+    const planBlock = planRows.length
+      ? `
       <div class="workspace-run-list-block">
         <div class="workspace-run-list-title">Plan</div>
         <div class="workspace-run-overview-grid">
-          ${planRows.map(([label, value]) => `
+          ${planRows
+            .map(
+              ([label, value]) => `
             <article class="workspace-run-overview-item">
               <div class="workspace-run-overview-label">${escapeHtml(label)}</div>
               <div class="workspace-run-overview-value">${escapeHtml(value)}</div>
             </article>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
       </div>
-    ` : '';
+    `
+      : '';
 
-    const preparedHeader = prepared ? `
+    const preparedHeader = prepared
+      ? `
       <div class="workspace-run-list-block">
         <div class="workspace-run-list-title">Prepared</div>
         <div>${escapeHtml(prepared.summary || 'Context prepared')}</div>
         ${prepared.prepared_at ? `<div class="workspace-run-meta">Prepared ${escapeHtml(formatDateTime(prepared.prepared_at))}</div>` : ''}
       </div>
-    ` : '';
+    `
+      : '';
 
-    const itemBlock = items.length ? `
+    const itemBlock = items.length
+      ? `
       <div class="workspace-run-context-list">
-        ${items.map((item) => `
+        ${items
+          .map(
+            item => `
           <article class="workspace-run-context-item">
             <div class="workspace-run-context-head">
               <strong>${escapeHtml(item?.name || formatKind(item?.kind))}</strong>
@@ -522,26 +772,35 @@ export class WorkspaceRunPage {
             ${item?.detail ? `<div class="workspace-run-trace-copy">${escapeHtml(item.detail)}</div>` : ''}
             ${item?.ref ? `<div class="workspace-run-code">${escapeHtml(item.ref)}</div>` : ''}
           </article>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
-    ` : '';
+    `
+      : '';
 
-    const toolsBlock = tools.length ? `
+    const toolsBlock = tools.length
+      ? `
       <div class="workspace-run-list-block">
         <div class="workspace-run-list-title">Available Tools</div>
         <ul class="workspace-run-list">
-          ${tools.map((tool) => `<li>${escapeHtml(tool)}</li>`).join('')}
+          ${tools.map(tool => `<li>${escapeHtml(tool)}</li>`).join('')}
         </ul>
       </div>
-    ` : '';
+    `
+      : '';
 
     this.elements.contextCard.hidden = false;
-    this.elements.context.innerHTML = [planBlock, preparedHeader, itemBlock, toolsBlock].filter(Boolean).join('');
+    this.elements.context.innerHTML = [planBlock, preparedHeader, itemBlock, toolsBlock]
+      .filter(Boolean)
+      .join('');
   }
 
   renderValidation() {
     if (!this.elements.validationCard || !this.elements.validation) return;
-    const checks = Array.isArray(this.run?.validation_result?.checks) ? this.run.validation_result.checks : [];
+    const checks = Array.isArray(this.run?.validation_result?.checks)
+      ? this.run.validation_result.checks
+      : [];
     const taskOutput = this.run?.task_output || null;
     if (!checks.length && !taskOutput) {
       this.elements.validationCard.hidden = true;
@@ -549,7 +808,8 @@ export class WorkspaceRunPage {
       return;
     }
 
-    const taskOutputBlock = taskOutput ? `
+    const taskOutputBlock = taskOutput
+      ? `
       <article class="workspace-run-validation-item">
         <div class="workspace-run-validation-head">
           <strong>Task Output</strong>
@@ -562,18 +822,28 @@ export class WorkspaceRunPage {
             taskOutput.contract_version ? `Contract ${taskOutput.contract_version}` : '',
             taskOutput.storage_status ? `Storage ${formatStatus(taskOutput.storage_status)}` : '',
             taskOutput.validated_at ? `Validated ${formatDateTime(taskOutput.validated_at)}` : ''
-          ].filter(Boolean).map(escapeHtml).join(' | ')}
+          ]
+            .filter(Boolean)
+            .map(escapeHtml)
+            .join(' | ')}
         </div>
-        ${Array.isArray(taskOutput.errors) && taskOutput.errors.length ? `
+        ${
+          Array.isArray(taskOutput.errors) && taskOutput.errors.length
+            ? `
           <ul class="workspace-run-list">
-            ${taskOutput.errors.map((error) => `<li>${escapeHtml(error?.message || error?.code || 'Validation failed')}</li>`).join('')}
+            ${taskOutput.errors.map(error => `<li>${escapeHtml(error?.message || error?.code || 'Validation failed')}</li>`).join('')}
           </ul>
-        ` : ''}
+        `
+            : ''
+        }
       </article>
-    ` : '';
+    `
+      : '';
 
     this.elements.validationCard.hidden = false;
-    const checkBlocks = checks.map((check) => `
+    const checkBlocks = checks
+      .map(
+        check => `
       <article class="workspace-run-validation-item">
         <div class="workspace-run-validation-head">
           <strong>${escapeHtml(check?.name || 'Check')}</strong>
@@ -584,7 +854,9 @@ export class WorkspaceRunPage {
         ${check?.soft ? `<div class="workspace-run-meta">Soft check</div>` : ''}
         ${check?.evidence ? `<div class="workspace-run-trace-copy">${escapeHtml(check.evidence)}</div>` : ''}
       </article>
-    `).join('');
+    `
+      )
+      .join('');
     this.elements.validation.innerHTML = [taskOutputBlock, checkBlocks].filter(Boolean).join('');
   }
 
@@ -598,18 +870,20 @@ export class WorkspaceRunPage {
     }
 
     this.elements.artifactsCard.hidden = false;
-    this.elements.artifacts.innerHTML = artifacts.map((artifact) => {
-      const metadata = artifact?.metadata && typeof artifact.metadata === 'object'
-        ? Object.entries(artifact.metadata)
-            .map(([key, value]) => `${key}: ${compactText(value)}`)
-            .filter(Boolean)
-        : [];
-      const detailParts = [
-        artifact?.path ? `path ${artifact.path}` : '',
-        artifact?.created_at ? `created ${formatDateTime(artifact.created_at)}` : '',
-        metadata.join(' | ')
-      ].filter(Boolean);
-      return `
+    this.elements.artifacts.innerHTML = artifacts
+      .map(artifact => {
+        const metadata =
+          artifact?.metadata && typeof artifact.metadata === 'object'
+            ? Object.entries(artifact.metadata)
+                .map(([key, value]) => `${key}: ${compactText(value)}`)
+                .filter(Boolean)
+            : [];
+        const detailParts = [
+          artifact?.path ? `path ${artifact.path}` : '',
+          artifact?.created_at ? `created ${formatDateTime(artifact.created_at)}` : '',
+          metadata.join(' | ')
+        ].filter(Boolean);
+        return `
         <article class="workspace-run-artifact">
           <div class="workspace-run-artifact-head">
             <strong>${escapeHtml(this.shortID(artifact?.id))}</strong>
@@ -619,7 +893,8 @@ export class WorkspaceRunPage {
           <div class="workspace-run-code">${escapeHtml(String(artifact?.id || ''))}</div>
         </article>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   renderTrace() {
@@ -637,16 +912,19 @@ export class WorkspaceRunPage {
       return;
     }
 
-    this.elements.trace.innerHTML = events.map((event) => {
-      const meta = [
-        Number.isFinite(Number(event?.sequence)) ? `#${Number(event.sequence)}` : '',
-        event?.source || '',
-        event?.created_at ? formatDateTime(event.created_at) : '',
-        event?.status ? `status ${event.status}` : '',
-        event?.tool_name ? `tool ${event.tool_name}` : ''
-      ].filter(Boolean).join(' | ');
-      const message = compactText(event?.message) || this.describeTraceEvent(event);
-      return `
+    this.elements.trace.innerHTML = events
+      .map(event => {
+        const meta = [
+          Number.isFinite(Number(event?.sequence)) ? `#${Number(event.sequence)}` : '',
+          event?.source || '',
+          event?.created_at ? formatDateTime(event.created_at) : '',
+          event?.status ? `status ${event.status}` : '',
+          event?.tool_name ? `tool ${event.tool_name}` : ''
+        ]
+          .filter(Boolean)
+          .join(' | ');
+        const message = compactText(event?.message) || this.describeTraceEvent(event);
+        return `
         <article class="workspace-run-trace-item">
           <div class="workspace-run-trace-head">
             <strong>${escapeHtml(message)}</strong>
@@ -656,7 +934,8 @@ export class WorkspaceRunPage {
           ${event?.artifact_id ? `<div class="workspace-run-code">artifact ${escapeHtml(event.artifact_id)}</div>` : ''}
         </article>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   renderActions() {
@@ -665,11 +944,17 @@ export class WorkspaceRunPage {
     const buttons = [];
 
     if (ACTIVE_STATUSES.has(status)) {
-      buttons.push(`<button type="button" class="workspace-run-action-btn danger" data-run-action="stop">Stop</button>`);
+      buttons.push(
+        `<button type="button" class="workspace-run-action-btn danger" data-run-action="stop">Stop</button>`
+      );
     }
     if (status === 'awaiting_approval') {
-      buttons.push(`<button type="button" class="workspace-run-action-btn primary" data-run-action="approve">Approve</button>`);
-      buttons.push(`<button type="button" class="workspace-run-action-btn danger" data-run-action="reject">Reject</button>`);
+      buttons.push(
+        `<button type="button" class="workspace-run-action-btn primary" data-run-action="approve">Approve</button>`
+      );
+      buttons.push(
+        `<button type="button" class="workspace-run-action-btn danger" data-run-action="reject">Reject</button>`
+      );
     }
 
     this.elements.actions.innerHTML = buttons.join('');

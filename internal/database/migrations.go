@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 36
+const schemaVersion = 37
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -137,6 +137,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration035WorkspaceToolboxes(ctx)
 	case 36:
 		return db.migration036WorkspaceMission(ctx)
+	case 37:
+		return db.migration037RunToolboxSnapshot(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1324,6 +1326,31 @@ func (db *DB) migration036WorkspaceMission(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN mission_state_json TEXT
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace mission_state_json column: %w", err)
+	}
+	return nil
+}
+
+// migration037RunToolboxSnapshot adds the two run columns that make a finished
+// run explainable: the immutable capability snapshot it started with, and the
+// Wrap-up measured against it.
+//
+// Purely additive. Historical runs keep NULL in both, which reads as "this run
+// predates snapshots" — deliberately not as "this run had no capabilities",
+// since the second would misreport what those runs actually did.
+func (db *DB) migration037RunToolboxSnapshot(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspace_runs")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	for _, column := range []string{"toolbox_snapshot_json", "toolbox_wrap_up_json"} {
+		if _, err := db.ExecContext(ctx,
+			"ALTER TABLE workspace_runs ADD COLUMN "+column+" TEXT",
+		); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("failed to add workspace run %s column: %w", column, err)
+		}
 	}
 	return nil
 }
