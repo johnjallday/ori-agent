@@ -37,6 +37,18 @@
     // never be mistaken for what the agent is actually using.
     draft: null,
     compare: null,
+    // preview holds the server's read-only answer to "what would using this
+    // toolbox mean?", plus the label it says to offer. The UI never decides
+    // between Use and Review itself — that gate is server-owned so a client
+    // bug cannot turn a permission-expanding switch into one click (FR-78).
+    preview: null,
+    previewAction: '',
+    // acknowledged records that the user worked through Review & Use. It is
+    // sent with the write and the server refuses an expanding switch without
+    // it (FR-79, FR-80).
+    acknowledged: new Set(),
+    receipt: null,
+    undo: null,
     loading: false,
     error: '',
     notice: '',
@@ -94,12 +106,16 @@
 
   // ---------------------------------------------------------------- loading
 
-  async function load({ agentInstanceId } = {}) {
+  // keepError preserves a failure message across the refresh that follows a
+  // failed write. Without it the reload would clear the very explanation the
+  // user needs — "nothing changed, here is why" — and leave the panel silently
+  // showing the old state as though the click had done nothing at all (FR-167).
+  async function load({ agentInstanceId, keepError = false } = {}) {
     if (agentInstanceId !== undefined) state.agentInstanceId = String(agentInstanceId || '');
     if (!wsId()) return;
 
     state.loading = true;
-    state.error = '';
+    if (!keepError) state.error = '';
     render();
     try {
       const listResponse = await api('/toolboxes');
@@ -481,6 +497,139 @@
     }
   }
 
+  // ------------------------------------------------- preview / use / undo
+
+  async function previewToolbox(toolboxId, version) {
+    state.busy = 'preview:' + toolboxId;
+    state.error = '';
+    state.receipt = null;
+    render();
+    try {
+      const query =
+        '?toolbox_id=' +
+        encodeURIComponent(toolboxId) +
+        (version ? '&version=' + encodeURIComponent(version) : '');
+      const payload = await readJSON(
+        await api(
+          '/agent-toolboxes/' + encodeURIComponent(state.agentInstanceId) + '/preview' + query
+        )
+      );
+      state.preview = payload.preview || null;
+      state.previewAction = payload.action || '';
+      state.workspaceVersion = Number(payload.workspace_version || state.workspaceVersion);
+    } catch (error) {
+      state.error = error?.message || 'That toolbox could not be previewed.';
+      state.preview = null;
+    } finally {
+      state.busy = '';
+      render();
+    }
+  }
+
+  function closePreview() {
+    state.preview = null;
+    state.previewAction = '';
+    render();
+  }
+
+  // Each prerequisite is acknowledged individually. Completing one never
+  // approves another — they are separate decisions about separate things
+  // (FR-80).
+  function acknowledgeIssue(key) {
+    if (state.acknowledged.has(key)) state.acknowledged.delete(key);
+    else state.acknowledged.add(key);
+    render();
+  }
+
+  function issueKey(issue, index) {
+    return (issue.binding_id || issue.capability_id || issue.action || 'issue') + ':' + index;
+  }
+
+  function allIssuesAcknowledged() {
+    const issues = (state.preview && state.preview.issues) || [];
+    return issues.every((issue, index) => state.acknowledged.has(issueKey(issue, index)));
+  }
+
+  async function useToolbox() {
+    if (!state.preview) return;
+    state.busy = 'use';
+    state.error = '';
+    render();
+    try {
+      const payload = await readJSON(
+        await api('/agent-toolboxes/' + encodeURIComponent(state.agentInstanceId) + '/use', {
+          method: 'POST',
+          body: JSON.stringify({
+            toolbox_id: state.preview.toolbox_id,
+            toolbox_version: state.preview.toolbox_version,
+            expected_workspace_version: state.workspaceVersion || undefined,
+            acknowledged_expansion: !state.preview.can_use_directly
+          })
+        })
+      );
+      state.receipt = payload.receipt || null;
+      state.notice = payload.message || 'Toolbox in use.';
+      state.preview = null;
+      state.acknowledged = new Set();
+      await load();
+      await loadUndo();
+    } catch (error) {
+      // A failed switch must say what did NOT change, and leave the previous
+      // toolbox visibly selected (FR-86, FR-167). The panel is reloaded from
+      // the server rather than patched, so what it shows is what is real.
+      state.error = error?.message || 'The toolbox could not be applied.';
+      await load({ keepError: true });
+    } finally {
+      state.busy = '';
+      render();
+    }
+  }
+
+  async function loadUndo() {
+    if (!state.agentInstanceId) return;
+    try {
+      const payload = await readJSON(
+        await api('/agent-toolboxes/' + encodeURIComponent(state.agentInstanceId) + '/undo')
+      );
+      state.undo = payload.available ? payload : null;
+    } catch {
+      state.undo = null;
+    }
+    // Undo is read after the panel has already painted, so it needs its own
+    // repaint — otherwise the control never appears on the load that matters.
+    render();
+  }
+
+  async function performUndo() {
+    if (!state.undo) return;
+    state.busy = 'undo';
+    state.error = '';
+    render();
+    try {
+      const payload = await readJSON(
+        await api('/agent-toolboxes/' + encodeURIComponent(state.agentInstanceId) + '/undo', {
+          method: 'POST',
+          body: JSON.stringify({
+            expected_workspace_version: state.workspaceVersion || undefined,
+            // Restoring a version that would now widen permissions is a
+            // Review & Restore, and the server enforces that regardless.
+            acknowledged_expansion: state.undo.action === 'Review & Restore'
+          })
+        })
+      );
+      state.receipt = payload.receipt || null;
+      state.notice = payload.message || 'Restored.';
+      await load();
+      await loadUndo();
+    } catch (error) {
+      state.error = error?.message || 'That could not be restored.';
+      await load({ keepError: true });
+    } finally {
+      state.busy = '';
+      render();
+    }
+  }
+
   function promptForName(message, initial) {
     if (typeof window === 'undefined' || typeof window.prompt !== 'function') return '';
     const answer = window.prompt(message, initial || '');
@@ -555,7 +704,23 @@
           ? 'operations not pinned yet'
           : toolbox.operation_count + ' operations');
 
+      const isCurrent = toolbox.id === (state.workshop || {}).toolbox_id;
       const actions = el('div', { className: 'ws-toolbox-row-actions' }, [
+        // Preview is the entry point to using a toolbox. There is deliberately
+        // no direct "apply" here: every switch goes through a preview the user
+        // can read first (FR-74, FR-78).
+        !isCurrent && toolbox.status !== 'archived'
+          ? el('button', {
+              className: 'modern-btn modern-btn-primary modern-btn-sm',
+              text: state.busy === 'preview:' + toolbox.id ? 'Checking…' : 'Preview',
+              attrs: {
+                type: 'button',
+                'data-toolbox-preview': toolbox.id,
+                'data-toolbox-version': toolbox.version
+              },
+              disabled: busy || state.busy !== ''
+            })
+          : null,
         el('button', {
           className: 'modern-btn modern-btn-secondary modern-btn-sm',
           text: 'Duplicate',
@@ -1070,6 +1235,225 @@
     ]);
   }
 
+  // Separate readouts for spaces, tools, risk, and context — never one opaque
+  // number (FR-71). Focus reasons are shown verbatim because they are the
+  // actionable part (FR-69).
+  function focusPanel(focus, capacity) {
+    if (!focus) return null;
+    const inputs = focus.inputs || {};
+    const readouts = [
+      capacity && capacity.capacity > 0
+        ? inputs.active_skills + ' / ' + capacity.capacity + ' skill spaces'
+        : (inputs.active_skills || 0) + ' active skills',
+      (inputs.exposed_operations || 0) + ' exposed tools',
+      (inputs.write_operations || 0) +
+        ' that change things, ' +
+        (inputs.external_operations || 0) +
+        ' that reach outside',
+      (inputs.prompt_chars || 0) + ' characters of skill instructions'
+    ];
+
+    return el('section', { className: 'ws-toolbox-focus' }, [
+      el('h4', {}, [
+        el('span', { text: 'Focus: ' }),
+        el('span', {
+          className:
+            'ws-toolbox-focus-state is-' +
+            String(focus.state || '')
+              .toLowerCase()
+              .replace(/\s+/g, '-'),
+          // The state is carried in text, so it survives without color (FR-162).
+          text: focus.state || ''
+        })
+      ]),
+      el(
+        'ul',
+        { className: 'ws-toolbox-facts' },
+        readouts.map(text => el('li', { text }))
+      ),
+      (focus.reasons || []).length
+        ? el(
+            'ul',
+            { className: 'ws-toolbox-focus-reasons' },
+            focus.reasons.map(reason => el('li', { text: reason }))
+          )
+        : null,
+      inputs.unclassified_operations
+        ? el('p', {
+            className: 'ws-toolbox-card-warn',
+            text:
+              inputs.unclassified_operations +
+              ' operation(s) have no read/write classification and will be blocked until you set one.'
+          })
+        : null
+    ]);
+  }
+
+  function diffList(diff) {
+    if (!diff) return null;
+    const line = (label, entries, describe) => {
+      if (!entries || !entries.length) return null;
+      return el('li', { text: label + ': ' + entries.map(describe).join(', ') });
+    };
+    return el('ul', { className: 'ws-toolbox-diff' }, [
+      line('Adds', diff.skills_added, e => e.display_name || e.capability_id),
+      line('Removes', diff.skills_removed, e => e.display_name || e.capability_id),
+      line('Connects', diff.bindings_added, e => e.binding_id),
+      line('Disconnects', diff.bindings_removed, e => e.binding_id),
+      line(
+        'Changes',
+        diff.bindings_changed,
+        e =>
+          e.binding_id +
+          (e.added_tools?.length ? ' +' + e.added_tools.join('/') : '') +
+          (e.removed_tools?.length ? ' −' + e.removed_tools.join('/') : '')
+      )
+    ]);
+  }
+
+  function previewPanel() {
+    if (!state.preview) return null;
+    const preview = state.preview;
+    const issues = preview.issues || [];
+    const ready = allIssuesAcknowledged();
+
+    const children = [
+      el('h4', { text: preview.toolbox_name + ' v' + preview.toolbox_version }),
+      el('p', {
+        className: 'ws-toolbox-section-note',
+        text: 'Readiness: ' + preview.readiness
+      }),
+      focusPanel(preview.focus, preview.capacity),
+      preview.diff ? el('h5', { text: 'What changes' }) : null,
+      diffList(preview.diff)
+    ];
+
+    // Review & Use: each prerequisite is its own step with its own checkbox,
+    // linking out to the flow that owns it. Nothing here performs the setup
+    // (FR-79, FR-80).
+    if (issues.length) {
+      children.push(el('h5', { text: 'Before this can be used' }));
+      children.push(
+        el(
+          'ul',
+          { className: 'ws-toolbox-prereqs' },
+          issues.map((issue, index) => {
+            const key = issueKey(issue, index);
+            const done = state.acknowledged.has(key);
+            return el('li', { className: done ? 'is-done' : '' }, [
+              el('button', {
+                className: 'ws-toolbox-prereq' + (done ? ' is-on' : ''),
+                text: done ? 'Reviewed' : 'Mark reviewed',
+                attrs: {
+                  type: 'button',
+                  role: 'checkbox',
+                  'aria-checked': done ? 'true' : 'false',
+                  'aria-label': (done ? 'Un-review: ' : 'Mark reviewed: ') + issue.message,
+                  'data-toolbox-ack': key
+                }
+              }),
+              el('span', { className: 'ws-toolbox-prereq-text', text: issue.message }),
+              el('span', {
+                className: 'ws-toolbox-chip' + (issue.blocking ? ' is-unavailable' : ''),
+                text: issue.blocking ? 'Required' : 'Optional'
+              })
+            ]);
+          })
+        )
+      );
+    }
+
+    // Submit needs a Ready toolbox and every listed prerequisite reviewed.
+    // With no prerequisites, `ready` is trivially true and the button itself is
+    // the confirmation — which is the one-click case (FR-78). An expanding
+    // switch with no listed issues still goes through this button labelled
+    // "Review & Use", and the server independently refuses it without the
+    // acknowledgement flag, so a client bug cannot skip the gate.
+    const canSubmit = preview.readiness === 'Ready' && ready;
+
+    children.push(
+      el('div', { className: 'ws-toolbox-actions' }, [
+        el('button', {
+          className: 'modern-btn modern-btn-primary modern-btn-sm',
+          text: state.busy === 'use' ? 'Applying…' : state.previewAction || 'Use This Toolbox',
+          attrs: { type: 'button', 'data-toolbox-use': 'true' },
+          disabled: state.busy === 'use' || !canSubmit
+        }),
+        el('button', {
+          className: 'modern-btn modern-btn-secondary modern-btn-sm',
+          text: 'Close',
+          attrs: { type: 'button', 'data-toolbox-close-preview': 'true' }
+        })
+      ])
+    );
+
+    if (!canSubmit) {
+      children.push(
+        el('p', {
+          className: 'ws-toolbox-section-note',
+          text:
+            preview.readiness === 'Ready'
+              ? 'Review each item above to continue.'
+              : 'Resolve the required items above, then preview again.'
+        })
+      );
+    }
+
+    return el('section', { className: 'ws-toolbox-preview' }, children);
+  }
+
+  // FR-87: the receipt states what the agent actually got, not just that it
+  // worked.
+  function receiptPanel() {
+    if (!state.receipt) return null;
+    const receipt = state.receipt;
+    const permissions = receipt.permissions || {};
+    const node = el('section', { className: 'ws-toolbox-receipt' }, [
+      el('h4', {
+        text:
+          receipt.agent_name + ' is using ' + receipt.toolbox_name + ' v' + receipt.toolbox_version
+      }),
+      el('ul', { className: 'ws-toolbox-facts' }, [
+        el('li', { text: 'Focus: ' + ((receipt.focus || {}).state || 'unknown') }),
+        el('li', {
+          text:
+            (receipt.capacity || {}).used +
+            ' skill spaces, ' +
+            (permissions.operations || 0) +
+            ' tools'
+        }),
+        el('li', {
+          text:
+            (permissions.read_operations || 0) +
+            ' read, ' +
+            (permissions.write_operations || 0) +
+            ' write, ' +
+            (permissions.external_operations || 0) +
+            ' external'
+        })
+      ])
+    ]);
+    node.setAttribute('role', 'status');
+    return node;
+  }
+
+  function undoPanel() {
+    if (!state.undo || state.preview) return null;
+    const previous = state.undo.previous || {};
+    return el('section', { className: 'ws-toolbox-undo' }, [
+      el('span', {
+        className: 'ws-toolbox-section-note',
+        text: 'Previously: v' + previous.toolbox_version
+      }),
+      el('button', {
+        className: 'modern-btn modern-btn-secondary modern-btn-sm',
+        text: state.busy === 'undo' ? 'Restoring…' : state.undo.action || 'Undo',
+        attrs: { type: 'button', 'data-toolbox-undo': 'true' },
+        disabled: state.busy === 'undo'
+      })
+    ]);
+  }
+
   function render() {
     const host = hostNode();
     if (!host) return;
@@ -1106,6 +1490,18 @@
       !(workshop.requirements || []).length;
 
     host.appendChild(header());
+
+    // The receipt and Undo sit directly under the header so the answer to
+    // "what just happened, and can I take it back?" is the first thing after
+    // an action (FR-87, FR-88).
+    const receipt = receiptPanel();
+    if (receipt) host.appendChild(receipt);
+    const undo = undoPanel();
+    if (undo) host.appendChild(undo);
+
+    const preview = previewPanel();
+    if (preview) host.appendChild(preview);
+
     host.appendChild(picker());
     host.appendChild(editorActions());
     if (state.compare) host.appendChild(comparePanel());
@@ -1241,6 +1637,18 @@
           }
         ],
         [
+          '[data-toolbox-preview]',
+          node =>
+            void previewToolbox(
+              node.getAttribute('data-toolbox-preview'),
+              Number(node.getAttribute('data-toolbox-version')) || 0
+            )
+        ],
+        ['[data-toolbox-close-preview]', () => closePreview()],
+        ['[data-toolbox-use]', () => void useToolbox()],
+        ['[data-toolbox-undo]', () => void performUndo()],
+        ['[data-toolbox-ack]', node => acknowledgeIssue(node.getAttribute('data-toolbox-ack'))],
+        [
           '[data-toolbox-expand]',
           node => {
             const key = node.getAttribute('data-toolbox-expand');
@@ -1310,6 +1718,7 @@
     const host = hostNode();
     if (host) bindHost(host);
     await load(options);
+    await loadUndo();
   }
 
   window.WorkspaceToolbox = {
@@ -1335,6 +1744,11 @@
       state.workspaceVersion = 0;
       state.draft = null;
       state.compare = null;
+      state.preview = null;
+      state.previewAction = '';
+      state.acknowledged = new Set();
+      state.receipt = null;
+      state.undo = null;
       state.loading = false;
       state.error = '';
       state.notice = '';
@@ -1348,6 +1762,8 @@
       state.toolboxes = Array.isArray(toolboxes) ? toolboxes : [];
       state.workshop = workshop || null;
     },
-    _draft: () => (state.draft ? JSON.parse(JSON.stringify(state.draft)) : null)
+    _draft: () => (state.draft ? JSON.parse(JSON.stringify(state.draft)) : null),
+    _preview: () => (state.preview ? JSON.parse(JSON.stringify(state.preview)) : null),
+    _receipt: () => (state.receipt ? JSON.parse(JSON.stringify(state.receipt)) : null)
   };
 })();

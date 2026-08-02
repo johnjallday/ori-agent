@@ -1,14 +1,41 @@
 package skills
 
 import (
-	"fmt"
 	"sort"
 )
 
-// sourceEnableRank orders skill sources for deterministic cap-filling on a
-// bulk "*" enable (PRD FR14: "starter/built-in skills first, then
-// alphabetical"). Lower rank fills first. Repo/.agents skills ship with the
-// app and stand in for "built-in"; user/personal/CLI skills come after.
+// Where active-skill capacity is enforced, and why it is no longer enforced
+// here (PRD FR-3, FR-55, FR-56; task 3.1).
+//
+// This file used to block enabling a skill once an agent reached its
+// stage-based cap, treating "enabled" as "active". Named Toolboxes separate
+// those two ideas, and the separation makes the old check enforce the wrong
+// thing:
+//
+//   - ENABLED now means the skill is in the agent's Skill Collection — it has
+//     learned it and may choose it. Collections are deliberately unbounded, so
+//     progression can keep meaning something without forcing a user to forget
+//     one skill to learn another (FR-3, approved decision 7).
+//   - ACTIVE means a Toolbox selected it. That is the set the runtime hands the
+//     model, so that is the set capacity must bound (FR-56).
+//
+// The old count also disagreed with reality in a way nobody could see: it
+// counted globally enabled skills BEFORE workspace-provided skills were merged
+// in, so an agent at its "cap" could still receive several more skills from its
+// workspace. Enforcement now happens on the final deduplicated effective
+// selection instead:
+//
+//   - workspace Toolboxes — workspace.EnforceToolboxCapacity, called on save
+//     and re-checked immediately before use;
+//   - the global Default Toolbox — the same rule applied at selection time.
+//
+// AgentLoadout and LoadoutResolver stay because the same stage lookup still
+// feeds those checks (see the server's loadoutResolverAdapter); only the
+// enable-time blocking is gone.
+
+// sourceEnableRank orders skill sources for deterministic ordering on a bulk
+// "*" enable. Repo/.agents skills ship with the app and stand in for
+// "built-in"; user/personal/CLI skills come after.
 var sourceEnableRank = map[string]int{
 	SourceRepo:         0,
 	SourceAgentsCompat: 1,
@@ -25,89 +52,35 @@ func sourceRank(source string) int {
 	return 99
 }
 
-// resolveLoadout returns the agent's cap budget, or ok=false when no resolver
-// is wired or the agent is unresolvable (fail open — never block a toggle).
-func (m *Manager) resolveLoadout(agentName string) (AgentLoadout, bool) {
-	if m.loadoutResolver == nil {
-		return AgentLoadout{}, false
-	}
-	return m.loadoutResolver.ResolveAgentLoadout(agentName)
-}
-
-// enforceSlotCapForEnable rejects enabling a not-yet-enabled skill when the
-// agent is already at (or over) its stage-based slot cap. Idempotent
-// re-enables of an already-active skill are always allowed, and over-cap
-// grandfathered agents keep everything — the cap only blocks *new* enables
-// (PRD FR12). Expert-mode and unresolvable agents bypass entirely.
-func (m *Manager) enforceSlotCapForEnable(agentName, skillKey string) error {
-	loadout, ok := m.resolveLoadout(agentName)
-	if !ok || loadout.ExpertMode {
-		return nil
-	}
-
+// enableAllSkills implements the bulk "*" enable by writing explicit per-skill
+// state for every skill rather than leaving a wildcard default.
+//
+// Explicit state is the point: a lingering "*" would silently enable every
+// skill added in the future, which is the same silent-inheritance problem named
+// Toolboxes exist to remove (FR-2, FR-32).
+//
+// It no longer stops at a cap. Adding a skill to a collection grants nothing on
+// its own — the agent still only runs what a Toolbox selected — so there is
+// nothing here to protect the user from.
+func (m *Manager) enableAllSkills(agentName string) error {
 	skillsList, err := m.ListSkills(agentName)
 	if err != nil {
 		return err
 	}
 
-	enabledCount := 0
-	for _, s := range skillsList {
-		if !s.Enabled {
-			continue
-		}
-		enabledCount++
-		if normalizeSkillKey(s.Name) == skillKey {
-			// Already enabled → re-enabling is a no-op, never blocked.
-			return nil
-		}
-	}
-
-	if enabledCount >= loadout.SlotCap {
-		return fmt.Errorf("%w: the %s stage allows %d active skills (%d in use). Disable a skill or enable expert mode to add more",
-			ErrSkillSlotCapReached, loadout.Stage, loadout.SlotCap, enabledCount)
-	}
-	return nil
-}
-
-// enableAllWithinCap implements the bulk "*" enable for a non-expert agent by
-// filling active-skill slots deterministically up to the cap rather than
-// blanket-enabling every skill. Order: currently-enabled first (never demote a
-// grandfathered skill out of the kept set), then built-in/source rank, then
-// alphabetical. Expert / unresolvable agents fall back to the legacy wildcard
-// enable (unrestricted). PRD FR14.
-func (m *Manager) enableAllWithinCap(agentName string) error {
-	loadout, ok := m.resolveLoadout(agentName)
-	if !ok || loadout.ExpertMode {
-		return m.updateSkillState(agentName, "*", func(state *SkillState) {
-			state.Enabled = true
-		})
-	}
-
-	skillsList, err := m.ListSkills(agentName)
-	if err != nil {
-		return err
-	}
-
+	// Deterministic order so the written state is stable across runs even
+	// though every entry ends up enabled.
 	sort.SliceStable(skillsList, func(i, j int) bool {
 		a, b := skillsList[i], skillsList[j]
-		// Currently-enabled skills sort first so a bulk enable never demotes
-		// an agent's existing loadout below the cap.
-		if a.Enabled != b.Enabled {
-			return a.Enabled
-		}
 		if ra, rb := sourceRank(a.Source), sourceRank(b.Source); ra != rb {
 			return ra < rb
 		}
 		return normalizeSkillKey(a.Name) < normalizeSkillKey(b.Name)
 	})
 
-	// Write explicit per-skill state for every skill: the first `cap` in the
-	// deterministic order enabled, the rest disabled. Explicit state avoids
-	// leaving a wildcard "*" default that would silently enable future skills.
-	for i, s := range skillsList {
-		enabled := i < loadout.SlotCap
+	for _, s := range skillsList {
 		if setErr := m.updateSkillState(agentName, s.Name, func(state *SkillState) {
-			state.Enabled = enabled
+			state.Enabled = true
 		}); setErr != nil {
 			return setErr
 		}

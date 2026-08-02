@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -99,6 +100,13 @@ func (h *Handler) updateDefaultToolbox(w http.ResponseWriter, r *http.Request, a
 		if req.Name != nil {
 			ag.DefaultToolbox.Name = strings.TrimSpace(*req.Name)
 		}
+		// Capacity binds HERE, at selection, not when a skill is learned
+		// (PRD FR-3, FR-56). The previous state is the comparison point so an
+		// agent already over capacity can still remove or swap — it just
+		// cannot grow (FR-33).
+		if capErr := enforceDefaultToolboxCapacity(ag, selection); capErr != nil {
+			return capErr
+		}
 		if setErr := ag.DefaultToolbox.SetSkills(selection); setErr != nil {
 			return setErr
 		}
@@ -140,6 +148,55 @@ func (h *Handler) updateDefaultToolbox(w http.ResponseWriter, r *http.Request, a
 		"skills":          annotateDefaultToolboxSkills(saved, collection),
 		"migrated":        true,
 	})
+}
+
+// enforceDefaultToolboxCapacity rejects a selection that would grow past the
+// agent's stage-based active-skill capacity (PRD FR-55, FR-56).
+//
+// It compares against the CURRENT selection rather than against the cap alone,
+// which is what keeps an agent that is already over capacity — one migrated
+// from before the limit, or one whose stage was lowered — able to edit its
+// Default Toolbox at all. Removing and swapping stay possible; only growing is
+// refused (FR-33).
+//
+// Expert mode lifts the ceiling and nothing else: it is a capacity override,
+// never a bypass of scopes, trust, classification, or approvals (FR-60–FR-62).
+func enforceDefaultToolboxCapacity(ag *agent.Agent, selection []types.DefaultToolboxSkillRef) error {
+	if ag == nil {
+		return nil
+	}
+	if ag.Metadata.IsExpertMode(ag.Role) {
+		return nil
+	}
+
+	stage := types.AgentStageSpark
+	if ag.Evolution != nil && ag.Evolution.Stage != "" {
+		stage = ag.Evolution.Stage
+	}
+	capacity := types.SkillSlotsForStage(stage)
+	if capacity <= 0 {
+		return nil
+	}
+
+	proposed, err := types.NormalizeDefaultToolboxSkills(selection)
+	if err != nil {
+		// A malformed selection is SetSkills's error to report, with a better
+		// message than a capacity complaint would be.
+		return nil
+	}
+	if len(proposed) <= capacity {
+		return nil
+	}
+
+	current := 0
+	if ag.DefaultToolbox != nil {
+		current = len(ag.DefaultToolbox.Skills)
+	}
+	if len(proposed) <= current {
+		return nil
+	}
+	return fmt.Errorf("this agent has %d active skill spaces at the %s stage and the change needs %d. Remove a skill, or turn on expert mode",
+		capacity, stage, len(proposed))
 }
 
 // skillCollectionFor lists the skills this agent may choose from — its Skill

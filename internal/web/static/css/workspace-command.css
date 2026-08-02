@@ -6050,13 +6050,119 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
 }
 
+/* ---------- Preview, Focus, receipt, and Undo (FR-71, FR-78-FR-90) ---------- */
+.ws-toolbox-preview,
+.ws-toolbox-receipt,
+.ws-toolbox-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #fff);
+}
+
+.ws-toolbox-preview h4,
+.ws-toolbox-receipt h4,
+.ws-toolbox-focus h4 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.ws-toolbox-preview h5 {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+}
+
+.ws-toolbox-receipt {
+  border-color: var(--success-color, #2e7d32);
+}
+
+/* The state is text, so it reads correctly without color (FR-162). */
+.ws-toolbox-focus-state {
+  font-weight: 700;
+}
+
+.ws-toolbox-focus-state.is-crowded,
+.ws-toolbox-focus-state.is-needs-attention {
+  color: var(--warning-color, #b26a00);
+}
+
+.ws-toolbox-focus-reasons {
+  list-style: disc;
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #666);
+}
+
+/* Each prerequisite is its own row with its own control: completing one never
+   approves another (FR-80). */
+.ws-toolbox-prereqs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ws-toolbox-prereqs li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-prereqs li.is-done .ws-toolbox-prereq-text {
+  color: var(--text-secondary, #666);
+}
+
+.ws-toolbox-prereq-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.ws-toolbox-prereq {
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  background: var(--bg-primary, #fff);
+  color: inherit;
+}
+
+.ws-toolbox-prereq.is-on {
+  border-color: var(--success-color, #2e7d32);
+  font-weight: 600;
+}
+
+.ws-toolbox-undo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-prereq:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}
+
 /* Reduced motion: the Workshop uses no entrance animation, but a card's
    selection change should not animate either when the user has asked for less
    movement (FR-165). */
 @media (prefers-reduced-motion: reduce) {
   .ws-toolbox-card,
   .ws-toolbox-select,
-  .ws-toolbox-op {
+  .ws-toolbox-op,
+  .ws-toolbox-prereq {
     transition: none;
   }
 }

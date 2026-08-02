@@ -203,11 +203,55 @@ function workshopFixture(overrides = {}) {
   };
 }
 
+function previewFixture(overrides = {}) {
+  return {
+    workspace_id: 'ws-1',
+    agent_instance_id: 'inst-1',
+    agent_name: 'Coder',
+    toolbox_id: 'tbx-2',
+    toolbox_name: 'Spare Kit',
+    toolbox_version: 1,
+    readiness: 'Ready',
+    issues: [],
+    focus: {
+      state: 'Focused',
+      reasons: ['1 of 4 skill spaces, 2 exposed tools'],
+      inputs: {
+        active_skills: 1,
+        skill_capacity: 4,
+        exposed_operations: 2,
+        read_operations: 2,
+        write_operations: 0,
+        external_operations: 0,
+        prompt_chars: 400,
+        unclassified_operations: 0
+      }
+    },
+    capacity: { used: 1, capacity: 4, full: false },
+    skills: [{ capability_id: 'testing', display_name: 'testing', available: true }],
+    mcp_bindings: [{ binding_id: 'mb-1', available: true }],
+    diff: {
+      skills_added: [{ capability_id: 'drafting', display_name: 'drafting' }],
+      skills_removed: [],
+      bindings_added: [],
+      bindings_removed: [],
+      bindings_changed: [{ binding_id: 'mb-1', added_tools: ['write_note'], removed_tools: [] }]
+    },
+    expands_permissions: false,
+    can_use_directly: true,
+    ...overrides
+  };
+}
+
 function load({
   workshop = workshopFixture(),
   toolboxes,
   failWrites = false,
-  promptAnswer = 'Research Kit'
+  promptAnswer = 'Research Kit',
+  preview = previewFixture(),
+  previewAction = 'Use This Toolbox',
+  undo = null,
+  useError = ''
 } = {}) {
   const host = new FakeElement('div');
   host.id = 'workspace-toolbox-panel';
@@ -266,6 +310,55 @@ function load({
       }
       if (String(url).includes('/toolbox-workshop')) {
         return { ok: true, status: 200, json: async () => ({ workshop, workspace_version: 7 }) };
+      }
+      if (String(url).includes('/preview')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ preview, action: previewAction, workspace_version: 7 })
+        };
+      }
+      if (String(url).includes('/undo')) {
+        if (method === 'GET') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => undo || { available: false, message: 'There is nothing to undo.' }
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            message: 'Restored Lean Kit v1 for Coder.',
+            receipt: { agent_name: 'Coder', toolbox_name: 'Lean Kit', toolbox_version: 1 }
+          })
+        };
+      }
+      if (String(url).includes('/use')) {
+        if (useError) {
+          return { ok: false, status: 409, json: async () => ({ message: useError }) };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            message: 'Coder is now using Spare Kit v1.',
+            receipt: {
+              agent_name: 'Coder',
+              toolbox_name: 'Spare Kit',
+              toolbox_version: 1,
+              focus: { state: 'Focused' },
+              capacity: { used: 1, capacity: 4 },
+              permissions: {
+                operations: 2,
+                read_operations: 2,
+                write_operations: 0,
+                external_operations: 0
+              }
+            }
+          })
+        };
       }
       if (String(url).includes('/compare')) {
         return {
@@ -564,4 +657,224 @@ test('the Workshop uses the cozy vocabulary and no military terms (FR-168)', asy
   assert.doesNotMatch(text, /armory/i);
   assert.doesNotMatch(text, /\bequip\b/i);
   assert.doesNotMatch(text, /\bdeploy\b/i);
+});
+
+// ------------------------------------------- preview / use / undo (group 3)
+
+async function openPreview(api, host) {
+  await api.init({ agentInstanceId: 'inst-1' });
+  click(host, '[data-toolbox-preview=tbx-2]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+test('Focus is shown as separate readouts, not one opaque number (FR-71)', async () => {
+  const { api, host } = load();
+  await openPreview(api, host);
+
+  const text = host.textContent;
+  assert.match(text, /Focus:\s*Focused/);
+  assert.match(text, /1 \/ 4 skill spaces/);
+  assert.match(text, /2 exposed tools/);
+  assert.match(text, /0 that change things, 0 that reach outside/);
+  assert.match(text, /400 characters of skill instructions/);
+});
+
+test('the exact diff is shown before anything is applied (FR-77)', async () => {
+  const { api, host } = load();
+  await openPreview(api, host);
+
+  assert.match(host.textContent, /Adds: drafting/);
+  assert.match(host.textContent, /Changes: mb-1 \+write_note/);
+});
+
+test('a ready, non-expanding switch offers one-click use (FR-78)', async () => {
+  const { api, host, requests } = load();
+  await openPreview(api, host);
+
+  const button = host.querySelector('[data-toolbox-use]');
+  assert.ok(button, 'expected a use action');
+  assert.equal(button.textContent, 'Use This Toolbox');
+  assert.equal(button.disabled, false);
+
+  click(host, '[data-toolbox-use]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const write = requests.find(request => request.method === 'POST' && request.url.includes('/use'));
+  assert.ok(write, 'expected exactly one use request');
+  assert.equal(write.body.toolbox_id, 'tbx-2');
+  assert.equal(write.body.expected_workspace_version, 7);
+  // A direct switch grants nothing new, so it carries no expansion claim.
+  assert.equal(write.body.acknowledged_expansion, false);
+});
+
+test('a switch with prerequisites is gated until each one is reviewed (FR-79, FR-80)', async () => {
+  const { api, host } = load({
+    previewAction: 'Review & Use',
+    preview: previewFixture({
+      readiness: 'Ready',
+      expands_permissions: true,
+      can_use_directly: false,
+      issues: [
+        {
+          state: 'Needs connection',
+          binding_id: 'mb-9',
+          message: 'Tracker is switched off.',
+          action: 'connect',
+          blocking: false
+        },
+        {
+          state: 'Needs approval',
+          binding_id: 'mb-1',
+          message: 'write_note has no classification.',
+          action: 'classify',
+          blocking: false
+        }
+      ]
+    })
+  });
+  await openPreview(api, host);
+
+  const button = host.querySelector('[data-toolbox-use]');
+  assert.equal(button.textContent, 'Review & Use');
+  assert.equal(button.disabled, true, 'expected use to be blocked until every step is reviewed');
+
+  // Reviewing ONE prerequisite must not unlock the other (FR-80).
+  const checks = host.querySelectorAll('[data-toolbox-ack]');
+  assert.equal(checks.length, 2);
+  click(host, '[data-toolbox-ack=' + checks[0].getAttribute('data-toolbox-ack') + ']');
+  assert.equal(host.querySelector('[data-toolbox-use]').disabled, true);
+
+  const remaining = host.querySelectorAll('[data-toolbox-ack]').find
+    ? host.querySelectorAll('[data-toolbox-ack]')
+    : [];
+  click(host, '[data-toolbox-ack=' + remaining[1].getAttribute('data-toolbox-ack') + ']');
+  assert.equal(host.querySelector('[data-toolbox-use]').disabled, false);
+});
+
+test('an expanding switch sends the acknowledgement the server requires (FR-79)', async () => {
+  const { api, host, requests } = load({
+    previewAction: 'Review & Use',
+    preview: previewFixture({ expands_permissions: true, can_use_directly: false })
+  });
+  await openPreview(api, host);
+
+  click(host, '[data-toolbox-use]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const write = requests.find(request => request.method === 'POST' && request.url.includes('/use'));
+  assert.equal(write.body.acknowledged_expansion, true);
+});
+
+test('a not-ready toolbox cannot be used at all (FR-73, FR-78)', async () => {
+  const { api, host } = load({
+    preview: previewFixture({
+      readiness: 'Needs connection',
+      can_use_directly: false,
+      focus: { state: 'Needs attention', reasons: ['Notes is switched off.'], inputs: {} },
+      issues: [
+        {
+          state: 'Needs connection',
+          binding_id: 'mb-1',
+          message: 'Notes is switched off.',
+          action: 'connect',
+          blocking: true
+        }
+      ]
+    })
+  });
+  await openPreview(api, host);
+
+  assert.equal(host.querySelector('[data-toolbox-use]').disabled, true);
+  assert.match(host.textContent, /Resolve the required items above/);
+  assert.match(host.textContent, /Focus:\s*Needs attention/);
+});
+
+test('a successful switch produces a receipt saying what the agent got (FR-87)', async () => {
+  const { api, host } = load();
+  await openPreview(api, host);
+  click(host, '[data-toolbox-use]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const receipt = host.querySelector('.ws-toolbox-receipt');
+  assert.ok(receipt, 'expected a receipt');
+  assert.match(receipt.textContent, /Coder is using Spare Kit v1/);
+  assert.match(receipt.textContent, /Focus: Focused/);
+  assert.match(receipt.textContent, /2 read, 0 write, 0 external/);
+  assert.equal(receipt.getAttribute('role'), 'status');
+});
+
+test('a failed switch says what did NOT change and keeps the panel truthful (FR-86, FR-167)', async () => {
+  const { api, host } = load({
+    useError: 'The workspace changed while you were editing. Nothing changed.'
+  });
+  await openPreview(api, host);
+  click(host, '[data-toolbox-use]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const alert = host.querySelector('.ws-toolbox-error');
+  assert.ok(alert, 'expected the failure to be announced');
+  assert.match(alert.textContent, /Nothing changed/);
+  assert.equal(alert.getAttribute('role'), 'alert');
+  assert.equal(host.querySelector('.ws-toolbox-receipt'), null, 'a failed switch has no receipt');
+});
+
+test('undo is offered after a switch and labelled by the server (FR-88, FR-90)', async () => {
+  const { api, host, requests } = load({
+    undo: {
+      available: true,
+      action: 'Review & Restore',
+      previous: { toolbox_id: 'tbx-1', toolbox_version: 2 },
+      preview: previewFixture({ can_use_directly: false })
+    }
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+  // init loads the panel and then the undo state; give the second read a tick.
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const button = host.querySelector('[data-toolbox-undo]');
+  assert.ok(button, 'expected an undo action');
+  // A prior version that would now widen permissions becomes Review & Restore
+  // rather than a silent one-click revert.
+  assert.equal(button.textContent, 'Review & Restore');
+
+  click(host, '[data-toolbox-undo]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const write = requests.find(
+    request => request.method === 'POST' && request.url.includes('/undo')
+  );
+  assert.ok(write, 'expected an undo request');
+  assert.equal(write.body.acknowledged_expansion, true);
+});
+
+test('undo is absent when there is nothing to undo', async () => {
+  const { api, host } = load();
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.equal(host.querySelector('[data-toolbox-undo]'), null);
+});
+
+test('every preview control carries an accessible name (FR-163)', async () => {
+  const { api, host } = load({
+    previewAction: 'Review & Use',
+    preview: previewFixture({
+      can_use_directly: false,
+      issues: [
+        {
+          state: 'Needs approval',
+          binding_id: 'mb-1',
+          message: 'write_note has no classification.',
+          action: 'classify',
+          blocking: false
+        }
+      ]
+    })
+  });
+  await openPreview(api, host);
+
+  for (const node of host.querySelectorAll('[data-toolbox-ack]')) {
+    assert.equal(node.getAttribute('role'), 'checkbox');
+    assert.ok(node.getAttribute('aria-label'));
+    assert.ok(['true', 'false'].includes(node.getAttribute('aria-checked')));
+  }
 });

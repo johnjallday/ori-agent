@@ -1020,6 +1020,14 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolbox-workshop", s.Handlers.Workspace.GetToolboxWorkshop)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes", s.Handlers.Workspace.ListAgentToolboxes)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}", s.Handlers.Workspace.GetAgentToolbox)
+	// Preview is a GET that cannot write; use is a POST that revalidates
+	// everything the preview claimed (PRD FR-74, FR-83). Keeping them separate
+	// is what stops "show me what would happen" from being the same request as
+	// "do it".
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/preview", s.Handlers.Workspace.PreviewToolboxHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/use", s.Handlers.Workspace.UseToolboxHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/undo", s.Handlers.Workspace.PreviewUndoToolboxHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/undo", s.Handlers.Workspace.UndoToolboxHandler)
 
 	// Agent skill access routes
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-skill-access", s.Handlers.Workspace.ListAgentSkillAccess)

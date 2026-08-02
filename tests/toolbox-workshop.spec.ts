@@ -152,6 +152,36 @@ test.describe('Workshop', () => {
     await expect(panel.locator('[data-toolbox-edit]')).toBeVisible();
   });
 
+  test('previewing a toolbox shows Focus, the exact change, and the right action', async ({
+    page
+  }) => {
+    const { panel } = await openToolboxTab(page);
+
+    const preview = panel.locator('[data-toolbox-preview]').first();
+    if ((await preview.count()) === 0) {
+      test.skip(true, 'this sandbox has only one toolbox, so there is nothing to switch to');
+    }
+    await preview.click();
+
+    const drawer = panel.locator('.ws-toolbox-preview');
+    await expect(drawer).toBeVisible({ timeout: 10000 });
+
+    // Separate readouts rather than one opaque number (FR-71). `.first()`
+    // because the tool count legitimately appears twice — once as a readout and
+    // again inside the Focus reason that explains the state.
+    await expect(drawer.getByText(/Focus:/).first()).toBeVisible();
+    await expect(drawer.getByText(/exposed tools/).first()).toBeVisible();
+    await expect(drawer.getByText(/that change things/).first()).toBeVisible();
+    await expect(drawer.getByText(/Readiness:/).first()).toBeVisible();
+
+    // The action is whatever the SERVER said to offer — never re-derived here
+    // (FR-78, FR-79).
+    const useButton = drawer.locator('[data-toolbox-use]');
+    await expect(useButton).toHaveText(/Use This Toolbox|Review & Use|Applying/);
+
+    await page.screenshot({ path: 'test-results/toolbox-preview.png' });
+  });
+
   test('every operation and selector is reachable and named for assistive tech', async ({
     page
   }) => {
