@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 // Mirrors tests/workspace-detail.a11y.spec.js: axe-core is loaded from a CDN and
 // scoped to the roster layout so pre-existing chrome (navbar/sidebar) doesn't
 // mask regressions in this component.
-const baseUrl = process.env.BASE_URL || 'http://localhost:8765';
+const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
 
 for (const theme of ['light', 'dark']) {
   test(`agents roster accessibility (${theme})`, async ({ page, request }) => {

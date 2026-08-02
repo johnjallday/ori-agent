@@ -39,6 +39,11 @@
     agents: [],
     filtered: [],
     byName: {},
+    // Derived presentation projection of `agents`, keyed by agent name. Not a
+    // second roster store: it holds no facts of its own, is rebuilt from
+    // `agents` on every list load and after any record patch, and is the only
+    // thing Gallery cards, List rows, and the Inspector hero read (PRD FR2).
+    viewByName: {},
     selected: null,
     detailCache: {},
     query: '',
@@ -79,6 +84,9 @@
       search: document.getElementById('rosterSearch'),
       sort: document.getElementById('rosterSort'),
       empty: document.getElementById('rosterEmpty'),
+      loading: document.getElementById('rosterLoading'),
+      error: document.getElementById('rosterError'),
+      retry: document.getElementById('rosterRetry'),
       clearSearch: document.getElementById('rosterClearSearch'),
       placeholder: document.getElementById('stagePlaceholder'),
       stage: document.getElementById('stage'),
@@ -138,6 +146,10 @@
       els.search.value = '';
       onSearch();
       els.search.focus();
+    });
+    els.retry.addEventListener('click', function () {
+      setCollectionState('loading');
+      loadAgents();
     });
     els.list.addEventListener('click', onListClick);
     els.list.addEventListener('keydown', onListKeydown);
@@ -294,6 +306,8 @@
             window.StageUpToast.check(a.name, a.evolution.stage);
           }
         });
+        rebuildViewModels();
+        setCollectionState('ready');
         pruneChecked();
         applyUrlToState();
         populateFilterOptions();
@@ -302,9 +316,150 @@
         restoreTabFromUrl();
       })
       .catch(function (err) {
-        els.count.textContent = 'Could not load agents.';
+        setCollectionState('error');
         console.error('[roster] load failed', err);
       });
+  }
+
+  // Loading / load-error / ready are distinct real states (PRD FR8). `error`
+  // keeps a retry action and leaves the rest of the page usable (PRD FR100).
+  function setCollectionState(phase) {
+    if (els.loading) els.loading.hidden = phase !== 'loading';
+    if (els.error) els.error.hidden = phase !== 'error';
+    if (els.list) els.list.hidden = phase !== 'ready';
+    if (phase !== 'ready' && els.empty) els.empty.hidden = true;
+    if (phase === 'loading') els.count.textContent = 'Loading agents…';
+    if (phase === 'error') els.count.textContent = 'Agents could not be loaded.';
+  }
+
+  /* ---- collection view model ----------------------------------------------- */
+
+  function rebuildViewModels() {
+    state.viewByName = {};
+    state.agents.forEach(function (a) {
+      state.viewByName[a.name] = buildViewModel(a);
+    });
+  }
+
+  // viewFor returns the normalized projection for a raw list record, building it
+  // on demand so callers holding a record from before a refresh still resolve.
+  function viewFor(agent) {
+    if (!agent || !agent.name) return buildViewModel(agent || {});
+    var vm = state.viewByName[agent.name];
+    if (!vm) {
+      vm = buildViewModel(agent);
+      state.viewByName[agent.name] = vm;
+    }
+    return vm;
+  }
+
+  // buildViewModel turns ONE dashboard list record into everything the collection
+  // renders. Every field below is derived from real list data; where a value is
+  // absent the model carries an explicit "missing" label and a boolean saying so,
+  // so no renderer can silently substitute a favorable default (PRD FR19/FR20).
+  function buildViewModel(a) {
+    var md = (a && a.metadata) || {};
+    var evo = (a && a.evolution) || {};
+    var builtIn = isPermanent(a);
+    var model = String((a && a.model) || '').trim();
+    var activity = lastActiveLabel(a);
+    var workspaces = normalizeWorkspaceRefs(a);
+    var caps = Array.isArray(a && a.capabilities) ? a.capabilities.slice() : [];
+    var tags = Array.isArray(md.tags) ? md.tags.slice() : [];
+    var description = String(md.description || '').trim();
+    var role = (a && a.role) || '';
+    var level = evo.level || 0;
+    var stage = evo.stage || 'spark';
+
+    var vm = {
+      name: (a && a.name) || '',
+      source: agentSourceKind(a),
+      builtIn: builtIn,
+      // Built-in CLI definitions and the system assistant have no editable
+      // definition here; the server rejects mutation and deletion alike.
+      editable: !builtIn,
+      health: agentHealth(a),
+      statusKind: healthKind(a),
+      statusText: titleCase(String((a && a.status) || 'idle')),
+      role: role,
+      roleLabel: roleLabel(role),
+      roleEntry: window.RoleCatalog ? window.RoleCatalog.entry(role) : null,
+      level: level,
+      stage: stage,
+      progressLabel: 'Lv ' + level + ' · ' + titleCase(stage),
+      description: description,
+      hasDescription: description !== '',
+      workspaces: workspaces,
+      workspaceCount: (a && a.workspace_count) || 0,
+      capabilities: caps,
+      model: model,
+      hasModel: model !== '',
+      // A blank model is exactly what agentHealth() counts as "needs attention",
+      // so name it rather than leaving the slot empty.
+      modelLabel: model || 'Model needed',
+      hasActivity: activity !== '',
+      activityLabel: activity || 'No recent activity',
+      tags: tags,
+      favorite: !!md.favorite,
+      avatarImage: String(md.avatar_image || '').trim(),
+      avatarColor: String(md.avatar_color || '').trim()
+    };
+
+    vm.workspaceLabel = workspaceSummaryLabel(vm.workspaceCount);
+    vm.capabilityLabel = capabilitySummaryLabel(caps);
+    // Case-insensitive search corpus over name, purpose, role, model, tags, and
+    // workspace names (PRD FR25) — precomputed so filtering never re-derives it.
+    vm.haystack = [
+      vm.name,
+      description,
+      vm.roleLabel,
+      role,
+      model,
+      tags.join(' '),
+      workspaces
+        .map(function (w) {
+          return w.name;
+        })
+        .join(' ')
+    ]
+      .join(' ')
+      .toLowerCase();
+    return vm;
+  }
+
+  // The list response carries workspaces[] as {id,name,entry_point} refs, so the
+  // Gallery gets membership names and links without one request per card.
+  function normalizeWorkspaceRefs(a) {
+    var refs = a && Array.isArray(a.workspaces) ? a.workspaces : [];
+    return refs
+      .map(function (w) {
+        return {
+          id: String((w && w.id) || ''),
+          name: String((w && w.name) || '').trim(),
+          entryPoint: !!(w && w.entry_point)
+        };
+      })
+      .filter(function (w) {
+        return w.name !== '';
+      });
+  }
+
+  function workspaceSummaryLabel(count) {
+    if (!count) return 'Library only';
+    return count + ' workspace' + (count === 1 ? '' : 's');
+  }
+
+  // Concise capability summary for a card (PRD FR23); the complete list belongs
+  // to the Inspector's Toolbox tab. An empty set is stated as empty rather than
+  // as "unavailable" — the list endpoint always computes this field, so nothing
+  // is unknown here (PRD FR20).
+  function capabilitySummaryLabel(caps) {
+    if (!caps || caps.length === 0) return 'No capabilities listed';
+    var shown = caps.slice(0, 2).map(function (c) {
+      return titleCase(String(c));
+    });
+    if (caps.length > 2) shown.push('+' + (caps.length - 2));
+    return shown.join(' · ');
   }
 
   // Drop checked names that no longer exist in the roster (e.g. after a reload or
@@ -365,20 +520,12 @@
     renderRoster();
   }
 
-  // Search matches name, role, description, and tags (PRD FR74).
+  // Search matches name, purpose/description, role, model, tags, and workspace
+  // names (PRD FR25) against the corpus the view model precomputed, so filtering
+  // never re-derives strings and never needs a detail fetch (PRD FR95/FR99).
   function matchesSearch(a, q) {
     if (!q) return true;
-    var tags = a.metadata && Array.isArray(a.metadata.tags) ? a.metadata.tags.join(' ') : '';
-    var hay = (
-      a.name +
-      ' ' +
-      (a.role || '') +
-      ' ' +
-      ((a.metadata && a.metadata.description) || '') +
-      ' ' +
-      tags
-    ).toLowerCase();
-    return hay.indexOf(q) !== -1;
+    return viewFor(a).haystack.indexOf(q) !== -1;
   }
 
   // Filter categories combine with AND; multiple health values combine with OR
@@ -522,11 +669,13 @@
 
     if (shown === 0) {
       renderEmptyState(total);
+      els.list.hidden = true;
       els.count.textContent = total === 0 ? 'No agents yet.' : '0 of ' + total + ' agents';
       updateBulkBar();
       return;
     }
     els.empty.hidden = true;
+    els.list.hidden = false;
     els.count.textContent =
       shown === total
         ? total + ' agent' + (total === 1 ? '' : 's')
@@ -567,11 +716,15 @@
     });
     var ready = total - needs - disabled;
     els.stats.hidden = false;
+    // Reading order matches the collection question the header asks: how many
+    // agents do I have, how many are ready, how many need me (PRD FR5).
+    // Disabled is a real bucket the health rule already produces, so it is kept
+    // rather than folded into another count.
     els.stats.innerHTML =
-      statTile('needs', 'Needs attention', needs) +
+      statTile('total', 'Agents', total) +
       statTile('ready', 'Ready', ready) +
-      statTile('disabled', 'Disabled', disabled) +
-      statTile('total', 'Total', total);
+      statTile('needs', 'Needs attention', needs) +
+      statTile('disabled', 'Disabled', disabled);
   }
 
   // Each tile is a toggle filter button (PRD FR72). "Total" clears the health
@@ -603,149 +756,193 @@
     );
   }
 
+  // One card renderer for both views. Everything it prints comes from the
+  // normalized view model, so a Gallery card and a List row state exactly the
+  // same facts about the same agent (PRD FR14/FR16/FR17).
   function buildCard(agent, idx) {
+    var vm = viewFor(agent);
+    var isChecked = state.checked.has(vm.name);
+
     var li = document.createElement('li');
-    li.className = 'roster-card' + (isPermanent(agent) ? ' is-permanent' : '');
-    li.dataset.name = agent.name;
+    li.className =
+      'roster-card' +
+      (vm.builtIn ? ' is-permanent' : '') +
+      (vm.health === 'needs' ? ' is-attention' : '') +
+      (vm.health === 'disabled' ? ' is-disabled' : '');
+    li.dataset.name = vm.name;
     li.dataset.index = idx;
-
-    var status = healthKind(agent);
-    var statusText = titleCase(String(agent.status || 'idle'));
-    var metaBits = [];
-    if (agent.model) metaBits.push(agent.model);
-    var wc = agent.workspace_count || 0;
-    metaBits.push(wc === 0 ? 'Library' : wc + ' workspace' + (wc === 1 ? '' : 's'));
-    var active = lastActiveLabel(agent);
-    if (active) metaBits.push(active);
-
-    var permanent = isPermanent(agent);
-    var isChecked = state.checked.has(agent.name);
-    var favorite = !!(agent.metadata && agent.metadata.favorite);
-    var tags = agent.metadata && Array.isArray(agent.metadata.tags) ? agent.metadata.tags : [];
-
-    // Concise spoken label so screen readers don't read the raw dot markup, and
-    // it carries the FULL tag list even when the visible chips are truncated
-    // (PRD FR59).
-    var roleLbl = roleLabel(agent.role);
-    var evolution = agent.evolution || {};
-    var stage = evolution.stage || 'spark';
-    var level = evolution.level || 0;
-    var progressLabel = 'Lv ' + level + ' · ' + titleCase(stage);
-
-    var wcLabel =
-      wc === 0 ? 'library agent, unattached' : wc + ' workspace' + (wc === 1 ? '' : 's');
-    var openLabel =
-      agent.name +
-      (permanent ? ', built-in' : '') +
-      (favorite ? ', favorite' : '') +
-      ', ' +
-      roleLbl +
-      ', ' +
-      progressLabel +
-      ', ' +
-      statusText +
-      ', ' +
-      wcLabel +
-      (tags.length ? ', tags: ' + tags.join(', ') : '');
-
-    var badge = permanent
-      ? '<span class="roster-card__badge" title="Built-in agent — always available and cannot be deleted">Built-in</span>'
-      : '';
-    var star = favorite
-      ? '<span class="roster-card__fav" title="Favorite" aria-hidden="true">★</span>'
-      : '';
-    var tagsRow = tagsRowHTML(tags);
-    var progressRow = permanent ? '' : roleProgressRowHTML(agent.role, roleLbl, progressLabel);
+    // Scope the role accent to the whole card so the top rule, hover border,
+    // focused ring, workspace pips, and capability strip all read as one role
+    // without any of them becoming the card's dominant colour (PRD FR71).
+    // Agents with no catalog role keep the neutral default rather than
+    // borrowing another role's colour.
+    var accent = roleAccent(vm);
+    if (accent) li.style.setProperty('--role-accent', accent);
 
     // A labeled checkbox and a separate open/focus button are siblings — never
     // nested — so the checkbox is not a child of an interactive element and the
-    // two actions stay independent (PRD FR2/FR3/FR4).
+    // two actions stay independent (PRD FR38/FR39/FR40).
     li.innerHTML =
       '<label class="roster-card__checkwrap">' +
       '<span class="visually-hidden">Select ' +
-      esc(agent.name) +
+      esc(vm.name) +
       '</span>' +
       '<input type="checkbox" class="roster-card__check" data-check="' +
-      esc(agent.name) +
+      esc(vm.name) +
       '"' +
       (isChecked ? ' checked' : '') +
       '>' +
       '</label>' +
       '<button type="button" class="roster-card__open" data-open="' +
-      esc(agent.name) +
+      esc(vm.name) +
       '" aria-label="' +
-      esc(openLabel) +
+      esc(cardSpokenLabel(vm)) +
       '">' +
-      avatarMarkup(agent, 'roster-card__avatar') +
-      '<span class="roster-card__body">' +
-      '<span class="roster-card__namerow">' +
-      '<span class="roster-card__name">' +
-      esc(agent.name) +
-      '</span>' +
-      star +
-      badge +
-      '<span class="roster-card__statuslabel is-' +
-      status +
-      '">' +
-      esc(statusText) +
-      '</span>' +
-      '</span>' +
-      '<span class="roster-card__meta">' +
-      esc(metaBits.join(' · ')) +
-      '</span>' +
-      progressRow +
-      tagsRow +
-      '</span>' +
-      '<span class="roster-card__status is-' +
-      status +
-      '" title="' +
-      esc(statusText) +
-      '" aria-hidden="true"></span>' +
+      cardVisualHTML(vm) +
+      cardPurposeHTML(vm) +
+      cardWorkspacesHTML(vm) +
+      cardCapabilitiesHTML(vm) +
+      cardFooterHTML(vm) +
       '</button>';
 
     if (isChecked) li.classList.add('is-checked');
     return li;
   }
 
-  // Role chip (emblem + name for a catalog role; a neutral italic badge with
-  // no emblem for Unspecialized — PRD FR7/FR17) plus a level/stage chip.
-  // Purely decorative (aria-hidden); the spoken label carries the same info
-  // via openLabel.
-  function roleProgressRowHTML(role, roleLbl, progressLabel) {
-    var entry = window.RoleCatalog ? window.RoleCatalog.entry(role) : null;
-    var roleChip;
-    if (entry) {
-      roleChip =
-        '<span class="roster-card__role-chip" style="--role-accent: ' +
-        esc(entry.accent_color) +
-        ';">' +
-        '<i class="bi bi-' +
-        esc(entry.emblem) +
-        ' roster-card__role-emblem"></i>' +
-        esc(roleLbl) +
-        '</span>';
-    } else {
-      roleChip = '<span class="roster-card__role-chip is-unspecialized">' + esc(roleLbl) + '</span>';
-    }
-    var levelChip = '<span class="roster-card__level-chip">' + esc(progressLabel) + '</span>';
-    return '<span class="roster-card__progress" aria-hidden="true">' + roleChip + levelChip + '</span>';
+  // Concise spoken summary for the open control (PRD FR84). The card's own text
+  // carries the same facts visually; this keeps them in one short sentence
+  // instead of making a screen reader walk every decorative span.
+  function cardSpokenLabel(vm) {
+    var parts = [vm.name];
+    if (vm.builtIn) parts.push('built-in');
+    if (vm.favorite) parts.push('favorite');
+    parts.push(vm.roleLabel);
+    if (!vm.builtIn) parts.push(vm.progressLabel);
+    parts.push(vm.statusText);
+    parts.push(vm.hasModel ? vm.model : 'model needed');
+    parts.push(vm.workspaceCount === 0 ? 'library only' : vm.workspaceLabel);
+    return parts.join(', ');
   }
 
-  // Up to two visible tag chips + a "+N" indicator when more exist. The full list
-  // still reaches assistive tech via the open button's aria-label (PRD FR58/FR59).
-  function tagsRowHTML(tags) {
-    if (!tags || tags.length === 0) return '';
-    var shown = tags
-      .slice(0, 2)
-      .map(function (t) {
-        return '<span class="roster-card__tag">' + esc(t) + '</span>';
-      })
-      .join('');
-    var more =
-      tags.length > 2
-        ? '<span class="roster-card__tag roster-card__tag--more">+' + (tags.length - 2) + '</span>'
-        : '';
-    return '<span class="roster-card__tags" aria-hidden="true">' + shown + more + '</span>';
+  // Who is this? Portrait, text status, name, and role/progression line.
+  function cardVisualHTML(vm) {
+    var badge = vm.builtIn
+      ? '<span class="agent-card__badge" title="Built-in agent — always available and cannot be edited or deleted">Built-in</span>'
+      : '';
+    // Progression is a user-agent concept; built-ins have no evolution record to
+    // report, so the slot is omitted rather than filled with a zero (PRD FR20).
+    var classBits = [esc(vm.roleLabel)];
+    if (!vm.builtIn) classBits.push(esc(vm.progressLabel));
+
+    return (
+      '<span class="agent-card__visual">' +
+      avatarMarkup(vm, 'agent-card__portrait', '', AVATAR_SIZE.card) +
+      '<span class="agent-card__heading">' +
+      '<span class="agent-card__status is-' +
+      vm.statusKind +
+      '">' +
+      '<span class="agent-card__dot" aria-hidden="true"></span>' +
+      esc(vm.statusText) +
+      '</span>' +
+      '<span class="agent-card__name">' +
+      esc(vm.name) +
+      '</span>' +
+      '<span class="agent-card__class">' +
+      classBits.join(' · ') +
+      badge +
+      '</span>' +
+      '</span>' +
+      '</span>'
+    );
+  }
+
+  // The catalog's reviewed accent colour for this agent's role, validated as a
+  // hex literal before it can reach CSS. An agent with no catalog role gets no
+  // accent rather than an invented one (PRD FR71, PRD 7.2).
+  function roleAccent(vm) {
+    var entry = vm.roleEntry;
+    if (!entry || !entry.accent_color) return '';
+    return window.AgentAvatar.normalizeHex(entry.accent_color);
+  }
+
+  // What are they for? Clamped in Gallery; the Inspector keeps the full text
+  // (PRD FR21). A missing description says so rather than borrowing the role's
+  // tagline, which describes the role and not this agent (PRD FR20).
+  function cardPurposeHTML(vm) {
+    if (!vm.hasDescription) {
+      return '<span class="agent-card__purpose is-missing">No description yet</span>';
+    }
+    return '<span class="agent-card__purpose">' + esc(vm.description) + '</span>';
+  }
+
+  // Where are they used? At most two workspace labels plus a +N overflow; the
+  // complete membership list belongs to the Workspaces tab (PRD FR22).
+  function cardWorkspacesHTML(vm) {
+    var pills;
+    if (vm.workspaceCount === 0) {
+      pills = '<span class="agent-card__pill is-empty">Library only</span>';
+    } else if (vm.workspaces.length === 0) {
+      // The count is real but the reference list was not included; say the count
+      // rather than implying we know which workspaces they are.
+      pills = '<span class="agent-card__pill is-empty">' + esc(vm.workspaceLabel) + '</span>';
+    } else {
+      pills = vm.workspaces
+        .slice(0, 2)
+        .map(function (w) {
+          return '<span class="agent-card__pill">' + esc(w.name) + '</span>';
+        })
+        .join('');
+      if (vm.workspaces.length > 2) {
+        pills +=
+          '<span class="agent-card__pill is-more">+' + (vm.workspaces.length - 2) + '</span>';
+      }
+    }
+    return (
+      '<span class="agent-card__section">' +
+      '<span class="agent-card__section-label">Workspace orbit</span>' +
+      '<span class="agent-card__pills">' +
+      pills +
+      '</span>' +
+      '</span>'
+    );
+  }
+
+  // A concise capability summary only; configuration and the complete list live
+  // in the Inspector's Toolbox tab (PRD FR23).
+  function cardCapabilitiesHTML(vm) {
+    var empty = vm.capabilities.length === 0 ? ' is-empty' : '';
+    return (
+      '<span class="agent-card__toolbox' +
+      empty +
+      '">' +
+      '<span class="agent-card__section-label">Capabilities</span>' +
+      '<span class="agent-card__toolbox-value">' +
+      esc(vm.capabilityLabel) +
+      '</span>' +
+      '</span>'
+    );
+  }
+
+  // Are they ready? Model availability, recent activity, favorite state.
+  function cardFooterHTML(vm) {
+    var star = vm.favorite
+      ? '<span class="agent-card__fav" title="Favorite" aria-hidden="true">★</span>'
+      : '';
+    return (
+      '<span class="agent-card__footer">' +
+      '<span class="agent-card__model' +
+      (vm.hasModel ? '' : ' is-missing') +
+      '">' +
+      esc(vm.modelLabel) +
+      '</span>' +
+      '<span class="agent-card__activity' +
+      (vm.hasActivity ? '' : ' is-missing') +
+      '">' +
+      esc(vm.activityLabel) +
+      '</span>' +
+      star +
+      '</span>'
+    );
   }
 
   // Distinct empty states (PRD FR81): no agents at all vs. an active
@@ -818,7 +1015,7 @@
     els.promptBody.innerHTML = '<p class="stage-hint">Loading system prompt…</p>';
     els.stageDelete.hidden = true;
 
-    els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar');
+    els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
     els.klass.textContent = listItem.role
@@ -1056,7 +1253,7 @@
       field('Tags', '<div id="ov-tags-host"></div>', 'ov-tags-host') +
       field(
         'Avatar color',
-        colorInput('ov-avatarcolor', md.avatar_color || colorFor(name)),
+        colorInput('ov-avatarcolor', md.avatar_color || fallbackAvatarColor(name)),
         'ov-avatarcolor'
       ) +
       '<div class="field"><span class="field__label">Avatar image</span><div class="field__control" id="ov-avatar-control"></div></div>' +
@@ -1327,7 +1524,7 @@
       var item = state.byName[name];
       if (item && detail.metadata)
         item.metadata = Object.assign({}, item.metadata, detail.metadata);
-      els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar');
+      els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
       els.avatar = document.getElementById('stageAvatar');
       refreshRosterMeta(name, detail);
       wireAvatarControl(name, detail.metadata || {});
@@ -1838,6 +2035,8 @@
         agents.forEach(function (a) {
           state.byName[a.name] = a;
         });
+        rebuildViewModels();
+        setCollectionState('ready');
         state.detailCache = {};
         pruneChecked();
         populateFilterOptions();
@@ -1901,6 +2100,9 @@
     // the rebuilt card reflects every edit, not just the description.
     if (detail.metadata) item.metadata = Object.assign({}, item.metadata, detail.metadata);
     if (detail.role) item.role = detail.role;
+    // The record changed, so its projection is stale: rebuild before re-rendering
+    // the card so name/model/role/tags/favorite/avatar all agree.
+    state.viewByName[name] = buildViewModel(item);
     var card = els.list.querySelector('.roster-card[data-name="' + cssEscape(name) + '"]');
     if (card) {
       var idx = Number(card.dataset.index);
@@ -3037,63 +3239,41 @@
     return '<span class="vital"><span>' + esc(label) + '</span><b>' + esc(value) + '</b></span>';
   }
 
-  function avatarMarkup(agent, className, id) {
-    var idAttr = id ? ' id="' + id + '"' : '';
-    var image = agent && agent.metadata && agent.metadata.avatar_image;
-    if (image) {
-      return (
-        '<div class="' +
-        className +
-        '"' +
-        idAttr +
-        ' style="padding:0;overflow:hidden;">' +
-        '<img src="/avatars/' +
-        esc(String(image)) +
-        '" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;"></div>'
-      );
-    }
-    var color =
-      (agent && agent.metadata && agent.metadata.avatar_color) || colorFor(agent ? agent.name : '');
-    return (
-      '<div class="' +
-      className +
-      '"' +
-      idAttr +
-      ' style="background:' +
-      esc(color) +
-      ';">' +
-      esc(initials(agent ? agent.name : '')) +
-      '</div>'
+  // Avatar sizes, in CSS pixels, for the three surfaces that render an identity.
+  var AVATAR_SIZE = { card: 72, row: 54, hero: 88 };
+
+  // Every avatar on this page goes through the shared Avatar Identity v1
+  // renderer, so one input record always yields one identity treatment across
+  // Gallery cards, List rows, and the Inspector hero (PRD FR66/FR69).
+  function avatarMarkup(agent, className, id, size) {
+    var vm = viewFor(agent);
+    var entry = vm.roleEntry;
+    return window.AgentAvatar.markup(
+      {
+        name: vm.name,
+        source: vm.source,
+        role: vm.role,
+        builtIn: vm.builtIn,
+        roleAccent: entry ? entry.accent_color : '',
+        roleEmblem: entry ? entry.emblem : '',
+        avatarImage: vm.avatarImage,
+        avatarColor: vm.avatarColor
+      },
+      { className: className, id: id, size: size || AVATAR_SIZE.card }
     );
   }
 
-  function initials(name) {
-    var parts = String(name || '?')
-      .trim()
-      .split(/\s+/);
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-
-  function colorFor(name) {
-    // 700-level shades so white initials clear WCAG AA contrast (>= 4.5:1).
-    var palette = [
-      '#4338ca',
-      '#0e7490',
-      '#6d28d9',
-      '#047857',
-      '#b45309',
-      '#be185d',
-      '#1d4ed8',
-      '#b91c1c'
-    ];
-    var sum = 0;
-    String(name || '')
-      .split('')
-      .forEach(function (c) {
-        sum += c.charCodeAt(0);
-      });
-    return palette[sum % palette.length];
+  // Seed the Avatar color picker with the identity the agent already shows, so
+  // opening the field does not silently propose a different colour.
+  function fallbackAvatarColor(name) {
+    var item = state.byName[name];
+    var vm = item ? viewFor(item) : null;
+    return window.AgentAvatar.signature({
+      name: name,
+      source: vm ? vm.source : 'user',
+      role: vm ? vm.role : '',
+      builtIn: vm ? vm.builtIn : false
+    }).base;
   }
 
   // "Permanent residency" agents: the built-in CLI agents (Claude Code, Codex,

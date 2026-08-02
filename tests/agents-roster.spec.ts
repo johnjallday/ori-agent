@@ -1,9 +1,17 @@
 import { test, expect } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 // Happy-path regression for the game-inspired Agents page (roster + stage).
 // Assumes a running server; create/cleanup a throwaway agent via the API so the
 // test is self-contained and order-independent.
-const baseUrl = process.env.BASE_URL || 'http://localhost:8765';
+const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
+
+// Serve Bootstrap from node_modules. Without it the shared vault modal renders
+// unstyled and its backdrop intercepts every click on the page, which fails
+// these specs for a reason that has nothing to do with the Agents surface.
+test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+});
 
 test.describe('Agents roster', () => {
   test('browse, select, edit, assign workspace, and delete', async ({ page, request }) => {
@@ -464,5 +472,418 @@ test.describe('Agents roster', () => {
           .catch(() => undefined);
       }
     }
+  });
+});
+
+// Gallery slice: every visible card value must come from the dashboard list
+// response, and the avatar must follow Avatar Identity v1 (PRD FR2–FR24,
+// FR67–FR78, FR95–FR98, FR102).
+test.describe('Agents gallery', () => {
+  async function openAgents(page) {
+    await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterList')).toBeVisible();
+    await expect(page.locator('.roster-card').first()).toBeVisible();
+  }
+
+  function card(page, name) {
+    return page.locator(`.roster-card[data-name="${name}"]`);
+  }
+
+  test('header metrics and card content are computed from the real list response', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWGal${Date.now()}`;
+    const rich = `${prefix} Rich`;
+    const bare = `${prefix} Bare`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: {
+        name: rich,
+        type: 'tool-calling',
+        role: 'researcher',
+        model: 'gpt-4o-mini',
+        description: 'Finds primary sources and leaves an evidence trail.',
+        tags: ['research']
+      }
+    });
+    await request.post(`${baseUrl}/api/agents`, { data: { name: bare, type: 'general' } });
+
+    try {
+      await openAgents(page);
+
+      // Summary counts are derived from the same list the cards render.
+      const list = await (
+        await request.get(`${baseUrl}/api/agents/dashboard/list?sort_by=name&order=asc`)
+      ).json();
+      const agents = list.agents || [];
+      const disabled = agents.filter(a => String(a.status).toLowerCase() === 'disabled').length;
+      const needs = agents.filter(
+        a =>
+          String(a.status).toLowerCase() !== 'disabled' &&
+          (String(a.status).toLowerCase() === 'error' || !String(a.model || '').trim())
+      ).length;
+      await expect(page.locator('.roster-stat--total .roster-stat__value')).toHaveText(
+        String(agents.length)
+      );
+      await expect(page.locator('.roster-stat--needs .roster-stat__value')).toHaveText(
+        String(needs)
+      );
+      await expect(page.locator('.roster-stat--ready .roster-stat__value')).toHaveText(
+        String(agents.length - needs - disabled)
+      );
+
+      // Card facts match this agent's own record, field for field.
+      const record = agents.find(a => a.name === rich);
+      const target = card(page, rich);
+      await expect(target.locator('.agent-card__name')).toHaveText(rich);
+      await expect(target.locator('.agent-card__status')).toContainText('Active');
+      await expect(target.locator('.agent-card__class')).toContainText('Researcher');
+      await expect(target.locator('.agent-card__class')).toContainText('Lv 0');
+      await expect(target.locator('.agent-card__purpose')).toHaveText(record.metadata.description);
+      await expect(target.locator('.agent-card__model')).toHaveText(record.model);
+
+      // An agent with no description says so instead of borrowing the role's
+      // tagline, and an unattached agent reads as library-only (FR20/FR22).
+      const bareCard = card(page, bare);
+      await expect(bareCard.locator('.agent-card__purpose')).toHaveText('No description yet');
+      await expect(bareCard.locator('.agent-card__purpose')).toHaveClass(/is-missing/);
+      await expect(bareCard.locator('.agent-card__pill')).toHaveText('Library only');
+      await expect(bareCard.locator('.agent-card__toolbox-value')).toHaveText(
+        'No capabilities listed'
+      );
+    } finally {
+      for (const n of [rich, bare]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('workspace orbit shows at most two labels plus a +N overflow', async ({ page, request }) => {
+    const prefix = `PWOrbit${Date.now()}`;
+    const name = `${prefix} Hub`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    const wsIds: string[] = [];
+    for (const suffix of ['One', 'Two', 'Three']) {
+      const r = await request.post(`${baseUrl}/api/workspaces`, {
+        data: { name: `${prefix} ${suffix}`, entry_agent_name: name }
+      });
+      if (r.ok()) {
+        const j = await r.json();
+        wsIds.push(j?.folder?.id || j?.id || '');
+      }
+    }
+
+    try {
+      await openAgents(page);
+      const target = card(page, name);
+      const pills = target.locator('.agent-card__pill');
+      // Two named workspaces plus one overflow chip — never all three.
+      await expect(pills).toHaveCount(3);
+      await expect(pills.nth(2)).toHaveText('+1');
+      await expect(pills.nth(2)).toHaveClass(/is-more/);
+    } finally {
+      for (const id of wsIds.filter(Boolean)) {
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(id)}`)
+          .catch(() => undefined);
+      }
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('built-in CLI agents are labeled, read-only, and given distinct system avatars', async ({
+    page
+  }) => {
+    await openAgents(page);
+
+    const builtIns = ['Claude Code', 'Codex', 'Gemini CLI'];
+    const signatures: string[] = [];
+    for (const name of builtIns) {
+      const target = card(page, name);
+      await expect(target).toHaveClass(/is-permanent/);
+      await expect(target.locator('.agent-card__badge')).toHaveText('Built-in');
+      // Their real source data still shows: CLI role and the actual model.
+      await expect(target.locator('.agent-card__class')).toContainText('Cli Agent');
+      await expect(target.locator('.agent-card__model')).not.toBeEmpty();
+      await expect(target.locator('.agent-card__toolbox-value')).toContainText('File Operations');
+
+      const avatar = target.locator('.agent-avatar');
+      await expect(avatar).toHaveAttribute('data-aa-system', '1');
+      signatures.push(
+        JSON.stringify(
+          await avatar.evaluate(el => ({
+            motif: (el as HTMLElement).dataset.aaMotif,
+            turn: (el as HTMLElement).dataset.aaTurn,
+            tone: (el as HTMLElement).dataset.aaTone,
+            base: (el as HTMLElement).style.getPropertyValue('--aa-base'),
+            initials: el.querySelector('.agent-avatar__initials')?.textContent
+          }))
+        )
+      );
+    }
+    // Recognisably system, but not interchangeable with one another (FR73).
+    expect(new Set(signatures).size).toBe(builtIns.length);
+  });
+
+  test('fallback avatars are deterministic across reloads and distinct per agent', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWAva${Date.now()}`;
+    const names = [`${prefix} Alpha`, `${prefix} Bravo`, `${prefix} Charlie`];
+    for (const n of names) {
+      await request.post(`${baseUrl}/api/agents`, {
+        // Same role for all three: they must still look different (FR71).
+        data: { name: n, type: 'tool-calling', role: 'researcher', model: 'gpt-4o-mini' }
+      });
+    }
+
+    const read = async () => {
+      const out: Record<string, string> = {};
+      for (const n of names) {
+        out[n] = await card(page, n)
+          .locator('.agent-avatar')
+          .evaluate(
+            el =>
+              `${(el as HTMLElement).dataset.aaMotif}|${(el as HTMLElement).dataset.aaTurn}|` +
+              `${(el as HTMLElement).dataset.aaTone}|${(el as HTMLElement).style.getPropertyValue('--aa-base')}|` +
+              `${el.querySelector('.agent-avatar__initials')?.textContent}`
+          );
+      }
+      return out;
+    };
+
+    try {
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(3);
+      const first = await read();
+
+      // Same three agents, same three identities after a full reload (FR69).
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+      await page.locator('#rosterSearch').fill(prefix);
+      await expect(page.locator('.roster-card')).toHaveCount(3);
+      expect(await read()).toEqual(first);
+
+      // Three same-role agents, three different signatures.
+      expect(new Set(Object.values(first)).size).toBe(3);
+
+      // Every fallback renders locally — no <img>, no remote reference (FR98).
+      const imgs = await page.locator('.roster-card .agent-avatar--fallback img').count();
+      expect(imgs).toBe(0);
+    } finally {
+      for (const n of names) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  test('an uploaded avatar renders ahead of the fallback and reserves its box', async ({
+    page,
+    request
+  }) => {
+    const name = `PWImg${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    // Smallest valid PNG: 1x1 transparent.
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64'
+    );
+
+    try {
+      const upload = await request.post(
+        `${baseUrl}/api/agents/${encodeURIComponent(name)}/avatar`,
+        { multipart: { avatar: { name: 'a.png', mimeType: 'image/png', buffer: png } } }
+      );
+      expect(upload.ok()).toBeTruthy();
+
+      await openAgents(page);
+      await page.locator('#rosterSearch').fill(name);
+      const target = card(page, name);
+      const avatar = target.locator('.agent-avatar');
+      await expect(avatar).toHaveClass(/agent-avatar--image/);
+      const img = avatar.locator('img.agent-avatar__img');
+      await expect(img).toHaveAttribute('loading', 'lazy');
+      await expect(img).toHaveAttribute('decoding', 'async');
+      await expect(img).toHaveAttribute('alt', '');
+      // The box is reserved before the bitmap decodes (FR97).
+      await expect(img).toHaveAttribute('width', /\d+/);
+      await expect(img).toHaveAttribute('height', /\d+/);
+      await expect(avatar.locator('.agent-avatar__initials')).toHaveCount(0);
+
+      // Removing it restores the deterministic identity (FR67/FR75).
+      const removed = await request.delete(
+        `${baseUrl}/api/agents/${encodeURIComponent(name)}/avatar`
+      );
+      expect(removed.ok()).toBeTruthy();
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.locator('#rosterSearch').fill(name);
+      await expect(card(page, name).locator('.agent-avatar')).toHaveClass(/agent-avatar--fallback/);
+      await expect(card(page, name).locator('.agent-avatar__initials')).toBeVisible();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('a broken avatar image falls back without leaving a broken-image element', async ({
+    page,
+    request
+  }) => {
+    const name = `PWBroken${Date.now()}`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64'
+    );
+
+    try {
+      await request.post(`${baseUrl}/api/agents/${encodeURIComponent(name)}/avatar`, {
+        multipart: { avatar: { name: 'a.png', mimeType: 'image/png', buffer: png } }
+      });
+
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
+        })
+      );
+      // Make the stored avatar unreachable so the failure path runs (FR74).
+      await page.route('**/avatars/**', route => route.abort());
+      await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('#rosterList')).toBeVisible();
+      await page.locator('#rosterSearch').fill(name);
+
+      const avatar = card(page, name).locator('.agent-avatar');
+      await expect(avatar).toHaveClass(/agent-avatar--fallback/);
+      await expect(avatar.locator('img')).toHaveCount(0);
+      await expect(avatar.locator('.agent-avatar__initials')).toBeVisible();
+    } finally {
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
+
+  test('open and check are separate sibling controls on every card', async ({ page }) => {
+    await openAgents(page);
+    const nesting = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('.roster-card')];
+      return cards.map(c => {
+        const check = c.querySelector('.roster-card__check')!;
+        const open = c.querySelector('.roster-card__open')!;
+        return {
+          name: (c as HTMLElement).dataset.name,
+          checkInsideOpen: open.contains(check),
+          openInsideCheck: check.contains(open),
+          checkHasName: (check.closest('label')?.textContent || '').includes(
+            (c as HTMLElement).dataset.name || ''
+          ),
+          openLabel: open.getAttribute('aria-label') || ''
+        };
+      });
+    });
+    expect(nesting.length).toBeGreaterThan(0);
+    for (const n of nesting) {
+      // Neither control may be nested inside the other (FR40).
+      expect(n.checkInsideOpen, `${n.name} checkbox nested in open control`).toBe(false);
+      expect(n.openInsideCheck, `${n.name} open control nested in checkbox`).toBe(false);
+      // Both carry the agent's name for assistive technology (FR84).
+      expect(n.checkHasName, `${n.name} checkbox missing its agent name`).toBe(true);
+      expect(n.openLabel).toContain(n.name!);
+    }
+  });
+
+  test('the collection contains no hardcoded prototype records', async ({ page, request }) => {
+    await openAgents(page);
+    const rendered = await page
+      .locator('.roster-card')
+      .evaluateAll(cards => cards.map(c => (c as HTMLElement).dataset.name));
+    const list = await (
+      await request.get(`${baseUrl}/api/agents/dashboard/list?sort_by=name&order=asc`)
+    ).json();
+    const real = (list.agents || []).map(a => a.name);
+
+    // Exactly the server's agents — no extras invented by the page (FR2/FR102).
+    expect(rendered.slice().sort()).toEqual(real.slice().sort());
+
+    // None of the prototype's simulated concepts reach production markup.
+    const body = (await page.locator('.roster-layout').innerText()).toLowerCase();
+    for (const banned of ['operations lead', 'native cli tools', 'interactive concept']) {
+      expect(body, `prototype fixture "${banned}" leaked into the page`).not.toContain(banned);
+    }
+  });
+
+  test('collection load failure offers a retry that recovers', async ({ page }) => {
+    await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+
+    let fail = true;
+    await page.route('**/api/agents/dashboard/list**', route => {
+      if (fail) return route.fulfill({ status: 500, body: 'boom' });
+      return route.continue();
+    });
+
+    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#rosterError')).toBeVisible();
+    await expect(page.locator('#rosterCount')).toHaveText('Agents could not be loaded.');
+
+    // Retry succeeds and the collection appears (FR100).
+    fail = false;
+    await page.locator('#rosterRetry').click();
+    await expect(page.locator('#rosterError')).toBeHidden();
+    await expect(page.locator('.roster-card').first()).toBeVisible();
+  });
+
+  test('rendering the collection issues exactly one list request and no per-card detail', async ({
+    page
+  }) => {
+    const listCalls: string[] = [];
+    const detailCalls: string[] = [];
+    page.on('request', r => {
+      const u = r.url();
+      if (u.includes('/api/agents/dashboard/list')) listCalls.push(u);
+      if (/\/api\/agents\/[^/]+\/detail/.test(u)) detailCalls.push(u);
+    });
+
+    await openAgents(page);
+    const cards = await page.locator('.roster-card').count();
+    expect(cards).toBeGreaterThan(1);
+    // One list request drives every card (FR95).
+    expect(listCalls.length).toBe(1);
+    // Detail is lazy: at most the one focused agent, never one per card.
+    expect(detailCalls.length).toBeLessThanOrEqual(1);
   });
 });

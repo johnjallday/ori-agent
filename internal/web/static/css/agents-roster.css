@@ -1,239 +1,469 @@
 /*
- * Agents roster + stage layout (game-inspired, "themed not skinned").
- * Reuses the app's existing design tokens; no new palette. Roster rail on the
- * left, selected-agent stage on the right.
+ * Agents Gallery + Inspector layout.
+ *
+ * The page is a collection of agent identities beside a focused-agent
+ * Inspector. Cards are portrait-led and factual: role tints an accent, never
+ * the whole card, and every state (hover, keyboard focus, focused, checked,
+ * disabled, needs-attention) is carried by shape or text as well as colour so
+ * none of them depend on hue alone (PRD FR24/FR90).
+ *
+ * Built on the app's existing tokens — no private palette — apart from the
+ * deterministic avatar variables, which agent-avatar.js supplies per element.
  */
 
 .agents-roster-page {
-  --roster-rail-width: 340px;
-  --roster-gap: 18px;
+  --collection-gap: 18px;
+  --inspector-width: clamp(360px, 30vw, 420px);
   --roster-radius: 14px;
   /* Accent used for small text/links. Lightened on dark so the brand primary
      (which may be dark) still clears AA contrast on near-black surfaces. */
   --roster-accent: var(--primary-color, #4f46e5);
+  --card-line: var(--border-color, #e5e7eb);
+  --card-surface: var(--bg-primary, #fff);
+  --card-soft: var(--bg-secondary, #f9fafb);
+  /* Muted text one step stronger than --text-secondary, whose dark value
+     (#8A8A8A) only reaches 4.03:1 on --bg-tertiary. */
+  --card-muted: #5b6472;
 }
 
 [data-bs-theme="dark"] .agents-roster-page,
 .agents-roster-page[data-bs-theme="dark"] {
   --roster-accent: color-mix(in srgb, var(--primary-color, #4f46e5) 38%, white);
+  --card-surface: var(--bg-primary, #1f2430);
+  --card-soft: rgba(255, 255, 255, 0.04);
+  --card-muted: #aab3c0;
 }
 
 .roster-layout {
-  display: grid;
-  grid-template-columns: var(--roster-rail-width) minmax(0, 1fr);
-  gap: var(--roster-gap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--collection-gap);
   padding: 20px;
-  max-width: 1500px;
+  max-width: 1600px;
   margin: 0 auto;
-  align-items: start;
+  min-width: 0;
 }
 
-/* ---- Roster rail ---------------------------------------------------------- */
+/* ---- Collection header ---------------------------------------------------- */
 
-.roster-rail {
-  position: sticky;
-  top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  max-height: calc(100vh - 96px);
-}
-
-.roster-rail__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.roster-rail__title {
-  font-size: 24px;
-  margin: 0;
-  line-height: 1.1;
-}
-
-.roster-rail__subtitle {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--text-secondary, #6b7280);
-}
-
-.roster-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.roster-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 10px;
-  background: var(--bg-secondary, #f9fafb);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.roster-stat:hover { border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb)); }
-.roster-stat:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 2px; }
-/* Selected health filter: ring + check glyph, not color alone. */
-.roster-stat.is-selected {
-  border-color: var(--primary-color, #4f46e5);
-  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
-}
-.roster-stat.is-selected .roster-stat__label::after { content: " ✓"; }
-.roster-stat__value { font-size: 18px; font-weight: 700; line-height: 1.1; color: var(--text-primary, #111827); }
-.roster-stat__label { font-size: 11px; color: var(--text-secondary, #6b7280); }
-.roster-stat--needs .roster-stat__value { color: #dc2626; }
-.roster-stat--needs.roster-stat--zero .roster-stat__value,
-.roster-stat--disabled.roster-stat--zero .roster-stat__value { color: var(--text-primary, #111827); }
-
-/* ---- Filter controls ------------------------------------------------------ */
-.roster-filters {
+.collection-head {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.collection-head__intro {
+  min-width: 0;
+  max-width: 680px;
+}
+
+.collection-head__eyebrow {
+  margin: 0 0 6px;
+  color: var(--roster-accent, #4f46e5);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.collection-head__title {
+  margin: 0;
+  font-size: clamp(24px, 2.4vw, 34px);
+  line-height: 1.1;
+  color: var(--text-primary, #111827);
+}
+
+.collection-head__copy {
+  margin: 8px 0 0;
+  color: var(--card-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.collection-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.collection-head__new {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 2px;
-}
-.roster-filter select {
-  border: 1px solid var(--border-color, #d1d5db);
-  border-radius: 8px;
-  padding: 5px 8px;
-  font-size: 12px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
-  cursor: pointer;
-  max-width: 140px;
-}
-.roster-filter select:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 1px; }
-.roster-filter-toggle {
-  border: 1px solid var(--border-color, #d1d5db);
-  border-radius: 8px;
-  padding: 5px 10px;
-  font-size: 12px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
-  cursor: pointer;
-}
-.roster-filter-toggle:hover { border-color: var(--primary-color, #4f46e5); }
-.roster-filter-toggle:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 1px; }
-.roster-filter-toggle.is-active {
-  border-color: #f59e0b;
-  background: color-mix(in srgb, #f59e0b 14%, transparent);
-  color: #b45309;
-}
-[data-bs-theme="dark"] .roster-filter-toggle.is-active { color: #fbbf24; }
-
-.roster-empty__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 6px;
-}
-[data-bs-theme="dark"] .roster-filter select,
-[data-bs-theme="dark"] .roster-filter-toggle { background: var(--bg-primary, #1f2430); }
-
-.roster-rail__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.roster-rail__new {
-  font-size: 12px;
-  border: 1px solid var(--primary-color, #4f46e5);
-  color: #fff;
+  height: 40px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
   background: var(--primary-color, #4f46e5);
-  border-radius: 999px;
-  padding: 5px 12px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
 }
-.roster-rail__new:hover { filter: brightness(1.05); }
-.roster-rail__new:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 2px; }
 
-.roster-rail__controls {
-  display: flex;
-  gap: 8px;
+.collection-head__new:hover {
+  filter: brightness(1.05);
 }
 
-.roster-search {
-  flex: 1 1 auto;
-  display: block;
-}
-
-.roster-search input,
-.roster-sort select {
-  width: 100%;
-  border: 1px solid var(--border-color, #d1d5db);
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 14px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
-}
-
-.roster-sort select {
-  width: auto;
-  cursor: pointer;
-}
-
-.roster-search input:focus-visible,
-.roster-sort select:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
-  border-color: var(--primary-color, #4f46e5);
-}
-
-.roster-list {
-  list-style: none;
-  margin: 0;
-  padding: 4px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border-radius: var(--roster-radius);
-}
-
-.roster-list:focus-visible {
+.collection-head__new:focus-visible {
   outline: 2px solid var(--primary-color, #4f46e5);
   outline-offset: 2px;
 }
 
-/* Roster card: a checkbox (bulk selection) + an open button (focus/stage), as
-   sibling controls so the two selection concepts never nest or collide. */
-.roster-card {
+/* ---- Summary tiles -------------------------------------------------------- */
+
+.roster-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.roster-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 84px;
+  padding: 7px 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-soft);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.14s ease;
+}
+
+.roster-stat:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--card-line));
+}
+
+.roster-stat:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+.roster-stat.is-selected {
+  border-color: var(--primary-color, #4f46e5);
+  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
+}
+
+/* Selection is stated in text, not only by the border colour. */
+.roster-stat.is-selected .roster-stat__label::after {
+  content: " ✓";
+}
+
+.roster-stat__value {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-primary, #111827);
+}
+
+.roster-stat__label {
+  font-size: 11px;
+  color: var(--card-muted);
+  white-space: nowrap;
+}
+
+.roster-stat--needs .roster-stat__value {
+  color: #b91c1c;
+}
+
+.roster-stat--needs.roster-stat--zero .roster-stat__value,
+.roster-stat--disabled.roster-stat--zero .roster-stat__value {
+  color: var(--text-primary, #111827);
+}
+
+/* ---- Collection shell ----------------------------------------------------- */
+
+/* The Inspector is a sibling column that can collapse to zero, so closing it
+   hands its width back to the Gallery without a reflow of the page (FR51). */
+.collection-shell {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--inspector-width);
+  gap: var(--collection-gap);
+  align-items: start;
+  min-width: 0;
+}
+
+.collection-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* ---- Collection controls -------------------------------------------------- */
+
+.collection-toolbar {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px 6px 8px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 12px;
-  background: var(--bg-primary, #fff);
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  gap: 10px;
+  min-width: 0;
+}
+
+.collection-search {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+}
+
+.collection-search input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 14px;
+}
+
+.collection-search input:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.collection-selects {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.collection-select {
+  margin: 0;
+  min-width: 0;
+}
+
+.collection-select select {
+  height: 38px;
+  max-width: 170px;
+  padding: 0 8px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.collection-select select:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.collection-chip {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: var(--card-surface);
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.collection-chip:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.collection-chip:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 1px;
+}
+
+.collection-chip[aria-pressed="true"] {
+  border-color: var(--primary-color, #4f46e5);
+  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
+  font-weight: 600;
+}
+
+.collection-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.collection-meta__count {
+  margin: 0;
+  color: var(--card-muted);
+  font-size: 12px;
+}
+
+.collection-meta__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.collection-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* ---- Loading / error states ----------------------------------------------- */
+
+.collection-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  border: 1px dashed var(--card-line);
+  border-radius: var(--roster-radius);
+  text-align: center;
+}
+
+.collection-state__msg {
+  margin: 0;
+  color: var(--card-muted);
+  font-size: 14px;
+}
+
+.collection-state--error {
+  border-style: solid;
+  border-color: color-mix(in srgb, #dc2626 40%, var(--card-line));
+  background: color-mix(in srgb, #dc2626 6%, transparent);
+}
+
+.collection-state--error .collection-state__msg {
+  color: #b91c1c;
+}
+
+[data-bs-theme="dark"] .collection-state--error .collection-state__msg {
+  color: #fca5a5;
+}
+
+/* ---- Gallery grid --------------------------------------------------------- */
+
+/* Fluid: columns follow the collection's own width, so opening or closing the
+   Inspector re-columns the Gallery instead of clipping it (FR79/FR80). */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+/* ---- Agent card ----------------------------------------------------------- */
+
+.roster-card {
+  --role-accent: var(--primary-color, #4f46e5);
+  position: relative;
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--card-line);
+  border-radius: var(--roster-radius);
+  background: var(--card-surface);
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    transform 0.14s ease;
+}
+
+/* Role reads as a top rule rather than as the card's fill, so two agents with
+   the same role are never rendered as the same object (FR71). */
+.roster-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  border-radius: var(--roster-radius) var(--roster-radius) 0 0;
+  background: linear-gradient(
+    90deg,
+    var(--role-accent),
+    color-mix(in srgb, var(--role-accent) 8%, transparent) 78%
+  );
 }
 
 .roster-card:hover {
-  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+  border-color: color-mix(in srgb, var(--role-accent) 50%, var(--card-line));
+  box-shadow: 0 10px 26px -20px rgba(15, 23, 42, 0.55);
+  transform: translateY(-1px);
 }
 
-/* Checkbox column */
+/* Focused (drives the Inspector) reads as a solid ring plus a corner marker;
+   checked (drives bulk actions) reads as an inset outline. Both can be present
+   at once and stay tellable apart without colour (FR41). */
+.roster-card.is-focused {
+  border-color: var(--role-accent);
+  box-shadow: inset 0 0 0 1px var(--role-accent);
+}
+
+.roster-card.is-focused::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--role-accent);
+  background: var(--card-surface);
+  transform: rotate(45deg);
+}
+
+.roster-card.is-checked {
+  box-shadow: inset 0 0 0 2px var(--primary-color, #4f46e5);
+}
+
+.roster-card.is-focused.is-checked {
+  box-shadow:
+    inset 0 0 0 2px var(--primary-color, #4f46e5),
+    0 0 0 1px var(--role-accent);
+}
+
+/* Needs-attention is carried by a dashed left edge as well as the status text,
+   so it survives a monochrome or colour-blind reading (FR24/FR90). */
+.roster-card.is-attention {
+  border-left: 3px dashed #b45309;
+}
+
+.roster-card.is-disabled {
+  opacity: 0.72;
+}
+
+.roster-card.is-disabled .agent-avatar {
+  filter: grayscale(0.6);
+}
+
+/* Built-in definitions are read-only here: a muted surface plus the visible
+   "Built-in" badge say so before a user tries to edit one (FR18). */
+.roster-card.is-permanent {
+  background: var(--card-soft);
+  border-style: dashed;
+}
+
 .roster-card__checkwrap {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 4px;
+  padding: 3px;
   margin: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--card-surface) 82%, transparent);
   cursor: pointer;
-  align-self: stretch;
 }
 
 .roster-card__check {
@@ -248,257 +478,445 @@
   outline-offset: 2px;
 }
 
-/* Open/focus button: a full-width, unstyled button that carries the card's
-   avatar + body + status. Button reset so it reads as a card, not a control. */
+/* The open control is the card body: a full-size button reset so it reads as a
+   card, kept a sibling of the checkbox rather than its parent (FR40). */
 .roster-card__open {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   width: 100%;
-  padding: 4px 2px;
+  min-width: 0;
+  padding: 20px 15px 15px;
   border: 0;
-  background: none;
-  font: inherit;
+  border-radius: inherit;
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  border-radius: 8px;
+  font: inherit;
 }
 
 .roster-card__open:focus-visible {
   outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
+  outline-offset: -3px;
 }
 
-/* Built-in "permanent residency" agents (CLI + Ori): a warm amber tint sets
-   them apart from user agents, kept distinct from the green selection cue. */
-.roster-card.is-permanent {
-  background: color-mix(in srgb, #f59e0b 22%, var(--bg-primary, #fff));
-  border-color: color-mix(in srgb, #f59e0b 45%, var(--border-color, #e5e7eb));
-}
-.roster-card.is-permanent .roster-card__meta {
-  /* Keep the secondary line readable on the filled amber background. */
-  color: color-mix(in srgb, var(--text-primary, #111827) 72%, transparent);
-}
-.roster-card.is-permanent:hover {
-  border-color: color-mix(in srgb, #f59e0b 65%, var(--border-color, #e5e7eb));
-}
-[data-bs-theme="dark"] .roster-card.is-permanent {
-  background: color-mix(in srgb, #f59e0b 20%, var(--bg-primary, #1f2430));
-}
-
-/* Focused agent (drives the stage): a left edge-bar + subtle tint. Distinct from
-   the checked cue below so a card can show focused, checked, both, or neither
-   without relying on color alone (PRD FR5). */
-.roster-card.is-focused {
-  border-color: var(--primary-color, #4f46e5);
-  background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, var(--bg-primary, #fff));
-  box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5);
-}
-
-/* Checked agent (bulk target): a ring around the whole card, driven by the
-   checkbox, independent of focus. */
-.roster-card.is-checked {
-  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 70%, var(--border-color, #e5e7eb));
-  background: color-mix(in srgb, var(--primary-color, #4f46e5) 5%, var(--bg-primary, #fff));
-}
-
-/* Focused AND checked: combine the edge-bar (focus) with the checked ring. */
-.roster-card.is-focused.is-checked {
-  box-shadow: inset 3px 0 0 var(--primary-color, #4f46e5),
-    0 0 0 1px color-mix(in srgb, var(--primary-color, #4f46e5) 55%, transparent);
-}
-
-.roster-card__avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  display: flex;
+.agent-card__visual {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
   align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 14px;
-  color: #fff;
-  overflow: hidden;
-}
-
-.roster-card__body {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.roster-card__namerow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   min-width: 0;
 }
 
-.roster-card__name {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0;
+.agent-card__heading {
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-primary, #111827);
 }
 
-.roster-card__badge {
-  flex: none;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: #92400e;
-  background: #fbe6c8;
-  border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent);
-}
-
-[data-bs-theme="dark"] .roster-card__badge {
-  color: #fbbf24;
-  background: color-mix(in srgb, #f59e0b 18%, transparent);
-}
-
-.roster-card__meta {
-  font-size: 12px;
-  color: var(--text-secondary, #6b7280);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-}
-
-.roster-card__status {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--border-color, #9ca3af);
-  flex: none;
-}
-
-.roster-card__status.is-idle { background: #9ca3af; }
-.roster-card__status.is-active { background: #22c55e; }
-.roster-card__status.is-error { background: #ef4444; }
-.roster-card__status.is-disabled { background: #d1d5db; }
-
-/* Favorite star + textual status label + tag chips on the card. Status is
-   conveyed by text, never by the dot's color alone (PRD FR55). */
-.roster-card__fav {
-  color: #f59e0b;
-  font-size: 13px;
-  flex: none;
-}
-
-/* Solid (opaque) pill colors so contrast is predictable on any card background,
-   including the amber built-in cards (WCAG AA, PRD FR55/FR87). */
-.roster-card__statuslabel {
-  flex: none;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: #374151;
-  background: #e5e7eb;
-}
-.roster-card__statuslabel.is-active {
-  color: #14532d;
-  background: #bbf7d0;
-}
-.roster-card__statuslabel.is-error {
-  color: #7f1d1d;
-  background: #fecaca;
-}
-[data-bs-theme="dark"] .roster-card__statuslabel { color: #1f2937; background: #cbd5e1; }
-[data-bs-theme="dark"] .roster-card__statuslabel.is-active { color: #14532d; background: #86efac; }
-[data-bs-theme="dark"] .roster-card__statuslabel.is-error { color: #7f1d1d; background: #fca5a5; }
-
-.roster-card__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 3px;
-}
-.roster-card__tag {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  color: var(--text-secondary, #6b7280);
-  background: color-mix(in srgb, var(--primary-color, #4f46e5) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 20%, transparent);
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.roster-card__tag--more {
-  background: none;
-  border-color: var(--border-color, #e5e7eb);
-}
-
-/* Progression row: role chip (emblem + name, or a neutral Unspecialized
-   badge) plus a level/stage chip. Additive to the existing card layout. */
-.roster-card__progress {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  flex-wrap: wrap;
-}
-
-.roster-card__role-chip {
+.agent-card__status {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
+  gap: 6px;
+  margin-bottom: 5px;
+  color: var(--card-muted);
+  font-size: 11px;
   font-weight: 600;
-  padding: 1px 7px 1px 5px;
-  border-radius: 999px;
-  color: var(--role-accent, var(--text-secondary, #6b7280));
-  background: color-mix(in srgb, var(--role-accent, #9ca3af) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--role-accent, #9ca3af) 30%, transparent);
-  max-width: 100%;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.agent-card__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.agent-card__status.is-active .agent-card__dot {
+  background: #15803d;
+}
+
+.agent-card__status.is-error {
+  color: #b91c1c;
+}
+
+.agent-card__status.is-error .agent-card__dot {
+  background: #b91c1c;
+  /* A ring makes error tellable from ready without relying on hue. */
+  box-shadow: 0 0 0 2px color-mix(in srgb, #b91c1c 30%, transparent);
+}
+
+.agent-card__status.is-disabled .agent-card__dot {
+  background: transparent;
+  border: 1px solid var(--card-muted);
+}
+
+.agent-card__name {
+  display: block;
   overflow: hidden;
+  color: var(--text-primary, #111827);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.roster-card__role-chip.is-unspecialized {
-  color: var(--text-secondary, #6b7280);
-  background: color-mix(in srgb, var(--border-color, #9ca3af) 20%, transparent);
-  border-color: var(--border-color, #d1d5db);
-  font-weight: 500;
+.agent-card__class {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 5px;
+  color: var(--role-accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-card__badge {
+  padding: 1px 6px;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  color: var(--card-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.agent-card__purpose {
+  display: -webkit-box;
+  min-height: 38px;
+  overflow: hidden;
+  color: var(--card-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* Missing values are stated, and stated as missing, rather than styled to look
+   like real content (FR20). */
+.agent-card__purpose.is-missing,
+.agent-card__model.is-missing,
+.agent-card__activity.is-missing {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.agent-card__section,
+.agent-card__toolbox {
+  display: block;
+  min-width: 0;
+}
+
+.agent-card__section-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--card-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.agent-card__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.agent-card__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 1px solid var(--card-line);
+  border-radius: 999px;
+  background: var(--card-soft);
+  color: var(--card-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card__pill::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  background: var(--role-accent);
+  transform: rotate(45deg);
+}
+
+.agent-card__pill.is-more::before,
+.agent-card__pill.is-empty::before {
+  display: none;
+}
+
+.agent-card__pill.is-empty {
   font-style: italic;
 }
 
-.roster-card__role-emblem {
-  font-size: 10px;
-  line-height: 1;
+.agent-card__toolbox {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--role-accent) 22%, var(--card-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--role-accent) 5%, var(--card-soft));
 }
 
-.roster-card__level-chip {
-  font-size: 10px;
+.agent-card__toolbox.is-empty {
+  border-color: var(--card-line);
+  background: var(--card-soft);
+}
+
+.agent-card__toolbox-value {
+  display: block;
+  overflow: hidden;
+  color: var(--text-primary, #111827);
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 1px 7px;
-  border-radius: 999px;
-  color: var(--text-secondary, #6b7280);
-  background: var(--bg-tertiary, #f3f4f6);
-  border: 1px solid var(--border-color, #e5e7eb);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.roster-empty {
-  text-align: center;
-  color: var(--text-secondary, #6b7280);
+.agent-card__toolbox.is-empty .agent-card__toolbox-value {
+  color: var(--card-muted);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.agent-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin-top: auto;
+  padding-top: 4px;
+  color: var(--card-muted);
+  font-size: 11px;
+}
+
+.agent-card__model,
+.agent-card__activity {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card__fav {
+  flex: 0 0 auto;
+  color: #b45309;
   font-size: 13px;
-  padding: 20px;
+}
+
+[data-bs-theme="dark"] .agent-card__fav {
+  color: #fbbf24;
+}
+
+[data-bs-theme="dark"] .agent-card__status.is-active .agent-card__dot {
+  background: #4ade80;
+}
+
+[data-bs-theme="dark"] .agent-card__status.is-error,
+[data-bs-theme="dark"] .roster-stat--needs:not(.roster-stat--zero) .roster-stat__value {
+  color: #fca5a5;
+}
+
+[data-bs-theme="dark"] .agent-card__status.is-error .agent-card__dot {
+  background: #fca5a5;
+}
+
+/* ---- Avatar Identity v1 --------------------------------------------------- */
+
+/* Geometry is fixed per size so the grid never reflows while a custom image
+   decodes (FR97). Every colour arrives as a --aa-* custom property that
+   agent-avatar.js validated; nothing here reads agent data directly. */
+.agent-avatar {
+  --aa-size: 72px;
+  --aa-base: #263243;
+  --aa-deep: #0b0f14;
+  --aa-ink: #fff;
+  --aa-angle: 155deg;
+  --aa-motif-alpha: 0.18;
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  width: var(--aa-size);
+  height: var(--aa-size);
+  place-items: center;
+  overflow: hidden;
+  border-radius: 12px;
+  isolation: isolate;
+}
+
+.agent-avatar--fallback {
+  border: 1px solid color-mix(in srgb, var(--aa-accent, var(--aa-base)) 55%, transparent);
+  background: linear-gradient(var(--aa-angle), var(--aa-base), var(--aa-deep));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.agent-avatar__initials {
+  position: relative;
+  z-index: 2;
+  color: var(--aa-ink);
+  font-size: calc(var(--aa-size) * 0.31);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Motifs are pure CSS keyed on a token the module owns, so the fallback needs
+   no image file and no remote request (FR98). */
+.agent-avatar__motif {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: var(--aa-motif-alpha);
+  pointer-events: none;
+}
+
+.agent-avatar[data-aa-turn="1"] .agent-avatar__motif {
+  transform: rotate(90deg);
+}
+
+.agent-avatar[data-aa-turn="2"] .agent-avatar__motif {
+  transform: rotate(180deg);
+}
+
+.agent-avatar[data-aa-turn="3"] .agent-avatar__motif {
+  transform: rotate(270deg);
+}
+
+.agent-avatar[data-aa-motif="rings"] .agent-avatar__motif {
+  background: repeating-radial-gradient(circle at 50% 50%, #fff 0 1px, transparent 1px 9px);
+}
+
+.agent-avatar[data-aa-motif="grid"] .agent-avatar__motif {
+  background:
+    repeating-linear-gradient(0deg, #fff 0 1px, transparent 1px 10px),
+    repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px);
+}
+
+.agent-avatar[data-aa-motif="bars"] .agent-avatar__motif {
+  background: repeating-linear-gradient(45deg, #fff 0 2px, transparent 2px 11px);
+}
+
+.agent-avatar[data-aa-motif="orbit"] .agent-avatar__motif {
+  background:
+    radial-gradient(circle at 78% 20%, #fff 0 22%, transparent 23%),
+    radial-gradient(circle at 20% 80%, #fff 0 14%, transparent 15%);
+}
+
+.agent-avatar[data-aa-motif="chevron"] .agent-avatar__motif {
+  background: repeating-conic-gradient(
+    from 45deg at 50% 50%,
+    #fff 0deg 12deg,
+    transparent 12deg 45deg
+  );
+}
+
+.agent-avatar[data-aa-motif="dots"] .agent-avatar__motif {
+  background: radial-gradient(circle, #fff 1.4px, transparent 1.5px);
+  background-size: 11px 11px;
+}
+
+.agent-avatar[data-aa-motif="prism"] .agent-avatar__motif {
+  background: conic-gradient(from 210deg at 30% 70%, #fff 0deg 55deg, transparent 55deg 360deg);
+}
+
+.agent-avatar[data-aa-motif="wave"] .agent-avatar__motif {
+  background: repeating-radial-gradient(circle at 15% 110%, transparent 0 12px, #fff 12px 13px);
+}
+
+/* Role emblem sits on the frame as an accent badge, never as the fill (FR71). */
+.agent-avatar__emblem {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 3;
+  display: grid;
+  width: calc(var(--aa-size) * 0.28);
+  height: calc(var(--aa-size) * 0.28);
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--aa-accent, #fff) 70%, transparent);
+  border-radius: 6px;
+  background: rgba(6, 10, 12, 0.72);
+  color: var(--aa-accent, #fff);
+  font-size: calc(var(--aa-size) * 0.15);
+  line-height: 1;
+}
+
+/* Built-in identities read as system infrastructure: a bracketed frame instead
+   of the library card's soft ring (FR73). */
+.agent-avatar[data-aa-system="1"] {
+  border-radius: 6px;
+}
+
+.agent-avatar[data-aa-system="1"]::before,
+.agent-avatar[data-aa-system="1"]::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  width: 9px;
+  height: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.agent-avatar[data-aa-system="1"]::before {
+  top: 4px;
+  left: 4px;
+  border-width: 1px 0 0 1px;
+}
+
+.agent-avatar[data-aa-system="1"]::after {
+  right: 4px;
+  bottom: 4px;
+  border-width: 0 1px 1px 0;
+}
+
+.agent-avatar--image {
+  border: 1px solid var(--card-line);
+  background: var(--card-soft);
+}
+
+.agent-avatar__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---- Empty state / link buttons ------------------------------------------- */
+
+.roster-empty {
+  padding: 40px 20px;
+  border: 1px dashed var(--card-line);
+  border-radius: var(--roster-radius);
+  text-align: center;
+  color: var(--card-muted);
+  font-size: 14px;
+}
+
+.roster-empty p {
+  margin: 0 0 10px;
+}
+
+.roster-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
 }
 
 .roster-linkbtn {
@@ -516,29 +934,21 @@
   border-radius: 4px;
 }
 
-/* ---- Bulk selection controls + action bar --------------------------------- */
+/* ---- Bulk action bar ------------------------------------------------------ */
 
-.roster-selectbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 2px 4px;
-  min-height: 20px;
-}
-
-/* Contextual bulk action bar, revealed when >=1 agent is checked. Sticks to the
-   bottom of the roster rail so it stays reachable without covering the stage
-   (PRD FR16/FR21). */
+/* Revealed when >=1 agent is checked. Sticks to the bottom of the page shell so
+   it stays reachable while the collection scrolls (PRD FR45). */
 .bulk-bar {
   position: sticky;
-  bottom: 0;
+  bottom: 12px;
+  z-index: 20;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
   padding: 10px 12px;
-  margin: 8px 4px 0;
-  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
+  border: 1px solid
+    color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
   border-radius: 12px;
   background: color-mix(in srgb, var(--primary-color, #4f46e5) 6%, var(--bg-primary, #fff));
   box-shadow: 0 -4px 12px color-mix(in srgb, #000 8%, transparent);
@@ -567,7 +977,9 @@
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .bulk-bar__btn:hover {
@@ -601,7 +1013,6 @@
 /* ---- Bulk result surface -------------------------------------------------- */
 
 .bulk-result {
-  margin: 8px 4px 0;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 12px;
   background: var(--bg-primary, #fff);
@@ -634,7 +1045,7 @@
   font-size: 12px;
   padding: 4px 6px;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--text-secondary, #6b7280) 8%, transparent);
+  background: color-mix(in srgb, var(--card-muted) 12%, transparent);
 }
 
 .bulk-result__item.is-failed {
@@ -648,11 +1059,13 @@
 }
 
 .bulk-result__reason {
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   min-width: 0;
 }
 
-[data-bs-theme="dark"] .bulk-result { background: var(--bg-primary, #1f2430); }
+[data-bs-theme="dark"] .bulk-result {
+  background: var(--bg-primary, #1f2430);
+}
 
 /* ---- Bulk-delete confirmation dialog -------------------------------------- */
 
@@ -679,7 +1092,7 @@
 .bulk-dialog__lead {
   margin: 0 0 14px;
   font-size: 13px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
 }
 
 .bulk-dialog__body {
@@ -705,7 +1118,7 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
 }
 
 .bulk-dialog__grouplist {
@@ -732,12 +1145,12 @@
 .bulk-dialog__reason,
 .bulk-dialog__wslink {
   font-size: 12px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
 }
 
 .bulk-dialog__none {
   font-size: 13px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   margin: 0;
 }
 
@@ -769,11 +1182,21 @@
   transition: background 0.15s ease;
 }
 
-.btn-danger:hover:not(:disabled) { background: #991b1b; }
-.btn-danger:focus-visible { outline: 2px solid #b91c1c; outline-offset: 2px; }
-.btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-danger:hover:not(:disabled) {
+  background: #991b1b;
+}
+.btn-danger:focus-visible {
+  outline: 2px solid #b91c1c;
+  outline-offset: 2px;
+}
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
-[data-bs-theme="dark"] .bulk-dialog { background: var(--bg-primary, #1f2430); }
+[data-bs-theme="dark"] .bulk-dialog {
+  background: var(--bg-primary, #1f2430);
+}
 
 .bulk-dialog__text {
   width: 100%;
@@ -836,7 +1259,7 @@
 }
 .avatar-control__status {
   font-size: 12px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
 }
 
 .stage-meta {
@@ -849,7 +1272,7 @@
   font-size: 12px;
 }
 .stage-meta dt {
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   font-weight: 600;
 }
 .stage-meta dd {
@@ -857,9 +1280,10 @@
   color: var(--text-primary, #111827);
 }
 
-/* ---- Stage ---------------------------------------------------------------- */
+/* ---- Inspector (selected agent) ------------------------------------------- */
 
-.roster-stage {
+.inspector {
+  min-width: 0;
   min-height: 420px;
 }
 
@@ -872,7 +1296,7 @@
   min-height: 420px;
   border: 1px dashed var(--border-color, #d1d5db);
   border-radius: var(--roster-radius);
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   text-align: center;
   padding: 24px;
 }
@@ -892,14 +1316,18 @@
 .stage__hero {
   position: relative;
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(0, 1fr);
   grid-template-areas:
     "avatar ident"
     "vitals vitals";
   gap: 14px 16px;
   padding: 22px 24px;
   border-bottom: 1px solid var(--border-color, #e5e7eb);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-color, #4f46e5) 6%, transparent), transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary-color, #4f46e5) 6%, transparent),
+    transparent
+  );
 }
 
 .stage__actions {
@@ -913,7 +1341,8 @@
 
 .stage__fullpage {
   font-size: 12px;
-  border: 1px solid color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
+  border: 1px solid
+    color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
   color: var(--primary-color, #4f46e5);
   background: transparent;
   border-radius: 8px;
@@ -922,8 +1351,13 @@
   text-decoration: none;
   white-space: nowrap;
 }
-.stage__fullpage:hover { background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent); }
-.stage__fullpage:focus-visible { outline: 2px solid var(--primary-color, #4f46e5); outline-offset: 2px; }
+.stage__fullpage:hover {
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent);
+}
+.stage__fullpage:focus-visible {
+  outline: 2px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
 
 .stage__delete {
   font-size: 12px;
@@ -934,24 +1368,25 @@
   padding: 6px 12px;
   cursor: pointer;
 }
-.stage__delete:hover { background: color-mix(in srgb, #dc2626 12%, transparent); }
-.stage__delete:focus-visible { outline: 2px solid #dc2626; outline-offset: 2px; }
-
-.stage__avatar {
-  grid-area: avatar;
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 24px;
-  color: #fff;
-  overflow: hidden;
+.stage__delete:hover {
+  background: color-mix(in srgb, #dc2626 12%, transparent);
+}
+.stage__delete:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
 }
 
-.stage__ident { grid-area: ident; align-self: center; min-width: 0; }
+/* Geometry comes from the shared avatar renderer (--aa-size); the stage only
+   places it in the hero grid. */
+.stage__avatar {
+  grid-area: avatar;
+}
+
+.stage__ident {
+  grid-area: ident;
+  align-self: center;
+  min-width: 0;
+}
 
 .stage__name {
   margin: 0;
@@ -964,7 +1399,7 @@
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
 }
 
 .stage__vitals {
@@ -1007,14 +1442,14 @@
   height: 26px;
   border-radius: 8px;
   font-size: 13px;
-  color: var(--role-accent, var(--text-secondary, #6b7280));
+  color: var(--role-accent, var(--card-muted));
   background: color-mix(in srgb, var(--role-accent, #9ca3af) 16%, transparent);
 }
 
 .stage__progression-level {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   white-space: nowrap;
 }
 
@@ -1043,14 +1478,16 @@
 
 .stage__progression-xplabel {
   font-size: 11px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   white-space: nowrap;
 }
 
+/* --card-muted rather than --text-secondary: the dark value of the latter
+   (#8A8A8A) only reaches 4.03:1 against --bg-tertiary (#2A2C33). */
 .stage__progression-slots {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   white-space: nowrap;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1070,24 +1507,34 @@
   color: var(--text-primary, #111827);
 }
 
-.vital b { font-weight: 600; }
-.vital span { color: var(--text-secondary, #6b7280); }
+.vital b {
+  font-weight: 600;
+}
+.vital span {
+  color: var(--card-muted);
+}
 
 .vital--warn {
   background: color-mix(in srgb, #f59e0b 14%, transparent);
   border-color: color-mix(in srgb, #f59e0b 45%, var(--border-color, #e5e7eb));
 }
-.vital--warn b { color: #b45309; }
+.vital--warn b {
+  color: #b45309;
+}
 
 /* Note under the Model picker: pricing / good-for hint, legacy warning. */
 .model-note {
   margin: 6px 2px 0;
   font-size: 12px;
   line-height: 1.4;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
 }
-.model-note:empty { display: none; }
-.model-note.is-legacy { color: #b45309; }
+.model-note:empty {
+  display: none;
+}
+.model-note.is-legacy {
+  color: #b45309;
+}
 
 /* Tabs */
 .stage__tabs {
@@ -1104,11 +1551,13 @@
   border-bottom: 2px solid transparent;
   padding: 12px 14px;
   font-size: 14px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   cursor: pointer;
 }
 
-.stage__tab:hover { color: var(--text-primary, #111827); }
+.stage__tab:hover {
+  color: var(--text-primary, #111827);
+}
 
 .stage__tab.is-active {
   /* High-contrast text; the colored underline + weight signal the active tab
@@ -1124,8 +1573,12 @@
   border-radius: 4px 4px 0 0;
 }
 
-.stage__panels { padding: 20px 24px; }
-.stage__panel[hidden] { display: none; }
+.stage__panels {
+  padding: 20px 24px;
+}
+.stage__panel[hidden] {
+  display: none;
+}
 
 .stage-facts {
   display: grid;
@@ -1134,8 +1587,15 @@
   margin: 0 0 16px;
 }
 
-.stage-facts dt { color: var(--text-secondary, #6b7280); font-size: 13px; }
-.stage-facts dd { margin: 0; font-size: 14px; color: var(--text-primary, #111827); }
+.stage-facts dt {
+  color: var(--card-muted);
+  font-size: 13px;
+}
+.stage-facts dd {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary, #111827);
+}
 
 .stage-desc {
   font-size: 14px;
@@ -1160,9 +1620,17 @@
   color: var(--text-primary, #111827);
 }
 
-.stage-hint { color: var(--text-secondary, #6b7280); font-size: 13px; margin: 0; }
+.stage-hint {
+  color: var(--card-muted);
+  font-size: 13px;
+  margin: 0;
+}
 
-.stage-workspaces { display: flex; flex-direction: column; gap: 8px; }
+.stage-workspaces {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .ws-row {
   display: flex;
@@ -1175,8 +1643,13 @@
   font-size: 14px;
 }
 
-.ws-row a { text-decoration: none; color: var(--text-primary, #111827); }
-.ws-row a:hover { color: var(--primary-color, #4f46e5); }
+.ws-row a {
+  text-decoration: none;
+  color: var(--text-primary, #111827);
+}
+.ws-row a:hover {
+  color: var(--primary-color, #4f46e5);
+}
 
 .ws-entry-pill {
   font-size: 11px;
@@ -1186,7 +1659,7 @@
   color: var(--roster-accent, #4f46e5);
 }
 
-/* ---- Editable forms (G3) -------------------------------------------------- */
+/* ---- Editable forms ------------------------------------------------------- */
 
 .stage-form {
   display: flex;
@@ -1202,7 +1675,7 @@
 }
 
 .field__label {
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   font-size: 13px;
 }
 
@@ -1221,12 +1694,15 @@
   font-family: inherit;
 }
 
-.field__control textarea { resize: vertical; line-height: 1.5; }
+.field__control textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
 
 /* Read-only derived field (e.g. Provider, set by the selected model). */
 .field__control input.field__readonly {
   background: var(--bg-secondary, #f3f4f6);
-  color: var(--text-secondary, #6b7280);
+  color: var(--card-muted);
   cursor: default;
 }
 .field__control input.field__readonly:focus-visible {
@@ -1258,7 +1734,9 @@
   font-size: 14px;
   color: var(--text-primary, #111827);
 }
-.field__control .check input { width: auto; }
+.field__control .check input {
+  width: auto;
+}
 
 /* Save bar */
 .save-bar {
@@ -1272,19 +1750,33 @@
 
 .save-bar .dirty-note {
   font-size: 12px;
-  color: var(--text-secondary, #9ca3af);
+  color: var(--card-muted);
   margin-right: auto;
 }
-.save-bar.is-dirty .dirty-note { color: var(--roster-accent, #4f46e5); }
+.save-bar.is-dirty .dirty-note {
+  color: var(--roster-accent, #4f46e5);
+}
 
-.save-status { font-size: 12px; }
-.save-status.is-ok { color: #15803d; }
-.save-status.is-error { color: #dc2626; }
-.save-status.is-muted { color: var(--text-secondary, #9ca3af); }
+.save-status {
+  font-size: 12px;
+}
+.save-status.is-ok {
+  color: #15803d;
+}
+.save-status.is-error {
+  color: #dc2626;
+}
+.save-status.is-muted {
+  color: var(--card-muted);
+}
 
 /* Brighter status text for sufficient contrast on dark surfaces. */
-[data-bs-theme="dark"] .save-status.is-ok { color: #4ade80; }
-[data-bs-theme="dark"] .save-status.is-error { color: #f87171; }
+[data-bs-theme="dark"] .save-status.is-ok {
+  color: #4ade80;
+}
+[data-bs-theme="dark"] .save-status.is-error {
+  color: #f87171;
+}
 
 .btn-primary,
 .btn-ghost {
@@ -1298,13 +1790,18 @@
   background: var(--primary-color, #4f46e5);
   color: #fff;
 }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .btn-ghost {
   background: transparent;
   border-color: var(--border-color, #d1d5db);
   color: var(--text-primary, #111827);
 }
-.btn-ghost:hover { border-color: var(--primary-color, #4f46e5); }
+.btn-ghost:hover {
+  border-color: var(--primary-color, #4f46e5);
+}
 .btn-primary:focus-visible,
 .btn-ghost:focus-visible {
   outline: 2px solid var(--primary-color, #4f46e5);
@@ -1325,7 +1822,9 @@
   border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border-color, #e5e7eb));
   color: var(--text-primary, #111827);
 }
-.conflict-banner span { flex: 1; }
+.conflict-banner span {
+  flex: 1;
+}
 .conflict-banner__action {
   flex: none;
   border: 1px solid #f59e0b;
@@ -1337,7 +1836,9 @@
   cursor: pointer;
   white-space: nowrap;
 }
-.conflict-banner__action:hover { background: color-mix(in srgb, #f59e0b 20%, transparent); }
+.conflict-banner__action:hover {
+  background: color-mix(in srgb, #f59e0b 20%, transparent);
+}
 
 [data-bs-theme="dark"] .field__control input,
 [data-bs-theme="dark"] .field__control select,
@@ -1347,14 +1848,17 @@
 }
 [data-bs-theme="dark"] .field__control input.field__readonly {
   background: rgba(255, 255, 255, 0.015);
-  color: var(--text-secondary, #9ca3af);
+  color: var(--card-muted);
 }
 
 @media (max-width: 560px) {
-  .field { grid-template-columns: 1fr; gap: 4px; }
+  .field {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 
-/* ---- Workspaces assignment + create panel (G4) ---------------------------- */
+/* ---- Workspaces assignment + create panel --------------------------------- */
 
 .ws-list {
   display: flex;
@@ -1372,11 +1876,22 @@
   font-size: 14px;
   cursor: pointer;
 }
-.ws-check:hover { border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb)); }
-.ws-check input { width: auto; }
-.ws-check__name { flex: 1; }
-.ws-check.is-locked { cursor: default; opacity: 0.85; }
-.ws-check.is-locked:hover { border-color: var(--border-color, #e5e7eb); }
+.ws-check:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
+}
+.ws-check input {
+  width: auto;
+}
+.ws-check__name {
+  flex: 1;
+}
+.ws-check.is-locked {
+  cursor: default;
+  opacity: 0.85;
+}
+.ws-check.is-locked:hover {
+  border-color: var(--border-color, #e5e7eb);
+}
 
 .create-panel {
   border: 1px solid var(--border-color, #e5e7eb);
@@ -1391,18 +1906,29 @@
   padding: 18px 24px;
   border-bottom: 1px solid var(--border-color, #e5e7eb);
 }
-.create-panel__head h2 { margin: 0; font-size: 20px; }
-.create-panel__body { padding: 20px 24px; }
+.create-panel__head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.create-panel__body {
+  padding: 20px 24px;
+}
 
 [data-bs-theme="dark"] .create-panel,
-[data-bs-theme="dark"] .ws-check { background: var(--bg-primary, #1f2430); }
+[data-bs-theme="dark"] .ws-check {
+  background: var(--bg-primary, #1f2430);
+}
 
 .visually-hidden {
   position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0 0 0 0);
-  white-space: nowrap; border: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---- Dark theme nudges ---------------------------------------------------- */
@@ -1415,35 +1941,41 @@
   background: color-mix(in srgb, #f59e0b 20%, transparent);
 }
 [data-bs-theme="dark"] .vital--warn b,
-[data-bs-theme="dark"] .model-note.is-legacy { color: #fbbf24; }
+[data-bs-theme="dark"] .model-note.is-legacy {
+  color: #fbbf24;
+}
 
-[data-bs-theme="dark"] .roster-card,
-[data-bs-theme="dark"] .stage,
-[data-bs-theme="dark"] .roster-search input,
-[data-bs-theme="dark"] .roster-sort select {
+[data-bs-theme="dark"] .stage {
   background: var(--bg-primary, #1f2430);
 }
-[data-bs-theme="dark"] .roster-stat { background: rgba(255, 255, 255, 0.03); }
-[data-bs-theme="dark"] .roster-stat--needs:not(.roster-stat--zero) .roster-stat__value { color: #f87171; }
 
 /* ---- Responsive ----------------------------------------------------------- */
 
+/* Tablet: the Inspector no longer earns a column of its own, so the collection
+   takes the full width and the Inspector stacks beneath it (FR52/FR79). */
+@media (max-width: 1100px) {
+  .collection-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .collection-select select {
+    max-width: none;
+  }
+}
+
 @media (max-width: 860px) {
   .roster-layout {
-    grid-template-columns: 1fr;
     padding: 14px;
     gap: 14px;
   }
-  .roster-rail {
-    position: static;
-    max-height: none;
+  .collection-head {
+    align-items: flex-start;
   }
-  /* Roster becomes a scrollable strip above the full-width stage. */
-  .roster-list {
-    max-height: 44vh;
+  .collection-head__actions {
+    width: 100%;
+    justify-content: space-between;
   }
-  /* Stack the bulk bar so its count and actions never overflow the narrow rail
-     or force horizontal page scrolling (PRD FR21). */
+  /* Bulk actions stack so the count and every button stay visible instead of
+     forcing horizontal page scroll (FR82/FR93). */
   .bulk-bar {
     flex-direction: column;
     align-items: stretch;
@@ -1451,16 +1983,58 @@
   .bulk-bar__actions {
     justify-content: flex-start;
   }
-  .roster-filter select { max-width: none; flex: 1 1 auto; }
   .stage__hero {
-    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-columns: 72px minmax(0, 1fr);
     padding: 18px 18px 16px;
   }
-  .stage__avatar { width: 52px; height: 52px; font-size: 20px; }
-  .stage__actions { top: 12px; right: 14px; }
-  .stage__panels { padding: 16px; }
-  .stage-facts { grid-template-columns: 1fr; gap: 2px 0; }
-  .stage-facts dt { margin-top: 8px; }
+  .stage__actions {
+    top: 12px;
+    right: 14px;
+  }
+  .stage__panels {
+    padding: 16px;
+  }
+  .stage-facts {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+  .stage-facts dt {
+    margin-top: 8px;
+  }
+}
+
+/* common.css enforces a 44x44 minimum touch target for checkboxes at this
+   breakpoint, which makes the checkwrap 50px square. Give the card body enough
+   top clearance that the control sits in its own band instead of covering the
+   portrait's initials — the same arrangement as the approved mobile reference. */
+@media (max-width: 768px) {
+  .roster-card__open {
+    padding-top: 58px;
+  }
+}
+
+/* Mobile: one full-width card column, and every control wraps rather than
+   overflowing (FR81/FR93). */
+@media (max-width: 640px) {
+  .agent-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .roster-stats {
+    flex: 1 1 auto;
+  }
+  .roster-stat {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .collection-selects {
+    width: 100%;
+  }
+  .collection-select {
+    flex: 1 1 140px;
+  }
+  .collection-select select {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1471,7 +2045,11 @@
   .bulk-bar__btn--danger,
   .btn-primary,
   .btn-ghost,
-  .btn-danger {
+  .btn-danger,
+  .stage__progression-xpfill {
     transition: none;
+  }
+  .roster-card:hover {
+    transform: none;
   }
 }
