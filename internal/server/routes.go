@@ -1041,6 +1041,17 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.GetMission)
 	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.UpdateMission)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.UpdateMission)
+	// Goal Prepare: propose/accept a brief, see explained recommendations, pin
+	// a toolbox version, and check the same preflight the scheduler runs
+	// (PRD FR-92–FR-106). Read paths change nothing; only the two PUTs write.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/goal/brief", s.Handlers.Workspace.GetGoalBrief)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/goal/brief", s.Handlers.Workspace.UpdateGoalBrief)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/goal/brief", s.Handlers.Workspace.UpdateGoalBrief)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/goal/recommendations", s.Handlers.Workspace.GetGoalRecommendations)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/goal/toolbox-policy", s.Handlers.Workspace.UpdateGoalToolboxPolicy)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/goal/toolbox-policy", s.Handlers.Workspace.UpdateGoalToolboxPolicy)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/goal/preflight", s.Handlers.Workspace.GetGoalPreflight)
+
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", s.Handlers.Workspace.TriggerMission)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", s.Handlers.Workspace.RunBaselineNow)
 

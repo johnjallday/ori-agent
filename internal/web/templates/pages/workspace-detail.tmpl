@@ -688,6 +688,12 @@
                     <div id="workspace-detail-mission-status-body" class="workspace-detail-settings-summary-copy">Loading goal automation status...</div>
                   </div>
 
+                  <!-- Goal Prepare: what this goal needs, and which saved
+                       toolbox covers it. Populated by workspace-goal-prepare.js
+                       from the server's brief + ranking. Read-only until the
+                       user accepts a brief or pins a toolbox (PRD FR-92-FR-106). -->
+                  <section id="workspace-goal-prepare" class="ws-goal-prepare" aria-label="Prepare this goal"></section>
+
                   <!-- Bindings readiness warning (shown only when bindings unclassified) -->
                   <div id="workspace-detail-mission-bindings-warning" class="workspace-detail-empty" style="display: none; border-left: 3px solid var(--warning-color, #f5a623); background: var(--warning-bg, rgba(245,166,35,0.08)); padding: 0.75rem 1rem; margin-bottom: 1rem;">
                     <strong>Classify your bindings before enabling goal automation.</strong>
@@ -8835,6 +8841,9 @@
        mounts into #workspace-toolbox-panel, which workspace-command.js renders
        inside the agent Toolbox tab and the map Unit Sheet. -->
   <script defer src="/js/modules/workspace-toolbox.js"></script>
+  <!-- Goal Prepare: the brief and the ranked toolbox recommendations. Mounts
+       into #workspace-goal-prepare inside the goal-automation panel. -->
+  <script defer src="/js/modules/workspace-goal-prepare.js"></script>
   <script defer src="/js/modules/calendar-ops-setup.js"></script>
   <script defer src="/js/modules/calendar-console.js"></script>
   <!-- Must precede sessions.js: it reads window.CreateWorkspaceTeamDraft while

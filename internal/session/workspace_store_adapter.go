@@ -297,11 +297,14 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 	// this store dropped would turn its assignment into an unreadable pin, and
 	// the runtime fails an agent closed rather than guessing (see
 	// toolboxAssignmentForInstance).
-	if len(ws.Toolboxes) > 0 || len(ws.ToolboxAssignments) > 0 || ws.ToolboxMigration != nil {
+	if len(ws.Toolboxes) > 0 || len(ws.ToolboxAssignments) > 0 || ws.ToolboxMigration != nil ||
+		ws.GoalBrief != nil || ws.GoalToolboxPolicy != nil {
 		state := workspaceToolboxState{
-			Toolboxes:   ws.Toolboxes,
-			Assignments: ws.ToolboxAssignments,
-			Migration:   ws.ToolboxMigration,
+			Toolboxes:         ws.Toolboxes,
+			Assignments:       ws.ToolboxAssignments,
+			Migration:         ws.ToolboxMigration,
+			GoalBrief:         ws.GoalBrief,
+			GoalToolboxPolicy: ws.GoalToolboxPolicy,
 		}
 		if data, err := json.Marshal(state); err != nil {
 			logger.Warn("Failed to marshal workspace toolboxes", logger.Fields{"workspace_id": ws.ID, "error": err})
@@ -314,10 +317,16 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 }
 
 // workspaceToolboxState is the envelope carried in ToolboxStateJSON.
+//
+// The Goal brief and policy ride along because they are read and written with
+// the toolboxes they reference: a pinned policy naming a toolbox this store did
+// not carry would be an unresolvable pin that stops the goal at preflight.
 type workspaceToolboxState struct {
-	Toolboxes   []workspace.ToolboxDefinition      `json:"toolboxes,omitempty"`
-	Assignments []workspace.AgentToolboxAssignment `json:"toolbox_assignments,omitempty"`
-	Migration   *workspace.ToolboxMigrationState   `json:"toolbox_migration,omitempty"`
+	Toolboxes         []workspace.ToolboxDefinition      `json:"toolboxes,omitempty"`
+	Assignments       []workspace.AgentToolboxAssignment `json:"toolbox_assignments,omitempty"`
+	Migration         *workspace.ToolboxMigrationState   `json:"toolbox_migration,omitempty"`
+	GoalBrief         *workspace.GoalBrief               `json:"goal_brief,omitempty"`
+	GoalToolboxPolicy *workspace.GoalToolboxPolicy       `json:"goal_toolbox_policy,omitempty"`
 }
 
 // toAgentWorkspace converts session.Workspace to workspace.Workspace.
@@ -495,6 +504,8 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			agentWS.Toolboxes = state.Toolboxes
 			agentWS.ToolboxAssignments = state.Assignments
 			agentWS.ToolboxMigration = state.Migration
+			agentWS.GoalBrief = state.GoalBrief
+			agentWS.GoalToolboxPolicy = state.GoalToolboxPolicy
 		}
 	}
 

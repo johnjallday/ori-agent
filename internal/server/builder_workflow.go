@@ -572,6 +572,11 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		newToolboxLibraryAdapter(b.skillsManager, b.mcpConfigManager),
 		newLoadoutResolverAdapter(b.st),
 	)
+	// The same inputs feed the Goal preflight that stops a cadence-driven run
+	// before the model is invoked when its pinned toolbox is unusable (FR-105).
+	if b.taskScheduler != nil {
+		b.taskScheduler.SetToolboxPreflightDeps(workshopSkills, newLoadoutResolverAdapter(b.st))
+	}
 	if verbose {
 		logger.Info("Workspace HTTP handler initialized", logger.Fields{})
 	}

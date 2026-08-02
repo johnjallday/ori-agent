@@ -203,6 +203,17 @@ type Workspace struct {
 	// event-fired run pushes the next cadence run back, like any other run.
 	MissionCadenceHeartbeat bool          `json:"mission_cadence_heartbeat,omitempty"`
 	Opportunities           []Opportunity `json:"opportunities,omitempty"`
+	// GoalBrief is the structured, user-accepted statement of what this
+	// workspace's Goal needs — output, sources, semantic operations, autonomy
+	// ceiling, mandatory capabilities (see toolbox_goal_brief.go). Nil until a
+	// user accepts one, and an unaccepted brief never drives recommendations
+	// (FR-92–FR-94).
+	GoalBrief *GoalBrief `json:"goal_brief,omitempty"`
+	// GoalToolboxPolicy records which Toolbox version the Goal runs with, and
+	// whether that choice is pinned. Pinning is the default so a recurring goal
+	// cannot silently change behavior when someone edits a toolbox (FR-103,
+	// FR-104).
+	GoalToolboxPolicy *GoalToolboxPolicy `json:"goal_toolbox_policy,omitempty"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`

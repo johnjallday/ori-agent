@@ -182,6 +182,28 @@ test.describe('Workshop', () => {
     await page.screenshot({ path: 'test-results/toolbox-preview.png' });
   });
 
+  test('Goal Prepare renders the brief and explained recommendations', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      })
+    );
+
+    const id = await workspaceID(page);
+    await page.goto(`/workspaces/${id}`);
+
+    const prepare = page.locator('#workspace-goal-prepare');
+    await expect(prepare).toBeAttached({ timeout: 20000 });
+    // The brief section always renders — either the accepted brief, or the
+    // invitation to review a suggestion (FR-92, FR-94).
+    await expect(prepare.getByText('What this goal needs')).toBeVisible({ timeout: 15000 });
+
+    await page.screenshot({ path: 'test-results/goal-prepare.png' });
+  });
+
   test('every operation and selector is reachable and named for assistive tech', async ({
     page
   }) => {

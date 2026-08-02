@@ -39,6 +39,11 @@ type TaskScheduler struct {
 	// concurrent run before the first finishes and advances NextMissionRunAt.
 	missionMu       sync.Mutex
 	missionInFlight map[string]bool
+
+	// Optional per-agent inputs for the Goal toolbox preflight that runs before
+	// a cadence-driven run (see preflightGoalToolbox). Nil is safe.
+	toolboxSkills   ToolboxMigrationSkillSource
+	toolboxCapacity ToolboxMigrationCapacitySource
 }
 
 // WakeCandidate describes the next task run that may need a macOS wake event.

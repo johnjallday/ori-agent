@@ -6155,6 +6155,134 @@ button.ws-cmd-rpg-class-card:focus-visible {
   outline-offset: 2px;
 }
 
+/* ---------- Goal Prepare (FR-92–FR-106) ---------- */
+.ws-goal-prepare {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.ws-goal-brief,
+.ws-goal-editor,
+.ws-goal-policy,
+.ws-goal-recs,
+.ws-goal-variant {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #fff);
+}
+
+.ws-goal-variant {
+  border-style: dashed;
+}
+
+.ws-goal-prepare h4,
+.ws-goal-prepare h5 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.ws-goal-brief-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-goal-note,
+.ws-goal-rec-why {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-goal-warn {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--warning-color, #b26a00);
+}
+
+.ws-goal-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger-color, #c62828);
+}
+
+.ws-goal-notice {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--success-color, #2e7d32);
+}
+
+.ws-goal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.ws-goal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.ws-goal-rec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.ws-goal-rec.is-covering {
+  border-color: var(--primary-color, #3355ff);
+}
+
+.ws-goal-rec-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ws-goal-rec-name {
+  font-weight: 600;
+}
+
+/* "Best match" is carried in text as well as in the accent (FR-162). */
+.ws-goal-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #eee);
+  color: var(--text-secondary, #666);
+  white-space: nowrap;
+}
+
+.ws-goal-chip.is-best {
+  color: var(--primary-color, #3355ff);
+}
+
+.ws-goal-inspect:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}
+
 /* Reduced motion: the Workshop uses no entrance animation, but a card's
    selection change should not animate either when the user has asked for less
    movement (FR-165). */
@@ -6162,7 +6290,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-toolbox-card,
   .ws-toolbox-select,
   .ws-toolbox-op,
-  .ws-toolbox-prereq {
+  .ws-toolbox-prereq,
+  .ws-goal-rec {
     transition: none;
   }
 }

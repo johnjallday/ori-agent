@@ -109,6 +109,8 @@ func (s *SyncStore) Save(ws *Workspace) error {
 					ws.Toolboxes = cloneToolboxDefinitions(diskWorkspace.Toolboxes)
 					ws.ToolboxAssignments = cloneToolboxAssignments(diskWorkspace.ToolboxAssignments)
 					ws.ToolboxMigration = diskWorkspace.ToolboxMigration
+					ws.GoalBrief = diskWorkspace.GoalBrief.Clone()
+					ws.GoalToolboxPolicy = diskWorkspace.GoalToolboxPolicy.Clone()
 				}
 			}
 		}
@@ -138,7 +140,8 @@ func capabilitiesMissing(ws *Workspace) bool {
 // references it (FR-21). So an entirely empty toolbox state can only mean this
 // record never loaded it.
 func toolboxStateMissing(ws *Workspace) bool {
-	return len(ws.Toolboxes) == 0 && len(ws.ToolboxAssignments) == 0 && ws.ToolboxMigration == nil
+	return len(ws.Toolboxes) == 0 && len(ws.ToolboxAssignments) == 0 && ws.ToolboxMigration == nil &&
+		ws.GoalBrief == nil && ws.GoalToolboxPolicy == nil
 }
 
 func cloneToolboxDefinitions(definitions []ToolboxDefinition) []ToolboxDefinition {
