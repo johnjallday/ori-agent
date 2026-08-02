@@ -234,6 +234,44 @@ type Workspace struct {
 	// mutate-then-save cycle (the window CanonicalUpdate holds open), and a copy
 	// decoded from disk correctly carries no pending intent.
 	capabilitiesExplicit bool
+
+	// missionLoaded records that THIS in-memory value arrived with its Goal
+	// configuration, as opposed to arriving without it.
+	//
+	// The two are otherwise indistinguishable — both leave Mission empty and
+	// MissionEnabled false — but they must produce opposite behavior on save: a
+	// record that predates the mission_state_json column has to be refilled
+	// from the canonical workspace.json, while a Goal the user deliberately
+	// cleared has to be allowed to write through. The primary store sets this
+	// via MarkMissionLoaded when its envelope was present (SQL NULL means
+	// absent), so a cleared Goal — a real, empty-valued envelope — is never
+	// resurrected. See SyncStore.Save.
+	//
+	// Never persisted and never cloned: it describes how one value was loaded,
+	// and a copy decoded from disk always carries its own Goal directly.
+	missionLoaded bool
+}
+
+// MarkMissionLoaded records that this value's Goal configuration came from a
+// store that actually carried it. Called by the primary store's conversion; see
+// the field comment for why the distinction matters.
+func (w *Workspace) MarkMissionLoaded() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.missionLoaded = true
+}
+
+// MissionLoaded reports whether this value arrived with its Goal configuration.
+func (w *Workspace) MissionLoaded() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.missionLoaded
 }
 
 // CanvasLayout stores positions of tasks and agents on the canvas

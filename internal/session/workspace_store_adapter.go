@@ -313,7 +313,47 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		}
 	}
 
+	// The Goal envelope is written UNCONDITIONALLY, even when every field is
+	// empty. That is what makes "no envelope" mean "this record predates the
+	// column" rather than "this workspace has no Goal" — the distinction
+	// SyncStore relies on to heal a legacy row without resurrecting a Goal the
+	// user cleared.
+	if data, err := json.Marshal(workspaceMissionState{
+		Mission:                 ws.Mission,
+		MissionEnabled:          ws.MissionEnabled,
+		AutonomyPolicy:          ws.AutonomyPolicy,
+		Cadence:                 ws.Cadence,
+		NotificationPolicy:      ws.NotificationPolicy,
+		LastMissionRunAt:        ws.LastMissionRunAt,
+		NextMissionRunAt:        ws.NextMissionRunAt,
+		MissionExecutionCount:   ws.MissionExecutionCount,
+		MissionFailureCount:     ws.MissionFailureCount,
+		MissionCadenceHeartbeat: ws.MissionCadenceHeartbeat,
+	}); err != nil {
+		logger.Warn("Failed to marshal workspace goal", logger.Fields{"workspace_id": ws.ID, "error": err})
+	} else {
+		sessionWS.MissionStateJSON = data
+	}
+
 	return sessionWS
+}
+
+// workspaceMissionState is the envelope carried in MissionStateJSON.
+//
+// Config and counters travel together because they are only meaningful
+// together: a cadence with no NextMissionRunAt reads as permanently due, and
+// counters without their cadence cannot be interpreted at all.
+type workspaceMissionState struct {
+	Mission                 string                        `json:"mission,omitempty"`
+	MissionEnabled          bool                          `json:"mission_enabled,omitempty"`
+	AutonomyPolicy          workspace.AutonomyPolicy      `json:"autonomy_policy,omitempty"`
+	Cadence                 *workspace.ScheduleConfig     `json:"cadence,omitempty"`
+	NotificationPolicy      *workspace.NotificationPolicy `json:"notification_policy,omitempty"`
+	LastMissionRunAt        *time.Time                    `json:"last_mission_run_at,omitempty"`
+	NextMissionRunAt        *time.Time                    `json:"next_mission_run_at,omitempty"`
+	MissionExecutionCount   int                           `json:"mission_execution_count,omitempty"`
+	MissionFailureCount     int                           `json:"mission_failure_count,omitempty"`
+	MissionCadenceHeartbeat bool                          `json:"mission_cadence_heartbeat,omitempty"`
 }
 
 // workspaceToolboxState is the envelope carried in ToolboxStateJSON.
@@ -506,6 +546,27 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			agentWS.ToolboxMigration = state.Migration
 			agentWS.GoalBrief = state.GoalBrief
 			agentWS.GoalToolboxPolicy = state.GoalToolboxPolicy
+		}
+	}
+
+	if len(ws.MissionStateJSON) > 0 {
+		var mission workspaceMissionState
+		if err := json.Unmarshal(ws.MissionStateJSON, &mission); err != nil {
+			logger.Warn("Failed to unmarshal workspace goal", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			// An envelope was present, so whatever it says — including a Goal
+			// the user cleared — is the truth and must not be healed away.
+			agentWS.MarkMissionLoaded()
+			agentWS.Mission = mission.Mission
+			agentWS.MissionEnabled = mission.MissionEnabled
+			agentWS.AutonomyPolicy = mission.AutonomyPolicy
+			agentWS.Cadence = mission.Cadence
+			agentWS.NotificationPolicy = mission.NotificationPolicy
+			agentWS.LastMissionRunAt = mission.LastMissionRunAt
+			agentWS.NextMissionRunAt = mission.NextMissionRunAt
+			agentWS.MissionExecutionCount = mission.MissionExecutionCount
+			agentWS.MissionFailureCount = mission.MissionFailureCount
+			agentWS.MissionCadenceHeartbeat = mission.MissionCadenceHeartbeat
 		}
 	}
 

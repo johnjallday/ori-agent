@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 35
+const schemaVersion = 36
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -135,6 +135,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration034WorkspaceInstalledCapabilities(ctx)
 	case 35:
 		return db.migration035WorkspaceToolboxes(ctx)
+	case 36:
+		return db.migration036WorkspaceMission(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -200,6 +202,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			agent_skill_access_json TEXT DEFAULT '[]',
 			installed_capabilities_json TEXT DEFAULT '[]',
 			toolbox_state_json TEXT DEFAULT '{}',
+			mission_state_json TEXT,
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -1291,6 +1294,36 @@ func (db *DB) migration035WorkspaceToolboxes(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN toolbox_state_json TEXT DEFAULT '{}'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace toolbox_state_json column: %w", err)
+	}
+	return nil
+}
+
+// migration036WorkspaceMission adds the mission_state_json column so a
+// workspace's Goal — its text, cadence, autonomy, notification policy, and run
+// counters — round-trips through the primary store.
+//
+// Without it every one of those fields was silently dropped on read, and the
+// ordinary load → mutate → save cycle then wrote the emptied values back over
+// the canonical workspace.json. A user could configure a Goal, see it save, and
+// find it gone after an unrelated edit.
+//
+// The default is NULL rather than '{}' on purpose. NULL is the durable signal
+// "this row predates the column", which is what lets SyncStore heal a legacy
+// workspace from disk exactly once without ever resurrecting a Goal the user
+// deliberately cleared — a cleared Goal writes a real (empty-valued) envelope,
+// which is not NULL.
+func (db *DB) migration036WorkspaceMission(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN mission_state_json TEXT
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace mission_state_json column: %w", err)
 	}
 	return nil
 }
