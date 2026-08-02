@@ -433,6 +433,26 @@ type Workspace struct {
 	// installed_capabilities; workspace.json stays canonical, and SyncStore.Save
 	// restores this from disk when a stale record would otherwise clear it.
 	InstalledCapabilitiesJSON json.RawMessage `json:"installed_capabilities,omitempty"`
+
+	// ToolboxStateJSON contains the workspace's named Toolboxes, their
+	// per-instance assignments, and its Toolbox migration state, serialized
+	// together as one envelope (see WorkspaceToolboxState).
+	//
+	// They travel as one value because they are only meaningful together: a
+	// Toolbox with no assignment grants nothing, and an assignment naming a
+	// Toolbox this store did not carry is an unreadable pin that fails the
+	// agent closed. Mirrors workspace.json, which stays canonical.
+	ToolboxStateJSON json.RawMessage `json:"toolbox_state,omitempty"`
+
+	// MissionStateJSON carries the workspace Goal: its text, cadence, autonomy
+	// policy, notification policy, enabled flag, and run counters, serialized
+	// together (see WorkspaceMissionState).
+	//
+	// NIL means this record predates the column and never loaded a Goal —
+	// which is what lets SyncStore heal it from the canonical workspace.json.
+	// A Goal the user deliberately cleared is a real, non-nil envelope with
+	// empty values, so healing can never resurrect it.
+	MissionStateJSON json.RawMessage `json:"mission_state,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.

@@ -217,6 +217,12 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			agentHandler.AssignWorkspaces(w, r)
 			return
 		}
+		// Global Default Toolbox — the agent's explicit skill selection for
+		// direct, non-workspace chat (PRD FR-24).
+		if strings.HasSuffix(r.URL.Path, "/default-toolbox") {
+			agentHandler.HandleDefaultToolbox(w, r)
+			return
+		}
 		// Regular agent requests - delegate to agentHandler
 		agentHandler.ServeHTTP(w, r)
 	})
@@ -997,6 +1003,32 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.UpdateSkillBinding)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/skill-bindings/{bindingID}", s.Handlers.Workspace.DeleteSkillBinding)
 
+	// Named Toolbox routes — the explicit, versioned capability recipes a
+	// workspace owns, and the pinned assignment each stable agent instance
+	// carries (PRD FR-8, FR-15, FR-37). Read-only in V1 group 1; creation,
+	// versioning, preview, and the atomic use operation land with the Workshop
+	// surface.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes", s.Handlers.Workspace.ListToolboxes)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/toolboxes", s.Handlers.Workspace.CreateToolboxHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.GetToolboxByID)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.UpdateToolboxHandler)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.UpdateToolboxHandler)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.DeleteToolboxHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/toolboxes/{toolboxID}/versions", s.Handlers.Workspace.CreateToolboxVersionHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/toolboxes/{toolboxID}/status", s.Handlers.Workspace.SetToolboxStatusHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes/{toolboxID}/compare", s.Handlers.Workspace.CompareToolboxVersionsHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolbox-workshop", s.Handlers.Workspace.GetToolboxWorkshop)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes", s.Handlers.Workspace.ListAgentToolboxes)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}", s.Handlers.Workspace.GetAgentToolbox)
+	// Preview is a GET that cannot write; use is a POST that revalidates
+	// everything the preview claimed (PRD FR-74, FR-83). Keeping them separate
+	// is what stops "show me what would happen" from being the same request as
+	// "do it".
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/preview", s.Handlers.Workspace.PreviewToolboxHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/use", s.Handlers.Workspace.UseToolboxHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/undo", s.Handlers.Workspace.PreviewUndoToolboxHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}/undo", s.Handlers.Workspace.UndoToolboxHandler)
+
 	// Agent skill access routes
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-skill-access", s.Handlers.Workspace.ListAgentSkillAccess)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-skill-access/{agentInstanceID}", s.Handlers.Workspace.GetAgentSkillAccessEntry)
@@ -1009,6 +1041,17 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.GetMission)
 	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.UpdateMission)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/mission", s.Handlers.Workspace.UpdateMission)
+	// Goal Prepare: propose/accept a brief, see explained recommendations, pin
+	// a toolbox version, and check the same preflight the scheduler runs
+	// (PRD FR-92–FR-106). Read paths change nothing; only the two PUTs write.
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/goal/brief", s.Handlers.Workspace.GetGoalBrief)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/goal/brief", s.Handlers.Workspace.UpdateGoalBrief)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/goal/brief", s.Handlers.Workspace.UpdateGoalBrief)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/goal/recommendations", s.Handlers.Workspace.GetGoalRecommendations)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/goal/toolbox-policy", s.Handlers.Workspace.UpdateGoalToolboxPolicy)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/goal/toolbox-policy", s.Handlers.Workspace.UpdateGoalToolboxPolicy)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/goal/preflight", s.Handlers.Workspace.GetGoalPreflight)
+
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/trigger", s.Handlers.Workspace.TriggerMission)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/mission/baseline", s.Handlers.Workspace.RunBaselineNow)
 

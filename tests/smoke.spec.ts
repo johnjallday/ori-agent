@@ -1314,12 +1314,12 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(inspector).toContainText('Research Analyst');
     await expect(inspector).toContainText('Needs input');
     await expect(inspector).toContainText('Class');
-    await expect(inspector).toContainText('Loadout');
+    await expect(inspector).toContainText('Toolbox');
     await expect(inspector).toContainText('Current Quest');
     await expect(inspector).toContainText('Command Menu');
     await expect(inspector).toContainText('Resolve Quest');
     await expect(inspector).toContainText('Start Session');
-    await expect(inspector).toContainText('Configure Loadout');
+    await expect(inspector).toContainText('Open the Workshop');
     await expect(inspector).toContainText('Quests');
     await expect(inspector).toContainText('Skills');
     const inspectorGeometry = await inspector.evaluate(node => {

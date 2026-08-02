@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -43,13 +44,13 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run *Run) error {
 			id, workspace_id, parent_run_id, profile_id, profile_version,
 			profile_snapshot_json, executor_json, scope_json, policy_json, environment_json, context_plan_json,
 			reference_url, prompt, status, created_at, started_at, finished_at,
-			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, error, updated_at
+			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, toolbox_snapshot_json, toolbox_wrap_up_json, error, updated_at
 		)
-		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, run.ID, run.WorkspaceID, run.ParentRunID, run.ProfileID, run.ProfileVersion,
 		mustJSON(run.ProfileSnapshot), mustJSON(run.Executor), mustJSON(run.Scope), mustJSON(run.Policy), mustJSON(run.Environment), mustJSON(run.ContextPlan),
 		run.ReferenceURL, run.Prompt, string(run.Status), run.CreatedAt, nullableTime(run.StartedAt), nullableTime(run.FinishedAt),
-		nullableJSON(run.PreparedContext), nullableJSON(run.ValidationRequest), nullableJSON(run.ValidationResult), nullableJSON(run.TaskOutput), nullableJSON(run.Cost), nullableJSON(run.Report), nullableString(run.Error), now)
+		nullableJSON(run.PreparedContext), nullableJSON(run.ValidationRequest), nullableJSON(run.ValidationResult), nullableJSON(run.TaskOutput), nullableJSON(run.Cost), nullableJSON(run.Report), nullableJSON(run.ToolboxSnapshot), nullableJSON(run.ToolboxWrapUp), nullableString(run.Error), now)
 	if err != nil {
 		if isUniqueConstraint(err) {
 			return ErrRunExists
@@ -294,6 +295,31 @@ func (s *SQLiteStore) SetCost(ctx context.Context, workspaceID, runID string, co
 	return checkRunUpdate(result, err, "set workspace run cost")
 }
 
+// SetToolboxSnapshot freezes the run's capabilities.
+//
+// Called BEFORE the model is invoked, which is the whole point: a snapshot
+// written afterwards would describe what the run ended up with rather than what
+// it was given, and could not prove that a mid-run toolbox edit changed nothing
+// (PRD FR-107).
+func (s *SQLiteStore) SetToolboxSnapshot(ctx context.Context, workspaceID, runID string, snapshot RunToolboxSnapshot) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE workspace_runs
+		SET toolbox_snapshot_json = ?, updated_at = ?
+		WHERE workspace_id = ? AND id = ?
+	`, mustJSON(snapshot), time.Now(), workspaceID, runID)
+	return checkRunUpdate(result, err, "set workspace run toolbox snapshot")
+}
+
+// SetToolboxWrapUp records the post-run measurement against that snapshot.
+func (s *SQLiteStore) SetToolboxWrapUp(ctx context.Context, workspaceID, runID string, wrapUp ToolboxWrapUp) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE workspace_runs
+		SET toolbox_wrap_up_json = ?, updated_at = ?
+		WHERE workspace_id = ? AND id = ?
+	`, mustJSON(wrapUp), time.Now(), workspaceID, runID)
+	return checkRunUpdate(result, err, "set workspace run toolbox wrap-up")
+}
+
 func (s *SQLiteStore) SetError(ctx context.Context, workspaceID, runID, errMessage string) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspace_runs
@@ -308,7 +334,7 @@ func (s *SQLiteStore) getRun(ctx context.Context, workspaceID, runID string) (*R
 		SELECT id, workspace_id, parent_run_id, profile_id, profile_version,
 			profile_snapshot_json, executor_json, scope_json, policy_json, environment_json, context_plan_json,
 			reference_url, prompt, status, created_at, started_at, finished_at,
-			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, error
+			prepared_context_json, validation_request_json, validation_result_json, task_output_json, cost_json, report_json, toolbox_snapshot_json, toolbox_wrap_up_json, error
 		FROM workspace_runs
 		WHERE workspace_id = ? AND id = ?
 	`, workspaceID, runID)
@@ -332,12 +358,12 @@ func scanRun(row scanner) (*Run, error) {
 	var profileJSON, executorJSON, scopeJSON, policyJSON, envJSON, contextPlanJSON string
 	var status string
 	var startedAt, finishedAt sql.NullTime
-	var preparedContextJSON, validationReqJSON, validationResultJSON, taskOutputJSON, costJSON, reportJSON, errText sql.NullString
+	var preparedContextJSON, validationReqJSON, validationResultJSON, taskOutputJSON, costJSON, reportJSON, toolboxSnapshotJSON, toolboxWrapUpJSON, errText sql.NullString
 	if err := row.Scan(
 		&run.ID, &run.WorkspaceID, &parent, &run.ProfileID, &run.ProfileVersion,
 		&profileJSON, &executorJSON, &scopeJSON, &policyJSON, &envJSON, &contextPlanJSON,
 		&run.ReferenceURL, &run.Prompt, &status, &run.CreatedAt, &startedAt, &finishedAt,
-		&preparedContextJSON, &validationReqJSON, &validationResultJSON, &taskOutputJSON, &costJSON, &reportJSON, &errText,
+		&preparedContextJSON, &validationReqJSON, &validationResultJSON, &taskOutputJSON, &costJSON, &reportJSON, &toolboxSnapshotJSON, &toolboxWrapUpJSON, &errText,
 	); err != nil {
 		return nil, err
 	}
@@ -406,6 +432,23 @@ func scanRun(row scanner) (*Run, error) {
 		}
 		run.Report = &report
 	}
+	// NULL means this run predates snapshots, which is different from having
+	// had no capabilities — leaving these nil keeps that distinction readable
+	// instead of reporting a historical run as unrestricted or empty.
+	if toolboxSnapshotJSON.Valid {
+		var snapshot RunToolboxSnapshot
+		if err := decodeJSON(toolboxSnapshotJSON.String, &snapshot); err != nil {
+			return nil, err
+		}
+		run.ToolboxSnapshot = &snapshot
+	}
+	if toolboxWrapUpJSON.Valid {
+		var wrapUp ToolboxWrapUp
+		if err := decodeJSON(toolboxWrapUpJSON.String, &wrapUp); err != nil {
+			return nil, err
+		}
+		run.ToolboxWrapUp = &wrapUp
+	}
 	return CloneRun(&run), nil
 }
 
@@ -451,8 +494,21 @@ func mustJSON(value any) string {
 	return string(b)
 }
 
+// nullableJSON stores a missing optional value as SQL NULL rather than the
+// JSON literal "null".
+//
+// The reflect check is doing real work. Every caller passes a TYPED pointer —
+// (*CostSummary)(nil), (*Report)(nil) — and a typed nil in an `any` is not
+// equal to nil, so the plain `value == nil` test never fired. Those fields were
+// being stored as the four bytes "null", read back as Valid, decoded into a
+// zero struct, and handed out as a non-nil pointer to an empty value. A run
+// with no cost reported a cost of zero rather than no cost at all, which is a
+// different claim.
 func nullableJSON(value any) any {
 	if value == nil {
+		return nil
+	}
+	if reflected := reflect.ValueOf(value); reflected.Kind() == reflect.Ptr && reflected.IsNil() {
 		return nil
 	}
 	return mustJSON(value)

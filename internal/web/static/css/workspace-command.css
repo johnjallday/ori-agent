@@ -5706,3 +5706,614 @@ button.ws-cmd-rpg-class-card:focus-visible {
   outline: 2px solid var(--ws-idle);
   outline-offset: 2px;
 }
+
+/* ---------- The Workshop: named toolboxes (PRD FR-37–FR-54, FR-165–FR-169) ----------
+   The visual language is a workbench, not an armory: shelves of labelled cards,
+   plain text for every real property, and no rarity tiers, badges, or fictional
+   bonuses. Everything a card shows maps to something the runtime actually does
+   (FR-166, FR-169). */
+.ws-toolbox-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.ws-toolbox-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ws-toolbox-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-title h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.ws-toolbox-version {
+  font-size: 0.78rem;
+  color: var(--text-secondary, #666);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Separate readouts rather than one opaque score (FR-71). */
+.ws-toolbox-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-toolbox-fact-warn {
+  color: var(--warning-color, #b26a00);
+  font-weight: 600;
+}
+
+.ws-toolbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ws-toolbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #fff);
+}
+
+/* Status is carried by text as well as by the accent, so it survives without
+   color (FR-162). */
+.ws-toolbox-row.is-current {
+  border-color: var(--primary-color, #3355ff);
+}
+
+.ws-toolbox-row.is-archived {
+  opacity: 0.72;
+}
+
+.ws-toolbox-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.ws-toolbox-row-name {
+  font-weight: 600;
+}
+
+.ws-toolbox-row-meta,
+.ws-toolbox-row-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-toolbox-row-actions,
+.ws-toolbox-create,
+.ws-toolbox-actions,
+.ws-toolbox-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ws-toolbox-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ws-toolbox-section h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.ws-toolbox-section-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-toolbox-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 0.5rem;
+}
+
+.ws-toolbox-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #fff);
+  min-width: 0;
+}
+
+.ws-toolbox-card.is-selected {
+  border-color: var(--primary-color, #3355ff);
+}
+
+.ws-toolbox-card.is-locked {
+  background: var(--bg-tertiary, #f4f4f5);
+}
+
+.ws-toolbox-card.is-unavailable,
+.ws-toolbox-card.is-library,
+.ws-toolbox-card.is-requirement {
+  border-style: dashed;
+}
+
+.ws-toolbox-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-card-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ws-toolbox-card-summary,
+.ws-toolbox-card-scope,
+.ws-toolbox-card-risk,
+.ws-toolbox-card-policy {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #666);
+  overflow-wrap: anywhere;
+}
+
+.ws-toolbox-card-warn {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--warning-color, #b26a00);
+  overflow-wrap: anywhere;
+}
+
+.ws-toolbox-chip,
+.ws-toolbox-lock {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #eee);
+  color: var(--text-secondary, #666);
+  white-space: nowrap;
+}
+
+.ws-toolbox-chip.is-connected {
+  color: var(--success-color, #2e7d32);
+}
+
+.ws-toolbox-chip.is-disconnected,
+.ws-toolbox-chip.is-unavailable,
+.ws-toolbox-chip.is-archived {
+  color: var(--warning-color, #b26a00);
+}
+
+.ws-toolbox-select,
+.ws-toolbox-op,
+.ws-toolbox-expand {
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  background: var(--bg-primary, #fff);
+  color: inherit;
+}
+
+.ws-toolbox-select.is-on,
+.ws-toolbox-op.is-on {
+  border-color: var(--primary-color, #3355ff);
+  font-weight: 600;
+}
+
+.ws-toolbox-select[disabled],
+.ws-toolbox-op[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.ws-toolbox-expand {
+  align-self: flex-start;
+  border-radius: var(--radius-sm, 0.3rem);
+}
+
+/* Concrete operations, not server names (FR-68). */
+.ws-toolbox-ops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ws-toolbox-ops li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-op-risk {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #666);
+}
+
+/* Wide content scrolls inside its own box; the panel never scrolls sideways. */
+.ws-toolbox-prompt,
+.ws-toolbox-config {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg-tertiary, #f4f4f5);
+  border-radius: var(--radius-sm, 0.3rem);
+  padding: 0.4rem 0.5rem;
+}
+
+.ws-toolbox-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.ws-toolbox-compare h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.ws-toolbox-diff {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.82rem;
+}
+
+.ws-toolbox-diff-line.is-warn {
+  color: var(--warning-color, #b26a00);
+  font-weight: 600;
+}
+
+.ws-toolbox-empty,
+.ws-toolbox-notice,
+.ws-toolbox-error {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.ws-toolbox-empty {
+  color: var(--text-secondary, #666);
+}
+
+.ws-toolbox-notice {
+  color: var(--success-color, #2e7d32);
+}
+
+.ws-toolbox-error {
+  color: var(--danger-color, #c62828);
+}
+
+/* The single persistent live region. Visually hidden because the same text is
+   already shown in .ws-toolbox-error / .ws-toolbox-notice — this node exists so
+   assistive tech hears a result once, when it happens, rather than on every
+   re-render (FR-164). Clip rather than display:none, which would remove it from
+   the accessibility tree entirely. */
+.ws-toolbox-live,
+.ws-goal-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* These four are custom-styled controls whose default ring the base styles
+   remove. Every one of them is a real <button>, so they are already in the tab
+   order — this rule is what makes it possible to SEE where you are (FR-163). */
+.ws-toolbox-select:focus-visible,
+.ws-toolbox-op:focus-visible,
+.ws-toolbox-expand:focus-visible,
+.ws-toolbox-prereq:focus-visible,
+.ws-toolbox-setup-link:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .ws-toolbox-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .ws-toolbox-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ---------- Preview, Focus, receipt, and Undo (FR-71, FR-78-FR-90) ---------- */
+.ws-toolbox-preview,
+.ws-toolbox-receipt,
+.ws-toolbox-focus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #fff);
+}
+
+.ws-toolbox-preview h4,
+.ws-toolbox-receipt h4,
+.ws-toolbox-focus h4 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.ws-toolbox-preview h5 {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+}
+
+.ws-toolbox-receipt {
+  border-color: var(--success-color, #2e7d32);
+}
+
+/* The state is text, so it reads correctly without color (FR-162). */
+.ws-toolbox-focus-state {
+  font-weight: 700;
+}
+
+.ws-toolbox-focus-state.is-crowded,
+.ws-toolbox-focus-state.is-needs-attention {
+  color: var(--warning-color, #b26a00);
+}
+
+.ws-toolbox-focus-reasons {
+  list-style: disc;
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #666);
+}
+
+/* Each prerequisite is its own row with its own control: completing one never
+   approves another (FR-80). */
+.ws-toolbox-prereqs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ws-toolbox-prereqs li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-prereqs li.is-done .ws-toolbox-prereq-text {
+  color: var(--text-secondary, #666);
+}
+
+.ws-toolbox-prereq-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.ws-toolbox-prereq {
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  background: var(--bg-primary, #fff);
+  color: inherit;
+}
+
+.ws-toolbox-prereq.is-on {
+  border-color: var(--success-color, #2e7d32);
+  font-weight: 600;
+}
+
+.ws-toolbox-undo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ws-toolbox-prereq:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}
+
+/* ---------- Goal Prepare (FR-92–FR-106) ---------- */
+.ws-goal-prepare {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.ws-goal-brief,
+.ws-goal-editor,
+.ws-goal-policy,
+.ws-goal-recs,
+.ws-goal-variant {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #fff);
+}
+
+.ws-goal-variant {
+  border-style: dashed;
+}
+
+.ws-goal-prepare h4,
+.ws-goal-prepare h5 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.ws-goal-brief-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-goal-note,
+.ws-goal-rec-why {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--text-secondary, #666);
+}
+
+.ws-goal-warn {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--warning-color, #b26a00);
+}
+
+.ws-goal-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger-color, #c62828);
+}
+
+.ws-goal-notice {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--success-color, #2e7d32);
+}
+
+.ws-goal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.ws-goal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.ws-goal-rec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.ws-goal-rec.is-covering {
+  border-color: var(--primary-color, #3355ff);
+}
+
+.ws-goal-rec-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.ws-goal-rec-name {
+  font-weight: 600;
+}
+
+/* "Best match" is carried in text as well as in the accent (FR-162). */
+.ws-goal-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #eee);
+  color: var(--text-secondary, #666);
+  white-space: nowrap;
+}
+
+.ws-goal-chip.is-best {
+  color: var(--primary-color, #3355ff);
+}
+
+.ws-goal-inspect:focus-visible {
+  outline: 2px solid var(--ws-idle);
+  outline-offset: 2px;
+}
+
+/* Reduced motion: the Workshop uses no entrance animation, but a card's
+   selection change should not animate either when the user has asked for less
+   movement (FR-165). */
+@media (prefers-reduced-motion: reduce) {
+  .ws-toolbox-card,
+  .ws-toolbox-select,
+  .ws-toolbox-op,
+  .ws-toolbox-prereq,
+  .ws-goal-rec {
+    transition: none;
+  }
+}

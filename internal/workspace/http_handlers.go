@@ -37,6 +37,13 @@ type HTTPHandler struct {
 	// trigger configuration as cadence-driven runs. Optional — handlers
 	// that depend on it should fall back to a 503 when nil.
 	scheduler *TaskScheduler
+	// Toolbox Workshop read sources. All optional: without them the editor
+	// still renders every workspace-approved capability, and simply omits the
+	// agent-learned / global-library groups rather than showing partial ones.
+	// See SetToolboxInventoryDeps.
+	toolboxSkills   ToolboxMigrationSkillSource
+	toolboxLibrary  ToolboxLibrarySource
+	toolboxCapacity ToolboxMigrationCapacitySource
 }
 
 // NewHTTPHandler creates a new HTTP handler

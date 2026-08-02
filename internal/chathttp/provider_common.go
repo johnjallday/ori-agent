@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -602,12 +603,17 @@ func (h *Handler) buildSystemPromptWithSkills(ag *resolvedChatAgent, agentName, 
 		return workspace.AppendSkillPromptsFromResolved(base, ag.EffectiveSkills)
 	}
 
-	// Fallback: load from SkillManager (for non-workspace contexts).
+	// Direct, non-workspace chat: the agent's own Default Toolbox decides what
+	// is active (PRD FR-24, FR-26).
 	if h.skillsManager == nil || agentName == "" {
 		return base
 	}
 	enabledSkills, err := h.skillsManager.ListEnabledSkillsWithPrompts(agentName)
-	if err != nil || len(enabledSkills) == 0 {
+	if err != nil {
+		return base
+	}
+	enabledSkills = selectDefaultToolboxSkills(ag.Agent, enabledSkills)
+	if len(enabledSkills) == 0 {
 		return base
 	}
 	var sb strings.Builder
@@ -621,6 +627,36 @@ func (h *Handler) buildSystemPromptWithSkills(ag *resolvedChatAgent, agentName, 
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// selectDefaultToolboxSkills narrows the agent's available skills to the ones
+// its Default Toolbox activates (PRD FR-24, FR-26, FR-27).
+//
+// The narrowing is what makes direct chat explicit: learning or enabling a
+// skill puts it in the agent's collection, but it does not become active in
+// direct chat until the user selects it — the same rule workspace Toolboxes
+// apply to workspace bindings (FR-2, FR-3).
+//
+// A nil Default Toolbox means "this agent has not been migrated yet" and falls
+// back to the pre-Toolbox behavior of using every enabled skill. Migration
+// fills the Default Toolbox from exactly that set, so migrating an agent
+// changes nothing about how it answers (FR-28).
+//
+// A Default Toolbox entry naming a skill that is not currently available
+// resolves to nothing here rather than erroring; direct chat has no preview
+// surface to report it on, and readiness reporting for Default Toolboxes is
+// part of the preview work, not the prompt path.
+func selectDefaultToolboxSkills(ag *agent.Agent, available []skills.Skill) []skills.Skill {
+	if ag == nil || ag.DefaultToolbox == nil {
+		return available
+	}
+	selected := make([]skills.Skill, 0, len(available))
+	for _, skill := range available {
+		if ag.DefaultToolbox.Has(skill.Name) {
+			selected = append(selected, skill)
+		}
+	}
+	return selected
 }
 
 func composeRuntimeSystemPrompt(basePrompt, runtimePrompt string) string {

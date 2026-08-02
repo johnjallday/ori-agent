@@ -64,6 +64,21 @@
             <div id="workspace-run-report" class="workspace-run-report"></div>
           </section>
 
+          <!-- Wrap-up: the immutable toolbox this run was given, and what it
+               measurably did with it. Populated by workspace-run.js from the
+               run's snapshot; hidden for runs that predate snapshots, since an
+               empty section would read as "this run had no capabilities"
+               (PRD FR-107-FR-120). -->
+          <section id="workspace-run-toolbox-card" class="workspace-run-card" hidden>
+            <div class="workspace-run-card-header">
+              <div>
+                <div class="workspace-run-card-kicker">Wrap-up</div>
+                <h2>What this run had, and what it used</h2>
+              </div>
+            </div>
+            <div id="workspace-run-toolbox" class="workspace-run-report"></div>
+          </section>
+
           <section class="workspace-run-card">
             <div class="workspace-run-card-header">
               <div>

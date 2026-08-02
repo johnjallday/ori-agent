@@ -114,6 +114,20 @@ type Run struct {
 	Cost              *CostSummary       `json:"cost,omitempty"`
 	Report            *Report            `json:"report,omitempty"`
 
+	// ToolboxSnapshot freezes the exact capabilities this run was given, taken
+	// before the model was invoked (see toolbox_snapshot.go). It is
+	// denormalized rather than a reference, so editing, switching, archiving,
+	// or deleting the toolbox afterwards cannot change what this run had
+	// (PRD FR-107, FR-110).
+	//
+	// Nil for runs that started before V1 migration, and for runs whose
+	// workspace could not be resolved — a missing snapshot means "unknown",
+	// never "unrestricted".
+	ToolboxSnapshot *RunToolboxSnapshot `json:"toolbox_snapshot,omitempty"`
+	// ToolboxWrapUp is the post-run measurement against that snapshot. Built
+	// after the run finishes and preserved with it (FR-114).
+	ToolboxWrapUp *ToolboxWrapUp `json:"toolbox_wrap_up,omitempty"`
+
 	Error string `json:"error,omitempty"`
 }
 

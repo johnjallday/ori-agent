@@ -130,6 +130,26 @@ type Agent struct {
 	Statistics *types.AgentStatistics `json:"statistics,omitempty"` // Usage and performance metrics
 	Metadata   *types.AgentMetadata   `json:"metadata,omitempty"`   // Descriptive information and tags
 	Evolution  *types.AgentEvolution  `json:"evolution,omitempty"`  // Agent progression state
+
+	// DefaultToolbox is the agent's explicit skill selection for DIRECT,
+	// non-workspace chat (PRD FR-24). It is skill-only and cannot reference a
+	// workspace binding, credential, scope, or agent instance (FR-25) — see
+	// types.AgentDefaultToolbox, which has no field able to hold one.
+	//
+	// It is deliberately separate from every workspace Toolbox this agent is
+	// used with: editing a workspace Toolbox must not touch it, and editing it
+	// must not touch any workspace assignment (FR-26, FR-27). Nil on an agent
+	// that predates the field; migration fills it from the agent's globally
+	// enabled skills so direct-chat behavior is unchanged (FR-28).
+	DefaultToolbox *types.AgentDefaultToolbox `json:"default_toolbox,omitempty"`
+}
+
+// InitializeDefaultToolbox safely initializes the Default Toolbox if nil.
+// Idempotent, like InitializeStatistics/InitializeEvolution.
+func (a *Agent) InitializeDefaultToolbox() {
+	if a.DefaultToolbox == nil {
+		a.DefaultToolbox = types.NewAgentDefaultToolbox()
+	}
 }
 
 // InitializeStatistics safely initializes the statistics if nil

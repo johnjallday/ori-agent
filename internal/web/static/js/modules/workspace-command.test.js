@@ -2404,7 +2404,7 @@ test('Operations Map renders units first and keeps support panels hidden by defa
       /aria-label="Change model for Researcher\. Current model: gpt-5\.3-codex"/
     );
     assert.match(agentSheetHTML, /<strong translate="no">gpt-5\.3-codex<\/strong>/);
-    assert.match(agentSheetHTML, /Loadout/);
+    assert.match(agentSheetHTML, /Toolbox/);
     assert.match(agentSheetHTML, /workspace-planning/);
     assert.match(agentSheetHTML, /filesystem/);
     assert.match(agentSheetHTML, /ws-cmd-rpg-stat-grid/);
@@ -2412,7 +2412,11 @@ test('Operations Map renders units first and keeps support panels hidden by defa
     assert.match(agentSheetHTML, /Command Menu/);
     assert.match(agentSheetHTML, /Track Quest/);
     assert.match(agentSheetHTML, /Continue Session/);
-    assert.match(agentSheetHTML, /Configure Loadout/);
+    assert.match(agentSheetHTML, /Open the Workshop/);
+    // The user-facing register is Toolbox/Workshop everywhere (FR-168). The
+    // "loadout" tab key survives underneath as an internal identifier.
+    assert.doesNotMatch(agentSheetHTML, />Loadout</);
+    assert.doesNotMatch(agentSheetHTML, /Configure Loadout/);
     assert.doesNotMatch(agentSheetHTML, /ws-cmd-rpg-loadout-model/);
     assert.doesNotMatch(agentSheetHTML, /ws-cmd-rpg-effects/);
     assert.doesNotMatch(agentSheetHTML, /In progress · In progress/);

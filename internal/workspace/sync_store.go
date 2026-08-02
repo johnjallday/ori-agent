@@ -80,7 +80,20 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		// value: uninstall. capabilitiesExplicit distinguishes the two, so an
 		// intentional removal writes through while an incidental absence is
 		// refilled — which is why removal does NOT need to bypass SyncStore.
-		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil || capabilitiesMissing(ws) {
+		// Toolbox state joins the same list, and its failure mode is the worst of
+		// them: a partial workspace that erased the assignments would leave every
+		// agent instance implicit again, silently re-inheriting every workspace
+		// binding — the exact behavior named Toolboxes exist to stop (FR-32).
+		// It has no legitimate empty value the way an uninstall does, because a
+		// migrated workspace always has at least one assignment, so "empty" here
+		// always means "this record never loaded it".
+		// The Goal joins the list for legacy records only. Its envelope is
+		// written unconditionally now, so a record that carries one — including
+		// a Goal the user cleared — is authoritative; only a record that
+		// predates the column has none, and that is the single case where the
+		// canonical workspace.json should refill it.
+		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil ||
+			capabilitiesMissing(ws) || toolboxStateMissing(ws) || missionStateMissing(ws) {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
 				if ws.ProjectPath == "" {
 					ws.ProjectPath = diskWorkspace.ProjectPath
@@ -96,6 +109,16 @@ func (s *SyncStore) Save(ws *Workspace) error {
 				}
 				if capabilitiesMissing(ws) {
 					ws.InstalledCapabilities = CloneInstalledCapabilities(diskWorkspace.InstalledCapabilities)
+				}
+				if toolboxStateMissing(ws) {
+					ws.Toolboxes = cloneToolboxDefinitions(diskWorkspace.Toolboxes)
+					ws.ToolboxAssignments = cloneToolboxAssignments(diskWorkspace.ToolboxAssignments)
+					ws.ToolboxMigration = diskWorkspace.ToolboxMigration
+					ws.GoalBrief = diskWorkspace.GoalBrief.Clone()
+					ws.GoalToolboxPolicy = diskWorkspace.GoalToolboxPolicy.Clone()
+				}
+				if missionStateMissing(ws) {
+					restoreMissionFromDisk(ws, diskWorkspace)
 				}
 			}
 		}
@@ -115,6 +138,72 @@ func (s *SyncStore) Save(ws *Workspace) error {
 // from disk.
 func capabilitiesMissing(ws *Workspace) bool {
 	return len(ws.InstalledCapabilities) == 0 && !ws.InstalledCapabilitiesExplicit()
+}
+
+// toolboxStateMissing reports whether ws carries no Toolbox state at all.
+//
+// Unlike installed capabilities, this needs no "was it deliberate?" flag: a
+// workspace that has been made explicit always keeps at least one assignment
+// per agent instance, and deleting the last Toolbox is blocked while anything
+// references it (FR-21). So an entirely empty toolbox state can only mean this
+// record never loaded it.
+func toolboxStateMissing(ws *Workspace) bool {
+	return len(ws.Toolboxes) == 0 && len(ws.ToolboxAssignments) == 0 && ws.ToolboxMigration == nil &&
+		ws.GoalBrief == nil && ws.GoalToolboxPolicy == nil
+}
+
+// missionStateMissing reports whether ws arrived without its Goal
+// configuration, as opposed to arriving with an empty one.
+//
+// The distinction is the whole point. A Goal the user cleared and a record that
+// predates the mission_state_json column both leave Mission empty, but only the
+// second should be refilled from disk — refilling the first would resurrect a
+// Goal somebody deliberately turned off. MarkMissionLoaded is what tells them
+// apart; see Workspace.missionLoaded.
+func missionStateMissing(ws *Workspace) bool {
+	return !ws.MissionLoaded() && ws.Mission == "" && !ws.MissionEnabled &&
+		ws.Cadence == nil && ws.NextMissionRunAt == nil
+}
+
+// restoreMissionFromDisk refills a legacy record's Goal from the canonical
+// workspace.json. Config and counters move together — a cadence without its
+// NextMissionRunAt reads as permanently due.
+func restoreMissionFromDisk(ws, disk *Workspace) {
+	if ws == nil || disk == nil {
+		return
+	}
+	ws.Mission = disk.Mission
+	ws.MissionEnabled = disk.MissionEnabled
+	ws.AutonomyPolicy = disk.AutonomyPolicy
+	ws.Cadence = disk.Cadence
+	ws.NotificationPolicy = disk.NotificationPolicy
+	ws.LastMissionRunAt = disk.LastMissionRunAt
+	ws.NextMissionRunAt = disk.NextMissionRunAt
+	ws.MissionExecutionCount = disk.MissionExecutionCount
+	ws.MissionFailureCount = disk.MissionFailureCount
+	ws.MissionCadenceHeartbeat = disk.MissionCadenceHeartbeat
+}
+
+func cloneToolboxDefinitions(definitions []ToolboxDefinition) []ToolboxDefinition {
+	if len(definitions) == 0 {
+		return nil
+	}
+	out := make([]ToolboxDefinition, len(definitions))
+	for i := range definitions {
+		out[i] = definitions[i].Clone()
+	}
+	return out
+}
+
+func cloneToolboxAssignments(assignments []AgentToolboxAssignment) []AgentToolboxAssignment {
+	if len(assignments) == 0 {
+		return nil
+	}
+	out := make([]AgentToolboxAssignment, len(assignments))
+	for i := range assignments {
+		out[i] = assignments[i].Clone()
+	}
+	return out
 }
 
 // Get retrieves a workspace from the primary store.

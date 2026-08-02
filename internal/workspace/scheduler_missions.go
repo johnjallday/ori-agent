@@ -41,6 +41,37 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 		return
 	}
 
+	// Stop BEFORE the model is invoked when the goal's pinned toolbox has
+	// become unusable (PRD FR-105).
+	//
+	// This has to happen here, not inside the run, because an unattended
+	// cadence run that started with fewer capabilities than the goal was built
+	// around would produce a quietly worse result and no signal. Marking the
+	// goal `Needs attention` and advancing the cadence turns that into
+	// something a user can see and fix.
+	if preflight := ts.preflightGoalToolbox(ws); !preflight.OK {
+		logger.Warn("mission run stopped before invocation: the goal's toolbox is not usable", logger.Fields{
+			"workspace_id": ws.ID,
+			"toolbox_id":   preflight.ToolboxID,
+			"readiness":    preflight.Readiness,
+			"reason":       preflight.Reason,
+		})
+		_ = ts.workspaceStore.Update(ws.ID, func(w *Workspace) error {
+			MarkGoalNeedsAttention(w, preflight.Reason)
+			// Advance the cadence so the scheduler does not re-fire every tick
+			// against a goal that cannot run until a human intervenes.
+			if w.Cadence != nil {
+				w.NextMissionRunAt = CalculateNextRun(*w.Cadence, now)
+			}
+			return nil
+		})
+		return
+	}
+	_ = ts.workspaceStore.Update(ws.ID, func(w *Workspace) error {
+		ClearGoalNeedsAttention(w)
+		return nil
+	})
+
 	// CycleOrdinal is 1 + the number of previously-executed mission runs.
 	cycleOrdinal := ws.MissionExecutionCount + 1
 
@@ -99,6 +130,45 @@ func (ts *TaskScheduler) checkMissionCadence(ws *Workspace, now time.Time) {
 			})
 		}
 	}
+}
+
+// preflightGoalToolbox resolves the per-agent inputs the check needs and runs
+// it.
+//
+// Both sources are optional. Without them the preflight still catches the
+// failures that matter most and are knowable from workspace state alone — a
+// deleted toolbox, an archived one, a version that no longer exists, a removed
+// binding — and simply cannot evaluate skill capacity. That is the right
+// trade: a partial check that never blocks a healthy goal beats no check.
+func (ts *TaskScheduler) preflightGoalToolbox(ws *Workspace) GoalPreflightResult {
+	var learned []ResolvedSkill
+	capacity, expertMode := 0, false
+
+	if ws.GoalToolboxPolicy != nil {
+		if instance := findAgentInstanceByID(ws, ws.GoalToolboxPolicy.EntryAgentInstanceID); instance != nil {
+			if ts.toolboxSkills != nil {
+				if resolved, err := ts.toolboxSkills.ListEnabledAgentSkills(instance.Name); err == nil {
+					learned = resolved
+				}
+			}
+			if ts.toolboxCapacity != nil {
+				if resolvedCapacity, resolvedExpert, ok := ts.toolboxCapacity.ResolveAgentCapacity(instance.Name); ok {
+					capacity, expertMode = resolvedCapacity, resolvedExpert
+				}
+			}
+		}
+	}
+	return PreflightGoalToolbox(ws, learned, capacity, expertMode, DefaultFocusThresholds())
+}
+
+// SetToolboxPreflightDeps wires the per-agent inputs the goal preflight uses.
+// Optional; see preflightGoalToolbox.
+func (ts *TaskScheduler) SetToolboxPreflightDeps(skills ToolboxMigrationSkillSource, capacity ToolboxMigrationCapacitySource) {
+	if ts == nil {
+		return
+	}
+	ts.toolboxSkills = skills
+	ts.toolboxCapacity = capacity
 }
 
 // missionDue reports whether the workspace's mission cadence is ready to fire

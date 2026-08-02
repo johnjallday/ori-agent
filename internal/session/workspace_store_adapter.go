@@ -293,8 +293,80 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.InstalledCapabilitiesJSON = data
 		}
 	}
+	// Toolboxes, assignments, and migration state travel together: a Toolbox
+	// this store dropped would turn its assignment into an unreadable pin, and
+	// the runtime fails an agent closed rather than guessing (see
+	// toolboxAssignmentForInstance).
+	if len(ws.Toolboxes) > 0 || len(ws.ToolboxAssignments) > 0 || ws.ToolboxMigration != nil ||
+		ws.GoalBrief != nil || ws.GoalToolboxPolicy != nil {
+		state := workspaceToolboxState{
+			Toolboxes:         ws.Toolboxes,
+			Assignments:       ws.ToolboxAssignments,
+			Migration:         ws.ToolboxMigration,
+			GoalBrief:         ws.GoalBrief,
+			GoalToolboxPolicy: ws.GoalToolboxPolicy,
+		}
+		if data, err := json.Marshal(state); err != nil {
+			logger.Warn("Failed to marshal workspace toolboxes", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.ToolboxStateJSON = data
+		}
+	}
+
+	// The Goal envelope is written UNCONDITIONALLY, even when every field is
+	// empty. That is what makes "no envelope" mean "this record predates the
+	// column" rather than "this workspace has no Goal" — the distinction
+	// SyncStore relies on to heal a legacy row without resurrecting a Goal the
+	// user cleared.
+	if data, err := json.Marshal(workspaceMissionState{
+		Mission:                 ws.Mission,
+		MissionEnabled:          ws.MissionEnabled,
+		AutonomyPolicy:          ws.AutonomyPolicy,
+		Cadence:                 ws.Cadence,
+		NotificationPolicy:      ws.NotificationPolicy,
+		LastMissionRunAt:        ws.LastMissionRunAt,
+		NextMissionRunAt:        ws.NextMissionRunAt,
+		MissionExecutionCount:   ws.MissionExecutionCount,
+		MissionFailureCount:     ws.MissionFailureCount,
+		MissionCadenceHeartbeat: ws.MissionCadenceHeartbeat,
+	}); err != nil {
+		logger.Warn("Failed to marshal workspace goal", logger.Fields{"workspace_id": ws.ID, "error": err})
+	} else {
+		sessionWS.MissionStateJSON = data
+	}
 
 	return sessionWS
+}
+
+// workspaceMissionState is the envelope carried in MissionStateJSON.
+//
+// Config and counters travel together because they are only meaningful
+// together: a cadence with no NextMissionRunAt reads as permanently due, and
+// counters without their cadence cannot be interpreted at all.
+type workspaceMissionState struct {
+	Mission                 string                        `json:"mission,omitempty"`
+	MissionEnabled          bool                          `json:"mission_enabled,omitempty"`
+	AutonomyPolicy          workspace.AutonomyPolicy      `json:"autonomy_policy,omitempty"`
+	Cadence                 *workspace.ScheduleConfig     `json:"cadence,omitempty"`
+	NotificationPolicy      *workspace.NotificationPolicy `json:"notification_policy,omitempty"`
+	LastMissionRunAt        *time.Time                    `json:"last_mission_run_at,omitempty"`
+	NextMissionRunAt        *time.Time                    `json:"next_mission_run_at,omitempty"`
+	MissionExecutionCount   int                           `json:"mission_execution_count,omitempty"`
+	MissionFailureCount     int                           `json:"mission_failure_count,omitempty"`
+	MissionCadenceHeartbeat bool                          `json:"mission_cadence_heartbeat,omitempty"`
+}
+
+// workspaceToolboxState is the envelope carried in ToolboxStateJSON.
+//
+// The Goal brief and policy ride along because they are read and written with
+// the toolboxes they reference: a pinned policy naming a toolbox this store did
+// not carry would be an unresolvable pin that stops the goal at preflight.
+type workspaceToolboxState struct {
+	Toolboxes         []workspace.ToolboxDefinition      `json:"toolboxes,omitempty"`
+	Assignments       []workspace.AgentToolboxAssignment `json:"toolbox_assignments,omitempty"`
+	Migration         *workspace.ToolboxMigrationState   `json:"toolbox_migration,omitempty"`
+	GoalBrief         *workspace.GoalBrief               `json:"goal_brief,omitempty"`
+	GoalToolboxPolicy *workspace.GoalToolboxPolicy       `json:"goal_toolbox_policy,omitempty"`
 }
 
 // toAgentWorkspace converts session.Workspace to workspace.Workspace.
@@ -463,6 +535,40 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 	// restore the canonical collection instead of writing an erasure. Contrast
 	// with MCPBindings above, where an empty slice is the intended zero value.
 	agentWS.InstalledCapabilities = workspace.NormalizeInstalledCapabilities(agentWS.InstalledCapabilities)
+
+	if len(ws.ToolboxStateJSON) > 0 {
+		var state workspaceToolboxState
+		if err := json.Unmarshal(ws.ToolboxStateJSON, &state); err != nil {
+			logger.Warn("Failed to unmarshal workspace toolboxes", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			agentWS.Toolboxes = state.Toolboxes
+			agentWS.ToolboxAssignments = state.Assignments
+			agentWS.ToolboxMigration = state.Migration
+			agentWS.GoalBrief = state.GoalBrief
+			agentWS.GoalToolboxPolicy = state.GoalToolboxPolicy
+		}
+	}
+
+	if len(ws.MissionStateJSON) > 0 {
+		var mission workspaceMissionState
+		if err := json.Unmarshal(ws.MissionStateJSON, &mission); err != nil {
+			logger.Warn("Failed to unmarshal workspace goal", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			// An envelope was present, so whatever it says — including a Goal
+			// the user cleared — is the truth and must not be healed away.
+			agentWS.MarkMissionLoaded()
+			agentWS.Mission = mission.Mission
+			agentWS.MissionEnabled = mission.MissionEnabled
+			agentWS.AutonomyPolicy = mission.AutonomyPolicy
+			agentWS.Cadence = mission.Cadence
+			agentWS.NotificationPolicy = mission.NotificationPolicy
+			agentWS.LastMissionRunAt = mission.LastMissionRunAt
+			agentWS.NextMissionRunAt = mission.NextMissionRunAt
+			agentWS.MissionExecutionCount = mission.MissionExecutionCount
+			agentWS.MissionFailureCount = mission.MissionFailureCount
+			agentWS.MissionCadenceHeartbeat = mission.MissionCadenceHeartbeat
+		}
+	}
 
 	if agentWS.SharedData == nil {
 		agentWS.SharedData = make(map[string]any)

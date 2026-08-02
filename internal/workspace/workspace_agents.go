@@ -79,6 +79,25 @@ func (w *Workspace) AgentNames() []string {
 	return w.agentNamesLocked()
 }
 
+// GetAgentInstances returns a copy of every stable agent instance attached to
+// this workspace, in attachment order.
+//
+// Callers that need to act per INSTANCE — Toolbox assignment, preview, and
+// migration all do — must use this rather than AgentNames: two instances of one
+// reusable agent share a name and differ only by ID (FR-16, FR-17).
+func (w *Workspace) GetAgentInstances() []AgentInstance {
+	if w == nil {
+		return nil
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if len(w.AgentInstances) == 0 {
+		return nil
+	}
+	return append([]AgentInstance(nil), w.AgentInstances...)
+}
+
 // AddAgent adds a new agent instance to the workspace
 func (w *Workspace) AddAgent(agentName string) error {
 	w.mu.Lock()

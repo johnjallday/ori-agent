@@ -38,3 +38,14 @@ func (a *loadoutResolverAdapter) ResolveAgentLoadout(agentName string) (skills.A
 		Stage:      string(stage),
 	}, true
 }
+
+// ResolveAgentCapacity adapts the same read for Toolbox migration, which needs
+// the stage capacity only to REPORT a grandfathered over-capacity position —
+// it never trims a migrated Toolbox to fit (PRD FR-33).
+func (a *loadoutResolverAdapter) ResolveAgentCapacity(agentName string) (int, bool, bool) {
+	loadout, ok := a.ResolveAgentLoadout(agentName)
+	if !ok {
+		return 0, false, false
+	}
+	return loadout.SlotCap, loadout.ExpertMode, true
+}

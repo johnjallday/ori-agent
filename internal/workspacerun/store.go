@@ -31,6 +31,10 @@ type Store interface {
 	SetTaskOutput(ctx context.Context, workspaceID, runID string, output TaskOutputSummary) error
 	SetReport(ctx context.Context, workspaceID, runID string, report Report) error
 	SetCost(ctx context.Context, workspaceID, runID string, cost CostSummary) error
+	// SetToolboxSnapshot freezes the run's capabilities before the model is
+	// invoked; SetToolboxWrapUp records what it did with them (FR-107, FR-114).
+	SetToolboxSnapshot(ctx context.Context, workspaceID, runID string, snapshot RunToolboxSnapshot) error
+	SetToolboxWrapUp(ctx context.Context, workspaceID, runID string, wrapUp ToolboxWrapUp) error
 	SetError(ctx context.Context, workspaceID, runID, errMessage string) error
 }
 
@@ -253,6 +257,30 @@ func (s *MemoryStore) SetReport(_ context.Context, workspaceID, runID string, re
 	report.ChangedFiles = cloneStrings(report.ChangedFiles)
 	report.FollowUps = cloneStrings(report.FollowUps)
 	run.Report = &report
+	return nil
+}
+
+func (s *MemoryStore) SetToolboxSnapshot(_ context.Context, workspaceID, runID string, snapshot RunToolboxSnapshot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, err := s.getLocked(workspaceID, runID)
+	if err != nil {
+		return err
+	}
+	run.ToolboxSnapshot = snapshot.Clone()
+	return nil
+}
+
+func (s *MemoryStore) SetToolboxWrapUp(_ context.Context, workspaceID, runID string, wrapUp ToolboxWrapUp) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, err := s.getLocked(workspaceID, runID)
+	if err != nil {
+		return err
+	}
+	run.ToolboxWrapUp = &wrapUp
 	return nil
 }
 

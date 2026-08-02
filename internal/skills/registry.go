@@ -126,15 +126,14 @@ func (m *Manager) SetSkillTrusted(agentName, skillName string, trusted bool) err
 
 func (m *Manager) SetSkillEnabled(agentName, skillName string, enabled bool) error {
 	key := normalizeSkillKey(skillName)
-	if enabled {
-		// Bulk "*" enable fills up to the cap deterministically for non-expert
-		// agents rather than blanket-enabling everything (PRD FR14).
-		if key == "*" {
-			return m.enableAllWithinCap(agentName)
-		}
-		if err := m.enforceSlotCapForEnable(agentName, key); err != nil {
-			return err
-		}
+	if enabled && key == "*" {
+		// Bulk "*" writes explicit per-skill state rather than leaving a
+		// wildcard default that would silently enable future skills too.
+		//
+		// Enabling is COLLECTION membership, not activation, so it is no longer
+		// capped here — capacity binds on the Toolbox that selects from the
+		// collection. See loadout.go.
+		return m.enableAllSkills(agentName)
 	}
 	return m.updateSkillState(agentName, skillName, func(state *SkillState) {
 		state.Enabled = enabled

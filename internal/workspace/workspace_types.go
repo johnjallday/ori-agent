@@ -119,10 +119,29 @@ type Workspace struct {
 	AgentMCPAccess       []AgentMCPAccess            `json:"agent_mcp_access,omitempty"`
 	SkillBindings        []SkillBinding              `json:"skill_bindings,omitempty"`
 	AgentSkillAccess     []AgentSkillAccess          `json:"agent_skill_access,omitempty"`
-	Workflows            map[string]Workflow         `json:"workflows,omitempty"`
-	Layout               *CanvasLayout               `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
-	Status               WorkspaceStatus             `json:"status"`
-	Version              int64                       `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
+	// Toolboxes are the workspace's named, versioned capability recipes, and
+	// ToolboxAssignments pin one version of one Toolbox to each stable agent
+	// instance (see toolbox.go). Together they are the SOURCE OF TRUTH for
+	// "what may this agent instance actually use" (FR-22).
+	//
+	// They live on the canonical workspace record rather than in a side store
+	// so they inherit Version and lost-write protection, which is what makes a
+	// Toolbox switch safe against a concurrent Workshop edit (FR-23).
+	//
+	// The older AgentSkillAccess / AgentMCPAccess entries above remain as a
+	// compatibility surface during the migration window; after migration they
+	// are derived from the assignment rather than consulted independently, so
+	// they can never become a second, invisible answer (FR-36).
+	Toolboxes          []ToolboxDefinition      `json:"toolboxes,omitempty"`
+	ToolboxAssignments []AgentToolboxAssignment `json:"toolbox_assignments,omitempty"`
+	// ToolboxMigration records that this workspace's legacy implicit capability
+	// state has been made explicit, so the migration is idempotent across
+	// restarts and cannot create a second `Workspace Default` (FR-34).
+	ToolboxMigration *ToolboxMigrationState `json:"toolbox_migration,omitempty"`
+	Workflows        map[string]Workflow    `json:"workflows,omitempty"`
+	Layout           *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
+	Status           WorkspaceStatus        `json:"status"`
+	Version          int64                  `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
 	// AllowNativeMCPCLI opts this workspace into letting CLI-provider agents
 	// (Claude Code / Codex) run the workspace's MCP + built-in tools natively,
 	// outside ori-agent's per-tool confirmation gate. Security-sensitive, so it
@@ -184,6 +203,17 @@ type Workspace struct {
 	// event-fired run pushes the next cadence run back, like any other run.
 	MissionCadenceHeartbeat bool          `json:"mission_cadence_heartbeat,omitempty"`
 	Opportunities           []Opportunity `json:"opportunities,omitempty"`
+	// GoalBrief is the structured, user-accepted statement of what this
+	// workspace's Goal needs — output, sources, semantic operations, autonomy
+	// ceiling, mandatory capabilities (see toolbox_goal_brief.go). Nil until a
+	// user accepts one, and an unaccepted brief never drives recommendations
+	// (FR-92–FR-94).
+	GoalBrief *GoalBrief `json:"goal_brief,omitempty"`
+	// GoalToolboxPolicy records which Toolbox version the Goal runs with, and
+	// whether that choice is pinned. Pinning is the default so a recurring goal
+	// cannot silently change behavior when someone edits a toolbox (FR-103,
+	// FR-104).
+	GoalToolboxPolicy *GoalToolboxPolicy `json:"goal_toolbox_policy,omitempty"`
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
@@ -204,6 +234,44 @@ type Workspace struct {
 	// mutate-then-save cycle (the window CanonicalUpdate holds open), and a copy
 	// decoded from disk correctly carries no pending intent.
 	capabilitiesExplicit bool
+
+	// missionLoaded records that THIS in-memory value arrived with its Goal
+	// configuration, as opposed to arriving without it.
+	//
+	// The two are otherwise indistinguishable — both leave Mission empty and
+	// MissionEnabled false — but they must produce opposite behavior on save: a
+	// record that predates the mission_state_json column has to be refilled
+	// from the canonical workspace.json, while a Goal the user deliberately
+	// cleared has to be allowed to write through. The primary store sets this
+	// via MarkMissionLoaded when its envelope was present (SQL NULL means
+	// absent), so a cleared Goal — a real, empty-valued envelope — is never
+	// resurrected. See SyncStore.Save.
+	//
+	// Never persisted and never cloned: it describes how one value was loaded,
+	// and a copy decoded from disk always carries its own Goal directly.
+	missionLoaded bool
+}
+
+// MarkMissionLoaded records that this value's Goal configuration came from a
+// store that actually carried it. Called by the primary store's conversion; see
+// the field comment for why the distinction matters.
+func (w *Workspace) MarkMissionLoaded() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.missionLoaded = true
+}
+
+// MissionLoaded reports whether this value arrived with its Goal configuration.
+func (w *Workspace) MissionLoaded() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.missionLoaded
 }
 
 // CanvasLayout stores positions of tasks and agents on the canvas
