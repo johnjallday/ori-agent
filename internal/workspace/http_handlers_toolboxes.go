@@ -79,6 +79,8 @@ func (h *HTTPHandler) ListToolboxes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.ensureToolboxes(workspaceID)
+
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
@@ -230,6 +232,8 @@ func (h *HTTPHandler) GetAgentToolbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.ensureToolboxes(workspaceID)
+
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
@@ -256,6 +260,8 @@ func (h *HTTPHandler) ListAgentToolboxes(w http.ResponseWriter, r *http.Request)
 		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
+
+	h.ensureToolboxes(workspaceID)
 
 	ws, err := h.store.Get(workspaceID)
 	if err != nil {
@@ -377,6 +383,146 @@ func buildAgentToolboxView(ws *Workspace, agentInstanceID string) (AgentToolboxV
 
 	view.CoreOnly = len(view.Skills) == 0 && len(view.MCPBindings) == 0
 	return view, true
+}
+
+// SetToolboxInventoryDeps wires the two read sources the Workshop editor needs
+// but the workspace package cannot reach on its own: the agent's learned skill
+// collection and Ori's global capability library.
+//
+// Both are optional. Without them the editor still renders every
+// workspace-approved capability — which is the part that is always
+// authoritative — and simply shows no agent-learned or global-library group,
+// rather than a partial one presented as complete.
+func (h *HTTPHandler) SetToolboxInventoryDeps(skills ToolboxMigrationSkillSource, library ToolboxLibrarySource, capacity ToolboxMigrationCapacitySource) {
+	if h == nil {
+		return
+	}
+	h.toolboxSkills = skills
+	h.toolboxLibrary = library
+	h.toolboxCapacity = capacity
+}
+
+// ensureToolboxes makes every agent instance in this workspace explicit before
+// a Toolbox surface reads it.
+//
+// Startup migration covers workspaces that already existed; this covers the
+// ones created — or the agents attached — since. It is idempotent and writes
+// only when an instance is genuinely missing an assignment, so the cost on the
+// overwhelmingly common already-explicit path is one read (see
+// toolboxMigrationNeeded).
+//
+// A failure is logged and swallowed: the surface still renders, the instance
+// keeps its pre-Toolbox behavior, and the user sees `assigned: false` rather
+// than an error page for something they did not ask for.
+func (h *HTTPHandler) ensureToolboxes(workspaceID string) {
+	if h == nil || h.store == nil {
+		return
+	}
+	if err := EnsureToolboxAssignments(h.store, workspaceID, h.toolboxSkills, h.toolboxCapacity); err != nil {
+		logger.Warn("Could not make this workspace's toolbox assignments explicit", logger.Fields{
+			"workspace_id": workspaceID,
+			"error":        err.Error(),
+		})
+	}
+}
+
+// GetToolboxWorkshop handles
+// GET /api/workspaces/{workspaceID}/toolbox-workshop
+//
+// Query parameters: agent_instance_id (required — capacity and the
+// agent-learned group are per instance), and optional toolbox_id / version to
+// mark what the Toolbox being edited currently selects.
+func (h *HTTPHandler) GetToolboxWorkshop(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceID")
+	if workspaceID == "" {
+		orihttp.BadRequest(w, "workspace ID is required")
+		return
+	}
+
+	h.ensureToolboxes(workspaceID)
+
+	ws, err := h.store.Get(workspaceID)
+	if err != nil {
+		orihttp.NotFound(w, fmt.Sprintf("Workspace not found: %v", err))
+		return
+	}
+
+	agentInstanceID := strings.TrimSpace(r.URL.Query().Get("agent_instance_id"))
+	var instance *AgentInstance
+	for _, candidate := range ws.GetAgentInstances() {
+		if strings.EqualFold(strings.TrimSpace(candidate.ID), agentInstanceID) {
+			found := candidate
+			instance = &found
+			break
+		}
+	}
+	if agentInstanceID != "" && instance == nil {
+		orihttp.NotFound(w, fmt.Sprintf("agent instance %s is not attached to this workspace", agentInstanceID))
+		return
+	}
+
+	// Which Toolbox's selection to mark: an explicit one when the client is
+	// editing a specific recipe, otherwise the instance's current assignment.
+	var recipe *ToolboxRecipe
+	var toolboxID string
+	if requested := strings.TrimSpace(r.URL.Query().Get("toolbox_id")); requested != "" {
+		definition, exists := ws.GetToolbox(requested)
+		if !exists {
+			orihttp.NotFound(w, fmt.Sprintf("Toolbox %s not found", requested))
+			return
+		}
+		version := definition.Version
+		if raw := strings.TrimSpace(r.URL.Query().Get("version")); raw != "" {
+			parsed, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil {
+				orihttp.BadRequest(w, fmt.Sprintf("invalid version %q", raw))
+				return
+			}
+			version = parsed
+		}
+		resolved, resolveErr := definition.ResolveVersion(version)
+		if resolveErr != nil {
+			orihttp.NotFound(w, resolveErr.Error())
+			return
+		}
+		recipe = &resolved
+		toolboxID = definition.ID
+	} else if instance != nil {
+		definition, resolved, ok, resolveErr := ws.ResolveAssignedToolbox(instance.ID)
+		if resolveErr == nil && ok {
+			recipe = &resolved
+			toolboxID = definition.ID
+		}
+	}
+
+	var learned []ResolvedSkill
+	if h.toolboxSkills != nil && instance != nil {
+		if resolved, listErr := h.toolboxSkills.ListEnabledAgentSkills(instance.Name); listErr == nil {
+			learned = resolved
+		} else {
+			logger.Warn("Workshop inventory could not read the agent's skill collection", logger.Fields{
+				"workspace_id": workspaceID,
+				"agent":        instance.Name,
+				"error":        listErr.Error(),
+			})
+		}
+	}
+
+	capacity, expertMode := 0, false
+	if h.toolboxCapacity != nil && instance != nil {
+		if resolvedCapacity, resolvedExpert, ok := h.toolboxCapacity.ResolveAgentCapacity(instance.Name); ok {
+			capacity, expertMode = resolvedCapacity, resolvedExpert
+		}
+	}
+
+	inventory := BuildWorkshopInventory(ws, instance, recipe, learned, h.toolboxLibrary, capacity, expertMode)
+	inventory.ToolboxID = toolboxID
+
+	writeToolboxJSON(w, http.StatusOK, map[string]any{
+		"workshop":          inventory,
+		"workspace":         workspaceID,
+		"workspace_version": ws.Version,
+	})
 }
 
 func writeToolboxJSON(w http.ResponseWriter, status int, payload map[string]any) {

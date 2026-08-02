@@ -383,9 +383,6 @@ func ApplyToolboxMigrationPlan(ws *Workspace, plan ToolboxMigrationPlan, actor s
 	if ws == nil {
 		return fmt.Errorf("workspace is required")
 	}
-	if ws.ToolboxMigration.Migrated() {
-		return nil
-	}
 	if plan.Blocked() {
 		for _, diagnostic := range plan.Diagnostics {
 			if diagnostic.Severity == ToolboxMigrationError {
@@ -408,6 +405,14 @@ func ApplyToolboxMigrationPlan(ws *Workspace, plan ToolboxMigrationPlan, actor s
 	for _, instancePlan := range plan.Instances {
 		if strings.TrimSpace(instancePlan.AgentInstanceID) == "" {
 			return fmt.Errorf("toolbox migration plan contains an instance with no ID")
+		}
+		// Skip instances that already have an explicit assignment. This is what
+		// makes the operation an ENSURE rather than a one-shot: an agent
+		// attached to a workspace long after its migration still gets its
+		// capabilities written down, and re-running over an already-migrated
+		// workspace stays a no-op (FR-34).
+		if _, assigned := ws.GetToolboxAssignment(instancePlan.AgentInstanceID); assigned {
+			continue
 		}
 		name, err := uniqueMigratedToolboxName(ws, instancePlan, reservedNames)
 		if err != nil {
@@ -444,17 +449,38 @@ func ApplyToolboxMigrationPlan(ws *Workspace, plan ToolboxMigrationPlan, actor s
 		pendingWrites = append(pendingWrites, pending{definition: definition, assignment: assignment})
 	}
 
+	// Nothing to do: already-explicit workspace, and no new instance to cover.
+	// Returning without touching the record is what keeps the ensure free to
+	// run often (see MigrateWorkspaceToolboxes's read-first guard).
+	if len(pendingWrites) == 0 && ws.ToolboxMigration.Migrated() {
+		return nil
+	}
+
 	for _, write := range pendingWrites {
 		ws.Toolboxes = append(ws.Toolboxes, write.definition.Clone())
 		ws.ToolboxAssignments = append(ws.ToolboxAssignments, write.assignment.Clone())
 	}
-	ws.ToolboxMigration = &ToolboxMigrationState{
-		Version:         ToolboxMigrationVersion,
-		CompletedAt:     now,
-		ToolboxCount:    len(pendingWrites),
-		AssignmentCount: len(pendingWrites),
-		Diagnostics:     plan.Diagnostics,
+
+	previous := ws.ToolboxMigration
+	state := &ToolboxMigrationState{
+		Version:     ToolboxMigrationVersion,
+		CompletedAt: now,
+		Diagnostics: plan.Diagnostics,
 	}
+	if previous != nil {
+		// Counts are cumulative across ensures, so they still answer "how much
+		// of this workspace was made explicit by migration" after a later agent
+		// was covered by the same mechanism.
+		state.ToolboxCount = previous.ToolboxCount
+		state.AssignmentCount = previous.AssignmentCount
+		if previous.CompletedAt.After(now) || !previous.CompletedAt.IsZero() && len(pendingWrites) == 0 {
+			state.CompletedAt = previous.CompletedAt
+		}
+	}
+	state.ToolboxCount += len(pendingWrites)
+	state.AssignmentCount += len(pendingWrites)
+
+	ws.ToolboxMigration = state
 	ws.UpdatedAt = now
 	return nil
 }
@@ -514,17 +540,17 @@ func MigrateWorkspaceToolboxes(store Store, workspaceID string, skillSource Tool
 		return nil, fmt.Errorf("workspace store is required")
 	}
 
-	// Check under a plain read first. Store.Update always saves, so routing an
-	// already-migrated workspace through it would rewrite workspace.json and
-	// bump Version on every single boot — churn that other sessions would see
-	// as a concurrent change.
-	if existing, err := store.Get(workspaceID); err == nil && existing.ToolboxMigration.Migrated() {
+	// Check under a plain read first. Store.Update always saves, so routing a
+	// workspace with nothing to do through it would rewrite workspace.json and
+	// bump Version on every call — churn that other sessions would see as a
+	// concurrent change.
+	if existing, err := store.Get(workspaceID); err == nil && !toolboxMigrationNeeded(existing) {
 		return existing.ToolboxMigration, nil
 	}
 
 	var result *ToolboxMigrationState
 	err := store.Update(workspaceID, func(ws *Workspace) error {
-		if ws.ToolboxMigration.Migrated() {
+		if !toolboxMigrationNeeded(ws) {
 			result = ws.ToolboxMigration
 			return nil
 		}
@@ -539,4 +565,37 @@ func MigrateWorkspaceToolboxes(store Store, workspaceID string, skillSource Tool
 		return nil, err
 	}
 	return result, nil
+}
+
+// toolboxMigrationNeeded reports whether this workspace has any instance whose
+// capabilities are still implicit.
+//
+// The check is per INSTANCE, not per workspace, because an agent attached after
+// migration would otherwise keep resolving through the legacy merge forever —
+// silently inheriting every binding the workspace gains, which is the exact
+// behavior this feature removes. There are ~18 code paths that attach an agent,
+// so covering them by hooking each one would be a maintenance trap; making the
+// ensure cheap and idempotent, and calling it from the few places that matter,
+// is the durable version.
+func toolboxMigrationNeeded(ws *Workspace) bool {
+	if ws == nil {
+		return false
+	}
+	if !ws.ToolboxMigration.Migrated() {
+		return true
+	}
+	for _, instance := range ws.GetAgentInstances() {
+		if _, assigned := ws.GetToolboxAssignment(instance.ID); !assigned {
+			return true
+		}
+	}
+	return false
+}
+
+// EnsureToolboxAssignments makes every agent instance in one workspace
+// explicit, and is safe to call on any read path that is about to present or
+// resolve Toolbox state. It writes only when something is genuinely missing.
+func EnsureToolboxAssignments(store Store, workspaceID string, skillSource ToolboxMigrationSkillSource, capacitySource ToolboxMigrationCapacitySource) error {
+	_, err := MigrateWorkspaceToolboxes(store, workspaceID, skillSource, capacitySource, "ensure")
+	return err
 }

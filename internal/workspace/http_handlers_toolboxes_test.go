@@ -72,12 +72,18 @@ func TestListToolboxes_SummarizesCountsAndAssignments(t *testing.T) {
 
 	payload := decodeToolboxResponse(t, rr)
 	toolboxes, _ := payload["toolboxes"].([]any)
-	if len(toolboxes) != 1 {
-		t.Fatalf("expected one toolbox, got %v", payload["toolboxes"])
+	// Opening the list also makes any not-yet-explicit instance explicit, so the
+	// second instance in the fixture contributes a migrated `Workspace Default`
+	// alongside the one this test created.
+	var summary map[string]any
+	for _, entry := range toolboxes {
+		candidate, _ := entry.(map[string]any)
+		if candidate["id"] == created.ID {
+			summary = candidate
+		}
 	}
-	summary, _ := toolboxes[0].(map[string]any)
-	if summary["id"] != created.ID {
-		t.Fatalf("expected the created toolbox, got %v", summary["id"])
+	if summary == nil {
+		t.Fatalf("expected the created toolbox in the list, got %v", payload["toolboxes"])
 	}
 	if summary["skill_count"].(float64) != 1 || summary["operation_count"].(float64) != 1 {
 		t.Fatalf("expected 1 skill and 1 operation, got %v / %v", summary["skill_count"], summary["operation_count"])
@@ -118,7 +124,7 @@ func TestGetToolboxByID_ResolvesAHistoricalVersion(t *testing.T) {
 	}
 }
 
-func TestGetAgentToolbox_ReportsProvenanceAndUnassignedInstances(t *testing.T) {
+func TestGetAgentToolbox_ReportsProvenanceAndCoversUncoveredInstances(t *testing.T) {
 	handler, ws, created := newToolboxHandlerFixture(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/agent-toolboxes/inst-1", nil)
@@ -140,16 +146,55 @@ func TestGetAgentToolbox_ReportsProvenanceAndUnassignedInstances(t *testing.T) {
 		t.Fatalf("expected an enabled binding to report as available, got %v", first["available"])
 	}
 
-	// The second instance is deliberately unmigrated.
-	unassignedReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/agent-toolboxes/inst-2", nil)
-	unassignedReq.SetPathValue("workspaceID", ws.ID)
-	unassignedReq.SetPathValue("agentInstanceID", "inst-2")
-	unassignedRR := httptest.NewRecorder()
-	handler.GetAgentToolbox(unassignedRR, unassignedReq)
+	// The second instance starts with no explicit toolbox. Reading the surface
+	// covers it, so an agent attached after migration stops resolving through
+	// the legacy implicit merge (FR-29, FR-32).
+	uncoveredReq := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/agent-toolboxes/inst-2", nil)
+	uncoveredReq.SetPathValue("workspaceID", ws.ID)
+	uncoveredReq.SetPathValue("agentInstanceID", "inst-2")
+	uncoveredRR := httptest.NewRecorder()
+	handler.GetAgentToolbox(uncoveredRR, uncoveredReq)
 
-	unassigned, _ := decodeToolboxResponse(t, unassignedRR)["agent_toolbox"].(map[string]any)
-	if unassigned["assigned"] != false {
-		t.Fatalf("expected an unmigrated instance to be reported as unassigned, got %v", unassigned)
+	covered, _ := decodeToolboxResponse(t, uncoveredRR)["agent_toolbox"].(map[string]any)
+	if covered["assigned"] != true {
+		t.Fatalf("expected reading the surface to make an uncovered instance explicit, got %v", covered)
+	}
+	if covered["toolbox_name"] != MigratedToolboxName {
+		t.Fatalf("expected the covering toolbox to be the migrated default, got %v", covered["toolbox_name"])
+	}
+	if covered["provenance"] != ToolboxProvenanceMigration {
+		t.Fatalf("expected migration provenance, got %v", covered["provenance"])
+	}
+	// And it must not have taken the first instance's toolbox with it.
+	if covered["toolbox_id"] == created.ID {
+		t.Fatalf("expected the covered instance to get its own toolbox, not the other instance's")
+	}
+}
+
+// The ensure writes only when something is genuinely missing: repeated reads of
+// an already-explicit workspace must not rewrite the record, or every page load
+// would look like a concurrent change to other sessions.
+func TestGetAgentToolbox_RepeatedReadsDoNotRewriteTheWorkspace(t *testing.T) {
+	handler, ws, _ := newToolboxHandlerFixture(t)
+
+	read := func() int64 {
+		req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/agent-toolboxes/inst-1", nil)
+		req.SetPathValue("workspaceID", ws.ID)
+		req.SetPathValue("agentInstanceID", "inst-1")
+		rr := httptest.NewRecorder()
+		handler.GetAgentToolbox(rr, req)
+		reloaded, err := handler.store.Get(ws.ID)
+		if err != nil {
+			t.Fatalf("store.Get() error = %v", err)
+		}
+		return reloaded.Version
+	}
+
+	// The first read covers inst-2 and legitimately writes once.
+	read()
+	settled := read()
+	if again := read(); again != settled {
+		t.Fatalf("expected repeated reads to leave the workspace version alone, went %d -> %d", settled, again)
 	}
 }
 

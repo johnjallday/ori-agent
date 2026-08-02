@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 34
+const schemaVersion = 35
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -133,6 +133,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration033CalendarMeetingPreps(ctx)
 	case 34:
 		return db.migration034WorkspaceInstalledCapabilities(ctx)
+	case 35:
+		return db.migration035WorkspaceToolboxes(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -197,6 +199,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			skill_bindings_json TEXT DEFAULT '[]',
 			agent_skill_access_json TEXT DEFAULT '[]',
 			installed_capabilities_json TEXT DEFAULT '[]',
+			toolbox_state_json TEXT DEFAULT '{}',
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -1259,6 +1262,35 @@ func (db *DB) migration034WorkspaceInstalledCapabilities(ctx context.Context) er
 		ALTER TABLE workspaces ADD COLUMN installed_capabilities_json TEXT DEFAULT '[]'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace installed_capabilities_json column: %w", err)
+	}
+	return nil
+}
+
+// migration035WorkspaceToolboxes adds the toolbox_state_json column so a
+// workspace's named Toolboxes, their per-instance assignments, and its
+// migration state round-trip through the primary store instead of living only
+// in workspace.json.
+//
+// One column rather than three because the three are always read and written
+// together — a Toolbox without its assignment is not a meaningful half-state,
+// and splitting them would let a partial write produce one.
+//
+// Purely additive: existing rows default to an empty object, which reads back
+// as "this workspace has no explicit toolboxes yet" and therefore as an
+// instance that still resolves through the legacy path — never as a phantom
+// assignment that would silently change what an agent can do.
+func (db *DB) migration035WorkspaceToolboxes(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN toolbox_state_json TEXT DEFAULT '{}'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace toolbox_state_json column: %w", err)
 	}
 	return nil
 }

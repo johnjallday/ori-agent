@@ -557,6 +557,21 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)
 	}
+	// The Workshop editor's read sources: the agent's learned collection, Ori's
+	// global capability library, and stage capacity (PRD FR-43, FR-55).
+	//
+	// Wired HERE, not in initializeTaskExecution, because workspaceHandler does
+	// not exist until this phase — setting it earlier is a silent no-op that
+	// leaves the editor showing no learned skills and no capacity.
+	var workshopSkills workspace.ToolboxMigrationSkillSource
+	if b.skillsManager != nil {
+		workshopSkills = newSkillResolverAdapter(b.skillsManager)
+	}
+	b.workspaceHandler.SetToolboxInventoryDeps(
+		workshopSkills,
+		newToolboxLibraryAdapter(b.skillsManager, b.mcpConfigManager),
+		newLoadoutResolverAdapter(b.st),
+	)
 	if verbose {
 		logger.Info("Workspace HTTP handler initialized", logger.Fields{})
 	}

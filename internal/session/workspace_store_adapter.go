@@ -293,8 +293,31 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.InstalledCapabilitiesJSON = data
 		}
 	}
+	// Toolboxes, assignments, and migration state travel together: a Toolbox
+	// this store dropped would turn its assignment into an unreadable pin, and
+	// the runtime fails an agent closed rather than guessing (see
+	// toolboxAssignmentForInstance).
+	if len(ws.Toolboxes) > 0 || len(ws.ToolboxAssignments) > 0 || ws.ToolboxMigration != nil {
+		state := workspaceToolboxState{
+			Toolboxes:   ws.Toolboxes,
+			Assignments: ws.ToolboxAssignments,
+			Migration:   ws.ToolboxMigration,
+		}
+		if data, err := json.Marshal(state); err != nil {
+			logger.Warn("Failed to marshal workspace toolboxes", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			sessionWS.ToolboxStateJSON = data
+		}
+	}
 
 	return sessionWS
+}
+
+// workspaceToolboxState is the envelope carried in ToolboxStateJSON.
+type workspaceToolboxState struct {
+	Toolboxes   []workspace.ToolboxDefinition      `json:"toolboxes,omitempty"`
+	Assignments []workspace.AgentToolboxAssignment `json:"toolbox_assignments,omitempty"`
+	Migration   *workspace.ToolboxMigrationState   `json:"toolbox_migration,omitempty"`
 }
 
 // toAgentWorkspace converts session.Workspace to workspace.Workspace.
@@ -463,6 +486,17 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 	// restore the canonical collection instead of writing an erasure. Contrast
 	// with MCPBindings above, where an empty slice is the intended zero value.
 	agentWS.InstalledCapabilities = workspace.NormalizeInstalledCapabilities(agentWS.InstalledCapabilities)
+
+	if len(ws.ToolboxStateJSON) > 0 {
+		var state workspaceToolboxState
+		if err := json.Unmarshal(ws.ToolboxStateJSON, &state); err != nil {
+			logger.Warn("Failed to unmarshal workspace toolboxes", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			agentWS.Toolboxes = state.Toolboxes
+			agentWS.ToolboxAssignments = state.Assignments
+			agentWS.ToolboxMigration = state.Migration
+		}
+	}
 
 	if agentWS.SharedData == nil {
 		agentWS.SharedData = make(map[string]any)

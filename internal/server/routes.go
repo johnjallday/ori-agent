@@ -1009,7 +1009,15 @@ func registerWorkspaceRuntimeRoutes(mux *http.ServeMux, s *Server) {
 	// versioning, preview, and the atomic use operation land with the Workshop
 	// surface.
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes", s.Handlers.Workspace.ListToolboxes)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/toolboxes", s.Handlers.Workspace.CreateToolboxHandler)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.GetToolboxByID)
+	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.UpdateToolboxHandler)
+	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.UpdateToolboxHandler)
+	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/toolboxes/{toolboxID}", s.Handlers.Workspace.DeleteToolboxHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/toolboxes/{toolboxID}/versions", s.Handlers.Workspace.CreateToolboxVersionHandler)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/toolboxes/{toolboxID}/status", s.Handlers.Workspace.SetToolboxStatusHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolboxes/{toolboxID}/compare", s.Handlers.Workspace.CompareToolboxVersionsHandler)
+	mux.HandleFunc("GET /api/workspaces/{workspaceID}/toolbox-workshop", s.Handlers.Workspace.GetToolboxWorkshop)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes", s.Handlers.Workspace.ListAgentToolboxes)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/agent-toolboxes/{agentInstanceID}", s.Handlers.Workspace.GetAgentToolbox)
 

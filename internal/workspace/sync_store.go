@@ -80,7 +80,15 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		// value: uninstall. capabilitiesExplicit distinguishes the two, so an
 		// intentional removal writes through while an incidental absence is
 		// refilled — which is why removal does NOT need to bypass SyncStore.
-		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil || capabilitiesMissing(ws) {
+		// Toolbox state joins the same list, and its failure mode is the worst of
+		// them: a partial workspace that erased the assignments would leave every
+		// agent instance implicit again, silently re-inheriting every workspace
+		// binding — the exact behavior named Toolboxes exist to stop (FR-32).
+		// It has no legitimate empty value the way an uninstall does, because a
+		// migrated workspace always has at least one assignment, so "empty" here
+		// always means "this record never loaded it".
+		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil ||
+			capabilitiesMissing(ws) || toolboxStateMissing(ws) {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
 				if ws.ProjectPath == "" {
 					ws.ProjectPath = diskWorkspace.ProjectPath
@@ -96,6 +104,11 @@ func (s *SyncStore) Save(ws *Workspace) error {
 				}
 				if capabilitiesMissing(ws) {
 					ws.InstalledCapabilities = CloneInstalledCapabilities(diskWorkspace.InstalledCapabilities)
+				}
+				if toolboxStateMissing(ws) {
+					ws.Toolboxes = cloneToolboxDefinitions(diskWorkspace.Toolboxes)
+					ws.ToolboxAssignments = cloneToolboxAssignments(diskWorkspace.ToolboxAssignments)
+					ws.ToolboxMigration = diskWorkspace.ToolboxMigration
 				}
 			}
 		}
@@ -115,6 +128,39 @@ func (s *SyncStore) Save(ws *Workspace) error {
 // from disk.
 func capabilitiesMissing(ws *Workspace) bool {
 	return len(ws.InstalledCapabilities) == 0 && !ws.InstalledCapabilitiesExplicit()
+}
+
+// toolboxStateMissing reports whether ws carries no Toolbox state at all.
+//
+// Unlike installed capabilities, this needs no "was it deliberate?" flag: a
+// workspace that has been made explicit always keeps at least one assignment
+// per agent instance, and deleting the last Toolbox is blocked while anything
+// references it (FR-21). So an entirely empty toolbox state can only mean this
+// record never loaded it.
+func toolboxStateMissing(ws *Workspace) bool {
+	return len(ws.Toolboxes) == 0 && len(ws.ToolboxAssignments) == 0 && ws.ToolboxMigration == nil
+}
+
+func cloneToolboxDefinitions(definitions []ToolboxDefinition) []ToolboxDefinition {
+	if len(definitions) == 0 {
+		return nil
+	}
+	out := make([]ToolboxDefinition, len(definitions))
+	for i := range definitions {
+		out[i] = definitions[i].Clone()
+	}
+	return out
+}
+
+func cloneToolboxAssignments(assignments []AgentToolboxAssignment) []AgentToolboxAssignment {
+	if len(assignments) == 0 {
+		return nil
+	}
+	out := make([]AgentToolboxAssignment, len(assignments))
+	for i := range assignments {
+		out[i] = assignments[i].Clone()
+	}
+	return out
 }
 
 // Get retrieves a workspace from the primary store.

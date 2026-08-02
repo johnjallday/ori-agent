@@ -1112,6 +1112,9 @@ export class WorkspaceCommandView {
     this.mountNoteFilterBar();
     this.restoreAgentDeckViewState();
     this.hydrateActiveAgentPrompt();
+    // The Workshop host only exists once the Toolbox tab has rendered, so it is
+    // mounted here rather than at page load. Idempotent per instance.
+    this.mountToolboxWorkshop();
 
     // The stat manager modal lives inside the .ws-cmd container (so it inherits
     // the tactical tokens) but survives full re-renders: re-attach + repaint it.
@@ -2915,6 +2918,9 @@ export class WorkspaceCommandView {
       : '<span class="ws-cmd-loadout-readonly">Read only</span>';
     return (
       '<div class="ws-cmd-loadout-grid">' +
+      // Model, provider, and prompt are shown here as read-only context and
+      // edited through their own controls. A Toolbox never changes them
+      // (PRD FR-53, FR-54).
       '<section class="ws-cmd-loadout-card"><header><span class="ws-cmd-loadout-kicker">Model</span>' +
       modelAction +
       '</header><strong>' +
@@ -2926,6 +2932,63 @@ export class WorkspaceCommandView {
       '</div>' +
       this.promptLoadoutHTML(agent)
     );
+  }
+
+  // The Workshop panel: named, versioned toolboxes for this agent instance.
+  // workspace-toolbox.js owns everything inside the host; this only places it
+  // and tells it which stable instance is selected (PRD FR-16, FR-37).
+  toolboxWorkshopHTML(agent) {
+    const instanceId = this.agentInstanceIdFor(agent);
+    return (
+      '<section class="ws-cmd-loadout-card is-workshop">' +
+      '<header><span class="ws-cmd-loadout-kicker">Workshop</span></header>' +
+      '<div id="workspace-toolbox-panel" class="ws-toolbox-panel" data-agent-instance-id="' +
+      escapeHtml(instanceId) +
+      '"></div>' +
+      '</section>'
+    );
+  }
+
+  // Resolve the stable AgentInstance.ID for the selected agent. Two instances of
+  // one reusable agent share a name, so the node ID is what distinguishes them
+  // — falling back to the first instance of that name only when the agent card
+  // carries no node (PRD FR-16).
+  agentInstanceIdFor(agent) {
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    const instances = Array.isArray(page?.workspace?.agent_instances)
+      ? page.workspace.agent_instances
+      : [];
+    if (!instances.length || !agent) return '';
+    const nodeId = String(agent.nodeId || agent.node_id || '').trim();
+    if (nodeId) {
+      const byNode = instances.find(instance => String(instance?.node_id || '') === nodeId);
+      if (byNode) return String(byNode.id || '');
+    }
+    const name = String(agent.name || '')
+      .trim()
+      .toLowerCase();
+    const byName = instances.find(
+      instance =>
+        String(instance?.name || '')
+          .trim()
+          .toLowerCase() === name
+    );
+    return byName ? String(byName.id || '') : '';
+  }
+
+  // Mount the Workshop after the panel exists in the DOM. Called from the same
+  // place that renders the agent tabs; a missing host or module is a no-op, so
+  // the tab still works when the Workshop script has not loaded.
+  mountToolboxWorkshop() {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    const host = document.getElementById('workspace-toolbox-panel');
+    const workshop = window.WorkspaceToolbox;
+    if (!host || !workshop) return;
+    const instanceId = host.getAttribute('data-agent-instance-id') || '';
+    if (host.dataset && host.dataset.toolboxMountedFor === instanceId) return;
+    if (host.dataset) host.dataset.toolboxMountedFor = instanceId;
+    workshop.bindHost(host);
+    void workshop.init({ agentInstanceId: instanceId });
   }
 
   recentActivityItems(agent) {
@@ -3032,7 +3095,10 @@ export class WorkspaceCommandView {
     const tabs = [
       { key: 'overview', label: 'Overview' },
       { key: 'tasks', label: 'Tasks' },
-      { key: 'loadout', label: 'Loadout' },
+      // The tab KEY stays `loadout` — it is persisted in URL state and read by
+      // the tab tests — while the visible label uses the cozy vocabulary
+      // (PRD FR-168: Loadout → Toolbox).
+      { key: 'loadout', label: 'Toolbox' },
       { key: 'recent', label: 'Recent Activity' }
     ];
     const safeKey = agent.key.replace(/[^a-z0-9_-]+/gi, '-');
@@ -3065,7 +3131,7 @@ export class WorkspaceCommandView {
     const content = {
       overview: this.overviewTabHTML(agent),
       tasks: this.tasksTabHTML(agent),
-      loadout: this.loadoutTabHTML(agent),
+      loadout: this.toolboxWorkshopHTML(agent) + this.loadoutTabHTML(agent),
       recent: this.recentActivityTabHTML(agent)
     };
     const panels = tabs
