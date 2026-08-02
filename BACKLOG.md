@@ -26,10 +26,10 @@ Kept in sync with git by `scripts/wt.sh`: `wt backlog add "<idea>"` appends here
 - 2026-07-19 Construct wizard tiering: 2–3 recommended blueprints up front + "More" expander; defer addons/roster to post-create #small (started 2026-07-28)
 - 2026-07-18 #dogfood `backlog` skill in Ori: add/list/prune/promote on workspace BACKLOG.md (DOGFOODING.md stage 1) #small (started 2026-07-29)
 - 2026-07-19 Template: Repo Watcher — GitHub MCP; PR/issue digest + weekly changelog mission #dogfood #small (started 2026-07-30)
-- agent-toolboxes-focus-memory -> PRD at tasks/prd-agent-toolboxes-focus-memory.md (started 2026-08-01)
 - agents-gallery-visual-roster -> PRD at tasks/prd-agents-gallery-visual-roster.md (started 2026-08-02)
 
 ## Shipped / dropped
+- 2026-08-02 agent-toolboxes-focus-memory -> PRD at tasks/prd-agent-toolboxes-focus-memory.md (started 2026-08-01) - PR #291 merged to dev (2026-08-02)
 - 2026-08-02 file-janitor-capability -> PRD at tasks/prd-file-janitor-capability.md (started 2026-07-30) - PR #286 merged to dev (2026-08-01)
 - 2026-08-01 home-workspace-cockpit -> PRD at tasks/prd-home-workspace-cockpit.md (started 2026-07-31) - PR #287 merged to dev (2026-08-01)
 - 2026-08-01 herdr-standalone-overnight-wake -> PRD at tasks/prd-herdr-standalone-overnight-wake.md (started 2026-07-31) - PR #282 merged to dev (2026-07-31)
