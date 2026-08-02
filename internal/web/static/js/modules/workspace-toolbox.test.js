@@ -811,11 +811,39 @@ test('a failed switch says what did NOT change and keeps the panel truthful (FR-
   click(host, '[data-toolbox-use]');
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  const alert = host.querySelector('.ws-toolbox-error');
-  assert.ok(alert, 'expected the failure to be announced');
-  assert.match(alert.textContent, /Nothing changed/);
-  assert.equal(alert.getAttribute('role'), 'alert');
+  const visible = host.querySelector('.ws-toolbox-error');
+  assert.ok(visible, 'expected the failure to be visible');
+  assert.match(visible.textContent, /Nothing changed/);
+  // The announcement comes from the one persistent live region, not from the
+  // visible copy — a role="alert" on both would say it twice (FR-164).
+  assert.equal(visible.getAttribute('role'), null);
+
+  const live = host.querySelector('.ws-toolbox-live');
+  assert.ok(live, 'expected a persistent live region');
+  assert.equal(live.getAttribute('role'), 'status');
+  assert.equal(live.getAttribute('aria-live'), 'assertive', 'a failure interrupts');
+  assert.match(live.textContent, /Nothing changed/);
+
   assert.equal(host.querySelector('.ws-toolbox-receipt'), null, 'a failed switch has no receipt');
+});
+
+test('the live region is one node, and repeats nothing on an unrelated click (FR-164)', async () => {
+  const { api, host } = load();
+  await openPreview(api, host);
+
+  const regions = host.querySelectorAll('.ws-toolbox-live');
+  assert.equal(regions.length, 1, 'expected exactly one live region');
+  const region = regions[0];
+  // Nothing has happened yet, so there is nothing to announce.
+  assert.equal(region.textContent, '');
+
+  // Ticking a prerequisite is a decorative change: the same node survives and
+  // its text does not churn, so nothing is re-announced.
+  const before = region.textContent;
+  click(host, '[data-toolbox-close-preview]');
+  const after = host.querySelector('.ws-toolbox-live');
+  assert.equal(after, region, 'expected the live region node to survive a re-render');
+  assert.equal(after.textContent, before, 'expected no announcement for a decorative change');
 });
 
 test('undo is offered after a switch and labelled by the server (FR-88, FR-90)', async () => {
@@ -877,4 +905,188 @@ test('every preview control carries an accessible name (FR-163)', async () => {
     assert.ok(node.getAttribute('aria-label'));
     assert.ok(['true', 'false'].includes(node.getAttribute('aria-checked')));
   }
+});
+
+// --- State coverage (task 6.13; FR-157, FR-162-FR-168) -----------------------
+//
+// Each of these is a state a real workspace reaches. The property under test is
+// the same every time: the state says what it is in words, and it never dead-
+// ends without telling you what to do next.
+
+test('an empty workshop offers a way to start rather than an empty list', async () => {
+  const { api, host } = load({ toolboxes: [] });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.match(host.textContent, /No saved toolboxes yet/);
+  // The two starting points are both offered — from what is already on, or clean.
+  assert.ok(host.querySelector('[data-toolbox-create=current]'));
+  assert.ok(host.querySelector('[data-toolbox-create=empty]'));
+});
+
+test('a core-only agent is described, not shown as broken', async () => {
+  const { api, host } = load({
+    workshop: workshopFixture({
+      agent_learned: [],
+      workspace_provided: [],
+      global_library: [],
+      capacity: { used: 0, capacity: 4, full: false }
+    })
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.match(host.textContent, /Core only/);
+  assert.match(host.textContent, /nothing else switched on yet/);
+});
+
+test('a full toolbox says swapping is still possible', async () => {
+  const { api, host } = load({
+    workshop: workshopFixture({ capacity: { used: 4, capacity: 4, full: true } })
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.match(host.textContent, /Toolbox full/);
+  assert.match(host.textContent, /remove a skill to add another/);
+});
+
+test('a grandfathered over-capacity toolbox is distinguished from a plain full one', async () => {
+  const { api, host } = load({
+    workshop: workshopFixture({
+      capacity: { used: 6, capacity: 4, full: true, grandfathered: true }
+    })
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  // The distinction matters: this one was legal when it was made, so the copy
+  // must not read as a mistake the user made.
+  assert.match(host.textContent, /kept from before the limit/);
+});
+
+test('a disconnected capability says so in words, not by color', async () => {
+  const { api, host } = load({
+    workshop: workshopFixture({
+      workspace_provided: [
+        {
+          kind: 'mcp',
+          capability_id: 'mb-1',
+          display_name: 'Notes',
+          source: 'workspace_provided',
+          binding_id: 'mb-1',
+          server_name: 'notes',
+          available: false,
+          connected: false,
+          selected: false,
+          exposed_tools: ['read_note'],
+          unavailable_reason: 'This connection is set up but switched off.',
+          consumes_skill_space: false
+        }
+      ]
+    })
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.match(host.textContent, /Not connected/);
+  assert.match(host.textContent, /switched off/);
+});
+
+test('a missing capability points at the flow that owns it and installs nothing', async () => {
+  const { api, host, requests } = load({
+    workshop: workshopFixture({
+      requirements: [
+        {
+          kind: 'skill',
+          capability_id: 'translation',
+          display_name: 'translation',
+          available: false,
+          unavailable_reason: 'Not set up in this workspace yet.'
+        }
+      ]
+    })
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.match(host.textContent, /Not set up in this workspace yet/);
+  // Reading the requirement must not have installed anything on its own.
+  assert.equal(requests.filter(request => request.method !== 'GET').length, 0);
+});
+
+// One case per non-Ready readiness state. Looping keeps them honest: adding an
+// eighth state to the Go side without teaching the UI to print it fails here.
+for (const readiness of [
+  'Needs connection',
+  'Needs approval',
+  'Missing capability',
+  'Toolbox full',
+  'Needs repair',
+  'Archived'
+]) {
+  test(`preview state "${readiness}" blocks Use and explains itself (FR-162)`, async () => {
+    const { api, host } = load({
+      previewAction: 'Review & Use',
+      preview: previewFixture({
+        readiness,
+        can_use_directly: false,
+        issues: [
+          {
+            state: readiness,
+            message: `Blocked: ${readiness}.`,
+            blocking: true
+          }
+        ]
+      })
+    });
+    await openPreview(api, host);
+
+    // The state itself is printed, so a user knows which of the seven they hit.
+    assert.match(host.textContent, new RegExp('Readiness: ' + readiness));
+    assert.match(host.textContent, /Before this can be used/);
+
+    const use = host.querySelector('[data-toolbox-use]');
+    assert.ok(use, 'the Use control should still be present');
+    assert.equal(use.disabled, true, `${readiness} must not be usable`);
+    assert.match(host.textContent, /Resolve the required items above/);
+  });
+}
+
+test('a failed operation says what did NOT change (FR-167)', async () => {
+  const { api, host } = load({
+    failWrites: true,
+    preview: previewFixture({ can_use_directly: true })
+  });
+  await openPreview(api, host);
+  click(host, '[data-toolbox-use]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const error = host.querySelector('.ws-toolbox-error');
+  assert.ok(error, 'expected the failure to stay on screen');
+  // The live region carries the same words once; the visible copy is not live.
+  assert.equal(error.getAttribute('role'), null);
+
+  const region = host.querySelector('.ws-toolbox-live');
+  assert.ok(region);
+  assert.equal(region.getAttribute('aria-live'), 'assertive');
+  assert.equal(region.textContent, error.textContent);
+});
+
+test('no secret-shaped config value is ever printed', async () => {
+  // The server redacts (see redactWorkshopConfig), but the client must not
+  // reintroduce a leak by rendering some other field verbatim.
+  const { api, host } = load({
+    workshop: workshopFixture({
+      agent_learned: [
+        {
+          kind: 'skill',
+          capability_id: 'notes',
+          display_name: 'notes',
+          source: 'agent_learned',
+          available: true,
+          selected: true,
+          consumes_skill_space: true,
+          config: { endpoint: 'https://notes.example.com', api_key: '(hidden)' }
+        }
+      ]
+    })
+  });
+  await api.init({ agentInstanceId: 'inst-1' });
+
+  assert.doesNotMatch(host.textContent, /sk-[a-z0-9-]+/i);
 });

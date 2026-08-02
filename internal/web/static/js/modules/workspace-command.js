@@ -6162,9 +6162,13 @@ export class WorkspaceCommandView {
     );
   }
 
+  // The method name, the CSS class, and the tab key stay "loadout" — they are
+  // internal identifiers, and renaming them would churn selectors and saved tab
+  // state for no user-visible gain. Only the label a person reads changes
+  // (FR-168).
   renderMapAgentLoadout(agent) {
     return (
-      '<section class="ws-cmd-rpg-loadout is-editable"><span>Loadout</span>' +
+      '<section class="ws-cmd-rpg-loadout is-editable"><span>Toolbox</span>' +
       this.renderLoadoutEditor(agent) +
       '</section>'
     );
@@ -6579,7 +6583,7 @@ export class WorkspaceCommandView {
     );
     actions.push(
       action({
-        label: 'Configure Loadout',
+        label: 'Open the Workshop',
         detail: loadoutDetail,
         icon: 'bi-sliders',
         attrs:

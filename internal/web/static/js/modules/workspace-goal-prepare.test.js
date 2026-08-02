@@ -325,7 +325,11 @@ test('a goal whose pinned toolbox broke says so, loudly (FR-105)', async () => {
   assert.ok(alert, 'expected the stop to be announced');
   assert.match(alert.textContent, /Needs attention/);
   assert.match(alert.textContent, /archived/);
-  assert.equal(alert.getAttribute('role'), 'alert');
+  // Loud in the sense that matters: it is the first thing in the policy
+  // section and it names the reason. It is deliberately NOT a live region —
+  // it renders on every pass, so announcing it would repeat forever (FR-164).
+  assert.equal(alert.getAttribute('role'), null);
+  assert.equal(alert.getAttribute('aria-live'), null);
 });
 
 test('when nothing covers the goal, the gap is honest and the variant is inert (FR-101, FR-102)', async () => {
@@ -360,4 +364,47 @@ test('every pin control carries an accessible name (FR-163)', async () => {
   for (const node of host.querySelectorAll('[data-goal-pin]')) {
     assert.match(node.getAttribute('aria-label') || '', /^Pin .+ for this goal$/);
   }
+});
+
+test('one live region survives re-renders and only speaks on a real result (FR-164)', async () => {
+  const { api, host } = load({ accepted: { required_capabilities: ['summarize'], version: 1 } });
+  await api.init();
+
+  const regions = host.querySelectorAll('.ws-goal-live');
+  assert.equal(regions.length, 1, 'expected exactly one live region');
+  const region = regions[0];
+  assert.equal(region.getAttribute('aria-live'), 'polite');
+  // Nothing has happened yet, so it has nothing to say.
+  assert.equal(region.textContent, '');
+
+  // Re-rendering for a reason the user did not cause must not re-announce.
+  await api.init();
+  const afterRerender = host.querySelectorAll('.ws-goal-live');
+  assert.equal(afterRerender.length, 1);
+  assert.equal(
+    afterRerender[0],
+    region,
+    'the live region was recreated — assistive tech would re-announce its contents'
+  );
+});
+
+test('a failure interrupts and says what stayed the same (FR-164, FR-167)', async () => {
+  const { api, host } = load({
+    accepted: { required_capabilities: ['summarize'], version: 1 },
+    failWrites: true
+  });
+  await api.init();
+  click(host, '[data-goal-pin]');
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const region = host.querySelector('.ws-goal-live');
+  assert.ok(region, 'expected the live region to still exist after a failure');
+  // A failure is the one case that jumps the queue.
+  assert.equal(region.getAttribute('aria-live'), 'assertive');
+  assert.match(region.textContent, /did not work/);
+
+  // The visible copy must not ALSO be live, or the message lands twice.
+  const visible = host.querySelector('.ws-goal-error');
+  assert.ok(visible, 'expected the failure to stay visible on screen');
+  assert.equal(visible.getAttribute('role'), null);
 });

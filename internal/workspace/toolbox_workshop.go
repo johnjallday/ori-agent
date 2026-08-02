@@ -71,7 +71,10 @@ type WorkshopItem struct {
 	// the user can check what it actually instructs rather than trusting the
 	// summary (FR-49).
 	Prompt string `json:"prompt,omitempty"`
-	// Config is the workspace binding's configuration for this skill.
+	// Config is the workspace binding's configuration for this skill, with
+	// secret-bearing values replaced by a placeholder. See redactWorkshopConfig
+	// — the Workshop shows what a capability is configured to do, never the
+	// credentials it does it with (FR-157).
 	Config map[string]any `json:"config,omitempty"`
 	// SkillAllowedTools / SkillDisallowedTools are the skill's own tool policy.
 	SkillAllowedTools    []string `json:"skill_allowed_tools,omitempty"`
@@ -430,7 +433,7 @@ func skillWorkshopItem(
 		item.Trusted = learned.Trusted
 	}
 	if binding != nil {
-		item.Config = binding.Config
+		item.Config = redactWorkshopConfig(binding.Config)
 		item.Trusted = binding.Trusted
 		item.OwnerCapabilityID = ownerByResource[resourceKey(ResourceMCPBinding, binding.ID)]
 	}
@@ -493,6 +496,68 @@ func sortWorkshopItems(items []WorkshopItem) {
 		}
 		return strings.ToLower(items[i].DisplayName) < strings.ToLower(items[j].DisplayName)
 	})
+}
+
+// redactedConfigValue is what a user sees in place of a secret. It says the
+// setting is present without saying what it is, which is the useful half:
+// "this binding has an api_key" is worth knowing; the key itself is not.
+const redactedConfigValue = "(hidden)"
+
+// secretConfigKeyParts are the substrings that mark a config key as carrying a
+// credential. Matching on the KEY rather than sniffing the value is deliberate:
+// a value-shaped heuristic ("looks like a token") both misses credentials that
+// look ordinary and hides ordinary settings that happen to look random.
+//
+// Written without separators because the key is normalized the same way — one
+// entry then covers api_key, apiKey, API-KEY, and apikey rather than needing a
+// row per spelling. Bare "auth" is deliberately absent: it would swallow an
+// ordinary "author" field.
+var secretConfigKeyParts = []string{
+	"secret", "password", "passwd", "token", "apikey",
+	"credential", "privatekey", "accesskey", "authorization", "oauth",
+	"bearer", "session", "cookie", "signature",
+}
+
+// redactWorkshopConfig copies a binding's config with secret-bearing values
+// replaced. The Workshop exists to make a capability legible before it is used
+// (FR-49), and a config map is free-form — nothing stops someone from putting
+// an API key in one. Returning the map by reference would also let a caller
+// mutate the live binding, so this copies unconditionally.
+func redactWorkshopConfig(config map[string]any) map[string]any {
+	if len(config) == 0 {
+		return nil
+	}
+	safe := make(map[string]any, len(config))
+	for key, value := range config {
+		if isSecretConfigKey(key) {
+			safe[key] = redactedConfigValue
+			continue
+		}
+		// A secret one level down is still a secret. Nested maps arrive here
+		// as map[string]any after a JSON round-trip.
+		if nested, ok := value.(map[string]any); ok {
+			safe[key] = redactWorkshopConfig(nested)
+			continue
+		}
+		safe[key] = value
+	}
+	return safe
+}
+
+func isSecretConfigKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	// Fold the separators away so one pattern covers every spelling a config
+	// author might use.
+	normalized = strings.NewReplacer("_", "", "-", "", ".", "", " ", "").Replace(normalized)
+	if normalized == "" {
+		return false
+	}
+	for _, part := range secretConfigKeyParts {
+		if strings.Contains(normalized, part) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

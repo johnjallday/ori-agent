@@ -1454,24 +1454,54 @@
     ]);
   }
 
+  // One persistent live region, announced only when the MESSAGE changes
+  // (FR-164).
+  //
+  // The panel re-renders on every click — expanding a card, ticking a
+  // prerequisite — and a live region recreated inside that render is a brand
+  // new node each time, which assistive tech announces afresh. A user
+  // acknowledging three prerequisites would hear the previous result read back
+  // three times. Keeping one node outside the re-rendered content, and writing
+  // to it only when the text differs, means the only things announced are the
+  // things that actually happened.
+  function syncLiveRegion(host) {
+    let region = host.__toolboxLiveRegion;
+    if (!region) {
+      region = el('p', { className: 'ws-toolbox-live' });
+      region.setAttribute('role', 'status');
+      region.setAttribute('aria-live', 'polite');
+      host.__toolboxLiveRegion = region;
+    }
+    // Errors are assertive; results are polite. Both matter, and neither should
+    // interrupt the other's category.
+    const message = state.error || state.notice || '';
+    region.setAttribute('aria-live', state.error ? 'assertive' : 'polite');
+    if (region.__lastMessage !== message) {
+      region.__lastMessage = message;
+      region.textContent = message;
+    }
+    return region;
+  }
+
   function render() {
     const host = hostNode();
     if (!host) return;
+    const liveRegion = syncLiveRegion(host);
     host.innerHTML = '';
+    host.appendChild(liveRegion);
 
     if (state.loading && !state.workshop) {
       host.appendChild(el('p', { className: 'ws-toolbox-empty', text: 'Loading the Workshop…' }));
       return;
     }
+    // The visible copies carry no live-region role. The persistent region above
+    // does the announcing; a role="alert" here would hold the same text and
+    // announce it a second time.
     if (state.error) {
-      const alert = el('p', { className: 'ws-toolbox-error', text: state.error });
-      alert.setAttribute('role', 'alert');
-      host.appendChild(alert);
+      host.appendChild(el('p', { className: 'ws-toolbox-error', text: state.error }));
     }
     if (state.notice) {
-      const notice = el('p', { className: 'ws-toolbox-notice', text: state.notice });
-      notice.setAttribute('role', 'status');
-      host.appendChild(notice);
+      host.appendChild(el('p', { className: 'ws-toolbox-notice', text: state.notice }));
     }
     if (!state.workshop) {
       host.appendChild(

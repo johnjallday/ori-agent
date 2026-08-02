@@ -6031,9 +6031,31 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--danger-color, #c62828);
 }
 
+/* The single persistent live region. Visually hidden because the same text is
+   already shown in .ws-toolbox-error / .ws-toolbox-notice — this node exists so
+   assistive tech hears a result once, when it happens, rather than on every
+   re-render (FR-164). Clip rather than display:none, which would remove it from
+   the accessibility tree entirely. */
+.ws-toolbox-live,
+.ws-goal-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* These four are custom-styled controls whose default ring the base styles
+   remove. Every one of them is a real <button>, so they are already in the tab
+   order — this rule is what makes it possible to SEE where you are (FR-163). */
 .ws-toolbox-select:focus-visible,
 .ws-toolbox-op:focus-visible,
 .ws-toolbox-expand:focus-visible,
+.ws-toolbox-prereq:focus-visible,
 .ws-toolbox-setup-link:focus-visible {
   outline: 2px solid var(--ws-idle);
   outline-offset: 2px;

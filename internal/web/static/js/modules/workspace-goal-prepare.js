@@ -301,12 +301,17 @@
     const children = [el('h4', { text: 'Toolbox for this goal' })];
 
     if (policy && policy.needs_attention) {
-      const alert = el('p', {
-        className: 'ws-goal-error',
-        text: 'Needs attention: ' + (policy.needs_attention_reason || 'this goal cannot start.')
-      });
-      alert.setAttribute('role', 'alert');
-      children.push(alert);
+      // Deliberately NOT a live region. "Needs attention" is a standing
+      // condition, not a result — marking it live would re-announce the same
+      // sentence on every re-render, which is the noise FR-164 exists to
+      // prevent. It reads as ordinary text, which a screen reader reaches in
+      // document order and a greyscale screenshot still shows.
+      children.push(
+        el('p', {
+          className: 'ws-goal-error',
+          text: 'Needs attention: ' + (policy.needs_attention_reason || 'this goal cannot start.')
+        })
+      );
     }
 
     if (!policy || (!policy.toolbox_id && !policy.use_current_at_start)) {
@@ -457,24 +462,45 @@
     return el('section', { className: 'ws-goal-recs' }, children);
   }
 
+  // One live region per host, reused across renders. Creating a fresh
+  // aria-live node each time makes assistive tech announce whatever it holds
+  // every render — including renders caused by nothing the user did. Keeping
+  // the same node and only writing to it when the text actually changes means
+  // a result is announced once, when it happens (FR-164).
+  function syncLiveRegion(host) {
+    let region = host.__goalLiveRegion;
+    if (!region) {
+      region = el('p', { className: 'ws-goal-live' });
+      region.setAttribute('role', 'status');
+      region.setAttribute('aria-live', 'polite');
+      host.__goalLiveRegion = region;
+    }
+    const message = state.error || state.notice || '';
+    // A failure interrupts; a success waits its turn.
+    region.setAttribute('aria-live', state.error ? 'assertive' : 'polite');
+    if (region.__lastMessage !== message) {
+      region.__lastMessage = message;
+      region.textContent = message;
+    }
+    return region;
+  }
+
   function render() {
     const host = hostNode();
     if (!host) return;
+    const liveRegion = syncLiveRegion(host);
     host.innerHTML = '';
+    host.appendChild(liveRegion);
 
     if (state.loading && !state.accepted && !state.proposed) {
       host.appendChild(el('p', { className: 'ws-goal-note', text: 'Preparing…' }));
       return;
     }
     if (state.error) {
-      const alert = el('p', { className: 'ws-goal-error', text: state.error });
-      alert.setAttribute('role', 'alert');
-      host.appendChild(alert);
+      host.appendChild(el('p', { className: 'ws-goal-error', text: state.error }));
     }
     if (state.notice) {
-      const notice = el('p', { className: 'ws-goal-notice', text: state.notice });
-      notice.setAttribute('role', 'status');
-      host.appendChild(notice);
+      host.appendChild(el('p', { className: 'ws-goal-notice', text: state.notice }));
     }
 
     const editor = briefEditor();
