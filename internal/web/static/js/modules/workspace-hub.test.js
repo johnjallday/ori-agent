@@ -15,9 +15,9 @@ function escapeHtml(value) {
 function createClassList() {
   const values = new Set();
   return {
-    add: (...classes) => classes.forEach((className) => values.add(className)),
-    remove: (...classes) => classes.forEach((className) => values.delete(className)),
-    contains: (className) => values.has(className),
+    add: (...classes) => classes.forEach(className => values.add(className)),
+    remove: (...classes) => classes.forEach(className => values.delete(className)),
+    contains: className => values.has(className),
     toggle: (className, force) => {
       const enabled = typeof force === 'boolean' ? force : !values.has(className);
       if (enabled) values.add(className);
@@ -45,15 +45,15 @@ function createElement(id = '') {
     focus: () => {},
     querySelector: () => null,
     querySelectorAll: () => [],
-    removeAttribute: (name) => attributes.delete(name),
+    removeAttribute: name => attributes.delete(name),
     setAttribute: (name, value) => attributes.set(name, String(value)),
-    getAttribute: (name) => attributes.get(name) || null
+    getAttribute: name => attributes.get(name) || null
   };
 }
 
 function flattenWorkspaces(workspaces, depth = 0, parentId = '') {
   const flattened = [];
-  (workspaces || []).forEach((workspace) => {
+  (workspaces || []).forEach(workspace => {
     if (!workspace) return;
     const row = { ...workspace, depth, parent_id: workspace.parent_id || parentId };
     flattened.push(row);
@@ -70,7 +70,7 @@ function collectWorkspaceDescendantIds(workspaces, rootId, { includeRoot = false
   const ids = [];
   if (!rootId) return ids;
   function walk(nodes, inSubtree) {
-    (nodes || []).forEach((node) => {
+    (nodes || []).forEach(node => {
       if (!node || !node.id) return;
       const isRoot = node.id === rootId;
       const nextInSubtree = inSubtree || isRoot;
@@ -93,7 +93,7 @@ function collectWorkspaceDescendantIds(workspaces, rootId, { includeRoot = false
 function buildWorkspaceMap(tree) {
   const map = new Map();
   (function walk(nodes) {
-    (nodes || []).forEach((node) => {
+    (nodes || []).forEach(node => {
       if (!node || !node.id) return;
       map.set(node.id, node);
       if (node.children) walk(node.children);
@@ -102,14 +102,20 @@ function buildWorkspaceMap(tree) {
   return map;
 }
 
-function createKeyboardRow({ id, kind = 'workspace', expanded = null, hidden = false, parentRow = null } = {}) {
+function createKeyboardRow({
+  id,
+  kind = 'workspace',
+  expanded = null,
+  hidden = false,
+  parentRow = null
+} = {}) {
   const listeners = new Map();
   const row = {
     dataset: { workspaceId: id, workspaceKind: kind },
     focused: false,
     tabIndex: 0,
     addEventListener: (type, handler) => listeners.set(type, handler),
-    closest: (selector) => {
+    closest: selector => {
       if (selector === '[hidden]') return hidden ? { hidden: true } : null;
       if (selector === '.launcher-tree-node') return row._node;
       return null;
@@ -131,18 +137,18 @@ function createKeyboardRow({ id, kind = 'workspace', expanded = null, hidden = f
     focus: () => {
       row.focused = true;
     },
-    getAttribute: (name) => (name === 'aria-expanded' ? expanded : null)
+    getAttribute: name => (name === 'aria-expanded' ? expanded : null)
   };
 
   const parentChildren = parentRow
-    ? { closest: (selector) => (selector === '.launcher-tree-node' ? parentRow._node : null) }
+    ? { closest: selector => (selector === '.launcher-tree-node' ? parentRow._node : null) }
     : null;
 
   row._node = {
     parentElement: {
-      closest: (selector) => (selector === '.launcher-tree-children' ? parentChildren : null)
+      closest: selector => (selector === '.launcher-tree-children' ? parentChildren : null)
     },
-    querySelector: (selector) => (selector === ':scope > .launcher-tree-row' ? row : null)
+    querySelector: selector => (selector === ':scope > .launcher-tree-row' ? row : null)
   };
 
   return row;
@@ -157,7 +163,9 @@ function loadWorkspaceHub(overrides = {}) {
   const launcherTagFilterbar = createElement('launcherTagFilterbar');
   const launcherTagFilterChips = createElement('launcherTagFilterChips');
   const launcherTagFilterClear = createElement('launcherTagFilterClear');
-  const launcherViewCards = overrides.includeCardsToggle ? createElement('launcherViewCards') : null;
+  const launcherViewCards = overrides.includeCardsToggle
+    ? createElement('launcherViewCards')
+    : null;
   const launcherViewTree = createElement('launcherViewTree');
   const launcherViewMap = createElement('launcherViewMap');
   const launcherMap = createElement('launcherMap');
@@ -188,7 +196,7 @@ function loadWorkspaceHub(overrides = {}) {
   const storage = new Map(Object.entries(overrides.localStorage || {}));
   const sessionStorageMap = new Map();
   const window = {
-    CSS: { escape: (value) => String(value).replace(/"/g, '\\"') },
+    CSS: { escape: value => String(value).replace(/"/g, '\\"') },
     EventBus: null,
     Toast: { error: () => {}, success: () => {} },
     WorkspaceHubFiles: {
@@ -241,19 +249,19 @@ function loadWorkspaceHub(overrides = {}) {
     WorkspaceHubUtils: {
       collectWorkspaceDescendantIds,
       flattenWorkspaces,
-      formatDate: (value) => String(value || '')
+      formatDate: value => String(value || '')
     },
     addEventListener: () => {},
     clearTimeout,
     confirm: () => false,
     localStorage: {
-      getItem: (key) => storage.get(key) || null,
+      getItem: key => storage.get(key) || null,
       setItem: (key, value) => storage.set(key, String(value))
     },
     location: { href: '' },
     sessionStorage: {
-      getItem: (key) => sessionStorageMap.get(key) || null,
-      removeItem: (key) => sessionStorageMap.delete(key),
+      getItem: key => sessionStorageMap.get(key) || null,
+      removeItem: key => sessionStorageMap.delete(key),
       setItem: (key, value) => sessionStorageMap.set(key, String(value))
     },
     setTimeout
@@ -267,12 +275,13 @@ function loadWorkspaceHub(overrides = {}) {
       if (documentListeners.get(type) === handler) documentListeners.delete(type);
     },
     elementFromPoint: overrides.elementFromPoint || (() => null),
-    getElementById: (id) => elements.get(id) || null,
-    querySelector: (selector) => selector === '.workspace-hub-header .hub-title-text' ? createElement('headerTitle') : null,
+    getElementById: id => elements.get(id) || null,
+    querySelector: selector =>
+      selector === '.workspace-hub-header .hub-title-text' ? createElement('headerTitle') : null,
     querySelectorAll: () => []
   };
 
-  const defaultFetch = async (url) => {
+  const defaultFetch = async url => {
     if (String(url).includes('/api/workspaces?tree=true')) {
       return { ok: true, json: async () => ({ folders: state.workspaces }) };
     }
@@ -453,7 +462,15 @@ test('launcher cards render always-available workspace checkboxes without select
       id: 'group-1',
       kind: 'group',
       name: 'Platform',
-      children: [{ id: 'workspace-1', kind: 'workspace', name: 'API', description: 'Backend work', parent_id: 'group-1' }]
+      children: [
+        {
+          id: 'workspace-1',
+          kind: 'workspace',
+          name: 'API',
+          description: 'Backend work',
+          parent_id: 'group-1'
+        }
+      ]
     },
     { id: 'workspace-2', kind: 'workspace', name: 'UI' }
   ];
@@ -473,15 +490,34 @@ test('launcher cards render always-available workspace checkboxes without select
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-1"/);
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="workspace-2" checked/);
   // Group headers are selectable too: the header card gets a checkbox.
-  assert.match(launcherGrid.innerHTML, /launcher-card-item launcher-group-header has-selection-checkbox/);
+  assert.match(
+    launcherGrid.innerHTML,
+    /launcher-card-item launcher-group-header has-selection-checkbox/
+  );
   assert.match(launcherGrid.innerHTML, /data-workspace-checkbox="group-1"/);
   assert.doesNotMatch(launcherGrid.innerHTML, /data-select-mode/);
 });
 
 test('launcher cards show the Idle/Working LED (from enriched active) instead of the workspace.Status chip', () => {
   const workspaces = [
-    { id: 'workspace-1', kind: 'workspace', name: 'API', status: 'active', active: true, agent_count: 2, open_task_count: 1 },
-    { id: 'workspace-2', kind: 'workspace', name: 'UI', status: 'active', active: false, agent_count: 1, open_task_count: 0 }
+    {
+      id: 'workspace-1',
+      kind: 'workspace',
+      name: 'API',
+      status: 'active',
+      active: true,
+      agent_count: 2,
+      open_task_count: 1
+    },
+    {
+      id: 'workspace-2',
+      kind: 'workspace',
+      name: 'UI',
+      status: 'active',
+      active: false,
+      agent_count: 1,
+      open_task_count: 0
+    }
   ];
   const flattened = flattenWorkspaces(workspaces);
   const { helpers, launcherGrid } = loadWorkspaceHub({ state: { workspaces } });
@@ -489,8 +525,14 @@ test('launcher cards show the Idle/Working LED (from enriched active) instead of
   helpers.renderLauncherCards(flattened);
 
   assert.doesNotMatch(launcherGrid.innerHTML, /launcher-card-status/);
-  assert.match(launcherGrid.innerHTML, /launcher-card-led-status is-working"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Working/);
-  assert.match(launcherGrid.innerHTML, /launcher-card-led-status"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Idle/);
+  assert.match(
+    launcherGrid.innerHTML,
+    /launcher-card-led-status is-working"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Working/
+  );
+  assert.match(
+    launcherGrid.innerHTML,
+    /launcher-card-led-status"[^>]*>\s*<span class="launcher-card-led"[^>]*><\/span>Idle/
+  );
   // Canonical "N agents · M open tasks" summary, same shape as the Map tile meta.
   assert.match(launcherGrid.innerHTML, /launcher-card-summary">2 agents · 1 open task</);
   assert.match(launcherGrid.innerHTML, /launcher-card-summary">1 agent · 0 open tasks</);
@@ -502,7 +544,16 @@ test('launcher tree rows carry the same canonical summary as the deprecated Card
       id: 'group-1',
       kind: 'group',
       name: 'Platform',
-      children: [{ id: 'workspace-1', kind: 'workspace', name: 'API', parent_id: 'group-1', agent_count: 3, open_task_count: 2 }]
+      children: [
+        {
+          id: 'workspace-1',
+          kind: 'workspace',
+          name: 'API',
+          parent_id: 'group-1',
+          agent_count: 3,
+          open_task_count: 2
+        }
+      ]
     }
   ];
   const flattened = flattenWorkspaces(workspaces);
@@ -522,19 +573,31 @@ test('renderLauncherTaskBadge reads counts straight off the workspace object', (
   assert.equal(helpers.renderLauncherTaskBadge(null), '');
   assert.equal(helpers.renderLauncherTaskBadge({ open_task_count: 0 }), '');
 
-  const openOnly = helpers.renderLauncherTaskBadge({ open_task_count: 3, needs_attention_count: 0 });
+  const openOnly = helpers.renderLauncherTaskBadge({
+    open_task_count: 3,
+    needs_attention_count: 0
+  });
   assert.match(openOnly, /class="launcher-task-badge"/);
   assert.doesNotMatch(openOnly, /is-attention/);
   assert.match(openOnly, />3 open</);
 
-  const withAttention = helpers.renderLauncherTaskBadge({ open_task_count: 2, needs_attention_count: 1 });
+  const withAttention = helpers.renderLauncherTaskBadge({
+    open_task_count: 2,
+    needs_attention_count: 1
+  });
   assert.match(withAttention, /class="launcher-task-badge is-attention"/);
   assert.match(withAttention, /1 need attention/);
 });
 
 test('launcher cards badge sources counts from enriched workspace fields, not a fetched map', () => {
   const workspaces = [
-    { id: 'workspace-1', kind: 'workspace', name: 'API', open_task_count: 2, needs_attention_count: 1 },
+    {
+      id: 'workspace-1',
+      kind: 'workspace',
+      name: 'API',
+      open_task_count: 2,
+      needs_attention_count: 1
+    },
     { id: 'workspace-2', kind: 'workspace', name: 'UI', open_task_count: 0 }
   ];
   const flattened = flattenWorkspaces(workspaces);
@@ -573,7 +636,13 @@ test('launcher tag filters use AND logic and retain matching groups', () => {
       kind: 'group',
       name: 'Music',
       children: [
-        { id: 'song-a', kind: 'workspace', name: 'Song A', parent_id: 'group-1', tags: ['music', 'reaper'] },
+        {
+          id: 'song-a',
+          kind: 'workspace',
+          name: 'Song A',
+          parent_id: 'group-1',
+          tags: ['music', 'reaper']
+        },
         { id: 'song-b', kind: 'workspace', name: 'Song B', parent_id: 'group-1', tags: ['music'] }
       ]
     },
@@ -590,7 +659,10 @@ test('launcher tag filters use AND logic and retain matching groups', () => {
 
   assert.equal(state.launcherActiveTags.has('music'), true);
   const mounted = mapMounts[mapMounts.length - 1].state;
-  assert.deepEqual(mounted.workspaces.map((workspace) => workspace.id), ['group-1', 'song-a']);
+  assert.deepEqual(
+    mounted.workspaces.map(workspace => workspace.id),
+    ['group-1', 'song-a']
+  );
   assert.equal(mounted.metadata.groupPreviewById['group-1'].childCount, 1);
 });
 
@@ -665,13 +737,13 @@ test('launcher checkbox click handlers select without triggering workspace navig
   });
   const checkbox = listenerElement({
     checked: true,
-    getAttribute: (name) => (name === 'data-workspace-checkbox' ? 'workspace-1' : null)
+    getAttribute: name => (name === 'data-workspace-checkbox' ? 'workspace-1' : null)
   });
   const checkboxShell = listenerElement();
   const { helpers, launcherGrid, state, window } = loadWorkspaceHub();
 
   launcherGrid.querySelector = () => null;
-  launcherGrid.querySelectorAll = (selector) => {
+  launcherGrid.querySelectorAll = selector => {
     if (selector === '[data-workspace-id]') return [workspaceRow];
     if (selector === '[data-workspace-checkbox]') return [checkbox];
     if (selector === '.launcher-card-checkbox, .launcher-tree-checkbox') return [checkboxShell];
@@ -797,7 +869,7 @@ test('launcher group row opens details on click while the caret toggles collapse
     dataset: { workspaceId: 'group-1', workspaceKind: 'group' }
   });
   const caretBtn = listenerElement({
-    getAttribute: (name) => (name === 'data-group-toggle' ? 'group-1' : null)
+    getAttribute: name => (name === 'data-group-toggle' ? 'group-1' : null)
   });
 
   const { helpers, launcherGrid, state, window } = loadWorkspaceHub({
@@ -805,7 +877,7 @@ test('launcher group row opens details on click while the caret toggles collapse
   });
 
   launcherGrid.querySelector = () => null;
-  launcherGrid.querySelectorAll = (selector) => {
+  launcherGrid.querySelectorAll = selector => {
     if (selector === '[data-workspace-id]') return [groupRow];
     if (selector === '[data-group-toggle]') return [caretBtn];
     return [];
@@ -822,8 +894,12 @@ test('launcher group row opens details on click while the caret toggles collapse
   const caretClick = {
     prevented: false,
     stopped: false,
-    preventDefault() { this.prevented = true; },
-    stopPropagation() { this.stopped = true; }
+    preventDefault() {
+      this.prevented = true;
+    },
+    stopPropagation() {
+      this.stopped = true;
+    }
   };
   caretBtn.dispatch('click', caretClick);
   assert.equal(caretClick.stopped, true);
@@ -840,7 +916,7 @@ test('launcher tree keyboard helpers move focus and ignore embedded controls', (
   const groupRow = createKeyboardRow({ id: 'group-1', kind: 'group', expanded: 'false' });
   const workspaceRow = createKeyboardRow({ id: 'workspace-1', parentRow: groupRow });
   const rows = [groupRow, workspaceRow];
-  launcherGrid.querySelectorAll = (selector) => {
+  launcherGrid.querySelectorAll = selector => {
     if (selector === '.launcher-tree-row[data-workspace-id]') return rows;
     return [];
   };
@@ -876,7 +952,7 @@ test('launcher tree keyboard helpers move focus and ignore embedded controls', (
 
   const modalEvent = groupRow.dispatchKey('k', {
     tagName: 'SPAN',
-    closest: (selector) => selector.includes('.modal.show') ? { className: 'modal show' } : null
+    closest: selector => (selector.includes('.modal.show') ? { className: 'modal show' } : null)
   });
   assert.equal(modalEvent.prevented, false);
 });
@@ -884,7 +960,7 @@ test('launcher tree keyboard helpers move focus and ignore embedded controls', (
 test('launcher tree drop intent maps edge and middle regions', () => {
   const { helpers } = loadWorkspaceHub();
   const row = {
-    classList: { contains: (className) => className === 'launcher-tree-row' },
+    classList: { contains: className => className === 'launcher-tree-row' },
     dataset: {
       nextSiblingId: 'workspace-next',
       parentId: 'group-parent',
@@ -896,7 +972,11 @@ test('launcher tree drop intent maps edge and middle regions', () => {
 
   assert.equal(
     JSON.stringify(helpers.getLauncherTreeDropIntent(row, { clientY: 101 })),
-    JSON.stringify({ type: 'before', targetParentId: 'group-parent', insertBeforeId: 'group-target' })
+    JSON.stringify({
+      type: 'before',
+      targetParentId: 'group-parent',
+      insertBeforeId: 'group-target'
+    })
   );
   assert.equal(
     JSON.stringify(helpers.getLauncherTreeDropIntent(row, { clientY: 115 })),
@@ -904,7 +984,11 @@ test('launcher tree drop intent maps edge and middle regions', () => {
   );
   assert.equal(
     JSON.stringify(helpers.getLauncherTreeDropIntent(row, { clientY: 129 })),
-    JSON.stringify({ type: 'after', targetParentId: 'group-parent', insertBeforeId: 'workspace-next' })
+    JSON.stringify({
+      type: 'after',
+      targetParentId: 'group-parent',
+      insertBeforeId: 'workspace-next'
+    })
   );
 
   row.dataset.nextSiblingId = '';
@@ -920,9 +1004,7 @@ test('launcher card drop intent moves into group cards and before workspace card
       id: 'group-1',
       kind: 'group',
       name: 'Clients',
-      children: [
-        { id: 'workspace-1', kind: 'workspace', name: 'Campaign', parent_id: 'group-1' }
-      ]
+      children: [{ id: 'workspace-1', kind: 'workspace', name: 'Campaign', parent_id: 'group-1' }]
     }
   ];
   const { helpers } = loadWorkspaceHub({
@@ -933,11 +1015,11 @@ test('launcher card drop intent moves into group cards and before workspace card
   });
 
   const groupCard = {
-    classList: { contains: (className) => className === 'launcher-card-item' },
+    classList: { contains: className => className === 'launcher-card-item' },
     dataset: { workspaceId: 'group-1', workspaceKind: 'group' }
   };
   const workspaceCard = {
-    classList: { contains: (className) => className === 'launcher-card-item' },
+    classList: { contains: className => className === 'launcher-card-item' },
     dataset: { workspaceId: 'workspace-1', workspaceKind: 'workspace' }
   };
 
@@ -965,7 +1047,7 @@ test('launcher dragstart is not blocked by checkbox selection', () => {
     }
   });
   launcherGrid.querySelector = () => null;
-  launcherGrid.querySelectorAll = (selector) => {
+  launcherGrid.querySelectorAll = selector => {
     if (selector === '[data-workspace-id]') return [workspaceRow];
     if (selector === '[data-workspace-id][draggable="true"]') return [workspaceRow];
     return [];
@@ -1015,7 +1097,7 @@ test('pointer dragging a tree row can move it to top level', async () => {
   const rootDrop = {
     classList: createClassList(),
     addEventListener: () => {},
-    closest: (selector) => selector === '[data-tree-root-drop]' ? rootDrop : null
+    closest: selector => (selector === '[data-tree-root-drop]' ? rootDrop : null)
   };
   const patches = [];
   const { helpers, launcherGrid, documentListeners } = loadWorkspaceHub({
@@ -1035,7 +1117,7 @@ test('pointer dragging a tree row can move it to top level', async () => {
     }
   });
   launcherGrid.querySelector = () => null;
-  launcherGrid.querySelectorAll = (selector) => {
+  launcherGrid.querySelectorAll = selector => {
     if (selector === '[data-workspace-id]') return [workspaceRow];
     if (selector === '[data-workspace-id][draggable="true"]') return [workspaceRow];
     if (selector === '[data-tree-root-drop]') return [rootDrop];
@@ -1063,9 +1145,9 @@ test('pointer dragging a tree row can move it to top level', async () => {
     stopPropagation() {}
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise(resolve => setTimeout(resolve, 20));
 
-  const movedWorkspace = patches.find((patch) => patch.url.endsWith('/api/workspaces/workspace-1'));
+  const movedWorkspace = patches.find(patch => patch.url.endsWith('/api/workspaces/workspace-1'));
   assert.equal(movedWorkspace.body.parent_id, '');
 });
 
@@ -1104,7 +1186,7 @@ test('launcher tree root drop target moves workspace to top level', async () => 
   });
 
   launcherGrid.querySelector = () => null;
-  launcherGrid.querySelectorAll = (selector) => {
+  launcherGrid.querySelectorAll = selector => {
     if (selector === '[data-tree-root-drop]') return [rootDrop];
     return [];
   };
@@ -1116,8 +1198,8 @@ test('launcher tree root drop target moves workspace to top level', async () => 
     stopPropagation() {}
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise(resolve => setTimeout(resolve, 20));
 
-  const movedWorkspace = patches.find((patch) => patch.url.endsWith('/api/workspaces/workspace-1'));
+  const movedWorkspace = patches.find(patch => patch.url.endsWith('/api/workspaces/workspace-1'));
   assert.equal(movedWorkspace.body.parent_id, '');
 });

@@ -9,8 +9,9 @@
     if (typeof window.escapeHtml === 'function') {
       return window.escapeHtml(value);
     }
-    return String(value == null ? '' : value).replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    return String(value == null ? '' : value).replace(
+      /[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
     );
   }
 
@@ -27,7 +28,7 @@
     if (!Array.isArray(items) || items.length === 0) {
       body = `<div class="codex-sync-value codex-sync-empty">${esc(emptyText)}</div>`;
     } else {
-      body = `<ul class="codex-sync-list">${items.map((item) => `<li>${itemHtml(item)}</li>`).join('')}</ul>`;
+      body = `<ul class="codex-sync-list">${items.map(item => `<li>${itemHtml(item)}</li>`).join('')}</ul>`;
     }
     return `
       <div class="codex-sync-card">
@@ -45,9 +46,8 @@
     if (envNames.length > 0) {
       meta.push(`env: ${esc(envNames.join(', '))}`);
     }
-    const metaHtml = meta.length > 0
-      ? ` <span class="codex-sync-muted">(${meta.join(' / ')})</span>`
-      : '';
+    const metaHtml =
+      meta.length > 0 ? ` <span class="codex-sync-muted">(${meta.join(' / ')})</span>` : '';
     return `<strong>${esc(server?.name || 'Unnamed')}</strong>${metaHtml}`;
   }
 
@@ -90,16 +90,28 @@
             <div>Reasoning effort: ${esc(reasoning || '-')}</div>
           </div>
         </div>
-        ${listCard(`Skill Agents (${agents.length})`, agents, (a) =>
-          `<strong>${esc(a?.name || 'Unnamed')}</strong>${a?.description ? ' - ' + esc(a.description) : ''}`,
-          'No Codex skill agents found in ~/.codex/skills.')}
+        ${listCard(
+          `Skill Agents (${agents.length})`,
+          agents,
+          a =>
+            `<strong>${esc(a?.name || 'Unnamed')}</strong>${a?.description ? ' - ' + esc(a.description) : ''}`,
+          'No Codex skill agents found in ~/.codex/skills.'
+        )}
         ${listCard(`MCP Servers (${mcpServers.length})`, mcpServers, renderMCPServer, 'No MCP servers configured.')}
-        ${listCard(`Skill Folders (${skills.length})`, skills, (s) =>
-          `<strong>${esc(s?.name || 'Unnamed')}</strong>${s?.path ? ` <span class="codex-sync-path">${esc(s.path)}</span>` : ''}`,
-          'No Codex skill folders found.')}
-        ${listCard(`Rules (${rules.length})`, rules, (r) =>
-          `<strong>${esc(r?.name || 'Unnamed')}</strong>${r?.path ? ` <span class="codex-sync-path">${esc(r.path)}</span>` : ''}`,
-          'No Codex rules found.')}
+        ${listCard(
+          `Skill Folders (${skills.length})`,
+          skills,
+          s =>
+            `<strong>${esc(s?.name || 'Unnamed')}</strong>${s?.path ? ` <span class="codex-sync-path">${esc(s.path)}</span>` : ''}`,
+          'No Codex skill folders found.'
+        )}
+        ${listCard(
+          `Rules (${rules.length})`,
+          rules,
+          r =>
+            `<strong>${esc(r?.name || 'Unnamed')}</strong>${r?.path ? ` <span class="codex-sync-path">${esc(r.path)}</span>` : ''}`,
+          'No Codex rules found.'
+        )}
       </div>`;
   }
 

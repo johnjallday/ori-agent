@@ -12,8 +12,12 @@ const createValidatedFields = [
 ];
 
 function supportsCodexReasoning(providerName, modelName) {
-  const provider = String(providerName || '').trim().toLowerCase();
-  const model = String(modelName || '').trim().toLowerCase();
+  const provider = String(providerName || '')
+    .trim()
+    .toLowerCase();
+  const model = String(modelName || '')
+    .trim()
+    .toLowerCase();
   return provider === 'codex' || model.includes('codex');
 }
 
@@ -201,20 +205,19 @@ async function loadPlugins() {
     const data = await response.json();
     availablePlugins = data.plugins || [];
     renderPlugins();
-
   } catch (error) {
     console.error('Error loading plugins:', error);
     showError('Failed to load plugins. Some features may be unavailable.');
   }
 }
 
-
 // Render plugins list
 function renderPlugins() {
   const container = document.getElementById('pluginsList');
 
   if (availablePlugins.length === 0) {
-    container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">No plugins available</div>';
+    container.innerHTML =
+      '<div style="text-align: center; padding: 20px; color: var(--text-muted, #666);">No plugins available</div>';
     return;
   }
 
@@ -239,7 +242,7 @@ function setupTagsInput() {
   const input = document.getElementById('tagsInput');
   if (!input) return;
 
-  input.addEventListener('keydown', (e) => {
+  input.addEventListener('keydown', e => {
     if (e.key === 'Enter' && input.value.trim()) {
       e.preventDefault();
       addTag(input.value.trim());
@@ -298,13 +301,13 @@ function setupValidationListeners() {
   const inputFieldIds = ['createAutoConfigDescription', 'agentName'];
   const selectFieldIds = ['agentType', 'agentRole', 'llmModel'];
 
-  inputFieldIds.forEach((fieldId) => {
+  inputFieldIds.forEach(fieldId => {
     const field = document.getElementById(fieldId);
     if (!field) return;
     field.addEventListener('input', () => clearFieldError(fieldId));
   });
 
-  selectFieldIds.forEach((fieldId) => {
+  selectFieldIds.forEach(fieldId => {
     const field = document.getElementById(fieldId);
     if (!field) return;
     field.addEventListener('change', () => clearFieldError(fieldId));
@@ -315,7 +318,7 @@ function setupCreateFormSubmission() {
   const form = document.getElementById('createAgentForm');
   if (!form) return;
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', event => {
     event.preventDefault();
     createAgent();
   });
@@ -341,12 +344,12 @@ function updateModelOptions() {
   availableProviders.forEach(provider => {
     // Map provider display names to our provider select values
     const providerNameMap = {
-      'OpenAI': 'openai',
+      OpenAI: 'openai',
       'OpenAI Codex (CLI)': 'codex',
-      'Anthropic': 'claude',
+      Anthropic: 'claude',
       'Anthropic Claude': 'claude',
       'Claude Code (CLI)': 'claude_code',
-      'Ollama': 'ollama',
+      Ollama: 'ollama',
       'LM Studio (Local)': 'lmstudio',
       'MLX-LM (Local)': 'mlx_lm',
       'Google Gemini': 'gemini'
@@ -567,7 +570,6 @@ async function createAgent() {
 
     // Success - redirect to agents page
     window.location.href = '/agents';
-
   } catch (error) {
     console.error('Error creating agent:', error);
     showError(error.message || 'Failed to create agent');
@@ -591,7 +593,11 @@ let createSystemModelConfigured = false;
 let createAutoConfigApplied = false;
 
 function isCreateAutoConfigFallback(config) {
-  return Boolean(config && typeof config.reasoning === 'string' && config.reasoning.startsWith('Auto-config failed'));
+  return Boolean(
+    config &&
+    typeof config.reasoning === 'string' &&
+    config.reasoning.startsWith('Auto-config failed')
+  );
 }
 
 // Setup auto-config event listeners
@@ -600,13 +606,13 @@ function setupAutoConfigListeners() {
   const configModeAuto = document.getElementById('createConfigModeAuto');
 
   if (configModeManual) {
-    configModeManual.addEventListener('change', function() {
+    configModeManual.addEventListener('change', function () {
       if (this.checked) handleCreateConfigModeChange('manual');
     });
   }
 
   if (configModeAuto) {
-    configModeAuto.addEventListener('change', async function() {
+    configModeAuto.addEventListener('change', async function () {
       if (this.checked) {
         await checkCreateLLMAvailability();
         handleCreateConfigModeChange('auto');
@@ -658,7 +664,8 @@ function handleCreateConfigModeChange(mode) {
         if (!createSystemModelConfigured) {
           llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
         } else {
-          llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+          llmWarningMessage.textContent =
+            'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
         }
       }
     }
@@ -700,7 +707,8 @@ async function generateCreateAutoConfig() {
   }
 
   generateBtn.disabled = true;
-  generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Generating…';
+  generateBtn.innerHTML =
+    '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Generating…';
   if (autoConfigStatus) {
     autoConfigStatus.textContent = 'Analyzing…';
     autoConfigStatus.classList.remove('d-none', 'bg-success', 'bg-danger', 'bg-warning');
@@ -753,7 +761,6 @@ async function generateCreateAutoConfig() {
     if (fallback && window.Toast) {
       Toast.warning('Auto-config failed, using defaults. Review the settings before saving.');
     }
-
   } catch (error) {
     console.error('Auto-config error:', error);
     if (autoConfigStatus) {
@@ -764,7 +771,8 @@ async function generateCreateAutoConfig() {
     showError('Failed to generate configuration: ' + error.message);
   } finally {
     generateBtn.disabled = false;
-    generateBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true" focusable="false"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>Generate Configuration';
+    generateBtn.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true" focusable="false"><path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/></svg>Generate Configuration';
   }
 }
 
@@ -859,7 +867,14 @@ function applyRecommendedPlugins(recommendedPlugins) {
 
 // Briefly highlight fields that were auto-configured
 function highlightCreateAutoConfiguredFields() {
-  const fields = ['agentName', 'agentType', 'llmModel', 'temperature', 'systemPrompt', 'pluginsList'];
+  const fields = [
+    'agentName',
+    'agentType',
+    'llmModel',
+    'temperature',
+    'systemPrompt',
+    'pluginsList'
+  ];
 
   fields.forEach(id => {
     const element = document.getElementById(id);

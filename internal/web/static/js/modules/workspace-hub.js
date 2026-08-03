@@ -17,7 +17,7 @@ console.log('[workspace-hub.js] FILE LOADED');
  *
  * @module workspace-hub
  */
-(function() {
+(function () {
   'use strict';
 
   const hubEl = document.getElementById('workspaceHub');
@@ -276,7 +276,9 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function normalizeOverviewStatus(status) {
-    const value = String(status || 'pending').trim().toLowerCase();
+    const value = String(status || 'pending')
+      .trim()
+      .toLowerCase();
     if (value === 'assigned') return 'pending';
     return value;
   }
@@ -337,12 +339,18 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function updateLauncherOverviewMetrics(metrics) {
-    if (elements.launcherOverviewOpen) elements.launcherOverviewOpen.textContent = String(metrics.open || 0);
-    if (elements.launcherOverviewPending) elements.launcherOverviewPending.textContent = String(metrics.pending || 0);
-    if (elements.launcherOverviewInProgress) elements.launcherOverviewInProgress.textContent = String(metrics.inProgress || 0);
-    if (elements.launcherOverviewAttention) elements.launcherOverviewAttention.textContent = String(metrics.needsAttention || 0);
-    if (elements.launcherOverviewScheduled) elements.launcherOverviewScheduled.textContent = String(metrics.scheduled || 0);
-    if (elements.launcherOverviewOpenSessions) elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
+    if (elements.launcherOverviewOpen)
+      elements.launcherOverviewOpen.textContent = String(metrics.open || 0);
+    if (elements.launcherOverviewPending)
+      elements.launcherOverviewPending.textContent = String(metrics.pending || 0);
+    if (elements.launcherOverviewInProgress)
+      elements.launcherOverviewInProgress.textContent = String(metrics.inProgress || 0);
+    if (elements.launcherOverviewAttention)
+      elements.launcherOverviewAttention.textContent = String(metrics.needsAttention || 0);
+    if (elements.launcherOverviewScheduled)
+      elements.launcherOverviewScheduled.textContent = String(metrics.scheduled || 0);
+    if (elements.launcherOverviewOpenSessions)
+      elements.launcherOverviewOpenSessions.textContent = String(metrics.openSessions || 0);
   }
 
   // Canonical "N agents · M open tasks" summary, shared by Tree rows and
@@ -369,9 +377,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     const titleParts = [`${open} open task${open === 1 ? '' : 's'}`];
     if (needsAttention > 0) titleParts.push(`${needsAttention} need attention`);
     const title = titleParts.join(' | ');
-    const badgeClass = needsAttention > 0
-      ? 'launcher-task-badge is-attention'
-      : 'launcher-task-badge';
+    const badgeClass =
+      needsAttention > 0 ? 'launcher-task-badge is-attention' : 'launcher-task-badge';
 
     // "N open" rather than a bare number: the count needs a visible unit
     // label, not just a hover tooltip, to read the same way as the Map/
@@ -380,7 +387,9 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function normalizeWorkspaceFolderPath(value) {
-    return String(value || '').trim().replace(/[\\/]+$/, '');
+    return String(value || '')
+      .trim()
+      .replace(/[\\/]+$/, '');
   }
 
   function collectWorkspaceLinkedDirectories(workspace) {
@@ -404,16 +413,21 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (Array.isArray(workspace?.directory_references)) {
-      workspace.directory_references.forEach((ref) => {
+      workspace.directory_references.forEach(ref => {
         if (!ref || typeof ref !== 'object') return;
         addDirectory(ref.path, ref.name);
       });
     }
 
     if (Array.isArray(workspace?.attachments)) {
-      workspace.attachments.forEach((attachment) => {
+      workspace.attachments.forEach(attachment => {
         if (!attachment || typeof attachment !== 'object') return;
-        if (String(attachment.type || '').trim().toLowerCase() !== 'directory') return;
+        if (
+          String(attachment.type || '')
+            .trim()
+            .toLowerCase() !== 'directory'
+        )
+          return;
         addDirectory(attachment.path || attachment.body, attachment.title || attachment.name);
       });
     }
@@ -443,7 +457,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const primaryPath = linkedDirectories[0].path || linkedDirectories[0].name || 'Linked folder';
     const extraCount = directoryCount - 1;
     const allPaths = linkedDirectories
-      .map((directory) => directory.path || directory.name)
+      .map(directory => directory.path || directory.name)
       .filter(Boolean);
 
     return {
@@ -461,20 +475,22 @@ console.log('[workspace-hub.js] FILE LOADED');
     const tagsById = {};
     const groupPreviewById = {};
 
-    (Array.isArray(flattened) ? flattened : []).forEach((workspace) => {
+    (Array.isArray(flattened) ? flattened : []).forEach(workspace => {
       if (!workspace || !workspace.id) return;
       folderDisplayById[workspace.id] = getWorkspaceFolderDisplay(workspace);
       tagsById[workspace.id] = getWorkspaceTags(workspace);
     });
 
     function visitGroups(nodes) {
-      (Array.isArray(nodes) ? nodes : []).forEach((workspace) => {
+      (Array.isArray(nodes) ? nodes : []).forEach(workspace => {
         if (!workspace || !workspace.id) return;
         const children = Array.isArray(workspace.children) ? workspace.children : [];
         if (isGroupWorkspace(workspace)) {
           const previewNames = children
             .slice(0, 3)
-            .map((child) => String(child && (child.name || child.id) || 'Untitled Workspace').trim())
+            .map(child =>
+              String((child && (child.name || child.id)) || 'Untitled Workspace').trim()
+            )
             .filter(Boolean);
           groupPreviewById[workspace.id] = {
             childCount: children.length,
@@ -498,7 +514,12 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function setLauncherWorkspaceRootDisplay(data) {
-    if (!elements.launcherWorkspaceRootPath || !elements.launcherWorkspaceRootSummary || !elements.launcherWorkspaceRootMeta || !elements.launcherWorkspaceRootBadge) {
+    if (
+      !elements.launcherWorkspaceRootPath ||
+      !elements.launcherWorkspaceRootSummary ||
+      !elements.launcherWorkspaceRootMeta ||
+      !elements.launcherWorkspaceRootBadge
+    ) {
       return;
     }
 
@@ -539,19 +560,27 @@ console.log('[workspace-hub.js] FILE LOADED');
     const defaultRoot = String(launcherWorkspaceRootState?.default_workspace_root || '').trim();
 
     if (elements.launcherWorkspaceRootEditBtn) {
-      elements.launcherWorkspaceRootEditBtn.textContent = launcherWorkspaceRootEditorOpen ? 'Close' : 'Edit';
-      elements.launcherWorkspaceRootEditBtn.setAttribute('aria-expanded', launcherWorkspaceRootEditorOpen ? 'true' : 'false');
+      elements.launcherWorkspaceRootEditBtn.textContent = launcherWorkspaceRootEditorOpen
+        ? 'Close'
+        : 'Edit';
+      elements.launcherWorkspaceRootEditBtn.setAttribute(
+        'aria-expanded',
+        launcherWorkspaceRootEditorOpen ? 'true' : 'false'
+      );
     }
 
     if (elements.launcherWorkspaceRootInput) {
-      elements.launcherWorkspaceRootInput.placeholder = defaultRoot || '/absolute/path/to/workspaces';
+      elements.launcherWorkspaceRootInput.placeholder =
+        defaultRoot || '/absolute/path/to/workspaces';
     }
 
     if (elements.launcherWorkspaceRootResetBtn) {
       elements.launcherWorkspaceRootResetBtn.disabled = !hasCustomRoot;
       elements.launcherWorkspaceRootResetBtn.textContent = hasCustomRoot
         ? 'Clear Custom'
-        : (isConfirmed ? 'Using Default' : 'Not Confirmed');
+        : isConfirmed
+          ? 'Using Default'
+          : 'Not Confirmed';
     }
   }
 
@@ -562,13 +591,21 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherWorkspaceRootEditor.hidden = !launcherWorkspaceRootEditorOpen;
     }
 
-    if (launcherWorkspaceRootEditorOpen && elements.launcherWorkspaceRootInput && options.preserveDraft !== true) {
+    if (
+      launcherWorkspaceRootEditorOpen &&
+      elements.launcherWorkspaceRootInput &&
+      options.preserveDraft !== true
+    ) {
       elements.launcherWorkspaceRootInput.value = getLauncherWorkspaceRootDraftValue();
     }
 
     syncLauncherWorkspaceRootEditorControls();
 
-    if (launcherWorkspaceRootEditorOpen && options.focusInput && elements.launcherWorkspaceRootInput) {
+    if (
+      launcherWorkspaceRootEditorOpen &&
+      options.focusInput &&
+      elements.launcherWorkspaceRootInput
+    ) {
       elements.launcherWorkspaceRootInput.focus();
       elements.launcherWorkspaceRootInput.select();
     }
@@ -603,7 +640,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function applyLauncherWorkspaceRootState(workspaceRootState) {
     launcherWorkspaceRootState = workspaceRootState || {};
-    const source = String(workspaceRootState?.source || 'default').trim().toLowerCase();
+    const source = String(workspaceRootState?.source || 'default')
+      .trim()
+      .toLowerCase();
     const effectiveRoot = String(workspaceRootState?.effective_workspace_root || '').trim();
     const fallbackRoot = String(workspaceRootState?.default_workspace_root || '').trim();
     const visiblePath = effectiveRoot || fallbackRoot || 'Workspace directory unavailable';
@@ -654,7 +693,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     });
 
     if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to save workspace directory');
+      throw new Error((await response.text()) || 'Failed to save workspace directory');
     }
 
     const data = await response.json();
@@ -796,10 +835,13 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function normalizeLauncherView(value, options = {}) {
-    const v = String(value || '').trim().toLowerCase();
+    const v = String(value || '')
+      .trim()
+      .toLowerCase();
     if (v === LAUNCHER_VIEW_TREE) return LAUNCHER_VIEW_TREE;
     if (v === LAUNCHER_VIEW_MAP) return LAUNCHER_VIEW_MAP;
-    if (v === LAUNCHER_VIEW_CARDS && options.allowDeprecatedCards !== false) return LAUNCHER_VIEW_CARDS;
+    if (v === LAUNCHER_VIEW_CARDS && options.allowDeprecatedCards !== false)
+      return LAUNCHER_VIEW_CARDS;
     return LAUNCHER_DEFAULT_VIEW;
   }
 
@@ -936,39 +978,47 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function bindLauncherOverviewLinks() {
     if (elements.launcherOverviewByWorkspace) {
-      elements.launcherOverviewByWorkspace.querySelectorAll('[data-overview-workspace]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
-          event.preventDefault();
-          navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+      elements.launcherOverviewByWorkspace
+        .querySelectorAll('[data-overview-workspace]')
+        .forEach(btn => {
+          btn.addEventListener('click', event => {
+            event.preventDefault();
+            navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+          });
         });
-      });
     }
 
     if (elements.launcherOverviewTopTasks) {
-      elements.launcherOverviewTopTasks.querySelectorAll('[data-overview-workspace]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
-          event.preventDefault();
-          navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+      elements.launcherOverviewTopTasks
+        .querySelectorAll('[data-overview-workspace]')
+        .forEach(btn => {
+          btn.addEventListener('click', event => {
+            event.preventDefault();
+            navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+          });
         });
-      });
     }
 
     if (elements.launcherOverviewScheduledTasks) {
-      elements.launcherOverviewScheduledTasks.querySelectorAll('[data-overview-workspace]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
-          event.preventDefault();
-          navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+      elements.launcherOverviewScheduledTasks
+        .querySelectorAll('[data-overview-workspace]')
+        .forEach(btn => {
+          btn.addEventListener('click', event => {
+            event.preventDefault();
+            navigateToWorkspace(btn.getAttribute('data-overview-workspace'));
+          });
         });
-      });
     }
 
     if (elements.launcherOverviewOpenSessionsList) {
-      elements.launcherOverviewOpenSessionsList.querySelectorAll('[data-overview-session]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
-          event.preventDefault();
-          navigateToSession(btn.getAttribute('data-overview-session'));
+      elements.launcherOverviewOpenSessionsList
+        .querySelectorAll('[data-overview-session]')
+        .forEach(btn => {
+          btn.addEventListener('click', event => {
+            event.preventDefault();
+            navigateToSession(btn.getAttribute('data-overview-session'));
+          });
         });
-      });
     }
   }
 
@@ -977,16 +1027,20 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherOverviewUpdatedAt.textContent = 'Refreshing...';
     }
     if (elements.launcherOverviewByWorkspace) {
-      elements.launcherOverviewByWorkspace.innerHTML = '<div class="hub-loading">Refreshing workspace overview...</div>';
+      elements.launcherOverviewByWorkspace.innerHTML =
+        '<div class="hub-loading">Refreshing workspace overview...</div>';
     }
     if (elements.launcherOverviewTopTasks) {
-      elements.launcherOverviewTopTasks.innerHTML = '<div class="hub-loading">Refreshing ongoing tasks...</div>';
+      elements.launcherOverviewTopTasks.innerHTML =
+        '<div class="hub-loading">Refreshing ongoing tasks...</div>';
     }
     if (elements.launcherOverviewScheduledTasks) {
-      elements.launcherOverviewScheduledTasks.innerHTML = '<div class="hub-loading">Refreshing scheduled tasks...</div>';
+      elements.launcherOverviewScheduledTasks.innerHTML =
+        '<div class="hub-loading">Refreshing scheduled tasks...</div>';
     }
     if (elements.launcherOverviewOpenSessionsList) {
-      elements.launcherOverviewOpenSessionsList.innerHTML = '<div class="hub-loading">Refreshing open sessions...</div>';
+      elements.launcherOverviewOpenSessionsList.innerHTML =
+        '<div class="hub-loading">Refreshing open sessions...</div>';
     }
   }
 
@@ -1023,7 +1077,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const [taskResponse, sessionResponse] = await Promise.allSettled([
       fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(safeWorkspaceId)}`),
-      fetch(`/api/sessions?folder_id=${encodeURIComponent(safeWorkspaceId)}&sort=updated_desc&limit=50`)
+      fetch(
+        `/api/sessions?folder_id=${encodeURIComponent(safeWorkspaceId)}&sort=updated_desc&limit=50`
+      )
     ]);
 
     const payload = {
@@ -1050,7 +1106,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (sessionResponse.status === 'fulfilled') {
       if (!sessionResponse.value.ok) {
-        payload.sessionError = new Error(`Session request failed (${sessionResponse.value.status})`);
+        payload.sessionError = new Error(
+          `Session request failed (${sessionResponse.value.status})`
+        );
       } else {
         try {
           const sessionData = await sessionResponse.value.json();
@@ -1069,7 +1127,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   async function refreshLauncherTaskOverview(flattened) {
     if (!elements.launcherTaskOverview) return;
 
-    const workspaces = (flattened || []).filter((workspace) => workspace && workspace.id);
+    const workspaces = (flattened || []).filter(workspace => workspace && workspace.id);
     if (workspaces.length === 0) {
       updateLauncherOverviewMetrics({
         open: 0,
@@ -1083,16 +1141,20 @@ console.log('[workspace-hub.js] FILE LOADED');
         elements.launcherOverviewUpdatedAt.textContent = 'No workspaces';
       }
       if (elements.launcherOverviewByWorkspace) {
-        elements.launcherOverviewByWorkspace.innerHTML = '<div class="launcher-overview-empty">Create a workspace to track tasks.</div>';
+        elements.launcherOverviewByWorkspace.innerHTML =
+          '<div class="launcher-overview-empty">Create a workspace to track tasks.</div>';
       }
       if (elements.launcherOverviewTopTasks) {
-        elements.launcherOverviewTopTasks.innerHTML = '<div class="launcher-overview-empty">No ongoing tasks yet.</div>';
+        elements.launcherOverviewTopTasks.innerHTML =
+          '<div class="launcher-overview-empty">No ongoing tasks yet.</div>';
       }
       if (elements.launcherOverviewScheduledTasks) {
-        elements.launcherOverviewScheduledTasks.innerHTML = '<div class="launcher-overview-empty">No scheduled tasks yet.</div>';
+        elements.launcherOverviewScheduledTasks.innerHTML =
+          '<div class="launcher-overview-empty">No scheduled tasks yet.</div>';
       }
       if (elements.launcherOverviewOpenSessionsList) {
-        elements.launcherOverviewOpenSessionsList.innerHTML = '<div class="launcher-overview-empty">No open sessions yet.</div>';
+        elements.launcherOverviewOpenSessionsList.innerHTML =
+          '<div class="launcher-overview-empty">No open sessions yet.</div>';
       }
       if (hubEl.dataset.state === 'launcher') {
         const state = window.WorkspaceHubState.getState();
@@ -1104,7 +1166,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const requestSeq = ++launcherOverviewRequestSeq;
     renderLauncherOverviewLoading();
 
-    const overviewResults = await mapWithConcurrency(workspaces, 6, async (workspace) => {
+    const overviewResults = await mapWithConcurrency(workspaces, 6, async workspace => {
       try {
         const payload = await fetchWorkspaceOverviewData(workspace.id);
         return {
@@ -1145,17 +1207,25 @@ console.log('[workspace-hub.js] FILE LOADED');
     let failedTaskFetches = 0;
     let failedSessionFetches = 0;
 
-    overviewResults.forEach((result) => {
+    overviewResults.forEach(result => {
       const workspace = result.workspace;
       const tasks = Array.isArray(result.tasks) ? result.tasks : [];
       const sessions = Array.isArray(result.sessions) ? result.sessions : [];
       if (result.taskError) {
         failedTaskFetches += 1;
-        console.error('Failed to load workspace tasks for overview:', workspace.id, result.taskError);
+        console.error(
+          'Failed to load workspace tasks for overview:',
+          workspace.id,
+          result.taskError
+        );
       }
       if (result.sessionError) {
         failedSessionFetches += 1;
-        console.error('Failed to load workspace sessions for overview:', workspace.id, result.sessionError);
+        console.error(
+          'Failed to load workspace sessions for overview:',
+          workspace.id,
+          result.sessionError
+        );
       }
 
       const summary = {
@@ -1170,12 +1240,13 @@ console.log('[workspace-hub.js] FILE LOADED');
         openSessions: 0
       };
       const workspaceSessionCount = Number(workspace.session_count);
-      summary.openSessions = Number.isFinite(workspaceSessionCount) && workspaceSessionCount >= 0
-        ? workspaceSessionCount
-        : sessions.length;
+      summary.openSessions =
+        Number.isFinite(workspaceSessionCount) && workspaceSessionCount >= 0
+          ? workspaceSessionCount
+          : sessions.length;
       totals.openSessions += summary.openSessions;
 
-      sessions.forEach((chatSession) => {
+      sessions.forEach(chatSession => {
         openSessions.push({
           id: chatSession.id || '',
           title: chatSession.title || chatSession.name || 'Untitled chat',
@@ -1187,9 +1258,15 @@ console.log('[workspace-hub.js] FILE LOADED');
         });
       });
 
-      tasks.forEach((task) => {
+      tasks.forEach(task => {
         const status = normalizeOverviewStatus(task.status);
-        const hasSchedule = Boolean(task.schedule_enabled || task.schedule || task.next_run || task.schedule_type || task.schedule_expression);
+        const hasSchedule = Boolean(
+          task.schedule_enabled ||
+          task.schedule ||
+          task.next_run ||
+          task.schedule_type ||
+          task.schedule_expression
+        );
         if (task.schedule_enabled) {
           summary.scheduled += 1;
           totals.scheduled += 1;
@@ -1287,57 +1364,69 @@ console.log('[workspace-hub.js] FILE LOADED');
         unavailable.push(`${failedTaskFetches} task feed${failedTaskFetches === 1 ? '' : 's'}`);
       }
       if (failedSessionFetches > 0) {
-        unavailable.push(`${failedSessionFetches} session feed${failedSessionFetches === 1 ? '' : 's'}`);
+        unavailable.push(
+          `${failedSessionFetches} session feed${failedSessionFetches === 1 ? '' : 's'}`
+        );
       }
       const suffix = unavailable.length > 0 ? ` | ${unavailable.join(', ')} unavailable` : '';
       elements.launcherOverviewUpdatedAt.textContent = `Updated ${formatOverviewTimestamp()}${suffix}`;
     }
 
     if (elements.launcherOverviewByWorkspace) {
-      const rows = workspaceSummaries.filter((item) => item.open > 0 || item.openSessions > 0);
+      const rows = workspaceSummaries.filter(item => item.open > 0 || item.openSessions > 0);
       if (rows.length === 0) {
-        elements.launcherOverviewByWorkspace.innerHTML = '<div class="launcher-overview-empty">No open tasks or sessions across workspaces.</div>';
+        elements.launcherOverviewByWorkspace.innerHTML =
+          '<div class="launcher-overview-empty">No open tasks or sessions across workspaces.</div>';
       } else {
-        elements.launcherOverviewByWorkspace.innerHTML = rows.map((item) => {
-          const metaParts = [];
-          metaParts.push(`${item.open} open`);
-          if (item.inProgress > 0) metaParts.push(`${item.inProgress} active`);
-          if (item.needsAttention > 0) metaParts.push(`${item.needsAttention} attention`);
-          if (item.openSessions > 0) metaParts.push(`${item.openSessions} sessions`);
-          return `
+        elements.launcherOverviewByWorkspace.innerHTML = rows
+          .map(item => {
+            const metaParts = [];
+            metaParts.push(`${item.open} open`);
+            if (item.inProgress > 0) metaParts.push(`${item.inProgress} active`);
+            if (item.needsAttention > 0) metaParts.push(`${item.needsAttention} attention`);
+            if (item.openSessions > 0) metaParts.push(`${item.openSessions} sessions`);
+            return `
             <button type="button" class="launcher-overview-workspace" data-overview-workspace="${escapeHtml(item.id)}" title="${escapeHtml(item.path)}">
               <span class="launcher-overview-workspace-name">${escapeHtml(item.name)}</span>
               <span class="launcher-overview-workspace-meta">${escapeHtml(metaParts.join(' | '))}</span>
             </button>
           `;
-        }).join('');
+          })
+          .join('');
       }
     }
 
     if (elements.launcherOverviewTopTasks) {
       const topTasks = aggregateTasks.slice(0, 12);
       if (topTasks.length === 0) {
-        elements.launcherOverviewTopTasks.innerHTML = '<div class="launcher-overview-empty">No ongoing tasks to show.</div>';
+        elements.launcherOverviewTopTasks.innerHTML =
+          '<div class="launcher-overview-empty">No ongoing tasks to show.</div>';
       } else {
-        elements.launcherOverviewTopTasks.innerHTML = topTasks.map((task) => `
+        elements.launcherOverviewTopTasks.innerHTML = topTasks
+          .map(
+            task => `
           <div class="launcher-overview-task">
             <div class="launcher-overview-task-title">${escapeHtml(truncateText(task.description, 96) || 'Untitled task')}</div>
             <div class="launcher-overview-task-meta">${escapeHtml(task.workspaceName)} | ${escapeHtml(formatOverviewStatus(task.status))}</div>
             <button type="button" class="launcher-overview-task-link" data-overview-workspace="${escapeHtml(task.workspaceId)}">Open workspace</button>
           </div>
-        `).join('');
+        `
+          )
+          .join('');
       }
     }
 
     if (elements.launcherOverviewScheduledTasks) {
       const upcoming = scheduledTasks.slice(0, 20);
       if (upcoming.length === 0) {
-        elements.launcherOverviewScheduledTasks.innerHTML = '<div class="launcher-overview-empty">No scheduled tasks to show.</div>';
+        elements.launcherOverviewScheduledTasks.innerHTML =
+          '<div class="launcher-overview-empty">No scheduled tasks to show.</div>';
       } else {
-        elements.launcherOverviewScheduledTasks.innerHTML = upcoming.map((task) => {
-          const nextRun = task.nextRun ? formatDate(task.nextRun) : 'No next run';
-          const statusLabel = task.enabled ? 'enabled' : 'disabled';
-          return `
+        elements.launcherOverviewScheduledTasks.innerHTML = upcoming
+          .map(task => {
+            const nextRun = task.nextRun ? formatDate(task.nextRun) : 'No next run';
+            const statusLabel = task.enabled ? 'enabled' : 'disabled';
+            return `
             <div class="launcher-overview-task">
               <div class="launcher-overview-task-title">${escapeHtml(truncateText(task.description, 96) || 'Untitled task')}</div>
               <div class="launcher-overview-task-meta">${escapeHtml(task.workspaceName)} | ${escapeHtml(statusLabel)}</div>
@@ -1345,20 +1434,25 @@ console.log('[workspace-hub.js] FILE LOADED');
               <button type="button" class="launcher-overview-task-link" data-overview-workspace="${escapeHtml(task.workspaceId)}">Open workspace</button>
             </div>
           `;
-        }).join('');
+          })
+          .join('');
       }
     }
 
     if (elements.launcherOverviewOpenSessionsList) {
       const recentSessions = openSessions.slice(0, 20);
       if (recentSessions.length === 0) {
-        elements.launcherOverviewOpenSessionsList.innerHTML = '<div class="launcher-overview-empty">No open sessions to show.</div>';
+        elements.launcherOverviewOpenSessionsList.innerHTML =
+          '<div class="launcher-overview-empty">No open sessions to show.</div>';
       } else {
-        elements.launcherOverviewOpenSessionsList.innerHTML = recentSessions.map((chatSession) => {
-          const updated = chatSession.updatedAt ? formatDate(chatSession.updatedAt) : 'No activity';
-          const hasSessionId = Boolean(chatSession.id);
-          const messageLabel = `${chatSession.messageCount} message${chatSession.messageCount === 1 ? '' : 's'}`;
-          return `
+        elements.launcherOverviewOpenSessionsList.innerHTML = recentSessions
+          .map(chatSession => {
+            const updated = chatSession.updatedAt
+              ? formatDate(chatSession.updatedAt)
+              : 'No activity';
+            const hasSessionId = Boolean(chatSession.id);
+            const messageLabel = `${chatSession.messageCount} message${chatSession.messageCount === 1 ? '' : 's'}`;
+            return `
             <div class="launcher-overview-task">
               <div class="launcher-overview-task-title">${escapeHtml(truncateText(chatSession.title, 96) || 'Untitled chat')}</div>
               <div class="launcher-overview-task-meta">${escapeHtml(chatSession.workspaceName)} | ${escapeHtml(chatSession.agentName)}</div>
@@ -1366,7 +1460,8 @@ console.log('[workspace-hub.js] FILE LOADED');
               <button type="button" class="launcher-overview-task-link" data-overview-session="${escapeHtml(chatSession.id)}" ${hasSessionId ? '' : 'disabled'}>Open chat</button>
             </div>
           `;
-        }).join('');
+          })
+          .join('');
       }
     }
 
@@ -1416,7 +1511,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       state.workspaces = data.folders || [];
 
       const flattened = flattenWorkspaces(state.workspaces);
-      state.workspaceMap = new Map(flattened.map((workspace) => [workspace.id, workspace]));
+      state.workspaceMap = new Map(flattened.map(workspace => [workspace.id, workspace]));
 
       populateWorkspaceSelect(flattened);
       if (hubEl.dataset.state === 'launcher') {
@@ -1435,7 +1530,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (!elements.workspaceSelect) return;
 
     const options = ['<option value="">Select a workspace...</option>'];
-    flattened.filter(isConcreteWorkspace).forEach((workspace) => {
+    flattened.filter(isConcreteWorkspace).forEach(workspace => {
       const indent = workspace.depth > 0 ? `${'--'.repeat(workspace.depth)} ` : '';
       const label = `${indent}${escapeHtml(workspace.name || 'Untitled Workspace')}`;
       options.push(`<option value="${escapeHtml(workspace.id)}">${label}</option>`);
@@ -1446,21 +1541,22 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function getWorkspaceTags(workspace) {
     if (!workspace || !Array.isArray(workspace.tags)) return [];
-    return workspace.tags
-      .map((tag) => String(tag || '').trim())
-      .filter((tag) => tag.length > 0);
+    return workspace.tags.map(tag => String(tag || '').trim()).filter(tag => tag.length > 0);
   }
 
   function ensureLauncherActiveTags(state) {
     const candidate = state.launcherActiveTags;
-    const looksLikeSet = candidate
-      && typeof candidate.has === 'function'
-      && typeof candidate.add === 'function'
-      && typeof candidate.delete === 'function'
-      && typeof candidate.clear === 'function';
+    const looksLikeSet =
+      candidate &&
+      typeof candidate.has === 'function' &&
+      typeof candidate.add === 'function' &&
+      typeof candidate.delete === 'function' &&
+      typeof candidate.clear === 'function';
     if (!looksLikeSet) {
       const values = Array.isArray(candidate) ? candidate : [];
-      state.launcherActiveTags = new Set(values.map((tag) => String(tag || '').trim()).filter(Boolean));
+      state.launcherActiveTags = new Set(
+        values.map(tag => String(tag || '').trim()).filter(Boolean)
+      );
     }
     return state.launcherActiveTags;
   }
@@ -1477,7 +1573,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   function filterWorkspaceTreeByTags(workspaces, activeTags) {
     if (!activeTags || activeTags.size === 0) return Array.isArray(workspaces) ? workspaces : [];
     return (Array.isArray(workspaces) ? workspaces : [])
-      .map((workspace) => {
+      .map(workspace => {
         if (!workspace) return null;
         const children = filterWorkspaceTreeByTags(workspace.children || [], activeTags);
         const matches = workspaceMatchesActiveTags(workspace, activeTags);
@@ -1489,8 +1585,8 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function collectLauncherTags(flattened) {
     const tags = new Set();
-    (flattened || []).forEach((workspace) => {
-      getWorkspaceTags(workspace).forEach((tag) => tags.add(tag));
+    (flattened || []).forEach(workspace => {
+      getWorkspaceTags(workspace).forEach(tag => tags.add(tag));
     });
     return Array.from(tags).sort((a, b) => a.localeCompare(b));
   }
@@ -1502,7 +1598,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const activeTags = ensureLauncherActiveTags(state);
     const availableTags = collectLauncherTags(flattened);
     const availableSet = new Set(availableTags);
-    Array.from(activeTags).forEach((tag) => {
+    Array.from(activeTags).forEach(tag => {
       if (!availableSet.has(tag)) {
         activeTags.delete(tag);
       }
@@ -1516,31 +1612,32 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     elements.launcherTagFilterbar.hidden = false;
-    elements.launcherTagFilterChips.innerHTML = availableTags.map((tag) => {
-      const active = activeTags.has(tag);
-      return `
+    elements.launcherTagFilterChips.innerHTML = availableTags
+      .map(tag => {
+        const active = activeTags.has(tag);
+        return `
         <button type="button" class="launcher-tag-filter-chip${active ? ' is-active' : ''}" data-launcher-tag-toggle="${escapeHtml(tag)}" aria-pressed="${active ? 'true' : 'false'}" title="${escapeHtml(tag)}">
           ${escapeHtml(tag)}
         </button>
       `;
-    }).join('');
+      })
+      .join('');
     if (elements.launcherTagFilterClear) {
       elements.launcherTagFilterClear.hidden = activeTags.size === 0;
     }
 
-    elements.launcherTagFilterChips.querySelectorAll('[data-launcher-tag-toggle]').forEach((chip) => {
-      chip.addEventListener('click', (event) => {
+    elements.launcherTagFilterChips.querySelectorAll('[data-launcher-tag-toggle]').forEach(chip => {
+      chip.addEventListener('click', event => {
         event.preventDefault();
         toggleLauncherTagFilter(chip.getAttribute('data-launcher-tag-toggle'));
       });
     });
     if (elements.launcherTagFilterClear) {
-      elements.launcherTagFilterClear.onclick = (event) => {
+      elements.launcherTagFilterClear.onclick = event => {
         event.preventDefault();
         clearLauncherTagFilters();
       };
     }
-
   }
 
   function refreshLauncherView() {
@@ -1567,7 +1664,8 @@ console.log('[workspace-hub.js] FILE LOADED');
   function renderWorkspaceTagChips(tags, options = {}) {
     const values = Array.isArray(tags) ? tags : [];
     if (values.length === 0) return '';
-    const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : values.length;
+    const limit =
+      Number.isFinite(options.limit) && options.limit > 0 ? options.limit : values.length;
     const visible = values.slice(0, limit);
     const overflow = Math.max(0, values.length - visible.length);
     const workspaceId = String(options.workspaceId || '');
@@ -1576,7 +1674,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const chipClass = options.chipClass || 'workspace-tag-chip';
     const chipExtraClass = options.chipExtraClass ? ` ${options.chipExtraClass}` : '';
 
-    const chips = visible.map((tag) => {
+    const chips = visible.map(tag => {
       const safeTag = escapeHtml(tag);
       if (canRemove || canFilter) {
         const label = canFilter
@@ -1591,7 +1689,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     });
 
     if (overflow > 0) {
-      chips.push(`<span class="${chipClass}${chipExtraClass} ${chipClass}-more" title="${escapeHtml(values.slice(limit).join(', '))}">+${overflow} more</span>`);
+      chips.push(
+        `<span class="${chipClass}${chipExtraClass} ${chipClass}-more" title="${escapeHtml(values.slice(limit).join(', '))}">+${overflow} more</span>`
+      );
     }
     return chips.join('');
   }
@@ -1617,7 +1717,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (flattened.length === 0) {
       elements.launcherGrid.innerHTML = '';
-      elements.launcherEmpty.textContent = activeTags.size > 0 ? 'No workspaces match the selected tags.' : 'No workspaces yet. Create one to get started.';
+      elements.launcherEmpty.textContent =
+        activeTags.size > 0
+          ? 'No workspaces match the selected tags.'
+          : 'No workspaces yet. Create one to get started.';
       elements.launcherEmpty.style.display = 'flex';
       return;
     }
@@ -1626,7 +1729,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const selectedSet = state.selectedWorkspaces || new Set();
 
-    const flattenedMap = new Map((flattened || []).map((ws) => [ws.id, ws]));
+    const flattenedMap = new Map((flattened || []).map(ws => [ws.id, ws]));
 
     function renderWorkspaceCard(workspace) {
       const row = flattenedMap.get(workspace.id) || workspace;
@@ -1643,9 +1746,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       const taskBadge = renderLauncherTaskBadge(row);
       const folderDisplay = getWorkspaceFolderDisplay(row);
       const parentGroup = row.parent_id ? flattenedMap.get(row.parent_id) : null;
-      const parentGroupChip = parentGroup && isGroupWorkspace(parentGroup)
-        ? `<span class="launcher-card-parent-chip">In ${escapeHtml(parentGroup.name || 'Group')}</span>`
-        : '';
+      const parentGroupChip =
+        parentGroup && isGroupWorkspace(parentGroup)
+          ? `<span class="launcher-card-parent-chip">In ${escapeHtml(parentGroup.name || 'Group')}</span>`
+          : '';
       const tagRow = renderWorkspaceTagRow(row, {
         rowClass: 'launcher-card-tags',
         chipClass: 'workspace-tag-chip',
@@ -1707,11 +1811,12 @@ console.log('[workspace-hub.js] FILE LOADED');
     function renderGroupSection(workspace) {
       const row = flattenedMap.get(workspace.id) || workspace;
       const childCount = Array.isArray(workspace.children) ? workspace.children.length : 0;
-      const isCollapsed = state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
+      const isCollapsed =
+        state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
       const hasChildren = Array.isArray(workspace.children) && workspace.children.length > 0;
       const previewNames = (workspace.children || [])
         .slice(0, 3)
-        .map((child) => escapeHtml(child && (child.name || child.id) || 'Untitled Workspace'))
+        .map(child => escapeHtml((child && (child.name || child.id)) || 'Untitled Workspace'))
         .join(' · ');
       const previewSuffix = childCount > 3 ? ` +${childCount - 3} more` : '';
       const groupDescription = row.description || 'Group workspace';
@@ -1761,14 +1866,22 @@ console.log('[workspace-hub.js] FILE LOADED');
         </div>
       `;
 
-      const childrenHtml = (workspace.children || []).map((child) => {
-        // child is already a tree node; ensure we render nested cards.
-        if (child && (isGroupWorkspace(child) || (Array.isArray(child.children) && child.children.length > 0))) {
-          return renderGroupSection(child);
-        }
-        return renderWorkspaceCard(child);
-      }).join('');
-      const emptyHint = hasChildren ? '' : '<div class="launcher-group-empty">Drop workspaces here</div>';
+      const childrenHtml = (workspace.children || [])
+        .map(child => {
+          // child is already a tree node; ensure we render nested cards.
+          if (
+            child &&
+            (isGroupWorkspace(child) ||
+              (Array.isArray(child.children) && child.children.length > 0))
+          ) {
+            return renderGroupSection(child);
+          }
+          return renderWorkspaceCard(child);
+        })
+        .join('');
+      const emptyHint = hasChildren
+        ? ''
+        : '<div class="launcher-group-empty">Drop workspaces here</div>';
 
       return `
         <div class="launcher-group${isCollapsed ? ' is-collapsed' : ''}">
@@ -1780,13 +1893,22 @@ console.log('[workspace-hub.js] FILE LOADED');
       `;
     }
 
-    const tree = Array.isArray(treeOverride) ? treeOverride : (Array.isArray(state.workspaces) ? state.workspaces : []);
-    const html = tree.map((ws) => {
-      if (ws && (isGroupWorkspace(ws) || (Array.isArray(ws.children) && ws.children.length > 0))) {
-        return renderGroupSection(ws);
-      }
-      return renderWorkspaceCard(ws);
-    }).join('');
+    const tree = Array.isArray(treeOverride)
+      ? treeOverride
+      : Array.isArray(state.workspaces)
+        ? state.workspaces
+        : [];
+    const html = tree
+      .map(ws => {
+        if (
+          ws &&
+          (isGroupWorkspace(ws) || (Array.isArray(ws.children) && ws.children.length > 0))
+        ) {
+          return renderGroupSection(ws);
+        }
+        return renderWorkspaceCard(ws);
+      })
+      .join('');
 
     elements.launcherGrid.innerHTML = html;
     bindLauncherInteractions();
@@ -1817,8 +1939,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const { state, selectedSet, flattenedMap } = ctx;
     const row = flattenedMap.get(workspace.id) || workspace;
-    const isGroup = isGroupWorkspace(row) || (Array.isArray(workspace.children) && workspace.children.length > 0);
-    const isCollapsed = isGroup && state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
+    const isGroup =
+      isGroupWorkspace(row) || (Array.isArray(workspace.children) && workspace.children.length > 0);
+    const isCollapsed =
+      isGroup && state.launcherCollapsedGroups && state.launcherCollapsedGroups.has(row.id);
     const children = Array.isArray(workspace.children) ? workspace.children : [];
     const nextSibling = Array.isArray(siblings) ? siblings[siblingIndex + 1] : null;
     const rowName = row.name || (isGroup ? 'Group' : 'Untitled Workspace');
@@ -1834,13 +1958,15 @@ console.log('[workspace-hub.js] FILE LOADED');
           <span class="launcher-card-checkmark" aria-hidden="true"></span>
         </label>
       `;
-    const caret = isGroup ? `
+    const caret = isGroup
+      ? `
       <button class="launcher-tree-caret launcher-group-toggle ${isCollapsed ? 'is-collapsed' : ''}" type="button" data-group-toggle="${safeId}" aria-label="${isCollapsed ? 'Expand' : 'Collapse'} group" aria-expanded="${isCollapsed ? 'false' : 'true'}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
         <svg class="launcher-group-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M7,10L12,15L17,10H7Z"/>
         </svg>
       </button>
-    ` : '<span class="launcher-tree-caret-placeholder" aria-hidden="true"></span>';
+    `
+      : '<span class="launcher-tree-caret-placeholder" aria-hidden="true"></span>';
     const deleteButton = `
       <button class="launcher-tree-delete launcher-card-delete" type="button" draggable="false" data-workspace-delete="${safeId}" title="${deleteTitle}" aria-label="${deleteTitle}">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1860,17 +1986,24 @@ console.log('[workspace-hub.js] FILE LOADED');
     });
     // Same canonical summary as Cards/Map; groups aggregate their members'
     // stats elsewhere (the group header) so this only applies to workspaces.
-    const treeMeta = isGroup ? '' : `<span class="launcher-tree-meta">${escapeHtml(formatWorkspaceSummaryMeta(row))}</span>`;
+    const treeMeta = isGroup
+      ? ''
+      : `<span class="launcher-tree-meta">${escapeHtml(formatWorkspaceSummaryMeta(row))}</span>`;
 
-    const childHtml = children.map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx)).join('');
-    const emptyHint = isGroup && children.length === 0
-      ? `<div class="launcher-tree-empty-group" role="group" data-group-children="${safeId}" style="--launcher-tree-depth: ${depth + 1}">Drop workspaces here</div>`
-      : '';
-    const childrenWrapper = isGroup ? `
+    const childHtml = children
+      .map((child, index) => renderLauncherTreeNode(child, depth + 1, children, index, ctx))
+      .join('');
+    const emptyHint =
+      isGroup && children.length === 0
+        ? `<div class="launcher-tree-empty-group" role="group" data-group-children="${safeId}" style="--launcher-tree-depth: ${depth + 1}">Drop workspaces here</div>`
+        : '';
+    const childrenWrapper = isGroup
+      ? `
       <div class="launcher-tree-children${children.length === 0 ? ' is-empty' : ''}" role="group" ${isCollapsed ? 'hidden' : ''} data-group-children="${safeId}">
         ${childHtml || emptyHint}
       </div>
-    ` : '';
+    `
+      : '';
 
     return `
       <div class="launcher-tree-node${isGroup ? ' is-group' : ' is-workspace'}${isCollapsed ? ' is-collapsed' : ''}">
@@ -1893,12 +2026,19 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const state = window.WorkspaceHubState.getState();
     const activeTags = ensureLauncherActiveTags(state);
-    const tree = Array.isArray(treeOverride) ? treeOverride : (Array.isArray(state.workspaces) ? state.workspaces : []);
+    const tree = Array.isArray(treeOverride)
+      ? treeOverride
+      : Array.isArray(state.workspaces)
+        ? state.workspaces
+        : [];
     elements.launcherGrid.classList.add('is-tree-view');
 
     if (tree.length === 0) {
       elements.launcherGrid.innerHTML = '';
-      elements.launcherEmpty.textContent = activeTags.size > 0 ? 'No workspaces match the selected tags.' : 'No workspaces yet. Create one to get started.';
+      elements.launcherEmpty.textContent =
+        activeTags.size > 0
+          ? 'No workspaces match the selected tags.'
+          : 'No workspaces yet. Create one to get started.';
       elements.launcherEmpty.style.display = 'flex';
       return;
     }
@@ -1908,7 +2048,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const ctx = {
       state,
       selectedSet: state.selectedWorkspaces || new Set(),
-      flattenedMap: new Map((flattened || []).map((ws) => [ws.id, ws]))
+      flattenedMap: new Map((flattened || []).map(ws => [ws.id, ws]))
     };
 
     elements.launcherGrid.innerHTML = `
@@ -1926,7 +2066,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     const sourceFlattened = Array.isArray(flattened) ? flattened : flattenWorkspaces(sourceTree);
     renderLauncherTagFilterBar(sourceFlattened);
     const activeTags = ensureLauncherActiveTags(state);
-    const tree = activeTags.size > 0 ? filterWorkspaceTreeByTags(sourceTree, activeTags) : sourceTree;
+    const tree =
+      activeTags.size > 0 ? filterWorkspaceTreeByTags(sourceTree, activeTags) : sourceTree;
     const visibleFlattened = activeTags.size > 0 ? flattenWorkspaces(tree) : sourceFlattened;
     updateLauncherViewToggle(launcherActiveView);
     if (launcherActiveView === LAUNCHER_VIEW_MAP) {
@@ -1938,7 +2079,7 @@ console.log('[workspace-hub.js] FILE LOADED');
           selectedId: state.selectedId,
           metadata: buildLauncherMapMetadata(visibleFlattened, tree),
           onTagFilter: toggleLauncherTagFilter,
-          onTagRemove: removeWorkspaceTag,
+          onTagRemove: removeWorkspaceTag
         });
       }
       return;
@@ -1970,7 +2111,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   function rebuildWorkspaceMapFromTree() {
     const state = window.WorkspaceHubState.getState();
     const flattened = flattenWorkspaces(state.workspaces || []);
-    state.workspaceMap = new Map(flattened.map((workspace) => [workspace.id, workspace]));
+    state.workspaceMap = new Map(flattened.map(workspace => [workspace.id, workspace]));
     return flattened;
   }
 
@@ -2033,7 +2174,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const workspace = state.workspaceMap.get(workspaceId);
     if (!workspace) return;
     const previousTags = getWorkspaceTags(workspace);
-    const nextTags = previousTags.filter((value) => value !== tag);
+    const nextTags = previousTags.filter(value => value !== tag);
     applyWorkspaceTagsToState(workspaceId, nextTags);
 
     try {
@@ -2053,13 +2194,13 @@ console.log('[workspace-hub.js] FILE LOADED');
   function bindLauncherInteractions() {
     if (!elements.launcherGrid) return;
 
-    elements.launcherGrid.querySelectorAll('[data-workspace-id]').forEach((card) => {
+    elements.launcherGrid.querySelectorAll('[data-workspace-id]').forEach(card => {
       // Clicking a row opens its detail page — a workspace opens its workspace
       // detail, a group opens its group details page (both live at
       // /workspaces/{id}; the server branches on kind). The caret
       // (data-group-toggle), checkboxes, and delete button each stopPropagation
       // so they keep their own behavior and never trigger navigation.
-      card.addEventListener('click', (e) => {
+      card.addEventListener('click', e => {
         if (Date.now() < launcherSuppressClickUntil) {
           e.preventDefault();
           e.stopPropagation();
@@ -2068,7 +2209,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         navigateToWorkspace(card.dataset.workspaceId);
       });
 
-      card.addEventListener('keydown', (e) => {
+      card.addEventListener('keydown', e => {
         if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
         const id = card.dataset.workspaceId;
         if (e.key === 'Enter') {
@@ -2092,28 +2233,30 @@ console.log('[workspace-hub.js] FILE LOADED');
       });
     });
 
-    elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach((cb) => {
-      cb.addEventListener('click', (e) => e.stopPropagation());
-      cb.addEventListener('change', (e) => {
+    elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach(cb => {
+      cb.addEventListener('click', e => e.stopPropagation());
+      cb.addEventListener('change', e => {
         const id = e.target.getAttribute('data-workspace-checkbox');
         toggleLauncherWorkspaceSelection(id, { force: e.target.checked });
       });
     });
 
-    elements.launcherGrid.querySelectorAll('.launcher-card-checkbox, .launcher-tree-checkbox').forEach((checkboxShell) => {
-      checkboxShell.addEventListener('click', (e) => e.stopPropagation());
-    });
+    elements.launcherGrid
+      .querySelectorAll('.launcher-card-checkbox, .launcher-tree-checkbox')
+      .forEach(checkboxShell => {
+        checkboxShell.addEventListener('click', e => e.stopPropagation());
+      });
 
-    elements.launcherGrid.querySelectorAll('[data-launcher-tag-filter]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    elements.launcherGrid.querySelectorAll('[data-launcher-tag-filter]').forEach(btn => {
+      btn.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
         toggleLauncherTagFilter(btn.getAttribute('data-launcher-tag-filter'));
       });
     });
 
-    elements.launcherGrid.querySelectorAll('[data-workspace-tag-remove]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    elements.launcherGrid.querySelectorAll('[data-workspace-tag-remove]').forEach(btn => {
+      btn.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
         void removeWorkspaceTag(
@@ -2128,8 +2271,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     // neither can be set from the rendered HTML.
     applyLauncherSelectionVisuals();
 
-    elements.launcherGrid.querySelectorAll('[data-group-toggle]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    elements.launcherGrid.querySelectorAll('[data-group-toggle]').forEach(btn => {
+      btn.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
         const id = btn.getAttribute('data-group-toggle');
@@ -2137,9 +2280,14 @@ console.log('[workspace-hub.js] FILE LOADED');
       });
     });
 
-    elements.launcherGrid.querySelectorAll('[data-group-children]').forEach((grid) => {
-      grid.addEventListener('dragover', (e) => {
-        if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-workspace-id]')) return;
+    elements.launcherGrid.querySelectorAll('[data-group-children]').forEach(grid => {
+      grid.addEventListener('dragover', e => {
+        if (
+          e.target &&
+          typeof e.target.closest === 'function' &&
+          e.target.closest('[data-workspace-id]')
+        )
+          return;
         e.preventDefault();
         e.stopPropagation();
         grid.classList.add('is-drag-over');
@@ -2148,8 +2296,13 @@ console.log('[workspace-hub.js] FILE LOADED');
       grid.addEventListener('dragleave', () => {
         grid.classList.remove('is-drag-over');
       });
-      grid.addEventListener('drop', (e) => {
-        if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-workspace-id]')) return;
+      grid.addEventListener('drop', e => {
+        if (
+          e.target &&
+          typeof e.target.closest === 'function' &&
+          e.target.closest('[data-workspace-id]')
+        )
+          return;
         e.preventDefault();
         e.stopPropagation();
         grid.classList.remove('is-drag-over');
@@ -2161,8 +2314,8 @@ console.log('[workspace-hub.js] FILE LOADED');
       });
     });
 
-    elements.launcherGrid.querySelectorAll('[data-tree-root-drop]').forEach((dropTarget) => {
-      dropTarget.addEventListener('dragover', (e) => {
+    elements.launcherGrid.querySelectorAll('[data-tree-root-drop]').forEach(dropTarget => {
+      dropTarget.addEventListener('dragover', e => {
         e.preventDefault();
         e.stopPropagation();
         dropTarget.classList.add('is-drag-over');
@@ -2171,7 +2324,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       dropTarget.addEventListener('dragleave', () => {
         dropTarget.classList.remove('is-drag-over');
       });
-      dropTarget.addEventListener('drop', (e) => {
+      dropTarget.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
         dropTarget.classList.remove('is-drag-over');
@@ -2182,8 +2335,8 @@ console.log('[workspace-hub.js] FILE LOADED');
       });
     });
 
-    elements.launcherGrid.querySelectorAll('[data-workspace-delete]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    elements.launcherGrid.querySelectorAll('[data-workspace-delete]').forEach(btn => {
+      btn.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
         const id = btn.getAttribute('data-workspace-delete');
@@ -2199,13 +2352,14 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function getVisibleLauncherTreeRows() {
     if (!elements.launcherGrid) return [];
-    return Array.from(elements.launcherGrid.querySelectorAll('.launcher-tree-row[data-workspace-id]'))
-      .filter((row) => !row.closest('[hidden]'));
+    return Array.from(
+      elements.launcherGrid.querySelectorAll('.launcher-tree-row[data-workspace-id]')
+    ).filter(row => !row.closest('[hidden]'));
   }
 
   function focusLauncherTreeRow(row) {
     if (!row) return;
-    getVisibleLauncherTreeRows().forEach((item) => {
+    getVisibleLauncherTreeRows().forEach(item => {
       item.tabIndex = item === row ? 0 : -1;
     });
     row.focus();
@@ -2216,7 +2370,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   // happens to contain one can't break out of the [attr="..."] selector.
   function escapeAttrSelectorValue(value) {
     const str = String(value);
-    return (window.CSS && typeof window.CSS.escape === 'function')
+    return window.CSS && typeof window.CSS.escape === 'function'
       ? window.CSS.escape(str)
       : str.replace(/"/g, '\\"');
   }
@@ -2224,7 +2378,9 @@ console.log('[workspace-hub.js] FILE LOADED');
   function focusLauncherTreeRowById(workspaceId) {
     if (!elements.launcherGrid || !workspaceId) return;
     const safeId = escapeAttrSelectorValue(workspaceId);
-    const row = elements.launcherGrid.querySelector(`.launcher-tree-row[data-workspace-id="${safeId}"]`);
+    const row = elements.launcherGrid.querySelector(
+      `.launcher-tree-row[data-workspace-id="${safeId}"]`
+    );
     focusLauncherTreeRow(row);
   }
 
@@ -2232,7 +2388,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const rows = getVisibleLauncherTreeRows();
     if (rows.length === 0) return;
     const activeRow = rows.includes(document.activeElement) ? document.activeElement : rows[0];
-    rows.forEach((row) => {
+    rows.forEach(row => {
       row.tabIndex = row === activeRow ? 0 : -1;
     });
   }
@@ -2254,7 +2410,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (target.isContentEditable) return true;
 
     if (typeof target.closest === 'function') {
-      return !!target.closest('input, textarea, select, button, [contenteditable="true"], [role="textbox"], .modal.show, [aria-modal="true"]');
+      return !!target.closest(
+        'input, textarea, select, button, [contenteditable="true"], [role="textbox"], .modal.show, [aria-modal="true"]'
+      );
     }
 
     return false;
@@ -2266,12 +2424,14 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     syncLauncherTreeRovingTabIndex();
 
-    rows.forEach((row) => {
-      row.addEventListener('keydown', (e) => {
+    rows.forEach(row => {
+      row.addEventListener('keydown', e => {
         if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
 
         const key = e.key;
-        if (!['ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft', 'h', 'j', 'k', 'l'].includes(key)) {
+        if (
+          !['ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft', 'h', 'j', 'k', 'l'].includes(key)
+        ) {
           return;
         }
 
@@ -2318,9 +2478,11 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function clearLauncherTreeDropIndicators() {
     if (!elements.launcherGrid) return;
-    elements.launcherGrid.querySelectorAll('.launcher-tree-row, .launcher-card-item, .launcher-tree-root-drop').forEach((row) => {
-      row.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
-    });
+    elements.launcherGrid
+      .querySelectorAll('.launcher-tree-row, .launcher-card-item, .launcher-tree-root-drop')
+      .forEach(row => {
+        row.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
+      });
   }
 
   function getLauncherTreeDropIntent(row, event) {
@@ -2409,23 +2571,25 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function shouldIgnoreLauncherPointerDragTarget(target) {
     if (!target || typeof target.closest !== 'function') return false;
-    return !!target.closest([
-      'input',
-      'textarea',
-      'select',
-      'button',
-      'a',
-      '[contenteditable="true"]',
-      '[role="textbox"]',
-      '[data-workspace-checkbox]',
-      '[data-workspace-delete]',
-      '[data-group-toggle]',
-      '[data-launcher-tag-filter]',
-      '[data-workspace-tag-remove]',
-      '.launcher-card-checkbox',
-      '.launcher-tree-checkbox',
-      '.workspace-tag-chip-remove'
-    ].join(', '));
+    return !!target.closest(
+      [
+        'input',
+        'textarea',
+        'select',
+        'button',
+        'a',
+        '[contenteditable="true"]',
+        '[role="textbox"]',
+        '[data-workspace-checkbox]',
+        '[data-workspace-delete]',
+        '[data-group-toggle]',
+        '[data-launcher-tag-filter]',
+        '[data-workspace-tag-remove]',
+        '.launcher-card-checkbox',
+        '.launcher-tree-checkbox',
+        '.workspace-tag-chip-remove'
+      ].join(', ')
+    );
   }
 
   function startLauncherDragVisuals(item, rootDrop, rootGrid) {
@@ -2441,7 +2605,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function stopLauncherDragVisuals(item, rootDrop, rootGrid, items = []) {
     if (item) item.classList.remove('is-dragging');
-    items.forEach(i => i.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into'));
+    items.forEach(i =>
+      i.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into')
+    );
     clearLauncherTreeDropIndicators();
     if (rootDrop) {
       rootDrop.classList.remove('is-drag-over');
@@ -2512,7 +2678,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function bindLauncherPointerDrag(item, items, rootDrop, rootGrid) {
-    item.addEventListener('pointerdown', (e) => {
+    item.addEventListener('pointerdown', e => {
       if (e.button !== undefined && e.button !== 0) return;
       if (shouldIgnoreLauncherPointerDragTarget(e.target)) return;
       if (!item.dataset.workspaceId) return;
@@ -2535,7 +2701,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         startLauncherDragVisuals(item, rootDrop, rootGrid);
       };
 
-      const onMove = (moveEvent) => {
+      const onMove = moveEvent => {
         if (pointerId !== undefined && moveEvent.pointerId !== pointerId) return;
         const dx = Math.abs(moveEvent.clientX - startX);
         const dy = Math.abs(moveEvent.clientY - startY);
@@ -2546,7 +2712,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         applyLauncherPointerDropIndicator(latestDrop);
       };
 
-      const finish = (upEvent) => {
+      const finish = upEvent => {
         if (pointerId !== undefined && upEvent.pointerId !== pointerId) return;
         cleanup();
         if (!active) return;
@@ -2554,12 +2720,20 @@ console.log('[workspace-hub.js] FILE LOADED');
         upEvent.stopPropagation();
         launcherSuppressClickUntil = Date.now() + 400;
         stopLauncherDragVisuals(item, rootDrop, rootGrid, Array.from(items || []));
-        if (latestDrop && latestDrop.intent && latestDrop.intent.targetParentId !== item.dataset.workspaceId) {
-          reorderWorkspace(item.dataset.workspaceId, latestDrop.intent.targetParentId, latestDrop.intent.insertBeforeId || '');
+        if (
+          latestDrop &&
+          latestDrop.intent &&
+          latestDrop.intent.targetParentId !== item.dataset.workspaceId
+        ) {
+          reorderWorkspace(
+            item.dataset.workspaceId,
+            latestDrop.intent.targetParentId,
+            latestDrop.intent.insertBeforeId || ''
+          );
         }
       };
 
-      const onUp = (upEvent) => finish(upEvent);
+      const onUp = upEvent => finish(upEvent);
       const onCancel = () => {
         cleanup();
         if (active) {
@@ -2582,7 +2756,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const ids = Array.from(revealIds);
     state.launcherJustExpandedGroups = new Set();
 
-    ids.forEach((id) => {
+    ids.forEach(id => {
       const safeId = escapeAttrSelectorValue(id);
       const header = elements.launcherGrid.querySelector(`[data-workspace-id="${safeId}"]`);
       const grid = elements.launcherGrid.querySelector(`[data-group-children="${safeId}"]`);
@@ -2601,16 +2775,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     const rootDrop = elements.launcherRootDropZone;
     const rootGrid = elements.launcherGrid;
 
-    const isRootGridTarget = (eventTarget) => {
+    const isRootGridTarget = eventTarget => {
       if (!eventTarget) return false;
-      if (!rootGrid || rootGrid !== eventTarget && !rootGrid.contains(eventTarget)) return false;
+      if (!rootGrid || (rootGrid !== eventTarget && !rootGrid.contains(eventTarget))) return false;
       if (eventTarget.closest('[data-workspace-id]')) return false;
       if (eventTarget.closest('[data-group-children]')) return false;
       return true;
     };
 
     if (rootDrop) {
-      rootDrop.addEventListener('dragover', (e) => {
+      rootDrop.addEventListener('dragover', e => {
         e.preventDefault();
         rootDrop.classList.add('is-drag-over');
         e.dataTransfer.dropEffect = 'move';
@@ -2618,7 +2792,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       rootDrop.addEventListener('dragleave', () => {
         rootDrop.classList.remove('is-drag-over');
       });
-      rootDrop.addEventListener('drop', (e) => {
+      rootDrop.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
         rootDrop.classList.remove('is-drag-over');
@@ -2630,17 +2804,17 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (rootGrid) {
-      rootGrid.addEventListener('dragover', (e) => {
+      rootGrid.addEventListener('dragover', e => {
         if (!isRootGridTarget(e.target)) return;
         e.preventDefault();
         rootGrid.classList.add('is-drag-over-root');
         e.dataTransfer.dropEffect = 'move';
       });
-      rootGrid.addEventListener('dragleave', (e) => {
+      rootGrid.addEventListener('dragleave', e => {
         if (!isRootGridTarget(e.target)) return;
         rootGrid.classList.remove('is-drag-over-root');
       });
-      rootGrid.addEventListener('drop', (e) => {
+      rootGrid.addEventListener('drop', e => {
         if (!isRootGridTarget(e.target)) return;
         e.preventDefault();
         e.stopPropagation();
@@ -2655,19 +2829,20 @@ console.log('[workspace-hub.js] FILE LOADED');
     items.forEach(item => {
       bindLauncherPointerDrag(item, items, rootDrop, rootGrid);
 
-      item.addEventListener('dragstart', (e) => {
+      item.addEventListener('dragstart', e => {
         e.dataTransfer.setData('text/plain', e.currentTarget.dataset.workspaceId);
         e.dataTransfer.effectAllowed = 'move';
         startLauncherDragVisuals(e.currentTarget, rootDrop, rootGrid);
       });
 
-      item.addEventListener('dragend', (e) => {
+      item.addEventListener('dragend', e => {
         stopLauncherDragVisuals(e.currentTarget, rootDrop, rootGrid, Array.from(items || []));
       });
 
-      item.addEventListener('dragover', (e) => {
+      item.addEventListener('dragover', e => {
         e.preventDefault(); // Allow drop
-        const draggedId = elements.launcherGrid.querySelector('[data-workspace-id].is-dragging')?.dataset.workspaceId;
+        const draggedId = elements.launcherGrid.querySelector('[data-workspace-id].is-dragging')
+          ?.dataset.workspaceId;
         const targetId = e.currentTarget.dataset.workspaceId;
 
         // Don't highlight if dragging over itself
@@ -2689,11 +2864,16 @@ console.log('[workspace-hub.js] FILE LOADED');
         e.currentTarget.classList.add('is-drag-over');
       });
 
-      item.addEventListener('dragleave', (e) => {
-        e.currentTarget.classList.remove('is-drag-over', 'is-drop-before', 'is-drop-after', 'is-drop-into');
+      item.addEventListener('dragleave', e => {
+        e.currentTarget.classList.remove(
+          'is-drag-over',
+          'is-drop-before',
+          'is-drop-after',
+          'is-drop-into'
+        );
       });
 
-      item.addEventListener('drop', (e) => {
+      item.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
         e.currentTarget.classList.remove('is-drag-over');
@@ -2729,7 +2909,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (draggedId === targetParentId) return;
 
     if (targetParentId) {
-      const descendants = collectWorkspaceDescendantIds(state.workspaces || [], draggedId, { includeRoot: false });
+      const descendants = collectWorkspaceDescendantIds(state.workspaces || [], draggedId, {
+        includeRoot: false
+      });
       if (descendants.includes(targetParentId)) {
         if (window.Toast) window.Toast.error('Cannot move a workspace into its own descendant.');
         return;
@@ -2750,7 +2932,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const sourceParentId = getWorkspaceParentId(draggedId);
     const updates = {};
 
-    const targetSiblings = getSiblingIds(targetParentId).filter((id) => id !== draggedId);
+    const targetSiblings = getSiblingIds(targetParentId).filter(id => id !== draggedId);
     const insertIndex = insertBeforeId ? targetSiblings.indexOf(insertBeforeId) : -1;
     if (insertIndex >= 0) {
       targetSiblings.splice(insertIndex, 0, draggedId);
@@ -2760,7 +2942,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     buildOrderUpdates(targetParentId, targetSiblings, updates, draggedId);
 
     if (sourceParentId !== targetParentId) {
-      const sourceSiblings = getSiblingIds(sourceParentId).filter((id) => id !== draggedId);
+      const sourceSiblings = getSiblingIds(sourceParentId).filter(id => id !== draggedId);
       buildOrderUpdates(sourceParentId, sourceSiblings, updates, '');
     }
 
@@ -2830,8 +3012,11 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     // Cascade: toggling a group toggles its whole subtree, so a checked group
     // means "this branch and everything in it." Leaves have no descendants.
-    const ids = [workspaceId, ...collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false })];
-    ids.forEach((id) => {
+    const ids = [
+      workspaceId,
+      ...collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false })
+    ];
+    ids.forEach(id => {
       if (shouldSelect) next.add(id);
       else next.delete(id);
     });
@@ -2863,7 +3048,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         return set.has(node.id);
       }
       let allSelected = true;
-      children.forEach((child) => {
+      children.forEach(child => {
         if (!visit(child)) allSelected = false;
       });
       if (allSelected) set.add(node.id);
@@ -2879,8 +3064,10 @@ console.log('[workspace-hub.js] FILE LOADED');
   function groupHasSelectedDescendant(groupId) {
     const state = window.WorkspaceHubState.getState();
     const set = state.selectedWorkspaces || new Set();
-    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], groupId, { includeRoot: false });
-    return descendants.some((id) => set.has(id));
+    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], groupId, {
+      includeRoot: false
+    });
+    return descendants.some(id => set.has(id));
   }
 
   // Paint the selection set onto the rendered rows in place: the indeterminate
@@ -2891,7 +3078,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (!elements.launcherGrid) return;
     const state = window.WorkspaceHubState.getState();
     const set = state.selectedWorkspaces || new Set();
-    elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach((input) => {
+    elements.launcherGrid.querySelectorAll('[data-workspace-checkbox]').forEach(input => {
       const id = input.getAttribute('data-workspace-checkbox');
       if (!id) return;
       const full = set.has(id);
@@ -2925,7 +3112,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     const state = window.WorkspaceHubState.getState();
     const ids = [];
     (function walk(nodes) {
-      (nodes || []).forEach((node) => {
+      (nodes || []).forEach(node => {
         if (!node || !node.id) return;
         ids.push(node.id);
         if (node.children) walk(node.children);
@@ -2939,14 +3126,15 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (all.length === 0) return false;
     const state = window.WorkspaceHubState.getState();
     const set = state.selectedWorkspaces || new Set();
-    return all.every((id) => set.has(id));
+    return all.every(id => set.has(id));
   }
 
   // Select every workspace (and group), or clear when everything is already
   // selected. `force` pins the direction (used by the keyboard shortcut).
   function toggleSelectAllLauncherWorkspaces({ force } = {}) {
     const state = window.WorkspaceHubState.getState();
-    const shouldSelectAll = typeof force === 'boolean' ? force : !areAllLauncherWorkspacesSelected();
+    const shouldSelectAll =
+      typeof force === 'boolean' ? force : !areAllLauncherWorkspacesSelected();
     state.selectedWorkspaces = shouldSelectAll ? new Set(getAllLauncherWorkspaceIds()) : new Set();
     reconcileGroupSelections();
     updateLauncherSelectionUI();
@@ -2970,7 +3158,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   function getTopLevelSelectedIds() {
     const state = window.WorkspaceHubState.getState();
     const set = state.selectedWorkspaces || new Set();
-    return Array.from(set).filter((id) => !hasSelectedAncestor(id));
+    return Array.from(set).filter(id => !hasSelectedAncestor(id));
   }
 
   function updateLauncherSelectionUI() {
@@ -2981,7 +3169,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.launcherSelectAllBtn) {
-      elements.launcherSelectAllBtn.textContent = areAllLauncherWorkspacesSelected() ? 'Deselect all' : 'Select all';
+      elements.launcherSelectAllBtn.textContent = areAllLauncherWorkspacesSelected()
+        ? 'Deselect all'
+        : 'Select all';
     }
 
     if (elements.launcherGroupSelectedBtn) {
@@ -3010,7 +3200,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   function getSiblingIds(parentId) {
     const state = window.WorkspaceHubState.getState();
     if (!parentId) {
-      return (state.workspaces || []).map((ws) => ws.id).filter(Boolean);
+      return (state.workspaces || []).map(ws => ws.id).filter(Boolean);
     }
 
     const stack = [...(state.workspaces || [])];
@@ -3018,7 +3208,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       const node = stack.pop();
       if (!node) continue;
       if (node.id === parentId) {
-        return (node.children || []).map((child) => child.id).filter(Boolean);
+        return (node.children || []).map(child => child.id).filter(Boolean);
       }
       if (node.children && node.children.length > 0) {
         stack.push(...node.children);
@@ -3042,15 +3232,17 @@ console.log('[workspace-hub.js] FILE LOADED');
     const entries = Object.entries(updates);
     if (entries.length === 0) return;
 
-    const responses = await Promise.all(entries.map(([id, payload]) => (
-      fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-    )));
+    const responses = await Promise.all(
+      entries.map(([id, payload]) =>
+        fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+      )
+    );
 
-    const failed = responses.find((res) => !res.ok);
+    const failed = responses.find(res => !res.ok);
     if (failed) {
       const msg = await extractErrorMessage(failed, 'Failed to move workspace');
       throw new Error(msg);
@@ -3173,21 +3365,32 @@ console.log('[workspace-hub.js] FILE LOADED');
           try {
             const data = await response.json();
             trashed = !!(data && data.trashed);
-          } catch (_) { /* no body */ }
+          } catch (_) {
+            /* no body */
+          }
         }
         if (trashed) undoAdds.push({ id, label });
       }
 
-      undoAdds.forEach((entry) => undoStack.push(entry));
+      undoAdds.forEach(entry => undoStack.push(entry));
       if (undoAdds.length > 0) updateUndoButton();
 
       if (window.Toast) {
         if (undoAdds.length > 0) {
-          window.Toast.show(`Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash`, 'info', {
-            title: ids.length === 1 ? 'Deleted' : 'Items deleted',
-            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
-            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
-          });
+          window.Toast.show(
+            `Moved ${ids.length} item${ids.length === 1 ? '' : 's'} to Trash`,
+            'info',
+            {
+              title: ids.length === 1 ? 'Deleted' : 'Items deleted',
+              duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+              action: {
+                label: 'Undo',
+                onClick: () => {
+                  void undoLastAction();
+                }
+              }
+            }
+          );
         } else {
           window.Toast.success(ids.length > 1 ? 'Workspaces deleted' : 'Workspace deleted');
         }
@@ -3204,11 +3407,19 @@ console.log('[workspace-hub.js] FILE LOADED');
   function openDeleteGroupModal(workspaceId) {
     const state = window.WorkspaceHubState.getState();
     const workspace = state.workspaceMap.get(workspaceId);
-    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false });
+    const descendants = collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, {
+      includeRoot: false
+    });
     const childCount = descendants.length;
 
-    if (!elements.launcherDeleteGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      const deleteAll = confirm(`"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (moved to the system Trash — Undo to restore while this app session is open).\nClick Cancel to delete only the group (its workspaces move back to the top level).`);
+    if (
+      !elements.launcherDeleteGroupModal ||
+      typeof bootstrap === 'undefined' ||
+      !bootstrap.Modal
+    ) {
+      const deleteAll = confirm(
+        `"${workspace?.name || 'Group'}" has ${childCount} sub-workspace(s).\n\nClick OK to delete the group and all contents (moved to the system Trash — Undo to restore while this app session is open).\nClick Cancel to delete only the group (its workspaces move back to the top level).`
+      );
       if (deleteAll) {
         void deleteGroupAndContents(workspaceId);
       } else {
@@ -3225,7 +3436,9 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.launcherDeleteGroupCount.textContent = String(childCount);
     }
 
-    const modal = bootstrap.Modal.getInstance(elements.launcherDeleteGroupModal) || new bootstrap.Modal(elements.launcherDeleteGroupModal);
+    const modal =
+      bootstrap.Modal.getInstance(elements.launcherDeleteGroupModal) ||
+      new bootstrap.Modal(elements.launcherDeleteGroupModal);
     modal.show();
   }
 
@@ -3263,7 +3476,9 @@ console.log('[workspace-hub.js] FILE LOADED');
         try {
           const data = await res.json();
           trashed = !!(data && data.trashed);
-        } catch (_) { /* no body */ }
+        } catch (_) {
+          /* no body */
+        }
       }
 
       if (trashed) {
@@ -3275,17 +3490,26 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       if (window.Toast) {
         if (trashed) {
-          window.Toast.show(mode === 'contents'
-            ? `Moved "${label}" and its contents to Trash`
-            : `Members moved out; "${label}" moved to Trash`, 'info', {
-            title: 'Group deleted',
-            duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
-            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
-          });
+          window.Toast.show(
+            mode === 'contents'
+              ? `Moved "${label}" and its contents to Trash`
+              : `Members moved out; "${label}" moved to Trash`,
+            'info',
+            {
+              title: 'Group deleted',
+              duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
+              action: {
+                label: 'Undo',
+                onClick: () => {
+                  void undoLastAction();
+                }
+              }
+            }
+          );
         } else {
-          window.Toast.success(mode === 'contents'
-            ? `Deleted "${label}" and its contents`
-            : `Deleted group "${label}"`);
+          window.Toast.success(
+            mode === 'contents' ? `Deleted "${label}" and its contents` : `Deleted group "${label}"`
+          );
         }
       }
     } catch (err) {
@@ -3296,9 +3520,14 @@ console.log('[workspace-hub.js] FILE LOADED');
 
   function showWorkspaceDeleteConfirm(options) {
     const title = String(options?.title || 'Confirm Delete').trim();
-    const message = String(options?.message || 'Are you sure you want to delete this workspace?').trim();
+    const message = String(
+      options?.message || 'Are you sure you want to delete this workspace?'
+    ).trim();
 
-    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showDeleteConfirm === 'function') {
+    if (
+      window.WorkspaceHubModals &&
+      typeof window.WorkspaceHubModals.showDeleteConfirm === 'function'
+    ) {
       return window.WorkspaceHubModals.showDeleteConfirm({
         title,
         message,
@@ -3359,9 +3588,12 @@ console.log('[workspace-hub.js] FILE LOADED');
   async function softDeleteWorkspace(workspaceId) {
     const label = getWorkspaceLabel(workspaceId) || 'Workspace';
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}?confirm=true`, { method: 'DELETE' });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}?confirm=true`,
+        { method: 'DELETE' }
+      );
       if (!response.ok && response.status !== 404) {
-        throw new Error(await response.text() || 'Failed to delete workspace');
+        throw new Error((await response.text()) || 'Failed to delete workspace');
       }
 
       // The server reports whether the workspace was moved to the Trash
@@ -3371,7 +3603,9 @@ console.log('[workspace-hub.js] FILE LOADED');
         try {
           const data = await response.json();
           trashed = !!(data && data.trashed);
-        } catch (_) { /* no body */ }
+        } catch (_) {
+          /* no body */
+        }
       }
 
       if (trashed) {
@@ -3384,7 +3618,12 @@ console.log('[workspace-hub.js] FILE LOADED');
           window.Toast.show(`Moved "${label}" to Trash`, 'info', {
             title: 'Workspace deleted',
             duration: WORKSPACE_DELETE_UNDO_TOAST_DURATION_MS,
-            action: { label: 'Undo', onClick: () => { void undoLastAction(); } }
+            action: {
+              label: 'Undo',
+              onClick: () => {
+                void undoLastAction();
+              }
+            }
           });
         } else {
           window.Toast.success(`Deleted "${label}"`);
@@ -3406,9 +3645,11 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (btn) btn.disabled = true; // guard against double-clicks during the request
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(entry.id)}/restore`, { method: 'POST' });
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(entry.id)}/restore`, {
+        method: 'POST'
+      });
       if (!response.ok) {
-        throw new Error(await response.text() || 'Failed to restore workspace');
+        throw new Error((await response.text()) || 'Failed to restore workspace');
       }
       undoStack.pop();
       updateUndoButton();
@@ -3417,7 +3658,10 @@ console.log('[workspace-hub.js] FILE LOADED');
     } catch (err) {
       console.error('Failed to restore workspace:', err);
       updateUndoButton(); // re-enable the button
-      if (window.Toast) window.Toast.error(`Couldn't restore "${entry.label}" — it may have been emptied from Trash`);
+      if (window.Toast)
+        window.Toast.error(
+          `Couldn't restore "${entry.label}" — it may have been emptied from Trash`
+        );
     }
   }
 
@@ -3435,7 +3679,8 @@ console.log('[workspace-hub.js] FILE LOADED');
     const label = getWorkspaceLabel(workspaceId) || 'Workspace';
     const confirmed = await showWorkspaceDeleteConfirm({
       title: `Move "${label}" to Trash?`,
-      message: 'This will move the workspace folder to the system Trash and hide it from Ori. You can restore it from Undo while this app session is open, or from Trash until it is emptied.',
+      message:
+        'This will move the workspace folder to the system Trash and hide it from Ori. You can restore it from Undo while this app session is open, or from Trash until it is emptied.',
       variant: 'trash',
       confirmLabel: 'Move to Trash'
     });
@@ -3464,14 +3709,18 @@ console.log('[workspace-hub.js] FILE LOADED');
       return;
     }
 
-    const selectedGroups = selected.filter((id) => workspaceIsGroup(id)).length;
+    const selectedGroups = selected.filter(id => workspaceIsGroup(id)).length;
     const selectedWorkspaces = selected.length - selectedGroups;
     const details = [];
     if (selectedWorkspaces > 0) {
-      details.push(`${selectedWorkspaces} workspace${selectedWorkspaces === 1 ? '' : 's'} will be moved to the system Trash.`);
+      details.push(
+        `${selectedWorkspaces} workspace${selectedWorkspaces === 1 ? '' : 's'} will be moved to the system Trash.`
+      );
     }
     if (selectedGroups > 0) {
-      details.push(`${selectedGroups} group${selectedGroups === 1 ? '' : 's'} and ${selectedGroups === 1 ? 'its' : 'their'} contents will be moved to the system Trash.`);
+      details.push(
+        `${selectedGroups} group${selectedGroups === 1 ? '' : 's'} and ${selectedGroups === 1 ? 'its' : 'their'} contents will be moved to the system Trash.`
+      );
     }
     details.push('You can Undo to restore. Continue?');
 
@@ -3498,7 +3747,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       if (!res.ok) return;
       const data = await res.json();
       const agents = Array.isArray(data?.agents) ? data.agents : [];
-      agents.forEach((agent) => {
+      agents.forEach(agent => {
         const name = String(typeof agent === 'string' ? agent : agent?.name || '').trim();
         if (!name) return;
         const option = document.createElement('option');
@@ -3523,8 +3772,11 @@ console.log('[workspace-hub.js] FILE LOADED');
   // view's "Group selected" action (memberIds → group that explicit set).
   function openCreateGroupModal(memberIds) {
     pendingGroupMemberIds = Array.isArray(memberIds) && memberIds.length ? memberIds.slice() : null;
-    if (!elements.launcherGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
-    const modal = bootstrap.Modal.getInstance(elements.launcherGroupModal) || new bootstrap.Modal(elements.launcherGroupModal);
+    if (!elements.launcherGroupModal || typeof bootstrap === 'undefined' || !bootstrap.Modal)
+      return;
+    const modal =
+      bootstrap.Modal.getInstance(elements.launcherGroupModal) ||
+      new bootstrap.Modal(elements.launcherGroupModal);
     if (elements.launcherGroupNameInput) elements.launcherGroupNameInput.value = '';
     if (elements.launcherGroupDescriptionInput) elements.launcherGroupDescriptionInput.value = '';
     if (elements.launcherGroupEntryAgentSelect) elements.launcherGroupEntryAgentSelect.value = '';
@@ -3565,15 +3817,22 @@ console.log('[workspace-hub.js] FILE LOADED');
       const groupId = created?.folder?.id;
       if (!groupId) throw new Error('Failed to create group');
 
-      const moveResults = await Promise.all(selected.map((id) => fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parent_id: groupId })
-      })));
+      const moveResults = await Promise.all(
+        selected.map(id =>
+          fetch(`/api/workspaces/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parent_id: groupId })
+          })
+        )
+      );
 
-      const failed = moveResults.find((r) => !r.ok);
+      const failed = moveResults.find(r => !r.ok);
       if (failed) {
-        const msg = await extractErrorMessage(failed, 'Failed to move one or more workspaces into the group');
+        const msg = await extractErrorMessage(
+          failed,
+          'Failed to move one or more workspaces into the group'
+        );
         throw new Error(msg);
       }
 
@@ -3618,9 +3877,12 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   function buildWorkspaceSlugConflictMessage(conflict) {
-    const requestedSlug = typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
-    const suggestedSlug = typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
-    const location = typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
+    const requestedSlug =
+      typeof conflict?.requested_slug === 'string' ? conflict.requested_slug.trim() : '';
+    const suggestedSlug =
+      typeof conflict?.suggested_slug === 'string' ? conflict.suggested_slug.trim() : '';
+    const location =
+      typeof conflict?.location === 'string' ? conflict.location.trim().replace(/[\\/]+$/, '') : '';
     const suggestedPath = location && suggestedSlug ? `${location}/${suggestedSlug}` : '';
 
     const parts = [
@@ -3658,9 +3920,10 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const result = await response.json().catch(() => ({}));
     if (response.status === 409 && result?.conflict?.type === 'folder_slug') {
-      const suggestedSlug = typeof result.conflict.suggested_slug === 'string'
-        ? result.conflict.suggested_slug.trim()
-        : '';
+      const suggestedSlug =
+        typeof result.conflict.suggested_slug === 'string'
+          ? result.conflict.suggested_slug.trim()
+          : '';
       if (suggestedSlug && window.confirm(buildWorkspaceSlugConflictMessage(result.conflict))) {
         return renameWorkspace(workspaceId, newName, suggestedSlug);
       }
@@ -3688,7 +3951,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     element.classList.add('is-editable');
     element.title = 'Double-click to edit';
 
-    element.addEventListener('dblclick', (e) => {
+    element.addEventListener('dblclick', e => {
       e.preventDefault();
       e.stopPropagation();
 
@@ -3697,7 +3960,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       // Get actual value from workspace, not display text (which may be placeholder)
       const workspace = state.workspaceMap.get(state.selectedId);
-      const currentValue = workspace ? (workspace[field] || '') : '';
+      const currentValue = workspace ? workspace[field] || '' : '';
 
       // Create input/textarea
       const input = document.createElement(isMultiline ? 'textarea' : 'input');
@@ -3718,7 +3981,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       input.focus();
       input.select();
 
-      const finishEdit = async (save) => {
+      const finishEdit = async save => {
         const newValue = input.value.trim();
         input.remove();
         element.style.display = originalDisplay || '';
@@ -3732,9 +3995,10 @@ console.log('[workspace-hub.js] FILE LOADED');
         }
 
         try {
-          const result = field === 'name'
-            ? await renameWorkspace(state.selectedId, newValue)
-            : await updateWorkspace(state.selectedId, { [field]: newValue });
+          const result =
+            field === 'name'
+              ? await renameWorkspace(state.selectedId, newValue)
+              : await updateWorkspace(state.selectedId, { [field]: newValue });
 
           const workspace = state.workspaceMap.get(state.selectedId);
           const updatedWorkspace = result?.folder || result?.workspace || null;
@@ -3766,12 +4030,13 @@ console.log('[workspace-hub.js] FILE LOADED');
           }
         } catch (err) {
           console.error(`Failed to update ${field}:`, err);
-          if (!err?.cancelled && window.Toast) window.Toast.error(err.message || `Failed to update ${field}`);
+          if (!err?.cancelled && window.Toast)
+            window.Toast.error(err.message || `Failed to update ${field}`);
         }
       };
 
       input.addEventListener('blur', () => finishEdit(true));
-      input.addEventListener('keydown', (evt) => {
+      input.addEventListener('keydown', evt => {
         if (evt.key === 'Enter' && !isMultiline) {
           evt.preventDefault();
           input.blur();
@@ -3828,11 +4093,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.workspaceUpdated) {
-      elements.workspaceUpdated.textContent = formatDate(workspace.updated_at || workspace.created_at);
+      elements.workspaceUpdated.textContent = formatDate(
+        workspace.updated_at || workspace.created_at
+      );
     }
 
     if (elements.workspaceAgents) {
-      const agentCount = (workspace.agent_instances && workspace.agent_instances.length) || (workspace.agents && workspace.agents.length) || 0;
+      const agentCount =
+        (workspace.agent_instances && workspace.agent_instances.length) ||
+        (workspace.agents && workspace.agents.length) ||
+        0;
       elements.workspaceAgents.textContent = agentCount ? `${agentCount} agents` : 'No agents yet';
     }
 
@@ -3871,13 +4141,17 @@ console.log('[workspace-hub.js] FILE LOADED');
     const excluded = new Set();
     if (selectedWorkspaceId) {
       excluded.add(selectedWorkspaceId);
-      const descendants = collectWorkspaceDescendantIds(state.workspaces || [], selectedWorkspaceId, { includeRoot: false });
-      descendants.forEach((id) => excluded.add(id));
+      const descendants = collectWorkspaceDescendantIds(
+        state.workspaces || [],
+        selectedWorkspaceId,
+        { includeRoot: false }
+      );
+      descendants.forEach(id => excluded.add(id));
     }
 
     const flattened = flattenWorkspaces(state.workspaces || []);
     const options = ['<option value="">No group</option>'];
-    flattened.forEach((ws) => {
+    flattened.forEach(ws => {
       if (!ws || !ws.id) return;
       if (excluded.has(ws.id)) return;
       if (!isGroupWorkspace(ws)) return;
@@ -3898,9 +4172,11 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     const ws = state.workspaceMap.get(state.selectedId);
     populateWorkspaceParentSelect(state.selectedId);
-    elements.workspaceParentSelect.value = (ws && ws.parent_id) ? ws.parent_id : '';
+    elements.workspaceParentSelect.value = ws && ws.parent_id ? ws.parent_id : '';
 
-    const modal = bootstrap.Modal.getInstance(elements.workspaceMoveModal) || new bootstrap.Modal(elements.workspaceMoveModal);
+    const modal =
+      bootstrap.Modal.getInstance(elements.workspaceMoveModal) ||
+      new bootstrap.Modal(elements.workspaceMoveModal);
     modal.show();
   }
 
@@ -3980,8 +4256,11 @@ console.log('[workspace-hub.js] FILE LOADED');
       }
     }
 
-    if (window.workspaceRealtime && typeof window.workspaceRealtime.subscribeToWorkspace === 'function') {
-      const unsub = window.workspaceRealtime.subscribeToWorkspace(workspaceId, (event) => {
+    if (
+      window.workspaceRealtime &&
+      typeof window.workspaceRealtime.subscribeToWorkspace === 'function'
+    ) {
+      const unsub = window.workspaceRealtime.subscribeToWorkspace(workspaceId, event => {
         if (!event || event.workspaceId !== state.selectedId) return;
         if (window.WorkspaceHubState.shouldRefreshForEvent(event.type)) {
           scheduleWorkspaceTasksRefresh();
@@ -4025,34 +4304,42 @@ console.log('[workspace-hub.js] FILE LOADED');
     window.WorkspaceHubSmartInput.setEnabled(false);
     window.WorkspaceHubSmartInput.resetPrompt();
     window.WorkspaceHubSmartInput.clearField();
-    window.WorkspaceHubSmartInput.setStatus('Select a workspace to use quick add.', { busy: false });
+    window.WorkspaceHubSmartInput.setStatus('Select a workspace to use quick add.', {
+      busy: false
+    });
     sessionStorage.removeItem(window.WorkspaceHubState.getStorageKey());
     clearWorkspaceSummary();
     window.WorkspaceHubTasks.renderStats({ completed: 0, in_progress: 0, failed: 0, scheduled: 0 });
     if (elements.tasksList) {
-      elements.tasksList.innerHTML = '<div class="hub-empty">Select a workspace to view tasks.</div>';
+      elements.tasksList.innerHTML =
+        '<div class="hub-empty">Select a workspace to view tasks.</div>';
     }
     if (elements.tasksSubtitle) {
       elements.tasksSubtitle.textContent = 'Select a workspace to see task activity.';
     }
     if (elements.schedulesList) {
-      elements.schedulesList.innerHTML = '<div class="hub-empty">Select a workspace to view schedules.</div>';
+      elements.schedulesList.innerHTML =
+        '<div class="hub-empty">Select a workspace to view schedules.</div>';
     }
     if (elements.sessionsList) {
-      elements.sessionsList.innerHTML = '<div class="hub-empty">Select a workspace to view sessions.</div>';
+      elements.sessionsList.innerHTML =
+        '<div class="hub-empty">Select a workspace to view sessions.</div>';
     }
     if (elements.notesList) {
-      elements.notesList.innerHTML = '<div class="hub-empty">Select a workspace to view notes.</div>';
+      elements.notesList.innerHTML =
+        '<div class="hub-empty">Select a workspace to view notes.</div>';
     }
     if (elements.copyNotesBtn) {
       elements.copyNotesBtn.disabled = true;
       elements.copyNotesBtn.title = 'No notes to copy';
     }
     if (elements.filesList) {
-      elements.filesList.innerHTML = '<div class="hub-empty">Select a workspace to view files.</div>';
+      elements.filesList.innerHTML =
+        '<div class="hub-empty">Select a workspace to view files.</div>';
     }
     if (elements.directoriesList) {
-      elements.directoriesList.innerHTML = '<div class="hub-empty">Select a workspace to view directories.</div>';
+      elements.directoriesList.innerHTML =
+        '<div class="hub-empty">Select a workspace to view directories.</div>';
     }
 
     setLauncherTab(launcherActiveTab, { refreshSummary: false, force: true });
@@ -4083,7 +4370,7 @@ console.log('[workspace-hub.js] FILE LOADED');
       state.workspaces = data.folders || [];
 
       const flattened = flattenWorkspaces(state.workspaces);
-      state.workspaceMap = new Map(flattened.map((workspace) => [workspace.id, workspace]));
+      state.workspaceMap = new Map(flattened.map(workspace => [workspace.id, workspace]));
 
       populateWorkspaceSelect(flattened);
       renderLauncherActiveView(flattened);
@@ -4102,7 +4389,10 @@ console.log('[workspace-hub.js] FILE LOADED');
   function openSchedulePanel() {
     const state = window.WorkspaceHubState.getState();
     if (!state.selectedId) return;
-    if (window.sessionManager && typeof window.sessionManager.openScheduledTasksPanel === 'function') {
+    if (
+      window.sessionManager &&
+      typeof window.sessionManager.openScheduledTasksPanel === 'function'
+    ) {
       window.sessionManager.openScheduledTasksPanel(state.selectedId);
     }
   }
@@ -4114,7 +4404,9 @@ console.log('[workspace-hub.js] FILE LOADED');
     const state = window.WorkspaceHubState.getState();
     if (!state.selectedId) return;
     if (window.taskModalController) {
-      window.taskModalController.openForCreate(state.selectedId, '', () => window.WorkspaceHubTasks.loadTasks(state.selectedId));
+      window.taskModalController.openForCreate(state.selectedId, '', () =>
+        window.WorkspaceHubTasks.loadTasks(state.selectedId)
+      );
     }
   }
 
@@ -4181,7 +4473,7 @@ console.log('[workspace-hub.js] FILE LOADED');
 
       let selectedWorkflowData = null;
 
-      fileInput.addEventListener('change', (e) => {
+      fileInput.addEventListener('change', e => {
         const file = e.target.files[0];
         if (!file) {
           selectedWorkflowData = null;
@@ -4191,7 +4483,7 @@ console.log('[workspace-hub.js] FILE LOADED');
         }
 
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = event => {
           try {
             const data = JSON.parse(event.target.result);
             selectedWorkflowData = data;
@@ -4216,7 +4508,8 @@ console.log('[workspace-hub.js] FILE LOADED');
         if (!selectedWorkflowData || !state.selectedId) return;
 
         confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Importing...';
+        confirmBtn.innerHTML =
+          '<span class="spinner-border spinner-border-sm me-1"></span> Importing...';
 
         try {
           await importWorkflowAsTask(selectedWorkflowData);
@@ -4228,7 +4521,8 @@ console.log('[workspace-hub.js] FILE LOADED');
           errorEl.style.display = 'block';
         } finally {
           confirmBtn.disabled = false;
-          confirmBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/></svg> Import';
+          confirmBtn.innerHTML =
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13.5,16V19H10.5V16H8L12,12L16,16H13.5M13,9V3.5L18.5,9H13Z"/></svg> Import';
         }
       });
     }
@@ -4363,7 +4657,9 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherWorkspaceRootEditBtn) {
       elements.launcherWorkspaceRootEditBtn.addEventListener('click', () => {
-        setLauncherWorkspaceRootEditorOpen(!launcherWorkspaceRootEditorOpen, { focusInput: !launcherWorkspaceRootEditorOpen });
+        setLauncherWorkspaceRootEditorOpen(!launcherWorkspaceRootEditorOpen, {
+          focusInput: !launcherWorkspaceRootEditorOpen
+        });
       });
     }
 
@@ -4375,7 +4671,11 @@ console.log('[workspace-hub.js] FILE LOADED');
 
     if (elements.launcherWorkspaceRootBrowseBtn) {
       elements.launcherWorkspaceRootBrowseBtn.addEventListener('click', async () => {
-        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootBrowseBtn, true, 'Selecting…');
+        setLauncherWorkspaceRootButtonLoading(
+          elements.launcherWorkspaceRootBrowseBtn,
+          true,
+          'Selecting…'
+        );
         try {
           await browseLauncherWorkspaceRoot();
         } catch (error) {
@@ -4396,7 +4696,8 @@ console.log('[workspace-hub.js] FILE LOADED');
         if (window.Toast) window.Toast.success('Workspace directory saved.');
       } catch (error) {
         console.error('Failed to save workspace directory:', error);
-        if (window.Toast) window.Toast.error('Failed to save workspace directory: ' + error.message);
+        if (window.Toast)
+          window.Toast.error('Failed to save workspace directory: ' + error.message);
       } finally {
         setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, false);
       }
@@ -4407,7 +4708,7 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.launcherWorkspaceRootInput) {
-      elements.launcherWorkspaceRootInput.addEventListener('keydown', (event) => {
+      elements.launcherWorkspaceRootInput.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
           event.preventDefault();
           void handleWorkspaceRootSave();
@@ -4421,14 +4722,19 @@ console.log('[workspace-hub.js] FILE LOADED');
           return;
         }
 
-        setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, true, 'Clearing…');
+        setLauncherWorkspaceRootButtonLoading(
+          elements.launcherWorkspaceRootResetBtn,
+          true,
+          'Clearing…'
+        );
         try {
           await saveLauncherWorkspaceRoot('');
           setLauncherWorkspaceRootEditorOpen(false);
           if (window.Toast) window.Toast.success('Custom workspace directory cleared.');
         } catch (error) {
           console.error('Failed to clear workspace directory:', error);
-          if (window.Toast) window.Toast.error('Failed to clear workspace directory: ' + error.message);
+          if (window.Toast)
+            window.Toast.error('Failed to clear workspace directory: ' + error.message);
         } finally {
           setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootResetBtn, false);
           syncLauncherWorkspaceRootEditorControls();
@@ -4451,15 +4757,21 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.launcherViewCardsBtn) {
-      elements.launcherViewCardsBtn.addEventListener('click', () => setLauncherViewMode(LAUNCHER_VIEW_CARDS));
+      elements.launcherViewCardsBtn.addEventListener('click', () =>
+        setLauncherViewMode(LAUNCHER_VIEW_CARDS)
+      );
     }
 
     if (elements.launcherViewTreeBtn) {
-      elements.launcherViewTreeBtn.addEventListener('click', () => setLauncherViewMode(LAUNCHER_VIEW_TREE));
+      elements.launcherViewTreeBtn.addEventListener('click', () =>
+        setLauncherViewMode(LAUNCHER_VIEW_TREE)
+      );
     }
 
     if (elements.launcherViewMapBtn) {
-      elements.launcherViewMapBtn.addEventListener('click', () => setLauncherViewMode(LAUNCHER_VIEW_MAP));
+      elements.launcherViewMapBtn.addEventListener('click', () =>
+        setLauncherViewMode(LAUNCHER_VIEW_MAP)
+      );
     }
 
     if (elements.launcherCancelSelectionBtn) {
@@ -4467,14 +4779,16 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.launcherSelectAllBtn) {
-      elements.launcherSelectAllBtn.addEventListener('click', () => toggleSelectAllLauncherWorkspaces());
+      elements.launcherSelectAllBtn.addEventListener('click', () =>
+        toggleSelectAllLauncherWorkspaces()
+      );
     }
 
     // Launcher-scoped keyboard shortcuts (only while the Workspaces tab is the
     // active panel and the user isn't typing in a field): Cmd/Ctrl+A selects
     // all, Escape clears the current selection.
     if (elements.launcherWorkspacesPanel) {
-      elements.launcherWorkspacesPanel.addEventListener('keydown', (e) => {
+      elements.launcherWorkspacesPanel.addEventListener('keydown', e => {
         if (elements.launcherWorkspacesPanel.hidden) return;
         if (shouldIgnoreLauncherTreeKeyboardEvent(e)) return;
 
@@ -4499,23 +4813,35 @@ console.log('[workspace-hub.js] FILE LOADED');
     }
 
     if (elements.launcherDeleteSelectedBtn) {
-      elements.launcherDeleteSelectedBtn.addEventListener('click', () => deleteSelectedWorkspaces());
+      elements.launcherDeleteSelectedBtn.addEventListener('click', () =>
+        deleteSelectedWorkspaces()
+      );
     }
 
     if (elements.launcherDeleteGroupOnlyBtn) {
-      elements.launcherDeleteGroupOnlyBtn.addEventListener('click', () => handleDeleteGroupChoice(false));
+      elements.launcherDeleteGroupOnlyBtn.addEventListener('click', () =>
+        handleDeleteGroupChoice(false)
+      );
     }
 
     if (elements.launcherDeleteGroupAllBtn) {
-      elements.launcherDeleteGroupAllBtn.addEventListener('click', () => handleDeleteGroupChoice(true));
+      elements.launcherDeleteGroupAllBtn.addEventListener('click', () =>
+        handleDeleteGroupChoice(true)
+      );
     }
 
     if (elements.newSessionBtn) {
       elements.newSessionBtn.addEventListener('click', () => {
         if (!state.selectedId) return;
-        if (window.sessionManager && typeof window.sessionManager.createAssistantSession === 'function') {
+        if (
+          window.sessionManager &&
+          typeof window.sessionManager.createAssistantSession === 'function'
+        ) {
           window.sessionManager.createAssistantSession(state.selectedId, 'Assistant');
-        } else if (window.sessionManager && typeof window.sessionManager.showCreateChatModalForWorkspace === 'function') {
+        } else if (
+          window.sessionManager &&
+          typeof window.sessionManager.showCreateChatModalForWorkspace === 'function'
+        ) {
           window.sessionManager.showCreateChatModalForWorkspace(state.selectedId);
         }
       });
@@ -4525,7 +4851,10 @@ console.log('[workspace-hub.js] FILE LOADED');
       elements.newNoteBtn.addEventListener('click', window.WorkspaceHubNotes.createNewNote);
     }
     if (elements.copyNotesBtn) {
-      elements.copyNotesBtn.addEventListener('click', window.WorkspaceHubNotes.copyAllNotesToClipboard);
+      elements.copyNotesBtn.addEventListener(
+        'click',
+        window.WorkspaceHubNotes.copyAllNotesToClipboard
+      );
     }
 
     if (elements.addFileBtn) {
@@ -4540,37 +4869,57 @@ console.log('[workspace-hub.js] FILE LOADED');
     if (elements.selectTasksBtn) {
       elements.selectTasksBtn.addEventListener('click', () =>
         window.WorkspaceHubSelection.toggleSelectionMode('tasks', () =>
-          window.WorkspaceHubTasks.renderTasksList(state.tasks)));
+          window.WorkspaceHubTasks.renderTasksList(state.tasks)
+        )
+      );
     }
     if (elements.bulkDeleteTasksBtn) {
-      elements.bulkDeleteTasksBtn.addEventListener('click', window.WorkspaceHubTasks.bulkDeleteTasks);
+      elements.bulkDeleteTasksBtn.addEventListener(
+        'click',
+        window.WorkspaceHubTasks.bulkDeleteTasks
+      );
     }
 
     if (elements.selectSessionsBtn) {
       elements.selectSessionsBtn.addEventListener('click', () =>
         window.WorkspaceHubSelection.toggleSelectionMode('sessions', () =>
-          window.WorkspaceHubSessions.renderSessions(state.sessions)));
+          window.WorkspaceHubSessions.renderSessions(state.sessions)
+        )
+      );
     }
     if (elements.bulkDeleteSessionsBtn) {
-      elements.bulkDeleteSessionsBtn.addEventListener('click', window.WorkspaceHubSessions.bulkDeleteSessions);
+      elements.bulkDeleteSessionsBtn.addEventListener(
+        'click',
+        window.WorkspaceHubSessions.bulkDeleteSessions
+      );
     }
 
     if (elements.selectNotesBtn) {
       elements.selectNotesBtn.addEventListener('click', () =>
         window.WorkspaceHubSelection.toggleSelectionMode('notes', () =>
-          window.WorkspaceHubNotes.renderNotes(state.notes)));
+          window.WorkspaceHubNotes.renderNotes(state.notes)
+        )
+      );
     }
     if (elements.bulkDeleteNotesBtn) {
-      elements.bulkDeleteNotesBtn.addEventListener('click', window.WorkspaceHubNotes.bulkDeleteNotes);
+      elements.bulkDeleteNotesBtn.addEventListener(
+        'click',
+        window.WorkspaceHubNotes.bulkDeleteNotes
+      );
     }
 
     if (elements.selectFilesBtn) {
       elements.selectFilesBtn.addEventListener('click', () =>
         window.WorkspaceHubSelection.toggleSelectionMode('files', () =>
-          window.WorkspaceHubFiles.renderFiles(state.files)));
+          window.WorkspaceHubFiles.renderFiles(state.files)
+        )
+      );
     }
     if (elements.bulkTrashFilesBtn) {
-      elements.bulkTrashFilesBtn.addEventListener('click', window.WorkspaceHubFiles.bulkMoveFilesToTrash);
+      elements.bulkTrashFilesBtn.addEventListener(
+        'click',
+        window.WorkspaceHubFiles.bulkMoveFilesToTrash
+      );
     }
 
     // Initialize sub-module event bindings
@@ -4587,75 +4936,104 @@ console.log('[workspace-hub.js] FILE LOADED');
   console.log('[workspace-hub] EventBus available:', !!window.EventBus);
   if (window.EventBus) {
     console.log('[workspace-hub] Registering EventBus listeners');
-    EventBus.on('workspace:files:updated', (data) => {
-      const state = window.WorkspaceHubState.getState();
-      if (!data?.workspaceId || data.workspaceId !== state.selectedId) return;
-      window.WorkspaceHubFiles.loadFiles(state.selectedId);
-    }, 'workspaceHub');
+    EventBus.on(
+      'workspace:files:updated',
+      data => {
+        const state = window.WorkspaceHubState.getState();
+        if (!data?.workspaceId || data.workspaceId !== state.selectedId) return;
+        window.WorkspaceHubFiles.loadFiles(state.selectedId);
+      },
+      'workspaceHub'
+    );
 
     // Refresh tasks when a task is created or updated
-    EventBus.on('task:created', (data) => {
-      const state = window.WorkspaceHubState.getState();
-      if (hubEl.dataset.state === 'launcher') {
-        // Cheap list refetch keeps Map/Tree/deprecated Cards fallback badges
-        // current; only re-run the expensive per-workspace fan-out if the
-        // Summary tab (which needs full task content, not just counts) is open.
-        scheduleWorkspaceListRefresh();
-        if (launcherActiveTab === 'summary') {
-          scheduleLauncherOverviewRefresh();
+    EventBus.on(
+      'task:created',
+      data => {
+        const state = window.WorkspaceHubState.getState();
+        if (hubEl.dataset.state === 'launcher') {
+          // Cheap list refetch keeps Map/Tree/deprecated Cards fallback badges
+          // current; only re-run the expensive per-workspace fan-out if the
+          // Summary tab (which needs full task content, not just counts) is open.
+          scheduleWorkspaceListRefresh();
+          if (launcherActiveTab === 'summary') {
+            scheduleLauncherOverviewRefresh();
+          }
         }
-      }
-      if (!state.selectedId) return;
-      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
-        window.WorkspaceHubTasks.loadTasks(state.selectedId);
-      }
-    }, 'workspaceHub');
+        if (!state.selectedId) return;
+        if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+          window.WorkspaceHubTasks.loadTasks(state.selectedId);
+        }
+      },
+      'workspaceHub'
+    );
 
-    EventBus.on('task:updated', (data) => {
-      const state = window.WorkspaceHubState.getState();
-      if (hubEl.dataset.state === 'launcher') {
-        // Cheap list refetch keeps Map/Tree/deprecated Cards fallback badges
-        // current; only re-run the expensive per-workspace fan-out if the
-        // Summary tab (which needs full task content, not just counts) is open.
-        scheduleWorkspaceListRefresh();
-        if (launcherActiveTab === 'summary') {
-          scheduleLauncherOverviewRefresh();
+    EventBus.on(
+      'task:updated',
+      data => {
+        const state = window.WorkspaceHubState.getState();
+        if (hubEl.dataset.state === 'launcher') {
+          // Cheap list refetch keeps Map/Tree/deprecated Cards fallback badges
+          // current; only re-run the expensive per-workspace fan-out if the
+          // Summary tab (which needs full task content, not just counts) is open.
+          scheduleWorkspaceListRefresh();
+          if (launcherActiveTab === 'summary') {
+            scheduleLauncherOverviewRefresh();
+          }
         }
-      }
-      if (!state.selectedId) return;
-      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
-        window.WorkspaceHubTasks.loadTasks(state.selectedId);
-      }
-    }, 'workspaceHub');
+        if (!state.selectedId) return;
+        if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+          window.WorkspaceHubTasks.loadTasks(state.selectedId);
+        }
+      },
+      'workspaceHub'
+    );
 
     // Refresh sessions when a session is created
-    EventBus.on('session:created', (data) => {
-      const state = window.WorkspaceHubState.getState();
-      if (!state.selectedId) return;
-      if (!data?.folderId || data.folderId === state.selectedId) {
-        window.WorkspaceHubSessions.loadSessions(state.selectedId);
-      }
-    }, 'workspaceHub');
+    EventBus.on(
+      'session:created',
+      data => {
+        const state = window.WorkspaceHubState.getState();
+        if (!state.selectedId) return;
+        if (!data?.folderId || data.folderId === state.selectedId) {
+          window.WorkspaceHubSessions.loadSessions(state.selectedId);
+        }
+      },
+      'workspaceHub'
+    );
 
     // Refresh notes when a note is created
-    EventBus.on('note:created', (data) => {
-      const state = window.WorkspaceHubState.getState();
-      if (!state.selectedId) return;
-      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
-        window.WorkspaceHubNotes.loadNotes(state.selectedId);
-      }
-    }, 'workspaceHub');
+    EventBus.on(
+      'note:created',
+      data => {
+        const state = window.WorkspaceHubState.getState();
+        if (!state.selectedId) return;
+        if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+          window.WorkspaceHubNotes.loadNotes(state.selectedId);
+        }
+      },
+      'workspaceHub'
+    );
 
     // Refresh notes when a note is updated
-    EventBus.on('note:updated', (data) => {
-      const state = window.WorkspaceHubState.getState();
-      console.log('[note:updated] received, selectedId:', state.selectedId, 'eventWorkspaceId:', data?.workspaceId);
-      if (!state.selectedId) return;
-      if (!data?.workspaceId || data.workspaceId === state.selectedId) {
-        console.log('[note:updated] calling loadNotes');
-        window.WorkspaceHubNotes.loadNotes(state.selectedId);
-      }
-    }, 'workspaceHub');
+    EventBus.on(
+      'note:updated',
+      data => {
+        const state = window.WorkspaceHubState.getState();
+        console.log(
+          '[note:updated] received, selectedId:',
+          state.selectedId,
+          'eventWorkspaceId:',
+          data?.workspaceId
+        );
+        if (!state.selectedId) return;
+        if (!data?.workspaceId || data.workspaceId === state.selectedId) {
+          console.log('[note:updated] calling loadNotes');
+          window.WorkspaceHubNotes.loadNotes(state.selectedId);
+        }
+      },
+      'workspaceHub'
+    );
   }
 
   // Initialize
@@ -4666,7 +5044,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   initLauncherViewState();
 
   // Keyboard shortcuts for checked launcher workspaces.
-  document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', e => {
     // Cmd/Ctrl+G to group selected workspaces
     if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
       if (hasLauncherSelection()) {
@@ -4695,7 +5073,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   window.WorkspaceHub.deleteWorkspaces = confirmAndDeleteWorkspaces;
   // Group an explicit id set (the Map view's multi-select) via the shared Create
   // Group modal + create/reparent flow; reloads on success, re-mounting the map.
-  window.WorkspaceHub.groupWorkspaces = (ids) => openCreateGroupModal(ids);
+  window.WorkspaceHub.groupWorkspaces = ids => openCreateGroupModal(ids);
   window.WorkspaceHub.__test = {
     getLauncherCardDropIntent,
     getLauncherTreeDropIntent,

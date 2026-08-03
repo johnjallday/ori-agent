@@ -15,11 +15,11 @@ class Web3SettingsManager {
 
     // Supported chains configuration
     this.CHAINS = {
-      1: { name: "Ethereum Mainnet", symbol: "ETH", hexId: "0x1" },
-      137: { name: "Polygon", symbol: "MATIC", hexId: "0x89" },
-      42161: { name: "Arbitrum", symbol: "ETH", hexId: "0xa4b1" },
-      10: { name: "Optimism", symbol: "ETH", hexId: "0xa" },
-      8453: { name: "Base", symbol: "ETH", hexId: "0x2105" },
+      1: { name: 'Ethereum Mainnet', symbol: 'ETH', hexId: '0x1' },
+      137: { name: 'Polygon', symbol: 'MATIC', hexId: '0x89' },
+      42161: { name: 'Arbitrum', symbol: 'ETH', hexId: '0xa4b1' },
+      10: { name: 'Optimism', symbol: 'ETH', hexId: '0xa' },
+      8453: { name: 'Base', symbol: 'ETH', hexId: '0x2105' }
     };
 
     // DOM elements (will be set in init)
@@ -31,7 +31,7 @@ class Web3SettingsManager {
    */
   async init() {
     // Only run on settings page
-    if (!document.getElementById("web3Status")) {
+    if (!document.getElementById('web3Status')) {
       return;
     }
 
@@ -44,7 +44,7 @@ class Web3SettingsManager {
     this.bindEvents();
 
     // Check if ethereum provider is available
-    if (typeof window.ethereum === "undefined") {
+    if (typeof window.ethereum === 'undefined') {
       this.showNoWalletState();
       return;
     }
@@ -63,22 +63,22 @@ class Web3SettingsManager {
    */
   cacheElements() {
     this.elements = {
-      status: document.getElementById("web3Status"),
-      statusIndicator: document.getElementById("web3StatusIndicator"),
-      statusText: document.getElementById("web3StatusText"),
-      statusDetails: document.getElementById("web3StatusDetails"),
-      connected: document.getElementById("web3Connected"),
-      disconnected: document.getElementById("web3Disconnected"),
-      noWallet: document.getElementById("web3NoWallet"),
-      address: document.getElementById("web3Address"),
-      ensName: document.getElementById("web3ENSName"),
-      network: document.getElementById("web3Network"),
-      chainId: document.getElementById("web3ChainId"),
-      networkSelect: document.getElementById("web3NetworkSelect"),
-      connectBtn: document.getElementById("web3ConnectBtn"),
-      disconnectBtn: document.getElementById("web3DisconnectBtn"),
-      switchNetworkBtn: document.getElementById("web3SwitchNetworkBtn"),
-      alerts: document.getElementById("web3Alerts"),
+      status: document.getElementById('web3Status'),
+      statusIndicator: document.getElementById('web3StatusIndicator'),
+      statusText: document.getElementById('web3StatusText'),
+      statusDetails: document.getElementById('web3StatusDetails'),
+      connected: document.getElementById('web3Connected'),
+      disconnected: document.getElementById('web3Disconnected'),
+      noWallet: document.getElementById('web3NoWallet'),
+      address: document.getElementById('web3Address'),
+      ensName: document.getElementById('web3ENSName'),
+      network: document.getElementById('web3Network'),
+      chainId: document.getElementById('web3ChainId'),
+      networkSelect: document.getElementById('web3NetworkSelect'),
+      connectBtn: document.getElementById('web3ConnectBtn'),
+      disconnectBtn: document.getElementById('web3DisconnectBtn'),
+      switchNetworkBtn: document.getElementById('web3SwitchNetworkBtn'),
+      alerts: document.getElementById('web3Alerts')
     };
   }
 
@@ -87,19 +87,13 @@ class Web3SettingsManager {
    */
   bindEvents() {
     if (this.elements.connectBtn) {
-      this.elements.connectBtn.addEventListener("click", () =>
-        this.connectWallet()
-      );
+      this.elements.connectBtn.addEventListener('click', () => this.connectWallet());
     }
     if (this.elements.disconnectBtn) {
-      this.elements.disconnectBtn.addEventListener("click", () =>
-        this.disconnectWallet()
-      );
+      this.elements.disconnectBtn.addEventListener('click', () => this.disconnectWallet());
     }
     if (this.elements.switchNetworkBtn) {
-      this.elements.switchNetworkBtn.addEventListener("click", () =>
-        this.switchNetwork()
-      );
+      this.elements.switchNetworkBtn.addEventListener('click', () => this.switchNetwork());
     }
   }
 
@@ -109,7 +103,7 @@ class Web3SettingsManager {
   setupEthereumListeners() {
     if (!window.ethereum) return;
 
-    window.ethereum.on("accountsChanged", (accounts) => {
+    window.ethereum.on('accountsChanged', accounts => {
       if (accounts.length === 0) {
         // User disconnected wallet
         this.handleDisconnect();
@@ -119,7 +113,7 @@ class Web3SettingsManager {
       }
     });
 
-    window.ethereum.on("chainChanged", (chainId) => {
+    window.ethereum.on('chainChanged', chainId => {
       // Chain ID is returned as hex string
       const decimalChainId = parseInt(chainId, 16);
       this.handleChainChange(decimalChainId);
@@ -131,7 +125,7 @@ class Web3SettingsManager {
    */
   async loadSavedState() {
     try {
-      const response = await fetch("/api/web3-wallet");
+      const response = await fetch('/api/web3-wallet');
       const data = await response.json();
 
       if (data.connected) {
@@ -142,7 +136,7 @@ class Web3SettingsManager {
 
         // Check if wallet is still connected in browser
         const accounts = await window.ethereum.request({
-          method: "eth_accounts",
+          method: 'eth_accounts'
         });
 
         if (accounts.length > 0 && accounts[0].toLowerCase() === this.address.toLowerCase()) {
@@ -157,7 +151,7 @@ class Web3SettingsManager {
         this.showDisconnectedState();
       }
     } catch (error) {
-      console.error("Failed to load Web3 wallet state:", error);
+      console.error('Failed to load Web3 wallet state:', error);
       this.showDisconnectedState();
     }
   }
@@ -172,7 +166,7 @@ class Web3SettingsManager {
     }
 
     if (!window.ethereum) {
-      this.showAlert("No Web3 wallet detected. Please install MetaMask.", "warning");
+      this.showAlert('No Web3 wallet detected. Please install MetaMask.', 'warning');
       return;
     }
 
@@ -181,21 +175,21 @@ class Web3SettingsManager {
 
       // Request account access
       const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
+        method: 'eth_requestAccounts'
       });
 
       if (accounts.length === 0) {
-        throw new Error("No accounts found");
+        throw new Error('No accounts found');
       }
 
       this.address = accounts[0];
 
       // Get chain ID
-      const chainId = await window.ethereum.request({ method: "eth_chainId" });
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
       this.chainId = parseInt(chainId, 16);
 
       // Try to resolve ENS name (only on Ethereum mainnet)
-      if (this.chainId === 1 && typeof ethers !== "undefined") {
+      if (this.chainId === 1 && typeof ethers !== 'undefined') {
         try {
           const provider = new ethers.BrowserProvider(window.ethereum);
           this.ensName = await provider.lookupAddress(this.address);
@@ -213,18 +207,18 @@ class Web3SettingsManager {
         address_masked: this.maskAddress(this.address),
         chain_id: this.chainId,
         chain_name: this.CHAINS[this.chainId]?.name || `Chain ${this.chainId}`,
-        ens_name: this.ensName,
+        ens_name: this.ensName
       });
 
-      this.showAlert("Wallet connected successfully!", "success");
+      this.showAlert('Wallet connected successfully!', 'success');
     } catch (error) {
-      console.error("Failed to connect wallet:", error);
+      console.error('Failed to connect wallet:', error);
       this.showDisconnectedState();
 
       if (error.code === 4001) {
-        this.showAlert("Connection request was rejected.", "warning");
+        this.showAlert('Connection request was rejected.', 'warning');
       } else {
-        this.showAlert("Failed to connect wallet. Please try again.", "danger");
+        this.showAlert('Failed to connect wallet. Please try again.', 'danger');
       }
     }
   }
@@ -240,7 +234,7 @@ class Web3SettingsManager {
 
     try {
       // Clear server state
-      await fetch("/api/web3-wallet", { method: "DELETE" });
+      await fetch('/api/web3-wallet', { method: 'DELETE' });
 
       // Clear local state
       this.address = null;
@@ -250,12 +244,12 @@ class Web3SettingsManager {
       this.showDisconnectedState();
 
       if (!silent) {
-        this.showAlert("Wallet disconnected.", "info");
+        this.showAlert('Wallet disconnected.', 'info');
       }
     } catch (error) {
-      console.error("Failed to disconnect wallet:", error);
+      console.error('Failed to disconnect wallet:', error);
       if (!silent) {
-        this.showAlert("Failed to disconnect wallet.", "danger");
+        this.showAlert('Failed to disconnect wallet.', 'danger');
       }
     }
   }
@@ -275,26 +269,26 @@ class Web3SettingsManager {
     const chain = this.CHAINS[targetChainId];
 
     if (!chain) {
-      this.showAlert("Unsupported network", "warning");
+      this.showAlert('Unsupported network', 'warning');
       return;
     }
 
     try {
       await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: chain.hexId }],
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: chain.hexId }]
       });
     } catch (error) {
       if (error.code === 4902) {
         this.showAlert(
-          "This network is not configured in your wallet. Please add it manually.",
-          "warning"
+          'This network is not configured in your wallet. Please add it manually.',
+          'warning'
         );
       } else if (error.code === 4001) {
-        this.showAlert("Network switch was rejected.", "warning");
+        this.showAlert('Network switch was rejected.', 'warning');
       } else {
-        console.error("Failed to switch network:", error);
-        this.showAlert("Failed to switch network.", "danger");
+        console.error('Failed to switch network:', error);
+        this.showAlert('Failed to switch network.', 'danger');
       }
     }
   }
@@ -303,18 +297,18 @@ class Web3SettingsManager {
    * Save wallet connection to server
    */
   async saveWalletToServer() {
-    const response = await fetch("/api/web3-wallet", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const response = await fetch('/api/web3-wallet', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         address: this.address,
         chain_id: this.chainId,
-        ens_name: this.ensName || "",
-      }),
+        ens_name: this.ensName || ''
+      })
     });
 
     if (!response.ok) {
-      throw new Error("Failed to save wallet to server");
+      throw new Error('Failed to save wallet to server');
     }
 
     return response.json();
@@ -327,7 +321,7 @@ class Web3SettingsManager {
     this.address = newAddress;
 
     // Try to resolve ENS name for new address
-    if (this.chainId === 1 && typeof ethers !== "undefined") {
+    if (this.chainId === 1 && typeof ethers !== 'undefined') {
       try {
         const provider = new ethers.BrowserProvider(window.ethereum);
         this.ensName = await provider.lookupAddress(this.address);
@@ -347,10 +341,10 @@ class Web3SettingsManager {
       address_masked: this.maskAddress(this.address),
       chain_id: this.chainId,
       chain_name: this.CHAINS[this.chainId]?.name || `Chain ${this.chainId}`,
-      ens_name: this.ensName,
+      ens_name: this.ensName
     });
 
-    this.showAlert("Account changed.", "info");
+    this.showAlert('Account changed.', 'info');
   }
 
   /**
@@ -374,10 +368,10 @@ class Web3SettingsManager {
         address_masked: this.maskAddress(this.address),
         chain_id: this.chainId,
         chain_name: this.CHAINS[this.chainId]?.name || `Chain ${this.chainId}`,
-        ens_name: this.ensName,
+        ens_name: this.ensName
       });
 
-      this.showAlert(`Switched to ${this.CHAINS[this.chainId]?.name || "Unknown Network"}`, "info");
+      this.showAlert(`Switched to ${this.CHAINS[this.chainId]?.name || 'Unknown Network'}`, 'info');
     }
   }
 
@@ -386,7 +380,7 @@ class Web3SettingsManager {
    */
   handleDisconnect() {
     this.disconnectWallet(true);
-    this.showAlert("Wallet disconnected from browser.", "info");
+    this.showAlert('Wallet disconnected from browser.', 'info');
   }
 
   /**
@@ -396,17 +390,17 @@ class Web3SettingsManager {
     // Update status
     this.elements.statusIndicator.innerHTML =
       '<span class="badge bg-success" style="width: 12px; height: 12px; border-radius: 50%; padding: 0;"></span>';
-    this.elements.statusText.textContent = "Connected";
+    this.elements.statusText.textContent = 'Connected';
     this.elements.statusDetails.textContent = data.address_masked;
 
     // Update address display
     this.elements.address.textContent = data.address_masked;
     if (data.ens_name) {
       this.elements.ensName.textContent = data.ens_name;
-      this.elements.ensName.classList.remove("d-none");
+      this.elements.ensName.classList.remove('d-none');
     } else {
-      this.elements.ensName.textContent = "";
-      this.elements.ensName.classList.add("d-none");
+      this.elements.ensName.textContent = '';
+      this.elements.ensName.classList.add('d-none');
     }
 
     // Update network display
@@ -419,9 +413,9 @@ class Web3SettingsManager {
     }
 
     // Show/hide appropriate sections
-    this.elements.connected.classList.remove("d-none");
-    this.elements.disconnected.classList.add("d-none");
-    this.elements.noWallet.classList.add("d-none");
+    this.elements.connected.classList.remove('d-none');
+    this.elements.disconnected.classList.add('d-none');
+    this.elements.noWallet.classList.add('d-none');
   }
 
   /**
@@ -431,13 +425,13 @@ class Web3SettingsManager {
     // Update status
     this.elements.statusIndicator.innerHTML =
       '<span class="badge bg-secondary" style="width: 12px; height: 12px; border-radius: 50%; padding: 0;"></span>';
-    this.elements.statusText.textContent = "Not Connected";
-    this.elements.statusDetails.textContent = "Connect your wallet to get started";
+    this.elements.statusText.textContent = 'Not Connected';
+    this.elements.statusDetails.textContent = 'Connect your wallet to get started';
 
     // Show/hide appropriate sections
-    this.elements.connected.classList.add("d-none");
-    this.elements.disconnected.classList.remove("d-none");
-    this.elements.noWallet.classList.add("d-none");
+    this.elements.connected.classList.add('d-none');
+    this.elements.disconnected.classList.remove('d-none');
+    this.elements.noWallet.classList.add('d-none');
   }
 
   /**
@@ -446,8 +440,8 @@ class Web3SettingsManager {
   showConnectingState() {
     this.elements.statusIndicator.innerHTML =
       '<span class="spinner-border spinner-border-sm" role="status"></span>';
-    this.elements.statusText.textContent = "Connecting...";
-    this.elements.statusDetails.textContent = "Please approve the connection in your wallet";
+    this.elements.statusText.textContent = 'Connecting...';
+    this.elements.statusDetails.textContent = 'Please approve the connection in your wallet';
   }
 
   /**
@@ -457,13 +451,13 @@ class Web3SettingsManager {
     // Update status
     this.elements.statusIndicator.innerHTML =
       '<span class="badge bg-warning" style="width: 12px; height: 12px; border-radius: 50%; padding: 0;"></span>';
-    this.elements.statusText.textContent = "No Wallet Detected";
-    this.elements.statusDetails.textContent = "Install a Web3 wallet to continue";
+    this.elements.statusText.textContent = 'No Wallet Detected';
+    this.elements.statusDetails.textContent = 'Install a Web3 wallet to continue';
 
     // Show/hide appropriate sections
-    this.elements.connected.classList.add("d-none");
-    this.elements.disconnected.classList.add("d-none");
-    this.elements.noWallet.classList.remove("d-none");
+    this.elements.connected.classList.add('d-none');
+    this.elements.disconnected.classList.add('d-none');
+    this.elements.noWallet.classList.remove('d-none');
   }
 
   /**
@@ -476,13 +470,13 @@ class Web3SettingsManager {
 
     this.elements.statusIndicator.innerHTML =
       '<span class="badge bg-secondary" style="width: 12px; height: 12px; border-radius: 50%; padding: 0;"></span>';
-    this.elements.statusText.textContent = "Web3 Disabled";
-    this.elements.statusDetails.textContent = "Web3 features are disabled on this server.";
+    this.elements.statusText.textContent = 'Web3 Disabled';
+    this.elements.statusDetails.textContent = 'Web3 features are disabled on this server.';
 
-    this.elements.connected.classList.add("d-none");
-    this.elements.disconnected.classList.add("d-none");
-    this.elements.noWallet.classList.add("d-none");
-    this.showAlert("Web3 features are disabled on this server.", "info");
+    this.elements.connected.classList.add('d-none');
+    this.elements.disconnected.classList.add('d-none');
+    this.elements.noWallet.classList.add('d-none');
+    this.showAlert('Web3 features are disabled on this server.', 'info');
   }
 
   /**
@@ -496,7 +490,7 @@ class Web3SettingsManager {
   /**
    * Show an alert message
    */
-  showAlert(message, type = "info") {
+  showAlert(message, type = 'info') {
     if (!this.elements.alerts) return;
 
     const alertId = `web3Alert${Date.now()}`;
@@ -507,7 +501,7 @@ class Web3SettingsManager {
       </div>
     `;
 
-    this.elements.alerts.insertAdjacentHTML("beforeend", alertHtml);
+    this.elements.alerts.insertAdjacentHTML('beforeend', alertHtml);
 
     // Auto-dismiss after 5 seconds
     setTimeout(() => {
@@ -521,4 +515,4 @@ class Web3SettingsManager {
 
 // Initialize on page load
 const web3SettingsManager = new Web3SettingsManager();
-document.addEventListener("DOMContentLoaded", () => web3SettingsManager.init());
+document.addEventListener('DOMContentLoaded', () => web3SettingsManager.init());

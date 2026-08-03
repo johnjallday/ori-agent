@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-notes
  */
-(function() {
+(function () {
   'use strict';
 
   const { formatDate } = window.WorkspaceHubUtils;
@@ -60,35 +60,43 @@
 
     setCopyAllButtonState(notes.length, true);
     try {
-      const sections = await Promise.all(notes.map(async (note, index) => {
-        const noteId = String(note?.id || '').trim();
-        const title = String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
-        let content = '';
+      const sections = await Promise.all(
+        notes.map(async (note, index) => {
+          const noteId = String(note?.id || '').trim();
+          const title =
+            String(note?.name || note?.title || `Note ${index + 1}`).trim() || `Note ${index + 1}`;
+          let content = '';
 
-        if (noteId) {
-          try {
-            const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
-            if (response.ok) {
-              const detail = await response.json();
-              content = String(detail?.content || detail?.preview || '').trim();
+          if (noteId) {
+            try {
+              const response = await fetch(`/api/notes/${encodeURIComponent(noteId)}`);
+              if (response.ok) {
+                const detail = await response.json();
+                content = String(detail?.content || detail?.preview || '').trim();
+              }
+            } catch (error) {
+              console.error('Failed to load note content for copy:', error);
             }
-          } catch (error) {
-            console.error('Failed to load note content for copy:', error);
           }
-        }
 
-        if (!content) {
-          content = String(note?.content || note?.preview || '').trim();
-        }
+          if (!content) {
+            content = String(note?.content || note?.preview || '').trim();
+          }
 
-        return `# ${title}\n${content || '(empty note)'}`;
-      }));
+          return `# ${title}\n${content || '(empty note)'}`;
+        })
+      );
 
       await writeClipboardText(sections.join('\n\n---\n\n'));
       if (typeof window.notifyToast === 'function') {
-        window.notifyToast(`Copied ${notes.length} note${notes.length === 1 ? '' : 's'} to clipboard`, 'success');
+        window.notifyToast(
+          `Copied ${notes.length} note${notes.length === 1 ? '' : 's'} to clipboard`,
+          'success'
+        );
       } else if (window.Toast) {
-        window.Toast.success(`Copied ${notes.length} note${notes.length === 1 ? '' : 's'} to clipboard`);
+        window.Toast.success(
+          `Copied ${notes.length} note${notes.length === 1 ? '' : 's'} to clipboard`
+        );
       }
     } catch (error) {
       console.error('Failed to copy notes to clipboard:', error);
@@ -153,7 +161,9 @@
 
       const result = await response.json();
       if (window.Toast) {
-        window.Toast.success(`Deleted ${result.success_count} note${result.success_count !== 1 ? 's' : ''}`);
+        window.Toast.success(
+          `Deleted ${result.success_count} note${result.success_count !== 1 ? 's' : ''}`
+        );
       }
 
       window.WorkspaceHubSelection.toggleSelectionMode('notes', () => renderNotes(state.notes));
@@ -281,7 +291,12 @@
     const elements = window.WorkspaceHubState.getElements();
     const state = window.WorkspaceHubState.getState();
 
-    console.log('[DEBUG renderNotes] called with', notes?.length, 'notes, element:', elements.notesList);
+    console.log(
+      '[DEBUG renderNotes] called with',
+      notes?.length,
+      'notes, element:',
+      elements.notesList
+    );
     if (!elements.notesList) return;
 
     if (!notes || notes.length === 0) {
@@ -293,7 +308,7 @@
     const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('notes');
     const selectedSet = state.selectedItems.notes;
 
-    const items = notes.slice(0, 5).map((note) => {
+    const items = notes.slice(0, 5).map(note => {
       const title = note.name || 'Untitled Note';
       const updated = formatDate(note.updated_at || note.created_at);
       // API returns 'preview' for list items, 'content' for full note
@@ -334,29 +349,34 @@
     const elements = window.WorkspaceHubState.getElements();
     const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('notes');
 
-    elements.notesList.querySelectorAll('.hub-note-item').forEach((item) => {
+    elements.notesList.querySelectorAll('.hub-note-item').forEach(item => {
       const noteId = item.dataset.noteId;
 
       const checkbox = item.querySelector('input[type="checkbox"]');
       if (checkbox) {
-        checkbox.addEventListener('change', (event) => {
+        checkbox.addEventListener('change', event => {
           event.stopPropagation();
           window.WorkspaceHubSelection.toggleItemSelection('notes', noteId);
         });
       }
 
-      item.querySelector('[data-action="delete"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="delete"]')?.addEventListener('click', event => {
         event.stopPropagation();
         deleteNote(noteId);
       });
 
-      item.querySelector('[data-action="open"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="open"]')?.addEventListener('click', event => {
         event.stopPropagation();
         openNote(noteId);
       });
 
-      item.addEventListener('click', (event) => {
-        console.log('[DEBUG click] note item clicked, noteId:', noteId, 'inSelectionMode:', inSelectionMode);
+      item.addEventListener('click', event => {
+        console.log(
+          '[DEBUG click] note item clicked, noteId:',
+          noteId,
+          'inSelectionMode:',
+          inSelectionMode
+        );
         console.log('[DEBUG click] event.target:', event.target);
         if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
           window.WorkspaceHubSelection.toggleItemSelection('notes', noteId);

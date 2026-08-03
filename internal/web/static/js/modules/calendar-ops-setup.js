@@ -40,7 +40,8 @@
     // it alone leaves this module idle on exactly the load that matters — the
     // first one, when the Setup Wizard is already asking for content.
     const match =
-      typeof window !== 'undefined' && /^\/workspaces\/([^/?#]+)/.exec(window.location?.pathname || '');
+      typeof window !== 'undefined' &&
+      /^\/workspaces\/([^/?#]+)/.exec(window.location?.pathname || '');
     if (match) return decodeURIComponent(match[1]);
     return (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
   }
@@ -48,7 +49,8 @@
   function setBadge(badge, label) {
     if (!badge) return;
     badge.textContent = label;
-    badge.className = 'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
+    badge.className =
+      'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
   }
 
   function el(tag, opts = {}, children = []) {
@@ -151,14 +153,24 @@
   // --- section builders -----------------------------------------------------
 
   function renderPresetSection(container, resp) {
-    container.appendChild(el('div', { text: 'Choose a calendar connector', style: 'font-weight:600;margin-top:8px;' }));
+    container.appendChild(
+      el('div', { text: 'Choose a calendar connector', style: 'font-weight:600;margin-top:8px;' })
+    );
 
     (resp.presets || []).forEach(preset => {
       const already = !!(resp.preset_added && resp.preset_added[preset.id]);
-      const card = el('div', { style: 'border:1px solid var(--border-color,#3333);border-radius:8px;padding:10px;margin:6px 0;' });
+      const card = el('div', {
+        style:
+          'border:1px solid var(--border-color,#3333);border-radius:8px;padding:10px;margin:6px 0;'
+      });
       card.appendChild(el('div', { text: preset.display_name, style: 'font-weight:600;' }));
       if (preset.developer_preview) {
-        card.appendChild(el('div', { text: 'Developer Preview — requires your Google account to be enrolled.', style: 'font-size:12px;opacity:0.8;' }));
+        card.appendChild(
+          el('div', {
+            text: 'Developer Preview — requires your Google account to be enrolled.',
+            style: 'font-size:12px;opacity:0.8;'
+          })
+        );
       }
       if (Array.isArray(preset.prerequisites) && preset.prerequisites.length) {
         const list = el('ul', { style: 'font-size:12px;margin:6px 0 6px 18px;padding:0;' });
@@ -166,7 +178,13 @@
         card.appendChild(list);
       }
       if (preset.docs_url) {
-        card.appendChild(el('a', { text: 'Official setup docs', attrs: { href: preset.docs_url, target: '_blank', rel: 'noopener' }, style: 'font-size:12px;' }));
+        card.appendChild(
+          el('a', {
+            text: 'Official setup docs',
+            attrs: { href: preset.docs_url, target: '_blank', rel: 'noopener' },
+            style: 'font-size:12px;'
+          })
+        );
       }
       const row = el('div', { style: 'margin-top:8px;' });
       row.appendChild(
@@ -180,11 +198,23 @@
     });
 
     if (resp.existing_connectors && resp.existing_connectors.length) {
-      container.appendChild(el('div', { text: 'Or use an existing MCP server', style: 'font-weight:600;margin-top:12px;' }));
+      container.appendChild(
+        el('div', {
+          text: 'Or use an existing MCP server',
+          style: 'font-weight:600;margin-top:12px;'
+        })
+      );
       resp.existing_connectors.forEach(c => {
         const row = el('div', { style: 'display:flex;align-items:center;gap:8px;margin:4px 0;' });
-        row.appendChild(el('span', { text: c.name + (c.remote ? ' (remote)' : ' (local)'), style: 'font-size:13px;' }));
-        row.appendChild(button('Use this connector', { onClick: () => selectConnector({ server_name: c.name }) }));
+        row.appendChild(
+          el('span', {
+            text: c.name + (c.remote ? ' (remote)' : ' (local)'),
+            style: 'font-size:13px;'
+          })
+        );
+        row.appendChild(
+          button('Use this connector', { onClick: () => selectConnector({ server_name: c.name }) })
+        );
         container.appendChild(row);
       });
     }
@@ -205,14 +235,17 @@
     // FR 58: when a global Google account is connected, use it — the browser
     // account chooser is pre-selected (login_hint) and the grant binds to that
     // identity. The OAuth client below is still your own self-hosted Web client.
-    const accountNote = el('div', { style: 'margin-top:6px;font-size:13px;color:var(--primary-color);' });
+    const accountNote = el('div', {
+      style: 'margin-top:6px;font-size:13px;color:var(--primary-color);'
+    });
     container.appendChild(accountNote);
     fetch('/api/connections/google/status', { headers: { Accept: 'application/json' } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((conn) => {
+      .then(r => (r.ok ? r.json() : null))
+      .then(conn => {
         if (conn && conn.subject && conn.email) {
           accountNote.textContent =
-            'Using your connected Google account: ' + conn.email +
+            'Using your connected Google account: ' +
+            conn.email +
             '. The OAuth client below is your own Google Cloud Web client (one-time, self-hosted).';
         }
       })
@@ -244,7 +277,10 @@
           try {
             const body =
               clientIdInput.value.trim() && clientSecretInput.value.trim()
-                ? { client_id: clientIdInput.value.trim(), client_secret: clientSecretInput.value.trim() }
+                ? {
+                    client_id: clientIdInput.value.trim(),
+                    client_secret: clientSecretInput.value.trim()
+                  }
                 : {};
             const result = await apiPost(
               '/api/mcp/servers/' + encodeURIComponent(resp.binding.server_name) + '/connect',
@@ -278,11 +314,12 @@
   }
 
   function renderMappingSection(container, resp) {
-    container.appendChild(el('div', { text: 'Mapping', style: 'font-weight:600;margin-top:12px;' }));
+    container.appendChild(
+      el('div', { text: 'Mapping', style: 'font-weight:600;margin-top:12px;' })
+    );
     container.appendChild(
       el('div', {
-        text:
-          'Suggested tool mappings prefill below — nothing activates until you run Validate and Save. Edit the JSON directly to correct any tool, argument, or field mapping.',
+        text: 'Suggested tool mappings prefill below — nothing activates until you run Validate and Save. Edit the JSON directly to correct any tool, argument, or field mapping.',
         style: 'font-size:12px;opacity:0.85;'
       })
     );
@@ -354,7 +391,12 @@
               mapping
             });
             if (!result.mapping_valid) {
-              resultsBox.appendChild(el('div', { text: 'Mapping error: ' + result.mapping_error, style: 'color:var(--danger,#c0392b);' }));
+              resultsBox.appendChild(
+                el('div', {
+                  text: 'Mapping error: ' + result.mapping_error,
+                  style: 'color:var(--danger,#c0392b);'
+                })
+              );
               return;
             }
             (result.validation_results || []).forEach(r => {
@@ -363,12 +405,16 @@
                   r.operation +
                   ': ' +
                   (r.success ? 'OK' : 'FAILED — ' + (r.error || 'unknown error')) +
-                  (r.missing_fields && r.missing_fields.length ? ' (missing: ' + r.missing_fields.join(', ') + ')' : '')
+                  (r.missing_fields && r.missing_fields.length
+                    ? ' (missing: ' + r.missing_fields.join(', ') + ')'
+                    : '')
               });
               resultsBox.appendChild(line);
             });
             if (result.calendars_error) {
-              resultsBox.appendChild(el('div', { text: 'Could not list calendars: ' + result.calendars_error }));
+              resultsBox.appendChild(
+                el('div', { text: 'Could not list calendars: ' + result.calendars_error })
+              );
             }
             lastCalendars = result.calendars || [];
             rerender();
@@ -385,7 +431,9 @@
 
   function renderCalendarPicker(container) {
     if (!lastCalendars.length) return;
-    container.appendChild(el('div', { text: 'Visible calendars', style: 'font-weight:600;margin-top:12px;' }));
+    container.appendChild(
+      el('div', { text: 'Visible calendars', style: 'font-weight:600;margin-top:12px;' })
+    );
     lastCalendars.forEach(cal => {
       const row = el('label', { style: 'display:flex;align-items:center;gap:6px;font-size:13px;' });
       const checkbox = el('input', { attrs: { type: 'checkbox' } });
@@ -404,7 +452,10 @@
     const candidates = resp.context_workspace_candidates || [];
     if (!candidates.length) return;
     container.appendChild(
-      el('div', { text: 'Ori workspaces Meeting Prep may read as context', style: 'font-weight:600;margin-top:12px;' })
+      el('div', {
+        text: 'Ori workspaces Meeting Prep may read as context',
+        style: 'font-weight:600;margin-top:12px;'
+      })
     );
     candidates.forEach(ws => {
       const row = el('label', { style: 'display:flex;align-items:center;gap:6px;font-size:13px;' });
@@ -421,7 +472,9 @@
   }
 
   function renderSaveSection(container, resp) {
-    container.appendChild(el('div', { text: 'Display timezone', style: 'font-weight:600;margin-top:12px;' }));
+    container.appendChild(
+      el('div', { text: 'Display timezone', style: 'font-weight:600;margin-top:12px;' })
+    );
     const tzInput = el('input', {
       className: 'form-control',
       attrs: { type: 'text', placeholder: 'e.g. America/New_York' },
@@ -532,7 +585,13 @@
     renderSaveSection(body, resp);
 
     if (resp.state === 'ready') {
-      body.insertBefore(el('div', { text: 'Calendar Ops is ready.', style: 'font-weight:600;color:var(--success,#2e7d32);' }), body.firstChild);
+      body.insertBefore(
+        el('div', {
+          text: 'Calendar Ops is ready.',
+          style: 'font-weight:600;color:var(--success,#2e7d32);'
+        }),
+        body.firstChild
+      );
     }
   }
 
@@ -623,7 +682,9 @@
       }
       if (lastState.state === 'connector_missing' || lastState.state === 'auth_required') {
         container.appendChild(
-          el('div', { text: 'Connect a calendar first — this step maps what Ori may read from it.' })
+          el('div', {
+            text: 'Connect a calendar first — this step maps what Ori may read from it.'
+          })
         );
         return;
       }
@@ -655,15 +716,15 @@
     }
   }
 
-// waitForWorkspaceId polls briefly for window.currentWorkspaceId, then calls
-// onReady. This module loads as a plain deferred script, while
-// workspace-detail.tmpl's own bootstrap (which sets currentWorkspaceId) runs
-// from an inline `type="module"` script -- module scripts are also deferred,
-// so their relative DOMContentLoaded-listener registration order against a
-// plain defer script isn't guaranteed. A one-shot DOMContentLoaded call here
-// can fire before that global exists, silently no-op (refresh() bails on an
-// empty id), and never retry. Polling avoids depending on that ordering.
-function waitForWorkspaceId(onReady) {
+  // waitForWorkspaceId polls briefly for window.currentWorkspaceId, then calls
+  // onReady. This module loads as a plain deferred script, while
+  // workspace-detail.tmpl's own bootstrap (which sets currentWorkspaceId) runs
+  // from an inline `type="module"` script -- module scripts are also deferred,
+  // so their relative DOMContentLoaded-listener registration order against a
+  // plain defer script isn't guaranteed. A one-shot DOMContentLoaded call here
+  // can fire before that global exists, silently no-op (refresh() bails on an
+  // empty id), and never retry. Polling avoids depending on that ordering.
+  function waitForWorkspaceId(onReady) {
     const started = Date.now();
     const attempt = () => {
       const id = (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
@@ -704,7 +765,11 @@ function waitForWorkspaceId(onReady) {
   // blindly so a redraw can be triggered exactly when the content would differ.
   function stateSignature(state) {
     if (!state) return '';
-    return [state.state || '', state.binding?.server_name || '', state.settings?.validated ? 'v' : ''].join('|');
+    return [
+      state.state || '',
+      state.binding?.server_name || '',
+      state.settings?.validated ? 'v' : ''
+    ].join('|');
   }
 
   // The card and the wizard show the same workspace: when setup changes, this

@@ -4,7 +4,7 @@
  * for the settings page.
  */
 
-const SettingsController = (function() {
+const SettingsController = (function () {
   // State
   let initialized = false;
   const modules = new Map();
@@ -189,7 +189,7 @@ const SettingsController = (function() {
           const errorData = await response.json();
           errorMessage = errorData.error || errorData.message || response.statusText;
         } catch {
-          errorMessage = await response.text() || response.statusText;
+          errorMessage = (await response.text()) || response.statusText;
         }
         throw new Error(errorMessage);
       }

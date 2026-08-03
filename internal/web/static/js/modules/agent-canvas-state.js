@@ -157,10 +157,10 @@ export class AgentCanvasState {
     this.agents = [];
     this.tasks = [];
     this.attachments = [];
-    this.storeNodes = [];  // Store nodes (file storage nodes)
-    this.directoryReferences = [];  // Directory references (read-only file paths)
-    this.workspaceFileTree = [];  // Workspace-owned files/folders from /files/tree
-    this.workspaceFolders = [];  // Workspace-owned folder container nodes
+    this.storeNodes = []; // Store nodes (file storage nodes)
+    this.directoryReferences = []; // Directory references (read-only file paths)
+    this.workspaceFileTree = []; // Workspace-owned files/folders from /files/tree
+    this.workspaceFolders = []; // Workspace-owned folder container nodes
 
     // Data & Communication
     this.messages = [];
@@ -296,16 +296,16 @@ export class AgentCanvasState {
     this.shiftPressed = false;
 
     // Multi-Selection State
-    this.selectedNodes = new Map();  // Map<id, {id: string, type: string, node: object}>
-    this.firstSelectedId = null;     // Track the first selected node
+    this.selectedNodes = new Map(); // Map<id, {id: string, type: string, node: object}>
+    this.firstSelectedId = null; // Track the first selected node
     this.multiSelectContextMenu = false;
     this.multiSelectMenuX = 0;
     this.multiSelectMenuY = 0;
-    this.multiSelectMenuItems = [];  // For click detection
+    this.multiSelectMenuItems = []; // For click detection
 
     // Marquee Selection State (Shift+Drag)
     this.isMarqueeSelecting = false;
-    this.marqueeStartX = 0;          // World coordinates
+    this.marqueeStartX = 0; // World coordinates
     this.marqueeStartY = 0;
     this.marqueeEndX = 0;
     this.marqueeEndY = 0;
@@ -315,8 +315,8 @@ export class AgentCanvasState {
     this.onTimelineEvent = null;
 
     // Workflow Selection State
-    this.selectedWorkflowId = null;  // null = show all tasks
-    this.allTasks = [];  // Unfiltered tasks for workflow detection
+    this.selectedWorkflowId = null; // null = show all tasks
+    this.allTasks = []; // Unfiltered tasks for workflow detection
   }
 
   /**
@@ -1041,13 +1041,13 @@ export class AgentCanvasState {
       const parentTask = tasksToSearch.find(t => t.id === parentId);
       if (parentTask) {
         // Count subtasks (check both field names)
-        const subtaskCount = tasksToSearch.filter(t =>
-          t.parent_id === parentId || t.parent_task_id === parentId
+        const subtaskCount = tasksToSearch.filter(
+          t => t.parent_id === parentId || t.parent_task_id === parentId
         ).length;
         workflows.push({
           id: parentTask.id,
           name: parentTask.name || parentTask.description || 'Unnamed Workflow',
-          taskCount: subtaskCount  // Just the subtask count (parent is the canvas now)
+          taskCount: subtaskCount // Just the subtask count (parent is the canvas now)
         });
       }
     }
@@ -1091,9 +1091,10 @@ export class AgentCanvasState {
 
     // When viewing a workflow, only show its subtasks (not the parent workflow task itself)
     // The canvas title will show the workflow name instead
-    return tasks.filter(task =>
-      task.parent_id === this.selectedWorkflowId ||
-      task.parent_task_id === this.selectedWorkflowId
+    return tasks.filter(
+      task =>
+        task.parent_id === this.selectedWorkflowId ||
+        task.parent_task_id === this.selectedWorkflowId
     );
   }
 

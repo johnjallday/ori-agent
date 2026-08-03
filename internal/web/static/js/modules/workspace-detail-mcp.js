@@ -495,14 +495,18 @@ export class WorkspaceMCPManager {
     try {
       await this.loadAvailableEmailAccounts(true);
       this.populateWorkspaceMCPEmailAccountOptions(
-        existingBinding?.config?.account_id || this.host.elements.mcpEmailAccountSelect?.value || '',
+        existingBinding?.config?.account_id ||
+          this.host.elements.mcpEmailAccountSelect?.value ||
+          '',
         existingBinding
       );
     } catch (error) {
       console.error('Failed to load email accounts for MCP modal:', error);
       this.availableEmailAccounts = [];
       this.populateWorkspaceMCPEmailAccountOptions(
-        existingBinding?.config?.account_id || this.host.elements.mcpEmailAccountSelect?.value || '',
+        existingBinding?.config?.account_id ||
+          this.host.elements.mcpEmailAccountSelect?.value ||
+          '',
         existingBinding
       );
       this.setWorkspaceMCPEmailAccountHelp(error.message || 'Failed to load email accounts', true);
@@ -533,7 +537,11 @@ export class WorkspaceMCPManager {
     const normalizedBindingId = String(bindingId || '')
       .trim()
       .toLowerCase();
-    if (!normalizedBindingId || !this.host.workspace || !Array.isArray(this.host.workspace.agent_instances)) {
+    if (
+      !normalizedBindingId ||
+      !this.host.workspace ||
+      !Array.isArray(this.host.workspace.agent_instances)
+    ) {
       return [];
     }
 
@@ -853,7 +861,8 @@ export class WorkspaceMCPManager {
       this.host.elements.mcpForm.reset();
     }
     if (this.host.elements.mcpServerSelect) {
-      this.host.elements.mcpServerSelect.innerHTML = '<option value="">Select an MCP server</option>';
+      this.host.elements.mcpServerSelect.innerHTML =
+        '<option value="">Select an MCP server</option>';
     }
     if (this.host.elements.mcpAgentOptions) {
       this.host.elements.mcpAgentOptions.innerHTML =
@@ -1107,7 +1116,8 @@ export class WorkspaceMCPManager {
     }
 
     if (allowedActions.includes('send')) {
-      config.require_send_confirmation = this.host.elements.mcpEmailSendConfirmInput?.checked !== false;
+      config.require_send_confirmation =
+        this.host.elements.mcpEmailSendConfirmInput?.checked !== false;
     } else {
       delete config.require_send_confirmation;
     }
@@ -1118,7 +1128,9 @@ export class WorkspaceMCPManager {
   getWorkspaceMCPSelectedAgentInstanceIDs() {
     if (!this.host.elements.mcpAgentOptions) return [];
     return Array.from(
-      this.host.elements.mcpAgentOptions.querySelectorAll('.workspace-detail-mcp-agent-checkbox:checked')
+      this.host.elements.mcpAgentOptions.querySelectorAll(
+        '.workspace-detail-mcp-agent-checkbox:checked'
+      )
     )
       .map(checkbox => String(checkbox.value || '').trim())
       .filter(Boolean);

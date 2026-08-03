@@ -39,7 +39,7 @@ function renderCodexAgentPage(detail) {
 
   setCodexDetailMessage('');
   content.innerHTML = window.CodexSync.renderHtml(detail?.codex_sync || null);
-  window.CodexSync.wireRefresh(content, codexAgentName, (reloaded) => {
+  window.CodexSync.wireRefresh(content, codexAgentName, reloaded => {
     renderCodexAgentPage(reloaded);
   });
 }
@@ -49,7 +49,9 @@ async function loadCodexAgentDetail() {
   try {
     const response = await fetch(`/api/agents/${encodeURIComponent(codexAgentName)}/detail`);
     if (response.status === 404) {
-      setCodexDetailMessage('Codex agent not found. The Codex CLI may not be installed or detected.');
+      setCodexDetailMessage(
+        'Codex agent not found. The Codex CLI may not be installed or detected.'
+      );
       return;
     }
     if (!response.ok) {

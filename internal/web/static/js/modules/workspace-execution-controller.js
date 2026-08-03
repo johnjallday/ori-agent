@@ -65,7 +65,8 @@ export class WorkspaceExecutionController {
   constructor(deps = {}) {
     this.workspaceId = deps.workspaceId || '';
     this._fetchTask = typeof deps.fetchTask === 'function' ? deps.fetchTask : async () => null;
-    this._subscribeRealtime = typeof deps.subscribeRealtime === 'function' ? deps.subscribeRealtime : null;
+    this._subscribeRealtime =
+      typeof deps.subscribeRealtime === 'function' ? deps.subscribeRealtime : null;
     this._pollIntervalMs = Number(deps.pollIntervalMs) > 0 ? Number(deps.pollIntervalMs) : 3000;
     this._setInterval = deps.setIntervalFn || ((fn, ms) => setInterval(fn, ms));
     this._clearInterval = deps.clearIntervalFn || (handle => clearInterval(handle));
@@ -271,7 +272,9 @@ export class WorkspaceExecutionController {
 
   _ensureRealtime() {
     if (this._realtimeUnsub || !this._subscribeRealtime) return;
-    this._realtimeUnsub = this._subscribeRealtime(this.workspaceId, event => this.handleRealtimeEvent(event));
+    this._realtimeUnsub = this._subscribeRealtime(this.workspaceId, event =>
+      this.handleRealtimeEvent(event)
+    );
   }
 
   _extractTaskId(event) {

@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-sessions
  */
-(function() {
+(function () {
   'use strict';
 
   const { formatDate } = window.WorkspaceHubUtils;
@@ -18,7 +18,8 @@
 
     const confirmed = await window.WorkspaceHubModals.showDeleteConfirm({
       title: 'Delete Chat Session',
-      message: 'Are you sure you want to delete this chat session and all its messages? This action cannot be undone.'
+      message:
+        'Are you sure you want to delete this chat session and all its messages? This action cannot be undone.'
     });
     if (!confirmed) return;
 
@@ -60,10 +61,14 @@
 
       const result = await response.json();
       if (window.Toast) {
-        window.Toast.success(`Deleted ${result.success_count} session${result.success_count !== 1 ? 's' : ''}`);
+        window.Toast.success(
+          `Deleted ${result.success_count} session${result.success_count !== 1 ? 's' : ''}`
+        );
       }
 
-      window.WorkspaceHubSelection.toggleSelectionMode('sessions', () => renderSessions(state.sessions));
+      window.WorkspaceHubSelection.toggleSelectionMode('sessions', () =>
+        renderSessions(state.sessions)
+      );
       await loadSessions(state.selectedId);
     } catch (error) {
       console.error('Failed to bulk delete sessions:', error);
@@ -132,7 +137,7 @@
     const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('sessions');
     const selectedSet = state.selectedItems.sessions;
 
-    const items = sessions.map((session) => {
+    const items = sessions.map(session => {
       const title = session.title || session.name || 'Untitled Chat';
       const agent = session.agent_name || 'default';
       const updated = formatDate(session.updated_at || session.created_at);
@@ -174,28 +179,28 @@
     const elements = window.WorkspaceHubState.getElements();
     const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('sessions');
 
-    elements.sessionsList.querySelectorAll('.hub-session-item').forEach((item) => {
+    elements.sessionsList.querySelectorAll('.hub-session-item').forEach(item => {
       const sessionId = item.dataset.sessionId;
 
       const checkbox = item.querySelector('input[type="checkbox"]');
       if (checkbox) {
-        checkbox.addEventListener('change', (event) => {
+        checkbox.addEventListener('change', event => {
           event.stopPropagation();
           window.WorkspaceHubSelection.toggleItemSelection('sessions', sessionId);
         });
       }
 
-      item.querySelector('[data-action="delete"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="delete"]')?.addEventListener('click', event => {
         event.stopPropagation();
         deleteSession(sessionId);
       });
 
-      item.querySelector('[data-action="open"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="open"]')?.addEventListener('click', event => {
         event.stopPropagation();
         openSession(sessionId);
       });
 
-      item.addEventListener('click', (event) => {
+      item.addEventListener('click', event => {
         if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
           window.WorkspaceHubSelection.toggleItemSelection('sessions', sessionId);
         } else if (!inSelectionMode && !event.target.closest('button')) {

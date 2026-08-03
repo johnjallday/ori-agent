@@ -21,7 +21,7 @@ class LocationSettingsManager {
       if (!response.ok) {
         throw new Error('Failed to fetch zones');
       }
-      this.zones = await response.json() || [];
+      this.zones = (await response.json()) || [];
     } catch (error) {
       console.error('Error loading zones:', error);
       this.showAlert('Failed to load location zones', 'danger');
@@ -47,21 +47,27 @@ class LocationSettingsManager {
       return;
     }
 
-    const zonesHTML = this.zones.map(zone => `
+    const zonesHTML = this.zones
+      .map(
+        zone => `
       <div class="zone-item modern-card p-3 mb-3" data-zone-id="${zone.id}">
         <div class="d-flex justify-content-between align-items-start">
           <div class="flex-grow-1">
             <h6 class="mb-1" style="color: var(--text-primary);">${this.escapeHtml(zone.name)}</h6>
             <p class="mb-2 text-muted" style="font-size: 0.875rem;">${this.escapeHtml(zone.description || '')}</p>
             <div class="d-flex flex-wrap gap-2">
-              ${zone.detection_rules.map(rule => `
+              ${zone.detection_rules
+                .map(
+                  rule => `
                 <span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color);">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z"/>
                   </svg>
                   WiFi: ${this.escapeHtml(rule.ssid)}
                 </span>
-              `).join('')}
+              `
+                )
+                .join('')}
             </div>
           </div>
           <div class="d-flex gap-2">
@@ -78,7 +84,9 @@ class LocationSettingsManager {
           </div>
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
 
     container.innerHTML = zonesHTML;
   }
@@ -92,7 +100,7 @@ class LocationSettingsManager {
     }
 
     // Edit zone buttons
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', e => {
       if (e.target.closest('.edit-zone-btn')) {
         const zoneId = e.target.closest('.edit-zone-btn').dataset.zoneId;
         this.editZone(zoneId);
@@ -100,7 +108,7 @@ class LocationSettingsManager {
     });
 
     // Delete zone buttons
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', e => {
       if (e.target.closest('.delete-zone-btn')) {
         const zoneId = e.target.closest('.delete-zone-btn').dataset.zoneId;
         this.deleteZone(zoneId);

@@ -17,7 +17,7 @@ import {
   taskMatchesFilters,
   sortTasksForRollup,
   isFileAttachment,
-  extractFileItems,
+  extractFileItems
 } from './workspace-detail-members.js';
 
 const tree = [
@@ -31,11 +31,11 @@ const tree = [
         id: 'g2',
         kind: 'group',
         name: 'Archive',
-        children: [{ id: 'w2', kind: 'workspace', name: 'Old' }],
-      },
-    ],
+        children: [{ id: 'w2', kind: 'workspace', name: 'Old' }]
+      }
+    ]
   },
-  { id: 'w3', kind: 'workspace', name: 'Personal' },
+  { id: 'w3', kind: 'workspace', name: 'Personal' }
 ];
 
 test('normalizeWorkspaceKind maps only "group" to group', () => {
@@ -61,7 +61,10 @@ test('findWorkspaceNode locates nodes at any depth', () => {
 
 test('directMembers returns the group children', () => {
   const g = findWorkspaceNode(tree, 'g1');
-  assert.deepEqual(directMembers(g).map((m) => m.id), ['w1', 'g2']);
+  assert.deepEqual(
+    directMembers(g).map(m => m.id),
+    ['w1', 'g2']
+  );
   assert.deepEqual(directMembers({}), []);
 });
 
@@ -96,7 +99,12 @@ test('taskMatchesFilters applies status, member, and created-date filters', () =
   // created_at relative to `now` so date-range assertions are timezone-robust.
   const open = { status: 'pending', __workspaceId: 'w1', created_at: new Date(now).toISOString() };
   const done = { status: 'completed', __workspaceId: 'w2', created_at: '2026-01-01T00:00:00Z' };
-  const sched = { status: 'completed', schedule: { cron: '0 9 * * *' }, __workspaceId: 'w1', created_at: new Date(now).toISOString() };
+  const sched = {
+    status: 'completed',
+    schedule: { cron: '0 9 * * *' },
+    __workspaceId: 'w1',
+    created_at: new Date(now).toISOString()
+  };
 
   // Default = open + scheduled.
   assert.equal(taskMatchesFilters(open, { status: 'default' }, now), true);
@@ -121,17 +129,25 @@ test('sortTasksForRollup orders newest-first by created_at', () => {
   const tasks = [
     { id: 'a', created_at: '2026-01-01T00:00:00Z' },
     { id: 'b', created_at: '2026-06-01T00:00:00Z' },
-    { id: 'c', created_at: '2026-03-01T00:00:00Z' },
+    { id: 'c', created_at: '2026-03-01T00:00:00Z' }
   ];
-  assert.deepEqual(sortTasksForRollup(tasks).map((t) => t.id), ['b', 'c', 'a']);
+  assert.deepEqual(
+    sortTasksForRollup(tasks).map(t => t.id),
+    ['b', 'c', 'a']
+  );
 });
 
 test('isFileAttachment / extractFileItems pick file attachments', () => {
   const attachments = [
     { id: 'n1', title: 'A note', type: 'note' },
-    { id: 'f1', title: 'Spec', type: 'doc', file_meta: { name: 'spec.pdf', url: '/files/spec.pdf' } },
+    {
+      id: 'f1',
+      title: 'Spec',
+      type: 'doc',
+      file_meta: { name: 'spec.pdf', url: '/files/spec.pdf' }
+    },
     { id: 'f2', type: 'image', file_meta: { name: 'pic.png' } },
-    { id: 'l1', title: 'Link', type: 'link', link_url: 'https://example.com' },
+    { id: 'l1', title: 'Link', type: 'link', link_url: 'https://example.com' }
   ];
   assert.equal(isFileAttachment(attachments[1]), true);
   assert.equal(isFileAttachment(attachments[0]), false);
@@ -140,12 +156,15 @@ test('isFileAttachment / extractFileItems pick file attachments', () => {
   const files = extractFileItems(attachments);
   assert.deepEqual(files, [
     { id: 'f1', title: 'Spec', url: '/files/spec.pdf' },
-    { id: 'f2', title: 'pic.png', url: '' },
+    { id: 'f2', title: 'pic.png', url: '' }
   ]);
 });
 
 test('flattenTree and collectDescendantIds walk the hierarchy', () => {
-  assert.deepEqual(flattenTree(tree).map((n) => n.id), ['g1', 'w1', 'g2', 'w2', 'w3']);
+  assert.deepEqual(
+    flattenTree(tree).map(n => n.id),
+    ['g1', 'w1', 'g2', 'w2', 'w3']
+  );
   const g1 = findWorkspaceNode(tree, 'g1');
   assert.deepEqual([...collectDescendantIds(g1)].sort(), ['g2', 'w1', 'w2']);
   assert.deepEqual([...collectDescendantIds({ id: 'leaf' })], []);
@@ -154,11 +173,17 @@ test('flattenTree and collectDescendantIds walk the hierarchy', () => {
 test('eligibleAddTargets excludes the group, its descendants, and direct members', () => {
   const g1 = findWorkspaceNode(tree, 'g1');
   // g1 contains w1 + g2(>w2); eligible = everything else (w3 only).
-  assert.deepEqual(eligibleAddTargets(tree, g1).map((n) => n.id), ['w3']);
+  assert.deepEqual(
+    eligibleAddTargets(tree, g1).map(n => n.id),
+    ['w3']
+  );
 
   const g2 = findWorkspaceNode(tree, 'g2');
   // g2 contains w2; eligible = g1, w1, w3 (g2 and w2 excluded).
-  assert.deepEqual(eligibleAddTargets(tree, g2).map((n) => n.id), ['g1', 'w1', 'w3']);
+  assert.deepEqual(
+    eligibleAddTargets(tree, g2).map(n => n.id),
+    ['g1', 'w1', 'w3']
+  );
 
   assert.deepEqual(eligibleAddTargets(tree, null), []);
 });
@@ -166,25 +191,34 @@ test('eligibleAddTargets excludes the group, its descendants, and direct members
 test('metadataChanges flags only the fields that changed', () => {
   const group = { name: 'Clients', description: 'VIP', color: '#3b82f6' };
 
-  assert.deepEqual(metadataChanges(group, { name: 'Clients', description: 'VIP', color: '#3b82f6' }), {
-    nameChanged: false,
-    metaChanged: false,
-  });
-  assert.deepEqual(metadataChanges(group, { name: 'Renamed', description: 'VIP', color: '#3b82f6' }), {
-    nameChanged: true,
-    metaChanged: false,
-  });
-  assert.deepEqual(metadataChanges(group, { name: 'Clients', description: 'New', color: '#3b82f6' }), {
-    nameChanged: false,
-    metaChanged: true,
-  });
+  assert.deepEqual(
+    metadataChanges(group, { name: 'Clients', description: 'VIP', color: '#3b82f6' }),
+    {
+      nameChanged: false,
+      metaChanged: false
+    }
+  );
+  assert.deepEqual(
+    metadataChanges(group, { name: 'Renamed', description: 'VIP', color: '#3b82f6' }),
+    {
+      nameChanged: true,
+      metaChanged: false
+    }
+  );
+  assert.deepEqual(
+    metadataChanges(group, { name: 'Clients', description: 'New', color: '#3b82f6' }),
+    {
+      nameChanged: false,
+      metaChanged: true
+    }
+  );
   assert.deepEqual(metadataChanges(group, { name: 'Clients', description: 'VIP', color: '' }), {
     nameChanged: false,
-    metaChanged: true,
+    metaChanged: true
   });
   // Missing fields are treated as empty strings, not changes.
   assert.deepEqual(metadataChanges({ name: 'X' }, { name: 'X' }), {
     nameChanged: false,
-    metaChanged: false,
+    metaChanged: false
   });
 });

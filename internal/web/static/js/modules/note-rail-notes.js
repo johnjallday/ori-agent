@@ -48,9 +48,15 @@ export function writeActiveTab(tab) {
 // =============================================================================
 
 export function filterNotesByQuery(notes, query) {
-  const q = String(query || '').trim().toLowerCase();
+  const q = String(query || '')
+    .trim()
+    .toLowerCase();
   if (!q) return notes;
-  return notes.filter((n) => String(n.name || '').toLowerCase().includes(q));
+  return notes.filter(n =>
+    String(n.name || '')
+      .toLowerCase()
+      .includes(q)
+  );
 }
 
 export function sortNotesForRail(notes) {
@@ -64,14 +70,13 @@ export function sortNotesForRail(notes) {
 }
 
 function escapeText(s) {
-  return String(s ?? '').replace(/[&<>]/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
-  ));
+  return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 }
 function escapeAttr(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 
 export function renderListItem(note, isActive = false) {
@@ -113,7 +118,7 @@ function paintList() {
     }</div>`;
     return;
   }
-  list.innerHTML = view.map((n) => renderListItem(n, n.id === _activeNoteId)).join('');
+  list.innerHTML = view.map(n => renderListItem(n, n.id === _activeNoteId)).join('');
 }
 
 async function refresh({ force = false } = {}) {
@@ -131,12 +136,12 @@ async function refresh({ force = false } = {}) {
 function setTab(tab) {
   const t = tab === 'notes' ? 'notes' : 'outline';
   writeActiveTab(t);
-  document.querySelectorAll('.note-rail-tab').forEach((btn) => {
+  document.querySelectorAll('.note-rail-tab').forEach(btn => {
     const isActive = btn.dataset.tab === t;
     btn.classList.toggle('is-active', isActive);
     btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
-  document.querySelectorAll('.note-rail-tab-pane').forEach((pane) => {
+  document.querySelectorAll('.note-rail-tab-pane').forEach(pane => {
     pane.hidden = pane.dataset.pane !== t;
   });
   if (t === 'notes') refresh();
@@ -160,7 +165,7 @@ async function createNewNote() {
     const resp = await fetch(`/api/workspaces/${encodeURIComponent(wsId)}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Untitled', content: '' }),
+      body: JSON.stringify({ name: 'Untitled', content: '' })
     });
     if (!resp.ok) return;
     const data = await resp.json();
@@ -172,7 +177,7 @@ async function createNewNote() {
 }
 
 function bindRail() {
-  document.querySelectorAll('.note-rail-tab').forEach((btn) => {
+  document.querySelectorAll('.note-rail-tab').forEach(btn => {
     if (btn.dataset._bound) return;
     btn.dataset._bound = '1';
     btn.addEventListener('click', () => setTab(btn.dataset.tab));
@@ -181,7 +186,7 @@ function bindRail() {
   const search = document.getElementById('noteRailNotesSearch');
   if (search && !search.dataset._bound) {
     search.dataset._bound = '1';
-    search.addEventListener('input', (e) => {
+    search.addEventListener('input', e => {
       _filter = e.target.value || '';
       paintList();
     });
@@ -190,7 +195,7 @@ function bindRail() {
   const list = document.getElementById('noteRailNotesList');
   if (list && !list.dataset._bound) {
     list.dataset._bound = '1';
-    list.addEventListener('click', (e) => {
+    list.addEventListener('click', e => {
       const item = e.target.closest('.note-rail-note-item');
       if (!item) return;
       e.preventDefault();
@@ -229,7 +234,7 @@ if (typeof window !== 'undefined') {
     readActiveTab,
     filterNotesByQuery,
     sortNotesForRail,
-    renderListItem,
+    renderListItem
   };
 }
 
@@ -241,5 +246,5 @@ export default {
   readActiveTab,
   filterNotesByQuery,
   sortNotesForRail,
-  renderListItem,
+  renderListItem
 };

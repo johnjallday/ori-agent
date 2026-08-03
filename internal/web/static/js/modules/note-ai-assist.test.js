@@ -6,11 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const assist = (await import('./note-ai-assist.js')).default;
-const {
-  deriveNoteTitle,
-  buildExtractedContent,
-  extractSelectionToNote,
-} = await import('./note-ai-assist.js');
+const { deriveNoteTitle, buildExtractedContent, extractSelectionToNote } =
+  await import('./note-ai-assist.js');
 
 // makeFakeBridge wires a stand-in sessionsApi over a mutable note body and
 // records the calls the extract flow makes. createNote echoes the requested
@@ -24,11 +21,17 @@ function makeFakeBridge(initialContent, { savedName = null, failCreate = false }
       if (failCreate) return null;
       return { id: 'note-new', name: savedName || title };
     },
-    getNoteContent: (paneId) => { events.push({ kind: 'get', paneId }); return content; },
-    setNoteContent: (value, paneId) => { events.push({ kind: 'set', value, paneId }); content = value; },
-    pushUndo: (paneId) => events.push({ kind: 'undo', paneId }),
-    scheduleAutoSave: (paneId) => events.push({ kind: 'save', paneId }),
-    showToast: (msg, kind) => events.push({ kind: 'toast', msg, level: kind }),
+    getNoteContent: paneId => {
+      events.push({ kind: 'get', paneId });
+      return content;
+    },
+    setNoteContent: (value, paneId) => {
+      events.push({ kind: 'set', value, paneId });
+      content = value;
+    },
+    pushUndo: paneId => events.push({ kind: 'undo', paneId }),
+    scheduleAutoSave: paneId => events.push({ kind: 'save', paneId }),
+    showToast: (msg, kind) => events.push({ kind: 'toast', msg, level: kind })
   };
   return { bridge, events, getContent: () => content };
 }
@@ -85,22 +88,22 @@ test('extractSelectionToNote: creates a note and swaps the selection for a wikil
   const { bridge, events, getContent } = makeFakeBridge(`${body}\nkeep me`);
   seed({
     bridge,
-    selection: { text: body, range: { start: 0, end: body.length }, paneId: 'primary' },
+    selection: { text: body, range: { start: 0, end: body.length }, paneId: 'primary' }
   });
 
   await extractSelectionToNote();
 
-  const create = events.find((e) => e.kind === 'create');
+  const create = events.find(e => e.kind === 'create');
   assert.deepEqual(
     { title: create.title, body: create.body, ws: create.opts.workspaceId },
-    { title: 'Description', body, ws: 'ws-1' },
+    { title: 'Description', body, ws: 'ws-1' }
   );
   // Source note now links to the new note where the selection used to be.
   assert.equal(getContent(), '[[Description]]\nkeep me');
   // Undo pushed before the edit; autosave scheduled after; routed to the pane.
-  assert.ok(events.some((e) => e.kind === 'undo' && e.paneId === 'primary'));
-  assert.ok(events.some((e) => e.kind === 'save' && e.paneId === 'primary'));
-  assert.ok(events.some((e) => e.kind === 'toast' && e.level === 'success'));
+  assert.ok(events.some(e => e.kind === 'undo' && e.paneId === 'primary'));
+  assert.ok(events.some(e => e.kind === 'save' && e.paneId === 'primary'));
+  assert.ok(events.some(e => e.kind === 'toast' && e.level === 'success'));
 });
 
 test('extractSelectionToNote: links to the backend-saved name on a collision', async () => {
@@ -108,7 +111,7 @@ test('extractSelectionToNote: links to the backend-saved name on a collision', a
   const { bridge, getContent } = makeFakeBridge(`x ${body} y`, { savedName: 'Notes 2' });
   seed({
     bridge,
-    selection: { text: body, range: { start: 2, end: 2 + body.length }, paneId: '' },
+    selection: { text: body, range: { start: 2, end: 2 + body.length }, paneId: '' }
   });
 
   await extractSelectionToNote();
@@ -120,14 +123,14 @@ test('extractSelectionToNote: surfaces an error and leaves content intact when c
   const { bridge, events, getContent } = makeFakeBridge('alpha beta', { failCreate: true });
   seed({
     bridge,
-    selection: { text: 'beta', range: { start: 6, end: 10 }, paneId: '' },
+    selection: { text: 'beta', range: { start: 6, end: 10 }, paneId: '' }
   });
 
   await extractSelectionToNote();
 
   assert.equal(getContent(), 'alpha beta'); // unchanged
-  assert.ok(!events.some((e) => e.kind === 'set'));
-  assert.ok(events.some((e) => e.kind === 'toast' && e.level === 'error'));
+  assert.ok(!events.some(e => e.kind === 'set'));
+  assert.ok(events.some(e => e.kind === 'toast' && e.level === 'error'));
 });
 
 test('extractSelectionToNote: no-op without a usable selection', async () => {
@@ -145,7 +148,7 @@ test('extractSelectionToNote: warns when the surface has no createNote host', as
   const events = [];
   seed({
     bridge: { showToast: (msg, level) => events.push({ msg, level }) },
-    selection: { text: 'beta', range: { start: 0, end: 4 } },
+    selection: { text: 'beta', range: { start: 0, end: 4 } }
   });
   await extractSelectionToNote();
   assert.equal(events.length, 1);

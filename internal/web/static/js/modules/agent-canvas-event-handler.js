@@ -22,13 +22,13 @@ export class AgentCanvasEventHandler {
     this.parent.notifications_array = this.parent.notifications_array || [];
 
     this.parent.eventSource = connectProgressStream(this.parent.workspaceId, {
-      onInitial: (data) => {
+      onInitial: data => {
         this.processWorkspacePayload(data, { setTasks: true, source: 'initial' });
       },
-      onWorkspaceProgress: (data) => {
+      onWorkspaceProgress: data => {
         this.processWorkspacePayload(data, { setTasks: false, source: 'workspace.progress' });
       },
-      onWorkspaceUpdated: (data) => {
+      onWorkspaceUpdated: data => {
         this.handleWorkspaceUpdated(data);
       },
       onTaskEvent: (type, data) => {
@@ -47,25 +47,45 @@ export class AgentCanvasEventHandler {
         }
         this.parent.timeline.addTimelineEvent(evt);
       },
-      onTaskThinking: (data) => {
-        this.parent.notifications.addExecutionLog(data.data.task_id, 'thinking', data.data.message || 'Analyzing task...');
+      onTaskThinking: data => {
+        this.parent.notifications.addExecutionLog(
+          data.data.task_id,
+          'thinking',
+          data.data.message || 'Analyzing task...'
+        );
         this.parent.timeline.addTimelineEvent({ type: 'task.thinking', data });
       },
-      onTaskToolCall: (data) => {
+      onTaskToolCall: data => {
         const toolName = data.data.tool_name || 'Unknown tool';
-        this.parent.notifications.addExecutionLog(data.data.task_id, 'tool_call', `Calling tool: ${toolName}`);
+        this.parent.notifications.addExecutionLog(
+          data.data.task_id,
+          'tool_call',
+          `Calling tool: ${toolName}`
+        );
         this.parent.timeline.addTimelineEvent({ type: 'task.tool_call', data });
       },
-      onTaskToolSuccess: (data) => {
-        this.parent.notifications.addExecutionLog(data.data.task_id, 'tool_success', data.data.message || 'Tool succeeded');
+      onTaskToolSuccess: data => {
+        this.parent.notifications.addExecutionLog(
+          data.data.task_id,
+          'tool_success',
+          data.data.message || 'Tool succeeded'
+        );
         this.parent.timeline.addTimelineEvent({ type: 'task.tool_success', data });
       },
-      onTaskToolError: (data) => {
-        this.parent.notifications.addExecutionLog(data.data.task_id, 'tool_error', data.data.message || 'Tool failed');
+      onTaskToolError: data => {
+        this.parent.notifications.addExecutionLog(
+          data.data.task_id,
+          'tool_error',
+          data.data.message || 'Tool failed'
+        );
         this.parent.timeline.addTimelineEvent({ type: 'task.tool_error', data });
       },
-      onTaskProgress: (data) => {
-        this.parent.notifications.addExecutionLog(data.data.task_id, 'progress', data.data.message || 'Task progress update');
+      onTaskProgress: data => {
+        this.parent.notifications.addExecutionLog(
+          data.data.task_id,
+          'progress',
+          data.data.message || 'Task progress update'
+        );
         this.parent.timeline.addTimelineEvent({ type: 'task.progress', data });
       },
       onAttachmentEvent: (type, data) => {
@@ -80,10 +100,13 @@ export class AgentCanvasEventHandler {
         const evt = { type, data };
         this.handleStoreNodeEvent(evt);
       },
-      onError: (error) => {
+      onError: error => {
         console.error('EventSource error:', error);
         setTimeout(() => {
-          if (this.parent.eventSource && this.parent.eventSource.readyState === EventSource.CLOSED) {
+          if (
+            this.parent.eventSource &&
+            this.parent.eventSource.readyState === EventSource.CLOSED
+          ) {
             this.connectEventStream();
           }
         }, 5000);
@@ -291,7 +314,10 @@ export class AgentCanvasEventHandler {
       return;
     }
 
-    const normalized = this.normalizeAttachmentWithPosition({ ...payload, file: payload.file || payload.file_meta });
+    const normalized = this.normalizeAttachmentWithPosition({
+      ...payload,
+      file: payload.file || payload.file_meta
+    });
     const idx = this.state.attachments.findIndex(a => a.id === normalized.id);
     if (idx === -1) {
       this.state.attachments.push(normalized);
@@ -362,7 +388,9 @@ export class AgentCanvasEventHandler {
     }
 
     // Find the store node in state
-    const storeNode = this.state.storeNodes.find(s => s.id === storeNodeId || s.canvas_node_id === storeNodeId);
+    const storeNode = this.state.storeNodes.find(
+      s => s.id === storeNodeId || s.canvas_node_id === storeNodeId
+    );
     if (!storeNode) {
       return;
     }
@@ -370,7 +398,7 @@ export class AgentCanvasEventHandler {
     // Update store node based on event type
     if (eventData.type === 'store_node.write.success') {
       // Update write statistics
-      storeNode.write_count = (eventData.data.write_count || storeNode.write_count || 0);
+      storeNode.write_count = eventData.data.write_count || storeNode.write_count || 0;
       storeNode.last_write_time = eventData.data.last_write_time || new Date().toISOString();
       storeNode.last_file_path = eventData.data.file_path || storeNode.last_file_path;
       storeNode.last_error = ''; // Clear error
@@ -432,7 +460,6 @@ export class AgentCanvasEventHandler {
     if (this.parent.onTimelineEvent) {
       this.parent.onTimelineEvent(event);
     }
-
   }
 
   /**
@@ -459,9 +486,8 @@ export class AgentCanvasEventHandler {
     // Check if task should be shown based on workflow filter
     const selectedWorkflowId = this.state.selectedWorkflowId;
     const taskParentId = task.parent_id || task.parent_task_id;
-    const shouldShowTask = !selectedWorkflowId ||
-      task.id === selectedWorkflowId ||
-      taskParentId === selectedWorkflowId;
+    const shouldShowTask =
+      !selectedWorkflowId || task.id === selectedWorkflowId || taskParentId === selectedWorkflowId;
 
     if (shouldShowTask) {
       this.ensureTaskPosition(task);
@@ -529,8 +555,9 @@ export class AgentCanvasEventHandler {
     if (!task || !task.to || task.to === 'unassigned') return null;
     // Prefer explicit assignment to a specific node id
     if (task.assigned_node_id) {
-      const matchByNode = this.state.agents.find(a =>
-        a.nodeId === task.assigned_node_id || a.id === task.assigned_node_id);
+      const matchByNode = this.state.agents.find(
+        a => a.nodeId === task.assigned_node_id || a.id === task.assigned_node_id
+      );
       if (matchByNode) return matchByNode;
     }
 
@@ -561,15 +588,20 @@ export class AgentCanvasEventHandler {
     const centerY = (this.parent.height / 2 - this.parent.offsetY) / this.parent.scale;
 
     // Define a generous viewport bounds to detect off-screen items
-    const halfW = (this.parent.width / this.parent.scale) / 2;
-    const halfH = (this.parent.height / this.parent.scale) / 2;
+    const halfW = this.parent.width / this.parent.scale / 2;
+    const halfH = this.parent.height / this.parent.scale / 2;
     const left = centerX - halfW * 1.5;
     const right = centerX + halfW * 1.5;
     const top = centerY - halfH * 1.5;
     const bottom = centerY + halfH * 1.5;
 
     const needsPlacement =
-      task.x == null || task.y == null || task.x < left || task.x > right || task.y < top || task.y > bottom;
+      task.x == null ||
+      task.y == null ||
+      task.x < left ||
+      task.x > right ||
+      task.y < top ||
+      task.y > bottom;
 
     if (!needsPlacement) return;
 
@@ -590,15 +622,20 @@ export class AgentCanvasEventHandler {
     const centerX = (this.parent.width / 2 - this.parent.offsetX) / this.parent.scale;
     const centerY = (this.parent.height / 2 - this.parent.offsetY) / this.parent.scale;
 
-    const halfW = (this.parent.width / this.parent.scale) / 2;
-    const halfH = (this.parent.height / this.parent.scale) / 2;
+    const halfW = this.parent.width / this.parent.scale / 2;
+    const halfH = this.parent.height / this.parent.scale / 2;
     const left = centerX - halfW * 1.5;
     const right = centerX + halfW * 1.5;
     const top = centerY - halfH * 1.5;
     const bottom = centerY + halfH * 1.5;
 
     const needsPlacement =
-      att.x == null || att.y == null || att.x < left || att.x > right || att.y < top || att.y > bottom;
+      att.x == null ||
+      att.y == null ||
+      att.x < left ||
+      att.x > right ||
+      att.y < top ||
+      att.y > bottom;
 
     if (!needsPlacement) return;
 

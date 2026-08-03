@@ -27,9 +27,8 @@ class MessageTimeline {
 
     // Subscribe to real-time message events
     if (window.workspaceRealtime) {
-      this.unsubscribe = window.workspaceRealtime.subscribeToWorkspace(
-        this.workspaceId,
-        (event) => this.handleRealtimeEvent(event)
+      this.unsubscribe = window.workspaceRealtime.subscribeToWorkspace(this.workspaceId, event =>
+        this.handleRealtimeEvent(event)
       );
     }
   }
@@ -65,7 +64,11 @@ class MessageTimeline {
    */
   applyFilters() {
     this.filteredMessages = this.messages.filter(msg => {
-      if (this.filters.agent !== 'all' && msg.from !== this.filters.agent && msg.to !== this.filters.agent) {
+      if (
+        this.filters.agent !== 'all' &&
+        msg.from !== this.filters.agent &&
+        msg.to !== this.filters.agent
+      ) {
         return false;
       }
 
@@ -93,9 +96,12 @@ class MessageTimeline {
             <div class="col-md-4">
               <select id="agent-filter" class="form-control form-control-sm">
                 <option value="all">All Agents</option>
-                ${this.getUniqueAgents().map(agent =>
-    `<option value="${this.escapeHtml(agent)}" ${this.filters.agent === agent ? 'selected' : ''}>${this.escapeHtml(agent)}</option>`
-  ).join('')}
+                ${this.getUniqueAgents()
+                  .map(
+                    agent =>
+                      `<option value="${this.escapeHtml(agent)}" ${this.filters.agent === agent ? 'selected' : ''}>${this.escapeHtml(agent)}</option>`
+                  )
+                  .join('')}
               </select>
             </div>
             <div class="col-md-4">
@@ -144,14 +150,18 @@ class MessageTimeline {
 
     const messagesByDate = this.groupMessagesByDate(this.filteredMessages);
 
-    return Object.keys(messagesByDate).map(date => `
+    return Object.keys(messagesByDate)
+      .map(
+        date => `
       <div class="timeline-date-group mb-4">
         <div class="timeline-date-header mb-3">
           <span class="modern-badge badge-secondary">${this.formatDate(date)}</span>
         </div>
         ${messagesByDate[date].map(msg => this.renderMessage(msg)).join('')}
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   /**
@@ -204,7 +214,7 @@ class MessageTimeline {
     const searchInput = document.getElementById('message-search');
 
     if (agentFilter) {
-      agentFilter.addEventListener('change', (e) => {
+      agentFilter.addEventListener('change', e => {
         this.filters.agent = e.target.value;
         this.applyFilters();
         this.render();
@@ -212,7 +222,7 @@ class MessageTimeline {
     }
 
     if (searchInput) {
-      searchInput.addEventListener('input', (e) => {
+      searchInput.addEventListener('input', e => {
         this.filters.search = e.target.value;
         this.applyFilters();
         this.render();
@@ -268,7 +278,12 @@ class MessageTimeline {
   }
 
   getInitials(name) {
-    return name.split(/[\s-_]/).map(part => part[0]).join('').toUpperCase().substring(0, 2);
+    return name
+      .split(/[\s-_]/)
+      .map(part => part[0])
+      .join('')
+      .toUpperCase()
+      .substring(0, 2);
   }
 
   showToast(title, message, type = 'info') {
@@ -277,7 +292,10 @@ class MessageTimeline {
     toast.style.cssText = `position: fixed; top: 20px; right: 20px; background: var(--surface-color); border-left: 4px solid var(--${type === 'error' ? 'danger' : type === 'success' ? 'success' : 'info'}-color); padding: 1rem; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); z-index: 9999; min-width: 300px; animation: slideIn 0.3s ease-out;`;
     toast.innerHTML = `<div style="color: var(--text-primary); font-weight: 600; margin-bottom: 0.25rem;">${this.escapeHtml(title)}</div><div style="color: var(--text-secondary); font-size: 0.9rem;">${this.escapeHtml(message)}</div>`;
     document.body.appendChild(toast);
-    setTimeout(() => { toast.style.animation = 'slideOut 0.3s ease-in'; setTimeout(() => toast.remove(), 300); }, 4000);
+    setTimeout(() => {
+      toast.style.animation = 'slideOut 0.3s ease-in';
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
   }
 
   destroy() {

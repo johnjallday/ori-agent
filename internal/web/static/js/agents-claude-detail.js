@@ -39,7 +39,7 @@ function renderClaudeAgentPage(detail) {
 
   setClaudeDetailMessage('');
   content.innerHTML = window.ClaudeSync.renderHtml(detail?.claude_sync || null);
-  window.ClaudeSync.wireRefresh(content, claudeAgentName, (reloaded) => {
+  window.ClaudeSync.wireRefresh(content, claudeAgentName, reloaded => {
     renderClaudeAgentPage(reloaded);
   });
 }
@@ -49,7 +49,9 @@ async function loadClaudeAgentDetail() {
   try {
     const response = await fetch(`/api/agents/${encodeURIComponent(claudeAgentName)}/detail`);
     if (response.status === 404) {
-      setClaudeDetailMessage('Claude Code agent not found. The Claude Code CLI may not be installed or detected.');
+      setClaudeDetailMessage(
+        'Claude Code agent not found. The Claude Code CLI may not be installed or detected.'
+      );
       return;
     }
     if (!response.ok) {

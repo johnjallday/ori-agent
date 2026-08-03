@@ -59,7 +59,9 @@ export class WorkspaceMemoryManager {
   async load() {
     if (!this.workspaceId || !this.elements.list) return;
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory`);
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory`
+      );
       if (!response.ok) throw new Error('Failed to load workspace memory');
       const payload = await response.json();
       this.entries = Array.isArray(payload?.entries) ? payload.entries : [];
@@ -93,8 +95,7 @@ export class WorkspaceMemoryManager {
     const warn = overBudget
       ? ' — over the injection budget; oldest non-watch/thread entries are dropped from prompts. Consider pruning.'
       : '';
-    this.elements.meta.innerHTML =
-      `<span class="workspace-detail-memory-size ${cls}">${rawSize} / ${charBudget} chars${this.esc(warn)}</span>`;
+    this.elements.meta.innerHTML = `<span class="workspace-detail-memory-size ${cls}">${rawSize} / ${charBudget} chars${this.esc(warn)}</span>`;
   }
 
   renderList() {
@@ -111,7 +112,11 @@ export class WorkspaceMemoryManager {
     }
 
     const entriesHtml = this.entries
-      .map((entry, index) => (index === this.editingIndex ? this.editRowHtml(entry, index) : this.entryRowHtml(entry, index)))
+      .map((entry, index) =>
+        index === this.editingIndex
+          ? this.editRowHtml(entry, index)
+          : this.entryRowHtml(entry, index)
+      )
       .join('');
 
     let unstructuredHtml = '';
@@ -131,7 +136,10 @@ export class WorkspaceMemoryManager {
 
   entryRowHtml(entry, index) {
     const type = this.esc(entry?.type || 'fact');
-    const meta = [entry?.provenance, entry?.date].filter(Boolean).map(v => this.esc(v)).join(' · ');
+    const meta = [entry?.provenance, entry?.date]
+      .filter(Boolean)
+      .map(v => this.esc(v))
+      .join(' · ');
     return `
       <article class="workspace-detail-memory-entry" data-index="${index}">
         <div class="workspace-detail-memory-entry-main">
@@ -149,9 +157,9 @@ export class WorkspaceMemoryManager {
   }
 
   editRowHtml(entry, index) {
-    const options = MEMORY_TYPES
-      .map(t => `<option value="${t}"${t === (entry?.type || 'fact') ? ' selected' : ''}>${t}</option>`)
-      .join('');
+    const options = MEMORY_TYPES.map(
+      t => `<option value="${t}"${t === (entry?.type || 'fact') ? ' selected' : ''}>${t}</option>`
+    ).join('');
     return `
       <article class="workspace-detail-memory-entry is-editing" data-index="${index}">
         <div class="workspace-detail-memory-edit">
@@ -197,10 +205,15 @@ export class WorkspaceMemoryManager {
     const text = (this.elements.addText?.value || '').trim();
     const type = this.elements.addType?.value || 'fact';
     if (!text) return;
-    await this.mutate('POST', `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries`, { text, type }, () => {
-      if (this.elements.addText) this.elements.addText.value = '';
-      if (window.Toast) window.Toast.success('Saved to workspace memory');
-    });
+    await this.mutate(
+      'POST',
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries`,
+      { text, type },
+      () => {
+        if (this.elements.addText) this.elements.addText.value = '';
+        if (window.Toast) window.Toast.success('Saved to workspace memory');
+      }
+    );
   }
 
   async saveEdit(index) {
@@ -209,16 +222,26 @@ export class WorkspaceMemoryManager {
     const text = (textEl?.value || '').trim();
     const type = typeEl?.value || 'fact';
     if (!text) return;
-    await this.mutate('PUT', `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries/${index}`, { text, type }, () => {
-      this.editingIndex = -1;
-      if (window.Toast) window.Toast.success('Memory entry updated');
-    });
+    await this.mutate(
+      'PUT',
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries/${index}`,
+      { text, type },
+      () => {
+        this.editingIndex = -1;
+        if (window.Toast) window.Toast.success('Memory entry updated');
+      }
+    );
   }
 
   async deleteEntry(index) {
-    await this.mutate('DELETE', `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries/${index}`, null, () => {
-      if (window.Toast) window.Toast.info('Memory entry removed');
-    });
+    await this.mutate(
+      'DELETE',
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/memory/entries/${index}`,
+      null,
+      () => {
+        if (window.Toast) window.Toast.info('Memory entry removed');
+      }
+    );
   }
 
   // mutate performs a memory mutation, refreshes from the authoritative
@@ -230,7 +253,9 @@ export class WorkspaceMemoryManager {
       const response = await fetch(url, options);
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload?.error?.message || payload?.message || `Request failed (${response.status})`);
+        throw new Error(
+          payload?.error?.message || payload?.message || `Request failed (${response.status})`
+        );
       }
       const payload = await response.json();
       this.entries = Array.isArray(payload?.entries) ? payload.entries : [];

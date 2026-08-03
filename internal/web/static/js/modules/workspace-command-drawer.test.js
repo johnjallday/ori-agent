@@ -24,7 +24,13 @@ function makeView(tasks, extraPage = {}) {
 const tasks = [
   { id: 'a-run', status: 'in_progress', to: 'agent', updated_at: '2026-06-01T00:00:00Z' },
   { id: 'b-blocked', status: 'blocked', to: 'agent', updated_at: '2026-06-01T00:00:00Z' },
-  { id: 'c-done', status: 'completed', to: 'agent', result: 'ok', updated_at: '2026-05-01T00:00:00Z' },
+  {
+    id: 'c-done',
+    status: 'completed',
+    to: 'agent',
+    result: 'ok',
+    updated_at: '2026-05-01T00:00:00Z'
+  },
   { id: 'd-ready', status: 'pending', to: 'agent', updated_at: '2026-06-02T00:00:00Z' },
   { id: 'e-unassigned', status: 'pending', updated_at: '2026-06-02T00:00:00Z' },
   { id: 'sub', status: 'pending', to: 'agent', parent_task_id: 'a-run' }
@@ -49,7 +55,11 @@ test('the New Quest FAB renders independently of drawer state (moved to top-left
   const closeCalls = [];
   view.closeTaskComposer = opts => closeCalls.push(opts);
   view.openTaskDrawer({ focus() {} });
-  assert.deepEqual(closeCalls, [], 'the composer is left untouched — no spatial conflict to resolve');
+  assert.deepEqual(
+    closeCalls,
+    [],
+    'the composer is left untouched — no spatial conflict to resolve'
+  );
   assert.equal(view.taskComposerOpen, true);
 
   view.taskDrawerOpen = true;

@@ -3,16 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const {
-  filterNotesByQuery,
-  sortNotesForRail,
-  renderListItem,
-} = await import('./note-rail-notes.js');
+const { filterNotesByQuery, sortNotesForRail, renderListItem } =
+  await import('./note-rail-notes.js');
 
 const notes = [
   { id: 'a', name: 'Alpha', updated_at: '2026-01-01T00:00:00Z' },
   { id: 'b', name: 'Bravo', updated_at: '2026-03-01T00:00:00Z' },
-  { id: 'c', name: 'Charlie', updated_at: '2026-02-15T00:00:00Z' },
+  { id: 'c', name: 'Charlie', updated_at: '2026-02-15T00:00:00Z' }
 ];
 
 test('filterNotesByQuery: empty query returns input', () => {
@@ -31,16 +28,16 @@ test('filterNotesByQuery: filters by name only (not body)', () => {
 });
 
 test('sortNotesForRail: most recently updated first', () => {
-  const ids = sortNotesForRail(notes).map((n) => n.id);
+  const ids = sortNotesForRail(notes).map(n => n.id);
   assert.deepEqual(ids, ['b', 'c', 'a']);
 });
 
 test('sortNotesForRail: handles missing updated_at', () => {
   const mixed = [
     { id: 'a', name: 'A' },
-    { id: 'b', name: 'B', updated_at: '2026-01-01T00:00:00Z' },
+    { id: 'b', name: 'B', updated_at: '2026-01-01T00:00:00Z' }
   ];
-  const ids = sortNotesForRail(mixed).map((n) => n.id);
+  const ids = sortNotesForRail(mixed).map(n => n.id);
   assert.equal(ids[0], 'b'); // dated one wins
 });
 

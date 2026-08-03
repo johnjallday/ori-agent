@@ -32,7 +32,7 @@ import { parseDelimitedRecords } from './task-result-artifacts.js';
 const HTML_ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 export function escapeHtml(text) {
-  return String(text ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c]);
+  return String(text ?? '').replace(/[&<>"']/g, c => HTML_ESCAPE_MAP[c]);
 }
 
 // =============================================================================
@@ -62,7 +62,7 @@ export function renderMarkdown(text) {
     const normalized = normalizeCompactTaskListMarkdown(text);
     const rendered = marked.parse(canSanitize ? normalized : escapeHtml(normalized), {
       breaks: true,
-      gfm: true,
+      gfm: true
     });
     return canSanitize ? dp.sanitize(rendered) : rendered;
   }
@@ -110,7 +110,7 @@ export function renderMarkdownLine(line) {
     const normalized = normalizeCompactTaskListMarkdown(line);
     const rendered = marked.parse(canSanitize ? normalized : escapeHtml(normalized), {
       breaks: true,
-      gfm: true,
+      gfm: true
     });
     html = canSanitize ? dp.sanitize(rendered) : rendered;
   } else {
@@ -132,7 +132,7 @@ export function renderInlineMarkdown(text) {
     const canSanitize = dp && typeof dp.sanitize === 'function';
     const rendered = marked.parseInline(canSanitize ? text : escapeHtml(text), {
       breaks: true,
-      gfm: true,
+      gfm: true
     });
     html = canSanitize ? dp.sanitize(rendered) : rendered;
   } else {
@@ -221,17 +221,21 @@ export function renderTaskLine(line, index) {
 export function pruneCollapsedHeadings(lines, collapsedHeadings) {
   if (!collapsedHeadings || typeof collapsedHeadings.delete !== 'function') return;
   for (const index of Array.from(collapsedHeadings)) {
-    if (!Number.isInteger(index)
-        || index < 0
-        || index >= lines.length
-        || parseHeadingLevel(lines[index]) === 0) {
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= lines.length ||
+      parseHeadingLevel(lines[index]) === 0
+    ) {
       collapsedHeadings.delete(index);
     }
   }
 }
 
 function csvFenceLanguage(line) {
-  const match = String(line || '').trim().match(/^```(csv|tsv)\s*$/i);
+  const match = String(line || '')
+    .trim()
+    .match(/^```(csv|tsv)\s*$/i);
   return match ? match[1].toLowerCase() : '';
 }
 
@@ -253,24 +257,29 @@ function rangeOverlaps(start, end, range) {
 
 export function renderCSVFenceBlock(lines, startIndex, endIndex, language) {
   const delimiter = language === 'tsv' ? '\t' : ',';
-  const records = parseDelimitedRecords(lines.slice(startIndex + 1, endIndex).join('\n'), delimiter);
+  const records = parseDelimitedRecords(
+    lines.slice(startIndex + 1, endIndex).join('\n'),
+    delimiter
+  );
   if (records.length < 2 || records[0].length < 1) {
     return '';
   }
 
   const header = records[0];
-  const body = records.slice(1).filter((row) => row.some((cell) => String(cell || '').trim()));
+  const body = records.slice(1).filter(row => row.some(cell => String(cell || '').trim()));
   if (body.length === 0) return '';
 
   const headHtml = header
-    .map((column) => `<th scope="col">${escapeHtml(column || 'column')}</th>`)
+    .map(column => `<th scope="col">${escapeHtml(column || 'column')}</th>`)
     .join('');
   const bodyHtml = body
-    .map((row) => `
+    .map(
+      row => `
       <tr>
         ${header.map((_, columnIndex) => `<td>${escapeHtml(row[columnIndex] ?? '')}</td>`).join('')}
       </tr>
-    `)
+    `
+    )
     .join('');
 
   return `
@@ -300,7 +309,10 @@ export function renderCSVFenceBlock(lines, startIndex, endIndex, language) {
 //   collapsedHeadings  — Set of line indexes whose section is folded
 //
 // Returns: HTML string ready to assign to innerHTML.
-export function buildLiveEditorHTML(lines, { activeRange = null, activeLineIndex = null, collapsedHeadings = new Set() } = {}) {
+export function buildLiveEditorHTML(
+  lines,
+  { activeRange = null, activeLineIndex = null, collapsedHeadings = new Set() } = {}
+) {
   const html = [];
   let hiddenByHeadingLevel = 0;
   for (let index = 0; index < lines.length; index += 1) {
@@ -314,11 +326,13 @@ export function buildLiveEditorHTML(lines, { activeRange = null, activeLineIndex
     }
 
     if (activeRange && index === activeRange.start) {
-      html.push(renderEditingRange(
-        lines.slice(activeRange.start, activeRange.end + 1).join('\n'),
-        activeRange.start,
-        activeRange.end,
-      ));
+      html.push(
+        renderEditingRange(
+          lines.slice(activeRange.start, activeRange.end + 1).join('\n'),
+          activeRange.start,
+          activeRange.end
+        )
+      );
       index = activeRange.end;
       continue;
     }
@@ -329,9 +343,10 @@ export function buildLiveEditorHTML(lines, { activeRange = null, activeLineIndex
     const fenceLanguage = csvFenceLanguage(lines[index]);
     if (fenceLanguage) {
       const fenceEnd = findFenceEnd(lines, index);
-      const shouldRenderFence = fenceEnd > index
-        && !rangeContainsIndex(index, fenceEnd, activeLineIndex)
-        && !rangeOverlaps(index, fenceEnd, activeRange);
+      const shouldRenderFence =
+        fenceEnd > index &&
+        !rangeContainsIndex(index, fenceEnd, activeLineIndex) &&
+        !rangeOverlaps(index, fenceEnd, activeRange);
       if (shouldRenderFence) {
         const renderedFence = renderCSVFenceBlock(lines, index, fenceEnd, fenceLanguage);
         if (renderedFence) {
@@ -363,7 +378,10 @@ export function renderRenderedLine(line, index, isCollapsed) {
       </div>
     `;
   }
-  const inner = renderHeadingLine(line, index, isCollapsed) || renderTaskLine(line, index) || renderMarkdownLine(line);
+  const inner =
+    renderHeadingLine(line, index, isCollapsed) ||
+    renderTaskLine(line, index) ||
+    renderMarkdownLine(line);
   return `
       <div class="note-live-line note-live-line-rendered ${kindClass}${emptyClass}" data-line-index="${index}" tabindex="0">
         ${inner}
@@ -397,7 +415,7 @@ export function parseTaskLine(line) {
     checked: String(match[4] || '').toLowerCase() === 'x',
     compactUnchecked: match[4] === '',
     afterGap: match[5] || '',
-    text: match[6] || '',
+    text: match[6] || ''
   };
 }
 
@@ -456,28 +474,34 @@ export function setContentLines(lines) {
 // isUndoShortcut returns true for ⌘Z / Ctrl+Z (without Shift).
 export function isUndoShortcut(event) {
   if (!event) return false;
-  return (event.metaKey || event.ctrlKey)
-    && !event.altKey
-    && !event.shiftKey
-    && String(event.key || '').toLowerCase() === 'z';
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    String(event.key || '').toLowerCase() === 'z'
+  );
 }
 
 // isRedoShortcut returns true for ⌘⇧Z / Ctrl+Shift+Z / Ctrl+Y / ⌘Y.
 export function isRedoShortcut(event) {
   if (!event) return false;
   const key = String(event.key || '').toLowerCase();
-  return (event.metaKey || event.ctrlKey)
-    && !event.altKey
-    && ((key === 'z' && event.shiftKey) || key === 'y');
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    ((key === 'z' && event.shiftKey) || key === 'y')
+  );
 }
 
 // isSelectAllShortcut returns true for Cmd+A / Ctrl+A scoped to an editor surface.
 export function isSelectAllShortcut(event) {
   if (!event) return false;
-  return (event.metaKey || event.ctrlKey)
-    && !event.altKey
-    && !event.shiftKey
-    && String(event.key || '').toLowerCase() === 'a';
+  return (
+    (event.metaKey || event.ctrlKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    String(event.key || '').toLowerCase() === 'a'
+  );
 }
 
 export function selectAllTargetRange({
@@ -485,25 +509,21 @@ export function selectAllTargetRange({
   selectedRange = null,
   lineIndex = null,
   selectionAnchorIndex = null,
-  selectionFocusIndex = null,
+  selectionFocusIndex = null
 } = {}) {
   const maxIndex = Math.max(0, Number(lineCount || 0) - 1);
   const normalizedLineIndex = Number.isInteger(lineIndex)
     ? Math.max(0, Math.min(lineIndex, maxIndex))
     : null;
   const hasSelectedRange =
-    selectedRange &&
-    Number.isInteger(selectedRange.start) &&
-    Number.isInteger(selectedRange.end);
+    selectedRange && Number.isInteger(selectedRange.start) && Number.isInteger(selectedRange.end);
 
   if (hasSelectedRange) {
     const start = Math.max(0, Math.min(selectedRange.start, maxIndex));
     const end = Math.max(start, Math.min(selectedRange.end, maxIndex));
     const isSingleLine = start === end;
     const isEditorSelectedSingleLine =
-      isSingleLine &&
-      selectionAnchorIndex === start &&
-      selectionFocusIndex === end;
+      isSingleLine && selectionAnchorIndex === start && selectionFocusIndex === end;
 
     if (!isSingleLine || isEditorSelectedSingleLine) {
       return { start: 0, end: maxIndex };
@@ -523,10 +543,7 @@ export function selectAllTargetRange({
 // into a textarea (single-character key, no command modifiers).
 export function isPrintableKey(event) {
   if (!event) return false;
-  return String(event.key || '').length === 1
-    && !event.metaKey
-    && !event.ctrlKey
-    && !event.altKey;
+  return String(event.key || '').length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey;
 }
 
 // =============================================================================
@@ -551,8 +568,10 @@ export function hasTextSelectionInside(container) {
   if (typeof window === 'undefined') return false;
   const selection = window.getSelection?.();
   if (!selection || selection.isCollapsed) return false;
-  return selectionContains(container, selection.anchorNode)
-    && selectionContains(container, selection.focusNode);
+  return (
+    selectionContains(container, selection.anchorNode) &&
+    selectionContains(container, selection.focusNode)
+  );
 }
 
 // pointerDragged returns true if `event`'s position has moved more than 4
@@ -585,17 +604,23 @@ export function getSelectedLineRange(container) {
   if (typeof window === 'undefined' || !container) return null;
   const selection = window.getSelection?.();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-  if (!selectionContains(container, selection.anchorNode)
-      || !selectionContains(container, selection.focusNode)) {
+  if (
+    !selectionContains(container, selection.anchorNode) ||
+    !selectionContains(container, selection.focusNode)
+  ) {
     return null;
   }
 
   const range = selection.getRangeAt(0);
   const selectedIndexes = Array.from(container.querySelectorAll('.note-live-line-rendered'))
-    .filter((line) => {
-      try { return range.intersectsNode(line); } catch (_) { return false; }
+    .filter(line => {
+      try {
+        return range.intersectsNode(line);
+      } catch (_) {
+        return false;
+      }
     })
-    .map((line) => Number(line.dataset.lineIndex))
+    .map(line => Number(line.dataset.lineIndex))
     .filter(Number.isInteger);
 
   if (selectedIndexes.length === 0) return null;
@@ -684,7 +709,7 @@ export function setActiveTocEntry(lineIndex, content, tocRailId = TOC_RAIL_ID) {
   if (!rail) return;
   const cursor = startOfLine(content, lineIndex);
   const target = rail.querySelector(`[data-position="${cursor}"]`);
-  rail.querySelectorAll('.note-toc-item').forEach((el) => {
+  rail.querySelectorAll('.note-toc-item').forEach(el => {
     el.removeAttribute('aria-current');
     el.classList.remove('is-active');
   });
@@ -797,7 +822,8 @@ export class NoteLiveEditor {
   toggleHeadingFold(lineIndex) {
     if (!Number.isInteger(lineIndex)) return;
     const lines = this.host.getContentLines?.() || [];
-    if (lineIndex < 0 || lineIndex >= lines.length || parseHeadingLevel(lines[lineIndex]) === 0) return;
+    if (lineIndex < 0 || lineIndex >= lines.length || parseHeadingLevel(lines[lineIndex]) === 0)
+      return;
     this.state.toggleHeadingFold(lineIndex);
     this.state.activeLineIndex = null;
     this.state.activeRange = null;
@@ -815,7 +841,8 @@ export class NoteLiveEditor {
     if (!task) return;
     this.host.pushUndo?.();
     const marker = checked ? '[x]' : '[]';
-    lines[lineIndex] = `${task.indent}${task.bullet}${task.gap}${marker}${task.afterGap}${task.text}`;
+    lines[lineIndex] =
+      `${task.indent}${task.bullet}${task.gap}${marker}${task.afterGap}${task.text}`;
     this.host.setContentLines?.(lines);
     this.state.activeLineIndex = null;
     this.state.activeRange = null;
@@ -890,8 +917,12 @@ export class NoteLiveEditor {
     const normalizedFocus = Math.max(0, Math.min(focusIndex, maxIndex));
     const startIndex = Math.min(normalizedAnchor, normalizedFocus);
     const endIndex = Math.max(normalizedAnchor, normalizedFocus);
-    const startLine = container.querySelector(`.note-live-line-rendered[data-line-index="${startIndex}"]`);
-    const endLine = container.querySelector(`.note-live-line-rendered[data-line-index="${endIndex}"]`);
+    const startLine = container.querySelector(
+      `.note-live-line-rendered[data-line-index="${startIndex}"]`
+    );
+    const endLine = container.querySelector(
+      `.note-live-line-rendered[data-line-index="${endIndex}"]`
+    );
     if (!startLine || !endLine) return;
 
     const range = document.createRange();
@@ -903,7 +934,8 @@ export class NoteLiveEditor {
       selection.addRange(range);
     }
 
-    container.querySelector(`.note-live-line-rendered[data-line-index="${normalizedFocus}"]`)
+    container
+      .querySelector(`.note-live-line-rendered[data-line-index="${normalizedFocus}"]`)
       ?.focus({ preventScroll: true });
     this.state.selectionAnchorIndex = normalizedAnchor;
     this.state.selectionFocusIndex = normalizedFocus;
@@ -918,13 +950,15 @@ export class NoteLiveEditor {
   }
 
   selectedLineRangeFromState() {
-    if (!Number.isInteger(this.state.selectionAnchorIndex)
-        || !Number.isInteger(this.state.selectionFocusIndex)) {
+    if (
+      !Number.isInteger(this.state.selectionAnchorIndex) ||
+      !Number.isInteger(this.state.selectionFocusIndex)
+    ) {
       return null;
     }
     return {
       start: Math.min(this.state.selectionAnchorIndex, this.state.selectionFocusIndex),
-      end: Math.max(this.state.selectionAnchorIndex, this.state.selectionFocusIndex),
+      end: Math.max(this.state.selectionAnchorIndex, this.state.selectionFocusIndex)
     };
   }
 
@@ -942,16 +976,19 @@ export class NoteLiveEditor {
       selectedRange,
       lineIndex,
       selectionAnchorIndex: this.state.selectionAnchorIndex,
-      selectionFocusIndex: this.state.selectionFocusIndex,
+      selectionFocusIndex: this.state.selectionFocusIndex
     });
     const repeatRange = this.state.selectAllRepeatRange;
-    const nextRange = repeatRange &&
+    const nextRange =
+      repeatRange &&
       repeatRange.start === repeatRange.end &&
       targetRange.start === repeatRange.start &&
       targetRange.end === repeatRange.end
-      ? { start: 0, end: Math.max(0, lines.length - 1) }
-      : targetRange;
-    this.selectLineRange(nextRange.start, nextRange.end, previewContent, { preserveSelectAllRepeat: true });
+        ? { start: 0, end: Math.max(0, lines.length - 1) }
+        : targetRange;
+    this.selectLineRange(nextRange.start, nextRange.end, previewContent, {
+      preserveSelectAllRepeat: true
+    });
     this.state.selectAllRepeatRange = nextRange.start === nextRange.end ? { ...nextRange } : null;
     return true;
   }
@@ -998,7 +1035,7 @@ export class NoteLiveEditor {
       this.host.scheduleAutoSave?.();
       this.host.render?.({
         focusLineIndex: this.state.activeLineIndex,
-        cursorPosition: parts[parts.length - 1].length,
+        cursorPosition: parts[parts.length - 1].length
       });
       return;
     }
@@ -1006,7 +1043,8 @@ export class NoteLiveEditor {
     lines[lineIndex] = normalizedValue;
     this.host.setContentLines?.(lines);
     input.className = ['note-live-line-input', lineKindClass(normalizedValue)]
-      .filter(Boolean).join(' ');
+      .filter(Boolean)
+      .join(' ');
     resizeLiveInput(input);
     this.host.scheduleAutoSave?.();
   }
@@ -1061,7 +1099,7 @@ export class NoteLiveEditor {
   bindEvents(previewContent) {
     if (!previewContent) return;
 
-    previewContent.onmousedown = (event) => {
+    previewContent.onmousedown = event => {
       this.state.selectAllRepeatRange = null;
       const target = event.target;
       if (!target || typeof target.closest !== 'function') {
@@ -1069,13 +1107,14 @@ export class NoteLiveEditor {
         return;
       }
       const renderedLine = target.closest('.note-live-line-rendered');
-      this.state.pointerDown = renderedLine && previewContent.contains(renderedLine)
-        ? {
-            lineIndex: Number(renderedLine.dataset.lineIndex),
-            x: event.clientX,
-            y: event.clientY,
-          }
-        : null;
+      this.state.pointerDown =
+        renderedLine && previewContent.contains(renderedLine)
+          ? {
+              lineIndex: Number(renderedLine.dataset.lineIndex),
+              x: event.clientX,
+              y: event.clientY
+            }
+          : null;
     };
 
     previewContent.onmouseup = () => {
@@ -1086,7 +1125,7 @@ export class NoteLiveEditor {
       }, 0);
     };
 
-    previewContent.onclick = (event) => {
+    previewContent.onclick = event => {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
       const headingFold = target.closest('.note-heading-fold');
@@ -1113,7 +1152,11 @@ export class NoteLiveEditor {
 
       if (event.shiftKey) {
         event.preventDefault();
-        this.selectLineRange(this.state.selectionAnchorIndex ?? lineIndex, lineIndex, previewContent);
+        this.selectLineRange(
+          this.state.selectionAnchorIndex ?? lineIndex,
+          lineIndex,
+          previewContent
+        );
         return;
       }
 
@@ -1128,7 +1171,7 @@ export class NoteLiveEditor {
       this.activate(lineIndex);
     };
 
-    previewContent.onkeydown = (event) => {
+    previewContent.onkeydown = event => {
       if (this.host.handleHistoryShortcut?.(event)) return;
 
       const target = event.target;
@@ -1190,7 +1233,11 @@ export class NoteLiveEditor {
         const direction = event.key === 'ArrowUp' ? -1 : 1;
         const lines = this.host.getContentLines?.() || [];
         const nextIndex = Math.max(0, Math.min(lineIndex + direction, lines.length - 1));
-        this.selectLineRange(this.state.selectionAnchorIndex ?? lineIndex, nextIndex, previewContent);
+        this.selectLineRange(
+          this.state.selectionAnchorIndex ?? lineIndex,
+          nextIndex,
+          previewContent
+        );
         return;
       }
 
@@ -1201,7 +1248,7 @@ export class NoteLiveEditor {
       }
     };
 
-    previewContent.oninput = (event) => {
+    previewContent.oninput = event => {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
       const blockInput = target.closest('.note-live-block-input');
@@ -1215,7 +1262,7 @@ export class NoteLiveEditor {
       }
     };
 
-    previewContent.onchange = (event) => {
+    previewContent.onchange = event => {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
       const checkbox = target.closest('.note-task-checkbox');
@@ -1223,9 +1270,10 @@ export class NoteLiveEditor {
       this.toggleTaskLine(Number(checkbox.dataset.lineIndex), checkbox.checked);
     };
 
-    previewContent.onpaste = (event) => {
+    previewContent.onpaste = event => {
       const target = event.target;
-      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input')) return;
+      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input'))
+        return;
       const selectedRange = getSelectedLineRange(previewContent);
       if (!selectedRange) return;
       const pastedText = event.clipboardData?.getData('text/plain') || '';
@@ -1233,9 +1281,10 @@ export class NoteLiveEditor {
       this.replaceRange(selectedRange, pastedText);
     };
 
-    previewContent.oncut = (event) => {
+    previewContent.oncut = event => {
       const target = event.target;
-      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input')) return;
+      if (target && typeof target.closest === 'function' && target.closest('.note-live-line-input'))
+        return;
       const selectedRange = getSelectedLineRange(previewContent);
       if (!selectedRange) return;
       const lines = this.host.getContentLines?.() || [];
@@ -1245,7 +1294,7 @@ export class NoteLiveEditor {
       this.deleteRange(selectedRange);
     };
 
-    previewContent.onfocusout = (event) => {
+    previewContent.onfocusout = event => {
       if (event.relatedTarget && previewContent.contains(event.relatedTarget)) return;
       window.setTimeout(() => {
         const activeElement = document.activeElement;
@@ -1306,7 +1355,12 @@ export class NoteLiveEditor {
       return;
     }
 
-    if (event.key === 'Delete' && selectionStart === value.length && selectionEnd === value.length && lineIndex < lines.length - 1) {
+    if (
+      event.key === 'Delete' &&
+      selectionStart === value.length &&
+      selectionEnd === value.length &&
+      lineIndex < lines.length - 1
+    ) {
       event.preventDefault();
       this.host.pushUndo?.();
       lines.splice(lineIndex, 2, value + (lines[lineIndex + 1] || ''));
@@ -1323,7 +1377,11 @@ export class NoteLiveEditor {
       return;
     }
 
-    if (event.key === 'ArrowDown' && selectionStart === value.length && lineIndex < lines.length - 1) {
+    if (
+      event.key === 'ArrowDown' &&
+      selectionStart === value.length &&
+      lineIndex < lines.length - 1
+    ) {
       event.preventDefault();
       this.activate(lineIndex + 1, Math.min((lines[lineIndex + 1] || '').length, selectionStart));
     }
@@ -1406,7 +1464,7 @@ export function mount(host = {}) {
   const autosave = new NoteAutoSaveTimer({
     delayMs: host.autosaveDelayMs ?? 3000,
     onFlush: host.onAutosaveFlush || (() => {}),
-    onStatusChange: host.onAutosaveStatusChange || ((status) => updateSaveStatus(status)),
+    onStatusChange: host.onAutosaveStatusChange || (status => updateSaveStatus(status))
   });
 
   // Shared sub-host wiring — both live and toc need most of these callbacks.
@@ -1418,8 +1476,8 @@ export function mount(host = {}) {
     isPreviewMode: host.isPreviewMode,
     pushUndo: () => history.push(host.getContent?.() || ''),
     scheduleAutoSave: () => autosave.schedule(),
-    render: (opts) => host.render?.(opts),
-    clearWindowSelection,
+    render: opts => host.render?.(opts),
+    clearWindowSelection
   };
 
   // The render function is owned by mount() — it composes buildLiveEditorHTML
@@ -1442,24 +1500,26 @@ export function mount(host = {}) {
       live.state.activeRange = null;
     }
 
-    const activeRange = !readOnly && live.state.activeRange
-      ? {
-          start: Math.max(0, Math.min(live.state.activeRange.start, lines.length - 1)),
-          end: Math.max(0, Math.min(live.state.activeRange.end, lines.length - 1)),
-        }
-      : null;
+    const activeRange =
+      !readOnly && live.state.activeRange
+        ? {
+            start: Math.max(0, Math.min(live.state.activeRange.start, lines.length - 1)),
+            end: Math.max(0, Math.min(live.state.activeRange.end, lines.length - 1))
+          }
+        : null;
     const focusLineIndex = Number.isInteger(opts.focusLineIndex)
       ? opts.focusLineIndex
       : live.state.activeLineIndex;
-    const activeLineIndex = !readOnly && !activeRange && Number.isInteger(focusLineIndex)
-      ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
-      : null;
+    const activeLineIndex =
+      !readOnly && !activeRange && Number.isInteger(focusLineIndex)
+        ? Math.max(0, Math.min(focusLineIndex, lines.length - 1))
+        : null;
     live.state.activeLineIndex = activeLineIndex;
 
     previewContent.innerHTML = buildLiveEditorHTML(lines, {
       activeRange,
       activeLineIndex,
-      collapsedHeadings: live.state.collapsedHeadings,
+      collapsedHeadings: live.state.collapsedHeadings
     });
     previewContent.classList.toggle('is-readonly', readOnly);
     previewContent.setAttribute('aria-readonly', readOnly ? 'true' : 'false');
@@ -1471,9 +1531,11 @@ export function mount(host = {}) {
 
     const focusInput = activeRange
       ? previewContent.querySelector('.note-live-block-input')
-      : (activeLineIndex !== null
-          ? previewContent.querySelector(`.note-live-line-input[data-line-index="${activeLineIndex}"]`)
-          : null);
+      : activeLineIndex !== null
+        ? previewContent.querySelector(
+            `.note-live-line-input[data-line-index="${activeLineIndex}"]`
+          )
+        : null;
     if (focusInput) {
       const cursorPosition = Number.isInteger(opts.cursorPosition)
         ? Math.max(0, Math.min(opts.cursorPosition, focusInput.value.length))
@@ -1493,11 +1555,11 @@ export function mount(host = {}) {
   // sharedHost.render is hot-wired to the local render so live/toc invoke it
   // when actions complete. Live's own action methods read `this.host.render`
   // and find the post-mount function.
-  sharedHost.render = (opts) => render(opts);
+  sharedHost.render = opts => render(opts);
 
   live = new NoteLiveEditor({
     ...sharedHost,
-    handleHistoryShortcut: (event) => {
+    handleHistoryShortcut: event => {
       if (isUndoShortcut(event)) {
         const previous = history.undo(host.getContent?.() || '');
         if (previous !== null) {
@@ -1523,10 +1585,10 @@ export function mount(host = {}) {
         }
       }
       return false;
-    },
+    }
   });
 
-  const handleDocumentSelectAll = (event) => {
+  const handleDocumentSelectAll = event => {
     if (!isSelectAllShortcut(event)) return;
     if (!host.isPreviewMode?.()) return;
 
@@ -1557,7 +1619,7 @@ export function mount(host = {}) {
     ? new NoteTocController({
         ...sharedHost,
         previewPaneId,
-        tocRailId: host.tocRailId || TOC_RAIL_ID,
+        tocRailId: host.tocRailId || TOC_RAIL_ID
       })
     : null;
 
@@ -1581,7 +1643,7 @@ export function mount(host = {}) {
       // Split-view hosts can route content I/O to a non-primary pane by
       // returning a { getContent, setContent, pushUndo, scheduleAutoSave,
       // render, scheduleTocRebuild } object for the given paneId.
-      getPaneApi: host.aiAssist.getPaneApi,
+      getPaneApi: host.aiAssist.getPaneApi
     });
   }
 
@@ -1597,7 +1659,7 @@ export function mount(host = {}) {
       if (typeof document !== 'undefined') {
         document.removeEventListener('keydown', handleDocumentSelectAll, true);
       }
-    },
+    }
   };
 }
 
@@ -1659,7 +1721,7 @@ export class NoteTocController {
     const source = this.host.getContent?.() || '';
     const outline = window.NoteTOC.buildOutline(source);
     const flat = [];
-    const flatten = (nodes) => {
+    const flatten = nodes => {
       for (const n of nodes) {
         flat.push(n);
         if (n.children?.length) flatten(n.children);
@@ -1669,7 +1731,7 @@ export class NoteTocController {
 
     // Line indexes the scroll-spy observer should watch — every outline entry,
     // not just real headings, so bold/list entries highlight as you scroll.
-    this._entryLineIndexes = new Set(flat.map((h) => lineIndexAtPosition(source, h.position)));
+    this._entryLineIndexes = new Set(flat.map(h => lineIndexAtPosition(source, h.position)));
 
     // Rail stays visible whenever the editor is in preview mode — the Notes
     // tab needs to be reachable even when the outline is empty.
@@ -1700,16 +1762,18 @@ export class NoteTocController {
       btn.style.paddingLeft = `${8 + (h.level - 1) * 12}px`;
       btn.textContent = h.text;
       btn.title = h.text;
-      btn.addEventListener('click', () => scrollToHeadingPosition(this.host.getContent?.() || '', h.position, this.previewPaneId));
+      btn.addEventListener('click', () =>
+        scrollToHeadingPosition(this.host.getContent?.() || '', h.position, this.previewPaneId)
+      );
 
       // Only real ATX headings are reorderable — moveHeadingRange operates on
       // heading blocks, so bold/list outline entries are navigation-only.
       if (kind === 'heading') {
         btn.draggable = true;
-        btn.addEventListener('dragstart', (e) => this._onDragStart(e, h.position));
+        btn.addEventListener('dragstart', e => this._onDragStart(e, h.position));
         btn.addEventListener('dragend', () => this._onDragEnd());
-        btn.addEventListener('dragover', (e) => this._onDragOver(e, h.position));
-        btn.addEventListener('drop', (e) => this._onDrop(e, h.position));
+        btn.addEventListener('dragover', e => this._onDragOver(e, h.position));
+        btn.addEventListener('drop', e => this._onDrop(e, h.position));
       }
 
       li.appendChild(btn);
@@ -1728,28 +1792,39 @@ export class NoteTocController {
     // Observe the rendered line for every outline entry (headings + bold/list
     // entries). Fall back to heading-class matching if the entry set is empty.
     const indexes = this._entryLineIndexes;
-    const headingEls = indexes && indexes.size
-      ? Array.from(previewPane.querySelectorAll('.note-live-line-rendered[data-line-index]'))
-          .filter((el) => indexes.has(Number(el.dataset.lineIndex)))
-      : Array.from(previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]'));
+    const headingEls =
+      indexes && indexes.size
+        ? Array.from(
+            previewPane.querySelectorAll('.note-live-line-rendered[data-line-index]')
+          ).filter(el => indexes.has(Number(el.dataset.lineIndex)))
+        : Array.from(
+            previewPane.querySelectorAll('.note-live-line-rendered[class*="is-heading-"]')
+          );
     if (!headingEls.length) return;
 
     const visible = new Map();
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) visible.set(entry.target, entry.intersectionRatio);
-        else visible.delete(entry.target);
-      }
-      let top = null;
-      let topY = Infinity;
-      for (const el of visible.keys()) {
-        const rect = el.getBoundingClientRect();
-        if (rect.top < topY) { topY = rect.top; top = el; }
-      }
-      if (top) setActiveTocEntry(top.dataset.lineIndex, this.host.getContent?.() || '', this.tocRailId);
-    }, { root: previewPane, rootMargin: '-10% 0px -85% 0px', threshold: [0, 0.1, 0.5] });
+    const observer = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) visible.set(entry.target, entry.intersectionRatio);
+          else visible.delete(entry.target);
+        }
+        let top = null;
+        let topY = Infinity;
+        for (const el of visible.keys()) {
+          const rect = el.getBoundingClientRect();
+          if (rect.top < topY) {
+            topY = rect.top;
+            top = el;
+          }
+        }
+        if (top)
+          setActiveTocEntry(top.dataset.lineIndex, this.host.getContent?.() || '', this.tocRailId);
+      },
+      { root: previewPane, rootMargin: '-10% 0px -85% 0px', threshold: [0, 0.1, 0.5] }
+    );
 
-    headingEls.forEach((el) => observer.observe(el));
+    headingEls.forEach(el => observer.observe(el));
     this.observer = observer;
   }
 
@@ -1782,16 +1857,18 @@ export class NoteTocController {
     const item = e.currentTarget.closest('.note-toc-item');
     if (!item) return;
     if (typeof document !== 'undefined') {
-      document.querySelectorAll('.note-toc-item.is-drop-target')
-        .forEach((el) => el.classList.remove('is-drop-target'));
+      document
+        .querySelectorAll('.note-toc-item.is-drop-target')
+        .forEach(el => el.classList.remove('is-drop-target'));
     }
     item.classList.add('is-drop-target');
   }
 
   _onDragEnd() {
     if (typeof document !== 'undefined') {
-      document.querySelectorAll('.note-toc-item.is-dragging, .note-toc-item.is-drop-target')
-        .forEach((el) => el.classList.remove('is-dragging', 'is-drop-target'));
+      document
+        .querySelectorAll('.note-toc-item.is-dragging, .note-toc-item.is-drop-target')
+        .forEach(el => el.classList.remove('is-dragging', 'is-drop-target'));
     }
     this.dragSource = null;
   }
@@ -1887,7 +1964,9 @@ function _renderPanelSelectionChip(selection) {
   el.hidden = false;
 }
 
-export function getPanelSelection() { return _panelSelection; }
+export function getPanelSelection() {
+  return _panelSelection;
+}
 
 // openGeneratePanel reveals the Ask AI form and sets the rail to "generating"
 // mode (which hides the suggestion stack so the form is the only visible
@@ -1950,12 +2029,13 @@ export function toggleGeneratePanel() {
 export function bindGenerateToggleButton(root = document) {
   if (typeof document === 'undefined') return;
   const scope = root || document;
-  const toggle = typeof scope.getElementById === 'function'
-    ? scope.getElementById(GEN_TOGGLE_ID)
-    : scope.querySelector?.(`#${GEN_TOGGLE_ID}`);
+  const toggle =
+    typeof scope.getElementById === 'function'
+      ? scope.getElementById(GEN_TOGGLE_ID)
+      : scope.querySelector?.(`#${GEN_TOGGLE_ID}`);
   if (!toggle || toggle.dataset.noteGenerateToggleBound === '1') return;
   toggle.dataset.noteGenerateToggleBound = '1';
-  toggle.addEventListener('click', (event) => {
+  toggle.addEventListener('click', event => {
     event.preventDefault();
     toggleGeneratePanel();
   });
@@ -2035,14 +2115,14 @@ let _lastAgentDropdownWorkspaceId = '';
 
 function _renderAgentOptions(select, names, previousValue) {
   select.innerHTML = '<option value="">Use workspace agent</option>';
-  Array.from(names).forEach((name) => {
+  Array.from(names).forEach(name => {
     if (!name) return;
     const option = document.createElement('option');
     option.value = name;
     option.textContent = name;
     select.appendChild(option);
   });
-  if (previousValue && Array.from(select.options).some((option) => option.value === previousValue)) {
+  if (previousValue && Array.from(select.options).some(option => option.value === previousValue)) {
     select.value = previousValue;
   }
   select.disabled = false;
@@ -2053,8 +2133,12 @@ async function _fetchWorkspaceAgentNames(workspaceId) {
   if (!response.ok) throw new Error(`Failed to load workspace ${workspaceId}`);
   const data = await response.json();
   const names = new Set();
-  (data.agent_instances || []).forEach((inst) => { if (inst?.name) names.add(inst.name); });
-  (data.agents || []).forEach((name) => { if (name) names.add(name); });
+  (data.agent_instances || []).forEach(inst => {
+    if (inst?.name) names.add(inst.name);
+  });
+  (data.agents || []).forEach(name => {
+    if (name) names.add(name);
+  });
   return names;
 }
 
@@ -2090,7 +2174,7 @@ export async function loadAgentsIntoDropdown(workspaceId = _lastAgentDropdownWor
     const response = await fetch('/api/agents');
     if (!response.ok) throw new Error('Failed to load agents');
     const data = await response.json();
-    const names = (data.agents || []).map((a) => a?.name).filter(Boolean);
+    const names = (data.agents || []).map(a => a?.name).filter(Boolean);
     _renderAgentOptions(select, names, previousValue);
   } catch (error) {
     select.innerHTML = '<option value="">Use workspace agent</option>';
@@ -2124,7 +2208,13 @@ export function getSelectedAgentId() {
 //
 // Returns { text, source, range: { start, end } | null, anchorRect } or null.
 
-export function readSelection({ getContent, isPreviewMode, textareaId = 'noteContentInput', previewPaneId = PREVIEW_PANE_ID, panes } = {}) {
+export function readSelection({
+  getContent,
+  isPreviewMode,
+  textareaId = 'noteContentInput',
+  previewPaneId = PREVIEW_PANE_ID,
+  panes
+} = {}) {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
 
   // Multi-pane mode: scan each pane in order, return the first match with
@@ -2179,8 +2269,11 @@ function _readSinglePaneSelection({ getContent, isPreviewMode, textareaId, previ
       return {
         text,
         source: 'preview',
-        range: { start: broadRange.start + localIdx, end: broadRange.start + localIdx + text.length },
-        anchorRect,
+        range: {
+          start: broadRange.start + localIdx,
+          end: broadRange.start + localIdx + text.length
+        },
+        anchorRect
       };
     }
     return { text: sourceText, source: 'preview', range: broadRange, anchorRect };
@@ -2205,7 +2298,7 @@ function _readTextareaSelection(textarea, baseOffset = 0) {
     range: { start: baseOffset + start, end: baseOffset + end },
     // Caret position inside a textarea isn't trivially available without
     // canvas measurement, so anchor the bar near the textarea's top-right.
-    anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right },
+    anchorRect: { top: rect.top, bottom: rect.top + 24, left: rect.right - 320, right: rect.right }
   };
 }
 
@@ -2236,11 +2329,17 @@ let _selectionOnChange = null;
 export function wireSelectionTracking({ onChange, textareaId, textareaIds } = {}) {
   if (typeof document === 'undefined') return;
   if (onChange) _selectionOnChange = onChange;
-  const update = () => { try { _selectionOnChange?.(); } catch (_) { /* ignore */ } };
+  const update = () => {
+    try {
+      _selectionOnChange?.();
+    } catch (_) {
+      /* ignore */
+    }
+  };
 
   if (!_selectionTrackingWired) {
     document.addEventListener('selectionchange', update);
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && typeof window !== 'undefined') window.NoteAIAssist?.hideBar();
     });
     _selectionTrackingWired = true;
@@ -2270,7 +2369,8 @@ let _aiAssistInitialized = false;
 // undo/save, toast, selection-read).
 export function initAIAssist(host = {}) {
   if (_aiAssistInitialized) return;
-  if (typeof window === 'undefined' || !window.NoteAIAssist || typeof document === 'undefined') return;
+  if (typeof window === 'undefined' || !window.NoteAIAssist || typeof document === 'undefined')
+    return;
   const bar = document.getElementById('noteAIActionBar');
   const rail = document.getElementById(ASSIST_RAIL_ID);
   if (!bar || !rail) return;
@@ -2280,13 +2380,13 @@ export function initAIAssist(host = {}) {
   // hosts. If the host doesn't implement it (or returns null), each call
   // falls back to the primary host callbacks. Single-pane callers (the
   // modal) work without any changes.
-  const resolvePane = (paneId) => host.getPaneApi?.(paneId) || null;
+  const resolvePane = paneId => host.getPaneApi?.(paneId) || null;
 
   window.NoteAIAssist.init({
     bar,
     rail,
     sessionsApi: {
-      getNoteContent: (paneId) => {
+      getNoteContent: paneId => {
         const pane = resolvePane(paneId);
         if (pane) return pane.getContent?.() || '';
         return host.getContent?.() || '';
@@ -2303,12 +2403,12 @@ export function initAIAssist(host = {}) {
         if (host.isPreviewMode?.()) host.render?.();
         host.scheduleTocRebuild?.();
       },
-      pushUndo: (paneId) => {
+      pushUndo: paneId => {
         const pane = resolvePane(paneId);
         if (pane) return pane.pushUndo?.();
         return host.pushUndo?.();
       },
-      scheduleAutoSave: (paneId) => {
+      scheduleAutoSave: paneId => {
         const pane = resolvePane(paneId);
         if (pane) return pane.scheduleAutoSave?.();
         return host.scheduleAutoSave?.();
@@ -2318,16 +2418,17 @@ export function initAIAssist(host = {}) {
       // returns the saved note ({ id, name }) so the wikilink can use its name.
       // Left undefined when the host doesn't wire it so the action bar hides the
       // Extract button on surfaces that don't support it (e.g. the modal).
-      createNote: typeof host.createNote === 'function'
-        ? (title, content, opts) => host.createNote(title, content, opts)
-        : undefined,
+      createNote:
+        typeof host.createNote === 'function'
+          ? (title, content, opts) => host.createNote(title, content, opts)
+          : undefined,
       showAssistRail: () => showRail('assist'),
-      hideAssistRail: () => hideRail('assist'),
-    },
+      hideAssistRail: () => hideRail('assist')
+    }
   });
 
   wireSelectionTracking({
-    onChange: () => window.NoteAIAssist?.onSelectionChanged(host.readSelection?.()),
+    onChange: () => window.NoteAIAssist?.onSelectionChanged(host.readSelection?.())
   });
   wireAskAIShortcut(host);
   wireAgentChangeHandler();
@@ -2345,7 +2446,7 @@ let _askShortcutWired = false;
 // once when initAIAssist first runs.
 function wireAskAIShortcut(host) {
   if (_askShortcutWired || typeof document === 'undefined') return;
-  document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', e => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
     if (e.key !== 'j' && e.key !== 'J') return;
 
@@ -2355,8 +2456,12 @@ function wireAskAIShortcut(host) {
     // can trigger Ask AI without leaving the keyboard.
     const target = e.target;
     const NOTE_INPUT_IDS = new Set(['noteContentInput', 'notePageSecondaryEditor']);
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-      const isLiveEditorInput = typeof target.closest === 'function' && target.closest('.note-live-line-input');
+    if (
+      target &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+    ) {
+      const isLiveEditorInput =
+        typeof target.closest === 'function' && target.closest('.note-live-line-input');
       if (!NOTE_INPUT_IDS.has(target.id) && !isLiveEditorInput) return;
     }
 
@@ -2409,7 +2514,7 @@ export async function applyAgentDefaultForWorkspace(workspaceId) {
   }
 
   if (entryAgent) {
-    const match = Array.from(select.options).find((o) => o.value === entryAgent);
+    const match = Array.from(select.options).find(o => o.value === entryAgent);
     if (match) {
       select.value = entryAgent;
       if (typeof window !== 'undefined') window.NoteAIAssist?.onAgentChanged(entryAgent);
@@ -2418,7 +2523,7 @@ export async function applyAgentDefaultForWorkspace(workspaceId) {
   }
 
   if (!select.value) {
-    const first = Array.from(select.options).find((o) => o.value);
+    const first = Array.from(select.options).find(o => o.value);
     if (first) select.value = first.value;
   }
   if (typeof window !== 'undefined') {
@@ -2437,10 +2542,16 @@ export async function applyAgentDefaultForWorkspace(workspaceId) {
 
 const RAIL_CONFIG = {
   toc: { railId: 'noteTocRail', toggleId: 'noteTocToggle', storageKey: 'note.toc.collapsed' },
-  assist: { railId: 'noteAssistRail', toggleId: 'noteAssistToggle', storageKey: 'note.aiAssist.collapsed' },
+  assist: {
+    railId: 'noteAssistRail',
+    toggleId: 'noteAssistToggle',
+    storageKey: 'note.aiAssist.collapsed'
+  }
 };
 
-function _railCfg(name) { return RAIL_CONFIG[name] || null; }
+function _railCfg(name) {
+  return RAIL_CONFIG[name] || null;
+}
 
 export function getRailCollapsed(name) {
   const cfg = _railCfg(name);
@@ -2696,7 +2807,7 @@ export function normalizeVaultReference(ref) {
   const normalized = {
     vaultName: String(ref.vault_name || ref.vaultName || '').trim(),
     recordLabel: String(ref.record_label || ref.recordLabel || '').trim(),
-    recordId: String(ref.record_id || ref.recordId || '').trim(),
+    recordId: String(ref.record_id || ref.recordId || '').trim()
   };
   if (!normalized.recordId) return null;
   return normalized;
@@ -2746,7 +2857,7 @@ export function updateSaveStatus(status) {
   const container = document.getElementById(SAVE_STATUS_CONTAINER_ID);
   if (!container) return;
 
-  container.querySelectorAll('span[class^="note-status-"]').forEach((el) => {
+  container.querySelectorAll('span[class^="note-status-"]').forEach(el => {
     el.style.display = 'none';
   });
   if (!SAVE_STATUS_VALUES.has(status)) return;
@@ -2831,7 +2942,7 @@ const api = {
   NoteLiveEditorState,
   NoteLiveEditor,
   resizeLiveInput,
-  mount,
+  mount
 };
 
 if (typeof window !== 'undefined') {

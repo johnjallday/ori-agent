@@ -35,8 +35,7 @@ class TaskQueue {
     // Listen for task updates
     window.addEventListener('taskCreated', () => this.loadTasks());
     window.addEventListener('taskUpdated', () => this.loadTasks());
-    window.addEventListener('sseEvent', (e) => this.handleSSEEvent(e.detail));
-
+    window.addEventListener('sseEvent', e => this.handleSSEEvent(e.detail));
   }
 
   /**
@@ -63,7 +62,8 @@ class TaskQueue {
   async loadWorkspaceContext() {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      this.currentWorkspaceId = urlParams.get('workspace') || sessionStorage.getItem('currentWorkspaceId');
+      this.currentWorkspaceId =
+        urlParams.get('workspace') || sessionStorage.getItem('currentWorkspaceId');
 
       if (!this.currentWorkspaceId) {
         const response = await fetch('/api/workspaces');
@@ -121,9 +121,8 @@ class TaskQueue {
       }
 
       const data = await response.json();
-      this.tasks = Array.isArray(data) ? data : (data.tasks || []);
+      this.tasks = Array.isArray(data) ? data : data.tasks || [];
       this.renderTasks();
-
     } catch (error) {
       console.error('TaskQueue: Failed to load tasks', error);
       this.showError('Failed to load tasks');
@@ -189,14 +188,18 @@ class TaskQueue {
           <span class="task-card-status ${task.status}">${statusLabel}</span>
         </div>
         <div class="task-card-meta">
-          ${task.agent_name ? `
+          ${
+            task.agent_name
+              ? `
             <span class="task-card-agent">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2Z"/>
               </svg>
               ${this.escapeHtml(task.agent_name)}
             </span>
-          ` : ''}
+          `
+              : ''
+          }
           <span class="task-card-time">${timeAgo}</span>
         </div>
       </div>
@@ -267,7 +270,6 @@ class TaskQueue {
       if (!response.ok) throw new Error('Failed to execute task');
 
       this.loadTasks();
-
     } catch (error) {
       console.error('TaskQueue: Failed to execute task', error);
     }
@@ -286,7 +288,6 @@ class TaskQueue {
       if (!response.ok) throw new Error('Failed to cancel task');
 
       this.loadTasks();
-
     } catch (error) {
       console.error('TaskQueue: Failed to cancel task', error);
     }

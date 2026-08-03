@@ -9,8 +9,9 @@
     if (typeof window.escapeHtml === 'function') {
       return window.escapeHtml(value);
     }
-    return String(value == null ? '' : value).replace(/[&<>"']/g, (c) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+    return String(value == null ? '' : value).replace(
+      /[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
     );
   }
 
@@ -27,7 +28,7 @@
     if (!Array.isArray(items) || items.length === 0) {
       body = `<div class="claude-sync-value claude-sync-empty">${esc(emptyText)}</div>`;
     } else {
-      body = `<ul class="claude-sync-list">${items.map((item) => `<li>${itemHtml(item)}</li>`).join('')}</ul>`;
+      body = `<ul class="claude-sync-list">${items.map(item => `<li>${itemHtml(item)}</li>`).join('')}</ul>`;
     }
     return `
       <div class="claude-sync-card">
@@ -75,20 +76,37 @@
             <div>Permission mode: ${esc(defaultMode || '—')}</div>
           </div>
         </div>
-        ${listCard(`Subagents (${agents.length})`, agents, (a) =>
-          `<strong>${esc(a?.name || 'Unnamed')}</strong>${a?.description ? ' — ' + esc(a.description) : ''}`,
-          'No subagents found in ~/.claude/agents.')}
-        ${listCard(`MCP Servers (${mcpServers.length})`, mcpServers, (s) =>
-          `<strong>${esc(s?.name || 'Unnamed')}</strong>${s?.transport ? ` <span class="claude-sync-muted">(${esc(s.transport)})</span>` : ''}`,
-          'No MCP servers configured.')}
-        ${listCard(`Plugins (${plugins.length})`, plugins, (p) =>
-          esc(p?.name || 'Unnamed'),
-          'No plugins installed.')}
-        ${listCard(`Recent Projects (${recent.length})`, recent, (p) => {
-          const cost = Number(p?.lastCost || 0);
-          const costStr = cost > 0 ? ` <span class="claude-sync-muted">$${cost.toFixed(4)}</span>` : '';
-          return `<span class="claude-sync-path">${esc(p?.path || '')}</span>${costStr}`;
-        }, 'No recent projects.')}
+        ${listCard(
+          `Subagents (${agents.length})`,
+          agents,
+          a =>
+            `<strong>${esc(a?.name || 'Unnamed')}</strong>${a?.description ? ' — ' + esc(a.description) : ''}`,
+          'No subagents found in ~/.claude/agents.'
+        )}
+        ${listCard(
+          `MCP Servers (${mcpServers.length})`,
+          mcpServers,
+          s =>
+            `<strong>${esc(s?.name || 'Unnamed')}</strong>${s?.transport ? ` <span class="claude-sync-muted">(${esc(s.transport)})</span>` : ''}`,
+          'No MCP servers configured.'
+        )}
+        ${listCard(
+          `Plugins (${plugins.length})`,
+          plugins,
+          p => esc(p?.name || 'Unnamed'),
+          'No plugins installed.'
+        )}
+        ${listCard(
+          `Recent Projects (${recent.length})`,
+          recent,
+          p => {
+            const cost = Number(p?.lastCost || 0);
+            const costStr =
+              cost > 0 ? ` <span class="claude-sync-muted">$${cost.toFixed(4)}</span>` : '';
+            return `<span class="claude-sync-path">${esc(p?.path || '')}</span>${costStr}`;
+          },
+          'No recent projects.'
+        )}
       </div>`;
   }
 

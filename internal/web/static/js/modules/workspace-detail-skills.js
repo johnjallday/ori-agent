@@ -201,7 +201,11 @@ export class WorkspaceSkillsManager {
     const normalizedBindingId = String(bindingId || '')
       .trim()
       .toLowerCase();
-    if (!normalizedBindingId || !this.host.workspace || !Array.isArray(this.host.workspace.agent_instances)) {
+    if (
+      !normalizedBindingId ||
+      !this.host.workspace ||
+      !Array.isArray(this.host.workspace.agent_instances)
+    ) {
       return [];
     }
 
@@ -529,10 +533,13 @@ export class WorkspaceSkillsManager {
   }
 
   updateWorkspaceSkillAgentAccessSummary() {
-    if (!this.host.elements.skillAgentAccessSummary || !this.host.elements.skillAgentOptions) return;
+    if (!this.host.elements.skillAgentAccessSummary || !this.host.elements.skillAgentOptions)
+      return;
 
     const checkboxes = Array.from(
-      this.host.elements.skillAgentOptions.querySelectorAll('.workspace-detail-skill-agent-checkbox')
+      this.host.elements.skillAgentOptions.querySelectorAll(
+        '.workspace-detail-skill-agent-checkbox'
+      )
     );
     if (checkboxes.length === 0) {
       this.host.elements.skillAgentAccessSummary.textContent = 'No agents';
@@ -555,19 +562,23 @@ export class WorkspaceSkillsManager {
       this.host.elements.skillPlanningTasksDirInput.value = normalized.tasks_dir;
     }
     if (this.host.elements.skillPlanningDefaultExecutionInput) {
-      this.host.elements.skillPlanningDefaultExecutionInput.value = normalized.default_execution_mode;
+      this.host.elements.skillPlanningDefaultExecutionInput.value =
+        normalized.default_execution_mode;
     }
     if (this.host.elements.skillPlanningWritePRDInput) {
       this.host.elements.skillPlanningWritePRDInput.checked = normalized.write_prd !== false;
     }
     if (this.host.elements.skillPlanningWriteTaskListInput) {
-      this.host.elements.skillPlanningWriteTaskListInput.checked = normalized.write_task_list !== false;
+      this.host.elements.skillPlanningWriteTaskListInput.checked =
+        normalized.write_task_list !== false;
     }
     if (this.host.elements.skillPlanningSyncTasksInput) {
-      this.host.elements.skillPlanningSyncTasksInput.checked = normalized.sync_workspace_tasks !== false;
+      this.host.elements.skillPlanningSyncTasksInput.checked =
+        normalized.sync_workspace_tasks !== false;
     }
     if (this.host.elements.skillPlanningRequireBranchInput) {
-      this.host.elements.skillPlanningRequireBranchInput.checked = normalized.require_branch !== false;
+      this.host.elements.skillPlanningRequireBranchInput.checked =
+        normalized.require_branch !== false;
     }
   }
 
@@ -729,7 +740,9 @@ export class WorkspaceSkillsManager {
       existingBinding?.config || this.getDefaultWorkspacePlanningConfig()
     );
     if (this.host.elements.skillSubmitBtn) {
-      this.host.elements.skillSubmitBtn.textContent = existingBinding ? 'Save Changes' : 'Add Binding';
+      this.host.elements.skillSubmitBtn.textContent = existingBinding
+        ? 'Save Changes'
+        : 'Add Binding';
       this.host.elements.skillSubmitBtn.disabled = false;
     }
 

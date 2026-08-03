@@ -1,4 +1,4 @@
-(function() {
+(function () {
   'use strict';
 
   const ACTIVATION_KEY = 'f';
@@ -27,31 +27,31 @@
       id: 'modal',
       prefix: 'M',
       label: 'modal',
-      matches: (element) => element.closest('.modal.show')
+      matches: element => element.closest('.modal.show')
     },
     {
       id: 'chat',
       prefix: 'H',
       label: 'chat',
-      matches: (element) => element.closest('#chatPanel[aria-hidden="false"]')
+      matches: element => element.closest('#chatPanel[aria-hidden="false"]')
     },
     {
       id: 'navbar',
       prefix: 'N',
       label: 'navbar',
-      matches: (element) => element.closest('.navbar')
+      matches: element => element.closest('.navbar')
     },
     {
       id: 'sidebar',
       prefix: 'S',
       label: 'sidebar',
-      matches: (element) => element.closest('#sidebar')
+      matches: element => element.closest('#sidebar')
     },
     {
       id: 'content',
       prefix: 'C',
       label: 'content',
-      matches: (element) => element.closest('main, .main-content, #workspaceCommandView')
+      matches: element => element.closest('main, .main-content, #workspaceCommandView')
     },
     {
       id: 'page',
@@ -82,7 +82,11 @@
     }
 
     const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') {
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.visibility === 'collapse'
+    ) {
       return false;
     }
 
@@ -95,7 +99,12 @@
       return false;
     }
 
-    if (rect.bottom < 0 || rect.right < 0 || rect.top > window.innerHeight || rect.left > window.innerWidth) {
+    if (
+      rect.bottom < 0 ||
+      rect.right < 0 ||
+      rect.top > window.innerHeight ||
+      rect.left > window.innerWidth
+    ) {
       return false;
     }
 
@@ -249,7 +258,12 @@
         return;
       }
 
-      if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      if (
+        event.key === 'ArrowUp' ||
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowLeft' ||
+        event.key === 'ArrowRight'
+      ) {
         event.preventDefault();
         event.stopPropagation();
         this.moveSelection(event.key);
@@ -370,7 +384,7 @@
         return;
       }
 
-      this.launcherButton.addEventListener('click', (event) => {
+      this.launcherButton.addEventListener('click', event => {
         event.preventDefault();
         this.togglePersistentMode();
       });
@@ -382,7 +396,9 @@
       }
 
       const persistentActive = this.active && this.mode === 'persistent';
-      const label = persistentActive ? 'Disable persistent keyboard navigation' : 'Enable persistent keyboard navigation';
+      const label = persistentActive
+        ? 'Disable persistent keyboard navigation'
+        : 'Enable persistent keyboard navigation';
       this.launcherButton.setAttribute('aria-pressed', persistentActive ? 'true' : 'false');
       this.launcherButton.setAttribute('aria-label', label);
       this.launcherButton.setAttribute('title', label);
@@ -497,8 +513,8 @@
       window.addEventListener('scroll', this.onRefreshRequested, true);
       document.addEventListener('focusin', this.onFocusIn, true);
 
-      this.observer = new MutationObserver((mutations) => {
-        const hasExternalMutation = mutations.some((mutation) => {
+      this.observer = new MutationObserver(mutations => {
+        const hasExternalMutation = mutations.some(mutation => {
           return !(this.overlay && this.overlay.contains(mutation.target));
         });
 
@@ -513,7 +529,15 @@
         subtree: true,
         childList: true,
         attributes: true,
-        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'aria-expanded', 'disabled', 'aria-disabled']
+        attributeFilter: [
+          'class',
+          'style',
+          'hidden',
+          'aria-hidden',
+          'aria-expanded',
+          'disabled',
+          'aria-disabled'
+        ]
       });
     }
 
@@ -555,7 +579,7 @@
         ...document.querySelectorAll('#chatPanel[aria-hidden="false"]'),
         ...document.querySelectorAll('.main-task-modal'),
         ...document.querySelectorAll('.workspace-detail-panel.is-expanded')
-      ].filter((element) => isVisible(element));
+      ].filter(element => isVisible(element));
 
       if (scopedRoots.length > 0) {
         return scopedRoots[scopedRoots.length - 1];
@@ -569,7 +593,7 @@
       const seen = new Set();
       const candidates = [];
 
-      queryRoot.querySelectorAll(ACTIONABLE_SELECTOR).forEach((element) => {
+      queryRoot.querySelectorAll(ACTIONABLE_SELECTOR).forEach(element => {
         if (seen.has(element) || !this.isNavigable(element)) {
           return;
         }
@@ -583,7 +607,7 @@
 
     resolveZone(element, scopeRoot) {
       if (scopeRoot && scopeRoot !== document.body) {
-        const scopedZone = ZONE_DEFINITIONS.find((zone) => {
+        const scopedZone = ZONE_DEFINITIONS.find(zone => {
           const match = zone.matches(element);
           return match && (match === scopeRoot || scopeRoot.contains(match));
         });
@@ -592,14 +616,17 @@
         }
       }
 
-      return ZONE_DEFINITIONS.find((zone) => zone.matches(element)) || ZONE_DEFINITIONS[ZONE_DEFINITIONS.length - 1];
+      return (
+        ZONE_DEFINITIONS.find(zone => zone.matches(element)) ||
+        ZONE_DEFINITIONS[ZONE_DEFINITIONS.length - 1]
+      );
     }
 
     groupCandidatesByZone(candidates, scopeRoot) {
       const groups = [];
       const groupsById = new Map();
 
-      candidates.forEach((element) => {
+      candidates.forEach(element => {
         const zone = this.resolveZone(element, scopeRoot);
         if (!groupsById.has(zone.id)) {
           const group = { zone, items: [] };
@@ -610,13 +637,13 @@
         groupsById.get(zone.id).items.push(element);
       });
 
-      groups.forEach((group) => {
+      groups.forEach(group => {
         group.items.sort(compareByVisualOrder);
       });
 
       groups.sort((leftGroup, rightGroup) => {
-        const leftIndex = ZONE_DEFINITIONS.findIndex((zone) => zone.id === leftGroup.zone.id);
-        const rightIndex = ZONE_DEFINITIONS.findIndex((zone) => zone.id === rightGroup.zone.id);
+        const leftIndex = ZONE_DEFINITIONS.findIndex(zone => zone.id === leftGroup.zone.id);
+        const rightIndex = ZONE_DEFINITIONS.findIndex(zone => zone.id === rightGroup.zone.id);
         return leftIndex - rightIndex;
       });
 
@@ -641,7 +668,11 @@
         return false;
       }
 
-      if (element.matches('label[for]') && !element.control && !document.getElementById(element.getAttribute('for'))) {
+      if (
+        element.matches('label[for]') &&
+        !element.control &&
+        !document.getElementById(element.getAttribute('for'))
+      ) {
         return false;
       }
 
@@ -658,11 +689,11 @@
       const groups = this.groupCandidatesByZone(candidates, this.scopeRoot);
 
       this.hintLayer.innerHTML = '';
-      this.zoneLegend = groups.map((group) => `${group.zone.prefix}:${group.zone.label}`).join('  ');
+      this.zoneLegend = groups.map(group => `${group.zone.prefix}:${group.zone.label}`).join('  ');
       this.hints = [];
       this.groups = groups;
 
-      groups.forEach((group) => {
+      groups.forEach(group => {
         const codeLength = computeCodeLength(group.items.length);
 
         group.items.forEach((element, index) => {
@@ -680,12 +711,12 @@
         });
       });
 
-      this.hints.forEach((hint) => {
+      this.hints.forEach(hint => {
         this.hintLayer.appendChild(hint.badge);
         this.positionHint(hint);
       });
 
-      if (this.selectedElement && !this.hints.some((hint) => hint.element === this.selectedElement)) {
+      if (this.selectedElement && !this.hints.some(hint => hint.element === this.selectedElement)) {
         this.selectedElement = null;
       }
 
@@ -698,7 +729,7 @@
       }
 
       const zonePrefix = this.buffer.charAt(0);
-      return this.groups.find((group) => group.zone.prefix === zonePrefix) || null;
+      return this.groups.find(group => group.zone.prefix === zonePrefix) || null;
     }
 
     buildZoneHighlightBoxes(group) {
@@ -712,8 +743,8 @@
       const mergeGapY = 18;
 
       const rects = group.items
-        .filter((element) => element && document.contains(element) && isVisible(element))
-        .map((element) => {
+        .filter(element => element && document.contains(element) && isVisible(element))
+        .map(element => {
           const rect = element.getBoundingClientRect();
           return {
             top: rect.top - paddingY,
@@ -732,8 +763,8 @@
 
       const boxes = [];
 
-      rects.forEach((rect) => {
-        const targetBox = boxes.find((box) => {
+      rects.forEach(rect => {
+        const targetBox = boxes.find(box => {
           const horizontalGap = Math.max(0, Math.max(box.left - rect.right, rect.left - box.right));
           const verticalGap = Math.max(0, Math.max(box.top - rect.bottom, rect.top - box.bottom));
           return horizontalGap <= mergeGapX && verticalGap <= mergeGapY;
@@ -831,7 +862,8 @@
       candidates.forEach((candidate, index) => {
         const clampedTop = clamp(candidate.top, viewportPadding, maxTop);
         const clampedLeft = clamp(candidate.left, viewportPadding, maxLeft);
-        const overflowPenalty = Math.abs(clampedTop - candidate.top) + Math.abs(clampedLeft - candidate.left);
+        const overflowPenalty =
+          Math.abs(clampedTop - candidate.top) + Math.abs(clampedLeft - candidate.left);
         const score = overflowPenalty + index * 0.01;
 
         if (score < bestScore) {
@@ -854,11 +886,11 @@
         return this.hints.slice();
       }
 
-      return this.hints.filter((hint) => hint.code.startsWith(buffer));
+      return this.hints.filter(hint => hint.code.startsWith(buffer));
     }
 
     getVisibleMatches(buffer = this.buffer) {
-      return this.getMatches(buffer).filter((hint) => {
+      return this.getMatches(buffer).filter(hint => {
         return hint.element && document.contains(hint.element) && !hint.badge.hidden;
       });
     }
@@ -868,7 +900,7 @@
         return null;
       }
 
-      return matches.find((hint) => hint.element === this.selectedElement) || null;
+      return matches.find(hint => hint.element === this.selectedElement) || null;
     }
 
     getHintRect(hint) {
@@ -890,7 +922,7 @@
       let bestHint = null;
       let bestScore = Number.POSITIVE_INFINITY;
 
-      matches.forEach((candidate) => {
+      matches.forEach(candidate => {
         if (candidate === currentHint) {
           return;
         }
@@ -937,7 +969,7 @@
         return null;
       }
 
-      const currentIndex = matches.findIndex((hint) => hint.element === currentHint.element);
+      const currentIndex = matches.findIndex(hint => hint.element === currentHint.element);
       if (currentIndex === -1) {
         return null;
       }
@@ -963,7 +995,8 @@
       if (!currentHint) {
         nextHint = matches[0];
       } else {
-        nextHint = this.findDirectionalHint(currentHint, matches, direction) ||
+        nextHint =
+          this.findDirectionalHint(currentHint, matches, direction) ||
           this.findSequentialHint(currentHint, matches, direction);
       }
 
@@ -977,7 +1010,13 @@
     }
 
     renderSelectedTarget(hint) {
-      if (!this.regionLayer || !hint || !hint.element || !document.contains(hint.element) || !isVisible(hint.element)) {
+      if (
+        !this.regionLayer ||
+        !hint ||
+        !hint.element ||
+        !document.contains(hint.element) ||
+        !isVisible(hint.element)
+      ) {
         return;
       }
 
@@ -1008,8 +1047,8 @@
 
     buildStatusPills(items) {
       return items
-        .filter((item) => item && item.label)
-        .map((item) => {
+        .filter(item => item && item.label)
+        .map(item => {
           const activeClass = item.active ? ' is-active' : '';
           return `<span class="ori-keyboard-nav-status-pill${activeClass}">${item.label}</span>`;
         })
@@ -1028,14 +1067,16 @@
       this.renderZoneSelection(selectedZoneGroup);
       this.renderSelectedTarget(selectedHint);
 
-      this.hints.forEach((hint) => {
+      this.hints.forEach(hint => {
         const isMatch = !this.suspended && (!this.buffer || hint.code.startsWith(this.buffer));
         const isExact = Boolean(this.buffer) && hint.code === this.buffer;
 
         hint.badge.hidden = !isMatch;
-        hint.badge.dataset.state = isExact ? 'exact' : (this.buffer ? 'match' : 'idle');
-        hint.badge.dataset.zoneSelected = selectedZoneGroup && hint.zone.id === selectedZoneGroup.zone.id ? 'true' : 'false';
-        hint.badge.dataset.navSelected = selectedHint && hint.element === selectedHint.element ? 'true' : 'false';
+        hint.badge.dataset.state = isExact ? 'exact' : this.buffer ? 'match' : 'idle';
+        hint.badge.dataset.zoneSelected =
+          selectedZoneGroup && hint.zone.id === selectedZoneGroup.zone.id ? 'true' : 'false';
+        hint.badge.dataset.navSelected =
+          selectedHint && hint.element === selectedHint.element ? 'true' : 'false';
       });
 
       if (!this.status) {
@@ -1073,7 +1114,7 @@
         { label: 'Backspace removes last key' },
         { label: 'Esc exits' }
       ];
-      const zonePills = this.groups.map((group) => ({
+      const zonePills = this.groups.map(group => ({
         label: `${group.zone.prefix}: ${group.zone.label}`,
         active: Boolean(selectedZoneGroup && group.zone.id === selectedZoneGroup.zone.id)
       }));
@@ -1146,7 +1187,11 @@
           }
         }
 
-        if (focusTarget.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea')) {
+        if (
+          focusTarget.matches(
+            'input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea'
+          )
+        ) {
           if (typeof focusTarget.select === 'function') {
             focusTarget.select();
           }

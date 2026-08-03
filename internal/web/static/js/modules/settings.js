@@ -62,9 +62,10 @@ async function loadSettings() {
     const temperatureSlider = document.getElementById('temperatureSlider');
     const temperatureValue = document.getElementById('temperatureValue');
     // Handle both nested (settings.Settings.temperature) and flat (settings.temperature) formats
-    let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
-      ? settings.Settings.temperature
-      : settings.temperature;
+    let temperatureValueData =
+      settings.Settings && typeof settings.Settings.temperature !== 'undefined'
+        ? settings.Settings.temperature
+        : settings.temperature;
 
     // Force temperature to 1.0 for GPT-5 models
     const gpt5Notice = document.getElementById('gpt5TempNotice');
@@ -86,7 +87,8 @@ async function loadSettings() {
 
     // Update system prompt
     const systemPromptInput = document.getElementById('systemPromptInput');
-    const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
+    const systemPromptValue =
+      (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
     if (systemPromptInput) {
       systemPromptInput.value = systemPromptValue;
     }
@@ -163,7 +165,7 @@ function setupSettings() {
 
   // Add model change listener to handle GPT-5 temperature restriction
   if (modelSelect && temperatureSlider && temperatureValue) {
-    modelSelect.addEventListener('change', function() {
+    modelSelect.addEventListener('change', function () {
       const gpt5Notice = document.getElementById('gpt5TempNotice');
       if (this.value.includes('gpt-5')) {
         temperatureSlider.value = 1.0;
@@ -178,7 +180,7 @@ function setupSettings() {
   }
 
   if (temperatureSlider && temperatureValue) {
-    temperatureSlider.addEventListener('input', function(e) {
+    temperatureSlider.addEventListener('input', function (e) {
       const modelSelect = document.getElementById('gptModelSelect');
       const selectedModel = modelSelect ? modelSelect.value : '';
 
@@ -197,7 +199,7 @@ function setupSettings() {
   // Temperature click-to-edit functionality
   if (temperatureValue && temperatureInput && temperatureSlider) {
     // Click on value to edit
-    temperatureValue.addEventListener('click', function() {
+    temperatureValue.addEventListener('click', function () {
       const modelSelect = document.getElementById('gptModelSelect');
       const selectedModel = modelSelect ? modelSelect.value : '';
 
@@ -226,7 +228,7 @@ function setupSettings() {
 
     // Save on Enter or blur
     temperatureInput.addEventListener('blur', updateTemperatureFromInput);
-    temperatureInput.addEventListener('keydown', function(e) {
+    temperatureInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
         updateTemperatureFromInput();
       } else if (e.key === 'Escape') {
@@ -237,7 +239,7 @@ function setupSettings() {
   }
 
   if (updateBtn) {
-    updateBtn.addEventListener('click', function() {
+    updateBtn.addEventListener('click', function () {
       saveSettings();
       settingsLog.debug('Settings saved to config.json');
     });
@@ -263,7 +265,7 @@ function setupSettings() {
 
   // Settings toggle switches
   document.querySelectorAll('.setting-item .form-check-input').forEach(toggle => {
-    toggle.addEventListener('change', (e) => {
+    toggle.addEventListener('change', e => {
       const settingName = e.target.closest('.setting-item').querySelector('span').textContent;
       toggleSetting(settingName, e.target.checked);
     });
@@ -271,10 +273,7 @@ function setupSettings() {
 
   // Only load settings when settings controls exist on the page.
   const hasSettingsControls = Boolean(
-    modelSelect ||
-    temperatureSlider ||
-    updateBtn ||
-    document.getElementById('systemPromptInput')
+    modelSelect || temperatureSlider || updateBtn || document.getElementById('systemPromptInput')
   );
   if (hasSettingsControls) {
     loadSettings();

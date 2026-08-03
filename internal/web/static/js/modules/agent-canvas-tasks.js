@@ -10,7 +10,10 @@ export async function executeTask(canvas, task) {
   // If unassigned, prompt assignment first
   if (task.to === 'unassigned') {
     if (!canvas.agents || canvas.agents.length === 0) {
-      canvas.showNotification('No agents in this workspace yet — add an agent before running tasks.', 'error');
+      canvas.showNotification(
+        'No agents in this workspace yet — add an agent before running tasks.',
+        'error'
+      );
       return;
     }
     const selectedAgent = await showCanvasAgentPicker({
@@ -40,9 +43,10 @@ export async function rerunTask(canvas, task) {
   const label = task.description || 'this task';
   const confirmed = await showCanvasConfirm({
     title: task.status === 'failed' ? 'Rerun failed task?' : 'Rerun task?',
-    message: task.status === 'failed'
-      ? `"${label}" will execute again from scratch.`
-      : `"${label}" will execute again with the same parameters.`,
+    message:
+      task.status === 'failed'
+        ? `"${label}" will execute again from scratch.`
+        : `"${label}" will execute again with the same parameters.`,
     confirmLabel: 'Rerun',
     cancelLabel: 'Cancel'
   });
@@ -87,7 +91,8 @@ export async function assignTaskToCombiner(canvas, combiner) {
       to: combiner.to || '',
       from: combiner.from || '',
       input_task_ids: newInputs,
-      result_combination_mode: combiner.result_combination_mode || combiner.resultCombinationMode || 'merge'
+      result_combination_mode:
+        combiner.result_combination_mode || combiner.resultCombinationMode || 'merge'
     });
 
     // Update local state
@@ -132,7 +137,9 @@ export async function linkTaskResult(canvas, sourceTaskId, targetTaskId) {
     return;
   }
 
-  const currentInputs = Array.isArray(targetTask.input_task_ids) ? [...targetTask.input_task_ids] : [];
+  const currentInputs = Array.isArray(targetTask.input_task_ids)
+    ? [...targetTask.input_task_ids]
+    : [];
   if (currentInputs.includes(sourceTaskId)) {
     canvas.showNotification('This task is already connected as an input', 'info');
     return;

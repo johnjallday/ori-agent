@@ -13,14 +13,14 @@
 /** Normalized tag list for one item (workspace, note, task…). */
 export function itemTags(item) {
   if (!item || !Array.isArray(item.tags)) return [];
-  return item.tags.map((tag) => String(tag || '').trim()).filter((tag) => tag.length > 0);
+  return item.tags.map(tag => String(tag || '').trim()).filter(tag => tag.length > 0);
 }
 
 /** Sorted unique tags across all items. */
 export function collectTags(items, getTags = itemTags) {
   const tags = new Set();
-  (Array.isArray(items) ? items : []).forEach((item) => {
-    getTags(item).forEach((tag) => tags.add(tag));
+  (Array.isArray(items) ? items : []).forEach(item => {
+    getTags(item).forEach(tag => tags.add(tag));
   });
   return Array.from(tags).sort((a, b) => a.localeCompare(b));
 }
@@ -30,14 +30,14 @@ export function matchesActiveTags(tags, activeTags) {
   const active = Array.from(activeTags || []);
   if (active.length === 0) return true;
   const tagSet = new Set(tags || []);
-  return active.every((tag) => tagSet.has(tag));
+  return active.every(tag => tagSet.has(tag));
 }
 
 /** Items that carry every active tag. */
 export function filterItems(items, activeTags, getTags = itemTags) {
   const active = Array.from(activeTags || []);
   if (active.length === 0) return Array.isArray(items) ? items : [];
-  return (Array.isArray(items) ? items : []).filter((item) =>
+  return (Array.isArray(items) ? items : []).filter(item =>
     matchesActiveTags(getTags(item), active)
   );
 }
@@ -91,7 +91,7 @@ export function createTagFilterBar(options = {}) {
       return;
     }
     root.hidden = false;
-    available.forEach((tag) => {
+    available.forEach(tag => {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'tag-filter-bar-chip';
@@ -126,7 +126,7 @@ export function createTagFilterBar(options = {}) {
       available = Array.from(new Set(tags || [])).sort((a, b) => a.localeCompare(b));
       // Prune selections that no longer exist among the available tags.
       let pruned = false;
-      Array.from(active).forEach((tag) => {
+      Array.from(active).forEach(tag => {
         if (!available.includes(tag)) {
           active.delete(tag);
           pruned = true;

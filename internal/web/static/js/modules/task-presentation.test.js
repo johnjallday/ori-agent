@@ -116,11 +116,17 @@ test('failed/timed-out expose Inspect & Retry only when retry is supported (FR35
 test('secondary actions: Running→Cancel(confirm), Completed→Re-run (FR32, FR36)', () => {
   const runPres = resolveTaskPresentation(running);
   assert.deepEqual(runPres.secondaryActions, [{ id: 'cancel', label: 'Cancel', confirm: true }]);
-  assert.equal(resolveTaskPresentation(running, { cancelSupported: false }).secondaryActions.length, 0);
+  assert.equal(
+    resolveTaskPresentation(running, { cancelSupported: false }).secondaryActions.length,
+    0
+  );
 
   const donePres = resolveTaskPresentation(completed);
   assert.deepEqual(donePres.secondaryActions, [{ id: 'rerun', label: 'Re-run' }]);
-  assert.equal(resolveTaskPresentation(completed, { rerunSupported: false }).secondaryActions.length, 0);
+  assert.equal(
+    resolveTaskPresentation(completed, { rerunSupported: false }).secondaryActions.length,
+    0
+  );
 });
 
 test('tones carry role-independent runtime meaning (FR40 boundary)', () => {
@@ -157,7 +163,17 @@ test('count categories: Actionable/Active/Needs Attention membership (FR16-19)',
 });
 
 test('resolveTaskCounts sums the same categories as the rows (FR45)', () => {
-  const tasks = [unassigned, ready, running, needsInputChoice, blocked, failed, timedOut, completed, cancelled];
+  const tasks = [
+    unassigned,
+    ready,
+    running,
+    needsInputChoice,
+    blocked,
+    failed,
+    timedOut,
+    completed,
+    cancelled
+  ];
   const counts = resolveTaskCounts(tasks);
   assert.equal(counts[FILTER.ALL], tasks.length);
   assert.equal(counts[FILTER.COMPLETED], 1);
@@ -182,8 +198,18 @@ test('sortTasksForDrawer: intervention → running → failed/timed → ready �
 });
 
 test('sort ties break by most-recent activity then ascending id (FR24)', () => {
-  const older = { id: 'b-older', status: 'in_progress', to: 'x', updated_at: '2026-01-01T00:00:00Z' };
-  const newer = { id: 'a-newer', status: 'in_progress', to: 'x', updated_at: '2026-06-01T00:00:00Z' };
+  const older = {
+    id: 'b-older',
+    status: 'in_progress',
+    to: 'x',
+    updated_at: '2026-01-01T00:00:00Z'
+  };
+  const newer = {
+    id: 'a-newer',
+    status: 'in_progress',
+    to: 'x',
+    updated_at: '2026-06-01T00:00:00Z'
+  };
   const sorted = sortTasksForDrawer([older, newer]);
   assert.equal(sorted[0].id, 'a-newer', 'more recent activity sorts first');
 
@@ -257,7 +283,10 @@ test('taskBlockedRepair surfaces the exact repair with its reason', () => {
 test('taskBlockedRepair is null for ordinary tasks and malformed repairs', () => {
   assert.equal(taskBlockedRepair(null), null);
   assert.equal(taskBlockedRepair({ status: 'pending' }), null);
-  assert.equal(taskBlockedRepair({ context: { human_loop: { state: 'waiting_for_choice' } } }), null);
+  assert.equal(
+    taskBlockedRepair({ context: { human_loop: { state: 'waiting_for_choice' } } }),
+    null
+  );
   // A repair with no label is not actionable, so it is not a repair.
   assert.equal(
     taskBlockedRepair({ context: { human_loop: { repair: { code: 'x', label: '  ' } } } }),
@@ -281,7 +310,11 @@ test('repair gating applies to a failed task too, not just waiting_for_choice', 
     id: 'task-mail-2',
     status: 'failed',
     to: 'Inbox',
-    context: { human_loop: { repair: { code: 'enable_gmail', label: 'Enable Gmail', url: '/settings#google-account' } } }
+    context: {
+      human_loop: {
+        repair: { code: 'enable_gmail', label: 'Enable Gmail', url: '/settings#google-account' }
+      }
+    }
   };
   const pres = resolveTaskPresentation(failed);
   assert.equal(pres.primaryAction.id, 'repair');
@@ -308,7 +341,11 @@ test('a quota failure offers provider settings and never a retry', () => {
         reason:
           "Your AI provider reports the account is out of quota or credit. Check the provider's billing settings; retrying won't help until that's resolved.",
         suggested_actions: ['Open AI provider settings (/settings#api-keys)'],
-        repair: { code: 'configure_provider', label: 'Open AI provider settings', url: '/settings#api-keys' }
+        repair: {
+          code: 'configure_provider',
+          label: 'Open AI provider settings',
+          url: '/settings#api-keys'
+        }
       }
     }
   };
@@ -337,7 +374,13 @@ test('provider failures that a user can fix all surface their own repair', () =>
       id: 'task-' + reason_code,
       status: 'failed',
       to: 'Researcher',
-      context: { human_loop: { reason_code, reason: 'x', repair: { code: 'configure_provider', label, url: '/settings#api-keys' } } }
+      context: {
+        human_loop: {
+          reason_code,
+          reason: 'x',
+          repair: { code: 'configure_provider', label, url: '/settings#api-keys' }
+        }
+      }
     });
     assert.equal(pres.primaryAction.id, 'repair', reason_code);
     assert.equal(pres.primaryAction.label, label, reason_code);

@@ -214,7 +214,7 @@ function handleConnectionSuccess() {
 /**
  * Manual retry connection
  */
-window.manualRetryConnection = async function() {
+window.manualRetryConnection = async function () {
   hideServerOfflineNotification();
 
   await loadWorkspaces({ showLoading: true });
@@ -260,7 +260,6 @@ async function loadWorkspaces(options = {}) {
     loadedWorkspaces = data.folders || [];
     renderFilteredWorkspaces();
     hasLoadedWorkspaces = true;
-
   } catch (error) {
     clearTimeout(timeoutId);
 
@@ -275,7 +274,11 @@ async function loadWorkspaces(options = {}) {
     if (isInitialLoad) renderWorkspacesErrorState();
 
     // Check if it's a network error (server offline)
-    if (error.name === 'AbortError' || error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+    if (
+      error.name === 'AbortError' ||
+      error.message.includes('Failed to fetch') ||
+      error.message.includes('NetworkError')
+    ) {
       handleConnectionFailure();
     } else {
       if (consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
@@ -289,7 +292,9 @@ function renderWorkspacesLoadingState() {
   const grid = document.getElementById('workspaces-grid');
   if (!grid) return;
 
-  const skeletons = Array.from({ length: 6 }).map(() => `
+  const skeletons = Array.from({ length: 6 })
+    .map(
+      () => `
         <div class="col-12 col-sm-6 col-lg-4">
             <div class="modern-card p-4 h-100 workspace-card workspace-card-skeleton">
                 <div class="d-flex justify-content-between align-items-start mb-3">
@@ -310,7 +315,9 @@ function renderWorkspacesLoadingState() {
                 </div>
             </div>
         </div>
-    `).join('');
+    `
+    )
+    .join('');
 
   grid.innerHTML = skeletons;
 }
@@ -393,7 +400,12 @@ function renderWorkspacesEmptyState() {
 function getWorkspaceStatusMeta(status) {
   const normalized = (status || '').toString().toLowerCase();
   if (normalized === 'active') {
-    return { label: 'Active', badgeClass: 'badge-success', indicatorClass: 'status-online', isActive: true };
+    return {
+      label: 'Active',
+      badgeClass: 'badge-success',
+      indicatorClass: 'status-online',
+      isActive: true
+    };
   }
   if (normalized === 'completed') {
     return { label: 'Completed', badgeClass: 'badge-info', indicatorClass: '', isActive: false };
@@ -493,14 +505,19 @@ function renderWorkspaceCard(workspace) {
   const relativeActivity = activityDate ? formatRelativeTime(activityDate) : '';
   const activityLabel = relativeActivity ? `Updated ${relativeActivity}` : 'Activity unknown';
   const activityTitle = activityDate ? formatDateTime(activityDate) : '';
-  const description = workspace.description ? escapeHtml(workspace.description) : 'No description provided yet.';
+  const description = workspace.description
+    ? escapeHtml(workspace.description)
+    : 'No description provided yet.';
   const tasksCount = workspace.task_count || 0;
   const sessionsCount = workspace.session_count || 0;
   const notesCount = workspace.note_count || 0;
-  const tags = Array.isArray(workspace.tags) ? workspace.tags.filter((tag) => String(tag || '').trim()) : [];
-  const tagsMarkup = tags.length > 0
-    ? `<div class="workspace-card-tags">${tags.map((tag) => `<span class="workspace-card-tag" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`).join('')}</div>`
-    : '';
+  const tags = Array.isArray(workspace.tags)
+    ? workspace.tags.filter(tag => String(tag || '').trim())
+    : [];
+  const tagsMarkup =
+    tags.length > 0
+      ? `<div class="workspace-card-tags">${tags.map(tag => `<span class="workspace-card-tag" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`).join('')}</div>`
+      : '';
 
   return `
         <div class="col-12 col-sm-6 col-lg-4">
@@ -594,8 +611,8 @@ function populateAgentDropdown() {
   const select = document.getElementById('workspaceEntryAgentSelect');
   if (!select) return;
   const options = ['<option value="">Auto-create workspace manager</option>'];
-  (window.availableAgents || []).forEach((agent) => {
-    const name = String(agent && agent.name || '').trim();
+  (window.availableAgents || []).forEach(agent => {
+    const name = String((agent && agent.name) || '').trim();
     if (!name) return;
     options.push(`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`);
   });
@@ -671,11 +688,14 @@ function populateCanvasWorkspaceSelect() {
     .then(data => {
       // API returns { folders: [...] } - map to workspaces
       const workspaces = data.folders || [];
-      select.innerHTML = '<option value="">Choose a workspace...</option>' +
-                workspaces.map(ws => {
-                  const groupLabel = String(ws.kind || '').toLowerCase() === 'group' ? ' (group)' : '';
-                  return `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}${groupLabel}</option>`;
-                }).join('');
+      select.innerHTML =
+        '<option value="">Choose a workspace...</option>' +
+        workspaces
+          .map(ws => {
+            const groupLabel = String(ws.kind || '').toLowerCase() === 'group' ? ' (group)' : '';
+            return `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}${groupLabel}</option>`;
+          })
+          .join('');
     })
     .catch(err => console.error('Error loading workspaces:', err));
 }

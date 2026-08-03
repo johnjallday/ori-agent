@@ -140,7 +140,15 @@ function lc(value) {
 
 // Raw statuses treated as "ready-ish": not yet running, resolves to Ready or
 // Needs Assignment depending on whether a runnable assignee exists.
-const READYISH_STATUSES = new Set(['pending', 'assigned', 'ready', 'queued', 'todo', 'not_started', '']);
+const READYISH_STATUSES = new Set([
+  'pending',
+  'assigned',
+  'ready',
+  'queued',
+  'todo',
+  'not_started',
+  ''
+]);
 const COMPLETED_STATUSES = new Set(['completed', 'success', 'done']);
 const FAILED_STATUSES = new Set(['failed', 'error']);
 
@@ -402,7 +410,8 @@ export function sortTasksForDrawer(tasks, opts) {
     const pa = resolveTaskPresentation(a, opts);
     const pb = resolveTaskPresentation(b, opts);
     if (pa.sortPriority !== pb.sortPriority) return pa.sortPriority - pb.sortPriority;
-    if (pa.latestActivityAt !== pb.latestActivityAt) return pb.latestActivityAt - pa.latestActivityAt;
+    if (pa.latestActivityAt !== pb.latestActivityAt)
+      return pb.latestActivityAt - pa.latestActivityAt;
     return String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
   });
 }
@@ -415,7 +424,10 @@ export function sortTasksForDrawer(tasks, opts) {
 export function taskShortId(task) {
   const id = String((task && task.id) || '').trim();
   if (!id) return '';
-  const tail = id.replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase();
+  const tail = id
+    .replace(/[^A-Za-z0-9]/g, '')
+    .slice(-4)
+    .toUpperCase();
   return tail ? `#${tail}` : '';
 }
 

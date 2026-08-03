@@ -19,18 +19,19 @@ body {
 body[data-bs-theme="dark"],
 [data-bs-theme="dark"] .bg-light,
 [data-bs-theme="dark"] body.bg-light {
-  background: linear-gradient(135deg, #0A0A0A 0%, #1F2128 50%, #2A2C33 100%) !important;
+  background: linear-gradient(135deg, #0a0a0a 0%, #1f2128 50%, #2a2c33 100%) !important;
 }
 
 /* Animated background particles */
 body::before {
-  content: '';
+  content: "";
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="80" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="40" cy="60" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="90" cy="10" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="60" cy="30" r="2" fill="rgba(255,255,255,0.1)"/></svg>') repeat;
+  background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="2" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="80" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="40" cy="60" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="90" cy="10" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="60" cy="30" r="2" fill="rgba(255,255,255,0.1)"/></svg>')
+    repeat;
   animation: float 20s ease-in-out infinite;
   pointer-events: none;
   z-index: -1;
@@ -49,8 +50,13 @@ body.home-command-page::before {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0px) rotate(0deg); }
-  50% { transform: translateY(-10px) rotate(180deg); }
+  0%,
+  100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(180deg);
+  }
 }
 
 /* =============================================================================
@@ -197,7 +203,9 @@ body.home-command-page::before {
 .main-content {
   padding: 1rem;
   padding-top: 1rem;
-  transition: margin-left 0.1s ease, max-width 0.1s ease;
+  transition:
+    margin-left 0.1s ease,
+    max-width 0.1s ease;
   min-height: 100vh;
 }
 
@@ -234,7 +242,7 @@ body.home-command-page::before {
 }
 
 .sidebar-resize-handle::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 50%;
   left: 50%;
@@ -336,7 +344,7 @@ body.home-command-page::before {
 }
 
 .sidebar-nav-link.active::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 50%;
@@ -349,11 +357,11 @@ body.home-command-page::before {
 
 [data-bs-theme="dark"] .sidebar-nav-link.active {
   background: rgba(42, 135, 98, 0.15);
-  color: #2A8762;
+  color: #2a8762;
 }
 
 [data-bs-theme="dark"] .sidebar-nav-link.active::before {
-  background: #2A8762;
+  background: #2a8762;
 }
 
 .sidebar-group-system {
@@ -577,7 +585,7 @@ body.home-command-page::before {
 
   /* Mobile overlay backdrop */
   .sidebar-mobile-show::before {
-    content: '';
+    content: "";
     position: fixed;
     top: 0;
     left: 0;

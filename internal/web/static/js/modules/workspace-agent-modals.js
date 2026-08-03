@@ -11,7 +11,11 @@ let workspaceSystemModelConfigured = false;
 let workspaceAutoConfigApplied = false;
 
 function isWorkspaceAutoConfigFallback(config) {
-  return Boolean(config && typeof config.reasoning === 'string' && config.reasoning.startsWith('Auto-config failed'));
+  return Boolean(
+    config &&
+    typeof config.reasoning === 'string' &&
+    config.reasoning.startsWith('Auto-config failed')
+  );
 }
 
 /**
@@ -130,7 +134,9 @@ function renderWorkspaceAgentsListModal() {
     return;
   }
 
-  container.innerHTML = workspaceSystemAgents.map(agent => `
+  container.innerHTML = workspaceSystemAgents
+    .map(
+      agent => `
         <div class="d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--bg-secondary); border-radius: var(--radius-sm);">
             <div class="d-flex align-items-center gap-3">
                 <div class="status-indicator status-online" style="width: 8px; height: 8px; border-radius: 50%; background: var(--success-color);"></div>
@@ -153,14 +159,18 @@ function renderWorkspaceAgentsListModal() {
                 </button>
             </div>
         </div>
-    `).join('');
+    `
+    )
+    .join('');
 }
 
 /**
  * Delete a system agent
  */
 async function deleteWorkspaceSystemAgent(agentName) {
-  if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
+  if (
+    !confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)
+  ) {
     return;
   }
 
@@ -204,10 +214,11 @@ async function loadWorkspacesForAgentManagement() {
       return;
     }
 
-    select.innerHTML = '<option value="">-- Select a workspace --</option>' +
-            workspaces.map(ws =>
-              `<option value="${escapeHtml(ws.id)}">${escapeHtml(ws.name || ws.id)}</option>`
-            ).join('');
+    select.innerHTML =
+      '<option value="">-- Select a workspace --</option>' +
+      workspaces
+        .map(ws => `<option value="${escapeHtml(ws.id)}">${escapeHtml(ws.name || ws.id)}</option>`)
+        .join('');
   } catch (error) {
     console.error('Error loading workspaces:', error);
     const select = document.getElementById('workspace-agent-workspace-select');
@@ -272,7 +283,11 @@ async function checkLLMAvailability() {
     console.error('Failed to check LLM availability:', error);
     workspaceLLMAvailable = false;
     workspaceSystemModelConfigured = false;
-    return { available: false, system_model_configured: false, message: 'Failed to check LLM availability' };
+    return {
+      available: false,
+      system_model_configured: false,
+      message: 'Failed to check LLM availability'
+    };
   }
 }
 
@@ -300,7 +315,8 @@ function handleConfigModeChange(mode) {
         if (!workspaceSystemModelConfigured) {
           llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
         } else {
-          llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+          llmWarningMessage.textContent =
+            'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
         }
       }
     }
@@ -368,7 +384,6 @@ async function generateAutoConfig() {
     if (fallback) {
       console.warn('Auto-config failed, using defaults.');
     }
-
   } catch (error) {
     console.error('Auto-config error:', error);
     autoConfigStatus.textContent = 'Failed';
@@ -465,13 +480,13 @@ function initializeAgentModalListeners() {
   const configModeAuto = document.getElementById('configModeAuto');
 
   if (configModeManual) {
-    configModeManual.addEventListener('change', function() {
+    configModeManual.addEventListener('change', function () {
       if (this.checked) handleConfigModeChange('manual');
     });
   }
 
   if (configModeAuto) {
-    configModeAuto.addEventListener('change', async function() {
+    configModeAuto.addEventListener('change', async function () {
       if (this.checked) {
         // Check LLM availability when switching to auto mode
         await checkLLMAvailability();
@@ -489,7 +504,7 @@ function initializeAgentModalListeners() {
   // Update model dropdown when agent type changes
   const typeSelect = document.getElementById('workspace-new-agent-type');
   if (typeSelect) {
-    typeSelect.addEventListener('change', function(e) {
+    typeSelect.addEventListener('change', function (e) {
       const modelSelect = document.getElementById('workspace-new-agent-model');
       if (modelSelect && workspaceAvailableProviders.length > 0) {
         populateWorkspaceModelSelect(modelSelect, e.target.value);
@@ -500,7 +515,7 @@ function initializeAgentModalListeners() {
   // Update temperature value display when slider changes
   const tempSlider = document.getElementById('workspace-new-agent-temperature');
   if (tempSlider) {
-    tempSlider.addEventListener('input', function(e) {
+    tempSlider.addEventListener('input', function (e) {
       const valueDisplay = document.getElementById('workspace-new-agent-temperature-value');
       if (valueDisplay) {
         valueDisplay.textContent = e.target.value;
@@ -511,7 +526,7 @@ function initializeAgentModalListeners() {
   // Create agent form submission
   const createAgentForm = document.getElementById('workspaceCreateAgentForm');
   if (createAgentForm) {
-    createAgentForm.addEventListener('submit', async function(e) {
+    createAgentForm.addEventListener('submit', async function (e) {
       e.preventDefault();
 
       const name = document.getElementById('workspace-new-agent-name').value.trim();
@@ -535,7 +550,9 @@ function initializeAgentModalListeners() {
 
       try {
         const requestBody = { name, type };
-        requestBody.allow_web_search = allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true;
+        requestBody.allow_web_search = allowWebSearchInput
+          ? Boolean(allowWebSearchInput.checked)
+          : true;
 
         if (model) {
           requestBody.model = model;

@@ -1,40 +1,90 @@
 <!-- Navigation Bar Component -->
-<nav class="navbar navbar-expand-lg modern-card p-3 mb-0" style="position: sticky; top: 0; z-index: 10002; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); border-radius: 0;">
+<nav
+  class="navbar navbar-expand-lg modern-card p-3 mb-0"
+  style="
+    position: sticky;
+    top: 0;
+    z-index: 10002;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 0;
+  "
+>
   <div class="container-fluid">
     <div class="d-flex align-items-center w-100">
       <!-- Sidebar Toggle -->
-      <button class="modern-btn modern-btn-secondary me-3" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">
+      <button
+        class="modern-btn modern-btn-secondary me-3"
+        type="button"
+        data-bs-toggle="offcanvas"
+        data-bs-target="#sidebar"
+        aria-controls="sidebar"
+      >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M3 12H21M3 6H21M3 18H21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path
+            d="M3 12H21M3 6H21M3 18H21"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
         Menu
       </button>
 
       <!-- Logo/Brand -->
-      <div class="navbar-brand fw-bold d-flex align-items-center me-auto" style="color: #d1d5db; font-size: 1.25rem;">
-        <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2" style="color: #d1d5db;">
-          <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
+      <div class="navbar-brand fw-bold d-flex align-items-center me-auto" style="color: #d1d5db; font-size: 1.25rem">
+        <svg
+          width="36"
+          height="36"
+          viewBox="0 0 1024 1024"
+          xmlns="http://www.w3.org/2000/svg"
+          class="me-2"
+          style="color: #d1d5db"
+        >
+          <path
+            d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
                L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
                L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
                L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474
                L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"
-            fill="currentColor"/>
+            fill="currentColor"
+          />
         </svg>
         {{.Title}}
       </div>
 
       <!-- Location Indicator -->
-      <div id="locationIndicator" class="d-flex align-items-center me-3 px-3 py-2 modern-card" style="background: var(--bg-primary); border: 1px solid var(--border-color);" title="Current location">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-2" style="color: var(--text-secondary);">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <div
+        id="locationIndicator"
+        class="d-flex align-items-center me-3 px-3 py-2 modern-card"
+        style="background: var(--bg-primary); border: 1px solid var(--border-color)"
+        title="Current location"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          class="me-2"
+          style="color: var(--text-secondary)"
+        >
+          <path
+            d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
-        <span class="fw-medium" style="color: var(--text-secondary); font-size: 0.875rem;">Loading...</span>
+        <span class="fw-medium" style="color: var(--text-secondary); font-size: 0.875rem">Loading...</span>
       </div>
 
       <!-- Theme Toggle -->
       <button class="modern-btn modern-btn-secondary" id="darkModeToggle" title="Toggle theme">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
         </svg>
         <span id="darkModeText">Dark</span>
       </button>

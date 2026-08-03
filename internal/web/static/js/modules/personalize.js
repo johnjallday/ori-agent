@@ -7,21 +7,66 @@
   // --- Data ---
 
   var INTERESTS = [
-    'coding', 'web-dev', 'mobile-dev', 'data-science', 'machine-learning',
-    'devops', 'cloud', 'security', 'databases', 'automation',
-    'design', 'writing', 'api-development', 'game-dev', 'embedded-systems'
+    'coding',
+    'web-dev',
+    'mobile-dev',
+    'data-science',
+    'machine-learning',
+    'devops',
+    'cloud',
+    'security',
+    'databases',
+    'automation',
+    'design',
+    'writing',
+    'api-development',
+    'game-dev',
+    'embedded-systems'
   ];
 
   var TOOLS = [
-    'Go', 'Python', 'JavaScript', 'TypeScript', 'Rust', 'Java', 'C++', 'Ruby',
-    'Docker', 'Kubernetes', 'PostgreSQL', 'MySQL', 'MongoDB', 'Redis',
-    'React', 'Vue', 'Node.js', 'Git', 'VS Code', 'Vim', 'Terraform', 'AWS', 'GCP', 'Azure'
+    'Go',
+    'Python',
+    'JavaScript',
+    'TypeScript',
+    'Rust',
+    'Java',
+    'C++',
+    'Ruby',
+    'Docker',
+    'Kubernetes',
+    'PostgreSQL',
+    'MySQL',
+    'MongoDB',
+    'Redis',
+    'React',
+    'Vue',
+    'Node.js',
+    'Git',
+    'VS Code',
+    'Vim',
+    'Terraform',
+    'AWS',
+    'GCP',
+    'Azure'
   ];
 
   var WORK_STYLES = [
-    { value: 'detailed', label: 'Detailed', description: 'Thorough explanations with examples and context' },
-    { value: 'concise', label: 'Concise', description: 'Brief, to-the-point responses focused on essentials' },
-    { value: 'formal', label: 'Formal', description: 'Professional tone with structured responses' },
+    {
+      value: 'detailed',
+      label: 'Detailed',
+      description: 'Thorough explanations with examples and context'
+    },
+    {
+      value: 'concise',
+      label: 'Concise',
+      description: 'Brief, to-the-point responses focused on essentials'
+    },
+    {
+      value: 'formal',
+      label: 'Formal',
+      description: 'Professional tone with structured responses'
+    },
     { value: 'casual', label: 'Casual', description: 'Friendly, conversational style' }
   ];
 
@@ -43,13 +88,13 @@
 
   function formatCategory(category) {
     var categories = {
-      'developer': 'Software Developer',
-      'devops': 'DevOps Engineer',
-      'designer': 'Designer',
-      'data_scientist': 'Data Scientist',
-      'writer': 'Writer / Content Creator',
-      'project_manager': 'Project Manager',
-      'general': 'General User'
+      developer: 'Software Developer',
+      devops: 'DevOps Engineer',
+      designer: 'Designer',
+      data_scientist: 'Data Scientist',
+      writer: 'Writer / Content Creator',
+      project_manager: 'Project Manager',
+      general: 'General User'
     };
     return categories[category] || category || 'General User';
   }
@@ -67,7 +112,9 @@
       toast.show();
     } else {
       toastEl.classList.add('show');
-      setTimeout(function () { toastEl.classList.remove('show'); }, 4000);
+      setTimeout(function () {
+        toastEl.classList.remove('show');
+      }, 4000);
     }
   }
 
@@ -81,9 +128,15 @@
     for (var i = 0; i < INTERESTS.length; i++) {
       var interest = INTERESTS[i];
       var isSelected = selectedInterests.indexOf(interest) !== -1;
-      var label = interest.replace(/-/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+      var label = interest.replace(/-/g, ' ').replace(/\b\w/g, function (c) {
+        return c.toUpperCase();
+      });
       html +=
-        '<button type="button" class="personalize-tag' + (isSelected ? ' active' : '') + '" data-interest="' + escapeHtml(interest) + '">' +
+        '<button type="button" class="personalize-tag' +
+        (isSelected ? ' active' : '') +
+        '" data-interest="' +
+        escapeHtml(interest) +
+        '">' +
         escapeHtml(label) +
         '</button>';
     }
@@ -123,7 +176,11 @@
       var tool = allTools[i];
       var isSelected = selectedTools.indexOf(tool) !== -1;
       html +=
-        '<button type="button" class="personalize-tag' + (isSelected ? ' active' : '') + '" data-tool="' + escapeHtml(tool) + '">' +
+        '<button type="button" class="personalize-tag' +
+        (isSelected ? ' active' : '') +
+        '" data-tool="' +
+        escapeHtml(tool) +
+        '">' +
         escapeHtml(tool) +
         '</button>';
     }
@@ -156,9 +213,19 @@
       var isSelected = selectedWorkStyle === ws.value;
       html +=
         '<div class="col-6 col-md-3">' +
-        '  <div class="personalize-card' + (isSelected ? ' active' : '') + '" data-workstyle="' + escapeHtml(ws.value) + '" style="cursor: pointer; padding: 1rem; border: 2px solid ' + (isSelected ? 'var(--primary-color)' : 'var(--border-color)') + '; border-radius: var(--radius-md); background: var(--bg-secondary); text-align: center; transition: border-color 0.2s;">' +
-        '    <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">' + escapeHtml(ws.label) + '</div>' +
-        '    <div style="font-size: 0.8rem; color: var(--text-secondary);">' + escapeHtml(ws.description) + '</div>' +
+        '  <div class="personalize-card' +
+        (isSelected ? ' active' : '') +
+        '" data-workstyle="' +
+        escapeHtml(ws.value) +
+        '" style="cursor: pointer; padding: 1rem; border: 2px solid ' +
+        (isSelected ? 'var(--primary-color)' : 'var(--border-color)') +
+        '; border-radius: var(--radius-md); background: var(--bg-secondary); text-align: center; transition: border-color 0.2s;">' +
+        '    <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">' +
+        escapeHtml(ws.label) +
+        '</div>' +
+        '    <div style="font-size: 0.8rem; color: var(--text-secondary);">' +
+        escapeHtml(ws.description) +
+        '</div>' +
         '  </div>' +
         '</div>';
     }
@@ -233,7 +300,10 @@
         }
 
         // Check if already personalized
-        if (existingProfile.personalized_at && existingProfile.personalized_at !== '0001-01-01T00:00:00Z') {
+        if (
+          existingProfile.personalized_at &&
+          existingProfile.personalized_at !== '0001-01-01T00:00:00Z'
+        ) {
           isAlreadyPersonalized = true;
         }
 
@@ -258,14 +328,15 @@
 
     btn.disabled = true;
     btn.innerHTML =
-      '<span class="spinner-border spinner-border-sm me-2" role="status"></span>' +
-      'Detecting...';
+      '<span class="spinner-border spinner-border-sm me-2" role="status"></span>' + 'Detecting...';
 
     fetch('/api/onboarding/detect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     })
-      .then(function (resp) { return resp.json(); })
+      .then(function (resp) {
+        return resp.json();
+      })
       .then(function (data) {
         var apps = (data && data.apps) || [];
         var listEl = document.getElementById('detectedAppsList');
@@ -274,12 +345,16 @@
           if (apps.length > 0) {
             var html = '';
             for (var i = 0; i < apps.length; i++) {
-              html += '<span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); font-weight: normal; font-size: 0.75rem;">' + escapeHtml(apps[i].name || apps[i]) + '</span>';
+              html +=
+                '<span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); font-weight: normal; font-size: 0.75rem;">' +
+                escapeHtml(apps[i].name || apps[i]) +
+                '</span>';
             }
             containerEl.innerHTML = html;
             listEl.classList.remove('d-none');
           } else {
-            containerEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.85rem;">No apps detected.</span>';
+            containerEl.innerHTML =
+              '<span style="color: var(--text-muted); font-size: 0.85rem;">No apps detected.</span>';
             listEl.classList.remove('d-none');
           }
         }
@@ -307,8 +382,7 @@
 
     btn.disabled = true;
     btn.innerHTML =
-      '<span class="spinner-border spinner-border-sm me-2" role="status"></span>' +
-      'Saving...';
+      '<span class="spinner-border spinner-border-sm me-2" role="status"></span>' + 'Saving...';
 
     fetch('/api/onboarding/personalize', {
       method: 'POST',
@@ -360,7 +434,9 @@
           '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">' +
           '<path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>' +
           '</svg>' +
-          '<span id="saveBtnText">' + (isAlreadyPersonalized ? 'Update Profile' : 'Save &amp; Earn 25 XP') + '</span>';
+          '<span id="saveBtnText">' +
+          (isAlreadyPersonalized ? 'Update Profile' : 'Save &amp; Earn 25 XP') +
+          '</span>';
       });
   }
 

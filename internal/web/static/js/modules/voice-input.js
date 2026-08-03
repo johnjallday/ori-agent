@@ -1,10 +1,12 @@
 // Voice Input Module
 // Provides push-to-talk voice input using Web Speech API and optional server transcription.
 
-(function() {
+(function () {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const speechSupported = Boolean(SpeechRecognition);
-  const mediaSupported = Boolean(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const mediaSupported = Boolean(
+    window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+  );
   const storageKey = 'voiceSettings';
   const defaultSettings = {
     provider: 'auto',
@@ -89,7 +91,7 @@
 
   function setStatus(context, message, state) {
     const targets = document.querySelectorAll(`[data-voice-status="${context}"]`);
-    targets.forEach((el) => {
+    targets.forEach(el => {
       el.textContent = message || '';
       el.classList.toggle('is-active', Boolean(message) && state !== 'error');
       el.classList.toggle('is-error', state === 'error');
@@ -123,7 +125,7 @@
 
   function releaseAudioStream(stream) {
     if (!stream) return;
-    stream.getTracks().forEach((track) => track.stop());
+    stream.getTracks().forEach(track => track.stop());
   }
 
   function finishSession(session) {
@@ -192,43 +194,46 @@
       return;
     }
 
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-      if (!activeSession || activeSession !== session || session.state !== 'recording') {
-        releaseAudioStream(stream);
-        return;
-      }
-
-      session.audioStream = stream;
-      const recorder = new MediaRecorder(stream);
-      session.mediaRecorder = recorder;
-      const chunks = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunks.push(event.data);
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then(stream => {
+        if (!activeSession || activeSession !== session || session.state !== 'recording') {
+          releaseAudioStream(stream);
+          return;
         }
-      };
 
-      recorder.onerror = () => {
-        notify('error', 'Audio recording failed.');
+        session.audioStream = stream;
+        const recorder = new MediaRecorder(stream);
+        session.mediaRecorder = recorder;
+        const chunks = [];
+
+        recorder.ondataavailable = event => {
+          if (event.data && event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+
+        recorder.onerror = () => {
+          notify('error', 'Audio recording failed.');
+          finishSession(session);
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+          sendTranscription(session, blob);
+        };
+
+        try {
+          recorder.start();
+        } catch (error) {
+          notify('error', 'Unable to start audio recording.');
+          finishSession(session);
+        }
+      })
+      .catch(() => {
+        notify('error', 'Microphone permission denied. Allow access to use voice input.');
         finishSession(session);
-      };
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-        sendTranscription(session, blob);
-      };
-
-      try {
-        recorder.start();
-      } catch (error) {
-        notify('error', 'Unable to start audio recording.');
-        finishSession(session);
-      }
-    }).catch(() => {
-      notify('error', 'Microphone permission denied. Allow access to use voice input.');
-      finishSession(session);
-    });
+      });
   }
 
   function resolveProvider(settings) {
@@ -298,8 +303,10 @@
 
     stopRecording();
 
-    const selectionStart = typeof target.selectionStart === 'number' ? target.selectionStart : target.value.length;
-    const selectionEnd = typeof target.selectionEnd === 'number' ? target.selectionEnd : target.value.length;
+    const selectionStart =
+      typeof target.selectionStart === 'number' ? target.selectionStart : target.value.length;
+    const selectionEnd =
+      typeof target.selectionEnd === 'number' ? target.selectionEnd : target.value.length;
     const before = target.value.slice(0, selectionStart);
     const after = target.value.slice(selectionEnd);
 
@@ -329,7 +336,7 @@
       recognition.lang = resolveLanguage(settings);
       session.recognition = recognition;
 
-      recognition.onresult = (event) => {
+      recognition.onresult = event => {
         if (!activeSession || activeSession !== session || session.state !== 'recording') return;
         let finalText = '';
         let interimText = '';
@@ -347,7 +354,7 @@
         updateTargetValue(session, `${finalText}${interimText}`.trim());
       };
 
-      recognition.onerror = (event) => {
+      recognition.onerror = event => {
         const message = speechErrorMessage(event.error);
         console.warn('Speech recognition error:', event.error);
         if (event.error && event.error !== 'no-speech') {
@@ -364,7 +371,8 @@
         }
         if (session.mode === 'toggle') {
           setTimeout(() => {
-            if (!activeSession || activeSession !== session || session.state !== 'recording') return;
+            if (!activeSession || activeSession !== session || session.state !== 'recording')
+              return;
             try {
               recognition.start();
             } catch (error) {
@@ -400,7 +408,7 @@
   }
 
   function attachButtonHandlers(button) {
-    button.addEventListener('pointerdown', (event) => {
+    button.addEventListener('pointerdown', event => {
       if (event.button && event.button !== 0) return;
       event.preventDefault();
       if (activeSession && activeSession.button === button && activeSession.mode === 'toggle') {
@@ -419,7 +427,7 @@
       startRecording(button);
     });
 
-    button.addEventListener('pointerup', (event) => {
+    button.addEventListener('pointerup', event => {
       const pointerId = button.dataset.voicePointerId;
       if (pointerId && event.pointerId != null && String(event.pointerId) === pointerId) {
         if (typeof button.releasePointerCapture === 'function') {
@@ -444,7 +452,7 @@
       stopRecording();
     });
 
-    button.addEventListener('pointercancel', (event) => {
+    button.addEventListener('pointercancel', event => {
       const pointerId = button.dataset.voicePointerId;
       if (pointerId && event.pointerId != null && String(event.pointerId) === pointerId) {
         if (typeof button.releasePointerCapture === 'function') {
@@ -467,11 +475,12 @@
     const settings = loadSettings();
     const buttons = getVoiceButtons();
     const provider = settings.provider || 'auto';
-    const supported = (provider === 'auto' && (speechSupported || mediaSupported))
-      || (provider === 'browser' && speechSupported)
-      || (provider === 'openai' && mediaSupported);
+    const supported =
+      (provider === 'auto' && (speechSupported || mediaSupported)) ||
+      (provider === 'browser' && speechSupported) ||
+      (provider === 'openai' && mediaSupported);
 
-    buttons.forEach((button) => {
+    buttons.forEach(button => {
       const disabled = settings.provider === 'off' || !supported;
       button.disabled = disabled;
       if (disabled) {

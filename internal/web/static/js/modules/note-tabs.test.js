@@ -19,7 +19,7 @@ const {
   moveTab,
   hydrate,
   allOpenNoteIds,
-  activeNoteIdFor,
+  activeNoteIdFor
 } = await import('./note-tabs.js');
 
 test('initialState: with no note', () => {
@@ -57,7 +57,7 @@ test('openTab: cleans repeated copies of an existing tab', () => {
   const s = {
     panes: [{ activeId: 'b', tabs: ['a', 'b', 'a'] }],
     splitMode: 'none',
-    focusedPaneIndex: 0,
+    focusedPaneIndex: 0
   };
   const s2 = openTab(s, 'a');
   assert.deepEqual(s2.panes[0].tabs, ['a', 'b']);
@@ -191,7 +191,7 @@ test('unsplit: noop when not split', () => {
 test('moveTab: cross-pane move removes from source and inserts in target', () => {
   let s = initialState('a');
   s = openTab(s, 'b'); // pane 0: [a,b]/b
-  s = splitRight(s);   // pane 1: [b]/b; focus = 1
+  s = splitRight(s); // pane 1: [b]/b; focus = 1
   s = openTab(s, 'c', 1); // pane 1: [b,c]/c
   // Move 'b' from pane 0 → pane 1 at index 0.
   s = moveTab(s, 0, 1, 1, 0);
@@ -222,7 +222,7 @@ test('moveTab: collapses split when source (right pane) empties', () => {
 test('moveTab: deduplicates if target already has the tab', () => {
   let s = initialState('a');
   s = openTab(s, 'b'); // pane 0: [a,b]
-  s = splitRight(s);   // pane 1: [b] (cloned active)
+  s = splitRight(s); // pane 1: [b] (cloned active)
   // Move 'b' from pane 0 → pane 1 at index 0. Target already has 'b';
   // result should still have a single 'b' in pane 1.
   s = moveTab(s, 0, 1, 1, 0);
@@ -318,10 +318,10 @@ test('hydrate: round-trips a valid two-pane state', () => {
   const saved = {
     panes: [
       { activeId: 'a', tabs: ['a', 'b'] },
-      { activeId: 'c', tabs: ['c'] },
+      { activeId: 'c', tabs: ['c'] }
     ],
     splitMode: 'horizontal',
-    focusedPaneIndex: 1,
+    focusedPaneIndex: 1
   };
   const s = hydrate(saved, null);
   assert.equal(s.panes.length, 2);
@@ -332,36 +332,48 @@ test('hydrate: round-trips a valid two-pane state', () => {
 });
 
 test('hydrate: deduplicates repeated tabs in a pane', () => {
-  const s = hydrate({
-    panes: [{ activeId: 'b', tabs: ['a', 'b', 'a', 'b'] }],
-  }, null);
+  const s = hydrate(
+    {
+      panes: [{ activeId: 'b', tabs: ['a', 'b', 'a', 'b'] }]
+    },
+    null
+  );
   assert.deepEqual(s.panes[0].tabs, ['a', 'b']);
   assert.equal(s.panes[0].activeId, 'b');
 });
 
 test('hydrate: clamps focusedPaneIndex when out of range', () => {
-  const s = hydrate({
-    panes: [{ activeId: 'a', tabs: ['a'] }],
-    focusedPaneIndex: 5,
-  }, 'fallback');
+  const s = hydrate(
+    {
+      panes: [{ activeId: 'a', tabs: ['a'] }],
+      focusedPaneIndex: 5
+    },
+    'fallback'
+  );
   assert.equal(s.focusedPaneIndex, 0);
 });
 
 test('hydrate: drops invalid activeId, falls back to first tab', () => {
-  const s = hydrate({
-    panes: [{ activeId: 'missing', tabs: ['a', 'b'] }],
-  }, null);
+  const s = hydrate(
+    {
+      panes: [{ activeId: 'missing', tabs: ['a', 'b'] }]
+    },
+    null
+  );
   assert.equal(s.panes[0].activeId, 'a');
 });
 
 test('hydrate: rejects too many panes', () => {
-  const s = hydrate({
-    panes: [
-      { activeId: 'a', tabs: ['a'] },
-      { activeId: 'b', tabs: ['b'] },
-      { activeId: 'c', tabs: ['c'] },
-    ],
-  }, 'fb');
+  const s = hydrate(
+    {
+      panes: [
+        { activeId: 'a', tabs: ['a'] },
+        { activeId: 'b', tabs: ['b'] },
+        { activeId: 'c', tabs: ['c'] }
+      ]
+    },
+    'fb'
+  );
   assert.equal(s.panes.length, 1);
   assert.equal(s.panes[0].activeId, 'fb');
 });

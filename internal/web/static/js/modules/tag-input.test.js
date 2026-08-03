@@ -9,7 +9,7 @@ const {
   filterSuggestions,
   topSuggestions,
   fetchTagPool,
-  clearTagPoolCache,
+  clearTagPoolCache
 } = await import('./tag-input.js');
 
 const pool = [
@@ -17,7 +17,7 @@ const pool = [
   { name: 'mixing', total: 5, counts: { workspaces: 1 } },
   { name: 'mastering', total: 5, counts: { notes: 5 } },
   { name: 'client', total: 2, counts: { sessions: 2 } },
-  { name: 'archive', total: 1, counts: { templates: 1 } },
+  { name: 'archive', total: 1, counts: { templates: 1 } }
 ];
 
 test('normalizeTagValue trims and lowercases', () => {
@@ -62,7 +62,10 @@ test('filterSuggestions with empty query returns nothing-filtered list by usage'
 });
 
 test('topSuggestions returns most-used tags excluding applied, capped at 10', () => {
-  const bigPool = Array.from({ length: 15 }, (_, i) => ({ name: `tag-${String(i).padStart(2, '0')}`, total: 100 - i }));
+  const bigPool = Array.from({ length: 15 }, (_, i) => ({
+    name: `tag-${String(i).padStart(2, '0')}`,
+    total: 100 - i
+  }));
   const names = topSuggestions(bigPool, { exclude: ['tag-00'] });
   assert.equal(names.length, 10);
   assert.equal(names[0], 'tag-01');

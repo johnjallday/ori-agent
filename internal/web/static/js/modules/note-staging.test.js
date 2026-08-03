@@ -13,7 +13,7 @@ const stagedCard = (overrides = {}) => ({
   output: overrides.output ?? 'NEW',
   originalText: overrides.originalText ?? 'OLD',
   action: 'rewrite',
-  ...overrides,
+  ...overrides
 });
 
 // =============================================================================
@@ -24,7 +24,7 @@ test('projectHunks: ignores cards that are not staged or not ready', () => {
   const cards = [
     stagedCard({ id: '1', staged: false }),
     stagedCard({ id: '2', status: 'loading' }),
-    stagedCard({ id: '3' }),
+    stagedCard({ id: '3' })
   ];
   const hunks = projectHunks(cards);
   assert.equal(hunks.length, 1);
@@ -35,16 +35,19 @@ test('projectHunks: ignores staged cards without a source range', () => {
   const hunks = projectHunks([
     stagedCard({ id: 'missing', sourceRange: null }),
     stagedCard({ id: 'invalid', sourceRange: { start: 5, end: 2 } }),
-    stagedCard({ id: 'ok', sourceRange: { start: 1, end: 3 } }),
+    stagedCard({ id: 'ok', sourceRange: { start: 1, end: 3 } })
   ]);
-  assert.deepEqual(hunks.map(h => h.id), ['ok']);
+  assert.deepEqual(
+    hunks.map(h => h.id),
+    ['ok']
+  );
   assert.deepEqual(hunks[0].sourceRange, { start: 1, end: 3 });
 });
 
 test('projectHunks: detects conflict on overlapping replace hunks', () => {
   const cards = [
     stagedCard({ id: 'a', sourceRange: { start: 0, end: 10 }, mode: 'replace' }),
-    stagedCard({ id: 'b', sourceRange: { start: 5, end: 15 }, mode: 'replace' }),
+    stagedCard({ id: 'b', sourceRange: { start: 5, end: 15 }, mode: 'replace' })
   ];
   const hunks = projectHunks(cards);
   assert.deepEqual(hunks[0].conflictsWith, ['b']);
@@ -54,7 +57,7 @@ test('projectHunks: detects conflict on overlapping replace hunks', () => {
 test('projectHunks: insert-before + insert-after at same offset do not conflict', () => {
   const cards = [
     stagedCard({ id: 'a', sourceRange: { start: 5, end: 10 }, mode: 'insert-before' }),
-    stagedCard({ id: 'b', sourceRange: { start: 5, end: 10 }, mode: 'insert-after' }),
+    stagedCard({ id: 'b', sourceRange: { start: 5, end: 10 }, mode: 'insert-after' })
   ];
   const hunks = projectHunks(cards);
   assert.deepEqual(hunks[0].conflictsWith, []);
@@ -64,7 +67,7 @@ test('projectHunks: insert-before + insert-after at same offset do not conflict'
 test('projectHunks: replace + overlapping insert flags conflict', () => {
   const cards = [
     stagedCard({ id: 'a', sourceRange: { start: 0, end: 10 }, mode: 'replace' }),
-    stagedCard({ id: 'b', sourceRange: { start: 5, end: 7 }, mode: 'insert-after' }),
+    stagedCard({ id: 'b', sourceRange: { start: 5, end: 7 }, mode: 'insert-after' })
   ];
   const hunks = projectHunks(cards);
   assert.equal(hunks[0].conflictsWith.length, 1);
@@ -77,12 +80,14 @@ test('projectHunks: replace + overlapping insert flags conflict', () => {
 
 test('applyHunks: single replace', () => {
   const src = 'Hello world';
-  const hunks = projectHunks([stagedCard({
-    sourceRange: { start: 6, end: 11 },
-    mode: 'replace',
-    originalText: 'world',
-    output: 'there',
-  })]);
+  const hunks = projectHunks([
+    stagedCard({
+      sourceRange: { start: 6, end: 11 },
+      mode: 'replace',
+      originalText: 'world',
+      output: 'there'
+    })
+  ]);
   assert.equal(applyHunks(src, hunks).content, 'Hello there');
 });
 
@@ -90,8 +95,20 @@ test('applyHunks: multiple non-overlapping hunks (replace + insert-after)', () =
   const src = 'A B C D E';
   // Replace "C" with "Z" and insert " — note" after the same position.
   const hunks = projectHunks([
-    stagedCard({ id: 'r', sourceRange: { start: 4, end: 5 }, mode: 'replace', originalText: 'C', output: 'Z' }),
-    stagedCard({ id: 'i', sourceRange: { start: 0, end: 1 }, mode: 'insert-after', originalText: 'A', output: 'note' }),
+    stagedCard({
+      id: 'r',
+      sourceRange: { start: 4, end: 5 },
+      mode: 'replace',
+      originalText: 'C',
+      output: 'Z'
+    }),
+    stagedCard({
+      id: 'i',
+      sourceRange: { start: 0, end: 1 },
+      mode: 'insert-after',
+      originalText: 'A',
+      output: 'note'
+    })
   ]);
   const out = applyHunks(src, hunks);
   // Bottom-up: replace at 4-5 first, then insert-after at 0-1.
@@ -102,8 +119,20 @@ test('applyHunks: multiple non-overlapping hunks (replace + insert-after)', () =
 test('applyHunks: insert-before vs insert-after at distinct offsets', () => {
   const src = 'one two three';
   const hunks = projectHunks([
-    stagedCard({ id: 'b', sourceRange: { start: 4, end: 7 }, mode: 'insert-before', originalText: 'two', output: 'BEFORE' }),
-    stagedCard({ id: 'a', sourceRange: { start: 8, end: 13 }, mode: 'insert-after', originalText: 'three', output: 'AFTER' }),
+    stagedCard({
+      id: 'b',
+      sourceRange: { start: 4, end: 7 },
+      mode: 'insert-before',
+      originalText: 'two',
+      output: 'BEFORE'
+    }),
+    stagedCard({
+      id: 'a',
+      sourceRange: { start: 8, end: 13 },
+      mode: 'insert-after',
+      originalText: 'three',
+      output: 'AFTER'
+    })
   ]);
   const out = applyHunks(src, hunks).content;
   assert.equal(out, 'one BEFORE\n\ntwo three\n\nAFTER');
@@ -111,12 +140,14 @@ test('applyHunks: insert-before vs insert-after at distinct offsets', () => {
 
 test('applyHunks: stale source range falls back to insert at start', () => {
   const src = 'something else entirely';
-  const hunks = projectHunks([stagedCard({
-    sourceRange: { start: 0, end: 5 },
-    mode: 'replace',
-    originalText: 'OLD',  // doesn't match the actual slice "somet"
-    output: 'NEW',
-  })]);
+  const hunks = projectHunks([
+    stagedCard({
+      sourceRange: { start: 0, end: 5 },
+      mode: 'replace',
+      originalText: 'OLD', // doesn't match the actual slice "somet"
+      output: 'NEW'
+    })
+  ]);
   const out = applyHunks(src, hunks);
   assert.equal(out.applied.length, 1);
   assert.equal(out.skipped.length, 1);
@@ -135,8 +166,20 @@ test('applyHunks: respects bottom-up ordering (offsets remain valid)', () => {
   // Two replaces — if applied top-down, the second one's offsets would be off.
   const src = '0123456789';
   const hunks = projectHunks([
-    stagedCard({ id: 'a', sourceRange: { start: 0, end: 2 }, mode: 'replace', originalText: '01', output: 'AA' }),
-    stagedCard({ id: 'b', sourceRange: { start: 5, end: 7 }, mode: 'replace', originalText: '56', output: 'BB' }),
+    stagedCard({
+      id: 'a',
+      sourceRange: { start: 0, end: 2 },
+      mode: 'replace',
+      originalText: '01',
+      output: 'AA'
+    }),
+    stagedCard({
+      id: 'b',
+      sourceRange: { start: 5, end: 7 },
+      mode: 'replace',
+      originalText: '56',
+      output: 'BB'
+    })
   ]);
   assert.equal(applyHunks(src, hunks).content, 'AA234BB789');
 });
@@ -150,8 +193,8 @@ test('diffLines: replace produces removed-then-added lines', () => {
   assert.deepEqual(lines, [
     { kind: 'removed', text: 'a' },
     { kind: 'removed', text: 'b' },
-    { kind: 'added',   text: 'A' },
-    { kind: 'added',   text: 'B' },
+    { kind: 'added', text: 'A' },
+    { kind: 'added', text: 'B' }
   ]);
 });
 
@@ -164,6 +207,6 @@ test('diffLines: insert-after yields only added lines', () => {
   const lines = diffLines('original', 'one\ntwo', 'insert-after');
   assert.deepEqual(lines, [
     { kind: 'added', text: 'one' },
-    { kind: 'added', text: 'two' },
+    { kind: 'added', text: 'two' }
   ]);
 });

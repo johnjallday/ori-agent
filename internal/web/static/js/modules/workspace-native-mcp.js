@@ -22,7 +22,7 @@ export class WorkspaceNativeMCPManager {
     const container = document.getElementById('workspace-detail-native-mcp');
     if (!container) return;
     this.bound = true;
-    container.addEventListener('change', (event) => {
+    container.addEventListener('change', event => {
       const target = event.target;
       if (!target || target.type !== 'checkbox') return;
       const wsId = this.workspaceId;
@@ -32,7 +32,7 @@ export class WorkspaceNativeMCPManager {
       } else if (target.dataset && target.dataset.agent) {
         this.patch(
           `/api/workspaces/${encodeURIComponent(wsId)}/agents/${encodeURIComponent(target.dataset.agent)}/native-mcp`,
-          target.checked,
+          target.checked
         );
       }
     });
@@ -62,7 +62,7 @@ export class WorkspaceNativeMCPManager {
     if (!container || !wsToggle || !agentsEl) return;
 
     const cliAgents = Array.isArray(data?.agents)
-      ? data.agents.filter((a) => a && a.is_cli_provider)
+      ? data.agents.filter(a => a && a.is_cli_provider)
       : [];
 
     // Only surface the opt-in when a CLI-provider agent can actually use it.
@@ -75,11 +75,11 @@ export class WorkspaceNativeMCPManager {
     wsToggle.checked = !!data.workspace_enabled;
     agentsEl.innerHTML = cliAgents
       .map(
-        (a) => `
+        a => `
         <label class="workspace-detail-native-mcp-agent">
           <input type="checkbox" class="form-check-input" data-agent="${escapeAttr(a.name)}" ${a.enabled ? 'checked' : ''}>
           <span>${escapeHtml(a.name)} <small class="text-muted">(${escapeHtml(a.provider || 'unknown')})</small></span>
-        </label>`,
+        </label>`
       )
       .join('');
   }
@@ -89,7 +89,7 @@ export class WorkspaceNativeMCPManager {
       const res = await fetch(url, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: !!enabled }),
+        body: JSON.stringify({ enabled: !!enabled })
       });
       if (!res.ok) {
         console.warn('native-MCP update failed:', res.status);

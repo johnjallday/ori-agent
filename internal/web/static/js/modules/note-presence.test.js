@@ -6,7 +6,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 class FakeBus {
-  constructor() { this.channels = new Map(); }
+  constructor() {
+    this.channels = new Map();
+  }
   register(name, ch) {
     if (!this.channels.has(name)) this.channels.set(name, new Set());
     this.channels.get(name).add(ch);
@@ -20,7 +22,7 @@ class FakeBus {
       const cloned = JSON.parse(JSON.stringify(message));
       // Deliver async so it mirrors real BroadcastChannel ordering.
       setImmediate(() => {
-        ch.listeners.forEach((fn) => fn({ data: cloned }));
+        ch.listeners.forEach(fn => fn({ data: cloned }));
       });
     }
   }
@@ -33,13 +35,19 @@ class FakeChannel {
     this.listeners = new Set();
     bus.register(name, this);
   }
-  addEventListener(type, fn) { if (type === 'message') this.listeners.add(fn); }
-  postMessage(msg) { this.bus.post(this.name, this, msg); }
+  addEventListener(type, fn) {
+    if (type === 'message') this.listeners.add(fn);
+  }
+  postMessage(msg) {
+    this.bus.post(this.name, this, msg);
+  }
 }
 
 async function setupTab(bus) {
   // Each "tab" is its own fresh module instance.
-  globalThis.BroadcastChannel = function (name) { return new FakeChannel(name, bus); };
+  globalThis.BroadcastChannel = function (name) {
+    return new FakeChannel(name, bus);
+  };
   globalThis.window = globalThis;
   // Bust the module cache by appending a unique query (ESM doesn't allow this
   // directly — instead, we re-import via a dynamic import + tiny eval-style

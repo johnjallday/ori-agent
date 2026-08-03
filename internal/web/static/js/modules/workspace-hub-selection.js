@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-selection
  */
-(function() {
+(function () {
   'use strict';
 
   /**

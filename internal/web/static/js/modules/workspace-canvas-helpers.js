@@ -53,12 +53,13 @@ function showTaskDetails(task) {
   // Show panel and populate immediately
   panel.style.display = 'block';
 
-  const statusBadge = {
-    'pending': '<span class="badge bg-warning">Pending</span>',
-    'in_progress': '<span class="badge bg-primary">In Progress</span>',
-    'completed': '<span class="badge bg-success">Completed</span>',
-    'failed': '<span class="badge bg-danger">Failed</span>'
-  }[task.status] || '<span class="badge bg-secondary">Unknown</span>';
+  const statusBadge =
+    {
+      pending: '<span class="badge bg-warning">Pending</span>',
+      in_progress: '<span class="badge bg-primary">In Progress</span>',
+      completed: '<span class="badge bg-success">Completed</span>',
+      failed: '<span class="badge bg-danger">Failed</span>'
+    }[task.status] || '<span class="badge bg-secondary">Unknown</span>';
 
   // Check if this is a combiner task
   const isCombinerTask = task.combiner_type || task.combinerType;
@@ -68,14 +69,21 @@ function showTaskDetails(task) {
   if (isCombinerTask) {
     // Combiner task details
     const combinerTypes = {
-      'merge': { icon: '🔀', name: 'Merge', description: 'Combines multiple inputs into a single context' },
-      'sequence': { icon: '⛓️', name: 'Sequence', description: 'Executes inputs in order' },
-      'parallel': { icon: '⚡', name: 'Parallel', description: 'Runs all inputs simultaneously' },
-      'vote': { icon: '🗳️', name: 'Vote', description: 'Selects best result via voting' }
+      merge: {
+        icon: '🔀',
+        name: 'Merge',
+        description: 'Combines multiple inputs into a single context'
+      },
+      sequence: { icon: '⛓️', name: 'Sequence', description: 'Executes inputs in order' },
+      parallel: { icon: '⚡', name: 'Parallel', description: 'Runs all inputs simultaneously' },
+      vote: { icon: '🗳️', name: 'Vote', description: 'Selects best result via voting' }
     };
 
-    const combinerType = combinerTypes[task.combiner_type || task.combinerType] ||
-                        { icon: '🔧', name: 'Combiner', description: 'Custom combiner' };
+    const combinerType = combinerTypes[task.combiner_type || task.combinerType] || {
+      icon: '🔧',
+      name: 'Combiner',
+      description: 'Custom combiner'
+    };
 
     html = `
       <div class="mb-3">
@@ -87,19 +95,26 @@ function showTaskDetails(task) {
         <strong style="color: var(--text-primary);">Status:</strong>
         <div>${statusBadge}</div>
       </div>
-      ${task.to ? `
+      ${
+        task.to
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Assigned To:</strong>
           <div style="color: var(--text-secondary);">${task.to}</div>
         </div>
-      ` : ''}
-      ${task.input_task_ids && task.input_task_ids.length > 0 ? `
+      `
+          : ''
+      }
+      ${
+        task.input_task_ids && task.input_task_ids.length > 0
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Input Tasks:</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
-            ${task.input_task_ids.map((id, idx) => {
-    const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
-    return `
+            ${task.input_task_ids
+              .map((id, idx) => {
+                const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
+                return `
                 <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
                   <span>🔗 Input ${idx + 1}: ${inputTask ? inputTask.description.substring(0, 30) : id.substring(0, 8)}...</span>
                   <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
@@ -110,22 +125,33 @@ function showTaskDetails(task) {
                   </button>
                 </div>
               `;
-  }).join('')}
+              })
+              .join('')}
           </div>
         </div>
-      ` : ''}
-      ${task.result_combination_mode || task.resultCombinationMode ? `
+      `
+          : ''
+      }
+      ${
+        task.result_combination_mode || task.resultCombinationMode
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Combination Mode:</strong>
           <div style="color: var(--text-secondary);">${task.result_combination_mode || task.resultCombinationMode}</div>
         </div>
-      ` : ''}
-      ${task.result ? `
+      `
+          : ''
+      }
+      ${
+        task.result
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Combined Output:</strong>
           <div style="color: var(--text-primary); white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; background: #0a0f1a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); max-height: 200px; overflow-y: auto;">${task.result}</div>
         </div>
-      ` : ''}
+      `
+          : ''
+      }
       <div class="mb-3">
         <button class="btn btn-sm btn-primary w-100 mb-2" onclick="addCombinerInput('${task.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -154,9 +180,8 @@ function showTaskDetails(task) {
     let combinerAssignment = '';
     let combinersUsingThisTask = [];
     if (window.agentCanvas && window.agentCanvas.state && window.agentCanvas.state.tasks) {
-      combinersUsingThisTask = window.agentCanvas.state.tasks.filter(t =>
-        (t.combiner_type || t.combinerType) &&
-        (t.input_task_ids || []).includes(task.id)
+      combinersUsingThisTask = window.agentCanvas.state.tasks.filter(
+        t => (t.combiner_type || t.combinerType) && (t.input_task_ids || []).includes(task.id)
       );
 
       if (combinersUsingThisTask.length > 0) {
@@ -185,13 +210,16 @@ function showTaskDetails(task) {
         <strong style="color: var(--text-primary);">Status:</strong>
         <div>${statusBadge}</div>
       </div>
-      ${task.input_task_ids && task.input_task_ids.length > 0 ? `
+      ${
+        task.input_task_ids && task.input_task_ids.length > 0
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Input Tasks (${task.input_task_ids.length}):</strong>
           <div style="color: var(--text-secondary); font-size: 0.85rem;">
-            ${task.input_task_ids.map((id, idx) => {
-    const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
-    return `
+            ${task.input_task_ids
+              .map((id, idx) => {
+                const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
+                return `
                 <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
                   <span>🔗 ${inputTask ? inputTask.description : id.substring(0, 8) + '...'}</span>
                   <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
@@ -202,7 +230,8 @@ function showTaskDetails(task) {
                   </button>
                 </div>
               `;
-  }).join('')}
+              })
+              .join('')}
           </div>
           <button class="btn btn-sm btn-outline-primary mt-2 w-100" onclick="addTaskInput('${task.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -212,7 +241,8 @@ function showTaskDetails(task) {
             Add Another Input
           </button>
         </div>
-      ` : `
+      `
+          : `
         <div class="mb-3">
           <button class="btn btn-sm btn-outline-primary w-100" onclick="addTaskInput('${task.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -222,88 +252,93 @@ function showTaskDetails(task) {
             Add Input Task
           </button>
         </div>
-      `}
+      `
+      }
       ${combinerAssignment}
       ${(() => {
-    // Determine what to show for "Assigned To"
-    let assignedTo = null;
+        // Determine what to show for "Assigned To"
+        let assignedTo = null;
 
-    // Priority 1: If task has a regular agent assignment (not "unassigned")
-    if (task.to && task.to !== 'unassigned') {
-      // Try to find the specific agent node instance
-      const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+        // Priority 1: If task has a regular agent assignment (not "unassigned")
+        if (task.to && task.to !== 'unassigned') {
+          // Try to find the specific agent node instance
+          const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
 
-      if (window.agentCanvas && window.agentCanvas.agents) {
-        let agentNode = null;
+          if (window.agentCanvas && window.agentCanvas.agents) {
+            let agentNode = null;
 
-        // First, try to find by nodeId (for tasks assigned after nodeId feature)
-        if (assignedNodeId) {
-          agentNode = window.agentCanvas.agents.find(a => a.nodeId === assignedNodeId);
-        }
+            // First, try to find by nodeId (for tasks assigned after nodeId feature)
+            if (assignedNodeId) {
+              agentNode = window.agentCanvas.agents.find(a => a.nodeId === assignedNodeId);
+            }
 
-        // If no nodeId or not found, try to match by agent name (for old tasks)
-        if (!agentNode) {
-          // Find all agents with matching name
-          const matchingAgents = window.agentCanvas.agents.filter(a => a.name === task.to);
-          if (matchingAgents.length > 0) {
-            // Use the first matching agent (by instance number)
-            matchingAgents.sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
-            agentNode = matchingAgents[0];
+            // If no nodeId or not found, try to match by agent name (for old tasks)
+            if (!agentNode) {
+              // Find all agents with matching name
+              const matchingAgents = window.agentCanvas.agents.filter(a => a.name === task.to);
+              if (matchingAgents.length > 0) {
+                // Use the first matching agent (by instance number)
+                matchingAgents.sort((a, b) => (a.instanceNumber || 0) - (b.instanceNumber || 0));
+                agentNode = matchingAgents[0];
+              }
+            }
+
+            if (agentNode && agentNode.instanceNumber) {
+              // Show agent name with instance number (e.g., "default #1")
+              assignedTo = `${agentNode.name} #${agentNode.instanceNumber}`;
+            } else if (agentNode) {
+              // Agent found but no instance number
+              assignedTo = agentNode.name;
+            } else {
+              // No matching agent node found, show agent name
+              assignedTo = task.to;
+            }
+          } else {
+            // Canvas not available, just show agent name
+            assignedTo = task.to;
           }
         }
-
-        if (agentNode && agentNode.instanceNumber) {
-          // Show agent name with instance number (e.g., "default #1")
-          assignedTo = `${agentNode.name} #${agentNode.instanceNumber}`;
-        } else if (agentNode) {
-          // Agent found but no instance number
-          assignedTo = agentNode.name;
-        } else {
-          // No matching agent node found, show agent name
-          assignedTo = task.to;
+        // Priority 2: If task is feeding into a combiner, show combiner name
+        else if (combinersUsingThisTask.length > 0) {
+          const combinerNames = combinersUsingThisTask.map(c => c.description || c.id).join(', ');
+          assignedTo = `<span style="color: #8b5cf6;">🔀 ${combinerNames}</span>`;
         }
-      } else {
-        // Canvas not available, just show agent name
-        assignedTo = task.to;
-      }
-    }
-    // Priority 2: If task is feeding into a combiner, show combiner name
-    else if (combinersUsingThisTask.length > 0) {
-      const combinerNames = combinersUsingThisTask.map(c => c.description || c.id).join(', ');
-      assignedTo = `<span style="color: #8b5cf6;">🔀 ${combinerNames}</span>`;
-    }
 
-    // Only show "Assigned To" if we have something to show
-    return assignedTo ? `
+        // Only show "Assigned To" if we have something to show
+        return assignedTo
+          ? `
           <div class="mb-3">
             <strong style="color: var(--text-primary);">Assigned To:</strong>
             <div style="color: var(--text-secondary);">${assignedTo}</div>
           </div>
-        ` : '';
-  })()}
+        `
+          : '';
+      })()}
       ${(() => {
-    // Show schedule info if task has a schedule
-    if (!task.schedule) return '';
+        // Show schedule info if task has a schedule
+        if (!task.schedule) return '';
 
-    const schedule = task.schedule;
-    const scheduleType = schedule.type || 'unknown';
-    let scheduleDesc = '';
-    if (scheduleType === 'interval' && schedule.interval) {
-      const mins = Math.floor(schedule.interval / 60000000000);
-      scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
-    } else if (scheduleType === 'cron' && schedule.cron_expression) {
-      scheduleDesc = `Cron: ${schedule.cron_expression}`;
-    } else if (scheduleType === 'daily') {
-      scheduleDesc = `Daily at ${schedule.time_of_day || '00:00'}`;
-    } else if (scheduleType === 'weekly') {
-      scheduleDesc = `Weekly on ${schedule.day_of_week || 'Monday'}`;
-    } else if (scheduleType === 'once') {
-      scheduleDesc = `Once at ${schedule.run_at ? new Date(schedule.run_at).toLocaleString() : 'N/A'}`;
-    }
-    const nextRun = task.next_run ? new Date(task.next_run).toLocaleString() : 'N/A';
-    const lastRun = task.last_scheduled_run ? new Date(task.last_scheduled_run).toLocaleString() : 'Never';
+        const schedule = task.schedule;
+        const scheduleType = schedule.type || 'unknown';
+        let scheduleDesc = '';
+        if (scheduleType === 'interval' && schedule.interval) {
+          const mins = Math.floor(schedule.interval / 60000000000);
+          scheduleDesc = `Every ${mins} minute${mins !== 1 ? 's' : ''}`;
+        } else if (scheduleType === 'cron' && schedule.cron_expression) {
+          scheduleDesc = `Cron: ${schedule.cron_expression}`;
+        } else if (scheduleType === 'daily') {
+          scheduleDesc = `Daily at ${schedule.time_of_day || '00:00'}`;
+        } else if (scheduleType === 'weekly') {
+          scheduleDesc = `Weekly on ${schedule.day_of_week || 'Monday'}`;
+        } else if (scheduleType === 'once') {
+          scheduleDesc = `Once at ${schedule.run_at ? new Date(schedule.run_at).toLocaleString() : 'N/A'}`;
+        }
+        const nextRun = task.next_run ? new Date(task.next_run).toLocaleString() : 'N/A';
+        const lastRun = task.last_scheduled_run
+          ? new Date(task.last_scheduled_run).toLocaleString()
+          : 'Never';
 
-    return `
+        return `
           <div class="mb-3">
             <div class="collapsible-header" onclick="this.parentElement.classList.toggle('expanded')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(139, 92, 246, 0.1); border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
               <span style="color: #8b5cf6; font-weight: 600;">
@@ -330,21 +365,22 @@ function showTaskDetails(task) {
             .expanded .collapse-icon { transform: rotate(180deg); }
           </style>
         `;
-  })()}
+      })()}
       ${(() => {
-    // Find store node connected to this task's agent
-    const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
-    if (!assignedNodeId) return '';
+        // Find store node connected to this task's agent
+        const assignedNodeId = task.assigned_node_id || task.assignedNodeId;
+        if (!assignedNodeId) return '';
 
-    const storeNodes = window.agentCanvas?.state?.storeNodes || [];
-    const store = storeNodes.find(s => s.agent_node_id === assignedNodeId);
-    if (!store) return '';
+        const storeNodes = window.agentCanvas?.state?.storeNodes || [];
+        const store = storeNodes.find(s => s.agent_node_id === assignedNodeId);
+        if (!store) return '';
 
-    const lastWrite = store.last_write_time && store.last_write_time !== '0001-01-01T00:00:00Z'
-      ? new Date(store.last_write_time).toLocaleString()
-      : 'Never';
+        const lastWrite =
+          store.last_write_time && store.last_write_time !== '0001-01-01T00:00:00Z'
+            ? new Date(store.last_write_time).toLocaleString()
+            : 'Never';
 
-    return `
+        return `
           <div class="mb-3">
             <div class="collapsible-header-store" onclick="this.parentElement.classList.toggle('expanded-store')" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 8px; background: rgba(20, 184, 166, 0.1); border-radius: 6px; border: 1px solid rgba(20, 184, 166, 0.3);">
               <span style="color: #14b8a6; font-weight: 600;">
@@ -373,25 +409,37 @@ function showTaskDetails(task) {
             .expanded-store .collapse-icon-store { transform: rotate(180deg); }
           </style>
         `;
-  })()}
-      ${task.result ? `
+      })()}
+      ${
+        task.result
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Result:</strong>
           <div style="color: var(--text-primary); white-space: pre-wrap; font-family: monospace; font-size: 0.85rem; background: #0a0f1a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color); max-height: 200px; overflow-y: auto;">${task.result}</div>
         </div>
-      ` : ''}
-      ${task.created_at ? `
+      `
+          : ''
+      }
+      ${
+        task.created_at
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Created:</strong>
           <div style="color: var(--text-secondary); font-size: 0.8rem;">${new Date(task.created_at).toLocaleString()}</div>
         </div>
-      ` : ''}
-      ${task.completed_at ? `
+      `
+          : ''
+      }
+      ${
+        task.completed_at
+          ? `
         <div class="mb-3">
           <strong style="color: var(--text-primary);">Completed:</strong>
           <div style="color: var(--text-secondary); font-size: 0.8rem;">${new Date(task.completed_at).toLocaleString()}</div>
         </div>
-      ` : ''}
+      `
+          : ''
+      }
     `;
   }
 
@@ -407,9 +455,8 @@ function showTaskDetails(task) {
   const unassignBtn = document.getElementById('unassign-task-btn');
   if (unassignBtn) {
     // Check if this task is feeding into a combiner
-    const isCombinerInput = window.agentCanvas?.state?.tasks?.some(t =>
-      (t.combiner_type || t.combinerType) &&
-      (t.input_task_ids || []).includes(task.id)
+    const isCombinerInput = window.agentCanvas?.state?.tasks?.some(
+      t => (t.combiner_type || t.combinerType) && (t.input_task_ids || []).includes(task.id)
     );
 
     // Show button only if task is assigned to an agent (not empty, not 'unassigned', and not a combiner input)
@@ -466,9 +513,9 @@ function showAttachmentDetails(att) {
   const typeLabel = (att.type || 'other').toUpperCase();
   const fileMeta = att.file || att.file_meta;
   const bodyHtml = att.body
-    ? ((window.marked && window.DOMPurify)
-        ? window.DOMPurify.sanitize(window.marked.parse(att.body))
-        : `<pre style="white-space: pre-wrap; margin:0;">${escapeHTML(att.body)}</pre>`)
+    ? window.marked && window.DOMPurify
+      ? window.DOMPurify.sanitize(window.marked.parse(att.body))
+      : `<pre style="white-space: pre-wrap; margin:0;">${escapeHTML(att.body)}</pre>`
     : '<div class="text-muted" style="font-size: 0.85rem;">No body</div>';
 
   const linkHtml = att.link_url
@@ -476,11 +523,12 @@ function showAttachmentDetails(att) {
     : '<span class="text-muted" style="font-size: 0.85rem;">No link</span>';
 
   // Helper function to check if URL is a web URL (http/https)
-  const isWebUrl = (url) => url && (url.startsWith('http://') || url.startsWith('https://'));
+  const isWebUrl = url => url && (url.startsWith('http://') || url.startsWith('https://'));
 
-  const fileHtml = fileMeta && (fileMeta.name || fileMeta.url)
-    ? `<div style="font-size: 0.85rem;">${fileMeta.name || 'File'}${fileMeta.size ? ` • ${(fileMeta.size/1024).toFixed(1)} KB` : ''}${fileMeta.url ? (isWebUrl(fileMeta.url) ? ` • <a href="${fileMeta.url}" target="_blank" rel="noopener">open</a>` : ` • <span style="color: var(--text-secondary); font-family: monospace;">${fileMeta.url}</span>`) : ''}</div>`
-    : '<span class="text-muted" style="font-size: 0.85rem;">No file</span>';
+  const fileHtml =
+    fileMeta && (fileMeta.name || fileMeta.url)
+      ? `<div style="font-size: 0.85rem;">${fileMeta.name || 'File'}${fileMeta.size ? ` • ${(fileMeta.size / 1024).toFixed(1)} KB` : ''}${fileMeta.url ? (isWebUrl(fileMeta.url) ? ` • <a href="${fileMeta.url}" target="_blank" rel="noopener">open</a>` : ` • <span style="color: var(--text-secondary); font-family: monospace;">${fileMeta.url}</span>`) : ''}</div>`
+      : '<span class="text-muted" style="font-size: 0.85rem;">No file</span>';
 
   const created = att.created_at ? new Date(att.created_at).toLocaleString() : '—';
   const updated = att.updated_at ? new Date(att.updated_at).toLocaleString() : '—';
@@ -575,17 +623,29 @@ function showCombinerDetails(combiner) {
 
   // Get combiner type info
   const typeInfo = {
-    'merge': { icon: '🔀', name: 'Merge', description: 'Combines multiple inputs into a single context' },
-    'sequence': { icon: '⛓️', name: 'Sequence', description: 'Executes inputs in order, each seeing previous results' },
-    'parallel': { icon: '⚡', name: 'Parallel', description: 'Runs all inputs simultaneously' }
+    merge: {
+      icon: '🔀',
+      name: 'Merge',
+      description: 'Combines multiple inputs into a single context'
+    },
+    sequence: {
+      icon: '⛓️',
+      name: 'Sequence',
+      description: 'Executes inputs in order, each seeing previous results'
+    },
+    parallel: { icon: '⚡', name: 'Parallel', description: 'Runs all inputs simultaneously' }
   };
 
-  const info = typeInfo[combiner.combinerType] || { icon: '🔧', name: 'Combiner', description: 'Combines inputs' };
+  const info = typeInfo[combiner.combinerType] || {
+    icon: '🔧',
+    name: 'Combiner',
+    description: 'Combines inputs'
+  };
 
   // Get connected tasks
   const connections = window.agentCanvas?.state?.connections || [];
-  const inputConnections = connections.filter(c =>
-    c.to === combiner.id && c.toPort && c.toPort.startsWith('input-')
+  const inputConnections = connections.filter(
+    c => c.to === combiner.id && c.toPort && c.toPort.startsWith('input-')
   );
 
   const html = `
@@ -605,24 +665,36 @@ function showCombinerDetails(combiner) {
       <strong style="color: var(--text-primary);">Input Ports:</strong>
       <div style="color: var(--text-secondary);">${combiner.inputPorts?.length || 0} ports</div>
     </div>
-    ${inputConnections.length > 0 ? `
+    ${
+      inputConnections.length > 0
+        ? `
       <div class="mb-3">
         <strong style="color: var(--text-primary);">Connected Inputs:</strong>
         <div style="color: var(--text-secondary); font-size: 0.85rem;">
-          ${inputConnections.map((c, i) => `
+          ${inputConnections
+            .map(
+              (c, i) => `
             <div style="padding: 5px 0;">
               ${i + 1}. Port ${c.toPort.replace('input-', '')} ← ${c.from}
             </div>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
       </div>
-    ` : ''}
-    ${combiner.taskId ? `
+    `
+        : ''
+    }
+    ${
+      combiner.taskId
+        ? `
       <div class="mb-3">
         <strong style="color: var(--text-primary);">Associated Task:</strong>
         <div style="color: var(--text-secondary); font-size: 0.85rem; font-family: monospace;">${combiner.taskId.substring(0, 8)}...</div>
       </div>
-    ` : ''}
+    `
+        : ''
+    }
   `;
 
   content.innerHTML = html;
@@ -643,7 +715,8 @@ function hideCombinerDetails() {
  */
 function showAddTaskModal() {
   // Get workspace ID from canvas (multiple possible sources)
-  const workspaceId = window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
+  const workspaceId =
+    window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
   if (!workspaceId) {
     console.error('No workspace ID available for creating task');
     alert('Unable to create task: workspace not loaded');
@@ -693,7 +766,7 @@ function guessAttachmentType(body, link, fileMeta) {
   const lowerName = (fileMeta?.name || '').toLowerCase();
   const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.svg'];
 
-  const isImage = (src) => imageExts.some(ext => src.endsWith(ext));
+  const isImage = src => imageExts.some(ext => src.endsWith(ext));
 
   if (fileMeta && isImage(lowerName)) return 'image';
   if (lowerLink && isImage(lowerLink)) return 'image';
@@ -724,21 +797,27 @@ async function editAttachment(attachmentId) {
   const title = prompt('Title', existing.title || '') ?? existing.title;
   const body = prompt('Body (markdown ok)', existing.body || '') ?? existing.body;
   const link = prompt('Link URL', existing.link_url || '') ?? existing.link_url;
-  const filePath = prompt('File path/URL', (existing.file || existing.file_meta || {}).url || '') || '';
-  const fileMeta = filePath ? { name: getFileNameFromPath(filePath), url: filePath } : (existing.file || existing.file_meta || null);
+  const filePath =
+    prompt('File path/URL', (existing.file || existing.file_meta || {}).url || '') || '';
+  const fileMeta = filePath
+    ? { name: getFileNameFromPath(filePath), url: filePath }
+    : existing.file || existing.file_meta || null;
 
   try {
-    const resp = await fetch(`/api/workspaces/${window.agentCanvas.workspaceId}/attachments/${attachmentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        body,
-        link_url: link,
-        file_meta: fileMeta,
-        type: guessAttachmentType(body, link, fileMeta)
-      })
-    });
+    const resp = await fetch(
+      `/api/workspaces/${window.agentCanvas.workspaceId}/attachments/${attachmentId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          body,
+          link_url: link,
+          file_meta: fileMeta,
+          type: guessAttachmentType(body, link, fileMeta)
+        })
+      }
+    );
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(text || 'Failed to update attachment');
@@ -778,30 +857,99 @@ async function editAttachmentColor(attachmentId) {
 function showColorPickerModal(attachmentId, currentColor) {
   // Define color palette (nice selection of colors)
   const colors = [
-    '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e',
-    '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1',
-    '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#be123c',
-    '#dc2626', '#ea580c', '#d97706', '#ca8a04', '#65a30d', '#16a34a',
-    '#059669', '#0d9488', '#0891b2', '#0284c7', '#2563eb', '#4f46e5',
-    '#7c3aed', '#9333ea', '#c026d3', '#db2777', '#e11d48', '#9f1239',
-    '#991b1b', '#c2410c', '#b45309', '#a16207', '#4d7c0f', '#15803d',
-    '#047857', '#115e59', '#155e75', '#075985', '#1e40af', '#3730a3',
-    '#6d28d9', '#7e22ce', '#a21caf', '#be185d', '#be123c', '#7f1d1d',
-    '#78350f', '#92400e', '#713f12', '#365314', '#14532d', '#064e3b',
-    '#134e4a', '#164e63', '#1e3a8a', '#312e81', '#4c1d95', '#581c87',
-    '#701a75', '#831843', '#881337', '#e2e8f0', '#cbd5e1', '#94a3b8',
-    '#64748b', '#475569', '#334155', '#1e293b', '#0f172a', '#020617'
+    '#ef4444',
+    '#f97316',
+    '#f59e0b',
+    '#eab308',
+    '#84cc16',
+    '#22c55e',
+    '#10b981',
+    '#14b8a6',
+    '#06b6d4',
+    '#0ea5e9',
+    '#3b82f6',
+    '#6366f1',
+    '#8b5cf6',
+    '#a855f7',
+    '#d946ef',
+    '#ec4899',
+    '#f43f5e',
+    '#be123c',
+    '#dc2626',
+    '#ea580c',
+    '#d97706',
+    '#ca8a04',
+    '#65a30d',
+    '#16a34a',
+    '#059669',
+    '#0d9488',
+    '#0891b2',
+    '#0284c7',
+    '#2563eb',
+    '#4f46e5',
+    '#7c3aed',
+    '#9333ea',
+    '#c026d3',
+    '#db2777',
+    '#e11d48',
+    '#9f1239',
+    '#991b1b',
+    '#c2410c',
+    '#b45309',
+    '#a16207',
+    '#4d7c0f',
+    '#15803d',
+    '#047857',
+    '#115e59',
+    '#155e75',
+    '#075985',
+    '#1e40af',
+    '#3730a3',
+    '#6d28d9',
+    '#7e22ce',
+    '#a21caf',
+    '#be185d',
+    '#be123c',
+    '#7f1d1d',
+    '#78350f',
+    '#92400e',
+    '#713f12',
+    '#365314',
+    '#14532d',
+    '#064e3b',
+    '#134e4a',
+    '#164e63',
+    '#1e3a8a',
+    '#312e81',
+    '#4c1d95',
+    '#581c87',
+    '#701a75',
+    '#831843',
+    '#881337',
+    '#e2e8f0',
+    '#cbd5e1',
+    '#94a3b8',
+    '#64748b',
+    '#475569',
+    '#334155',
+    '#1e293b',
+    '#0f172a',
+    '#020617'
   ];
 
   // Populate color palette grid
   const grid = document.getElementById('color-palette-grid');
-  grid.innerHTML = colors.map(color => `
+  grid.innerHTML = colors
+    .map(
+      color => `
     <div class="color-palette-item ${color === currentColor ? 'selected' : ''}"
          style="background-color: ${color};"
          data-color="${color}"
          onclick="selectColor('${color}', '${attachmentId}')">
     </div>
-  `).join('');
+  `
+    )
+    .join('');
 
   // Set current color in custom input
   document.getElementById('custom-color-input').value = currentColor;
@@ -860,13 +1008,16 @@ async function updateAttachmentColor(attachmentId, color) {
   if (!attachmentId || !window.agentCanvas) return;
 
   try {
-    const resp = await fetch(`/api/workspaces/${window.agentCanvas.workspaceId}/attachments/${attachmentId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        color: color
-      })
-    });
+    const resp = await fetch(
+      `/api/workspaces/${window.agentCanvas.workspaceId}/attachments/${attachmentId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          color: color
+        })
+      }
+    );
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(text || 'Failed to update attachment color');
@@ -901,7 +1052,11 @@ async function deleteCurrentTask() {
   }
 
   // Confirm deletion
-  if (!confirm(`Are you sure you want to delete this task?\n\n"${task.description || 'Task'}"\n\nThis action cannot be undone.`)) {
+  if (
+    !confirm(
+      `Are you sure you want to delete this task?\n\n"${task.description || 'Task'}"\n\nThis action cannot be undone.`
+    )
+  ) {
     return;
   }
 
@@ -1091,16 +1246,16 @@ function showStoreDetails(storeNode) {
   // Find assigned agent if any
   const canvas = window.agentCanvas;
   const agents = canvas?.state?.agents || [];
-  
-  
 
   // Build agent options for dropdown
-  const agentOptions = agents.map(a => {
-    const nodeId = a.nodeId || a.id;
-    const label = `${a.name} #${a.instanceNumber || 1}`;
-    const selected = nodeId === storeNode.agent_node_id ? 'selected' : '';
-    return `<option value="${nodeId}" ${selected}>${label}</option>`;
-  }).join('');
+  const agentOptions = agents
+    .map(a => {
+      const nodeId = a.nodeId || a.id;
+      const label = `${a.name} #${a.instanceNumber || 1}`;
+      const selected = nodeId === storeNode.agent_node_id ? 'selected' : '';
+      return `<option value="${nodeId}" ${selected}>${label}</option>`;
+    })
+    .join('');
 
   const html = `
     <div class="mb-3">
@@ -1208,27 +1363,39 @@ function showStoreDetails(storeNode) {
       <span style="color: var(--text-secondary);">Write Count:</span>
       <span style="color: #10b981; font-weight: bold;">${storeNode.write_count || 0}</span>
     </div>
-    ${storeNode.last_write_time ? `
+    ${
+      storeNode.last_write_time
+        ? `
       <div class="mb-2" style="font-size: 0.85rem;">
         <span style="color: var(--text-secondary);">Last Write:</span>
         <span style="color: var(--text-primary);">${new Date(storeNode.last_write_time).toLocaleString()}</span>
       </div>
-    ` : ''}
-    ${storeNode.last_file_path ? `
+    `
+        : ''
+    }
+    ${
+      storeNode.last_file_path
+        ? `
       <div class="mb-2" style="font-size: 0.85rem;">
         <span style="color: var(--text-secondary);">Last File:</span>
         <div style="color: var(--text-primary); font-family: monospace; font-size: 0.75rem; word-break: break-all;">
           ${storeNode.last_file_path}
         </div>
       </div>
-    ` : ''}
-    ${storeNode.last_error && storeNode.last_error !== '' ? `
+    `
+        : ''
+    }
+    ${
+      storeNode.last_error && storeNode.last_error !== ''
+        ? `
       <div class="mb-2">
         <div style="color: #ef4444; font-size: 0.85rem; padding: 8px; background: rgba(239, 68, 68, 0.1); border-radius: 4px;">
           ⚠️ ${storeNode.last_error}
         </div>
       </div>
-    ` : ''}
+    `
+        : ''
+    }
     <div class="mb-2" style="font-size: 0.75rem;">
       <span style="color: var(--text-muted);">ID:</span>
       <span style="color: var(--text-secondary); font-family: monospace;">
@@ -1260,7 +1427,9 @@ async function saveStoreDetails(storeNode) {
   const name = document.getElementById('store-edit-name')?.value?.trim();
   const baseDir = document.getElementById('store-edit-basedir')?.value?.trim();
   const storageTarget = document.getElementById('store-edit-storage-target')?.value || '';
-  const workspaceFolder = normalizeWorkspaceFolderPath(document.getElementById('store-edit-workspace-folder')?.value || '');
+  const workspaceFolder = normalizeWorkspaceFolderPath(
+    document.getElementById('store-edit-workspace-folder')?.value || ''
+  );
   const agentNodeId = document.getElementById('store-edit-agent')?.value || null;
   const format = document.getElementById('store-edit-format')?.value;
   const writeMode = document.getElementById('store-edit-writemode')?.value;
@@ -1270,21 +1439,24 @@ async function saveStoreDetails(storeNode) {
   const nodeId = storeNode.canvas_node_id || storeNode.id;
 
   try {
-    const response = await fetch(`/api/workspaces/${canvas.workspaceId}/canvas/store-nodes/${nodeId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: name,
-        base_dir: baseDir,
-        storage_target: storageTarget,
-        workspace_folder: workspaceFolder,
-        agent_node_id: agentNodeId,
-        format: format,
-        write_mode: writeMode,
-        auto_create_dir: autoCreateDir,
-        auto_store: autoStore
-      })
-    });
+    const response = await fetch(
+      `/api/workspaces/${canvas.workspaceId}/canvas/store-nodes/${nodeId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name,
+          base_dir: baseDir,
+          storage_target: storageTarget,
+          workspace_folder: workspaceFolder,
+          agent_node_id: agentNodeId,
+          format: format,
+          write_mode: writeMode,
+          auto_create_dir: autoCreateDir,
+          auto_store: autoStore
+        })
+      }
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -1351,8 +1523,8 @@ async function addCombinerInput(combinerTaskId) {
   }
 
   // Get list of all non-combiner tasks
-  const availableTasks = window.agentCanvas.state.tasks.filter(t =>
-    !t.combiner_type && !t.combinerType && t.id !== combinerTaskId
+  const availableTasks = window.agentCanvas.state.tasks.filter(
+    t => !t.combiner_type && !t.combinerType && t.id !== combinerTaskId
   );
 
   if (availableTasks.length === 0) {
@@ -1361,14 +1533,14 @@ async function addCombinerInput(combinerTaskId) {
   }
 
   // Show selection UI
-  const taskList = availableTasks.map((t, i) =>
-    `${i + 1}. ${t.description.substring(0, 50)}${t.description.length > 50 ? '...' : ''} (${t.status})`
-  ).join('\n');
+  const taskList = availableTasks
+    .map(
+      (t, i) =>
+        `${i + 1}. ${t.description.substring(0, 50)}${t.description.length > 50 ? '...' : ''} (${t.status})`
+    )
+    .join('\n');
 
-  const choice = prompt(
-    `Select task to add as input:\n\n${taskList}\n\nEnter task number:`,
-    ''
-  );
+  const choice = prompt(`Select task to add as input:\n\n${taskList}\n\nEnter task number:`, '');
 
   if (!choice) return;
 
@@ -1452,14 +1624,14 @@ async function addTaskInput(taskId) {
   }
 
   // Show selection UI
-  const taskList = availableTasks.map((t, i) =>
-    `${i + 1}. ${t.description.substring(0, 50)}${t.description.length > 50 ? '...' : ''} (${t.status})`
-  ).join('\n');
+  const taskList = availableTasks
+    .map(
+      (t, i) =>
+        `${i + 1}. ${t.description.substring(0, 50)}${t.description.length > 50 ? '...' : ''} (${t.status})`
+    )
+    .join('\n');
 
-  const choice = prompt(
-    `Select task to add as input:\n\n${taskList}\n\nEnter task number:`,
-    ''
-  );
+  const choice = prompt(`Select task to add as input:\n\n${taskList}\n\nEnter task number:`, '');
 
   if (!choice) return;
 
@@ -1490,7 +1662,9 @@ async function addTaskInput(taskId) {
         from: task.from || '',
         input_task_ids: newInputs,
         ...(task.combiner_type && { combiner_type: task.combiner_type }),
-        ...(task.result_combination_mode && { result_combination_mode: task.result_combination_mode })
+        ...(task.result_combination_mode && {
+          result_combination_mode: task.result_combination_mode
+        })
       })
     });
 
@@ -1552,8 +1726,14 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
 
   // Confirm removal
   const inputTask = window.agentCanvas.state.tasks.find(t => t.id === inputTaskIdToRemove);
-  const inputDesc = inputTask ? inputTask.description.substring(0, 40) : inputTaskIdToRemove.substring(0, 8);
-  if (!confirm(`Remove input connection?\n\n"${inputDesc}..."\n\nThis will disconnect this input from the task.`)) {
+  const inputDesc = inputTask
+    ? inputTask.description.substring(0, 40)
+    : inputTaskIdToRemove.substring(0, 8);
+  if (
+    !confirm(
+      `Remove input connection?\n\n"${inputDesc}..."\n\nThis will disconnect this input from the task.`
+    )
+  ) {
     return;
   }
 
@@ -1571,7 +1751,9 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
         from: task.from || '',
         input_task_ids: newInputs,
         ...(task.combiner_type && { combiner_type: task.combiner_type }),
-        ...(task.result_combination_mode && { result_combination_mode: task.result_combination_mode })
+        ...(task.result_combination_mode && {
+          result_combination_mode: task.result_combination_mode
+        })
       })
     });
 
@@ -1596,8 +1778,6 @@ async function removeTaskInput(taskId, inputTaskIdToRemove) {
         window.agentCanvas.draw();
       }, 100);
     }
-
-
   } catch (error) {
     console.error('Failed to remove input:', error);
     alert(`Failed to remove input: ${error.message}`);
@@ -1676,7 +1856,9 @@ async function executeCombinerTask(combinerTaskId) {
       throw new Error(`Failed to execute combiner: ${response.statusText}`);
     }
 
-    alert(`Executing merge task...\n\nInputs: ${combinerTask.input_task_ids.length} tasks\nOutput: ${combinerTask.to}`);
+    alert(
+      `Executing merge task...\n\nInputs: ${combinerTask.input_task_ids.length} tasks\nOutput: ${combinerTask.to}`
+    );
 
     // Close task details
     hideTaskDetails();
@@ -1747,8 +1929,11 @@ function populateCanvasWorkspaceSelect() {
     .then(res => res.json())
     .then(data => {
       const workspaces = data.workspaces || [];
-      select.innerHTML = '<option value="">Choose a workspace...</option>' +
-                workspaces.map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`).join('');
+      select.innerHTML =
+        '<option value="">Choose a workspace...</option>' +
+        workspaces
+          .map(ws => `<option value="${ws.id}">${escapeHtml(ws.name || ws.id)}</option>`)
+          .join('');
     })
     .catch(err => console.error('Error loading workspaces:', err));
 }
@@ -1849,7 +2034,8 @@ async function executeMission() {
     alert('Failed to execute mission');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
+    btn.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z"/></svg>Set Mission';
   }
 }
 
@@ -1869,8 +2055,11 @@ async function loadAvailableAgents() {
     const data = await response.json();
 
     // Show all available agents (allow adding same agent multiple times for multiple instances)
-    select.innerHTML = '<option value="">Select agent to add...</option>' +
-            (data.agents || []).map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`).join('');
+    select.innerHTML =
+      '<option value="">Select agent to add...</option>' +
+      (data.agents || [])
+        .map(agent => `<option value="${agent.name}">${escapeHtml(agent.name)}</option>`)
+        .join('');
   } catch (error) {
     console.error('Failed to load agents:', error);
   }
@@ -1954,13 +2143,15 @@ function updateCurrentAgentsList() {
   }
 
   if (!window.agentCanvas || !window.agentCanvas.agents) {
-    listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+    listDiv.innerHTML =
+      '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
     return;
   }
 
   const agents = window.agentCanvas.agents;
   if (agents.length === 0) {
-    listDiv.innerHTML = '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
+    listDiv.innerHTML =
+      '<p style="color: var(--text-muted); font-style: italic;">No agents in workspace</p>';
     return;
   }
 
@@ -1968,7 +2159,9 @@ function updateCurrentAgentsList() {
         <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.5rem;">
             <small style="color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Assigned Agents:</small>
             <div class="mt-2">
-                ${agents.map(agent => `
+                ${agents
+                  .map(
+                    agent => `
                     <div class="d-flex justify-content-between align-items-center mb-1 p-2" style="background: rgba(255,255,255,0.03); border-radius: 4px;">
                         <div class="d-flex align-items-center">
                             <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${agent.color}; margin-right: 8px;"></span>
@@ -1980,7 +2173,9 @@ function updateCurrentAgentsList() {
                             </svg>
                         </button>
                     </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
             </div>
         </div>
     `;
@@ -2003,8 +2198,11 @@ function updateTaskAgentSelectors() {
   }
 
   const agents = window.agentCanvas.agents;
-  const options = '<option value="">Select agent...</option>' +
-        agents.map(agent => `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`).join('');
+  const options =
+    '<option value="">Select agent...</option>' +
+    agents
+      .map(agent => `<option value="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</option>`)
+      .join('');
 
   toSelect.innerHTML = options;
 }
@@ -2080,8 +2278,12 @@ async function showAgentDetails(agent) {
 
   panel.style.display = 'block';
 
-  const statusBadge = agent.status === 'active' ? 'badge-success' :
-    agent.status === 'busy' ? 'badge-warning' : 'badge-secondary';
+  const statusBadge =
+    agent.status === 'active'
+      ? 'badge-success'
+      : agent.status === 'busy'
+        ? 'badge-warning'
+        : 'badge-secondary';
 
   // Show loading state
   content.innerHTML = `
@@ -2128,11 +2330,15 @@ async function showAgentDetails(agent) {
       <div class="small mb-2" style="color: var(--text-secondary); font-style: italic;">
         Color: <span style="display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: ${agent.color}; vertical-align: middle; border: 1px solid rgba(0,0,0,0.2);"></span>
       </div>
-      ${agent.nodeId ? `
+      ${
+        agent.nodeId
+          ? `
         <div class="small mb-1" style="color: var(--text-secondary);">
           Node ID: <span style="font-family: monospace;">${escapeHtml(agent.nodeId)}</span>
         </div>
-      ` : ''}
+      `
+          : ''
+      }
     </div>
 
     <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
@@ -2173,23 +2379,31 @@ async function showAgentDetails(agent) {
       </div>
     </div>
 
-    ${lastResult ? `
+    ${
+      lastResult
+        ? `
       <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
         <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">Last Result</h6>
         <div class="p-2" style="background: #0b1525; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 0.85rem; max-height: 200px; overflow-y: auto;">
           ${escapeHtml(lastResult.toString())}
         </div>
       </div>
-    ` : ''}
+    `
+        : ''
+    }
 
-    ${systemPrompt ? `
+    ${
+      systemPrompt
+        ? `
       <div class="mb-3" style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
         <h6 style="color: var(--text-primary); font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem;">System Prompt</h6>
         <div class="p-2" style="background: #0b1525; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 0.85rem; max-height: 240px; overflow-y: auto; white-space: pre-wrap;">
           ${escapeHtml(systemPrompt)}
         </div>
       </div>
-    ` : ''}
+    `
+        : ''
+    }
 
     <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -2207,14 +2421,21 @@ async function showAgentDetails(agent) {
         </a>
       </div>
       <div class="small" style="color: var(--text-secondary);">
-        ${enabledPlugins.length > 0 ? enabledPlugins.map(plugin => `
+        ${
+          enabledPlugins.length > 0
+            ? enabledPlugins
+                .map(
+                  plugin => `
           <div class="mb-1 p-2" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); border-radius: 6px; display: flex; align-items: center;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="color: #7c3aed; margin-right: 8px;">
               <path d="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M11,16.5L6.5,12L7.91,10.59L11,13.67L16.59,8.09L18,9.5L11,16.5Z"/>
             </svg>
             <span style="color: #7c3aed; font-weight: 500;">${escapeHtml(plugin)}</span>
           </div>
-        `).join('') : `
+        `
+                )
+                .join('')
+            : `
           <div class="text-center py-3" style="color: var(--text-muted);">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="mb-2" style="opacity: 0.4;">
               <path d="M22.7,19L13.6,9.9C14.5,7.6 14,4.9 12.1,3C10.1,1 7.1,0.6 4.7,1.7L9,6L6,9L1.6,4.7C0.4,7.1 0.9,10.1 2.9,12.1C4.8,14 7.5,14.5 9.8,13.6L18.9,22.7C19.3,23.1 19.9,23.1 20.3,22.7L22.6,20.4C23.1,20 23.1,19.3 22.7,19Z"/>
@@ -2229,7 +2450,8 @@ async function showAgentDetails(agent) {
               </a>
             </div>
           </div>
-        `}
+        `
+        }
       </div>
     </div>
   `;
@@ -2302,7 +2524,11 @@ function changeCanvasBackground(color) {
  * Return tasks that are ready to run: assigned, pending, and dependencies completed
  */
 function getExecutableTasks() {
-  if (!window.agentCanvas || !window.agentCanvas.state || !Array.isArray(window.agentCanvas.state.tasks)) {
+  if (
+    !window.agentCanvas ||
+    !window.agentCanvas.state ||
+    !Array.isArray(window.agentCanvas.state.tasks)
+  ) {
     return [];
   }
 
@@ -2363,10 +2589,12 @@ async function toggleCanvasAnimation() {
   const btn = document.getElementById('animation-toggle');
   if (btn) {
     if (isPaused) {
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
+      btn.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
       btn.title = 'Resume Animation';
     } else {
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,19H18V5H14M6,19H10V5H6V19Z"/></svg>';
+      btn.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M14,19H18V5H14M6,19H10V5H6V19Z"/></svg>';
       btn.title = 'Pause Animation';
     }
   }
@@ -2391,7 +2619,9 @@ function connectToMerge() {
   // Find the merge node
   const mergeNode = canvas.combinerNodes.find(n => n.combinerType === 'merge');
   if (!mergeNode) {
-    alert('No MERGE node found! Please add a MERGE combiner node first using the palette on the left.');
+    alert(
+      'No MERGE node found! Please add a MERGE combiner node first using the palette on the left.'
+    );
     return;
   }
 
@@ -2410,7 +2640,10 @@ function connectToMerge() {
   canvas.createConnection(selectedAgent.name, 'output', mergeNode.id, nextInputPort);
   canvas.draw();
 
-  canvas.showNotification(`✅ Connected ${selectedAgent.name} to MERGE node (${nextInputPort})`, 'success');
+  canvas.showNotification(
+    `✅ Connected ${selectedAgent.name} to MERGE node (${nextInputPort})`,
+    'success'
+  );
 }
 
 /**
@@ -2447,15 +2680,17 @@ async function createMergeWorkflowTasks() {
 
   const targetAgentName = outputConnection.to;
 
-  alert(`✅ Merge Workflow Ready!\n\n` +
-          `Input Agents: ${inputConnections.map(c => c.from).join(', ')}\n` +
-          `Target Agent: ${targetAgentName}\n\n` +
-          `Next Steps:\n` +
-          `1. Create tasks for input agents\n` +
-          `2. Run those tasks to completion\n` +
-          `3. Create a task for ${targetAgentName}\n` +
-          `4. That task can reference previous results\n\n` +
-          `Check the console (F12) for more details!`);
+  alert(
+    `✅ Merge Workflow Ready!\n\n` +
+      `Input Agents: ${inputConnections.map(c => c.from).join(', ')}\n` +
+      `Target Agent: ${targetAgentName}\n\n` +
+      `Next Steps:\n` +
+      `1. Create tasks for input agents\n` +
+      `2. Run those tasks to completion\n` +
+      `3. Create a task for ${targetAgentName}\n` +
+      `4. That task can reference previous results\n\n` +
+      `Check the console (F12) for more details!`
+  );
 }
 
 /**
@@ -2635,7 +2870,6 @@ async function saveAgentSettings(agentName) {
     } else {
       alert(`Successfully updated ${agentName} settings`);
     }
-
   } catch (error) {
     console.error('Failed to update agent settings:', error);
     alert(`Failed to update agent: ${error.message}`);
@@ -2767,7 +3001,8 @@ function parseCronExpression(cronExpr) {
     desc += `every ${interval} days`;
   } else if (minute !== '*' && hour !== '*') {
     // Specific time
-    const h = hour === '*' ? 'every hour' : `at ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    const h =
+      hour === '*' ? 'every hour' : `at ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
     desc += h;
   } else if (minute !== '*') {
     desc += `at minute ${minute}`;
@@ -2795,8 +3030,21 @@ function parseCronExpression(cronExpr) {
   }
 
   if (month !== '*') {
-    const months = ['', 'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'];
+    const months = [
+      '',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December'
+    ];
     const monthNames = month.split(',').map(m => months[parseInt(m)] || `month ${m}`);
     constraints.push(`in ${monthNames.join(', ')}`);
   }
@@ -2847,10 +3095,14 @@ async function loadWorkspaceFolderSelect(selectId, selectedPath = '') {
     const folders = (Array.isArray(payload.files) ? payload.files : [])
       .filter(item => item?.is_dir && item?.relative_path)
       .sort((left, right) =>
-        String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
-          sensitivity: 'base',
-          numeric: true
-        })
+        String(left.relative_path || '').localeCompare(
+          String(right.relative_path || ''),
+          undefined,
+          {
+            sensitivity: 'base',
+            numeric: true
+          }
+        )
       );
 
     select.innerHTML = [
@@ -2892,7 +3144,9 @@ async function submitStoreNode() {
   const name = document.getElementById('store-name').value.trim();
   const baseDir = document.getElementById('store-base-dir').value.trim();
   const storageTarget = document.getElementById('store-storage-target')?.value || '';
-  const workspaceFolder = normalizeWorkspaceFolderPath(document.getElementById('store-workspace-folder')?.value || '');
+  const workspaceFolder = normalizeWorkspaceFolderPath(
+    document.getElementById('store-workspace-folder')?.value || ''
+  );
   const format = document.getElementById('store-format').value;
   const writeMode = document.getElementById('store-write-mode').value;
   const autoCreateDir = document.getElementById('store-auto-create-dir').checked;
@@ -2902,7 +3156,8 @@ async function submitStoreNode() {
     return;
   }
 
-  const workspaceId = window.currentWorkspaceId || (window.agentCanvas && window.agentCanvas.workspaceId);
+  const workspaceId =
+    window.currentWorkspaceId || (window.agentCanvas && window.agentCanvas.workspaceId);
 
   if (!workspaceId) {
     alert('Error: Workspace ID not found. Please refresh the page.');
@@ -2911,7 +3166,8 @@ async function submitStoreNode() {
 
   try {
     // Calculate center of visible viewport
-    let x = 400, y = 400;
+    let x = 400,
+      y = 400;
     if (window.agentCanvas) {
       const canvas = window.agentCanvas;
       const scale = canvas.state?.scale || canvas.scale || 1;
@@ -2954,7 +3210,6 @@ async function submitStoreNode() {
     if (window.agentCanvas && window.agentCanvas.init) {
       await window.agentCanvas.init();
     }
-
   } catch (error) {
     console.error('Error creating store node:', error);
     alert(`Error creating store node: ${error.message}`);
@@ -2989,7 +3244,8 @@ async function submitDirectory() {
     return;
   }
 
-  const workspaceId = window.currentWorkspaceId || (window.agentCanvas && window.agentCanvas.workspaceId);
+  const workspaceId =
+    window.currentWorkspaceId || (window.agentCanvas && window.agentCanvas.workspaceId);
 
   if (!workspaceId) {
     alert('Error: Workspace ID not found. Please refresh the page.');
@@ -2998,7 +3254,8 @@ async function submitDirectory() {
 
   try {
     // Calculate center of visible viewport
-    let x = 400, y = 400;
+    let x = 400,
+      y = 400;
     if (window.agentCanvas) {
       const canvas = window.agentCanvas;
       const scale = canvas.state?.scale || canvas.scale || 1;
@@ -3023,7 +3280,9 @@ async function submitDirectory() {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `Failed to create directory reference: ${response.statusText}`);
+      throw new Error(
+        errorData.error || `Failed to create directory reference: ${response.statusText}`
+      );
     }
 
     await response.json();
@@ -3051,8 +3310,9 @@ async function submitDirectory() {
  * Launch the folder picker helper app
  */
 async function launchFolderPicker() {
-  const workspaceId = window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
-  
+  const workspaceId =
+    window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
+
   try {
     const response = await fetch('/api/launch-folder-picker', {
       method: 'POST',
@@ -3070,7 +3330,9 @@ async function launchFolderPicker() {
       }
 
       if (window.Toast) {
-        window.Toast.info('Folder picker opened. Select a folder and it will be added to this workspace.');
+        window.Toast.info(
+          'Folder picker opened. Select a folder and it will be added to this workspace.'
+        );
       }
     } else {
       if (window.Toast) {
@@ -3122,7 +3384,9 @@ function showSaveWorkflowModal(selectionData) {
   }
 
   if (selectionData.nodes.length > MAX_WORKFLOW_NODES) {
-    alert(`Too many nodes selected. Maximum ${MAX_WORKFLOW_NODES} nodes allowed per workflow. You have ${selectionData.nodes.length} selected.`);
+    alert(
+      `Too many nodes selected. Maximum ${MAX_WORKFLOW_NODES} nodes allowed per workflow. You have ${selectionData.nodes.length} selected.`
+    );
     return;
   }
 
@@ -3174,9 +3438,13 @@ function showSaveWorkflowModal(selectionData) {
   modal.show();
 
   // Focus on name input after modal is shown
-  document.getElementById('saveWorkflowModal').addEventListener('shown.bs.modal', function() {
-    document.getElementById('workflow-name').focus();
-  }, { once: true });
+  document.getElementById('saveWorkflowModal').addEventListener(
+    'shown.bs.modal',
+    function () {
+      document.getElementById('workflow-name').focus();
+    },
+    { once: true }
+  );
 }
 
 /**
@@ -3198,10 +3466,10 @@ function collectWorkflowSelectionData() {
 
   // Convert selected nodes to workflow format
   const nodes = [];
-  
 
   // Calculate center of selection for relative positioning
-  let sumX = 0, sumY = 0;
+  let sumX = 0,
+    sumY = 0;
   selectedNodes.forEach(sel => {
     const node = sel.node;
     sumX += node.x || 0;
@@ -3229,7 +3497,10 @@ function collectWorkflowSelectionData() {
   // For now, connections would need to be inferred from task assignments
 
   // Calculate layout dimensions
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
   nodes.forEach(n => {
     minX = Math.min(minX, n.relative_x);
     maxX = Math.max(maxX, n.relative_x);
@@ -3319,7 +3590,11 @@ async function submitSaveWorkflow() {
   }
 
   // Ensure we have workflow data
-  if (!pendingWorkflowData || !pendingWorkflowData.nodes || pendingWorkflowData.nodes.length === 0) {
+  if (
+    !pendingWorkflowData ||
+    !pendingWorkflowData.nodes ||
+    pendingWorkflowData.nodes.length === 0
+  ) {
     showWorkflowError('No nodes data available. Please try again.');
     return;
   }
@@ -3375,7 +3650,6 @@ async function submitSaveWorkflow() {
     } else {
       alert(`Workflow "${name}" saved successfully!`);
     }
-
   } catch (error) {
     console.error('Error saving workflow:', error);
     showWorkflowError(error.message);
