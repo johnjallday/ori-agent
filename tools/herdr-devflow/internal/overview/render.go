@@ -138,8 +138,8 @@ func RenderExpanded(out io.Writer, snapshot Snapshot, options RenderOptions) err
 
 	inHistory := false
 	for _, feature := range snapshot.Features {
-		// Shipped and dropped work stays available but visually separate, so
-		// history never competes with what is in flight.
+		// Shipped work stays available but visually separate, so history never
+		// competes with what is in flight.
 		if feature.Phase.Phase.Terminal() && !inHistory {
 			inHistory = true
 			if err := write("\n%s", colors.paint("--- history ---", ansiDim)); err != nil {
@@ -339,7 +339,10 @@ func renderEmpty(out io.Writer, snapshot Snapshot, options RenderOptions) error 
 	if _, err := fmt.Fprintln(out, "No features were found in this repository."); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(out, "Looked for planning artifacts, BACKLOG.md entries, and feature worktrees."); err != nil {
+	if _, err := fmt.Fprintln(out, "Looked for planning artifacts and feature worktrees."); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(out, "Ideas that have not been planned yet live in GitHub Issues: wt backlog"); err != nil {
 		return err
 	}
 	// A repository with no features can still have agents open in it, and those

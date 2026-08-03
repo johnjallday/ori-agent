@@ -73,9 +73,9 @@ type Config struct {
 // Service collects the shared read-only snapshot behind `wt status`, its JSON
 // contract, and the Herdr board.
 //
-// Collection is local-first: planning, backlog, worktree, and Git evidence are
-// gathered without a network. Remote enrichment is layered on top and is
-// required before a snapshot may call itself complete.
+// Collection is local-first: planning, worktree, and Git evidence are gathered
+// without a network. Remote enrichment is layered on top and is required before
+// a snapshot may call itself complete.
 type Service struct {
 	config Config
 	clock  *remoteClock
@@ -156,13 +156,10 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 		Detail:       devPlanning.Detail,
 	})
 
-	backlog := planning.ReadBacklog(filepath.Join(planningRoot, "BACKLOG.md"), now)
-	snapshot.Sources = append(snapshot.Sources, Source{
-		Kind:         SourceBacklog,
-		Availability: planAvailability(backlog.State),
-		ObservedAt:   now,
-		Detail:       backlog.Detail,
-	})
+	// There is no backlog source. The repository's backlog is GitHub Issues, and
+	// an unselected Issue is not a feature: it has no plan, no branch, and no
+	// worktree, so it would be a row describing nothing. `wt backlog` reads
+	// them, and this board describes work that has actually been selected.
 
 	// Herdr and the bridge are collected before the join so a feature known
 	// only to the bridge still gets a row.
@@ -176,7 +173,6 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 
 	features, findings := BuildInventory(Input{
 		DevPlanning:      devPlanning,
-		Backlog:          backlog,
 		Checkouts:        checkouts,
 		BridgeSlugs:      BridgeSlugs(agentEvidence.Bridge),
 		LookupActivePlan: activePlanLookup(now),
@@ -342,10 +338,22 @@ func (s *Service) collectRemote(ctx context.Context, features []Feature, now tim
 }
 
 // expectsPullRequest reports whether a feature should have remote delivery
-// evidence. Work in progress legitimately has none, so only a feature the
-// backlog already calls delivered is suspicious without one.
+// evidence, which decides whether it is worth one extra query when the bulk
+// page was capped.
+//
+// It used to ask the backlog whether the feature was shipped. The replacement
+// asks the same question of evidence that still exists: the worktree is gone
+// and the archived plan is fully ticked — exactly what a completed feature
+// leaves behind after `wt done`. Work that is merely planned, or still under
+// way, is not chased: it legitimately has no pull request, and querying for
+// each one would turn every board render into a burst of API calls.
 func expectsPullRequest(feature Feature) bool {
-	return feature.Backlog.State == BacklogShipped
+	if feature.Git.WorktreePath != "" || feature.Plan.Copy != PlanCopyDev {
+		return false
+	}
+	progress := feature.Plan.Progress
+	return progress.Availability.OK() && progress.SubtasksTotal > 0 &&
+		progress.SubtasksCompleted == progress.SubtasksTotal
 }
 
 // resolveMissingHeads runs one targeted query per feature the bulk listing

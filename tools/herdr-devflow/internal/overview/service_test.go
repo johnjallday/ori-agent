@@ -2,6 +2,7 @@ package overview
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -339,21 +340,93 @@ func TestCollectResolvesPullRequestsTheBulkListingMissed(t *testing.T) {
 			"feature/sample-feature": {pull(12, "feature/sample-feature", "merged")},
 		},
 	}
-	service := newTestService(t, remote, func(config *Config) {
-		config.Now = func() time.Time { return observed }
+	// Delivered-looking evidence is what warrants the extra query: no worktree,
+	// and an archived plan whose work is finished.
+	root, run := repoFixture(t)
+	if err := os.WriteFile(
+		filepath.Join(root, "ori-agent-dev", "tasks", "tasks-sample-feature.md"),
+		[]byte("- [x] 1.0 Done\n  - [x] 1.1 Done\n- [x] 2.0 Also done\n  - [x] 2.1 Done\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(Config{
+		RepoRoot: root, Git: run, Remote: remote,
+		Now: func() time.Time { return observed },
 	})
 
-	// Give the feature delivered-looking evidence so a lookup is warranted.
 	snapshot, err := service.Collect(context.Background())
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	found, _ := snapshot.Feature("sample-feature")
-	if found.Backlog.State != BacklogShipped {
-		t.Skip("fixture has no backlog entry; targeted lookup is only for delivered features")
-	}
 	if found.Remote.PullRequest == nil || found.Remote.PullRequest.Number != 12 {
 		t.Fatalf("remote = %+v, want the targeted lookup to resolve #12", found.Remote)
+	}
+}
+
+func TestCollectReadsNoBacklogFileAndReportsNoBacklogSource(t *testing.T) {
+	// A leftover BACKLOG.md in somebody's checkout must not come back to life:
+	// nothing reads it, no source reports it, and no row is created from it.
+	root, run := repoFixture(t)
+	dev := filepath.Join(root, "ori-agent-dev")
+	backlog := "# Backlog\n\n## Ideas\n- an idea nobody planned\n\n## Doing\n" +
+		"- ghost-feature -> PRD at tasks/prd-ghost-feature.md\n"
+	if err := os.WriteFile(filepath.Join(dev, "BACKLOG.md"), []byte(backlog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(Config{
+		RepoRoot: root, Git: run,
+		Remote: &fakeRemote{result: github.Result{ObservedAt: observed}},
+		Now:    func() time.Time { return observed },
+	})
+
+	snapshot, err := service.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	if _, ok := snapshot.Feature("ghost-feature"); ok {
+		t.Fatal("a feature row was built from a leftover backlog file")
+	}
+	for _, source := range snapshot.Sources {
+		if string(source.Kind) == "backlog" {
+			t.Fatalf("sources = %+v, want no backlog source", snapshot.Sources)
+		}
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "backlog") {
+		t.Fatalf("the snapshot still mentions a backlog: %s", encoded)
+	}
+	// Removing a source must not make the snapshot look incomplete.
+	if !snapshot.Complete {
+		t.Fatal("a snapshot with a fresh remote query was reported incomplete")
+	}
+}
+
+func TestCollectMakesNoIssueRequest(t *testing.T) {
+	// `wt status` describes selected work. Listing every open Issue here would
+	// both slow the board down and blur the line this feature drew: unselected
+	// ideas belong to `wt backlog`.
+	var asked [][]string
+	client := github.New(github.Options{Run: func(_ context.Context, args ...string) ([]byte, error) {
+		asked = append(asked, args)
+		return []byte("[]"), nil
+	}})
+	root, run := repoFixture(t)
+	service := NewService(Config{
+		RepoRoot: root, Git: run, Remote: client,
+		Now: func() time.Time { return observed },
+	})
+
+	if _, err := service.Collect(context.Background()); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	for _, call := range asked {
+		if len(call) > 0 && call[0] == "issue" {
+			t.Fatalf("the status collector asked GitHub about Issues: %v", asked)
+		}
 	}
 }
 
@@ -386,7 +459,7 @@ func TestResolveMissingHeadsIsBounded(t *testing.T) {
 	// More delivered features than the lookup budget allows.
 	var features []Feature
 	for index := range github.MaxTargetedLookups + 15 {
-		row := feature("feature-"+string(rune('a'+index%26))+string(rune('a'+index/26)), withBacklog(BacklogShipped))
+		row := feature("feature-"+string(rune('a'+index%26))+string(rune('a'+index/26)), withCompletedArchive())
 		features = append(features, row)
 	}
 
@@ -400,7 +473,7 @@ func TestResolveMissingHeadsSkipsAlreadyCoveredFeatures(t *testing.T) {
 	remote := &fakeRemote{}
 	service := newTestService(t, remote)
 
-	features := []Feature{feature("covered", withBacklog(BacklogShipped))}
+	features := []Feature{feature("covered", withCompletedArchive())}
 	service.resolveMissingHeads(context.Background(), features,
 		[]github.PullRequest{pull(5, "feature/covered", "merged")})
 
@@ -415,7 +488,7 @@ func TestResolveMissingHeadsToleratesLookupFailures(t *testing.T) {
 	service := newTestService(t, remote)
 
 	resolved := service.resolveMissingHeads(context.Background(),
-		[]Feature{feature("missing", withBacklog(BacklogShipped))}, nil)
+		[]Feature{feature("missing", withCompletedArchive())}, nil)
 	if len(resolved) != 0 {
 		t.Fatalf("resolved = %v, want nothing from a failed lookup", resolved)
 	}

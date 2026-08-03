@@ -22,9 +22,9 @@ type DeriveOptions struct {
 // are added by the GitHub enrichment slice; until then this function never
 // invents them.
 //
-// Precedence is by evidence strength, not recency. A live worktree outranks a
-// backlog line, because the backlog is bookkeeping a human updates by hand
-// while a worktree is a fact on disk.
+// Precedence is by evidence strength, not recency. A merged pull request
+// outranks a checkout on disk, which outranks planning files, because each is
+// harder to be wrong about than the next.
 func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 	baseline := options.Baseline
 	if baseline == "" {
@@ -39,7 +39,7 @@ func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 
 	// Remote delivery evidence outranks every local signal. A merged pull
 	// request is a fact about the repository's history; an unchecked task list
-	// or a stale Doing entry is somebody forgetting to tick a box.
+	// is somebody forgetting to tick a box.
 	switch {
 	case pull != nil && pull.Merged:
 		if outstandingCleanup(feature) {
@@ -68,17 +68,9 @@ func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 
 	switch {
 	case hasWorktree:
-		// A checkout on disk is the strongest local lifecycle evidence there
-		// is. Even a backlog entry claiming the feature shipped cannot
-		// override it; that disagreement is reported as drift instead.
+		// A checkout on disk is the strongest local lifecycle evidence there is.
 		state.Phase = PhaseImplementing
 		state.Reason = "a feature worktree exists on disk"
-	case feature.Backlog.State == BacklogDropped:
-		state.Phase = PhaseDropped
-		state.Reason = "BACKLOG.md records this feature as dropped"
-	case feature.Backlog.State == BacklogShipped:
-		state.Phase = PhaseShipped
-		state.Reason = "BACKLOG.md records this feature as shipped"
 	case prdPresent && tasksPresent:
 		state.Phase = PhaseReady
 		state.Reason = "a PRD and task list exist but no worktree does"
@@ -87,8 +79,10 @@ func DerivePhase(feature Feature, options DeriveOptions) PhaseState {
 		state.Reason = "planning artifacts are incomplete and no worktree exists"
 	default:
 		state.Phase = PhaseUnknown
-		state.Reason = "no planning, worktree, or backlog evidence was found"
+		state.Reason = "no planning or worktree evidence was found"
 	}
+	// Nothing below a worktree can claim a feature shipped. Only a merged pull
+	// request does that, and it was already handled above.
 
 	// Only a fresh remote query can settle a phase, because every local phase
 	// above is falsifiable by an open or merged PR.
@@ -105,9 +99,6 @@ func cleanupReasons(feature Feature, baseline string) []string {
 	if feature.Git.WorktreePath != "" {
 		reasons = append(reasons, "the feature worktree still exists")
 	}
-	if feature.Backlog.State == BacklogDoing {
-		reasons = append(reasons, "BACKLOG.md still lists it as in progress")
-	}
 	progress := feature.Plan.Progress
 	if progress.Availability.OK() && progress.SubtasksTotal > 0 && progress.SubtasksCompleted < progress.SubtasksTotal {
 		reasons = append(reasons, strconv.Itoa(progress.SubtasksTotal-progress.SubtasksCompleted)+
@@ -117,20 +108,17 @@ func cleanupReasons(feature Feature, baseline string) []string {
 }
 
 // delivered reports whether remote evidence shows this feature's pull request
-// merged. It is the only signal that can contradict a Doing entry.
+// merged. It is the authoritative shipped signal.
 func delivered(feature Feature) bool {
 	pull := feature.Remote.PullRequest
 	return pull != nil && pull.Merged
 }
 
 // outstandingCleanup reports whether anything local still needs tidying after
-// a merge: the worktree or branch survives, the backlog still calls the
-// feature in progress, or the ticked plan was never archived back into dev.
+// a merge: the worktree or branch survives, or the ticked plan was never
+// archived back into dev.
 func outstandingCleanup(feature Feature) bool {
 	if feature.Git.WorktreePath != "" {
-		return true
-	}
-	if feature.Backlog.State == BacklogDoing {
 		return true
 	}
 	progress := feature.Plan.Progress
@@ -159,7 +147,11 @@ func DeriveFindings(feature Feature, options DeriveOptions) []Finding {
 	hasWorktree := feature.Git.WorktreePath != ""
 	prd := feature.Plan.PRDAvailability
 	tasks := feature.Plan.TaskListAvailability
-	active := hasWorktree || feature.Backlog.State == BacklogDoing
+	// "Active" is now exactly what it sounds like: a checkout exists, or a pull
+	// request is open. It used to include a hand-written Doing entry, which
+	// could call a feature active months after anyone last touched it.
+	pull := feature.Remote.PullRequest
+	active := hasWorktree || (pull != nil && pull.State == "open")
 
 	// Planning gaps. A missing artifact matters more once work has started.
 	switch {
@@ -185,41 +177,20 @@ func DeriveFindings(feature Feature, options DeriveOptions) []Finding {
 			"A planning artifact could not be read.", "")
 	}
 
-	// Backlog bookkeeping drift. The backlog is never authoritative; it is
-	// only compared against stronger evidence.
-	switch {
-	case feature.Backlog.State == BacklogShipped && hasWorktree:
-		raise(FindingBacklogDrift, SeverityWarning, SourceBacklog,
-			"BACKLOG.md records this feature as shipped, but its worktree still exists.",
-			boundedEntry(feature.Backlog))
-	case feature.Backlog.State == BacklogDropped && hasWorktree:
-		raise(FindingBacklogDrift, SeverityWarning, SourceBacklog,
-			"BACKLOG.md records this feature as dropped, but its worktree still exists.",
-			boundedEntry(feature.Backlog))
-	case feature.Backlog.State == BacklogAbsent && hasWorktree:
-		raise(FindingBacklogDrift, SeverityInfo, SourceBacklog,
-			"A feature worktree exists with no BACKLOG.md entry.", "")
-	case feature.Backlog.State == BacklogDoing && delivered(feature):
-		// The merge happened but the backlog was never retired. This is the
-		// single most common bookkeeping gap, and only a remote query can see
-		// it: locally the entry looks like ordinary work in progress.
-		raise(FindingBacklogDrift, SeverityWarning, SourceBacklog,
-			"This feature's pull request merged, but BACKLOG.md still lists it as in progress.",
-			boundedEntry(feature.Backlog))
-	case feature.Backlog.State == BacklogDoing && !hasWorktree && feature.Plan.Copy == PlanCopyNone:
-		raise(FindingBacklogDrift, SeverityWarning, SourceBacklog,
-			"BACKLOG.md lists this feature as in progress, but no worktree or plan was found.",
-			boundedEntry(feature.Backlog))
-	}
+	// There is no bookkeeping-drift family any more. Every finding it produced
+	// compared a hand-maintained file against reality, and reality is now the
+	// only thing recorded: the pull request, the worktree, and the plan.
 
 	// Archive bookkeeping: once the worktree is gone, `wt done` should have
-	// left the ticked planning copy behind in dev.
-	if !hasWorktree && feature.Backlog.State == BacklogShipped && feature.Plan.Copy == PlanCopyNone {
+	// left the ticked planning copy behind in dev. The trigger is the merged
+	// pull request — stronger evidence than the shipped line this used to read,
+	// and the same evidence the shipped phase itself is derived from.
+	if !hasWorktree && delivered(feature) && feature.Plan.Copy == PlanCopyNone {
 		raise(FindingArchiveMissing, SeverityInfo, SourcePlanning,
 			"This feature shipped but no archived planning copy remains in "+baseline+".", "")
 	}
-	// A merged feature is only finished once its worktree, branch, backlog
-	// entry, and archived plan agree. Naming what is outstanding matters: a
+	// A merged feature is only finished once its worktree, branch, and archived
+	// plan agree. Naming what is outstanding matters: a
 	// row reading "Merged (cleanup)" with nothing flagged tells a reader that
 	// work remains but not what it is.
 	if feature.Phase.Phase == PhaseMergedCleanup {
@@ -271,13 +242,6 @@ func severityIf(active bool, whenActive, otherwise Severity) Severity {
 		return whenActive
 	}
 	return otherwise
-}
-
-func boundedEntry(backlog Backlog) string {
-	if backlog.Entry == "" {
-		return ""
-	}
-	return "BACKLOG.md:" + strconv.Itoa(backlog.Line) + " " + backlog.Entry
 }
 
 // sortFindings orders findings most severe first, then by stable code, so both

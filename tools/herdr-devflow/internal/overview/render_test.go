@@ -138,7 +138,7 @@ func TestRenderCompactCountsAdditionalFindings(t *testing.T) {
 	row.Findings = []Finding{
 		{Code: FindingBranchBehindBase, Severity: SeverityWarning},
 		{Code: FindingWorktreeDirty, Severity: SeverityInfo},
-		{Code: FindingBacklogDrift, Severity: SeverityInfo},
+		{Code: FindingArchiveStale, Severity: SeverityInfo},
 	}
 
 	output := renderToString(t, baseSnapshot(row))
@@ -218,9 +218,9 @@ func TestRenderCompactSaysImplementationCompleteInsteadOfANextItem(t *testing.T)
 }
 
 func TestRenderDetailShowsProvenanceAndFullText(t *testing.T) {
-	row := feature("measured", withWorktree("/w/measured"), withBacklog(BacklogDoing))
+	row := feature("measured", withWorktree("/w/measured"))
 	row.Title = "PRD: Measured"
-	row.Sources = []SourceKind{SourcePlanning, SourceBacklog, SourceWorktree}
+	row.Sources = []SourceKind{SourcePlanning, SourceWorktree, SourceGit}
 	row.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true, Reason: "a feature worktree exists on disk"}
 	progressed(&row)
 	row.Git.Availability = AvailabilityAvailable
@@ -237,7 +237,7 @@ func TestRenderDetailShowsProvenanceAndFullText(t *testing.T) {
 	for _, want := range []string{
 		"measured — PRD: Measured",
 		"a feature worktree exists on disk",
-		"Evidence: planning, backlog, worktree",
+		"Evidence: planning, worktree, git",
 		"Authoritative copy: active_worktree",
 		"/w/x/tasks/prd-x.md",
 		"Active milestone: 5.0 Fifth group",

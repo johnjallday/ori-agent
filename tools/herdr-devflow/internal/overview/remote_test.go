@@ -169,16 +169,6 @@ func TestDerivePhaseRemotePrecedence(t *testing.T) {
 			want: PhaseMergedCleanup,
 		},
 		{
-			name: "merged with a stale Doing entry needs cleanup",
-			build: func() Feature {
-				row := feature("x", withBacklog(BacklogDoing))
-				selected := PullRequest{Number: 1, State: "merged", Merged: true}
-				row.Remote = Remote{Availability: AvailabilityAvailable, PullRequest: &selected}
-				return row
-			},
-			want: PhaseMergedCleanup,
-		},
-		{
 			name: "merged with an unticked archive needs cleanup",
 			build: func() Feature {
 				row := feature("x", withProgress(func(progress *PlanProgress) {
@@ -219,8 +209,8 @@ func TestDerivePhaseRemotePrecedence(t *testing.T) {
 
 func TestDerivePhaseDeliveredEvidenceOverridesStaleLocalState(t *testing.T) {
 	// The whole point of the remote query: a merged pull request settles the
-	// question even when the task list and backlog were never updated.
-	row := feature("x", withBacklog(BacklogDoing), withProgress(func(progress *PlanProgress) {
+	// question even when the task list was never ticked.
+	row := feature("x", withProgress(func(progress *PlanProgress) {
 		progress.SubtasksTotal, progress.SubtasksCompleted = 100, 3
 	}))
 	selected := PullRequest{Number: 1, State: "merged", Merged: true}

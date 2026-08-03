@@ -57,7 +57,8 @@ func hostileRepo(t *testing.T) *Service {
 	write("tasks-hostile-feature.md",
 		"- [ ] 1.0 Milestone "+escapeSequence+"\n  - [ ] 1.1 Subtask "+escapeSequence+nullByte+"\n")
 
-	// A BACKLOG.md entry with the same treatment.
+	// A stray BACKLOG.md is written deliberately: the file this feature deleted
+	// may still exist in somebody's checkout, and nothing may read it back in.
 	backlog := "# Backlog\n\n## Doing\n- hostile-feature -> PRD at tasks/prd-hostile-feature.md " + escapeSequence + "\n"
 	if err := os.WriteFile(filepath.Join(dev, "BACKLOG.md"), []byte(backlog), 0o600); err != nil {
 		t.Fatal(err)
@@ -165,7 +166,7 @@ func TestHostileInputNeverReachesJSON(t *testing.T) {
 	}
 	row, _ := decoded.Feature("hostile-feature")
 
-	values := []string{row.Title, row.Backlog.Entry, row.Plan.Progress.NextActionable.Text}
+	values := []string{row.Title, row.Plan.Progress.NextActionable.Text}
 	for _, agent := range row.Agents {
 		values = append(values, agent.Live.Pane, agent.Saved.Session, agent.BindingDetail)
 	}
@@ -311,9 +312,6 @@ func TestSanitizedValuesStayBounded(t *testing.T) {
 
 	if runes := []rune(row.Title); len(runes) > 200 {
 		t.Fatalf("title length = %d, want bounded", len(runes))
-	}
-	if runes := []rune(row.Backlog.Entry); len(runes) > 260 {
-		t.Fatalf("backlog entry length = %d, want bounded", len(runes))
 	}
 	if runes := []rune(row.Plan.Progress.NextActionable.Text); len(runes) > 260 {
 		t.Fatalf("task text length = %d, want bounded", len(runes))

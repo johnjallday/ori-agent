@@ -447,6 +447,50 @@ feature/delivery snapshot used by `wt status`. It may therefore include saved
 binding diagnostics and feature history that the deliberately smaller
 `wt herd status` live roster omits.
 
+## Backlog
+
+~~~bash
+wt backlog                         # open Issues in this repository that you authored
+wt backlog --all                   # every author's open Issues in this repository
+wt backlog view <number>           # one Issue in full, including its body
+wt backlog add "<title>" [--body "<text>"]
+wt backlog --json                  # any of the above, as a schema-versioned envelope
+~~~
+
+The product backlog is GitHub Issues. There is no backlog file, no cache, and no
+backlog commit: every invocation performs one fresh authenticated query, and a
+failure is reported as a failure rather than as an empty backlog — the one wrong
+answer that looks like a right one.
+
+The repository is resolved from the checkout the command ran in and then named
+explicitly on every request, so the source checkout, the `dev` worktree, and any
+feature worktree all read the same backlog and no configured default repository
+can answer instead. `--all` drops the author filter and nothing else: the listing
+stays open Issues in this repository, and pull requests never appear.
+
+`view` accepts an Issue number or a URL belonging to this repository, and shows
+open or closed Issues — the open filter is what a backlog *listing* means, not a
+restriction on what you may look at. It prints the body as Markdown text: no HTML
+is rendered, no link is followed, no attachment is downloaded.
+
+`add` creates the Issue and nothing else — no label, assignee, milestone, Issue
+type, Project, or parent, and no browser or editor. Titles and bodies are passed
+as data, never as shell syntax.
+
+Exit codes: `0` the operation completed (an empty backlog is a completed
+listing), `1` GitHub could not answer, `2` invalid arguments.
+
+**Removed, and not coming back as a local file:** `wt backlog sync` and
+`wt backlog prune` (GitHub is live and keeps its own history). **Not implemented
+yet, deliberately:** any command that changes an Issue's state — promote, ship,
+drop, close, select — and any Project operation. `wt start`, `wt pr`, and
+`wt done` do not read, update, or close an Issue either. Daily selection stays
+manual in GitHub until enough of it has been done by hand to know what the
+command should be.
+
+New Issue-backed work uses `<issue-number>-<slug>` as its feature identity; see
+"Feature Naming: Issue Number First" in `AGENTS.md`.
+
 ## Feature overview
 
 ~~~bash
@@ -466,7 +510,6 @@ exact slug across every source.
 | Source | Contributes |
 | --- | --- |
 | planning | `prd-<slug>.md` and `tasks-<slug>.md` — exact filenames only |
-| backlog | `BACKLOG.md` Doing / Shipped / dropped entries (never the Ideas section) |
 | worktree | linked checkouts, resolved through the Git common directory |
 | git | branch, HEAD, dirty state, ahead/behind versus `dev`, stale baseline |
 | github | pull request, base, draft/open/closed/merged, required-check rollup |
@@ -475,6 +518,11 @@ exact slug across every source.
 
 The authoritative planning copy is the one inside the feature's own worktree
 while that worktree exists, and the archived copy in `dev` after `wt done`.
+
+There is no backlog source. The repository's backlog is GitHub Issues, and an
+Issue nobody has planned yet has no PRD, no branch, and no worktree — it would
+be a row describing nothing. `wt status` describes selected and executing work;
+`wt backlog` reads the ideas that have not been selected.
 
 ### Phases
 
@@ -488,10 +536,14 @@ forgetting a checkbox.
 | `ready` | a PRD and task list exist but no worktree does |
 | `implementing` | a feature worktree exists on disk |
 | `review` | an exact open or draft pull request targets `dev` |
-| `merged_cleanup` | merged, but a worktree, `Doing` entry, or unticked archive remains |
-| `shipped` | merged and tidy, or recorded shipped in `BACKLOG.md` |
-| `dropped` | `BACKLOG.md` records the feature as dropped |
+| `merged_cleanup` | merged, but a worktree or an unticked archived plan remains |
+| `shipped` | merged, with no local cleanup outstanding |
 | `unknown` | no evidence was strong enough to place it |
+
+A merged pull request is the only thing that can call a feature delivered. There
+is deliberately no `dropped` phase: the only source that ever reported one was a
+hand-maintained file, and a closed Issue does not mean abandoned work, so nothing
+infers it. Restoring a dropped state needs a source that actually means it.
 
 A phase is only marked confirmed when a fresh GitHub query succeeded. Without
 one, every phase renders as `(unconfirmed)` — a local-only board cannot tell
@@ -527,7 +579,7 @@ and a later collector never removes a finding raised earlier.
 | `info` | a gap that is expected at this stage, or bookkeeping lag |
 
 Common codes: `prd_missing`, `task_list_missing`, `plan_malformed`,
-`worktree_without_plan`, `name_mismatch`, `backlog_drift`, `archive_stale`,
+`worktree_without_plan`, `name_mismatch`, `archive_stale`,
 `archive_missing`, `branch_behind_base`, `worktree_dirty`, `identity_ambiguous`,
 `github_unavailable`, `pr_ambiguous`, `pr_unexpected_base`, `pr_closed_unmerged`,
 `checks_failing`, `agent_missing`, `agent_ambiguous`, `agent_possible_drift`,
@@ -560,9 +612,9 @@ wt herd status --clear-view
 
 `wt herd status` answers only "which coding agents are open right now?" Its
 human output has four columns: agent, kind, Herdr's live status, and worktree.
-It reads Herdr's live `agent.list` result and does not join plans, backlog
-history, saved bridge records, Git state, GitHub pull requests, schedules, or
-Overnight eligibility.
+It reads Herdr's live `agent.list` result and does not join plans, saved bridge
+records, Git state, GitHub pull requests, Issues, schedules, or Overnight
+eligibility.
 
 With no selector it lists every open Herdr agent. `--current` narrows to the
 current checkout, `--worktree PATH` narrows by canonical path, and `--feature
@@ -637,7 +689,7 @@ unrelated user views or metadata.
 
 ### Feature-overview JSON contract
 
-`wt status --json` emits schema version 2 (`overview.Snapshot`). It carries the
+`wt status --json` emits schema version 3 (`overview.Snapshot`). It carries the
 generation and GitHub-check timestamps, repository and baseline identity,
 overall completeness and staleness, one entry per feature, per-source
 availability, and every finding.
@@ -647,11 +699,17 @@ must not be collapsed by a consumer. An unparsed plan reports its availability
 and no counts; it never reports `0/0`, which would read as "no work done".
 Consumers must tolerate additive fields within a schema version.
 
-Path binding added fields additively within the same schema version 2: each
-agent carries `managed` (a saved bridge record exists) and `matched_path` (the
-canonical worktree its working directory resolved to); each feature carries
-`occupancy` (panes with no agent running, counted but not rendered as agent
-rows). None of this required a schema bump.
+**Version 3 removed the backlog contract**, which is why it is a version and not
+an additive change: `features[].backlog`, the `backlog` source, the
+`backlog_drift` finding code, and the `dropped` phase are all gone. A consumer
+reading any of them should be told the shape changed rather than handed a
+silently missing key.
+
+Path binding added fields additively within schema version 2: each agent carries
+`managed` (a saved bridge record exists) and `matched_path` (the canonical
+worktree its working directory resolved to); each feature carries `occupancy`
+(panes with no agent running, counted but not rendered as agent rows). None of
+this required a schema bump.
 
 ## Guarded cleanup
 

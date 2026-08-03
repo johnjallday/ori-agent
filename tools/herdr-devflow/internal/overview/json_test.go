@@ -147,10 +147,16 @@ func TestJSONOmitsEmptyOptionalStructsButKeepsRequiredState(t *testing.T) {
 		t.Fatalf("empty agent list was encoded: %s", encoded)
 	}
 	// ...but every state-bearing field must always be present.
-	for _, required := range []string{"slug", "phase", "plan", "backlog", "git", "remote"} {
+	for _, required := range []string{"slug", "phase", "plan", "git", "remote"} {
 		if _, present := decoded[required]; !present {
 			t.Fatalf("required field %q was omitted: %s", required, encoded)
 		}
+	}
+	// The backlog object left the contract in schema version 3. A consumer that
+	// still reads it should find nothing there rather than an empty shape it
+	// could mistake for "this feature has no backlog entry".
+	if _, present := decoded["backlog"]; present {
+		t.Fatalf("the removed backlog field is still encoded: %s", encoded)
 	}
 }
 

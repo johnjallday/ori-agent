@@ -12,9 +12,9 @@ import (
 func richSnapshot(t *testing.T) Snapshot {
 	t.Helper()
 
-	building := feature("downloads-janitor", withWorktree("/w/downloads-janitor"), withBacklog(BacklogDoing))
+	building := feature("downloads-janitor", withWorktree("/w/downloads-janitor"))
 	building.Title = "PRD: Downloads Janitor"
-	building.Sources = []SourceKind{SourcePlanning, SourceBacklog, SourceWorktree, SourceHerdr}
+	building.Sources = []SourceKind{SourcePlanning, SourceWorktree, SourceHerdr}
 	building.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true, Reason: "a feature worktree exists on disk"}
 	progressed(&building)
 	building.Git.Availability = AvailabilityAvailable
@@ -39,7 +39,7 @@ func richSnapshot(t *testing.T) Snapshot {
 		Role: "builder", Message: "A live agent matches this role only partially; the saved identity may be stale.",
 	}}
 
-	shipped := feature("herdr-devflow-bridge", withBacklog(BacklogShipped))
+	shipped := feature("herdr-devflow-bridge", withCompletedArchive())
 	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true, Reason: "the pull request merged"}
 	shipped.Git.Availability = AvailabilityAbsent
 	merged := PullRequest{Number: 258, State: "merged", Merged: true, Checks: ChecksPassing}

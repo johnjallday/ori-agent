@@ -72,12 +72,13 @@ type Result struct {
 // keeps this package testable without a network or an authenticated CLI.
 type Runner func(ctx context.Context, args ...string) ([]byte, error)
 
-// Client queries pull requests for one repository.
+// Client queries pull requests and Issues for one repository.
 type Client struct {
 	run            Runner
 	dir            string
 	timeout        time.Duration
 	candidateLimit int
+	issueLimit     int
 }
 
 // Options configures a Client.
@@ -91,6 +92,11 @@ type Options struct {
 	// CandidateLimit bounds how many pull requests are requested; zero uses
 	// DefaultCandidateLimit.
 	CandidateLimit int
+	// IssueLimit bounds how many Issues one backlog listing requests and
+	// decodes; zero uses DefaultIssueLimit. It is separate from CandidateLimit
+	// because the two answer different questions: delivery evidence wants every
+	// recent pull request, while a backlog wants a list somebody can read.
+	IssueLimit int
 }
 
 // New builds a Client, applying bounded defaults.
@@ -100,6 +106,7 @@ func New(options Options) *Client {
 		dir:            options.Dir,
 		timeout:        options.Timeout,
 		candidateLimit: options.CandidateLimit,
+		issueLimit:     options.IssueLimit,
 	}
 	if client.run == nil {
 		client.run = ExecRunner(options.Dir)
@@ -109,6 +116,9 @@ func New(options Options) *Client {
 	}
 	if client.candidateLimit <= 0 {
 		client.candidateLimit = DefaultCandidateLimit
+	}
+	if client.issueLimit <= 0 {
+		client.issueLimit = DefaultIssueLimit
 	}
 	return client
 }
@@ -299,6 +309,21 @@ const (
 	ErrorTimeout         ErrorKind = "gh_timeout"
 	ErrorNetwork         ErrorKind = "gh_network"
 	ErrorMalformed       ErrorKind = "gh_malformed"
+	// ErrorRepository means no GitHub repository could be resolved for the
+	// current checkout, or the resolved one cannot be read. It is separate from
+	// a network failure because the fix is different: check where you are and
+	// what you have access to, not whether github.com is reachable.
+	ErrorRepository ErrorKind = "gh_repository"
+	// ErrorForbidden means the credential is valid but is not allowed to do
+	// this. Reporting it as "unauthenticated" would send someone to log in
+	// again, which they already did.
+	ErrorForbidden ErrorKind = "gh_forbidden"
+	// ErrorRateLimit means GitHub is refusing further requests for now. It is
+	// the one failure where waiting genuinely is the fix.
+	ErrorRateLimit ErrorKind = "gh_rate_limit"
+	// ErrorNotFound means the repository or Issue named does not exist, or is
+	// invisible to this credential — GitHub does not distinguish the two.
+	ErrorNotFound ErrorKind = "gh_not_found"
 )
 
 // Error is a sanitized query failure. It never carries raw `gh` output.
@@ -314,28 +339,55 @@ func (e *Error) Error() string {
 	return string(e.Kind) + ": " + e.Detail
 }
 
-// Recovery is the operator action that most likely fixes this failure.
+// Recovery is the operator action that most likely fixes this failure. Each
+// one is a command or a decision the reader can act on immediately; "try again
+// later" is only offered where waiting really is the fix.
 func (e *Error) Recovery() string {
 	switch e.Kind {
 	case ErrorMissing:
 		return "install the GitHub CLI: https://cli.github.com"
 	case ErrorUnauthenticated:
 		return "run: gh auth login"
+	case ErrorForbidden:
+		return "check that this account may act on the repository: gh auth status"
+	case ErrorRateLimit:
+		return "wait for the GitHub rate limit to reset, then retry; check it with: gh api rate_limit"
+	case ErrorNotFound:
+		return "check the repository and Issue number, then retry"
 	case ErrorTimeout, ErrorNetwork:
 		return "check network access to github.com, then retry"
+	case ErrorRepository:
+		return "run wt backlog from a checkout of a GitHub repository you can read; verify with: gh repo view"
 	default:
 		return "run: gh pr list --limit 1"
 	}
 }
 
-// authMessage matches the phrases `gh` uses for an unusable credential. It is
-// matched against stderr only to classify the failure; the stderr text itself
-// is discarded.
-var authMessage = regexp.MustCompile(`(?i)(auth|credential|login|token|permission|HTTP 401|HTTP 403|not logged)`)
+// These patterns are matched against stderr only to choose a failure class.
+// The stderr text itself is then discarded: it is the single most likely place
+// for a token, an authorization header, or a request body to appear.
+//
+// Order matters where the phrases overlap. A rate-limit refusal is also an HTTP
+// 403, and reporting it as an authorization problem would send someone to check
+// permissions that are fine.
+var (
+	authMessage = regexp.MustCompile(
+		`(?i)(gh auth login|not logged in|bad credentials|requires authentication|` +
+			`authentication token|missing required token|HTTP 401|401 Unauthorized)`)
+	rateLimitMessage = regexp.MustCompile(
+		`(?i)(rate limit|rate-limit|abuse detection|secondary limit|too many requests|HTTP 429)`)
+	forbiddenMessage = regexp.MustCompile(
+		`(?i)(HTTP 403|403 Forbidden|forbidden|resource not accessible|` +
+			`must have (admin|push|write)|SAML enforcement|SSO)`)
+	notFoundMessage = regexp.MustCompile(
+		`(?i)(HTTP 404|404 Not Found|could not resolve to|no issues found|not found)`)
+	networkMessage = regexp.MustCompile(
+		`(?i)(dial tcp|no such host|connection refused|connection reset|` +
+			`network is unreachable|i/o timeout|failed to verify certificate|` +
+			`x509|TLS|proxy|EOF|HTTP 5\d\d|server error)`)
+)
 
-// classify converts a raw exec failure into a sanitized Error. The original
-// stderr is examined here and then dropped: it is the single most likely place
-// for a token to appear.
+// classify converts a raw exec failure into a sanitized Error.
 func classify(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return &Error{Kind: ErrorTimeout, Detail: "the GitHub query did not finish before its timeout"}
@@ -345,26 +397,69 @@ func classify(ctx context.Context, err error) error {
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		if authMessage.Match(exitErr.Stderr) {
-			return &Error{Kind: ErrorUnauthenticated, Detail: "the GitHub CLI is not authenticated for this repository"}
-		}
-		return &Error{Kind: ErrorNetwork, Detail: "the GitHub query failed"}
+		return classifyStderr(exitErr.Stderr)
 	}
 	return &Error{Kind: ErrorNetwork, Detail: "the GitHub query could not be run"}
 }
 
+// classifyStderr chooses a failure class from `gh` diagnostics. Every returned
+// detail is written here, from the class alone; none of it is copied out of the
+// text being matched.
+func classifyStderr(stderr []byte) *Error {
+	switch {
+	case authMessage.Match(stderr):
+		return &Error{Kind: ErrorUnauthenticated, Detail: "the GitHub CLI is not authenticated for this repository"}
+	case rateLimitMessage.Match(stderr):
+		return &Error{Kind: ErrorRateLimit, Detail: "GitHub is rate limiting this account right now"}
+	case forbiddenMessage.Match(stderr):
+		return &Error{Kind: ErrorForbidden, Detail: "this GitHub account is not allowed to perform that operation"}
+	case notFoundMessage.Match(stderr):
+		return &Error{Kind: ErrorNotFound, Detail: "GitHub has no such repository or Issue for this account"}
+	case networkMessage.Match(stderr):
+		return &Error{Kind: ErrorNetwork, Detail: "the GitHub query could not reach github.com"}
+	default:
+		return &Error{Kind: ErrorNetwork, Detail: "the GitHub query failed"}
+	}
+}
+
 // sanitize strips control characters and bounds a remote-supplied value.
-// Branch names and URLs come from the network and are rendered in terminals.
+// Branch names, Issue titles, and URLs come from the network and are rendered
+// in terminals.
 func sanitize(value string) string {
+	return boundedText(value, maxDetailRunes)
+}
+
+// boundedText is sanitize with an explicit bound, for remote fields whose
+// readable length differs from a diagnostic's — an Issue title is given more
+// room than a label, and both are given less than a body.
+//
+// Two classes of character are removed. ASCII and C1 controls carry terminal
+// escape sequences, which is how remote text repaints a screen it was only
+// supposed to appear on. Bidirectional overrides and line separators are
+// removed for a quieter reason: they reorder or split a line without being
+// visible, so a title can be made to read as something it is not.
+func boundedText(value string, limit int) string {
 	cleaned := strings.Map(func(r rune) rune {
-		if r < 32 || r == 127 {
+		switch {
+		case r < 32, r == 127:
 			return -1
+		case r >= 0x80 && r <= 0x9f:
+			return -1
+		case r == 0x200e, r == 0x200f:
+			return -1
+		case r >= 0x202a && r <= 0x202e:
+			return -1
+		case r >= 0x2066 && r <= 0x2069:
+			return -1
+		case r == 0x2028, r == 0x2029:
+			return -1
+		default:
+			return r
 		}
-		return r
 	}, value)
 	runes := []rune(strings.TrimSpace(cleaned))
-	if len(runes) > maxDetailRunes {
-		return string(runes[:maxDetailRunes]) + "…"
+	if limit > 0 && len(runes) > limit {
+		return string(runes[:limit]) + "…"
 	}
 	return string(runes)
 }

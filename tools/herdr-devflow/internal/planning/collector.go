@@ -1,5 +1,10 @@
-// Package planning discovers the exact PRD and task-list artifacts and the
-// tracked BACKLOG.md lifecycle entries that describe a repository's features.
+// Package planning discovers the exact PRD and task-list artifacts that
+// describe a repository's features.
+//
+// It reads planning documents and nothing else. The repository's backlog lives
+// in GitHub Issues, which this package deliberately knows nothing about: an
+// idea nobody has planned yet has no PRD and no task list, so there is nothing
+// here to discover about it.
 //
 // Discovery is read-only and bounded. It reads only files whose names it
 // constructs itself from a validated slug, never arbitrary paths, and it

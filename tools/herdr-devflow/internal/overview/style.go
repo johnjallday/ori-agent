@@ -80,7 +80,7 @@ func (p palette) phase(state PhaseState) string {
 		return p.paint(text, ansiBlue)
 	case PhaseShipped:
 		return p.paint(text, ansiGreen, ansiDim)
-	case PhaseDropped, PhaseUnknown:
+	case PhaseUnknown:
 		return p.paint(text, ansiDim)
 	default:
 		return text
