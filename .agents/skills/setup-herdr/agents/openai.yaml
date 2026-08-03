@@ -1,0 +1,4 @@
+interface:
+  display_name: "Set Up Herdr"
+  short_description: "Configure and verify Ori Herdr bridge"
+  default_prompt: "Use $setup-herdr to inspect and set up Herdr for this Ori checkout."
