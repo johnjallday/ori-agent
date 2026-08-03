@@ -48,11 +48,15 @@ type Dependencies struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	// Stdin is where a recorder invoked by Claude Code reads its payload.
-	Stdin               io.Reader
-	Getwd               func() (string, error)
-	LookupEnv           func(string) (string, bool)
-	LookPath            func(string) (string, error)
-	Runner              herdr.Runner
+	Stdin     io.Reader
+	Getwd     func() (string, error)
+	LookupEnv func(string) (string, bool)
+	LookPath  func(string) (string, error)
+	Runner    herdr.Runner
+	// GitHubRunner overrides how `gh` is invoked. Tests inject deterministic
+	// responses through it so no suite depends on a network, an authenticated
+	// CLI, or the repository's real Issues.
+	GitHubRunner        github.Runner
 	BuildHelper         func(context.Context, string, string) error
 	GOOS                string
 	UserHomeDir         func() (string, error)
@@ -123,6 +127,7 @@ type App struct {
 	lookupEnv           func(string) (string, bool)
 	lookPath            func(string) (string, error)
 	runner              herdr.Runner
+	githubRunner        github.Runner
 	buildHelper         func(context.Context, string, string) error
 	goos                string
 	userHomeDir         func() (string, error)
@@ -204,6 +209,7 @@ func New(deps Dependencies) *App {
 		lookupEnv:           deps.LookupEnv,
 		lookPath:            deps.LookPath,
 		runner:              deps.Runner,
+		githubRunner:        deps.GitHubRunner,
 		buildHelper:         deps.BuildHelper,
 		goos:                deps.GOOS,
 		userHomeDir:         deps.UserHomeDir,
@@ -269,6 +275,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.goAgent(ctx, opts, commandArgs)
 	case "feature-overview":
 		return a.overview(ctx, opts, commandArgs)
+	case "backlog":
+		return a.backlog(ctx, opts, commandArgs)
 	case "target":
 		return a.handoffTarget(ctx, opts)
 	case "cleanup":
@@ -3123,6 +3131,15 @@ Usage:
   wt herd overview [same options]
                                 Compatibility alias for wt herd status.
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
+  wt backlog [list] [--all] [--json]
+                                List this repository's open GitHub Issues, which are the
+                                product backlog. The default scope is the Issues you
+                                authored (author:@me); --all keeps the repository and the
+                                open state and drops only that author filter.
+                                Every invocation queries GitHub: there is no cache and no
+                                local backlog file, so a failure is reported as a failure
+                                rather than as an empty backlog. Issue bodies are not
+                                listed; read one with wt backlog view.
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.

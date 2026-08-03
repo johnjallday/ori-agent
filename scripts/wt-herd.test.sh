@@ -500,7 +500,7 @@ wt help > /dev/null
 
 # The remaining Herdr-free commands mutate Git or GitHub, so they are asserted
 # structurally instead of by running them: no dispatcher branch below may
-# mention the bridge helper at all.
+# reach for the bridge.
 function wt_case_branch_body {
   awk -v want="  $1)" '
     $0 == want { inside = 1; next }
@@ -516,6 +516,23 @@ for herdr_free_command in pr merge demo backlog cd ls; do
   fi
   if print -r -- "$body" | rg -q "wt_herd"; then
     print -r -- "wt $herdr_free_command reaches for the Herdr bridge; it must stay Herdr-free" >&2
+    exit 1
+  fi
+done
+
+# `wt backlog` is the one Herdr-free command that does call the shared Go
+# helper, because GitHub Issues are collected there. Grepping for the bridge
+# function name is therefore no longer enough on its own: what makes the command
+# Herdr-free is that the only thing it asks the helper for is `backlog`. A
+# bridge subcommand appearing here would need a running Herdr to read a backlog.
+backlog_body="$(wt_case_branch_body backlog)"
+if ! print -r -- "$backlog_body" | rg -q "wt_devflow backlog"; then
+  print -r -- "wt backlog no longer routes its listing through the devflow helper" >&2
+  exit 1
+fi
+for bridge_command in handoff retry setup doctor cleanup target status overview add prompt; do
+  if print -r -- "$backlog_body" | rg -q "wt_devflow $bridge_command"; then
+    print -r -- "wt backlog asked the helper for the Herdr command '$bridge_command'" >&2
     exit 1
   fi
 done

@@ -15,13 +15,13 @@
 #   wt status --worktrees   # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
 #   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
-#   wt backlog [sub]        # BACKLOG.md: list | add | sync | prune [days] (scoped commit+push to dev)
+#   wt backlog [list] [--all] [--json]  # This repository's open GitHub Issues
 #   wt merge [name]         # Local merge into dev (legacy; prefer wt pr)
 #
-# Backlog is kept in sync with git automatically: `wt start` promotes the PRD's
-# feature to ## Doing, `wt done` retires it to ## Shipped with the merged PR
-# number, and both push a scoped docs(backlog) commit to dev. Every mutation
-# also prunes date-prefixed Shipped / dropped history older than seven days.
+# The backlog is GitHub Issues, read live on every invocation. `wt backlog`
+# lists the open Issues you authored in the current repository; --all drops only
+# the author filter. There is no backlog file, no cache, and no backlog commit:
+# GitHub owns the record, so nothing here has to be kept in sync with it.
 #
 # Planning docs live in the dev worktree's tasks/ folder (gitignored). Create
 # each PRD + task list there, then `wt start` fans a single PRD out into its
@@ -730,21 +730,35 @@ function wt_status_worktrees {
   echo "Compared against: ${WT_C_CYAN}$BASE_BRANCH${WT_C_RESET}"
 }
 
-function wt_herd {
-  # Delegate bridge behavior to a small Go helper rather than growing the
-  # worktree manager into a terminal/session implementation. The helper finds
-  # repository-local configuration and keeps mutable runtime state outside Git.
+function wt_devflow {
+  # Delegate structured work to the small repository-local Go helper rather than
+  # growing the worktree manager into a terminal, GitHub, or session
+  # implementation. The helper resolves repository-local configuration and keeps
+  # mutable runtime state outside Git.
+  #
+  # It runs from whichever checkout the caller is standing in — source, dev, or
+  # any linked feature worktree — because `git rev-parse` answers per worktree
+  # while all of them share one repository. Arguments are forwarded as separate
+  # words and never through eval, so a title, a flag, or a slug carrying shell
+  # metacharacters is data the helper reads, not syntax this shell runs.
   local repo_root helper
   repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "wt herd must run from an Ori Git worktree"
+    echo "wt must run from an Ori Git worktree"
     return 1
   }
   helper="$repo_root/scripts/herdr-devflow.sh"
   if [[ ! -f "$helper" ]]; then
-    echo "Herdr bridge helper not found: $helper"
+    echo "Ori devflow helper not found: $helper"
     return 1
   fi
   bash "$helper" "$@"
+}
+
+function wt_herd {
+  # The Herdr bridge half of the helper. Kept as its own name because the
+  # commands behind it need a running Herdr, while the Git/GitHub commands that
+  # go through wt_devflow do not.
+  wt_devflow "$@"
 }
 
 # --- Guided start flow -------------------------------------------------------
@@ -1823,8 +1837,25 @@ function wt_dispatch {
     fi
     ;;
   backlog)
-    # BACKLOG.md capture + sync. Operates on the tracked copy in the dev
-    # worktree and commits/pushes scoped changes so the file never drifts.
+    # The backlog is this repository's open GitHub Issues. Listing them is
+    # delegated to the Go helper, which owns the query, the bounds, the
+    # sanitization, and the JSON contract; this shell only forwards words.
+    #
+    # Bare `wt backlog` is the primary spelling, so the subcommand has to read
+    # as empty rather than as an unset parameter: a caller running under
+    # `set -u` would otherwise get a shell error instead of a listing.
+    case "${2-}" in
+      add|sync|prune)
+        : # Handled by the file-backed paths below until they are removed.
+        ;;
+      *)
+        # Everything else — no subcommand, list, ls, --all, --json, and any
+        # unsupported spelling — is the helper's to accept or reject. Rejection
+        # belongs there too, so one parser decides what the command means.
+        wt_devflow backlog "${@:2}"
+        return $?
+        ;;
+    esac
     wt_color_init
     local bl_file
     bl_file="$(wt_backlog_file)" || { echo "Could not find $BASE_BRANCH worktree"; return 1; }
@@ -1833,16 +1864,7 @@ function wt_dispatch {
       return 1
     fi
     local bl_dev="${bl_file:h}"
-    case "$2" in
-      ""|list|ls)
-        # Pretty colorized view for a terminal; raw file when piped/redirected
-        # so downstream tools (grep, less -F, editors) still see plain markdown.
-        if [[ -t 1 ]]; then
-          wt_backlog_render "$bl_file"
-        else
-          cat "$bl_file"
-        fi
-        ;;
+    case "${2-}" in
       add)
         shift 2
         local idea="$*"
@@ -1889,7 +1911,9 @@ function wt_dispatch {
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
-    echo "  wt backlog [sub] - BACKLOG.md: list | add <idea> | sync | prune [days] (7-day shipped-history retention)"
+    echo "  wt backlog [list] [--all] [--json] - This repository's open GitHub Issues"
+    echo "                     Default scope is the Issues you authored; --all drops only"
+    echo "                     that author filter. Queried live on every run (no cache)."
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;
   esac
