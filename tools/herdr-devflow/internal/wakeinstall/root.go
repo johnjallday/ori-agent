@@ -429,7 +429,7 @@ func socketRequest(
 	if err != nil {
 		return wakeprotocol.Response{}, err
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(wakeservice.DefaultIOTimeout))
 	if err := wakeprotocol.WriteRequest(connection, request); err != nil {
 		return wakeprotocol.Response{}, err
@@ -465,7 +465,7 @@ func captureFile(path string, maximum int64) (capturedFile, error) {
 	if err != nil {
 		return capturedFile{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, maximum+1))
 	if err != nil {
 		return capturedFile{}, err
@@ -491,7 +491,7 @@ func readApprovedArtifact(source string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, "", err
@@ -529,7 +529,7 @@ func atomicWrite(destination string, data []byte, mode os.FileMode, config RootC
 		return err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if _, err := temporary.Write(data); err != nil {
 		_ = temporary.Close()
 		return err

@@ -291,11 +291,14 @@ run_check "Format Check (gofmt)" "test -z \"\$(gofmt -l . 2>&1 | grep -v '^vendo
 # Go vet
 run_check "Go Vet" "go vet ./..." || true
 
-# Lint check (golangci-lint)
+# Lint check (golangci-lint). Ratcheted against origin/dev, matching the CI
+# gate: only issues introduced since dev fail this check. The full,
+# pre-existing legacy baseline (tracked separately, not required to reach
+# zero for this delivery) is visible via `make lint` but does not block here.
 if command -v golangci-lint &> /dev/null; then
-  LINT_CMD="golangci-lint run ./..."
+  LINT_CMD="golangci-lint run --new-from-merge-base=origin/dev ./..."
 elif [ -x "$HOME/go/bin/golangci-lint" ]; then
-  LINT_CMD="$HOME/go/bin/golangci-lint run ./..."
+  LINT_CMD="$HOME/go/bin/golangci-lint run --new-from-merge-base=origin/dev ./..."
 else
   LINT_CMD=""
 fi

@@ -237,7 +237,7 @@ func roundTrip(t *testing.T, socket string, request wakeprotocol.Request) wakepr
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	if err := wakeprotocol.WriteRequest(connection, request); err != nil {
 		t.Fatal(err)
 	}

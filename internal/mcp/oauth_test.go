@@ -418,7 +418,7 @@ func simulateBrowserAuthorize(t *testing.T, client *http.Client, authorizeURL st
 	if err != nil {
 		t.Fatalf("simulated browser GET authorize url failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("expected 302 from fake authorize endpoint, got %d", resp.StatusCode)
 	}

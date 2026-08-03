@@ -276,7 +276,7 @@ vet: ## Run go vet
 	$(GOVET) ./...
 	@echo "$(GREEN)✓ Vet passed$(NC)"
 
-lint: ## Run linter (requires golangci-lint)
+lint: ## Run the full linter (includes the pre-existing legacy baseline; see lint-new)
 	@echo "$(BLUE)Running linter...$(NC)"
 	@if ! command -v golangci-lint > /dev/null; then \
 		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
@@ -284,6 +284,15 @@ lint: ## Run linter (requires golangci-lint)
 	fi
 	golangci-lint run ./...
 	@echo "$(GREEN)✓ Lint passed$(NC)"
+
+lint-new: ## Run the ratcheted linter: only issues new vs origin/dev (mirrors the CI gate)
+	@echo "$(BLUE)Running linter (new issues vs origin/dev only)...$(NC)"
+	@if ! command -v golangci-lint > /dev/null; then \
+		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
+		exit 1; \
+	fi
+	golangci-lint run --new-from-merge-base=origin/dev ./...
+	@echo "$(GREEN)✓ No new lint findings$(NC)"
 
 lint-fix: ## Auto-fix lint issues where possible (gofmt rewrites + golangci-lint --fix)
 	@echo "$(BLUE)Auto-fixing Go lint issues...$(NC)"
@@ -383,9 +392,9 @@ dev-setup: deps build ## Initial development setup
 	@echo "  2. Run the server: make run"
 	@echo "  3. Visit: http://localhost:8765"
 
-install-tools: ## Install development tools
+install-tools: ## Install development tools (golangci-lint pinned to .golangci-lint-version)
 	@echo "$(BLUE)Installing development tools...$(NC)"
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$(cat .golangci-lint-version)
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "$(GREEN)✓ Tools installed$(NC)"
 

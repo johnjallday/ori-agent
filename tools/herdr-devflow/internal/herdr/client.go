@@ -921,7 +921,7 @@ func (c *Client) CallSocket(ctx context.Context, method string, params any) (jso
 	if err != nil {
 		return nil, socketError(method, err)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 
 	id := fmt.Sprintf("ori-devflow-%d", c.sequence.Add(1))
 	request := map[string]any{"id": id, "method": method, "params": params}

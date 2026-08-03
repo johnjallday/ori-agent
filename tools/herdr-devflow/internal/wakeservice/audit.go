@@ -89,7 +89,7 @@ func (s *rootStore) appendAudit(entry auditEntry) error {
 	if err != nil {
 		return fmt.Errorf("open wake audit: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if err := file.Chmod(0600); err != nil {
 		return fmt.Errorf("secure wake audit: %w", err)
 	}

@@ -369,7 +369,7 @@ func (m *Manager) request(ctx context.Context, request wakeprotocol.Request) (wa
 	if err != nil {
 		return wakeprotocol.Response{}, err
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(wakeservice.DefaultIOTimeout))
 	if err := wakeprotocol.WriteRequest(connection, request); err != nil {
 		return wakeprotocol.Response{}, err
@@ -466,7 +466,7 @@ func fileDigest(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open wake artifact for digest: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", fmt.Errorf("digest wake artifact: %w", err)
