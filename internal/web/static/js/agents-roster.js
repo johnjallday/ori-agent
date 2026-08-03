@@ -1089,7 +1089,18 @@
       pills = vm.workspaces
         .slice(0, 2)
         .map(function (w) {
-          return '<span class="agent-card__pill">' + esc(w.name) + '</span>';
+          // The truncated label is a nested span, not text directly inside the
+          // flex pill: text-overflow:ellipsis does not reliably apply to a
+          // flex container's own anonymous text content, only to a normal
+          // inline/block box, so the label needs its own overflow context
+          // (PRD FR21 — clamped, not silently cut off with no indicator).
+          return (
+            '<span class="agent-card__pill" title="' +
+            esc(w.name) +
+            '"><span class="agent-card__pill-label">' +
+            esc(w.name) +
+            '</span></span>'
+          );
         })
         .join('');
       if (vm.workspaces.length > 2) {
@@ -2392,9 +2403,14 @@
     var item = state.byName[name];
     if (!item || !detail) return;
     if (detail.model) item.model = detail.model;
-    // Merge the full metadata snapshot (description, tags, favorite, avatar) so
-    // the rebuilt card reflects every edit, not just the description.
-    if (detail.metadata) item.metadata = Object.assign({}, item.metadata, detail.metadata);
+    // Replace wholesale, not merge: both callers pass a just-forced /detail
+    // fetch, which is the complete authoritative metadata, not a partial patch.
+    // A shallow merge can only add/overwrite keys, never clear one — after
+    // removing an avatar the server's response simply omits avatar_image
+    // (empty, omitempty), and merging into the old object would leave the
+    // stale path in place, so the card kept showing the just-deleted image
+    // (PRD FR67/FR74/FR96).
+    if (detail.metadata) item.metadata = detail.metadata;
     if (detail.role) item.role = detail.role;
 
     // Rebuild the projection FIRST: everything below reads through viewFor(),

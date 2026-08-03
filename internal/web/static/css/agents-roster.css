@@ -682,15 +682,13 @@
   align-items: center;
   gap: 5px;
   max-width: 100%;
+  min-width: 0;
   padding: 2px 8px;
-  overflow: hidden;
   border: 1px solid var(--card-line);
   border-radius: 999px;
   background: var(--card-soft);
   color: var(--card-muted);
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .agent-card__pill::before {
@@ -700,6 +698,17 @@
   height: 5px;
   background: var(--role-accent);
   transform: rotate(45deg);
+}
+
+/* text-overflow does not reliably apply to a flex container's own text (the
+   pill above is display:inline-flex); the truncated label needs its own
+   inline overflow context, and min-width:0 so it can shrink below its
+   content's intrinsic width inside the flex row (PRD FR21). */
+.agent-card__pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-card__pill.is-more::before,

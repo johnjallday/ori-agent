@@ -1101,6 +1101,68 @@ test.describe('Agents single-agent editing', () => {
         .catch(() => undefined);
     }
   });
+
+  test('a failed workspace save preserves the checkbox selection and reports the error', async ({
+    page,
+    request
+  }) => {
+    const prefix = `PWWsFail${Date.now()}`;
+    const name = `${prefix} Agent`;
+    const wsName = `${prefix} Target`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    let wsId = '';
+    const ws = await request.post(`${baseUrl}/api/workspaces`, { data: { name: wsName } });
+    if (ws.ok()) {
+      const j = await ws.json();
+      wsId = j?.folder?.id || j?.id || '';
+    }
+    expect(wsId).toBeTruthy();
+
+    try {
+      await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ needs_onboarding: false, completed: true })
+        })
+      );
+      await page.route(`**/api/agents/${encodeURIComponent(name)}/workspaces`, route =>
+        route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'Simulated workspace save failure.' })
+        })
+      );
+
+      await page.goto(`${baseUrl}/agents?agent=${encodeURIComponent(name)}&tab=workspaces`, {
+        waitUntil: 'domcontentloaded'
+      });
+      await expect(page.locator('#stageName')).toHaveText(name);
+      await expect(page.locator('#panel-workspaces')).toBeVisible();
+
+      const box = page.locator(`input[data-ws-id="${wsId}"]`);
+      await box.check();
+      await page.locator('#savebar-workspaces [data-role="save"]').click();
+
+      // The failure is reported, and the user's checked box is not reverted or
+      // silently discarded (PRD FR100/FR101).
+      await expect(page.locator('#panel-workspaces .save-status')).toContainText(
+        'Simulated workspace save failure.'
+      );
+      await expect(box).toBeChecked();
+    } finally {
+      if (wsId)
+        await request
+          .delete(`${baseUrl}/api/workspaces/${encodeURIComponent(wsId)}`)
+          .catch(() => undefined);
+      await request
+        .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)
+        .catch(() => undefined);
+    }
+  });
 });
 
 // Inspector slice: responsive open/close, the four-tab contract, and truthful
