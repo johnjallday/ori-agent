@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages test-test-maintenance lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
+.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages test-test-maintenance lint lint-fix lint-new lint-js lint-js-fix fmt fmt-js check-js check-wails-modes vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
 
 # Default target
 .DEFAULT_GOAL := help
@@ -360,6 +360,9 @@ check-cross-platform: ## Check builds for all platforms (Linux, Windows, macOS)
 	@echo "$(BLUE)Checking cross-platform builds...$(NC)"
 	@./scripts/check-cross-platform.sh
 	@echo "$(GREEN)✓ All platforms build successfully$(NC)"
+
+check-wails-modes: ## Verify generated Wails bindings are tracked as regular files, not executable
+	@./scripts/check-wails-binding-modes.sh
 
 
 ## Docker targets

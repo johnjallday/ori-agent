@@ -1,5 +1,73 @@
 # Ori Evolution System Plan (Revised)
 
+## 0. Implementation Status (reconciled 2026-08-03)
+
+The plan below is the original design document, kept as-written for historical
+context. This section is the current, evidence-checked status against the
+Rollout Roadmap in section 7.
+
+| Phase | Status |
+|---|---|
+| 0 - Data Integrity | Partial |
+| 1 - Core XP + Stages | Done |
+| 2 - Feeding | Done |
+| 3 - Specialization Paths | Done |
+| 4 - Hatch + Handoff Suggestions | Partial |
+| 5 - UX and Observability | Partial |
+
+- **Phase 0 (Partial):** The persistence bug this phase targets is fixed -
+  `internal/store/file_store.go` now saves and loads the agent's `Evolution`
+  field in full, with `normalizeLoadedAgent` initializing defaults when nil.
+  What's still missing is the phase's own named exit criterion: a restart
+  round-trip test asserting `Evolution` specifically survives (the existing
+  `TestFileStore_SaveLoad_NestedRoundTrip` in that package never sets or
+  checks it; `internal/onboarding/manager_test.go` has that kind of test, but
+  only for the separate `AssistantProgress` object).
+- **Phase 1 (Done):** XP formula, the five stage thresholds, duplicate-message
+  suppression, the hourly XP cap, and no-XP-on-failure are all implemented in
+  `internal/evolution/service.go` and wired from every chat provider handler
+  through `trackAgentStatistics`. Substantial test coverage in
+  `internal/evolution/service_test.go`. The optional +0-20 quality bonus from
+  section 4.3 remains unimplemented, matching the plan's own "phase-gated"
+  framing.
+- **Phase 2 (Done):** `POST /api/agents/{name}/feed` is implemented in
+  `internal/evolutionhttp/handler.go` with validation, source tagging, and
+  both unit and end-to-end integration test coverage.
+- **Phase 3 (Done):** Path selection is gated to the Learner stage and, beyond
+  being stored, is actually consumed - `internal/chathttp/provider_common.go`
+  appends path-specific system-prompt guidance and reprioritizes the tool
+  list by path, unit-tested in `internal/chathttp/evolution_prompt_test.go`.
+- **Phase 4 (Partial):** `GetSuggestions` in `internal/evolution/service.go`
+  is a real keyword-based intent-classification engine, not a stub, and every
+  suggestion it emits sets `RequiresApproval: true`; the `evolution.AgentStore`
+  interface it depends on has no `CreateAgent` method, so it is structurally
+  incapable of auto-hatching an agent. What's missing is any frontend: nothing
+  under `internal/web/static/js` calls `/api/evolution/suggestions` or
+  displays a suggestion, so there is no way for a user to see or act on one
+  yet.
+- **Phase 5 (Partial):** The sidebar rank/XP display, agent-card stage badges
+  and XP bar, and a stage-up toast are real and wired
+  (`internal/web/static/js/modules/sidebar.js`, `agents.js`,
+  `dashboard-agents.js`, `agents-roster.js`, `stage-up-toast.js`). The
+  evolution-specific activity log (`internal/agenthttp/activity_log.go`,
+  routed at `GET .../activity`) has no frontend consumer - the dashboard's
+  activity feed reads a separate, unrelated orchestration endpoint - so
+  "support can diagnose progression issues from logs" is only true via raw
+  JSONL files or direct API calls today.
+
+Data-model drift from section 6.1 worth knowing before reading further: the
+plan's `XP`/`Stage`/`Path` fields shipped as `Experience` (json `"experience"`)
+and typed `AgentStage`/`AgentPath`; `AwardAssistantXP` from section 6.3 was
+never built as a separate entry point (assistant XP instead mirrors every
+agent XP award 1:1, resolving open question 11.1 in favor of strict
+sum-of-agent-XP by default); and `EvaluateStageTransitions` exists but has no
+callers - stage transitions happen inline inside the unexported `awardXP()`.
+
+Also: `internal/progression` (quest-log onboarding, `t2-build-hq`-style quest
+IDs, surfaced by `progression-widget.js`) is a **different, unrelated**
+system from the agent-leveling "Ori Evolution System" this document
+describes. Don't conflate the two when searching for "progression".
+
 ## 1. Vision
 Ori should evolve from a static set of agents into a system where:
 - the main assistant progresses globally as the primary assistant profile,

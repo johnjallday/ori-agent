@@ -1,4 +1,3 @@
-console.log('[workspace-hub.js] FILE LOADED');
 /**
  * Workspace Hub - Main Coordinator
  * Orchestrates workspace hub sub-modules for task, session, note, and file management.
@@ -28,7 +27,6 @@ console.log('[workspace-hub.js] FILE LOADED');
   const LAUNCHER_VIEW_TREE = 'tree';
   const LAUNCHER_VIEW_MAP = 'map';
   const LAUNCHER_DEFAULT_VIEW = LAUNCHER_VIEW_MAP;
-  console.log('[workspace-hub] hubEl exists:', !!hubEl);
   if (!hubEl) return;
 
   // Initialize DOM element references
@@ -4933,9 +4931,7 @@ console.log('[workspace-hub.js] FILE LOADED');
   }
 
   // Subscribe to global events
-  console.log('[workspace-hub] EventBus available:', !!window.EventBus);
   if (window.EventBus) {
-    console.log('[workspace-hub] Registering EventBus listeners');
     EventBus.on(
       'workspace:files:updated',
       data => {
@@ -5020,15 +5016,8 @@ console.log('[workspace-hub.js] FILE LOADED');
       'note:updated',
       data => {
         const state = window.WorkspaceHubState.getState();
-        console.log(
-          '[note:updated] received, selectedId:',
-          state.selectedId,
-          'eventWorkspaceId:',
-          data?.workspaceId
-        );
         if (!state.selectedId) return;
         if (!data?.workspaceId || data.workspaceId === state.selectedId) {
-          console.log('[note:updated] calling loadNotes');
           window.WorkspaceHubNotes.loadNotes(state.selectedId);
         }
       },

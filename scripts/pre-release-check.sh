@@ -291,6 +291,11 @@ run_check "Format Check (gofmt)" "test -z \"\$(gofmt -l . 2>&1 | grep -v '^vendo
 # Go vet
 run_check "Go Vet" "go vet ./..." || true
 
+# Generated Wails bindings must stay regular files. Wails' generator writes
+# them executable; regenerating locally and committing without noticing
+# reintroduces that.
+run_check "Wails Binding Modes" "./scripts/check-wails-binding-modes.sh" || true
+
 # Lint check (golangci-lint). Ratcheted against origin/dev, matching the CI
 # gate: only issues introduced since dev fail this check. The full,
 # pre-existing legacy baseline (tracked separately, not required to reach

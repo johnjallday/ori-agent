@@ -34,6 +34,9 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Check generated Wails binding file modes
+        run: ./scripts/check-wails-binding-modes.sh
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

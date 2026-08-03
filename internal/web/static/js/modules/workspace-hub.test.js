@@ -172,7 +172,7 @@ function loadWorkspaceHub(overrides = {}) {
   const workspaceTags = createElement('hubWorkspaceTags');
   const mapMounts = [];
 
-  elements.set('workspaceHub', hubEl);
+  if (!overrides.omitHubEl) elements.set('workspaceHub', hubEl);
   elements.set('launcherGrid', launcherGrid);
   elements.set('launcherEmptyState', launcherEmpty);
   elements.set('launcherTagFilterbar', launcherTagFilterbar);
@@ -197,7 +197,7 @@ function loadWorkspaceHub(overrides = {}) {
   const sessionStorageMap = new Map();
   const window = {
     CSS: { escape: value => String(value).replace(/"/g, '\\"') },
-    EventBus: null,
+    EventBus: overrides.EventBus || null,
     Toast: { error: () => {}, success: () => {} },
     WorkspaceHubFiles: {
       bindFileUploadEvents: () => {},
@@ -291,8 +291,13 @@ function loadWorkspaceHub(overrides = {}) {
   const context = {
     bootstrap: {},
     clearTimeout,
-    console,
+    console: overrides.console || console,
     document,
+    // Mirrors browser global-scope semantics, where `window.X` and a bare
+    // `X` reference are the same binding - workspace-hub.js's EventBus
+    // subscription block relies on that (checks window.EventBus, then
+    // calls the bare EventBus.on(...)).
+    EventBus: overrides.EventBus || undefined,
     escapeHtml,
     fetch: overrides.fetch || defaultFetch,
     localStorage: window.localStorage,
@@ -305,7 +310,7 @@ function loadWorkspaceHub(overrides = {}) {
   vm.runInNewContext(source, context, { filename: 'workspace-hub.js' });
 
   return {
-    helpers: window.WorkspaceHub.__test,
+    helpers: window.WorkspaceHub?.__test,
     launcherEmpty,
     launcherGrid,
     launcherMap,
@@ -323,6 +328,39 @@ function loadWorkspaceHub(overrides = {}) {
     workspaceTags
   };
 }
+
+test('workspace-hub returns early, without initializing or logging, when the hub element is missing', () => {
+  const logCalls = [];
+  const { helpers, window } = loadWorkspaceHub({
+    omitHubEl: true,
+    console: { ...console, log: (...args) => logCalls.push(args) }
+  });
+
+  assert.equal(helpers, undefined, 'initialization past the early return must not run');
+  assert.equal(window.WorkspaceHub, undefined, 'window.WorkspaceHub must not be exposed');
+  assert.deepEqual(logCalls, [], 'no console.log calls expected when the hub element is missing');
+});
+
+test('workspace-hub normal initialization, including EventBus listener registration, emits no console.log output', () => {
+  const logCalls = [];
+  const registered = [];
+  const eventBus = {
+    on: (name, _handler, namespace) => registered.push({ name, namespace })
+  };
+
+  const { helpers } = loadWorkspaceHub({
+    EventBus: eventBus,
+    console: { ...console, log: (...args) => logCalls.push(args) }
+  });
+
+  assert.ok(helpers, 'module should finish initializing with a real hub element');
+  assert.deepEqual(logCalls, [], 'no console.log calls expected during normal initialization');
+  assert.ok(registered.length > 0, 'EventBus.on should be called when window.EventBus is present');
+  assert.ok(
+    registered.every(entry => entry.namespace === 'workspaceHub'),
+    'all workspace-hub EventBus subscriptions should be namespaced'
+  );
+});
 
 test('launcher view preference defaults to map and persists valid values', () => {
   const { helpers, storage } = loadWorkspaceHub();
