@@ -1845,13 +1845,14 @@ function wt_dispatch {
     # as empty rather than as an unset parameter: a caller running under
     # `set -u` would otherwise get a shell error instead of a listing.
     case "${2-}" in
-      add|sync|prune)
+      sync|prune)
         : # Handled by the file-backed paths below until they are removed.
         ;;
       *)
-        # Everything else — no subcommand, list, ls, --all, --json, and any
-        # unsupported spelling — is the helper's to accept or reject. Rejection
-        # belongs there too, so one parser decides what the command means.
+        # Everything else — no subcommand, list, ls, view, add, their flags, and
+        # any unsupported spelling — is the helper's to accept or reject.
+        # Rejection belongs there too, so one parser decides what the command
+        # means and a title is never re-split by two of them.
         wt_devflow backlog "${@:2}"
         return $?
         ;;
@@ -1914,6 +1915,10 @@ function wt_dispatch {
     echo "  wt backlog [list] [--all] [--json] - This repository's open GitHub Issues"
     echo "                     Default scope is the Issues you authored; --all drops only"
     echo "                     that author filter. Queried live on every run (no cache)."
+    echo "  wt backlog view <number> [--json] - One Issue in full, including its body"
+    echo "  wt backlog add \"<title>\" [--body \"<text>\"] [--json] - Capture an idea as an Issue"
+    echo "                     Creates the Issue and nothing else: no label, assignee,"
+    echo "                     milestone, or Project, and no browser or editor."
     echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
     ;;
   esac

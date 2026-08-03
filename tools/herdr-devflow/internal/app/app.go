@@ -3140,6 +3140,16 @@ Usage:
                                 local backlog file, so a failure is reported as a failure
                                 rather than as an empty backlog. Issue bodies are not
                                 listed; read one with wt backlog view.
+  wt backlog view <number|url> [--json]
+                                Show one Issue of this repository in full, open or closed:
+                                state, author, labels, timestamps, URL, and body. The body
+                                is printed as Markdown text — no HTML is rendered, no link
+                                is followed, and no attachment is downloaded.
+  wt backlog add "<title>" [--body "<text>"] [--json]
+                                Create one Issue in this repository from a required title
+                                and an optional Markdown body. It sets nothing else: no
+                                label, assignee, milestone, Issue type, Project, or
+                                parent, and it opens no browser or editor.
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.

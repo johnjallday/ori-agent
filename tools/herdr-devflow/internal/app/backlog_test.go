@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -412,6 +413,322 @@ func TestBacklogFailsLoudlyRatherThanShowingAnEmptyBacklog(t *testing.T) {
 type errNoNetwork struct{}
 
 func (errNoNetwork) Error() string { return "gh could not be started" }
+
+func TestParseBacklogArgsReadsViewAndAddExactly(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"view", "292"},
+		{"view", "#292"},
+		{"view", "https://github.com/johnjallday/ori-agent/issues/292"},
+		{"show", "292"},
+	} {
+		parsed, err := parseBacklogArgs(args)
+		if err != nil || parsed.command != "view" || parsed.number != 292 {
+			t.Fatalf("parseBacklogArgs(%v) = %+v, %v", args, parsed, err)
+		}
+	}
+
+	parsed, err := parseBacklogArgs([]string{"add", "  Coordinate based map  ", "--body", "why it matters"})
+	if err != nil {
+		t.Fatalf("parseBacklogArgs(add): %v", err)
+	}
+	if parsed.command != "add" || parsed.title != "Coordinate based map" || parsed.body != "why it matters" {
+		t.Fatalf("parsed = %+v, want a trimmed title and its body", parsed)
+	}
+
+	// A body may legitimately begin with a dash, so the value after --body is
+	// taken as written rather than mistaken for a flag.
+	dashed, err := parseBacklogArgs([]string{"add", "a title", "--body", "--not-a-flag"})
+	if err != nil || dashed.body != "--not-a-flag" {
+		t.Fatalf("parsed = %+v, %v; want the body taken verbatim", dashed, err)
+	}
+	joined, err := parseBacklogArgs([]string{"add", "a title", "--body=inline text"})
+	if err != nil || joined.body != "inline text" {
+		t.Fatalf("parsed = %+v, %v; want --body= accepted", joined, err)
+	}
+
+	// Flags read the same wherever they are typed.
+	for _, args := range [][]string{
+		{"view", "292", "--json"},
+		{"--json", "view", "292"},
+	} {
+		parsed, err := parseBacklogArgs(args)
+		if err != nil || !parsed.json || parsed.number != 292 {
+			t.Fatalf("parseBacklogArgs(%v) = %+v, %v", args, parsed, err)
+		}
+	}
+}
+
+func TestParseBacklogArgsRefusesUnsafeOrAmbiguousViewAndAdd(t *testing.T) {
+	t.Parallel()
+	cases := map[string][]string{
+		"view without a number":      {"view"},
+		"view with two Issues":       {"view", "292", "293"},
+		"view of nothing numeric":    {"view", "soon"},
+		"view of a zero Issue":       {"view", "0"},
+		"view of a negative Issue":   {"view", "-4"},
+		"view of a pull request":     {"view", "https://github.com/johnjallday/ori-agent/pull/292"},
+		"add without a title":        {"add"},
+		"add with an unquoted title": {"add", "Coordinate", "based", "map"},
+		"add with an empty title":    {"add", "   "},
+		"add with a dangling body":   {"add", "a title", "--body"},
+		// --all widens whose Issues are listed; on one Issue or a creation it
+		// would mean nothing, and accepting it would suggest it did something.
+		"all with view": {"view", "292", "--all"},
+		"all with add":  {"add", "a title", "--all"},
+		// A body has nowhere to go on a read.
+		"body with view": {"view", "292", "--body", "text"},
+		"body with list": {"--body", "text"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			if parsed, err := parseBacklogArgs(args); err == nil {
+				t.Fatalf("parseBacklogArgs(%v) = %+v, want a usage error", args, parsed)
+			}
+		})
+	}
+}
+
+func TestBacklogViewShowsOneIssueInFull(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: `{
+		"number":292,"title":"Coordinate based map","author":{"login":"johnjallday"},
+		"labels":[{"name":"idea"}],"url":"https://github.com/johnjallday/ori-agent/issues/292",
+		"createdAt":"2026-08-02T23:06:49Z","updatedAt":"2026-08-02T23:10:00Z",
+		"state":"OPEN","stateReason":"","closedAt":"",
+		"body":"Show stations at real coordinates.\n\n- [ ] pick a projection"
+	}`}
+	application, stdout, stderr, base := newBacklogApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "292")); exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"#292", "Coordinate based map", "open", "johnjallday", "idea",
+		"2026-08-02T23:06:49Z", "https://github.com/johnjallday/ori-agent/issues/292",
+		"Show stations at real coordinates.", "- [ ] pick a projection",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("view = %q, want it to contain %q", output, want)
+		}
+	}
+	if strings.Join(remote.calls[1], " ") !=
+		"issue view 292 --repo johnjallday/ori-agent --json "+
+			"number,title,author,labels,url,createdAt,updatedAt,state,stateReason,closedAt,body" {
+		t.Fatalf("view args = %v", remote.calls[1])
+	}
+}
+
+func TestBacklogViewSaysSoWhenThereIsNoDescription(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: `{"number":293,"title":"Skin Makeover",
+		"author":{"login":"johnjallday"},"labels":[],
+		"url":"https://github.com/johnjallday/ori-agent/issues/293","state":"OPEN","body":""}`}
+	application, stdout, _, base := newBacklogApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "293")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// Blank space under the header reads like the command failed to print
+	// something, so the absence is stated.
+	if !strings.Contains(stdout.String(), "(this Issue has no description)") {
+		t.Fatalf("view = %q, want the missing body named", stdout.String())
+	}
+}
+
+func TestBacklogViewJSONCarriesTheDetailFields(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: `{"number":270,"title":"Downloads Janitor",
+		"author":{"login":"johnjallday"},"labels":[],
+		"url":"https://github.com/johnjallday/ori-agent/issues/270",
+		"createdAt":"2026-07-20T10:00:00Z","updatedAt":"2026-07-26T10:00:00Z",
+		"state":"CLOSED","stateReason":"COMPLETED","closedAt":"2026-07-26T10:00:00Z",
+		"body":"shipped"}`}
+	application, stdout, _, base := newBacklogApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "270", "--json")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+
+	var payload backlogDetailPayload
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout = %q: %v", stdout.String(), err)
+	}
+	if payload.SchemaVersion != backlogSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
+		payload.Number != 270 || payload.State != "closed" || payload.StateReason != "COMPLETED" ||
+		payload.ClosedAt != "2026-07-26T10:00:00Z" || payload.Body != "shipped" {
+		t.Fatalf("payload = %+v", payload)
+	}
+	// The detail shares the list's core identity fields, so one consumer can
+	// read both.
+	if payload.Title == "" || payload.Author == "" || payload.URL == "" ||
+		payload.CreatedAt == "" || payload.UpdatedAt == "" || payload.Labels == nil {
+		t.Fatalf("payload = %+v, want the shared identity fields present", payload)
+	}
+}
+
+func TestBacklogViewRefusesAnotherRepositorysIssueURL(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{}
+	application, _, stderr, base := newBacklogApp(t, remote)
+
+	exit := application.Run(context.Background(),
+		append(base, "view", "https://github.com/other/project/issues/292"))
+
+	if exit != 2 {
+		t.Fatalf("exit = %d, want 2 for an Issue outside this repository", exit)
+	}
+	if !strings.Contains(stderr.String(), "other/project") {
+		t.Fatalf("stderr = %q, want the mismatch explained", stderr.String())
+	}
+	// The repository was resolved to make the comparison, but the Issue itself
+	// was never fetched from anywhere.
+	for _, call := range remote.calls {
+		if len(call) > 1 && call[0] == "issue" && call[1] == "view" {
+			t.Fatalf("a wrong-repository Issue was still fetched: %v", remote.calls)
+		}
+	}
+}
+
+func TestBacklogAddCreatesOneIssueAndReportsIt(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: "https://github.com/johnjallday/ori-agent/issues/294\n"}
+	application, stdout, stderr, base := newBacklogApp(t, remote)
+
+	exit := application.Run(context.Background(),
+		append(base, "add", "Coordinate based map", "--body", "Show stations at real coordinates."))
+
+	if exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
+	}
+	for _, want := range []string{"#294", "Coordinate based map",
+		"https://github.com/johnjallday/ori-agent/issues/294"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("output = %q, want it to contain %q", stdout.String(), want)
+		}
+	}
+
+	create := remote.calls[1]
+	if create[0] != "issue" || create[1] != "create" {
+		t.Fatalf("calls = %v, want exactly one creation after resolution", remote.calls)
+	}
+	if len(remote.calls) != 2 {
+		t.Fatalf("calls = %v, want no second request after creating", remote.calls)
+	}
+	for _, unwanted := range []string{"--label", "--assignee", "--milestone",
+		"--project", "--template", "--editor", "--web", "--body-file"} {
+		if strings.Contains(strings.Join(create, " "), unwanted) {
+			t.Fatalf("create args = %v, want no %s", create, unwanted)
+		}
+	}
+}
+
+func TestBacklogAddJSONIsSchemaVersionedAndMinimal(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: "https://github.com/johnjallday/ori-agent/issues/295\n"}
+	application, stdout, _, base := newBacklogApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "add", "Just a title", "--json")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+
+	var payload backlogCreatedPayload
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout = %q: %v", stdout.String(), err)
+	}
+	if payload.SchemaVersion != backlogSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
+		payload.Number != 295 || payload.Title != "Just a title" || payload.State != "open" ||
+		payload.URL != "https://github.com/johnjallday/ori-agent/issues/295" {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestBacklogAddPassesHostileTitlesAndBodiesThroughAsData(t *testing.T) {
+	t.Parallel()
+	title := `$(rm -rf /); echo "pwned" | tee /tmp/x && :`
+	body := "line one\n\n```sh\nrm -rf /\n```\n\nSee https://example.test/a?b=c&d=e"
+	remote := &fakeGitHub{issues: "https://github.com/johnjallday/ori-agent/issues/296\n"}
+	application, stdout, _, base := newBacklogApp(t, remote)
+
+	if exit := application.Run(context.Background(),
+		append(base, "add", title, "--body", body)); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+
+	create := remote.calls[1]
+	titleIndex := indexOfArg(create, "--title")
+	bodyIndex := indexOfArg(create, "--body")
+	if titleIndex < 0 || create[titleIndex+1] != title {
+		t.Fatalf("title was altered on its way to GitHub: %v", create)
+	}
+	if bodyIndex < 0 || create[bodyIndex+1] != body {
+		t.Fatalf("body was altered on its way to GitHub: %v", create)
+	}
+	if !strings.Contains(stdout.String(), "#296") {
+		t.Fatalf("output = %q", stdout.String())
+	}
+}
+
+func TestBacklogAddFailureLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{failure: errNoNetwork{}}
+	application, stdout, stderr, base := newBacklogApp(t, remote)
+	repo := repoRootFromArgs(t, base)
+	before := readDirNames(t, repo)
+
+	exit := application.Run(context.Background(), append(base, "add", "an idea"))
+
+	if exit != 1 {
+		t.Fatalf("exit = %d, want 1 when the Issue could not be created", exit)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("a failed creation printed no reason")
+	}
+	// Nothing local stands in for the Issue that was not created: no draft
+	// file, no temporary body, no backlog entry to mistake for the real thing.
+	if after := readDirNames(t, repo); !slices.Equal(before, after) {
+		t.Fatalf("the checkout changed: before=%v after=%v", before, after)
+	}
+	if strings.Contains(stdout.String(), "#") {
+		t.Fatalf("a failed creation reported an Issue number: %q", stdout.String())
+	}
+}
+
+func indexOfArg(args []string, flag string) int {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == flag {
+			return index
+		}
+	}
+	return -1
+}
+
+func repoRootFromArgs(t *testing.T, args []string) string {
+	t.Helper()
+	for index, argument := range args {
+		if argument == "--repo-root" && index+1 < len(args) {
+			return args[index+1]
+		}
+	}
+	t.Fatal("the fixture arguments carry no repository root")
+	return ""
+}
+
+func readDirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	slices.Sort(names)
+	return names
+}
 
 // TestBacklogListPayloadIsAStableSchemaVersionOneEnvelope pins the JSON
 // contract itself, separately from any command that emits it.

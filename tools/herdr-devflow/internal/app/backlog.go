@@ -32,43 +32,103 @@ type backlogArgs struct {
 	command string
 	scope   github.AuthorScope
 	json    bool
+	// repository is set only when `view` was given a full Issue URL, and is
+	// checked against the resolved repository before anything is read.
+	repository github.Repository
+	number     int
+	title      string
+	body       string
 }
 
 // parseBacklogArgs validates an invocation completely before anything runs.
 //
 // Nothing here contacts GitHub, and that is deliberate: a typo should cost a
-// message, not a network round trip against somebody's rate limit. The parser
-// therefore decides the whole shape of the command — which operation, whose
-// Issues, which output — and refuses anything it does not recognize.
+// message, not a network round trip against somebody's rate limit — and for
+// `add`, a misread invocation would create a real Issue somebody has to go and
+// close. The parser therefore decides the whole shape of the command — which
+// operation, whose Issues, which output — and refuses anything it does not
+// recognize.
 func parseBacklogArgs(args []string) (backlogArgs, error) {
 	parsed := backlogArgs{scope: github.ScopeMe}
-	command := ""
+	var positional []string
 	all := false
+	body := ""
+	bodyGiven := false
 
-	for _, argument := range args {
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
 		switch {
 		case argument == "--all":
 			all = true
 		case argument == "--json":
 			parsed.json = true
+		case argument == "--body":
+			// The next token is the body whatever it looks like: a body may
+			// legitimately begin with a dash, and silently treating it as a
+			// flag would drop the text somebody wrote.
+			if index+1 >= len(args) {
+				return backlogArgs{}, errors.New("backlog: --body requires text")
+			}
+			index++
+			body, bodyGiven = args[index], true
+		case strings.HasPrefix(argument, "--body="):
+			body, bodyGiven = strings.TrimPrefix(argument, "--body="), true
 		case strings.HasPrefix(argument, "-"):
 			return backlogArgs{}, fmt.Errorf("backlog: unknown option %q", argument)
-		case command == "":
-			command = argument
 		default:
-			// A second positional means the invocation is ambiguous — most
-			// often an unquoted title. Guessing which word was meant is how a
-			// command creates the wrong thing.
-			return backlogArgs{}, fmt.Errorf("backlog: unexpected argument %q", argument)
+			positional = append(positional, argument)
 		}
 	}
 
-	if command == "" {
-		command = "list"
+	command := "list"
+	if len(positional) > 0 {
+		command = positional[0]
+		positional = positional[1:]
 	}
+
 	switch command {
 	case "list", "ls":
 		parsed.command = "list"
+		if len(positional) > 0 {
+			return backlogArgs{}, fmt.Errorf("backlog: list takes no arguments, but got %q", positional[0])
+		}
+	case "view", "show":
+		parsed.command = "view"
+		if len(positional) == 0 {
+			return backlogArgs{}, errors.New("backlog: view needs an Issue number, for example: wt backlog view 292")
+		}
+		if len(positional) > 1 {
+			return backlogArgs{}, fmt.Errorf("backlog: view takes one Issue, but also got %q", positional[1])
+		}
+		repository, number, err := github.ParseIssueReference(positional[0])
+		if err != nil {
+			return backlogArgs{}, fmt.Errorf("backlog: %w", err)
+		}
+		parsed.repository, parsed.number = repository, number
+	case "add", "new":
+		parsed.command = "add"
+		if len(positional) == 0 {
+			return backlogArgs{}, errors.New(
+				"backlog: add needs a quoted title, for example: wt backlog add \"Coordinate based map\"")
+		}
+		if len(positional) > 1 {
+			// Almost always an unquoted title. Creating an Issue named after
+			// its first word is not a helpful guess.
+			return backlogArgs{}, fmt.Errorf(
+				"backlog: add takes one quoted title, but also got %q — quote the whole title", positional[1])
+		}
+		title, err := github.ValidateTitle(positional[0])
+		if err != nil {
+			return backlogArgs{}, fmt.Errorf("backlog: %w", err)
+		}
+		parsed.title = title
+		if bodyGiven {
+			validated, err := github.ValidateBody(body)
+			if err != nil {
+				return backlogArgs{}, fmt.Errorf("backlog: %w", err)
+			}
+			parsed.body = validated
+		}
 	case "sync":
 		return backlogArgs{}, errors.New(
 			"backlog: sync was removed — GitHub Issues are read live on every invocation, so there is nothing to sync")
@@ -79,7 +139,15 @@ func parseBacklogArgs(args []string) (backlogArgs, error) {
 		return backlogArgs{}, fmt.Errorf("backlog: unknown subcommand %q", command)
 	}
 
+	if bodyGiven && parsed.command != "add" {
+		return backlogArgs{}, fmt.Errorf("backlog: --body applies to add, not %s", parsed.command)
+	}
 	if all {
+		// --all widens whose Issues are listed. It has no meaning for one
+		// Issue, and accepting it there would suggest it did something.
+		if parsed.command != "list" {
+			return backlogArgs{}, fmt.Errorf("backlog: --all applies to list, not %s", parsed.command)
+		}
 		parsed.scope = github.ScopeAll
 	}
 	return parsed, nil
@@ -111,16 +179,76 @@ func (a *App) backlog(ctx context.Context, opts options, args []string) int {
 		return 1
 	}
 
+	switch parsed.command {
+	case "view":
+		return a.backlogView(ctx, client, repository, parsed, opts.json)
+	case "add":
+		return a.backlogAdd(ctx, client, repository, parsed, opts.json)
+	default:
+		return a.backlogList(ctx, client, repository, parsed, opts.json)
+	}
+}
+
+func (a *App) backlogList(
+	ctx context.Context, client *github.Client, repository github.Repository,
+	parsed backlogArgs, asJSON bool,
+) int {
 	list, err := client.ListIssues(ctx, repository, parsed.scope)
 	if err != nil {
-		a.writeBacklogError(err, opts.json)
+		a.writeBacklogError(err, asJSON)
 		return 1
 	}
-	if opts.json {
+	if asJSON {
 		a.writeResult(true, newBacklogListPayload(list))
 		return 0
 	}
 	a.renderBacklogList(list)
+	return 0
+}
+
+func (a *App) backlogView(
+	ctx context.Context, client *github.Client, repository github.Repository,
+	parsed backlogArgs, asJSON bool,
+) int {
+	// A URL is accepted as a convenience, not as a way to read another
+	// repository: it has to name the one this checkout resolves to.
+	if !parsed.repository.Empty() && parsed.repository.Slug() != repository.Slug() {
+		a.writeError(fmt.Errorf(
+			"backlog: that Issue URL is for %s, but this checkout is %s",
+			parsed.repository.Slug(), repository.Slug()), asJSON)
+		return 2
+	}
+
+	detail, err := client.ViewIssue(ctx, repository, parsed.number)
+	if err != nil {
+		a.writeBacklogError(err, asJSON)
+		return 1
+	}
+	if asJSON {
+		a.writeResult(true, newBacklogDetailPayload(repository, detail))
+		return 0
+	}
+	a.renderBacklogDetail(detail)
+	return 0
+}
+
+func (a *App) backlogAdd(
+	ctx context.Context, client *github.Client, repository github.Repository,
+	parsed backlogArgs, asJSON bool,
+) int {
+	created, err := client.CreateIssue(ctx, repository, parsed.title, parsed.body)
+	if err != nil {
+		a.writeBacklogError(err, asJSON)
+		return 1
+	}
+	if asJSON {
+		a.writeResult(true, newBacklogCreatedPayload(created))
+		return 0
+	}
+	style := a.backlogStyle()
+	fmt.Fprintf(a.stdout, "Created %s#%d%s  %s\n%s%s%s\n",
+		style.bold, created.Number, style.reset, created.Title,
+		style.dim, created.URL, style.reset)
 	return 0
 }
 
@@ -211,6 +339,105 @@ func (a *App) renderBacklogListStyled(list github.IssueList, style backlogStyle)
 		fmt.Fprintf(a.stdout,
 			"\n%sMore open Issues matched than this listing reads; showing the first %d.%s\n",
 			style.dim, len(list.Issues), style.reset)
+	}
+}
+
+// renderBacklogDetail writes one Issue in full.
+//
+// It prints the Markdown source as text. It does not render HTML, fetch an
+// image, follow a link, or download an attachment — a backlog entry is
+// something somebody else wrote, and reading it must not be an action.
+func (a *App) renderBacklogDetail(detail github.IssueDetail) {
+	style := a.backlogStyle()
+	state := string(detail.State)
+	if detail.StateReason != "" {
+		state += " (" + detail.StateReason + ")"
+	}
+
+	fmt.Fprintf(a.stdout, "%s#%d  %s%s\n", style.bold, detail.Number, detail.Title, style.reset)
+	fmt.Fprintf(a.stdout, "%sstate%s    %s\n", style.dim, style.reset, state)
+	fmt.Fprintf(a.stdout, "%sauthor%s   %s\n", style.dim, style.reset, orPlaceholder(detail.Author, "unknown"))
+	fmt.Fprintf(a.stdout, "%slabels%s   %s\n", style.dim, style.reset, orPlaceholder(strings.Join(detail.Labels, ", "), "none"))
+	fmt.Fprintf(a.stdout, "%screated%s  %s\n", style.dim, style.reset, orPlaceholder(backlogTimestamp(detail.CreatedAt), "unknown"))
+	fmt.Fprintf(a.stdout, "%supdated%s  %s\n", style.dim, style.reset, orPlaceholder(backlogTimestamp(detail.UpdatedAt), "unknown"))
+	if !detail.ClosedAt.IsZero() {
+		fmt.Fprintf(a.stdout, "%sclosed%s   %s\n", style.dim, style.reset, backlogTimestamp(detail.ClosedAt))
+	}
+	fmt.Fprintf(a.stdout, "%surl%s      %s\n", style.dim, style.reset, detail.URL)
+
+	fmt.Fprintln(a.stdout)
+	if strings.TrimSpace(detail.Body) == "" {
+		// Said explicitly, because a blank space below the header reads like
+		// the command failed to print something.
+		fmt.Fprintf(a.stdout, "%s(this Issue has no description)%s\n", style.dim, style.reset)
+		return
+	}
+	fmt.Fprintln(a.stdout, detail.Body)
+}
+
+func orPlaceholder(value, placeholder string) string {
+	if strings.TrimSpace(value) == "" {
+		return placeholder
+	}
+	return value
+}
+
+// backlogDetailPayload is the `wt backlog view --json` contract: the same core
+// identity as a list item, plus the fields that only exist for one Issue.
+type backlogDetailPayload struct {
+	SchemaVersion int    `json:"schema_version"`
+	Repository    string `json:"repository"`
+	backlogIssuePayload
+	State       string `json:"state"`
+	StateReason string `json:"state_reason,omitempty"`
+	ClosedAt    string `json:"closed_at,omitempty"`
+	Body        string `json:"body"`
+}
+
+func newBacklogDetailPayload(repository github.Repository, detail github.IssueDetail) backlogDetailPayload {
+	labels := detail.Labels
+	if labels == nil {
+		labels = []string{}
+	}
+	return backlogDetailPayload{
+		SchemaVersion: backlogSchemaVersion,
+		Repository:    repository.Slug(),
+		backlogIssuePayload: backlogIssuePayload{
+			Number:    detail.Number,
+			Title:     detail.Title,
+			Author:    detail.Author,
+			Labels:    labels,
+			URL:       detail.URL,
+			CreatedAt: backlogTimestamp(detail.CreatedAt),
+			UpdatedAt: backlogTimestamp(detail.UpdatedAt),
+		},
+		State:       string(detail.State),
+		StateReason: detail.StateReason,
+		ClosedAt:    backlogTimestamp(detail.ClosedAt),
+		Body:        detail.Body,
+	}
+}
+
+// backlogCreatedPayload is the `wt backlog add --json` contract. It names what
+// was created and where to find it, and nothing else: this command sets no
+// metadata, so there is none to report.
+type backlogCreatedPayload struct {
+	SchemaVersion int    `json:"schema_version"`
+	Repository    string `json:"repository"`
+	Number        int    `json:"number"`
+	Title         string `json:"title"`
+	URL           string `json:"url"`
+	State         string `json:"state"`
+}
+
+func newBacklogCreatedPayload(created github.CreatedIssue) backlogCreatedPayload {
+	return backlogCreatedPayload{
+		SchemaVersion: backlogSchemaVersion,
+		Repository:    created.Repository.Slug(),
+		Number:        created.Number,
+		Title:         created.Title,
+		URL:           created.URL,
+		State:         string(created.State),
 	}
 }
 

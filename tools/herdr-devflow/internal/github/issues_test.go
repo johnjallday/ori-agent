@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -631,6 +632,375 @@ func TestListIssuesClassifiesATimeoutRatherThanAnEmptyBacklog(t *testing.T) {
 	if list.Complete {
 		t.Fatalf("list = %+v, want a timeout reported as a failure, not as an empty backlog", list)
 	}
+}
+
+func TestViewIssueReadsOneIssueOfThisRepositoryInFull(t *testing.T) {
+	payload := `{
+		"number":292,"title":"Coordinate based map","author":{"login":"johnjallday"},
+		"labels":[{"name":"idea"}],"url":"https://github.com/johnjallday/ori-agent/issues/292",
+		"createdAt":"2026-08-02T23:06:49Z","updatedAt":"2026-08-02T23:10:00Z",
+		"state":"OPEN","stateReason":"","closedAt":"",
+		"body":"Show stations at real coordinates.\n\n- [ ] pick a projection\n"
+	}`
+	client := newRecordingClient(t, payload, Options{})
+
+	detail, err := client.ViewIssue(context.Background(), oriAgent, 292)
+	if err != nil {
+		t.Fatalf("ViewIssue: %v", err)
+	}
+
+	if detail.Number != 292 || detail.Title != "Coordinate based map" || detail.Author != "johnjallday" {
+		t.Fatalf("detail = %+v", detail)
+	}
+	if detail.State != StateOpen || detail.StateReason != "" || !detail.ClosedAt.IsZero() {
+		t.Fatalf("state = %q reason = %q closed = %v", detail.State, detail.StateReason, detail.ClosedAt)
+	}
+	// The body is the reason `view` exists, and its Markdown structure is what
+	// makes it readable.
+	if !strings.Contains(detail.Body, "- [ ] pick a projection") || !strings.Contains(detail.Body, "\n") {
+		t.Fatalf("body = %q, want the Markdown preserved as text", detail.Body)
+	}
+
+	joined := strings.Join(client.calls[0], " ")
+	if joined != "issue view 292 --repo johnjallday/ori-agent --json "+issueDetailFields {
+		t.Fatalf("args = %q", joined)
+	}
+	if strings.Contains(joined, "--web") || strings.Contains(joined, "--comments") {
+		t.Fatalf("args = %q, want no browser and no comment fetch", joined)
+	}
+}
+
+func TestViewIssueShowsAClosedIssueAndItsReason(t *testing.T) {
+	// The open filter is what a backlog listing means. It is not a rule about
+	// what you may look at: a closed Issue is exactly what you want to read
+	// when you are checking whether something already shipped.
+	payload := `{
+		"number":270,"title":"Downloads Janitor","author":{"login":"johnjallday"},"labels":[],
+		"url":"https://github.com/johnjallday/ori-agent/issues/270",
+		"createdAt":"2026-07-20T10:00:00Z","updatedAt":"2026-07-26T10:00:00Z",
+		"state":"CLOSED","stateReason":"COMPLETED","closedAt":"2026-07-26T10:00:00Z",
+		"body":"done"
+	}`
+	client := newRecordingClient(t, payload, Options{})
+
+	detail, err := client.ViewIssue(context.Background(), oriAgent, 270)
+	if err != nil {
+		t.Fatalf("ViewIssue: %v", err)
+	}
+	if detail.State != StateClosed || detail.StateReason != "COMPLETED" || detail.ClosedAt.IsZero() {
+		t.Fatalf("detail = %+v, want a closed Issue with its reason and time", detail)
+	}
+}
+
+func TestViewIssueRefusesAnIssueFromAnotherRepository(t *testing.T) {
+	// Issue numbers are repository-local, so #292 exists in thousands of
+	// repositories. Showing the wrong one is worse than showing none.
+	payload := `{"number":292,"title":"someone else's issue","author":{"login":"stranger"},
+		"labels":[],"url":"https://github.com/other/project/issues/292",
+		"state":"OPEN","body":"not ours"}`
+	client := newRecordingClient(t, payload, Options{})
+
+	_, err := client.ViewIssue(context.Background(), oriAgent, 292)
+
+	var remoteErr *Error
+	if !errors.As(err, &remoteErr) || remoteErr.Kind != ErrorNotFound {
+		t.Fatalf("err = %v, want the wrong-repository Issue refused", err)
+	}
+}
+
+func TestViewIssueRefusesAnAnswerAboutADifferentNumber(t *testing.T) {
+	payload := `{"number":11,"title":"a different issue","author":{"login":"johnjallday"},
+		"labels":[],"url":"https://github.com/johnjallday/ori-agent/issues/11","state":"OPEN"}`
+	client := newRecordingClient(t, payload, Options{})
+
+	_, err := client.ViewIssue(context.Background(), oriAgent, 292)
+
+	var remoteErr *Error
+	if !errors.As(err, &remoteErr) || remoteErr.Kind != ErrorMalformed {
+		t.Fatalf("err = %v, want an answer about the wrong Issue refused", err)
+	}
+}
+
+func TestViewIssueBoundsAndSanitizesHostileContent(t *testing.T) {
+	body := strings.Repeat("b", MaxBodyLength+500)
+	payload := `{"number":292,"title":"title\u001b[31m","author":{"login":"a\u0000b"},
+		"labels":[{"name":"l\u0007"}],
+		"url":"https://github.com/johnjallday/ori-agent/issues/292",
+		"state":"OPEN","stateReason":"\u001b]0;pwned\u0007",
+		"body":"line one\u001b[2Jline two\u202espoof\n` + body + `"}`
+	client := newRecordingClient(t, payload, Options{})
+
+	detail, err := client.ViewIssue(context.Background(), oriAgent, 292)
+	if err != nil {
+		t.Fatalf("ViewIssue: %v", err)
+	}
+
+	for name, value := range map[string]string{
+		"title": detail.Title, "author": detail.Author,
+		"state reason": detail.StateReason, "body": detail.Body,
+	} {
+		if strings.ContainsAny(value, "\x1b\x00\x07") || strings.ContainsRune(value, 0x202e) {
+			t.Fatalf("%s kept a control character: %q", name, value)
+		}
+	}
+	if len([]rune(detail.Body)) > MaxBodyLength+2 {
+		t.Fatalf("body is %d runes, want it bounded to %d", len([]rune(detail.Body)), MaxBodyLength)
+	}
+	// Sanitizing a body must not flatten it: the line structure is the content.
+	if !strings.Contains(detail.Body, "line one") || !strings.Contains(detail.Body, "\n") {
+		t.Fatalf("body = %q, want its lines preserved", detail.Body[:80])
+	}
+}
+
+func TestViewIssueRejectsUnusableRequestsAndResponses(t *testing.T) {
+	client := newRecordingClient(t, "{}", Options{})
+	for _, number := range []int{0, -1} {
+		if _, err := client.ViewIssue(context.Background(), oriAgent, number); err == nil {
+			t.Fatalf("ViewIssue(%d) was accepted", number)
+		}
+	}
+	if _, err := client.ViewIssue(context.Background(), Repository{}, 292); err == nil {
+		t.Fatal("ViewIssue accepted an unresolved repository")
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("made %d calls, want none before the request was valid", len(client.calls))
+	}
+
+	for name, payload := range map[string]string{
+		"not JSON":  `gh: something went wrong`,
+		"no Issue":  `{}`,
+		"oversized": strings.Repeat("a", maxIssueOutputBytes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := newRecordingClient(t, payload, Options{}).
+				ViewIssue(context.Background(), oriAgent, 292)
+			var remoteErr *Error
+			if !errors.As(err, &remoteErr) {
+				t.Fatalf("err = %v, want a classified error", err)
+			}
+		})
+	}
+}
+
+func TestCreateIssueSendsOnlyATitleAndBody(t *testing.T) {
+	client := newRecordingClient(t,
+		"https://github.com/johnjallday/ori-agent/issues/294\n", Options{})
+
+	created, err := client.CreateIssue(context.Background(), oriAgent,
+		"  Coordinate based map  ", "Show stations at real coordinates.\n\n- [ ] projection")
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	if created.Number != 294 || created.Title != "Coordinate based map" ||
+		created.State != StateOpen || created.Repository != oriAgent {
+		t.Fatalf("created = %+v", created)
+	}
+	if created.URL != "https://github.com/johnjallday/ori-agent/issues/294" {
+		t.Fatalf("url = %q", created.URL)
+	}
+
+	args := client.calls[0]
+	if args[0] != "issue" || args[1] != "create" {
+		t.Fatalf("args = %v, want the creation command", args)
+	}
+	// The title and body are their own argument-vector elements, so the body
+	// keeps its newlines and neither is ever a fragment of a command string.
+	if !slicesContainPair(args, "--title", "Coordinate based map") {
+		t.Fatalf("args = %v, want the trimmed title passed as data", args)
+	}
+	if !slicesContainPair(args, "--body", "Show stations at real coordinates.\n\n- [ ] projection") {
+		t.Fatalf("args = %v, want the body passed verbatim", args)
+	}
+	if !slicesContainPair(args, "--repo", "johnjallday/ori-agent") {
+		t.Fatalf("args = %v, want the repository named explicitly", args)
+	}
+
+	// Everything this command deliberately does not do.
+	for _, unwanted := range []string{
+		"--label", "--assignee", "--milestone", "--project", "--template",
+		"--editor", "--web", "--recover", "--body-file",
+	} {
+		if slices.Contains(args, unwanted) {
+			t.Fatalf("args = %v, want no %s", args, unwanted)
+		}
+	}
+}
+
+func TestCreateIssueOmitsTheBodyFlagWhenThereIsNoBody(t *testing.T) {
+	client := newRecordingClient(t,
+		"https://github.com/johnjallday/ori-agent/issues/295\n", Options{})
+
+	if _, err := client.CreateIssue(context.Background(), oriAgent, "Just a title", "   "); err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if slices.Contains(client.calls[0], "--body") {
+		t.Fatalf("args = %v, want no empty body flag", client.calls[0])
+	}
+}
+
+func TestCreateIssueTreatsHostileTitlesAndBodiesAsData(t *testing.T) {
+	hostile := []struct {
+		name  string
+		title string
+		body  string
+	}{
+		{"command substitution", "$(rm -rf /) idea", "backtick `id` and $(whoami)"},
+		{"shell operators", "a; b && c | d > e", "pipe | and semicolon ;"},
+		{"quotes", `he said "quote" and 'quote'`, `mixed "quotes" everywhere`},
+		{"markdown and urls", "fix the map", "See https://example.test/a_b?c=d&e=f\n\n```go\nfmt.Println()\n```"},
+	}
+	for _, testCase := range hostile {
+		t.Run(testCase.name, func(t *testing.T) {
+			client := newRecordingClient(t,
+				"https://github.com/johnjallday/ori-agent/issues/296\n", Options{})
+
+			created, err := client.CreateIssue(context.Background(), oriAgent, testCase.title, testCase.body)
+			if err != nil {
+				t.Fatalf("CreateIssue: %v", err)
+			}
+			if created.Number != 296 {
+				t.Fatalf("created = %+v", created)
+			}
+			// Every character arrives at `gh` unchanged, as one argument. It is
+			// data in an Issue, not syntax on a machine.
+			if !slicesContainPair(client.calls[0], "--title", testCase.title) {
+				t.Fatalf("title was altered: %v", client.calls[0])
+			}
+			if !slicesContainPair(client.calls[0], "--body", testCase.body) {
+				t.Fatalf("body was altered: %v", client.calls[0])
+			}
+		})
+	}
+}
+
+func TestCreateIssueStripsTerminalEscapesAndFlattensTitleLines(t *testing.T) {
+	client := newRecordingClient(t,
+		"https://github.com/johnjallday/ori-agent/issues/297\n", Options{})
+
+	created, err := client.CreateIssue(context.Background(), oriAgent,
+		"first line\nsecond line\x1b[31m", "body\x1b[2J stays\nmulti-line")
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	// A title is one line, so the break becomes a space rather than vanishing
+	// and running two words together into a third nobody typed. The escape
+	// character is removed and its printable remainder is left alone: "[31m"
+	// with no escape ahead of it is text, and rewriting somebody's text further
+	// than safety requires is its own kind of wrong.
+	if created.Title != "first line second line[31m" {
+		t.Fatalf("title = %q", created.Title)
+	}
+	for _, arg := range client.calls[0] {
+		if strings.ContainsRune(arg, 0x1b) {
+			t.Fatalf("an escape sequence was sent to GitHub: %q", arg)
+		}
+	}
+	if !slicesContainPair(client.calls[0], "--body", "body[2J stays\nmulti-line") {
+		t.Fatalf("body = %v, want its lines kept and its escapes removed", client.calls[0])
+	}
+}
+
+func TestCreateIssueRefusesInputItCannotFaithfullyCreate(t *testing.T) {
+	client := newRecordingClient(t, "", Options{})
+	cases := map[string]struct{ title, body string }{
+		"no title":           {"", ""},
+		"whitespace title":   {"   \n\t ", ""},
+		"escapes-only title": {"\x1b\x00", ""},
+		"title too long":     {strings.Repeat("t", MaxTitleLength+1), ""},
+		"body too long":      {"fine", strings.Repeat("b", MaxBodyLength+1)},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := client.CreateIssue(context.Background(), oriAgent, testCase.title, testCase.body); err == nil {
+				t.Fatal("unusable input was sent to GitHub")
+			}
+		})
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("made %d calls, want nothing created from invalid input", len(client.calls))
+	}
+}
+
+func TestCreateIssueRefusesAnUnconfirmableResult(t *testing.T) {
+	// If the address of the new Issue cannot be read back, the command must not
+	// report a number it guessed. Something may still have been created, and
+	// saying so honestly is the only safe answer.
+	for name, payload := range map[string]string{
+		"nothing printed":     "",
+		"no URL":              "Creating issue in johnjallday/ori-agent\n",
+		"another repository":  "https://github.com/other/project/issues/12\n",
+		"not an Issue at all": "https://github.com/johnjallday/ori-agent/pull/12\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := newRecordingClient(t, payload, Options{})
+
+			created, err := client.CreateIssue(context.Background(), oriAgent, "an idea", "")
+
+			var remoteErr *Error
+			if !errors.As(err, &remoteErr) || remoteErr.Kind != ErrorMalformed {
+				t.Fatalf("err = %v, want an unconfirmable creation reported as such", err)
+			}
+			if created.Number != 0 {
+				t.Fatalf("created = %+v, want no invented identity", created)
+			}
+		})
+	}
+}
+
+func TestCreateIssueClassifiesFailuresWithoutLeakingOutput(t *testing.T) {
+	secret := "ghp_SUPERSECRETTOKENVALUE0000000000000000"
+	client := New(Options{Run: func(context.Context, ...string) ([]byte, error) {
+		return nil, exitError(t, "HTTP 403: Resource not accessible (Authorization: token "+secret+")")
+	}})
+
+	_, err := client.CreateIssue(context.Background(), oriAgent, "an idea", "")
+
+	var remoteErr *Error
+	if !errors.As(err, &remoteErr) || remoteErr.Kind != ErrorForbidden {
+		t.Fatalf("err = %v, want a classified authorization failure", err)
+	}
+	if strings.Contains(remoteErr.Error(), secret) {
+		t.Fatalf("a token survived into %q", remoteErr.Error())
+	}
+}
+
+func TestParseIssueReferenceAcceptsNumbersAndThisRepositorysURLs(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{"292", "#292"} {
+		repository, number, err := ParseIssueReference(input)
+		if err != nil || number != 292 || !repository.Empty() {
+			t.Fatalf("ParseIssueReference(%q) = %#v, %d, %v", input, repository, number, err)
+		}
+	}
+
+	repository, number, err := ParseIssueReference("https://github.com/johnjallday/ori-agent/issues/292")
+	if err != nil || number != 292 || repository.Slug() != "johnjallday/ori-agent" {
+		t.Fatalf("ParseIssueReference(url) = %#v, %d, %v", repository, number, err)
+	}
+
+	for _, input := range []string{
+		"", "  ", "0", "-4", "#0", "abc", "292abc",
+		"https://github.com/johnjallday/ori-agent/pull/292",
+		"https://github.com/johnjallday/ori-agent/issues",
+		"https://github.com/johnjallday/ori-agent/issues/abc",
+		"ftp://github.com/johnjallday/ori-agent/issues/292",
+		"github.com/johnjallday/ori-agent/issues/292",
+	} {
+		if repository, number, err := ParseIssueReference(input); err == nil {
+			t.Fatalf("ParseIssueReference(%q) = %#v, %d; want a rejection", input, repository, number)
+		}
+	}
+}
+
+// slicesContainPair reports whether flag is immediately followed by value.
+func slicesContainPair(args []string, flag, value string) bool {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == flag && args[index+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseRepositoryAcceptsOnlyAnExactSlug(t *testing.T) {

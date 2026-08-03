@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -46,6 +47,18 @@ const (
 	// carries two short names, so anything larger is not the answer to this
 	// question and is refused before it is decoded.
 	maxRepositoryOutputBytes = 64 << 10
+	// MaxTitleLength bounds a title this tool will create. GitHub accepts more,
+	// but a backlog title is a line somebody reads in a list, and silently
+	// creating something unreadable is worse than saying it is too long.
+	MaxTitleLength = 256
+	// MaxBodyLength bounds a body this tool will create or render. It is the
+	// length GitHub itself accepts, and keeping the whole body in one argument
+	// stays far inside the operating system's argument limit — which is why no
+	// temporary file is needed to pass one.
+	MaxBodyLength = 65536
+	// maxIssueOutputBytes bounds a single-Issue response. A body is bounded, so
+	// a response far larger than one is not an Issue.
+	maxIssueOutputBytes = 4 << 20
 )
 
 // IssueState is the lifecycle state GitHub reports for an Issue.
@@ -329,6 +342,285 @@ func decodeIssueList(output []byte, limit int) ([]Issue, bool, error) {
 	}
 	sortIssues(issues)
 	return issues, capped, nil
+}
+
+// IssueDetail is one Issue read in full, which is the only place a body
+// appears. Unlike a listing, a detail may describe a closed Issue: the open
+// filter is what a backlog *listing* means, not a restriction on what you are
+// allowed to look at.
+type IssueDetail struct {
+	Issue
+	State IssueState
+	// StateReason is GitHub's reason for a closed Issue — completed, or not
+	// planned — and is empty when GitHub did not supply one.
+	StateReason string
+	// Body is the Issue description as Markdown source, bounded and stripped of
+	// terminal escapes but otherwise unchanged. It is never rendered as HTML,
+	// and nothing in it is fetched, downloaded, or followed.
+	Body     string
+	ClosedAt time.Time
+}
+
+// CreatedIssue is the result of one creation: enough to name what was made and
+// go look at it.
+type CreatedIssue struct {
+	Repository Repository
+	Number     int
+	Title      string
+	URL        string
+	State      IssueState
+}
+
+// issueDetailFields are the exact fields the detail view renders.
+var issueDetailFields = strings.Join([]string{
+	"number", "title", "author", "labels", "url", "createdAt", "updatedAt",
+	"state", "stateReason", "closedAt", "body",
+}, ",")
+
+// ViewIssue reads one Issue of the resolved repository.
+//
+// The repository is named explicitly and the answer is checked against it. That
+// check is the point of this function's strictness: Issue numbers are
+// repository-local, so #292 exists in thousands of repositories, and quietly
+// showing the wrong one would be worse than showing nothing.
+func (c *Client) ViewIssue(ctx context.Context, repository Repository, number int) (IssueDetail, error) {
+	if repository.Empty() {
+		return IssueDetail{}, errors.New("a resolved repository is required")
+	}
+	if number <= 0 {
+		return IssueDetail{}, fmt.Errorf("an Issue number must be a positive whole number")
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	output, err := c.run(queryCtx,
+		"issue", "view", strconv.Itoa(number),
+		"--repo", repository.Slug(),
+		"--json", issueDetailFields,
+	)
+	if err != nil {
+		return IssueDetail{}, classify(queryCtx, err)
+	}
+	return decodeIssueDetail(output, repository, number)
+}
+
+func decodeIssueDetail(output []byte, repository Repository, number int) (IssueDetail, error) {
+	if len(output) > maxIssueOutputBytes {
+		return IssueDetail{}, &Error{Kind: ErrorMalformed, Detail: "the GitHub Issue response was larger than this tool will decode"}
+	}
+	var raw rawIssueDetail
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return IssueDetail{}, &Error{Kind: ErrorMalformed, Detail: "the GitHub Issue response could not be decoded"}
+	}
+	summary, ok := raw.rawIssue.normalize()
+	if !ok {
+		return IssueDetail{}, &Error{Kind: ErrorNotFound, Detail: "GitHub did not return a readable Issue for that number"}
+	}
+	if raw.Number != number {
+		return IssueDetail{}, &Error{Kind: ErrorMalformed, Detail: "GitHub answered with a different Issue than the one requested"}
+	}
+	if !belongsTo(summary.URL, repository) {
+		return IssueDetail{}, &Error{Kind: ErrorNotFound, Detail: "that Issue belongs to a different repository"}
+	}
+	detail := IssueDetail{
+		Issue:       summary,
+		State:       normalizeState(raw.State),
+		StateReason: boundedText(raw.StateReason, maxLabelRunes),
+		Body:        boundedBody(raw.Body),
+		ClosedAt:    parseTimestamp(raw.ClosedAt),
+	}
+	return detail, nil
+}
+
+// belongsTo reports whether a canonical Issue URL names this repository. An
+// empty URL fails the check: an Issue this tool cannot place is one it will not
+// show.
+func belongsTo(url string, repository Repository) bool {
+	if url == "" || repository.Empty() {
+		return false
+	}
+	return strings.Contains(strings.ToLower(url),
+		"/"+strings.ToLower(repository.Owner)+"/"+strings.ToLower(repository.Name)+"/issues/")
+}
+
+func normalizeState(value string) IssueState {
+	switch strings.ToLower(sanitize(value)) {
+	case "closed":
+		return StateClosed
+	default:
+		return StateOpen
+	}
+}
+
+// boundedBody keeps Markdown readable while removing what a terminal would
+// act on. Newlines survive — they are the structure of the text — but escape
+// sequences and invisible reordering characters do not, and the whole body is
+// capped.
+func boundedBody(value string) string {
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	for index, line := range lines {
+		lines[index] = boundedText(line, 0)
+	}
+	joined := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	runes := []rune(joined)
+	if len(runes) > MaxBodyLength {
+		return string(runes[:MaxBodyLength]) + "\n…"
+	}
+	return joined
+}
+
+type rawIssueDetail struct {
+	rawIssue
+	State       string `json:"state"`
+	StateReason string `json:"stateReason"`
+	ClosedAt    string `json:"closedAt"`
+	Body        string `json:"body"`
+}
+
+// CreateIssue creates one Issue in the resolved repository.
+//
+// It is deliberately the least capable creation this repository could ship. No
+// label, assignee, milestone, Issue type, Project, parent, or template is set,
+// and no browser or editor is opened, because the whole value of capturing an
+// idea from a terminal is that it costs one line and interrupts nothing. The
+// metadata can be added later by someone who has decided what it should be.
+//
+// The title and body travel as their own argument-vector elements. Nothing is
+// interpolated into a command string, so a backtick, a dollar sign, or a
+// semicolon in an idea is text in an Issue rather than a command on a machine.
+func (c *Client) CreateIssue(ctx context.Context, repository Repository, title, body string) (CreatedIssue, error) {
+	if repository.Empty() {
+		return CreatedIssue{}, errors.New("a resolved repository is required")
+	}
+	cleanTitle, err := ValidateTitle(title)
+	if err != nil {
+		return CreatedIssue{}, err
+	}
+	cleanBody, err := ValidateBody(body)
+	if err != nil {
+		return CreatedIssue{}, err
+	}
+
+	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	args := []string{"issue", "create", "--repo", repository.Slug(), "--title", cleanTitle}
+	if cleanBody != "" {
+		args = append(args, "--body", cleanBody)
+	}
+	output, err := c.run(queryCtx, args...)
+	if err != nil {
+		return CreatedIssue{}, classify(queryCtx, err)
+	}
+	return decodeCreatedIssue(output, repository, cleanTitle)
+}
+
+// decodeCreatedIssue reads the created Issue's identity out of what `gh` prints:
+// the new Issue's URL.
+//
+// The number comes from that URL and nowhere else. Looking the Issue up by
+// title afterwards would be both a second request and a guess — two Issues can
+// share a title, and the wrong one would be reported as the one just created.
+func decodeCreatedIssue(output []byte, repository Repository, title string) (CreatedIssue, error) {
+	if len(output) > maxRepositoryOutputBytes {
+		return CreatedIssue{}, &Error{Kind: ErrorMalformed, Detail: "the GitHub creation response was larger than this tool will decode"}
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		candidate := boundedText(line, maxURLRunes)
+		if !belongsTo(candidate, repository) {
+			continue
+		}
+		reference, number, err := ParseIssueReference(candidate)
+		if err != nil || reference.Slug() != repository.Slug() {
+			continue
+		}
+		return CreatedIssue{
+			Repository: repository,
+			Number:     number,
+			Title:      title,
+			URL:        candidate,
+			// A newly created Issue is open. This is stated rather than read
+			// back, because reading it back would be a second request that can
+			// fail after the Issue already exists.
+			State: StateOpen,
+		}, nil
+	}
+	return CreatedIssue{}, &Error{
+		Kind:   ErrorMalformed,
+		Detail: "GitHub did not report the new Issue's address, so the result could not be confirmed",
+	}
+}
+
+// ValidateTitle trims and bounds a title, rejecting one that cannot be an Issue
+// title at all.
+//
+// Line breaks and tabs become spaces rather than disappearing: a title is one
+// line, and dropping the break would run two words together into a third that
+// the author never typed.
+func ValidateTitle(title string) (string, error) {
+	flattened := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, title)
+	cleaned := strings.Join(strings.Fields(boundedText(flattened, 0)), " ")
+	if cleaned == "" {
+		return "", errors.New("an Issue needs a title")
+	}
+	if len([]rune(cleaned)) > MaxTitleLength {
+		return "", fmt.Errorf("an Issue title must be %d characters or fewer; put the detail in the body", MaxTitleLength)
+	}
+	return cleaned, nil
+}
+
+// ValidateBody bounds an optional body while leaving its Markdown intact.
+// Paragraphs, lists, code fences, and URLs are the point of a body, so nothing
+// reshapes them; only characters a terminal would execute are removed.
+func ValidateBody(body string) (string, error) {
+	if strings.TrimSpace(body) == "" {
+		return "", nil
+	}
+	if len([]rune(body)) > MaxBodyLength {
+		return "", fmt.Errorf("an Issue body must be %d characters or fewer", MaxBodyLength)
+	}
+	return boundedBody(body), nil
+}
+
+// ParseIssueReference reads either a bare Issue number or a full GitHub Issue
+// URL. The returned repository is empty for a bare number, which means "the
+// repository this checkout resolves to".
+func ParseIssueReference(value string) (Repository, int, error) {
+	cleaned := strings.TrimSpace(boundedText(value, maxURLRunes))
+	if cleaned == "" {
+		return Repository{}, 0, errors.New("an Issue number is required")
+	}
+	if number, err := strconv.Atoi(strings.TrimPrefix(cleaned, "#")); err == nil {
+		if number <= 0 {
+			return Repository{}, 0, errors.New("an Issue number must be a positive whole number")
+		}
+		return Repository{}, number, nil
+	}
+
+	lowered := strings.ToLower(cleaned)
+	if !strings.HasPrefix(lowered, "http://") && !strings.HasPrefix(lowered, "https://") {
+		return Repository{}, 0, fmt.Errorf("%q is neither an Issue number nor an Issue URL", cleaned)
+	}
+	trimmed := cleaned[strings.Index(cleaned, "://")+3:]
+	segments := strings.Split(strings.Trim(trimmed, "/"), "/")
+	// host / owner / name / issues / number
+	if len(segments) < 5 || !strings.EqualFold(segments[3], "issues") {
+		return Repository{}, 0, fmt.Errorf("%q is not a GitHub Issue URL", cleaned)
+	}
+	repository, err := ParseRepository(segments[1] + "/" + segments[2])
+	if err != nil {
+		return Repository{}, 0, err
+	}
+	number, err := strconv.Atoi(segments[4])
+	if err != nil || number <= 0 {
+		return Repository{}, 0, fmt.Errorf("%q does not name an Issue number", cleaned)
+	}
+	return repository, number, nil
 }
 
 // sortIssues puts the most recently updated Issue first, breaking ties by
