@@ -2,25 +2,55 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"testing"
 	"time"
 )
 
+// providerIntegrationOptIn is the dedicated environment variable a caller
+// must set, in addition to a provider credential, before this file will
+// attempt a live network call. Requiring both prevents these tests from
+// running - and billing - merely because a developer or CI job happens to
+// have an API key in its environment.
+const providerIntegrationOptIn = "ORI_RUN_PROVIDER_INTEGRATION"
+
+// requireOpenAIDecision reports why a provider-integration test should skip
+// given the current guard state, or "" if it should proceed. It takes its
+// inputs as parameters (rather than reading the environment/dialing itself)
+// so the decision logic is testable without an API key or network access.
+func requireOpenAIDecision(short bool, optIn string, apiKey string, dial func() error) string {
+	if short {
+		return "skipping provider integration test in short mode"
+	}
+	if optIn != "1" {
+		return providerIntegrationOptIn + "=1 not set - skipping provider integration test"
+	}
+	if apiKey == "" {
+		return "OPENAI_API_KEY not set - skipping integration test"
+	}
+	if err := dial(); err != nil {
+		return fmt.Sprintf("OpenAI endpoint unreachable - skipping integration test: %v", err)
+	}
+	return ""
+}
+
 func requireOpenAI(t *testing.T) string {
 	t.Helper()
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		t.Skip("OPENAI_API_KEY not set - skipping integration test")
+	dial := func() error {
+		conn, err := net.DialTimeout("tcp", "api.openai.com:443", 2*time.Second)
+		if err != nil {
+			return err
+		}
+		return conn.Close()
 	}
 
-	conn, err := net.DialTimeout("tcp", "api.openai.com:443", 2*time.Second)
-	if err != nil {
-		t.Skipf("OpenAI endpoint unreachable - skipping integration test: %v", err)
+	if reason := requireOpenAIDecision(testing.Short(), os.Getenv(providerIntegrationOptIn), apiKey, dial); reason != "" {
+		t.Skip(reason)
 	}
-	_ = conn.Close()
 
 	return apiKey
 }

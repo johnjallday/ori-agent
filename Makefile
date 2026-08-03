@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-test-maintenance lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
+.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages test-test-maintenance lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
 
 # Default target
 .DEFAULT_GOAL := help
@@ -171,14 +171,19 @@ run-menubar: menubar ## Build and run the menu bar app
 
 ## Test targets
 
-test: ## Run all tests (unit + integration)
+test: ## Run all tests (unit + integration; excludes node_modules)
 	@echo "$(BLUE)Running all tests...$(NC)"
-	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/tests$$')
+	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/node_modules/')
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
-test-unit: ## Run unit tests only
+test-unit: ## Run unit tests only (concise; see test-unit-verbose for -v)
 	@echo "$(BLUE)Running unit tests...$(NC)"
-	$(TEST_RUNNER) $(GOTEST) -v -short $$(go list ./... | grep -v '/tests$$')
+	$(TEST_RUNNER) $(GOTEST) -short $$(./scripts/list-unit-packages.sh)
+	@echo "$(GREEN)✓ Unit tests passed$(NC)"
+
+test-unit-verbose: ## Run unit tests with -v output, for focused diagnosis
+	@echo "$(BLUE)Running unit tests (verbose)...$(NC)"
+	$(TEST_RUNNER) $(GOTEST) -v -short $$(./scripts/list-unit-packages.sh)
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
 
 test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported targets
@@ -196,21 +201,21 @@ test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge 
 	@$(TEST_RUNNER) zsh scripts/wt-herd.test.sh
 	@$(TEST_RUNNER) zsh scripts/wt-backlog.test.sh
 
-test-integration: ## Run integration tests
+test-integration: ## Run integration tests (needs OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running integration tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping integration tests (OPENAI_API_KEY not set)$(NC)"; \
 	else \
-		$(TEST_RUNNER) $(GOTEST) -v -run Integration ./...; \
+		ORI_RUN_PROVIDER_INTEGRATION=1 $(TEST_RUNNER) $(GOTEST) -v -run Integration ./...; \
 		echo "$(GREEN)✓ Integration tests passed$(NC)"; \
 	fi
 
-test-e2e: build ## Run end-to-end tests
+test-e2e: build ## Run end-to-end tests (needs OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running E2E tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping E2E tests (OPENAI_API_KEY not set)$(NC)"; \
 	else \
-		$(TEST_RUNNER) $(GOTEST) -v ./tests/e2e/...; \
+		ORI_RUN_PROVIDER_INTEGRATION=1 $(TEST_RUNNER) $(GOTEST) -v ./tests/e2e/...; \
 		echo "$(GREEN)✓ E2E tests passed$(NC)"; \
 	fi
 
@@ -304,7 +309,10 @@ test-prune-test-cache: ## Test automatic cache pruning in isolated fixtures
 test-run-test-command: ## Test run-owned sandbox cleanup and opt-outs
 	@./scripts/run-test-command.test.sh
 
-test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command ## Test all test-maintenance helpers
+test-list-unit-packages: ## Test the shared unit-package selection contract
+	@./scripts/list-unit-packages.test.sh
+
+test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages ## Test all test-maintenance helpers
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)
 	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"

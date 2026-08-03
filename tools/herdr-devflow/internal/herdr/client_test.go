@@ -127,7 +127,7 @@ func TestCallSocketUsesJSONLines(t *testing.T) {
 		t.Skip("Unix socket fixture")
 	}
 	t.Parallel()
-	socket := filepath.Join(t.TempDir(), "herdr.sock")
+	socket := filepath.Join(shortSocketDir(t), "herdr.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestAgentListAndWorkspaceClosePreferTheStructuredSocket(t *testing.T) {
 	} {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			pathFile, err := os.CreateTemp("", "herdr-socket-")
+			pathFile, err := os.CreateTemp(shortSocketDir(t), "herdr-socket-")
 			if err != nil {
 				t.Fatal(err)
 			}
