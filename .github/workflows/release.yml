@@ -42,7 +42,7 @@ jobs:
         run: ./scripts/build-folder-picker.sh
 
       - name: Reset Wails-generated file changes
-        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ cmd/folder-picker/frontend/wailsjs/go/main/ go.mod go.sum 2>/dev/null || true
+        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ cmd/folder-picker/frontend/wailsjs/go/ go.mod go.sum 2>/dev/null || true
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
@@ -76,7 +76,7 @@ jobs:
         run: ./scripts/build-folder-picker.sh
 
       - name: Reset Wails-generated file changes
-        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ cmd/folder-picker/frontend/wailsjs/go/main/ go.mod go.sum 2>/dev/null || true
+        run: git checkout -- cmd/folder-picker/frontend/wailsjs/runtime/ cmd/folder-picker/frontend/wailsjs/go/ go.mod go.sum 2>/dev/null || true
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v7
