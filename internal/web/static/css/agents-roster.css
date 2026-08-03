@@ -1634,7 +1634,8 @@ body.inspector-sheet-open {
   grid-template-columns: 88px minmax(0, 1fr);
   grid-template-areas:
     "avatar ident"
-    "vitals vitals";
+    "vitals vitals"
+    "purpose purpose";
   gap: 14px 16px;
   padding: 22px 24px;
   border-bottom: 1px solid var(--border-color, #e5e7eb);
@@ -1704,9 +1705,23 @@ body.inspector-sheet-open {
 }
 
 .stage__name {
+  display: inline;
   margin: 0;
   font-size: 22px;
   line-height: 1.15;
+}
+
+/* Repeats the card's favorite star beside the name so it reads at a glance
+   without opening Overview (PRD FR54). */
+.stage__favorite {
+  margin-left: 8px;
+  color: #b45309;
+  font-size: 16px;
+  vertical-align: middle;
+}
+
+[data-bs-theme="dark"] .stage__favorite {
+  color: #fbbf24;
 }
 
 .stage__class {
@@ -1715,6 +1730,28 @@ body.inspector-sheet-open {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--card-muted);
+}
+
+/* Repeats the card's purpose so it stays visible on every Inspector tab, not
+   only while Overview happens to be open (PRD FR54). Clamped so a very long
+   description does not push the tabs out of view; the full text remains
+   editable in the Overview form. */
+.stage__purpose {
+  grid-area: purpose;
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-primary, #111827);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.stage__purpose.is-missing {
+  color: var(--card-muted);
+  font-style: italic;
 }
 
 .stage__vitals {

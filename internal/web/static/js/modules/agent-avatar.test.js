@@ -287,7 +287,7 @@ const FIXTURE_NAMES = [
   'Mail Triage Bots',
   'Release Gate',
   'Gate Release',
-  'release gate'
+  'Wayfinder'
 ];
 
 test('25 reviewed names produce no duplicate fallback signature', () => {

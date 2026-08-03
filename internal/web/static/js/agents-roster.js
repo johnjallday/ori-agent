@@ -121,6 +121,8 @@
       avatar: document.getElementById('stageAvatar'),
       name: document.getElementById('stageName'),
       klass: document.getElementById('stageClass'),
+      favorite: document.getElementById('stageFavorite'),
+      purpose: document.getElementById('stagePurpose'),
       vitals: document.getElementById('stageVitals'),
       progression: document.getElementById('stageProgression'),
       overviewFacts: document.getElementById('overviewFacts'),
@@ -169,6 +171,19 @@
       emptyClearFilters: document.getElementById('rosterEmptyClearFilters'),
       emptyCreate: document.getElementById('rosterEmptyCreate')
     };
+
+    // Restore search/sort/filters/tab from the URL synchronously, before any
+    // fetch fires. Doing this later (e.g. inside loadAgents()'s success
+    // handler) raced a fresh keystroke/programmatic fill against this
+    // function's direct `els.search.value =` write: on a reload, the URL
+    // still carries the previous ?q=, and if that write lands mid-keystroke
+    // it can corrupt what the user just typed instead of merely being a
+    // harmless no-op. state.query/filters/pendingUrlTab set here are read
+    // later by populateFilterOptions()/applyFilterSort()/restoreTabFromUrl()
+    // once the roster actually loads, so running early doesn't skip anything
+    // — it just stops re-running on every subsequent loadAgents() (e.g. the
+    // Retry button), which was clobbering in-progress edits on each retry.
+    applyUrlToState();
 
     els.search.addEventListener('input', onSearch);
     els.sort.addEventListener('change', onSort);
@@ -370,7 +385,10 @@
         rebuildViewModels();
         setCollectionState('ready');
         pruneChecked();
-        applyUrlToState();
+        // applyUrlToState() already ran synchronously at boot (see init()) —
+        // re-running it here on every load (including a Retry-button reload)
+        // would stomp on search/filter edits made while this fetch was in
+        // flight.
         populateFilterOptions();
         applyFilterSort();
         restoreSelection();
@@ -1309,6 +1327,13 @@
     els.klass.textContent = listItem.role
       ? roleLabel(listItem.role)
       : titleCase(listItem.type || 'agent');
+    // Purpose and favorite repeat here so they stay visible on every tab, not
+    // only while Overview happens to be open (PRD FR54). Sourced from the same
+    // view model the card already renders, so the two can never disagree.
+    var heroVm = viewFor(listItem);
+    els.favorite.hidden = !heroVm.favorite;
+    els.purpose.textContent = heroVm.hasDescription ? heroVm.description : 'No description yet.';
+    els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
     // Deep-link to the full agent detail page (/agents/{name}). The server routes
     // this to the rich editor for catalog agents and to the dedicated read-only
     // pages for the built-in Claude Code / Codex CLI agents.
@@ -2427,9 +2452,21 @@
       highlightSelected();
     }
 
-    if (state.selected === name && els.avatar) {
-      els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
-      els.avatar = document.getElementById('stageAvatar');
+    if (state.selected === name) {
+      if (els.avatar) {
+        els.avatar.outerHTML = avatarMarkup(item, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
+        els.avatar = document.getElementById('stageAvatar');
+      }
+      // Keep the hero's repeated purpose/favorite (FR54) in step with a save
+      // made on the Overview form, not just the card.
+      var heroVm = viewFor(item);
+      if (els.favorite) els.favorite.hidden = !heroVm.favorite;
+      if (els.purpose) {
+        els.purpose.textContent = heroVm.hasDescription
+          ? heroVm.description
+          : 'No description yet.';
+        els.purpose.classList.toggle('is-missing', !heroVm.hasDescription);
+      }
     }
   }
 

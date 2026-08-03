@@ -179,11 +179,15 @@
                   <div class="stage__avatar" id="stageAvatar" aria-hidden="true"></div>
                   <div class="stage__ident">
                     <h2 class="stage__name" id="stageName"></h2>
+                    <span class="stage__favorite" id="stageFavorite" title="Favorite" aria-hidden="true" hidden>★</span>
                     <div class="stage__class" id="stageClass"></div>
                   </div>
                   <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
                     <!-- vitals chips injected -->
                   </div>
+                  <!-- Repeats the card's purpose so it stays visible on every
+                       Inspector tab, not only Overview (PRD FR54). -->
+                  <p class="stage__purpose" id="stagePurpose"></p>
                   <div class="stage__actions">
                     <a id="stageFullPage" class="stage__fullpage" href="#" title="Open the full agent detail page">Open full page ↗</a>
                     <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>

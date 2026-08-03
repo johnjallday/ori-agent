@@ -1181,6 +1181,59 @@ test.describe('Agents inspector', () => {
     await expect(page.locator('#rosterList')).toBeVisible();
   }
 
+  test('the hero repeats purpose and favorite state on every tab (FR54)', async ({
+    page,
+    request
+  }) => {
+    const name = `PWHero${Date.now()}`;
+    const bare = `${name} Bare`;
+    await request.post(`${baseUrl}/api/agents`, {
+      data: {
+        name,
+        type: 'tool-calling',
+        model: 'gpt-4o-mini',
+        description: 'Repeats on every tab, not just Overview.',
+        favorite: true
+      }
+    });
+    await request.post(`${baseUrl}/api/agents`, {
+      data: { name: bare, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+
+    try {
+      await open(page, `?agent=${encodeURIComponent(name)}`);
+      await expect(page.locator('#stageName')).toHaveText(name);
+
+      // Visible on Overview…
+      await expect(page.locator('#stagePurpose')).toHaveText(
+        'Repeats on every tab, not just Overview.'
+      );
+      await expect(page.locator('#stageFavorite')).toBeVisible();
+
+      // …and still visible after switching away from Overview, where the
+      // editable form (and its own description/favorite fields) is hidden.
+      for (const tab of ['tab-prompt', 'tab-workspaces', 'tab-toolbox']) {
+        await page.locator(`#${tab}`).click();
+        await expect(page.locator('#stagePurpose')).toHaveText(
+          'Repeats on every tab, not just Overview.'
+        );
+        await expect(page.locator('#stageFavorite')).toBeVisible();
+      }
+
+      // A missing description says so rather than going blank (FR20).
+      await page.locator(`.roster-card[data-name="${bare}"] .roster-card__open`).click();
+      await expect(page.locator('#stagePurpose')).toHaveText('No description yet.');
+      await expect(page.locator('#stagePurpose')).toHaveClass(/is-missing/);
+      await expect(page.locator('#stageFavorite')).toBeHidden();
+    } finally {
+      for (const n of [name, bare]) {
+        await request
+          .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(n)}`)
+          .catch(() => undefined);
+      }
+    }
+  });
+
   test('desktop: closing reclaims collection width and keeps focus and selection', async ({
     page,
     request
