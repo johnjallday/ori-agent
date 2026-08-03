@@ -117,6 +117,13 @@ Its own executable, so nothing has to be sourced first — one stable token a
 human or an agent can run from any checkout of this repository. It needs `gh`
 authenticated; it does not need Herdr installed, running, or healthy.
 
+It runs the first helper it finds, preferring an already-built one over
+compiling: `$HERDR_DEVFLOW_BINARY`, then the installed runtime helper
+(`$HERDR_DEVFLOW_HOME`, or `<user config dir>/herdr/ori-devflow`), then
+`bin/herdr-devflow` in the checkout, then `go run`. If it answers
+`unknown command "backlog"`, the installed helper is older than this command —
+`wt herd setup` reinstalls it.
+
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.
 
