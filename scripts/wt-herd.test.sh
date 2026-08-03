@@ -279,6 +279,50 @@ fi
 wt new adhoc <<< "n" > /dev/null 2>&1
 [[ ! -f "$fixture_root/decline-mutations" ]]
 
+# start and new share one flag parser but not one voice. Each command names
+# itself, prints its own usage line, and calls its positional what it calls it —
+# the wording is the user-visible surface, so a shared parser must carry it
+# rather than flatten it. Every rejection below also has to happen before
+# anything is created.
+rm -f "$fixture_root/decline-mutations"
+typeset -a parser_cases
+parser_cases=(
+  "start x --kind|wt start --kind requires a Herdr agent kind"
+  "start x --kind|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start x --kind --nope|wt start --kind requires a Herdr agent kind"
+  "start x --kind a --kind b|wt start accepts --kind only once"
+  "start --bogus|Unknown wt start option: --bogus"
+  "start --bogus|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start one two|wt start accepts one PRD/feature name (got: one and two)"
+  "start x --kind codex --no-herdr|wt start --kind cannot be combined with --no-herdr"
+  "new x --kind|wt new --kind requires a Herdr agent kind"
+  "new x --kind|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new x --kind --nope|wt new --kind requires a Herdr agent kind"
+  "new x --kind a --kind b|wt new accepts --kind only once"
+  "new --bogus|Unknown wt new option: --bogus"
+  "new --bogus|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new one two|wt new accepts one name (got: one and two)"
+  "new x --kind codex --no-herdr|wt new --kind cannot be combined with --no-herdr"
+)
+for parser_case in "${parser_cases[@]}"; do
+  parser_args="${parser_case%%|*}"
+  parser_expected="${parser_case#*|}"
+  parser_status=0
+  wt ${=parser_args} > "$fixture_root/parser-output" 2>&1 < /dev/null || parser_status=$?
+  if [[ "$parser_status" == "0" ]]; then
+    print -r -- "wt $parser_args was accepted; it must be rejected" >&2
+    exit 1
+  fi
+  if ! rg -qF -- "$parser_expected" "$fixture_root/parser-output"; then
+    print -r -- "wt $parser_args did not say '$parser_expected': $(<"$fixture_root/parser-output")" >&2
+    exit 1
+  fi
+done
+if [[ -f "$fixture_root/decline-mutations" ]]; then
+  print -r -- "a rejected invocation still mutated something" >&2
+  exit 1
+fi
+
 # A name the bridge could never adopt is rejected before the branch exists,
 # rather than after a worktree has been created that handoff will always refuse.
 for bad_name in "bad name" "-leading-dash" "has/slash/but//empty"; do

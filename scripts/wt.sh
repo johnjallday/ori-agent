@@ -92,6 +92,70 @@ function wt_parse_name {
   fi
 }
 
+function wt_parse_create_flags {
+  # The argument parser `wt start` and `wt new` share. Both accept the same five
+  # things — --no-herdr, --yes/-y, --kind <value>, one positional name, and no
+  # other option — and both used to say so in their own copy of this loop.
+  #
+  # What they do not share is wording. Each command names itself, prints its own
+  # usage line, and calls its positional something different, so the caller
+  # passes those three strings in: they are the user-visible surface, and
+  # homogenizing them would be a behavior change wearing a refactor's clothes.
+  #
+  # Results come back in WT_PARSE_* globals rather than on stdout, because a
+  # positional may contain anything and a command substitution would re-split it.
+  typeset -g WT_PARSE_NAME WT_PARSE_NO_HERDR WT_PARSE_KIND WT_PARSE_ASSUME_YES
+  local label="$1" usage="$2" positional_noun="$3"
+  shift 3
+
+  WT_PARSE_NAME=""
+  WT_PARSE_NO_HERDR=0
+  WT_PARSE_KIND=""
+  WT_PARSE_ASSUME_YES=0
+
+  local -a parse_args
+  parse_args=("$@")
+  local parse_arg parse_index=1
+  while (( parse_index <= ${#parse_args[@]} )); do
+    parse_arg="${parse_args[$parse_index]}"
+    case "$parse_arg" in
+      --no-herdr)
+        WT_PARSE_NO_HERDR=1
+        ;;
+      --yes|-y)
+        WT_PARSE_ASSUME_YES=1
+        ;;
+      --kind)
+        parse_index=$(( parse_index + 1 ))
+        if (( parse_index > ${#parse_args[@]} )) || [[ "${parse_args[$parse_index]}" == --* ]]; then
+          echo "$label --kind requires a Herdr agent kind"
+          echo "$usage"
+          return 1
+        fi
+        if [[ -n "$WT_PARSE_KIND" ]]; then
+          echo "$label accepts --kind only once"
+          return 1
+        fi
+        WT_PARSE_KIND="${parse_args[$parse_index]}"
+        ;;
+      --*)
+        echo "Unknown $label option: $parse_arg"
+        echo "$usage"
+        return 1
+        ;;
+      *)
+        if [[ -n "$WT_PARSE_NAME" ]]; then
+          echo "$label accepts one $positional_noun (got: $WT_PARSE_NAME and $parse_arg)"
+          return 1
+        fi
+        WT_PARSE_NAME="$parse_arg"
+        ;;
+    esac
+    parse_index=$(( parse_index + 1 ))
+  done
+  return 0
+}
+
 function wt_resolve_worktree_path {
   local name="$1"
   local absolute_name="${name:A}"
@@ -858,47 +922,17 @@ function wt_dispatch {
       prd_files+=("${f:t}")
     done
 
-    local chosen="" no_herdr=0 primary_kind="" assume_yes=0 start_arg start_index
-    local -a start_args
-    start_args=("${@:2}")
-    start_index=1
-    while (( start_index <= ${#start_args[@]} )); do
-      start_arg="${start_args[$start_index]}"
-      case "$start_arg" in
-        --no-herdr)
-          no_herdr=1
-          ;;
-        --yes|-y)
-          assume_yes=1
-          ;;
-        --kind)
-          start_index=$(( start_index + 1 ))
-          if (( start_index > ${#start_args[@]} )) || [[ "${start_args[$start_index]}" == --* ]]; then
-            echo "wt start --kind requires a Herdr agent kind"
-            echo "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
-            return 1
-          fi
-          if [[ -n "$primary_kind" ]]; then
-            echo "wt start accepts --kind only once"
-            return 1
-          fi
-          primary_kind="${start_args[$start_index]}"
-          ;;
-        --*)
-          echo "Unknown wt start option: $start_arg"
-          echo "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
-          return 1
-          ;;
-        *)
-          if [[ -n "$chosen" ]]; then
-            echo "wt start accepts one PRD/feature name (got: $chosen and $start_arg)"
-            return 1
-          fi
-          chosen="$start_arg"
-          ;;
-      esac
-      start_index=$(( start_index + 1 ))
-    done
+    local chosen no_herdr primary_kind assume_yes
+    if ! wt_parse_create_flags "wt start" \
+      "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]" \
+      "PRD/feature name" "${@:2}"; then
+      return 1
+    fi
+    chosen="$WT_PARSE_NAME"
+    no_herdr="$WT_PARSE_NO_HERDR"
+    primary_kind="$WT_PARSE_KIND"
+    assume_yes="$WT_PARSE_ASSUME_YES"
+
     if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
       echo "wt start --kind cannot be combined with --no-herdr"
       return 1
@@ -1033,47 +1067,16 @@ function wt_dispatch {
     wt_color_init
     wt_plan_reset
 
-    local name="" no_herdr=0 primary_kind="" assume_yes=0 new_arg new_index
-    local -a new_args
-    new_args=("${@:2}")
-    new_index=1
-    while (( new_index <= ${#new_args[@]} )); do
-      new_arg="${new_args[$new_index]}"
-      case "$new_arg" in
-        --no-herdr)
-          no_herdr=1
-          ;;
-        --yes|-y)
-          assume_yes=1
-          ;;
-        --kind)
-          new_index=$(( new_index + 1 ))
-          if (( new_index > ${#new_args[@]} )) || [[ "${new_args[$new_index]}" == --* ]]; then
-            echo "wt new --kind requires a Herdr agent kind"
-            echo "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
-            return 1
-          fi
-          if [[ -n "$primary_kind" ]]; then
-            echo "wt new accepts --kind only once"
-            return 1
-          fi
-          primary_kind="${new_args[$new_index]}"
-          ;;
-        --*)
-          echo "Unknown wt new option: $new_arg"
-          echo "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
-          return 1
-          ;;
-        *)
-          if [[ -n "$name" ]]; then
-            echo "wt new accepts one name (got: $name and $new_arg)"
-            return 1
-          fi
-          name="$new_arg"
-          ;;
-      esac
-      new_index=$(( new_index + 1 ))
-    done
+    local name no_herdr primary_kind assume_yes
+    if ! wt_parse_create_flags "wt new" \
+      "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]" \
+      "name" "${@:2}"; then
+      return 1
+    fi
+    name="$WT_PARSE_NAME"
+    no_herdr="$WT_PARSE_NO_HERDR"
+    primary_kind="$WT_PARSE_KIND"
+    assume_yes="$WT_PARSE_ASSUME_YES"
 
     if [[ -z "$name" ]]; then
       echo "Usage: wt new <name>            (branch feature/<name>)"
