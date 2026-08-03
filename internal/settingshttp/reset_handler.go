@@ -53,6 +53,13 @@ func NewResetHandler(onboardingMgr *onboarding.Manager, st store.Store, dataDir 
 	}
 }
 
+// DataDir returns the resolved data directory reset operations are confined
+// to. Exported for characterization tests that verify the server wires this
+// handler to the same directory every other store resolves.
+func (h *ResetHandler) DataDir() string {
+	return h.dataDir
+}
+
 // SetWorkspaceStore sets the workspace store used to clear in-memory state during reset.
 func (h *ResetHandler) SetWorkspaceStore(ws *workspace.FileStore) {
 	h.workspaceStore = ws
@@ -154,20 +161,72 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	orihttp.WriteJSON(w, response)
 }
 
-// validatePath ensures the target path is within the data directory
+// validatePath ensures the target path is safely contained within the
+// resolved data directory before any deletion. It rejects an empty or
+// filesystem-root data directory outright, then compares cleaned, symlink-
+// resolved absolute paths so neither a sibling directory that merely shares
+// the data directory's name as a string prefix (e.g. "OriData-backup") nor a
+// symlink planted inside the data directory can redirect deletion outside it.
 func (h *ResetHandler) validatePath(targetPath string) error {
+	if strings.TrimSpace(h.dataDir) == "" {
+		return fmt.Errorf("refusing to operate: no data directory configured")
+	}
+	absDataDir, err := filepath.Abs(h.dataDir)
+	if err != nil {
+		return fmt.Errorf("resolve data directory: %w", err)
+	}
+	absDataDir = filepath.Clean(absDataDir)
+	if filepath.Dir(absDataDir) == absDataDir {
+		return fmt.Errorf("refusing to operate on a filesystem root: %s", absDataDir)
+	}
+	resolvedDataDir, err := resolveAsFarAsExists(absDataDir)
+	if err != nil {
+		return fmt.Errorf("resolve data directory: %w", err)
+	}
+
 	absTarget, err := filepath.Abs(targetPath)
 	if err != nil {
 		return err
 	}
-	absDataDir, err := filepath.Abs(h.dataDir)
+	absTarget = filepath.Clean(absTarget)
+	resolvedTarget, err := resolveAsFarAsExists(absTarget)
 	if err != nil {
-		return err
+		return fmt.Errorf("resolve target path: %w", err)
 	}
-	if !strings.HasPrefix(absTarget, absDataDir+string(filepath.Separator)) && absTarget != absDataDir {
+
+	if resolvedTarget != resolvedDataDir && !strings.HasPrefix(resolvedTarget, resolvedDataDir+string(filepath.Separator)) {
 		return fmt.Errorf("path escapes data directory: %s", targetPath)
 	}
 	return nil
+}
+
+// resolveAsFarAsExists resolves symlinks through the longest existing prefix
+// of path, then rejoins any not-yet-created suffix unresolved. A deletion
+// target is frequently absent (already removed, or never created), and that
+// alone must not fail validation - but comparing an unresolved target
+// against an already-resolved data directory would falsely reject it too:
+// on macOS, a data directory under the default temp root resolves through
+// the /var -> /private/var symlink, and a missing target must resolve the
+// same way to stay comparable.
+func resolveAsFarAsExists(path string) (string, error) {
+	suffix := ""
+	current := path
+	for {
+		real, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(real, suffix), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			// Reached the root without finding an existing component.
+			return filepath.Join(current, suffix), nil
+		}
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		current = parent
+	}
 }
 
 // resetSettings removes settings.json

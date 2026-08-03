@@ -125,29 +125,23 @@ prune-test-cache: ## Prune stale Ori artifacts and an oversized Go build cache
 cache-report: ## Preview automatic test artifact and Go cache pruning
 	@./scripts/prune-test-cache.sh --dry-run
 
-clean-state: ## Delete all configuration and state files (fresh start)
-	@echo "$(YELLOW)⚠️  WARNING: This will delete ALL configuration, agents, workspaces, and settings!$(NC)"
-	@echo "$(YELLOW)You will need to reconfigure the app from scratch.$(NC)"
+clean-state: ## Show how to reset app state (points to the canonical selective reset)
+	@echo "$(YELLOW)clean-state no longer deletes files itself.$(NC)"
 	@echo ""
-	@read -p "Are you sure? [y/N]: " -n 1 -r && echo && \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "$(BLUE)Cleaning state files...$(NC)"; \
-		rm -rf agents/; \
-		rm -rf workspaces/; \
-		rm -rf sessions/; \
-		rm -f settings.json; \
-		rm -f agents.json; \
-		rm -f app_state.json; \
-		rm -f mcp_registry.json; \
-		rm -f locations.json; \
-		rm -f .feature-sessions.json; \
-		echo "$(GREEN)✓ All state files cleaned - app will start fresh$(NC)"; \
-	else \
-		echo "$(YELLOW)Cancelled$(NC)"; \
-		exit 1; \
-	fi
+	@echo "Ori resolves all state to one canonical data directory (ORI_DATA_DIR,"
+	@echo "or the platform default under your home directory - see"
+	@echo "config.DefaultDataDir()), not this Makefile's working directory. A"
+	@echo "second, cwd-relative deletion list here would drift from the real one"
+	@echo "and could silently target the wrong path."
+	@echo ""
+	@echo "To reset app state, use the canonical selective reset instead:"
+	@echo "  1. In the app: Settings -> Reset, choose what to reset, confirm."
+	@echo "  2. Scripted, with the server running on port 8765 (adjust for PORT):"
+	@echo "     curl -X POST http://localhost:8765/api/reset \\"
+	@echo "       -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' \\"
+	@echo "       -d '{\"settings\":true,\"agents\":true,\"sessions\":true,\"onboarding\":true,\"confirmation\":\"RESET\"}'"
 
-reset: clean-state ## Alias for clean-state (fresh start)
+reset: clean-state ## Alias for clean-state
 
 ## Run targets
 
