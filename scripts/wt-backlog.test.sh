@@ -334,6 +334,96 @@ if [[ -s "$gh_calls" ]]; then
   exit 1
 fi
 
+# --- every command, every JSON form, from every checkout ----------------------
+#
+# One repository read from three linked checkouts must answer identically. The
+# list case is asserted above; this repeats it for view and add, and for the
+# machine contract of all three, because a difference between checkouts would
+# mean the command was reading something other than the repository it is in.
+
+for checkout in "${gh_checkouts[@]}"; do
+  name="${checkout:t}"
+  ( cd "$checkout" && wt backlog view 292 --json ) > "$gh_root/$name-view-json"
+  ( cd "$checkout" && wt backlog add "one idea" --json ) > "$gh_root/$name-add-json"
+  ( cd "$checkout" && wt backlog --all --json ) | rg -v "observed_at" > "$gh_root/$name-all-json"
+done
+for form in view-json add-json all-json; do
+  if ! cmp -s "$gh_root/source-$form" "$gh_root/dev-checkout-$form" \
+    || ! cmp -s "$gh_root/source-$form" "$gh_root/feature-checkout-$form"; then
+    print -r -- "the $form output differed between checkouts of one repository" >&2
+    exit 1
+  fi
+done
+rg -q '"schema_version": 1' "$gh_root/source-view-json"
+rg -q '"schema_version": 1' "$gh_root/source-add-json"
+rg -q '"body"' "$gh_root/source-view-json"
+rg -q '"state": "open"' "$gh_root/source-add-json"
+rg -q '"author_scope": "all"' "$gh_root/source-all-json"
+
+# --- hostile content and the failure matrix -----------------------------------
+#
+# Remote text is rendered into a terminal and user text is sent to a subprocess.
+# Neither may become something the shell or the terminal acts on.
+
+cat > "$gh_root/hostile-issues.json" <<'JSON'
+[
+  {"number":9001,"title":"title with \u001b[31mescape and \u202ereordering",
+   "author":{"login":"a\u0000b"},"labels":[{"name":"lab\u0007el"}],
+   "url":"https://github.com/johnjallday/ori-agent/issues/9001",
+   "createdAt":"2026-08-01T10:00:00Z","updatedAt":"2026-08-01T10:00:00Z"}
+]
+JSON
+( export GH_ISSUES="$gh_root/hostile-issues.json"; cd "$gh_root/feature-checkout" && wt backlog ) \
+  > "$gh_root/hostile-output"
+rg -q -- "9001" "$gh_root/hostile-output"
+if rg -q -- $'\033' "$gh_root/hostile-output"; then
+  print -r -- "a remote escape sequence reached the terminal" >&2
+  exit 1
+fi
+if rg -q -- $'\u202e' "$gh_root/hostile-output"; then
+  print -r -- "a remote reordering character reached the terminal" >&2
+  exit 1
+fi
+
+# Every classified failure exits 1, explains itself, and offers a recovery. The
+# working fake is kept aside so the loop below can swap it out and back.
+cp "$fake_bin/gh" "$fake_bin/gh-working"
+cat > "$fake_bin/gh-failing" <<'SH'
+#!/bin/sh
+printf '%s\n' "$GH_FAILURE_TEXT" >&2
+exit 1
+SH
+chmod +x "$fake_bin/gh-failing"
+for failure_text in \
+  "gh: To get started with GitHub CLI, please run: gh auth login" \
+  "HTTP 403: API rate limit exceeded for user ID 1" \
+  "HTTP 403: Resource not accessible by integration" \
+  "HTTP 404: Not Found" \
+  "dial tcp: lookup api.github.com: no such host" \
+  "unrecognized catastrophe"; do
+  failure_status=0
+  ( export GH_FAILURE_TEXT="$failure_text"
+    cp "$fake_bin/gh-failing" "$fake_bin/gh"
+    cd "$gh_root/feature-checkout" && wt backlog ) \
+    > "$gh_root/failure-output" 2>&1 || failure_status=$?
+  if [[ "$failure_status" != "1" ]]; then
+    print -r -- "'$failure_text' exited $failure_status, want 1" >&2
+    exit 1
+  fi
+  rg -q -- "Recovery:" "$gh_root/failure-output"
+  # The raw CLI text — which is where a token would be — is never echoed.
+  if rg -qF -- "$failure_text" "$gh_root/failure-output"; then
+    print -r -- "raw gh output was echoed for: $failure_text" >&2
+    exit 1
+  fi
+done
+cp "$fake_bin/gh-working" "$fake_bin/gh"
+
+# A working GitHub after a run of failures is an ordinary listing again: no
+# state was carried forward, because there is no state to carry.
+( cd "$gh_root/feature-checkout" && wt backlog ) > "$gh_root/recovered-output"
+rg -q -- "2 open Issues" "$gh_root/recovered-output"
+
 # Help documents the command, and the rest of the dispatcher is unaffected.
 wt help > "$fixture_root/help-output" 2>&1
 rg -q "wt backlog" "$fixture_root/help-output"

@@ -433,6 +433,27 @@ if rg -qv "^pr list " "$fixture_root/gh-calls"; then
   exit 1
 fi
 
+# The whole lifecycle just ran for a feature named `bridge` — a slug with no
+# Issue number in it. New work is named `<issue-number>-<slug>` now, but nothing
+# renames what already exists, and a legacy identity must keep working end to
+# end: planning documents, branch, worktree, handoff, and cleanup.
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge" "$fixture_root/herd-calls"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+[[ -f "$dev_root/tasks/prd-bridge.md" ]]
+[[ -f "$dev_root/tasks/tasks-bridge.md" ]]
+
+# And an issue-number-first slug is just as ordinary: the number is part of the
+# name, not a special case the flow has to understand.
+> "$fixture_root/herd-calls"
+print -r -- "# numbered PRD" > "$dev_root/tasks/prd-292-coordinate-based-map.md"
+print -r -- "## Tasks" > "$dev_root/tasks/tasks-292-coordinate-based-map.md"
+wt start 292-coordinate-based-map --yes > "$fixture_root/numbered-output" 2>&1
+rg -q "Feature .*292-coordinate-based-map" "$fixture_root/numbered-output"
+rg -q "Branch .*feature/292-coordinate-based-map" "$fixture_root/numbered-output"
+rg -q "^handoff --feature 292-coordinate-based-map --worktree $target_root --branch feature/292-coordinate-based-map" \
+  "$fixture_root/herd-calls"
+[[ -f "$target_root/tasks/prd-292-coordinate-based-map.md" ]]
+
 # The cleanup addition must not perturb the existing read-only worktree views.
 function wt_load_merged_set {
   return 0
