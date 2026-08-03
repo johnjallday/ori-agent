@@ -14,193 +14,274 @@
     {{template "sidebar.tmpl" .}}
 
     <main class="main-content" id="roster-main" role="main" aria-labelledby="roster-title">
+      <!-- .roster-layout stays the scoped root for the accessibility spec's axe
+           run, so it must continue to wrap the collection, the Inspector, the
+           bulk surfaces, and every dialog this page can open. -->
       <div class="roster-layout">
-        <!-- Roster rail: browse + select -->
-        <section class="roster-rail" aria-label="Agent roster">
-          <header class="roster-rail__header">
-            <div class="roster-rail__titles">
-              <h1 id="roster-title" class="roster-rail__title">Agents</h1>
-              <p class="roster-rail__subtitle" id="rosterCount" aria-live="polite">Loading roster…</p>
+
+        <!-- Collection header: what this surface is, how it behaves, real
+             summary counts, and the creation entry point (PRD FR3–FR5). -->
+        <header class="collection-head">
+          <div class="collection-head__intro">
+            <p class="collection-head__eyebrow">Agent library</p>
+            <h1 id="roster-title" class="collection-head__title">Your agent collection</h1>
+            <p class="collection-head__copy">
+              Reusable identities with their own roles, experience, and workspaces.
+              Open a card to inspect it; check a card to manage several at once.
+            </p>
+          </div>
+          <div class="collection-head__actions">
+            <div class="roster-stats" id="rosterStats" role="group" aria-label="Agent status summary" hidden>
+              <!-- real summary tiles injected here -->
             </div>
-            <div class="roster-rail__actions">
-              <button type="button" id="newAgentBtn" class="roster-rail__new" title="Create a new agent">+ New</button>
-            </div>
-          </header>
-
-          <div class="roster-stats" id="rosterStats" role="group" aria-label="Agent status summary" hidden>
-            <!-- status tiles injected here -->
+            <button type="button" id="newAgentBtn" class="collection-head__new" title="Create a new agent">
+              <span aria-hidden="true">+</span> New Agent
+            </button>
           </div>
+        </header>
 
-          <div class="roster-rail__controls">
-            <label class="roster-search" for="rosterSearch">
-              <span class="visually-hidden">Search agents</span>
-              <input id="rosterSearch" type="search" placeholder="Search agents…" autocomplete="off" spellcheck="false">
-            </label>
-            <label class="roster-sort" for="rosterSort">
-              <span class="visually-hidden">Sort agents</span>
-              <select id="rosterSort" aria-label="Sort agents">
-                <option value="name-asc">Name A–Z</option>
-                <option value="name-desc">Name Z–A</option>
-                <option value="level-desc">Level (highest first)</option>
-                <option value="workspaces-desc">Most workspaces</option>
-                <option value="active-desc">Recently active</option>
-              </select>
-            </label>
-          </div>
+        <div class="collection-shell" id="collectionShell">
+          <section class="collection-pane" aria-label="Agent collection">
 
-          <div class="roster-filters" role="group" aria-label="Filter agents">
-            <label class="roster-filter">
-              <span class="visually-hidden">Filter by role</span>
-              <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
-            </label>
-            <label class="roster-filter">
-              <span class="visually-hidden">Filter by source</span>
-              <select id="filterSource" aria-label="Filter by source">
-                <option value="">All sources</option>
-                <option value="user">User</option>
-                <option value="cli">Built-in</option>
-              </select>
-            </label>
-            <label class="roster-filter">
-              <span class="visually-hidden">Filter by assignment</span>
-              <select id="filterAssignment" aria-label="Filter by assignment">
-                <option value="">Library &amp; assigned</option>
-                <option value="library">Library only</option>
-                <option value="assigned">Assigned only</option>
-              </select>
-            </label>
-            <label class="roster-filter">
-              <span class="visually-hidden">Filter by tag</span>
-              <select id="filterTag" aria-label="Filter by tag"><option value="">All tags</option></select>
-            </label>
-            <button type="button" id="filterFavorite" class="roster-filter-toggle" aria-pressed="false">★ Favorites</button>
-            <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
-          </div>
+            <!-- Collection controls: search, discovery filters, and sorting. The
+                 Gallery/List switch and quick-collection chips mount here too. -->
+            <div class="collection-toolbar">
+              <label class="collection-search" for="rosterSearch">
+                <span class="visually-hidden">Search agents</span>
+                <input id="rosterSearch" type="search" placeholder="Search name, purpose, model, or tag…"
+                  autocomplete="off" spellcheck="false">
+              </label>
 
-          <div class="roster-selectbar" role="group" aria-label="Bulk selection">
-            <button type="button" id="rosterSelectAll" class="roster-linkbtn">Select all visible</button>
-            <button type="button" id="rosterClearSelection" class="roster-linkbtn" hidden>Clear selection</button>
-          </div>
-
-          <ul class="roster-list" id="rosterList" role="list" aria-label="Agents">
-            <!-- roster cards injected here -->
-          </ul>
-
-          <!-- Bulk action bar: revealed when at least one agent is checked. -->
-          <div class="bulk-bar" id="bulkBar" role="region" aria-label="Bulk actions" hidden>
-            <div class="bulk-bar__count" id="bulkCount" aria-live="polite"></div>
-            <div class="bulk-bar__actions">
-              <button type="button" class="bulk-bar__btn" id="bulkAddTags">Add tags</button>
-              <button type="button" class="bulk-bar__btn" id="bulkRemoveTags">Remove tags</button>
-              <button type="button" class="bulk-bar__btn" id="bulkSetRole">Set role</button>
-              <button type="button" class="bulk-bar__btn" id="bulkFavorite">Favorite</button>
-              <button type="button" class="bulk-bar__btn" id="bulkUnfavorite">Unfavorite</button>
-              <button type="button" class="bulk-bar__btn bulk-bar__btn--danger" id="bulkDelete">Delete</button>
-            </div>
-          </div>
-          <p class="visually-hidden" id="bulkLive" role="status" aria-live="polite"></p>
-
-          <!-- Persistent bulk-result surface: partial-success results stay
-               inspectable here until dismissed (PRD FR44/FR45). -->
-          <div class="bulk-result" id="bulkResult" role="region" aria-label="Bulk action results" hidden>
-            <div class="bulk-result__head">
-              <span class="bulk-result__summary" id="bulkResultSummary"></span>
-              <button type="button" class="roster-linkbtn" id="bulkResultDismiss">Dismiss</button>
-            </div>
-            <ul class="bulk-result__list" id="bulkResultList"></ul>
-          </div>
-
-          <!-- Bulk-delete confirmation. Native <dialog> traps focus and closes on
-               Escape before submission (PRD FR34/FR85). -->
-          <dialog class="bulk-dialog" id="bulkDeleteDialog" aria-labelledby="bulkDeleteTitle">
-            <h2 class="bulk-dialog__title" id="bulkDeleteTitle">Delete agents</h2>
-            <p class="bulk-dialog__lead">Deleting an agent is permanent and cannot be undone.</p>
-            <div class="bulk-dialog__body" id="bulkDeleteBody"></div>
-            <div class="bulk-dialog__actions">
-              <button type="button" class="btn-ghost" id="bulkDeleteCancel">Cancel</button>
-              <button type="button" class="btn-danger" id="bulkDeleteConfirm">Delete</button>
-            </div>
-          </dialog>
-
-          <!-- Bulk tag add/remove. Body is rebuilt per mode (add = tag entry,
-               remove = checklist of tags across the checked set). -->
-          <dialog class="bulk-dialog" id="bulkTagsDialog" aria-labelledby="bulkTagsTitle">
-            <h2 class="bulk-dialog__title" id="bulkTagsTitle">Tags</h2>
-            <div class="bulk-dialog__body" id="bulkTagsBody"></div>
-            <div class="bulk-dialog__actions">
-              <button type="button" class="btn-ghost" id="bulkTagsCancel">Cancel</button>
-              <button type="button" class="btn-primary" id="bulkTagsConfirm">Apply</button>
-            </div>
-          </dialog>
-
-          <div class="roster-empty" id="rosterEmpty" hidden>
-            <p id="rosterEmptyMsg">No agents match your search.</p>
-            <div class="roster-empty__actions">
-              <button type="button" id="rosterClearSearch" class="roster-linkbtn" hidden>Clear search</button>
-              <button type="button" id="rosterEmptyClearFilters" class="roster-linkbtn" hidden>Clear filters</button>
-              <button type="button" id="rosterEmptyCreate" class="roster-linkbtn" hidden>Create your first agent</button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Stage: selected agent -->
-        <section class="roster-stage" aria-label="Selected agent" aria-live="polite">
-          <div class="stage-placeholder" id="stagePlaceholder">
-            <div class="stage-placeholder__art" aria-hidden="true">◈</div>
-            <p>Select an agent from the roster to view its details.</p>
-          </div>
-
-          <article class="stage" id="stage" hidden>
-            <header class="stage__hero">
-              <div class="stage__avatar" id="stageAvatar" aria-hidden="true"></div>
-              <div class="stage__ident">
-                <h2 class="stage__name" id="stageName"></h2>
-                <div class="stage__class" id="stageClass"></div>
+              <!-- Quick collections are shortcuts over the same canonical filter
+                   model as the selects below, so their pressed state stays
+                   truthful however the filters were set. -->
+              <div class="quick-filters" role="group" aria-label="Quick collections">
+                <button type="button" class="collection-chip" data-quick="all" aria-pressed="true">All</button>
+                <button type="button" class="collection-chip" id="filterFavorite" data-quick="favorite" aria-pressed="false">★ Favorites</button>
+                <button type="button" class="collection-chip" data-quick="attention" aria-pressed="false">Needs attention</button>
+                <button type="button" class="collection-chip" data-quick="builtin" aria-pressed="false">Built-in</button>
               </div>
-              <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
-                <!-- vitals chips injected -->
-              </div>
-              <div class="stage__actions">
-                <a id="stageFullPage" class="stage__fullpage" href="#" title="Open the full agent detail page">Open full page ↗</a>
-                <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>
-              </div>
-            </header>
 
-            <div class="stage__progression" id="stageProgression" aria-live="polite">
-              <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
+              <div class="view-toggle" role="group" aria-label="Collection view">
+                <button type="button" class="view-button" id="viewGallery" data-view="gallery"
+                  aria-pressed="true" title="Gallery view">
+                  <i class="bi bi-grid-3x3-gap-fill" aria-hidden="true"></i>
+                  <span class="visually-hidden">Gallery view</span>
+                </button>
+                <button type="button" class="view-button" id="viewList" data-view="list"
+                  aria-pressed="false" title="List view">
+                  <i class="bi bi-list-ul" aria-hidden="true"></i>
+                  <span class="visually-hidden">List view</span>
+                </button>
+              </div>
+
+              <div class="collection-selects" role="group" aria-label="Filter and sort agents">
+                <label class="collection-select">
+                  <span class="visually-hidden">Filter by role</span>
+                  <select id="filterRole" aria-label="Filter by role"><option value="">All roles</option></select>
+                </label>
+                <label class="collection-select">
+                  <span class="visually-hidden">Filter by workspace</span>
+                  <select id="filterWorkspace" aria-label="Filter by workspace"><option value="">All workspaces</option></select>
+                </label>
+                <label class="collection-select">
+                  <span class="visually-hidden">Filter by source</span>
+                  <select id="filterSource" aria-label="Filter by source">
+                    <option value="">All sources</option>
+                    <option value="user">User</option>
+                    <option value="cli">Built-in</option>
+                  </select>
+                </label>
+                <label class="collection-select">
+                  <span class="visually-hidden">Filter by assignment</span>
+                  <select id="filterAssignment" aria-label="Filter by assignment">
+                    <option value="">Library &amp; assigned</option>
+                    <option value="library">Library only</option>
+                    <option value="assigned">Assigned only</option>
+                  </select>
+                </label>
+                <label class="collection-select">
+                  <span class="visually-hidden">Filter by tag</span>
+                  <select id="filterTag" aria-label="Filter by tag"><option value="">All tags</option></select>
+                </label>
+                <label class="collection-select">
+                  <span class="visually-hidden">Sort agents</span>
+                  <select id="rosterSort" aria-label="Sort agents">
+                    <option value="name-asc">Name A–Z</option>
+                    <option value="name-desc">Name Z–A</option>
+                    <option value="level-desc">Level (highest first)</option>
+                    <option value="workspaces-desc">Most workspaces</option>
+                    <option value="active-desc">Recently active</option>
+                  </select>
+                </label>
+                <button type="button" id="clearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+              </div>
             </div>
 
-            <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
-              <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
-              <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
-              <button class="stage__tab" role="tab" id="tab-workspaces" aria-controls="panel-workspaces" aria-selected="false" data-tab="workspaces" type="button" tabindex="-1">Workspaces</button>
-            </nav>
-
-            <div class="stage__panels">
-              <section class="stage__panel is-active" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabindex="0">
-                <div class="stage-editwrap" id="overviewFacts"></div>
-                <div class="stage-desc" id="overviewDesc"></div>
-              </section>
-              <section class="stage__panel" role="tabpanel" id="panel-prompt" aria-labelledby="tab-prompt" tabindex="0" hidden>
-                <div class="stage-prompt" id="promptBody">
-                  <p class="stage-hint">Loading system prompt…</p>
+            <div class="collection-scroll">
+              <div class="collection-meta">
+                <p class="collection-meta__count" id="rosterCount" aria-live="polite">Loading agents…</p>
+                <div class="collection-meta__actions">
+                  <button type="button" id="rosterSelectAll" class="roster-linkbtn">Select visible</button>
+                  <button type="button" id="rosterClearSelection" class="roster-linkbtn" hidden>Clear selection</button>
                 </div>
-              </section>
-              <section class="stage__panel" role="tabpanel" id="panel-workspaces" aria-labelledby="tab-workspaces" tabindex="0" hidden>
-                <div class="stage-workspaces" id="workspacesBody"></div>
-              </section>
-            </div>
-          </article>
+              </div>
 
-          <!-- Create-agent panel (toggled from the roster "+ New" button) -->
-          <article class="create-panel" id="createPanel" hidden aria-label="Create a new agent">
-            <header class="create-panel__head">
-              <h2>New agent</h2>
-              <button type="button" id="createCancel" class="btn-ghost">Cancel</button>
-            </header>
-            <div class="create-panel__body" id="createBody"></div>
-          </article>
-        </section>
+              <!-- Gallery/List host. Both views render the same normalized model
+                   into this one element; List is a presentation mode on it. -->
+              <ul class="agent-grid" id="rosterList" role="list" aria-label="Agents">
+                <!-- agent cards injected here -->
+              </ul>
+
+              <!-- Real loading state, shown until the one dashboard request settles. -->
+              <div class="collection-state" id="rosterLoading">
+                <p class="collection-state__msg">Loading your agents…</p>
+              </div>
+
+              <!-- Collection load failure keeps a retry action (PRD FR8/FR100). -->
+              <div class="collection-state collection-state--error" id="rosterError" role="alert" hidden>
+                <p class="collection-state__msg" id="rosterErrorMsg">We couldn't load your agents.</p>
+                <button type="button" class="roster-linkbtn" id="rosterRetry">Try again</button>
+              </div>
+
+              <div class="roster-empty" id="rosterEmpty" hidden>
+                <p id="rosterEmptyMsg">No agents match your search.</p>
+                <div class="roster-empty__actions">
+                  <button type="button" id="rosterClearSearch" class="roster-linkbtn" hidden>Clear search</button>
+                  <button type="button" id="rosterEmptyClearFilters" class="roster-linkbtn" hidden>Clear filters</button>
+                  <button type="button" id="rosterEmptyCreate" class="roster-linkbtn" hidden>New Agent</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Selected-agent Inspector. Beside the collection on wide screens;
+               a modal sheet over it when narrow. The backdrop is a sibling so
+               it only participates in the mobile presentation. -->
+          <div class="inspector-backdrop" id="inspectorBackdrop" hidden></div>
+          <aside class="inspector" id="inspector" aria-label="Selected agent">
+            <div class="inspector-scroll" id="inspectorScroll">
+              <div class="inspector-topline">
+                <span class="inspector-kicker">Selected agent</span>
+                <button type="button" class="inspector-close" id="inspectorClose"
+                  aria-label="Close inspector" title="Close inspector">
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+
+              <div class="stage-placeholder" id="stagePlaceholder">
+                <div class="stage-placeholder__art" aria-hidden="true">◈</div>
+                <p>Open an agent card to inspect it here.</p>
+              </div>
+
+              <article class="stage" id="stage" hidden>
+                <header class="stage__hero">
+                  <div class="stage__avatar" id="stageAvatar" aria-hidden="true"></div>
+                  <div class="stage__ident">
+                    <h2 class="stage__name" id="stageName"></h2>
+                    <span class="stage__favorite" id="stageFavorite" title="Favorite" aria-hidden="true" hidden>★</span>
+                    <div class="stage__class" id="stageClass"></div>
+                  </div>
+                  <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
+                    <!-- vitals chips injected -->
+                  </div>
+                  <!-- Repeats the card's purpose so it stays visible on every
+                       Inspector tab, not only Overview (PRD FR54). -->
+                  <p class="stage__purpose" id="stagePurpose"></p>
+                  <div class="stage__actions">
+                    <a id="stageFullPage" class="stage__fullpage" href="#" title="Open the full agent detail page">Open full page ↗</a>
+                    <button type="button" id="stageDelete" class="stage__delete" hidden title="Delete this agent">Delete</button>
+                  </div>
+                </header>
+
+                <div class="stage__progression" id="stageProgression" aria-live="polite">
+                  <!-- role emblem/name, level, stage, XP bar, slot usage injected -->
+                </div>
+
+                <nav class="stage__tabs" role="tablist" aria-label="Agent detail sections">
+                  <button class="stage__tab is-active" role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" data-tab="overview" type="button">Overview</button>
+                  <button class="stage__tab" role="tab" id="tab-prompt" aria-controls="panel-prompt" aria-selected="false" data-tab="prompt" type="button" tabindex="-1">Prompt</button>
+                  <button class="stage__tab" role="tab" id="tab-workspaces" aria-controls="panel-workspaces" aria-selected="false" data-tab="workspaces" type="button" tabindex="-1">Workspaces</button>
+                  <button class="stage__tab" role="tab" id="tab-toolbox" aria-controls="panel-toolbox" aria-selected="false" data-tab="toolbox" type="button" tabindex="-1">Toolbox</button>
+                </nav>
+
+                <div class="stage__panels">
+                  <section class="stage__panel is-active" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview" tabindex="0">
+                    <div class="stage-editwrap" id="overviewFacts"></div>
+                    <div class="stage-desc" id="overviewDesc"></div>
+                  </section>
+                  <section class="stage__panel" role="tabpanel" id="panel-prompt" aria-labelledby="tab-prompt" tabindex="0" hidden>
+                    <div class="stage-prompt" id="promptBody">
+                      <p class="stage-hint">Loading system prompt…</p>
+                    </div>
+                  </section>
+                  <section class="stage__panel" role="tabpanel" id="panel-workspaces" aria-labelledby="tab-workspaces" tabindex="0" hidden>
+                    <div class="stage-workspaces" id="workspacesBody"></div>
+                  </section>
+                  <section class="stage__panel" role="tabpanel" id="panel-toolbox" aria-labelledby="tab-toolbox" tabindex="0" hidden>
+                    <div class="stage-toolbox" id="toolboxBody"></div>
+                  </section>
+                </div>
+              </article>
+
+              <!-- Create-agent panel (toggled from the header "New Agent" button) -->
+              <article class="create-panel" id="createPanel" hidden aria-label="Create a new agent">
+                <header class="create-panel__head">
+                  <h2>New agent</h2>
+                  <button type="button" id="createCancel" class="btn-ghost">Cancel</button>
+                </header>
+                <div class="create-panel__body" id="createBody"></div>
+              </article>
+            </div>
+          </aside>
+        </div>
+
+        <!-- Bulk action bar: revealed when at least one agent is checked. -->
+        <div class="bulk-bar" id="bulkBar" role="region" aria-label="Bulk actions" hidden>
+          <div class="bulk-bar__count" id="bulkCount" aria-live="polite"></div>
+          <div class="bulk-bar__actions">
+            <button type="button" class="bulk-bar__btn" id="bulkAddTags">Add tags</button>
+            <button type="button" class="bulk-bar__btn" id="bulkRemoveTags">Remove tags</button>
+            <button type="button" class="bulk-bar__btn" id="bulkSetRole">Set role</button>
+            <button type="button" class="bulk-bar__btn" id="bulkFavorite">Favorite</button>
+            <button type="button" class="bulk-bar__btn" id="bulkUnfavorite">Unfavorite</button>
+            <button type="button" class="bulk-bar__btn bulk-bar__btn--danger" id="bulkDelete">Delete</button>
+          </div>
+        </div>
+        <p class="visually-hidden" id="bulkLive" role="status" aria-live="polite"></p>
+
+        <!-- Persistent bulk-result surface: partial-success results stay
+             inspectable here until dismissed (PRD FR44/FR45). -->
+        <div class="bulk-result" id="bulkResult" role="region" aria-label="Bulk action results" hidden>
+          <div class="bulk-result__head">
+            <span class="bulk-result__summary" id="bulkResultSummary"></span>
+            <button type="button" class="roster-linkbtn" id="bulkResultDismiss">Dismiss</button>
+          </div>
+          <ul class="bulk-result__list" id="bulkResultList"></ul>
+        </div>
+
+        <!-- Bulk-delete confirmation. Native <dialog> traps focus and closes on
+             Escape before submission (PRD FR34/FR85). -->
+        <dialog class="bulk-dialog" id="bulkDeleteDialog" aria-labelledby="bulkDeleteTitle">
+          <h2 class="bulk-dialog__title" id="bulkDeleteTitle">Delete agents</h2>
+          <p class="bulk-dialog__lead">Deleting an agent is permanent and cannot be undone.</p>
+          <div class="bulk-dialog__body" id="bulkDeleteBody"></div>
+          <div class="bulk-dialog__actions">
+            <button type="button" class="btn-ghost" id="bulkDeleteCancel">Cancel</button>
+            <button type="button" class="btn-danger" id="bulkDeleteConfirm">Delete</button>
+          </div>
+        </dialog>
+
+        <!-- Bulk tag add/remove. Body is rebuilt per mode (add = tag entry,
+             remove = checklist of tags across the checked set). -->
+        <dialog class="bulk-dialog" id="bulkTagsDialog" aria-labelledby="bulkTagsTitle">
+          <h2 class="bulk-dialog__title" id="bulkTagsTitle">Tags</h2>
+          <div class="bulk-dialog__body" id="bulkTagsBody"></div>
+          <div class="bulk-dialog__actions">
+            <button type="button" class="btn-ghost" id="bulkTagsCancel">Cancel</button>
+            <button type="button" class="btn-primary" id="bulkTagsConfirm">Apply</button>
+          </div>
+        </dialog>
       </div>
     </main>
   </div>
@@ -216,6 +297,9 @@
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/role-catalog.js"></script>
   <script defer src="/js/modules/stage-up-toast.js"></script>
+  <!-- Shared deterministic avatar renderer (exposes window.AgentAvatar). Must load
+       before the roster controller so first paint already uses one identity. -->
+  <script defer src="/js/modules/agent-avatar.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 
