@@ -1599,7 +1599,7 @@ function wt_dispatch {
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
     echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
     echo "  wt new <name> [--kind KIND] [--no-herdr] [--yes] - Ad-hoc worktree (feature/<name>, or <type>/<name>)"
-    echo "                     Same guided flow as wt start, minus planning docs and backlog."
+    echo "                     Same guided flow as wt start, minus the planning documents."
     echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
     echo "                     Herdr is optional throughout; if it is missing or unhealthy the"
     echo "                     worktree is still created and 'wt herd retry' resumes the rest."

@@ -3,8 +3,22 @@
 Migrate the capture → discover → decide → build loop from Cowork into Ori Agent, one stage
 at a time, harvesting product gaps as backlog entries while doing it.
 
-**Prime directive:** every friction point hit while dogfooding becomes a `BACKLOG.md` entry
-tagged `#dogfood`. The loop's job is to feed itself.
+**Prime directive:** every friction point hit while dogfooding becomes a GitHub Issue tagged
+`#dogfood` in its title or body. The loop's job is to feed itself.
+
+```bash
+wt backlog add "#dogfood <the friction, in one line>" --body "<what you were doing>"
+wt backlog                 # what is open, mine, and unplanned
+wt backlog view <number>   # the full idea before deciding anything
+```
+
+Capture it while you are annoyed, not later. One line is enough; the body is optional and the
+Issue needs no label, milestone, assignee, or Project to count.
+
+**Selecting the day's work stays manual and outside `wt`.** `wt backlog` reads and captures;
+choosing what to do next — and moving it on a GitHub Project, if you keep one — is done by
+hand in GitHub for now. That is deliberate: the selection workflow gets designed after enough
+days of doing it manually to know what it should be.
 
 **Safety rule:** Cowork stays the fallback at every stage. Dogfooding must never block real
 development. A stage's Ori version becomes the default only when it meets its graduation
@@ -12,8 +26,8 @@ criterion; start stage N+1 only after N graduates.
 
 ## Stage 0 — Product HQ workspace (foundation)
 
-Create an "Ori DevOps" workspace pointed at this repo folder. `BACKLOG.md` and
-`docs/feature-discovery/` are then already inside it via folder sync. Personal HQ
+Create an "Ori DevOps" workspace pointed at this repo folder. `docs/feature-discovery/` is
+then already inside it via folder sync, and the backlog itself is read from GitHub. Personal HQ
 (shipped 2026-07-16, `internal/personalhq/`) proves the HQ-workspace pattern; this is its
 product-development sibling.
 
@@ -28,11 +42,16 @@ product-development sibling.
 
 ## Stage 1 — Backlog skill (smallest surface first)
 
-Author a `backlog` skill in Ori's skills system (`internal/skills/`): add / list / prune /
-promote on `BACKLOG.md`, conventions baked in. Bind it to the HQ workspace.
+Author a `backlog` skill in Ori's skills system (`internal/skills/`) that captures and reads
+GitHub Issues — the same list / view / add surface `wt backlog` exposes, reachable from a
+chat. Bind it to the HQ workspace.
 
-- Exercises: skill authoring ergonomics, workspace skill bindings, file-write tools.
-- Graduates when: "add X to the backlog" works correctly in an Ori chat 5 times out of 5.
+The skill stays read-and-capture, like the command it mirrors: no promoting, closing, or
+Project writes, because GitHub owns the lifecycle and no local copy of it exists to maintain.
+
+- Exercises: skill authoring ergonomics, workspace skill bindings, GitHub access from a skill.
+- Graduates when: "add X to the backlog" works correctly in an Ori chat 5 times out of 5, and
+  the Issue it creates is the one you meant.
 
 ## Stage 2 — Discovery run as a scheduled Workspace Run
 
@@ -48,9 +67,11 @@ Report lands in workspace files; run metadata could use an output contract
 ## Stage 3 — Shortlist → Action Center
 
 The weekly run's shortlist surfaces as Action Center items (`actioncenterhttp` — its literal
-mission is cross-workspace triage of workspace findings). Picking an item promotes the entry
-to `## Doing` in the backlog. Note: Action Center's periodic delivery wiring is already a
-known pending gap (see personal-hq-assistant.md deferred list) — this stage forces it.
+mission is cross-workspace triage of workspace findings), each carrying the Issue number and
+URL it came from. What "picking" an item should do to the Issue is exactly the open question
+this dogfooding is meant to answer, so for now picking is a human action taken in GitHub.
+Note: Action Center's periodic delivery wiring is already a known pending gap (see
+personal-hq-assistant.md deferred list) — this stage forces it.
 
 - Exercises: Action Center end-to-end, event bus, scheduled delivery wiring.
 - Graduates when: you triage Monday's shortlist from Action Center, not from the report file.
@@ -58,8 +79,10 @@ known pending gap (see personal-hq-assistant.md deferred list) — this stage fo
 ## Stage 4 — PRD handoff
 
 Picked candidate → orchestration template or custom workflow (`workflowhttp`) drafts the PRD
-into `tasks/prd-<feature>.md` (matching the existing convention) plus a task breakdown.
-Optionally two-agent: drafter + critic via agent delegation.
+into `tasks/prd-<issue-number>-<slug>.md` (see the naming convention in `scripts/README.md`)
+plus a task breakdown. Carrying the Issue number into the filename is what lets a later run
+tell a planned Issue from a fresh one without comparing titles. Optionally two-agent: drafter
++ critic via agent delegation.
 
 - Exercises: orchestration templates, multi-agent delegation, task generation.
 - Graduates when: one real feature's PRD is produced in Ori and used for the actual build.
@@ -70,8 +93,8 @@ whether `cliagenthttp` can hand builds off to a CLI agent.
 ## Cadence & scorecard
 
 One stage per week alongside normal work. The weekly discovery run doubles as the test
-harness — each run stress-tests whatever stage is newest. Track per stage: `#dogfood`
-entries filed, features shipped because of them, manual steps remaining.
+harness — each run stress-tests whatever stage is newest. Track per stage: `#dogfood` Issues
+filed, features shipped because of them, manual steps remaining.
 
 ## Predicted first findings (verify early)
 

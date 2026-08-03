@@ -24,6 +24,25 @@ CLI-provider agents can run native workspace MCP only after both `Workspace.Allo
 ## Planning Artifact Location
 For the PRD and task-list workflows below, create planning artifacts in this dev worktree's `tasks/` directory (that is, `ori-agent-dev/tasks/`), creating it if necessary. `/tasks/` is not an absolute filesystem path. Finish both planning artifacts there before running `wt start`; it copies them to the isolated feature worktree. Because `tasks/` is gitignored, verify planning artifacts by reading the files directly (and, if needed, use `git status --ignored`) rather than relying on `git diff`.
 
+## Feature Naming: Issue Number First
+
+The product backlog is GitHub Issues (`wt backlog`). Work selected from an Issue uses the Issue number at the front of its identity:
+
+```
+Issue #292 "Coordinate based map"
+  → feature slug   292-coordinate-based-map
+  → PRD            tasks/prd-292-coordinate-based-map.md
+  → task list      tasks/tasks-292-coordinate-based-map.md
+  → worktree       292-coordinate-based-map
+  → branch         feature/292-coordinate-based-map   (prefix still states intent: feature/, fix/, docs/, …)
+```
+
+The number is the repository-local integer GitHub shows. Never derive it from title text, body text, a timestamp, or a position in a list.
+
+**Why the number and not the title:** it is the one part of an Issue that cannot change. Renaming an Issue after planning starts must never require renaming the branch, the worktree, the PRD, or the pull request — and later tooling that joins delivery back to an Issue can then match on an exact identifier instead of comparing prose.
+
+Work that did not come from an Issue keeps a plain descriptive slug. Existing features whose slugs have no number remain valid and are **not** renamed.
+
 
 # Rule: Generating a Product Requirements Document (PRD)
 
