@@ -450,12 +450,18 @@ binding diagnostics and feature history that the deliberately smaller
 ## Backlog
 
 ~~~bash
-wt backlog                         # open Issues in this repository that you authored
-wt backlog --all                   # every author's open Issues in this repository
-wt backlog view <number>           # one Issue in full, including its body
-wt backlog add "<title>" [--body "<text>"]
-wt backlog --json                  # any of the above, as a schema-versioned envelope
+./scripts/backlog.sh                       # open Issues in this repository that you authored
+./scripts/backlog.sh --all                 # every author's open Issues in this repository
+./scripts/backlog.sh view <number>         # one Issue in full, including its body
+./scripts/backlog.sh add "<title>" [--body "<text>"]
+./scripts/backlog.sh --json                # any of the above, as a schema-versioned envelope
 ~~~
+
+The backlog is its own executable rather than a `wt` subcommand: `wt` is a shell
+function that must be sourced, which puts it out of reach of anything that is not
+an interactive zsh — an agent, a script, a Makefile. It reaches the same Go
+helper the bridge commands use, but it needs no Herdr: a missing, stopped, or
+misconfigured bridge cannot stop anyone from reading their own backlog.
 
 The product backlog is GitHub Issues. There is no backlog file, no cache, and no
 backlog commit: every invocation performs one fresh authenticated query, and a
@@ -480,8 +486,8 @@ as data, never as shell syntax.
 Exit codes: `0` the operation completed (an empty backlog is a completed
 listing), `1` GitHub could not answer, `2` invalid arguments.
 
-**Removed, and not coming back as a local file:** `wt backlog sync` and
-`wt backlog prune` (GitHub is live and keeps its own history). **Not implemented
+**Removed, and not coming back as a local file:** `sync` and `prune` (GitHub is
+live and keeps its own history). **Not implemented
 yet, deliberately:** any command that changes an Issue's state — promote, ship,
 drop, close, select — and any Project operation. `wt start`, `wt pr`, and
 `wt done` do not read, update, or close an Issue either. Daily selection stays
@@ -522,7 +528,7 @@ while that worktree exists, and the archived copy in `dev` after `wt done`.
 There is no backlog source. The repository's backlog is GitHub Issues, and an
 Issue nobody has planned yet has no PRD, no branch, and no worktree — it would
 be a row describing nothing. `wt status` describes selected and executing work;
-`wt backlog` reads the ideas that have not been selected.
+`./scripts/backlog.sh` reads the ideas that have not been selected.
 
 ### Phases
 

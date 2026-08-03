@@ -357,7 +357,7 @@ func (e *Error) Recovery() string {
 	case ErrorTimeout, ErrorNetwork:
 		return "check network access to github.com, then retry"
 	case ErrorRepository:
-		return "run wt backlog from a checkout of a GitHub repository you can read; verify with: gh repo view"
+		return "run ./scripts/backlog.sh from a checkout of a GitHub repository you can read; verify with: gh repo view"
 	default:
 		return "run: gh pr list --limit 1"
 	}

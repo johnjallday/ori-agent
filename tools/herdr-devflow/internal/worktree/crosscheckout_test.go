@@ -13,7 +13,7 @@ import (
 //
 // A source checkout and each linked worktree are separate directories with
 // separate working trees, but they are one repository: they share a common Git
-// directory, and therefore one stable repository identity. `wt backlog` must
+// directory, and therefore one stable repository identity. `./scripts/backlog.sh` must
 // select the same GitHub repository from any of them, so the property is
 // pinned here before the backlog command starts relying on it.
 func TestLinkedWorktreesResolveOneRepositoryIdentity(t *testing.T) {

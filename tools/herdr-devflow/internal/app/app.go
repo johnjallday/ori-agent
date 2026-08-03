@@ -3131,7 +3131,7 @@ Usage:
   wt herd overview [same options]
                                 Compatibility alias for wt herd status.
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
-  wt backlog [list] [--all] [--json]
+  ./scripts/backlog.sh [list] [--all] [--json]
                                 List this repository's open GitHub Issues, which are the
                                 product backlog. The default scope is the Issues you
                                 authored (author:@me); --all keeps the repository and the
@@ -3139,13 +3139,13 @@ Usage:
                                 Every invocation queries GitHub: there is no cache and no
                                 local backlog file, so a failure is reported as a failure
                                 rather than as an empty backlog. Issue bodies are not
-                                listed; read one with wt backlog view.
-  wt backlog view <number|url> [--json]
+                                listed; read one with ./scripts/backlog.sh view.
+  ./scripts/backlog.sh view <number|url> [--json]
                                 Show one Issue of this repository in full, open or closed:
                                 state, author, labels, timestamps, URL, and body. The body
                                 is printed as Markdown text — no HTML is rendered, no link
                                 is followed, and no attachment is downloaded.
-  wt backlog add "<title>" [--body "<text>"] [--json]
+  ./scripts/backlog.sh add "<title>" [--body "<text>"] [--json]
                                 Create one Issue in this repository from a required title
                                 and an optional Markdown body. It sets nothing else: no
                                 label, assignee, milestone, Issue type, Project, or

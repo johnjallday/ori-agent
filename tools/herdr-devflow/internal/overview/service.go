@@ -158,7 +158,7 @@ func (s *Service) collect(ctx context.Context, forceRemote bool) (Snapshot, erro
 
 	// There is no backlog source. The repository's backlog is GitHub Issues, and
 	// an unselected Issue is not a feature: it has no plan, no branch, and no
-	// worktree, so it would be a row describing nothing. `wt backlog` reads
+	// worktree, so it would be a row describing nothing. `./scripts/backlog.sh` reads
 	// them, and this board describes work that has actually been selected.
 
 	// Herdr and the bridge are collected before the join so a feature known

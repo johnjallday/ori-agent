@@ -26,7 +26,7 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 
 ## Feature Naming: Issue Number First
 
-The product backlog is GitHub Issues (`wt backlog`). Work selected from an Issue uses the Issue number at the front of its identity:
+The product backlog is GitHub Issues (`./scripts/backlog.sh`). Work selected from an Issue uses the Issue number at the front of its identity:
 
 ```
 Issue #292 "Coordinate based map"
