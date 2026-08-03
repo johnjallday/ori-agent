@@ -30,7 +30,6 @@
 WORKTREE_DIR="../"
 BASE_BRANCH="dev"
 PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
-WT_BACKLOG_RETENTION_DAYS="${WT_BACKLOG_RETENTION_DAYS:-7}"
 
 # Permission mode written into each new feature worktree's
 # .claude/settings.local.json. Feature worktrees are isolated and reviewed at
@@ -354,246 +353,6 @@ JSON
   return 0
 }
 
-function wt_backlog_file {
-  # Echoes the path to the tracked BACKLOG.md, which lives in the dev worktree
-  # (where its docs(backlog) commits ride, same as they do by hand today).
-  # Returns non-zero if the dev worktree can't be found.
-  local dev_path
-  dev_path="$(wt_get_dev_worktree)" || return 1
-  [[ -z "$dev_path" ]] && return 1
-  print -r -- "$dev_path/BACKLOG.md"
-}
-
-function wt_backlog_cutoff_date {
-  # Prints the oldest date retained in ## Shipped / dropped. macOS and GNU date
-  # use different relative-date syntax, so support both without adding another
-  # runtime dependency.
-  local days="$1" cutoff=""
-  if [[ "$days" != <-> ]] || (( days < 1 || days > 3650 )); then
-    echo "Backlog: retention days must be a whole number from 1 to 3650." >&2
-    return 1
-  fi
-  cutoff="$(date -v-"${days}"d +%F 2>/dev/null)" \
-    || cutoff="$(date -d "$days days ago" +%F 2>/dev/null)" \
-    || {
-      echo "Backlog: could not calculate the retention cutoff date." >&2
-      return 1
-    }
-  print -r -- "$cutoff"
-}
-
-function wt_backlog_prune {
-  # Removes only date-prefixed entries older than the retention window from
-  # ## Shipped / dropped. Ideas, Doing, and undated history are preserved.
-  # Git remains the durable archive for every removed line.
-  # Args: $1 = BACKLOG.md path, $2 = retention days (optional).
-  local file="$1" days="${2:-$WT_BACKLOG_RETENTION_DAYS}" cutoff tmp
-  [[ -f "$file" ]] || { echo "Backlog: no BACKLOG.md at $file" >&2; return 1; }
-  cutoff="$(wt_backlog_cutoff_date "$days")" || return 1
-  tmp="${file}.wt.$$"
-  awk -v cutoff="$cutoff" '
-    /^## / {
-      shipped = ($0 ~ /^## Shipped \/ dropped *$/)
-      print
-      next
-    }
-    shipped && /^- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / {
-      entry_date = substr($0, 3, 10)
-      if (entry_date < cutoff) next
-    }
-    { print }
-  ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
-  if cmp -s "$file" "$tmp"; then
-    rm -f "$tmp"
-    echo "Backlog: no Shipped / dropped entries older than $days days."
-    return 0
-  fi
-  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-  echo "Backlog: pruned Shipped / dropped entries older than $days days (before $cutoff)."
-}
-
-function wt_backlog_commit_push {
-  # Scoped commit of BACKLOG.md ONLY + push to origin/$BASE_BRANCH. The
-  # path-limited commit never sweeps up unrelated WIP in the shared dev
-  # worktree. On a non-fast-forward push (a concurrent backlog edit landed) it
-  # rebases onto origin/$BASE_BRANCH - but only when nothing else is dirty,
-  # since rebase can't run over unstaged edits. Non-fatal by contract: returns
-  # non-zero on failure, but callers proceed with their real work.
-  # Args: $1 = dev worktree path, $2 = commit message, $3 = retention days (optional).
-  local dev_path="$1" msg="$2" retention_days="${3:-$WT_BACKLOG_RETENTION_DAYS}"
-  wt_backlog_prune "$dev_path/BACKLOG.md" "$retention_days" || return 1
-  if [[ -z "$(git -C "$dev_path" status --porcelain -- BACKLOG.md 2>/dev/null)" ]]; then
-    echo "Backlog: no BACKLOG.md changes to commit."
-    return 0
-  fi
-  git -C "$dev_path" commit -q -m "$msg" -- BACKLOG.md || return 1
-  echo "Backlog: committed - $msg"
-  git -C "$dev_path" fetch origin "$BASE_BRANCH" --quiet 2>/dev/null
-  if git -C "$dev_path" push -q origin "$BASE_BRANCH" 2>/dev/null; then
-    echo "Backlog: pushed to origin/$BASE_BRANCH"
-    return 0
-  fi
-  echo "Backlog: push rejected (origin/$BASE_BRANCH moved); integrating..."
-  if [[ -n "$(git -C "$dev_path" status --porcelain --untracked-files=no)" ]]; then
-    echo "Backlog: dev worktree has other uncommitted changes; can't auto-rebase."
-    echo "  Sync manually: git -C '$dev_path' pull --rebase origin $BASE_BRANCH && git -C '$dev_path' push origin $BASE_BRANCH"
-    return 1
-  fi
-  if git -C "$dev_path" rebase "origin/$BASE_BRANCH" >/dev/null 2>&1; then
-    git -C "$dev_path" push -q origin "$BASE_BRANCH" \
-      && echo "Backlog: pushed to origin/$BASE_BRANCH" \
-      || { echo "Backlog: push still failing; push manually from $dev_path"; return 1; }
-  else
-    git -C "$dev_path" rebase --abort >/dev/null 2>&1
-    echo "Backlog: rebase onto origin/$BASE_BRANCH hit conflicts; resolve in $dev_path and push."
-    return 1
-  fi
-}
-
-function wt_backlog_add_idea {
-  # Inserts "- YYYY-MM-DD <text>" after the last bullet of the ## Ideas section
-  # (or right after the header if the section is empty). Args: $1 = file,
-  # $2 = idea text (verbatim; user supplies any !, #small/#large, tags).
-  local file="$1" text="$2"
-  local bullet="- $(date +%F) $text"
-  local tmp="${file}.wt.$$"
-  awk -v nl="$bullet" '
-    { L[NR] = $0 }
-    END {
-      ideas = 0
-      for (i = 1; i <= NR; i++) if (L[i] ~ /^## Ideas *$/) { ideas = i; break }
-      if (ideas == 0) { for (i = 1; i <= NR; i++) print L[i]; print nl; exit }
-      nx = NR + 1
-      for (i = ideas + 1; i <= NR; i++) if (L[i] ~ /^## /) { nx = i; break }
-      at = ideas
-      for (i = ideas + 1; i < nx; i++) if (L[i] ~ /^- /) at = i
-      for (i = 1; i <= NR; i++) { print L[i]; if (i == at) print nl }
-    }
-  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-}
-
-function wt_backlog_ensure_doing {
-  # Appends a Doing entry keyed by the PRD slug, so wt done can retire it on
-  # merge. Idempotent: skips if a Doing line already references prd-<feature>.md.
-  # Deliberately does NOT touch ## Ideas (rule E forbids rewording/deleting
-  # ideas; matching free text to a slug is unsafe). Args: $1 = file, $2 = slug.
-  local file="$1" feature="$2"
-  local entry="- $feature -> PRD at tasks/prd-$feature.md (started $(date +%F))"
-  local tmp="${file}.wt.$$"
-  awk -v feature="$feature" -v entry="$entry" '
-    { L[NR] = $0 }
-    END {
-      doing = 0
-      for (i = 1; i <= NR; i++) if (L[i] ~ /^## Doing *$/) { doing = i; break }
-      if (doing == 0) { for (i = 1; i <= NR; i++) print L[i]; exit }
-      nx = NR + 1
-      for (i = doing + 1; i <= NR; i++) if (L[i] ~ /^## /) { nx = i; break }
-      for (i = doing + 1; i < nx; i++)
-        if (index(L[i], "prd-" feature ".md") > 0) { for (j = 1; j <= NR; j++) print L[j]; exit }
-      at = doing
-      for (i = doing + 1; i < nx; i++) if (L[i] ~ /^- /) at = i
-      for (i = 1; i <= NR; i++) { print L[i]; if (i == at) print entry }
-    }
-  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-}
-
-function wt_backlog_retire {
-  # Moves the ## Doing line for this feature to the top of ## Shipped / dropped,
-  # annotated with the merged PR number and date. Falls back to appending a
-  # fresh Shipped line if no Doing line matches (shipment still recorded).
-  # Matches on prd-<feature>.md first, then a bare-slug substring for
-  # hand-written Doing lines. Args: $1 = file, $2 = slug, $3 = PR number (opt).
-  local file="$1" feature="$2" prnum="$3"
-  local d="$(date +%F)" suffix
-  if [[ -n "$prnum" ]]; then suffix="PR #$prnum merged to dev ($d)"; else suffix="merged to dev ($d)"; fi
-  local tmp="${file}.wt.$$"
-  awk -v feature="$feature" -v suffix="$suffix" -v d="$d" '
-    { L[NR] = $0 }
-    END {
-      doing = 0; shipped = 0
-      for (i = 1; i <= NR; i++) {
-        if (L[i] ~ /^## Doing *$/) doing = i
-        if (L[i] ~ /^## Shipped/) shipped = i
-      }
-      moved = 0
-      if (doing > 0) {
-        dn = NR + 1
-        for (i = doing + 1; i <= NR; i++) if (L[i] ~ /^## /) { dn = i; break }
-        for (i = doing + 1; i < dn; i++)
-          if (L[i] ~ /^- / && (index(L[i], "prd-" feature ".md") > 0 || index(L[i], feature) > 0)) { moved = i; break }
-      }
-      if (moved > 0) { base = L[moved]; sub(/^- /, "", base) } else { base = feature }
-      shipline = "- " d " " base " - " suffix
-      for (i = 1; i <= NR; i++) {
-        if (i == moved) continue
-        print L[i]
-        if (i == shipped) print shipline
-      }
-      if (shipped == 0) { print ""; print "## Shipped / dropped"; print shipline }
-    }
-  ' "$file" > "$tmp" && mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-}
-
-function wt_backlog_render {
-  # Pretty, colorized view of BACKLOG.md for reading in a terminal: a one-line
-  # summary, section headers tinted by kind (Ideas cyan / Doing yellow /
-  # Shipped green) with a bullet count, and per-bullet emphasis - dimmed date
-  # prefix, red "!" priority flag, magenta #tags. Intro prose is folded away.
-  # Colours come from wt_color_init and vanish when stdout isn't a tty, but
-  # callers should prefer raw `cat` when piped (see the dispatch).
-  local file="$1"
-  wt_color_init
-  awk -v R="$WT_C_RESET" -v B="$WT_C_BOLD" -v D="$WT_C_DIM" \
-      -v RED="$WT_C_RED" -v GRN="$WT_C_GREEN" -v YEL="$WT_C_YELLOW" \
-      -v CYN="$WT_C_CYAN" -v MAG="$WT_C_MAGENTA" '
-    { L[NR] = $0 }
-    END {
-      ideas = 0; doing = 0; shipped = 0
-      for (i = 1; i <= NR; i++) {
-        if (L[i] ~ /^## /) {
-          c = 0
-          for (j = i + 1; j <= NR && L[j] !~ /^## /; j++) if (L[j] ~ /^- /) c++
-          cnt[i] = c
-          if (L[i] ~ /Ideas/)   ideas = c
-          if (L[i] ~ /Doing/)   doing = c
-          if (L[i] ~ /Shipped/) shipped = c
-        }
-      }
-      cur = CYN
-      for (i = 1; i <= NR; i++) {
-        line = L[i]
-        if (line ~ /^# /) {
-          print B line R
-          print D ideas " ideas  •  " doing " doing  •  " shipped " shipped" R
-          for (j = i + 1; j <= NR && L[j] !~ /^## /; j++) ;   # fold intro prose
-          i = j - 1
-          continue
-        }
-        if (line ~ /^## /) {
-          hc = CYN
-          if (line ~ /Doing/)   hc = YEL
-          if (line ~ /Shipped/) hc = GRN
-          cur = hc
-          print ""
-          print hc B line R "  " D "(" cnt[i] ")" R
-          continue
-        }
-        if (line ~ /^- /) {
-          t = substr(line, 3)
-          sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/, D "&" R, t)
-          sub(/^! /, RED B "!" R " ", t)
-          gsub(/ ! /, " " RED B "!" R " ", t)
-          gsub(/#[a-zA-Z0-9_-]+/, MAG "&" R, t)
-          print "  " cur "•" R " " t
-          continue
-        }
-        if (line == "") continue   # spacing is emitted per-header, not per file blank
-        print D line R
-      }
-    }
-  ' "$file"
-}
-
 function wt_repl {
   # Persistent prompt: read a line and dispatch it as `wt <words>`. Runs in the
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
@@ -694,7 +453,7 @@ function wt_status_help {
   echo "       wt status --worktrees   # the Git-only worktree table"
   echo
   echo "Feature-first overview of every feature in this repository, joining"
-  echo "planning artifacts, BACKLOG.md, worktrees, Git, GitHub, and Herdr."
+  echo "planning artifacts, worktrees, Git, GitHub, and Herdr."
   echo "Read-only: it never writes planning, Git, GitHub, bridge, or Herdr state."
   echo
   echo "Exit codes: 0 complete, 1 incomplete (a required source such as GitHub"
@@ -766,8 +525,8 @@ function wt_herd {
 # wt start runs in four phases: resolve → plan → confirm → execute. The split is
 # the point of the feature. Everything up to and including the confirmation
 # summary is pure reading, so declining costs exactly nothing: no branch, no
-# worktree, no npm install, no BACKLOG.md commit, no Herdr call happens until
-# wt_start_execute runs. Previously all of it happened before you saw any of it.
+# worktree, no npm install, no Herdr call happens until wt_start_execute runs.
+# Previously all of it happened before you saw any of it.
 #
 # The plan is a record of decisions, deliberately separate from the code that
 # applies it, so the summary cannot drift from what actually runs — and so the
@@ -777,7 +536,7 @@ function wt_plan_reset {
   typeset -g WT_PLAN_FEATURE="" WT_PLAN_BRANCH="" WT_PLAN_TARGET=""
   typeset -g WT_PLAN_DEV="" WT_PLAN_PRD="" WT_PLAN_TASKS="" WT_PLAN_TASKS_STATE="none"
   typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1 WT_PLAN_PROMPT=1
-  typeset -g WT_PLAN_BACKLOG=0 WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
+  typeset -g WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
 }
 
 # The configured primary kind, so the summary names what will actually start.
@@ -867,10 +626,6 @@ function wt_plan_render {
     printf '  %-14s %s\n' "Agent" "${WT_C_DIM}none (--no-herdr)${WT_C_RESET}"
   fi
 
-  if (( WT_PLAN_BACKLOG )); then
-    printf '  %-14s %s  %s\n' "Backlog" "promote to ## Doing in $WT_PLAN_DEV/BACKLOG.md" "$marker ${WT_C_DIM}commits and pushes${WT_C_RESET}"
-  fi
-
   echo
   echo "  ${WT_C_YELLOW}!${WT_C_RESET} ${WT_C_DIM}marks steps that are not undone by declining later.${WT_C_RESET}"
 }
@@ -901,7 +656,7 @@ function wt_plan_confirm {
 
 # Everything that mutates lives here, and nothing above it does. Ordered so the
 # irreversible Git step happens first and the optional layers stack on top: a
-# failure in the backlog or Herdr half leaves a worktree you can still work in.
+# failure in the Herdr half leaves a worktree you can still work in.
 function wt_start_execute {
   if ! wt_provision_worktree "$WT_PLAN_BRANCH" "$WT_PLAN_FEATURE"; then
     return 1
@@ -919,14 +674,10 @@ function wt_start_execute {
     fi
   fi
 
-  # Backlog bookkeeping: record this feature under ## Doing (keyed by the PRD
-  # slug) and push, so wt done can retire it on merge. Non-fatal - never blocks
-  # starting the feature. Commits land on the dev worktree's tracked
-  # BACKLOG.md, not this new feature worktree.
-  if (( WT_PLAN_BACKLOG )) && [[ -f "$WT_PLAN_DEV/BACKLOG.md" ]]; then
-    wt_backlog_ensure_doing "$WT_PLAN_DEV/BACKLOG.md" "$WT_PLAN_FEATURE" \
-      && wt_backlog_commit_push "$WT_PLAN_DEV" "docs(backlog): promote $WT_PLAN_FEATURE to Doing"
-  fi
+  # Nothing is recorded anywhere else. Starting a feature used to also write and
+  # push a backlog entry on dev, which moved dev and left the new branch behind
+  # it the moment it was created. The Issue on GitHub is the record now, and
+  # `wt start` does not touch it: it neither reads an Issue nor changes one.
 
   if (( WT_PLAN_START_AGENT )); then
     wt_herd_handoff "$WT_PLAN_FEATURE" "$WT_PLAN_TARGET" "$WT_PLAN_BRANCH" "$WT_PLAN_KIND" "$WT_PLAN_PROMPT"
@@ -1084,8 +835,8 @@ function wt_dispatch {
     ;;
   start)
     # PRD-driven creation, in four phases: resolve → plan → confirm → execute.
-    # Only wt_start_execute mutates anything, so declining below leaves Git,
-    # BACKLOG.md, and Herdr exactly as they were.
+    # Only wt_start_execute mutates anything, so declining below leaves Git and
+    # Herdr exactly as they were.
     wt_color_init
     wt_plan_reset
 
@@ -1214,7 +965,6 @@ function wt_dispatch {
     WT_PLAN_BRANCH="feature/$WT_PLAN_FEATURE"
     WT_PLAN_TARGET="$(wt_new_worktree_dir)/$WT_PLAN_FEATURE"
     WT_PLAN_PRD="$tasks_dir/$chosen"
-    WT_PLAN_BACKLOG=1
     WT_PLAN_COPY_DOCS=1
 
     if [[ -f "$tasks_dir/tasks-$WT_PLAN_FEATURE.md" ]]; then
@@ -1282,8 +1032,8 @@ function wt_dispatch {
   new)
     # Ad-hoc creation, through the same four phases as wt start. The only
     # differences are the ones FR-23 allows: no planning documents are copied,
-    # no BACKLOG.md entry is made, and the agent is started without a bootstrap
-    # prompt because there is no PRD or checklist to point it at.
+    # and the agent is started without a bootstrap prompt because there is no
+    # PRD or checklist to point it at.
     wt_color_init
     wt_plan_reset
 
@@ -1367,7 +1117,6 @@ function wt_dispatch {
     WT_PLAN_PRD=""
     WT_PLAN_TASKS_STATE="none"
     WT_PLAN_COPY_DOCS=0
-    WT_PLAN_BACKLOG=0
     # Resolved during group 5 (PRD open question 4): no bootstrap prompt. There
     # is no PRD and no checklist, so any prompt would either name documents that
     # do not exist or say nothing the agent cannot already see.
@@ -1472,19 +1221,16 @@ function wt_dispatch {
     fi
 
     # Do this after merged-PR resolution but before every existing mutation:
-    # backlog retirement, task archival, dirty confirmation, and Git removal.
+    # task archival, dirty confirmation, and Git removal.
     if ! wt_done_herdr_guard "$target_path" "$herdr_override"; then
       return 1
     fi
 
-    # Backlog bookkeeping: move this feature from ## Doing to ## Shipped/dropped
-    # with the merged PR number, then commit+push on dev. Non-fatal - a failed
-    # push here never blocks the worktree cleanup below. $name is the worktree
-    # dir = feature slug (matches prd-<slug>.md created by wt start).
-    if [[ -f "$dev_path/BACKLOG.md" ]]; then
-      wt_backlog_retire "$dev_path/BACKLOG.md" "$name" "$merged_num" \
-        && wt_backlog_commit_push "$dev_path" "docs(backlog): ship $name${merged_num:+ (PR #$merged_num)}"
-    fi
+    # Nothing is retired anywhere else. The merged pull request is the record
+    # that this shipped, and GitHub already has it; writing a second one on dev
+    # only created a copy that could disagree. Closing the Issue is deliberately
+    # not done here either — that contract is not designed yet, and guessing it
+    # would close Issues nobody asked to close.
 
     # Archive tasks/ (with ticked checkboxes) back into the dev worktree.
     if [[ -d "$target_path/tasks" ]]; then
@@ -1837,58 +1583,15 @@ function wt_dispatch {
     fi
     ;;
   backlog)
-    # The backlog is this repository's open GitHub Issues. Listing them is
-    # delegated to the Go helper, which owns the query, the bounds, the
-    # sanitization, and the JSON contract; this shell only forwards words.
+    # The backlog is this repository's open GitHub Issues. Every subcommand —
+    # list, view, add, their flags, and any spelling this shell has never heard
+    # of — goes to the Go helper, which owns the query, the bounds, the
+    # sanitization, the JSON contract, and the rejections.
     #
-    # Bare `wt backlog` is the primary spelling, so the subcommand has to read
-    # as empty rather than as an unset parameter: a caller running under
-    # `set -u` would otherwise get a shell error instead of a listing.
-    case "${2-}" in
-      sync|prune)
-        : # Handled by the file-backed paths below until they are removed.
-        ;;
-      *)
-        # Everything else — no subcommand, list, ls, view, add, their flags, and
-        # any unsupported spelling — is the helper's to accept or reject.
-        # Rejection belongs there too, so one parser decides what the command
-        # means and a title is never re-split by two of them.
-        wt_devflow backlog "${@:2}"
-        return $?
-        ;;
-    esac
-    wt_color_init
-    local bl_file
-    bl_file="$(wt_backlog_file)" || { echo "Could not find $BASE_BRANCH worktree"; return 1; }
-    if [[ ! -f "$bl_file" ]]; then
-      echo "No BACKLOG.md at $bl_file"
-      return 1
-    fi
-    local bl_dev="${bl_file:h}"
-    case "${2-}" in
-      add)
-        shift 2
-        local idea="$*"
-        idea="${idea## }"; idea="${idea%% }"
-        if [[ -z "$idea" ]]; then
-          echo "Usage: wt backlog add <idea text>"
-          return 1
-        fi
-        wt_backlog_add_idea "$bl_file" "$idea" || { echo "Failed to edit BACKLOG.md"; return 1; }
-        wt_backlog_commit_push "$bl_dev" "docs(backlog): add idea - $idea"
-        ;;
-      sync)
-        wt_backlog_commit_push "$bl_dev" "docs(backlog): update"
-        ;;
-      prune)
-        local retention_days="${3:-$WT_BACKLOG_RETENTION_DAYS}"
-        wt_backlog_commit_push "$bl_dev" "docs(backlog): prune shipped and dropped history" "$retention_days"
-        ;;
-      *)
-        echo "Usage: wt backlog [list | add <idea> | sync | prune [days]]"
-        return 1
-        ;;
-    esac
+    # One parser decides what an invocation means. Splitting that between the
+    # shell and the helper is how a quoted title ends up as two arguments.
+    wt_devflow backlog "${@:2}"
+    return $?
     ;;
   *)
     echo "Usage: wt [command] [args]"

@@ -163,8 +163,6 @@ function wt_provision_worktree {
   typeset -g WT_PROVISIONED_TARGET="$target_root"
   return 0
 }
-function wt_backlog_ensure_doing { print -r -- "backlog" >> "$fixture_root/decline-mutations"; return 0 }
-function wt_backlog_commit_push { print -r -- "push" >> "$fixture_root/decline-mutations"; return 0 }
 
 # `target` is the summary's read-only lookup and runs before the gate by design,
 # so it is answered rather than recorded. Everything else is a mutation and any
@@ -178,7 +176,7 @@ function wt_herd {
   return 0
 }
 
-# Declining at the gate: not one Git, backlog, or Herdr call may be recorded.
+# Declining at the gate: not one Git or Herdr call may be recorded.
 wt start bridge <<< "n" > "$fixture_root/declined-output" 2>&1
 rg -q "Nothing was changed" "$fixture_root/declined-output"
 if [[ -f "$fixture_root/decline-mutations" ]]; then
@@ -238,16 +236,17 @@ rg -q "replace this file with a real task" "$target_root/tasks/tasks-planless.md
 rg -q "^- \[ \] 1\.1 " "$target_root/tasks/tasks-planless.md"
 
 # FR-22/23: wt new runs the same flow. The only differences allowed are the
-# planning documents, the backlog entry, and the bootstrap prompt.
+# planning documents and the bootstrap prompt.
 rm -f "$fixture_root/decline-mutations"
 wt new adhoc --yes > "$fixture_root/new-output" 2>&1
 rg -q "PRD .*none \(ad-hoc\)" "$fixture_root/new-output"
 rg -q "no prompt" "$fixture_root/new-output"
 rg -q "^handoff --feature adhoc --worktree $target_root --branch feature/adhoc --no-prompt$" "$fixture_root/decline-mutations"
 
-# FR-25: ad-hoc work is not backlog work. No Doing entry, no commit, no push.
-if rg -q "backlog|push" "$fixture_root/decline-mutations"; then
-  print -r -- "wt new touched BACKLOG.md: $(<"$fixture_root/decline-mutations")" >&2
+# FR-25: creating a worktree records nothing anywhere else. Starting work makes
+# no commit and no push — not for an ad-hoc worktree, and not for a planned one.
+if rg -q "commit|push" "$fixture_root/decline-mutations"; then
+  print -r -- "wt new committed or pushed something: $(<"$fixture_root/decline-mutations")" >&2
   exit 1
 fi
 # And no planning documents are invented for it.
@@ -296,7 +295,6 @@ function wt_provision_worktree {
   typeset -g WT_PROVISIONED_TARGET="$target_root"
   return 0
 }
-function wt_backlog_ensure_doing { return 1 }
 function wt_herd {
   print -r -- "$*" >> "$fixture_root/herd-calls"
   return 1
@@ -304,12 +302,9 @@ function wt_herd {
 rm -f "$target_root/tasks/tasks-planless.md" "$fixture_root/decline-mutations"
 print -r -- "## Tasks" > "$dev_root/tasks/tasks-bridge.md"
 
-# A blocked Herdr cleanup guard must stop wt done before it mutates the
-# backlog, archives tasks, checks dirty state, or asks Git to remove anything.
-print -r -- "## Doing" > "$dev_root/BACKLOG.md"
-print -r -- "- [bridge](tasks/prd-bridge.md)" >> "$dev_root/BACKLOG.md"
+# A blocked Herdr cleanup guard must stop wt done before it archives tasks,
+# checks dirty state, or asks Git to remove anything.
 print -r -- "# completed bridge tasks" > "$target_root/tasks/tasks-bridge.md"
-before_backlog="$(<"$dev_root/BACKLOG.md")"
 
 function wt_resolve_worktree_path {
   print -r -- "$target_root"
@@ -329,6 +324,9 @@ function wt_herd_cleanup_preflight {
 }
 
 function gh {
+  # Records the question and answers with a merged pull-request number. The
+  # recording is what proves cleanup asks GitHub nothing else.
+  print -r -- "$*" >> "$fixture_root/gh-calls"
   print -r -- "42"
 }
 
@@ -342,7 +340,6 @@ if wt done bridge > "$fixture_root/done-output" 2>&1; then
   exit 1
 fi
 [[ "$(<"$fixture_root/cleanup-calls")" == "$target_root 0" ]]
-[[ "$(<"$dev_root/BACKLOG.md")" == "$before_backlog" ]]
 [[ -f "$target_root/tasks/tasks-bridge.md" ]]
 [[ ! -e "$fixture_root/git-calls" ]]
 rg -q "Herdr work is still active in this worktree" "$fixture_root/done-output"
@@ -358,9 +355,83 @@ if wt done bridge --herdr-override > "$fixture_root/done-unavailable-output" 2>&
   print -r -- "Expected unverified Herdr cleanup to fail closed without a terminal." >&2
   exit 1
 fi
-[[ "$(<"$dev_root/BACKLOG.md")" == "$before_backlog" ]]
 [[ ! -e "$fixture_root/git-calls" ]]
 rg -q "cannot be verified in a non-interactive shell" "$fixture_root/done-unavailable-output"
+
+# The blocked paths above prove what wt done refuses to do. This is the other
+# half: what it must still do when nothing blocks it. These are the effects the
+# user actually asked for, and no later change to backlog bookkeeping may cost
+# any of them.
+function wt_herd_cleanup_preflight {
+  print -r -- "$*" >> "$fixture_root/cleanup-calls"
+  return 0
+}
+
+rm -f "$fixture_root/git-calls" "$fixture_root/cleanup-calls" "$fixture_root/gh-calls"
+print -r -- "# completed bridge tasks" > "$target_root/tasks/tasks-bridge.md"
+done_status=0
+# One answer, for the "delete the remote branch too?" prompt.
+wt done bridge <<< "n" > "$fixture_root/done-success-output" 2>&1 || done_status=$?
+[[ "$done_status" == "0" ]]
+
+# The merged pull request is looked up for this exact branch, so cleanup is not
+# discarding unmerged work.
+rg -q "pr list --head feature/bridge --state merged" "$fixture_root/gh-calls"
+# Herdr safety is still consulted, and it ran before anything was removed.
+[[ "$(<"$fixture_root/cleanup-calls")" == "$target_root 0" ]]
+# The completed task list is archived back to dev, which is the record of what
+# was done.
+[[ -f "$dev_root/tasks/tasks-bridge.md" ]]
+rg -q "completed bridge tasks" "$dev_root/tasks/tasks-bridge.md"
+# The worktree and its local branch are removed, exactly and by name.
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+rg -q "branch -D feature/bridge" "$fixture_root/git-calls"
+# Declining the remote-branch prompt leaves the remote branch alone.
+if rg -q "push origin --delete" "$fixture_root/git-calls"; then
+  print -r -- "wt done deleted a remote branch that was not confirmed" >&2
+  exit 1
+fi
+# dev is brought up to date by rebasing, never by resetting: unpushed dev
+# commits belong to whoever made them.
+rg -q "rebase origin/dev" "$fixture_root/git-calls"
+if rg -q "reset --hard" "$fixture_root/git-calls"; then
+  print -r -- "wt done hard-reset the dev worktree" >&2
+  exit 1
+fi
+
+# Starting and finishing a feature writes nothing to Git except the branch and
+# worktree themselves. The old flow pushed a backlog commit at each end, which
+# moved dev and left a day-old feature branch behind it. Both ends are checked
+# against the same recording, because either one reappearing would bring the
+# whole problem back.
+for lifecycle_call in "$fixture_root/git-calls" "$fixture_root/decline-mutations"; do
+  [[ -e "$lifecycle_call" ]] || continue
+  if rg -q "docs\(backlog\)" "$lifecycle_call"; then
+    print -r -- "a docs(backlog) commit was created: $(<"$lifecycle_call")" >&2
+    exit 1
+  fi
+  if rg -q "BACKLOG.md" "$lifecycle_call"; then
+    print -r -- "a backlog file was touched: $(<"$lifecycle_call")" >&2
+    exit 1
+  fi
+done
+if rg -q "commit" "$fixture_root/git-calls"; then
+  print -r -- "wt done created a commit: $(<"$fixture_root/git-calls")" >&2
+  exit 1
+fi
+if [[ -e "$dev_root/BACKLOG.md" ]]; then
+  print -r -- "the lifecycle recreated a backlog file" >&2
+  exit 1
+fi
+
+# Nor does either end touch an Issue. Linking delivery to Issue state is a
+# contract this version deliberately does not have, so the only thing cleanup
+# may ask GitHub is which pull request merged.
+rg -q "^pr list --head feature/bridge --state merged" "$fixture_root/gh-calls"
+if rg -qv "^pr list " "$fixture_root/gh-calls"; then
+  print -r -- "wt done asked GitHub something beyond the merged-PR lookup: $(<"$fixture_root/gh-calls")" >&2
+  exit 1
+fi
 
 # The cleanup addition must not perturb the existing read-only worktree views.
 function wt_load_merged_set {

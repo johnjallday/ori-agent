@@ -98,21 +98,35 @@ wt new <name>          # create a worktree
 wt rm <name>           # remove a worktree
 wt ls                  # list worktrees
 wt cd <name>           # navigate to a worktree
-wt backlog             # read Ideas, Doing, and retained terminal history
-wt backlog prune       # force seven-day Shipped / dropped retention + push
+wt backlog                       # the open GitHub Issues you authored
+wt backlog --all                 # every author's open Issues in this repository
+wt backlog view <number>         # one Issue in full, including its body
+wt backlog add "<title>"         # capture an idea as a new Issue
 ```
 Source it (don't execute) so `cd` affects your current shell.
 
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
-Every backlog mutation (`add`, `sync`, `wt start`, and `wt done`) automatically
-removes date-prefixed `## Shipped / dropped` entries older than seven days,
-then commits only `BACKLOG.md` and pushes `dev` through the existing scoped
-workflow. `Ideas`, `Doing`, undated terminal records, and plain `wt backlog`
-listing are never pruned. Set `WT_BACKLOG_RETENTION_DAYS` before sourcing the
-script to choose a different retention window; Git remains the archive for
-removed history.
+### `wt backlog` — the repository's GitHub Issues
+
+The product backlog is GitHub Issues. There is no backlog file to maintain,
+sync, or prune, and no backlog commit ever lands on `dev`.
+
+Every invocation queries GitHub fresh — there is no cache and no local fallback,
+so an unavailable GitHub is reported as a failure rather than as an empty
+backlog. `--json` emits a schema-versioned envelope for scripting. `add` creates
+the Issue and nothing else: no label, assignee, milestone, Project, browser, or
+editor.
+
+Exit codes: `0` the operation completed (an empty backlog is a completed
+listing), `1` GitHub could not answer, `2` invalid arguments.
+
+New Issue-backed work uses the Issue number in its identity —
+`<issue-number>-<slug>`, for example `292-coordinate-based-map` — so a PRD,
+task list, worktree, branch, and pull request can be joined on an exact number
+instead of a title that may change. Existing features whose slugs have no
+number remain valid and are never renamed.
 
 ### `wt status` — feature overview
 
@@ -126,9 +140,10 @@ wt status --worktrees          # the legacy Git-only worktree table
 ```
 
 `wt status` answers "what features exist, and where is each one" — joining
-planning artifacts, `BACKLOG.md`, feature worktrees, local Git, GitHub pull
-requests, and live Herdr agents on the exact feature slug. It is read-only: it
-never writes planning files, Git, GitHub, bridge, or Herdr state.
+planning artifacts, feature worktrees, local Git, GitHub pull requests, and live
+Herdr agents on the exact feature slug. It is read-only: it never writes
+planning files, Git, GitHub, bridge, or Herdr state. It describes selected and
+executing work; unselected ideas live in `wt backlog`.
 
 Exit codes: `0` complete, `1` incomplete (a required source, normally GitHub,
 was unavailable — the board still prints every local fact it observed), `2`

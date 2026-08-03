@@ -1,83 +1,56 @@
 #!/bin/zsh
 set -euo pipefail
 
+# wt backlog reads and writes GitHub Issues. There is no backlog file, so there
+# is nothing here about dates, retention windows, or scoped commits: this suite
+# checks the command, and it checks that the command touches no Git state at all.
+
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/ori-wt-backlog.XXXXXX")"
 trap 'rm -rf -- "$fixture_root"' EXIT
 
-dev_root="$fixture_root/dev"
-remote_root="$fixture_root/origin.git"
-git init -q -b dev "$dev_root"
-git init -q --bare "$remote_root"
-git -C "$dev_root" config user.name "Ori Backlog Test"
-git -C "$dev_root" config user.email "ori-backlog@example.test"
-git -C "$dev_root" remote add origin "$remote_root"
-
-today="$(date +%F)"
-boundary="$(date -v-7d +%F 2>/dev/null || date -d '7 days ago' +%F)"
-old="$(date -v-8d +%F 2>/dev/null || date -d '8 days ago' +%F)"
-
-cat > "$dev_root/BACKLOG.md" <<EOF
-# Backlog
-
-## Ideas
-- $old old idea must remain
-
-## Doing
-- $old old active work must remain
-
-## Shipped / dropped
-- $today recent shipment
-- $boundary boundary shipment
-- $old old shipment to prune
-- undated historical decision must remain
-EOF
-
-git -C "$dev_root" add BACKLOG.md
-git -C "$dev_root" commit -q -m "test: seed backlog"
-git -C "$dev_root" push -q -u origin dev
-
 source "$repo_root/scripts/wt.sh"
 
-function wt_get_dev_worktree {
-  print -r -- "$dev_root"
-}
+# The removed file commands say what replaced them rather than failing as an
+# unknown word, because somebody with the old habit deserves an answer.
+for removed_command in sync prune; do
+  removed_status=0
+  wt backlog "$removed_command" > "$fixture_root/removed-$removed_command" 2>&1 || removed_status=$?
+  if [[ "$removed_status" != "2" ]]; then
+    print -r -- "wt backlog $removed_command exited $removed_status, want 2" >&2
+    exit 1
+  fi
+  rg -q -- "was removed" "$fixture_root/removed-$removed_command"
+done
 
-# The remaining file-backed commands are `sync` and `prune`, and they exist only
-# until the file lifecycle is removed. Capture now goes to GitHub, so the idea
-# below is written into the fixture directly rather than through `wt backlog
-# add`, which no longer touches a file at all.
-print -r -- "- $today new retained idea" >> "$dev_root/BACKLOG.md"
-wt backlog sync > "$fixture_root/sync-output"
-rg -q -- "old idea must remain" "$dev_root/BACKLOG.md"
-rg -q -- "old active work must remain" "$dev_root/BACKLOG.md"
-rg -q -- "boundary shipment" "$dev_root/BACKLOG.md"
-rg -q -- "undated historical decision must remain" "$dev_root/BACKLOG.md"
-rg -q -- "new retained idea" "$dev_root/BACKLOG.md"
-if rg -q -- "old shipment to prune" "$dev_root/BACKLOG.md"; then
-  print -r -- "automatic retention left an expired shipped entry" >&2
+# No lifecycle-mutation command exists. GitHub owns Issue state; inventing a
+# local one is what this feature removed.
+for absent_command in promote doing ship drop close select project; do
+  absent_status=0
+  wt backlog "$absent_command" > /dev/null 2>&1 || absent_status=$?
+  if [[ "$absent_status" != "2" ]]; then
+    print -r -- "wt backlog $absent_command exited $absent_status, want 2" >&2
+    exit 1
+  fi
+done
+
+# The file-backed helpers are gone, not merely unreferenced.
+for removed_function in wt_backlog_file wt_backlog_prune wt_backlog_commit_push \
+  wt_backlog_add_idea wt_backlog_ensure_doing wt_backlog_retire wt_backlog_render \
+  wt_backlog_cutoff_date; do
+  if typeset -f "$removed_function" > /dev/null 2>&1; then
+    print -r -- "$removed_function still exists" >&2
+    exit 1
+  fi
+done
+if rg -q "WT_BACKLOG_RETENTION_DAYS" "$repo_root/scripts/wt.sh"; then
+  print -r -- "the backlog retention setting still exists" >&2
   exit 1
 fi
-git --git-dir="$remote_root" show dev:BACKLOG.md > "$fixture_root/remote-backlog"
-rg -q -- "new retained idea" "$fixture_root/remote-backlog"
-if rg -q -- "old shipment to prune" "$fixture_root/remote-backlog"; then
-  print -r -- "automatic retention was not pushed" >&2
+if [[ -e "$repo_root/BACKLOG.md" ]]; then
+  print -r -- "BACKLOG.md is still present" >&2
   exit 1
 fi
-
-# Explicit pruning is idempotent and does not create an empty follow-up commit.
-before_count="$(git -C "$dev_root" rev-list --count HEAD)"
-wt backlog prune 7 > "$fixture_root/prune-output"
-after_count="$(git -C "$dev_root" rev-list --count HEAD)"
-[[ "$before_count" == "$after_count" ]]
-rg -q "no BACKLOG.md changes to commit" "$fixture_root/prune-output"
-
-# Invalid retention cannot mutate or commit anything.
-if wt backlog prune never > "$fixture_root/invalid-output" 2>&1; then
-  print -r -- "invalid retention was accepted" >&2
-  exit 1
-fi
-[[ "$after_count" == "$(git -C "$dev_root" rev-list --count HEAD)" ]]
 
 # --- GitHub-backed listing ----------------------------------------------------
 #
