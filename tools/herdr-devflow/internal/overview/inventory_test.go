@@ -66,9 +66,6 @@ func TestBuildInventoryUnionsEverySourceOnExactSlugs(t *testing.T) {
 		DevPlanning: devSet(map[string]planning.Feature{
 			"planned-only": devFeature("planned-only", "PRD: Planned Only"),
 		}),
-		Backlog: planning.Backlog{Entries: map[string]planning.Entry{
-			"shipped-history": {Slug: "shipped-history", Lifecycle: planning.LifecycleShipped, Text: "shipped-history - PR #1 merged", Line: 44},
-		}},
 		Checkouts:   checkoutInventory(featureCheckout("in-progress", "/repo/worktrees/in-progress")),
 		BridgeSlugs: []string{"bridge-only"},
 		HerdrSlugs:  []string{"herdr-only"},
@@ -80,7 +77,9 @@ func TestBuildInventoryUnionsEverySourceOnExactSlugs(t *testing.T) {
 	if len(findings) != 0 {
 		t.Fatalf("findings = %v, want none for a clean union", findings)
 	}
-	want := []string{"bridge-only", "herdr-only", "in-progress", "planned-only", "remote-only", "shipped-history"}
+	// Every row exists because something real does: a plan, a checkout, a
+	// bridge record, a live agent, or a branch on GitHub.
+	want := []string{"bridge-only", "herdr-only", "in-progress", "planned-only", "remote-only"}
 	if len(features) != len(want) {
 		t.Fatalf("features = %d, want %d", len(features), len(want))
 	}
@@ -94,11 +93,8 @@ func TestBuildInventoryUnionsEverySourceOnExactSlugs(t *testing.T) {
 func TestBuildInventoryRecordsContributingSources(t *testing.T) {
 	input := Input{
 		DevPlanning: devSet(map[string]planning.Feature{"shared": devFeature("shared", "PRD: Shared")}),
-		Backlog: planning.Backlog{Entries: map[string]planning.Entry{
-			"shared": {Slug: "shared", Lifecycle: planning.LifecycleDoing, Text: "shared -> PRD", Line: 12},
-		}},
-		Checkouts: checkoutInventory(featureCheckout("shared", "/repo/worktrees/shared")),
-		Now:       observed,
+		Checkouts:   checkoutInventory(featureCheckout("shared", "/repo/worktrees/shared")),
+		Now:         observed,
 	}
 
 	features, _ := BuildInventory(input)
@@ -106,7 +102,7 @@ func TestBuildInventoryRecordsContributingSources(t *testing.T) {
 		t.Fatalf("features = %d, want one joined row", len(features))
 	}
 	feature := features[0]
-	want := []SourceKind{SourcePlanning, SourceBacklog, SourceWorktree}
+	want := []SourceKind{SourcePlanning, SourceWorktree}
 	if len(feature.Sources) != len(want) {
 		t.Fatalf("sources = %v, want %v", feature.Sources, want)
 	}
@@ -114,9 +110,6 @@ func TestBuildInventoryRecordsContributingSources(t *testing.T) {
 		if feature.Sources[index] != want[index] {
 			t.Fatalf("sources = %v, want %v in fixed order", feature.Sources, want)
 		}
-	}
-	if feature.Backlog.State != BacklogDoing || feature.Backlog.Line != 12 {
-		t.Fatalf("backlog = %+v, want the Doing entry with provenance", feature.Backlog)
 	}
 	if feature.Title != "PRD: Shared" {
 		t.Fatalf("title = %q, want the PRD title", feature.Title)

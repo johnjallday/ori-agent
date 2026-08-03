@@ -17,8 +17,6 @@ type Input struct {
 	// DevPlanning is the dev worktree's tasks directory scan. It is planning
 	// input before `wt start` and archived history after `wt done`.
 	DevPlanning planning.Set
-	// Backlog is the parsed BACKLOG.md lifecycle view.
-	Backlog planning.Backlog
 	// Checkouts is the linked-worktree inventory.
 	Checkouts worktree.Inventory
 	// BridgeSlugs are features with a saved bridge record.
@@ -60,12 +58,9 @@ func BuildInventory(input Input) ([]Feature, []Finding) {
 	for slug := range input.DevPlanning.Features {
 		add(slug, SourcePlanning)
 	}
-	for slug, entry := range input.Backlog.Entries {
-		// A dropped or shipped backlog entry still deserves a row: history
-		// stays visible, it just sorts last.
-		_ = entry
-		add(slug, SourceBacklog)
-	}
+	// A row exists because something real exists: a plan, a checkout, a bridge
+	// record, a live agent, or a branch on GitHub. An unselected idea is not a
+	// feature — it is an Issue, and `wt backlog` is where those are read.
 	for slug := range input.Checkouts.Features {
 		add(slug, SourceWorktree)
 	}
@@ -133,7 +128,7 @@ func pathCollisions(features []Feature) []Finding {
 }
 
 func sourceList(set map[SourceKind]struct{}) []SourceKind {
-	order := []SourceKind{SourcePlanning, SourceBacklog, SourceWorktree, SourceGit, SourceGitHub, SourceBridge, SourceHerdr}
+	order := []SourceKind{SourcePlanning, SourceWorktree, SourceGit, SourceGitHub, SourceBridge, SourceHerdr}
 	kinds := make([]SourceKind, 0, len(set))
 	for _, kind := range order {
 		if _, ok := set[kind]; ok {
@@ -187,7 +182,6 @@ func buildFeature(slug string, sources []SourceKind, input Input) (Feature, []Fi
 	}
 
 	feature.Plan = selectPlan(slug, active, input)
-	feature.Backlog = backlogState(slug, input.Backlog)
 	if feature.Plan.Title != "" {
 		feature.Title = feature.Plan.Title
 	}
@@ -325,23 +319,6 @@ func planAvailability(state planning.State) Availability {
 	default:
 		return AvailabilityUnknown
 	}
-}
-
-func backlogState(slug string, backlog planning.Backlog) Backlog {
-	entry, ok := backlog.Entry(slug)
-	if !ok {
-		return Backlog{State: BacklogAbsent}
-	}
-	state := BacklogAbsent
-	switch entry.Lifecycle {
-	case planning.LifecycleDoing:
-		state = BacklogDoing
-	case planning.LifecycleShipped:
-		state = BacklogShipped
-	case planning.LifecycleDropped:
-		state = BacklogDropped
-	}
-	return Backlog{State: state, Entry: entry.Text, Line: entry.Line}
 }
 
 const maxJoinedItems = 8

@@ -5,12 +5,101 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/overview"
 )
+
+// TestFeatureOverviewCarriesNoBacklogEvidence proves the status contract after
+// the backlog source was removed: the JSON is the new schema version, no
+// backlog field or finding survives anywhere in it, and no Issue is listed as
+// though it were a feature.
+func TestFeatureOverviewCarriesNoBacklogEvidence(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	// A real checkout: the status collector inspects linked worktrees, so a
+	// directory merely containing a .git entry is not enough.
+	repo := filepath.Join(t.TempDir(), "repo")
+	runGitFixture(t, "", "init", "-b", "dev", repo)
+	if err := os.Mkdir(filepath.Join(repo, ".herdr"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".herdr", "devflow.toml"),
+		[]byte(devflowConfigFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A leftover backlog file must not be read back in by any surface.
+	backlog := "# Backlog\n\n## Ideas\n- an unplanned idea\n\n## Doing\n- ghost -> PRD at tasks/prd-ghost.md\n"
+	if err := os.WriteFile(filepath.Join(repo, "BACKLOG.md"), []byte(backlog), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		Getwd:     func() (string, error) { return repo, nil },
+		LookupEnv: func(string) (string, bool) { return "", false },
+		// Issue and pull-request queries both come through here; the empty
+		// answer keeps the test off the network.
+		GitHubRunner: func(context.Context, ...string) ([]byte, error) { return []byte("[]"), nil },
+	})
+	args := []string{
+		"--repo-root", repo, "--home", filepath.Join(t.TempDir(), "runtime"),
+		"--herdr-bin", "fake-herdr", "feature-overview", "--json",
+	}
+	// Exit 1 is expected here: Herdr is unavailable in this fixture, so the
+	// snapshot is incomplete. The payload is still the contract under test.
+	application.Run(context.Background(), args)
+
+	var snapshot struct {
+		SchemaVersion int              `json:"schema_version"`
+		Features      []map[string]any `json:"features"`
+		Sources       []struct {
+			Kind string `json:"kind"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("stdout = %q: %v", stdout.String(), err)
+	}
+	if snapshot.SchemaVersion != overview.SchemaVersion {
+		t.Fatalf("schema_version = %d, want %d; stdout=%s stderr=%s",
+			snapshot.SchemaVersion, overview.SchemaVersion, stdout.String(), stderr.String())
+	}
+	for _, source := range snapshot.Sources {
+		if source.Kind == "backlog" {
+			t.Fatalf("sources still include a backlog: %+v", snapshot.Sources)
+		}
+	}
+	for _, feature := range snapshot.Features {
+		if _, present := feature["backlog"]; present {
+			t.Fatalf("a feature row still carries backlog evidence: %v", feature)
+		}
+		if feature["slug"] == "ghost" {
+			t.Fatal("a leftover backlog entry became a feature row")
+		}
+	}
+	if strings.Contains(stdout.String(), "backlog") {
+		t.Fatalf("the status payload still mentions a backlog: %s", stdout.String())
+	}
+}
+
+// runGitFixture runs one Git command for a test fixture.
+func runGitFixture(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if dir != "" {
+		args = append([]string{"-C", dir}, args...)
+	}
+	// #nosec G204 -- every argument is a fixed literal or a path this test made.
+	if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+}
 
 // refusingRunner fails the test if anything asks it to run a Herdr command. It
 // is how a test states "this path must not contact Herdr" as an assertion

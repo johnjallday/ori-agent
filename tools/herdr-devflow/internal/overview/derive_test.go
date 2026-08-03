@@ -18,9 +18,8 @@ func feature(slug string, mutate ...func(*Feature)) Feature {
 			TaskListAvailability: AvailabilityAbsent,
 			Progress:             PlanProgress{Availability: AvailabilityAbsent},
 		},
-		Backlog: Backlog{State: BacklogAbsent},
-		Git:     GitState{Availability: AvailabilityUnknown},
-		Remote:  Remote{Availability: AvailabilityUnknown},
+		Git:    GitState{Availability: AvailabilityUnknown},
+		Remote: Remote{Availability: AvailabilityUnknown},
 	}
 	for _, apply := range mutate {
 		apply(&built)
@@ -43,8 +42,36 @@ func withWorktree(path string) func(*Feature) {
 	}
 }
 
-func withBacklog(state BacklogState) func(*Feature) {
-	return func(f *Feature) { f.Backlog = Backlog{State: state, Entry: "entry text", Line: 40} }
+// withMergedPR is the only evidence that can place a feature past
+// implementation. It replaced the backlog states these tests used to set.
+func withMergedPR(number int) func(*Feature) {
+	return func(f *Feature) {
+		f.Remote.Availability = AvailabilityAvailable
+		f.Remote.PullRequest = &PullRequest{Number: number, State: "merged", Merged: true}
+	}
+}
+
+func withOpenPR(number int) func(*Feature) {
+	return func(f *Feature) {
+		f.Remote.Availability = AvailabilityAvailable
+		f.Remote.PullRequest = &PullRequest{Number: number, State: "open"}
+	}
+}
+
+// withCompletedArchive is what a finished feature leaves behind: no worktree,
+// and a fully ticked plan archived in the baseline checkout. It is the evidence
+// that makes a missing pull request worth one targeted query.
+func withCompletedArchive() func(*Feature) {
+	return func(f *Feature) {
+		f.Plan.Copy = PlanCopyDev
+		f.Plan.PRDAvailability = AvailabilityAvailable
+		f.Plan.TaskListAvailability = AvailabilityAvailable
+		f.Plan.Progress = PlanProgress{
+			Availability:      AvailabilityAvailable,
+			SubtasksTotal:     10,
+			SubtasksCompleted: 10,
+		}
+	}
 }
 
 func withGit(mutate func(*GitState)) func(*Feature) {
@@ -78,14 +105,22 @@ func TestDerivePhaseLocalPrecedence(t *testing.T) {
 			want:  PhaseImplementing,
 		},
 		{
-			name:  "backlog dropped",
-			input: feature("abandoned", withBacklog(BacklogDropped)),
-			want:  PhaseDropped,
+			// Delivery is a merged pull request and nothing else. Planning
+			// artifacts left behind after cleanup do not make a feature look
+			// unfinished, and no local file can call it shipped.
+			name:  "merged pull request with cleanup done",
+			input: feature("delivered", withMergedPR(200)),
+			want:  PhaseShipped,
 		},
 		{
-			name:  "backlog shipped",
-			input: feature("delivered", withBacklog(BacklogShipped)),
-			want:  PhaseShipped,
+			name:  "merged pull request with the worktree still there",
+			input: feature("tidying", withMergedPR(201), withWorktree("/repo/worktrees/tidying")),
+			want:  PhaseMergedCleanup,
+		},
+		{
+			name:  "open pull request",
+			input: feature("reviewing", withOpenPR(202)),
+			want:  PhaseReview,
 		},
 	}
 	for _, testCase := range cases {
@@ -101,16 +136,29 @@ func TestDerivePhaseLocalPrecedence(t *testing.T) {
 	}
 }
 
-func TestDerivePhaseWorktreeOutranksBacklogBookkeeping(t *testing.T) {
-	// The backlog is hand-maintained; a checkout is a fact on disk.
-	shippedButLive := feature("contested", withBacklog(BacklogShipped), withWorktree("/repo/worktrees/contested"))
-	if got := DerivePhase(shippedButLive, localOptions()); got.Phase != PhaseImplementing {
-		t.Fatalf("phase = %q, want implementing (a backlog line must not override a live worktree)", got.Phase)
+func TestDerivePhaseNeverDerivesADroppedState(t *testing.T) {
+	// Nothing reports abandoned work any more. The only source that ever did
+	// was a hand-maintained file, and an Issue can be closed for reasons that
+	// have nothing to do with abandoning the work — so no combination of
+	// evidence may put those words in somebody's mouth.
+	inputs := []Feature{
+		feature("nothing"),
+		feature("planned", withPlan(AvailabilityAvailable, AvailabilityAvailable)),
+		feature("building", withWorktree("/w/building")),
+		feature("reviewing", withOpenPR(1)),
+		feature("delivered", withMergedPR(2)),
+		feature("tidying", withMergedPR(3), withWorktree("/w/tidying")),
 	}
-
-	droppedButLive := feature("revived", withBacklog(BacklogDropped), withWorktree("/repo/worktrees/revived"))
-	if got := DerivePhase(droppedButLive, localOptions()); got.Phase != PhaseImplementing {
-		t.Fatalf("phase = %q, want implementing", got.Phase)
+	for _, input := range inputs {
+		for _, options := range []DeriveOptions{localOptions(), {Baseline: "dev", RemoteAvailable: true}} {
+			state := DerivePhase(input, options)
+			if string(state.Phase) == "dropped" {
+				t.Fatalf("%s derived a dropped phase", input.Slug)
+			}
+			if strings.Contains(strings.ToLower(state.Reason), "backlog") {
+				t.Fatalf("%s explained its phase with backlog evidence: %q", input.Slug, state.Reason)
+			}
+		}
 	}
 }
 
@@ -126,7 +174,7 @@ func TestDerivePhaseIsNeverConfirmedWithoutAFreshRemoteQuery(t *testing.T) {
 }
 
 func TestDeriveFindingsPlanningGaps(t *testing.T) {
-	tasksOnly := feature("orphan-tasks", withPlan(AvailabilityAbsent, AvailabilityAvailable), withBacklog(BacklogDoing))
+	tasksOnly := feature("orphan-tasks", withPlan(AvailabilityAbsent, AvailabilityAvailable), withWorktree("/w/orphan-tasks"))
 	if finding, ok := findingFor(DeriveFindings(tasksOnly, localOptions()), FindingPRDMissing); !ok {
 		t.Fatal("a task list with no PRD raised no finding")
 	} else if finding.Severity != SeverityWarning {
@@ -163,27 +211,59 @@ func TestDeriveFindingsWorktreeWithoutAnyPlan(t *testing.T) {
 	}
 }
 
-func TestDeriveFindingsBacklogDrift(t *testing.T) {
-	cases := []struct {
-		name     string
-		input    Feature
-		severity Severity
-	}{
-		{"shipped but still checked out", feature("a", withBacklog(BacklogShipped), withWorktree("/w/a"), withPlan(AvailabilityAvailable, AvailabilityAvailable)), SeverityWarning},
-		{"dropped but still checked out", feature("b", withBacklog(BacklogDropped), withWorktree("/w/b"), withPlan(AvailabilityAvailable, AvailabilityAvailable)), SeverityWarning},
-		{"checked out but never recorded", feature("c", withWorktree("/w/c"), withPlan(AvailabilityAvailable, AvailabilityAvailable)), SeverityInfo},
-		{"recorded doing with nothing to show", feature("d", withBacklog(BacklogDoing)), SeverityWarning},
+func TestDeriveFindingsNoLongerReportsBookkeepingDrift(t *testing.T) {
+	// Every finding in this family compared a hand-maintained file against
+	// reality. With the file gone there is nothing to disagree with, and a
+	// perfectly ordinary checkout must not be flagged for lacking an entry that
+	// no longer exists anywhere.
+	inputs := []Feature{
+		feature("a", withWorktree("/w/a"), withPlan(AvailabilityAvailable, AvailabilityAvailable)),
+		feature("b", withMergedPR(10), withWorktree("/w/b"), withPlan(AvailabilityAvailable, AvailabilityAvailable)),
+		feature("c", withMergedPR(11), withPlan(AvailabilityAvailable, AvailabilityAvailable)),
 	}
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			finding, ok := findingFor(DeriveFindings(testCase.input, localOptions()), FindingBacklogDrift)
-			if !ok {
-				t.Fatal("no backlog drift finding was raised")
+	for _, input := range inputs {
+		for _, finding := range DeriveFindings(input, localOptions()) {
+			if string(finding.Code) == "backlog_drift" || string(finding.Source) == "backlog" {
+				t.Fatalf("%s still raised backlog bookkeeping: %+v", input.Slug, finding)
 			}
-			if finding.Severity != testCase.severity {
-				t.Fatalf("severity = %q, want %q", finding.Severity, testCase.severity)
+			if strings.Contains(finding.Message, "BACKLOG") || strings.Contains(finding.Detail, "BACKLOG") {
+				t.Fatalf("%s mentioned the removed file: %+v", input.Slug, finding)
 			}
-		})
+		}
+	}
+}
+
+func TestDeriveFindingsCleanupNamesWhatIsOutstanding(t *testing.T) {
+	// A row reading "Merged (cleanup)" with nothing flagged tells a reader that
+	// work remains but not what it is. The reasons now come from the worktree
+	// and the archived plan, which is everything cleanup actually touches.
+	merged := feature("tidying", withMergedPR(12), withWorktree("/w/tidying"),
+		withPlan(AvailabilityAvailable, AvailabilityAvailable))
+	merged.Phase = DerivePhase(merged, localOptions())
+	if merged.Phase.Phase != PhaseMergedCleanup {
+		t.Fatalf("phase = %q, want merged cleanup", merged.Phase.Phase)
+	}
+	finding, ok := findingFor(DeriveFindings(merged, localOptions()), FindingCleanupOutstanding)
+	if !ok {
+		t.Fatal("a merged feature with a live worktree flagged no outstanding cleanup")
+	}
+	if !strings.Contains(finding.Detail, "worktree") {
+		t.Fatalf("detail = %q, want the surviving worktree named", finding.Detail)
+	}
+}
+
+func TestDeriveFindingsArchiveMissingFollowsTheMergedPullRequest(t *testing.T) {
+	// This used to trigger on a shipped backlog line. The merged pull request
+	// is the same conclusion drawn from stronger evidence.
+	delivered := feature("archived-nowhere", withMergedPR(13))
+	if _, ok := findingFor(DeriveFindings(delivered, localOptions()), FindingArchiveMissing); !ok {
+		t.Fatal("a merged feature with no archived plan raised no finding")
+	}
+	// Work that has not merged is not missing an archive; it has not finished.
+	building := feature("still-going", withWorktree("/w/still-going"),
+		withPlan(AvailabilityAvailable, AvailabilityAvailable))
+	if _, ok := findingFor(DeriveFindings(building, localOptions()), FindingArchiveMissing); ok {
+		t.Fatal("in-progress work was told its archive was missing")
 	}
 }
 
@@ -191,7 +271,6 @@ func TestDeriveFindingsNoDriftForACleanInProgressFeature(t *testing.T) {
 	clean := feature("tidy",
 		withPlan(AvailabilityAvailable, AvailabilityAvailable),
 		withWorktree("/repo/worktrees/tidy"),
-		withBacklog(BacklogDoing),
 		withGit(func(git *GitState) {
 			git.Availability = AvailabilityAvailable
 			git.DirtyAvailability = AvailabilityAvailable
@@ -206,7 +285,6 @@ func TestDeriveFindingsNoDriftForACleanInProgressFeature(t *testing.T) {
 
 func TestDeriveFindingsLocalGitEvidence(t *testing.T) {
 	behind := feature("lagging", withWorktree("/w/lagging"), withPlan(AvailabilityAvailable, AvailabilityAvailable),
-		withBacklog(BacklogDoing),
 		withGit(func(git *GitState) {
 			git.Availability = AvailabilityAvailable
 			git.DivergenceAvailability = AvailabilityAvailable
@@ -232,7 +310,6 @@ func TestDeriveFindingsLocalGitEvidence(t *testing.T) {
 
 func TestDeriveFindingsUnavailableGitIsNotSilence(t *testing.T) {
 	broken := feature("opaque", withWorktree("/w/opaque"), withPlan(AvailabilityAvailable, AvailabilityAvailable),
-		withBacklog(BacklogDoing),
 		withGit(func(git *GitState) {
 			git.Availability = AvailabilityUnavailable
 			git.Detail = "divergence versus dev could not be computed"
@@ -249,7 +326,6 @@ func TestDeriveFindingsUnavailableGitIsNotSilence(t *testing.T) {
 
 func TestDeriveFindingsDoesNotInventDivergenceFromUnknownCounts(t *testing.T) {
 	unknown := feature("unmeasured", withWorktree("/w/unmeasured"), withPlan(AvailabilityAvailable, AvailabilityAvailable),
-		withBacklog(BacklogDoing),
 		withGit(func(git *GitState) {
 			git.Availability = AvailabilityAvailable
 			git.DivergenceAvailability = AvailabilityUnavailable
@@ -319,7 +395,7 @@ func withProgress(mutate func(*PlanProgress)) func(*Feature) {
 func TestDeriveFindingsStaleArchivedPlan(t *testing.T) {
 	// `wt done` archives the ticked copy back into dev. A shipped feature whose
 	// archived plan is still untouched means that never happened.
-	shipped := feature("workspace-backlog", withBacklog(BacklogShipped),
+	shipped := feature("workspace-backlog", withMergedPR(254),
 		withProgress(func(progress *PlanProgress) {
 			progress.MilestonesTotal, progress.MilestonesCompleted = 7, 0
 			progress.SubtasksTotal, progress.SubtasksCompleted = 136, 0
@@ -339,7 +415,7 @@ func TestDeriveFindingsStaleArchivedPlan(t *testing.T) {
 }
 
 func TestDeriveFindingsNoStaleArchiveForACompletedPlan(t *testing.T) {
-	shipped := feature("herdr-devflow-bridge", withBacklog(BacklogShipped),
+	shipped := feature("herdr-devflow-bridge", withMergedPR(258),
 		withProgress(func(progress *PlanProgress) {
 			progress.MilestonesTotal, progress.MilestonesCompleted = 7, 7
 			progress.SubtasksTotal, progress.SubtasksCompleted = 103, 103
@@ -353,7 +429,7 @@ func TestDeriveFindingsNoStaleArchiveForACompletedPlan(t *testing.T) {
 
 func TestDeriveFindingsNoStaleArchiveWhileStillImplementing(t *testing.T) {
 	// An in-progress feature's plan is supposed to have unchecked work.
-	building := feature("in-flight", withWorktree("/w/in-flight"), withBacklog(BacklogDoing),
+	building := feature("in-flight", withWorktree("/w/in-flight"),
 		withProgress(func(progress *PlanProgress) {
 			progress.SubtasksTotal, progress.SubtasksCompleted = 100, 12
 		}))
@@ -365,7 +441,7 @@ func TestDeriveFindingsNoStaleArchiveWhileStillImplementing(t *testing.T) {
 }
 
 func TestDeriveFindingsNoStaleArchiveFromAnUnparsedPlan(t *testing.T) {
-	shipped := feature("opaque-archive", withBacklog(BacklogShipped),
+	shipped := feature("opaque-archive", withMergedPR(260),
 		withProgress(func(progress *PlanProgress) {
 			progress.Availability = AvailabilityMalformed
 			progress.SubtasksTotal = 0

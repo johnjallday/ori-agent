@@ -15,7 +15,13 @@ import (
 
 // SchemaVersion identifies the JSON contract emitted from this snapshot.
 // Consumers must tolerate additive fields within one version.
-const SchemaVersion = 2
+//
+// Version 3 removed every backlog field: the per-feature `backlog` object, the
+// `backlog` source, the `backlog_drift` finding code, and the `dropped` phase.
+// A removal is not additive, so it gets a version rather than being slipped
+// into the existing one — a consumer reading `.features[].backlog` should be
+// told the shape changed, not handed a silently missing key.
+const SchemaVersion = 3
 
 // Availability separates "absent", "not understood", and "could not look" from
 // a real zero value. Renderers and JSON consumers must never collapse these.
@@ -92,7 +98,6 @@ type SourceKind string
 
 const (
 	SourcePlanning SourceKind = "planning"
-	SourceBacklog  SourceKind = "backlog"
 	SourceWorktree SourceKind = "worktree"
 	SourceGit      SourceKind = "git"
 	SourceGitHub   SourceKind = "github"
@@ -141,18 +146,22 @@ const (
 	PhaseImplementing Phase = "implementing"
 	// PhaseReview means an exact open or draft PR targets the baseline branch.
 	PhaseReview Phase = "review"
-	// PhaseMergedCleanup means the PR merged but worktree, branch, backlog, or
-	// archive evidence is still outstanding.
+	// PhaseMergedCleanup means the PR merged but worktree, branch, or archive
+	// evidence is still outstanding.
 	PhaseMergedCleanup Phase = "merged_cleanup"
-	// PhaseShipped means merged and cleaned up, or recorded shipped in backlog.
+	// PhaseShipped means the pull request merged and no local cleanup remains.
 	PhaseShipped Phase = "shipped"
-	// PhaseDropped means the backlog records the feature as dropped.
-	PhaseDropped Phase = "dropped"
 )
+
+// There is deliberately no dropped phase. The only thing that ever reported one
+// was a hand-maintained backlog file, and nothing replaced it: an Issue can be
+// closed for reasons that have nothing to do with abandoning work, so inferring
+// "dropped" from a closed Issue would put words in somebody's mouth. If a
+// dropped state is wanted later it needs a source that actually means it.
 
 // Terminal reports whether the phase is history rather than active work.
 // Terminal features stay visible but sort last and group separately.
-func (p Phase) Terminal() bool { return p == PhaseShipped || p == PhaseDropped }
+func (p Phase) Terminal() bool { return p == PhaseShipped }
 
 // Label is the full textual phase name for human output.
 func (p Phase) Label() string {
@@ -169,8 +178,6 @@ func (p Phase) Label() string {
 		return "Merged (cleanup)"
 	case PhaseShipped:
 		return "Shipped"
-	case PhaseDropped:
-		return "Dropped"
 	default:
 		return "Unknown"
 	}
@@ -193,10 +200,8 @@ func (p Phase) order() int {
 		return 5
 	case PhaseShipped:
 		return 6
-	case PhaseDropped:
-		return 7
 	default:
-		return 8
+		return 7
 	}
 }
 
@@ -260,7 +265,6 @@ const (
 	FindingPlanMalformed         FindingCode = "plan_malformed"
 	FindingNameMismatch          FindingCode = "name_mismatch"
 	FindingWorktreeWithoutPlan   FindingCode = "worktree_without_plan"
-	FindingBacklogDrift          FindingCode = "backlog_drift"
 	FindingArchiveStale          FindingCode = "archive_stale"
 	FindingCleanupOutstanding    FindingCode = "cleanup_outstanding"
 	FindingBindingPathStale      FindingCode = "binding_path_stale"
@@ -388,26 +392,6 @@ type Plan struct {
 	// TaskListModTime is when the authoritative task list last changed. It is
 	// what makes displayed metadata verifiable as current or stale.
 	TaskListModTime time.Time `json:"task_list_mod_time,omitzero"`
-}
-
-// BacklogState is the lifecycle section a feature appears under in BACKLOG.md.
-type BacklogState string
-
-const (
-	BacklogAbsent  BacklogState = "absent"
-	BacklogDoing   BacklogState = "doing"
-	BacklogShipped BacklogState = "shipped"
-	BacklogDropped BacklogState = "dropped"
-)
-
-// Backlog is the tracked BACKLOG.md evidence for one feature. It is planning
-// bookkeeping only and never overrides stronger lifecycle evidence.
-type Backlog struct {
-	State BacklogState `json:"state"`
-	// Entry is the bounded entry text as written.
-	Entry string `json:"entry,omitempty"`
-	// Line is the 1-based line of the entry in BACKLOG.md.
-	Line int `json:"line,omitempty"`
 }
 
 // GitState is the local Git evidence for one feature's checkout and branch.
@@ -667,7 +651,7 @@ type RunMembership struct {
 }
 
 // Feature is one row of the feature-first overview: the union of planning,
-// backlog, worktree, Git, GitHub, bridge, and Herdr evidence for one slug.
+// worktree, Git, GitHub, bridge, and Herdr evidence for one slug.
 type Feature struct {
 	// Slug is the exact normalized feature identifier used to join sources.
 	Slug string `json:"slug"`
@@ -675,11 +659,10 @@ type Feature struct {
 	Title string `json:"title,omitempty"`
 	// Phase is the derived lifecycle position and its confirmation state.
 	Phase PhaseState `json:"phase"`
-	// Plan, Backlog, Git, and Remote carry each evidence family.
-	Plan    Plan     `json:"plan"`
-	Backlog Backlog  `json:"backlog"`
-	Git     GitState `json:"git"`
-	Remote  Remote   `json:"remote"`
+	// Plan, Git, and Remote carry each evidence family.
+	Plan   Plan     `json:"plan"`
+	Git    GitState `json:"git"`
+	Remote Remote   `json:"remote"`
 	// Agents are the managed roles and unmanaged live agents for this feature.
 	// A feature has zero or more; it is never collapsed to a single agent.
 	Agents []Agent `json:"agents,omitempty"`

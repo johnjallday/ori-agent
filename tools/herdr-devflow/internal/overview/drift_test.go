@@ -1,6 +1,9 @@
 package overview
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The six drift cases this feature was written to explain. Each is asserted
 // against the derivation rules rather than against a live repository, so they
@@ -10,7 +13,7 @@ func TestKnownDriftCases(t *testing.T) {
 
 	t.Run("merged but never cleaned up", func(t *testing.T) {
 		// calendar-ops-mcp: merged, worktree gone, archived plan still unticked.
-		row := feature("calendar-ops-mcp", withBacklog(BacklogDoing),
+		row := feature("calendar-ops-mcp",
 			withProgress(func(progress *PlanProgress) {
 				progress.MilestonesTotal, progress.MilestonesCompleted = 8, 7
 				progress.SubtasksTotal, progress.SubtasksCompleted = 84, 81
@@ -23,22 +26,28 @@ func TestKnownDriftCases(t *testing.T) {
 			t.Fatalf("phase = %q, want merged_cleanup", row.Phase.Phase)
 		}
 		findings := DeriveFindings(row, remote)
-		if _, ok := findingFor(findings, FindingBacklogDrift); !ok {
-			t.Fatalf("findings = %v, want backlog drift for a merged feature still marked Doing", findings)
+		finding, ok := findingFor(findings, FindingCleanupOutstanding)
+		if !ok {
+			t.Fatalf("findings = %v, want the outstanding cleanup named", findings)
+		}
+		if !strings.Contains(finding.Detail, "subtasks") {
+			t.Fatalf("detail = %q, want the unchecked archive named", finding.Detail)
 		}
 	})
 
 	t.Run("stale archived plan", func(t *testing.T) {
 		// workspace-backlog: shipped, but the ticked copy never returned to dev.
-		row := feature("workspace-backlog", withBacklog(BacklogShipped),
+		row := feature("workspace-backlog", withMergedPR(254),
 			withProgress(func(progress *PlanProgress) {
 				progress.MilestonesTotal, progress.MilestonesCompleted = 7, 0
 				progress.SubtasksTotal, progress.SubtasksCompleted = 136, 0
 			}))
 		row.Phase = DerivePhase(row, remote)
 
-		if row.Phase.Phase != PhaseShipped {
-			t.Fatalf("phase = %q, want shipped", row.Phase.Phase)
+		// The unticked archive is itself outstanding cleanup, so a merged
+		// feature carrying one is not finished yet.
+		if row.Phase.Phase != PhaseMergedCleanup {
+			t.Fatalf("phase = %q, want merged_cleanup", row.Phase.Phase)
 		}
 		finding, ok := findingFor(DeriveFindings(row, remote), FindingArchiveStale)
 		if !ok {
@@ -65,7 +74,7 @@ func TestKnownDriftCases(t *testing.T) {
 
 	t.Run("branch behind the baseline", func(t *testing.T) {
 		row := feature("downloads-janitor", withWorktree("/w/downloads-janitor"),
-			withBacklog(BacklogDoing), withPlan(AvailabilityAvailable, AvailabilityAvailable),
+			withPlan(AvailabilityAvailable, AvailabilityAvailable),
 			withGit(func(git *GitState) {
 				git.Availability = AvailabilityAvailable
 				git.DivergenceAvailability = AvailabilityAvailable
@@ -95,7 +104,7 @@ func TestKnownDriftCases(t *testing.T) {
 	t.Run("delivered work overrides stale local bookkeeping", func(t *testing.T) {
 		// The case only a remote query can settle: every local signal says
 		// "in progress", the pull request says otherwise.
-		row := feature("email-ops-workspace", withBacklog(BacklogDoing),
+		row := feature("email-ops-workspace",
 			withProgress(func(progress *PlanProgress) {
 				progress.SubtasksTotal, progress.SubtasksCompleted = 90, 4
 			}))
@@ -117,7 +126,7 @@ func TestKnownDriftCases(t *testing.T) {
 func TestKnownDriftCasesAreUnconfirmedWithoutGitHub(t *testing.T) {
 	local := DeriveOptions{Baseline: "dev"}
 
-	row := feature("email-ops-workspace", withBacklog(BacklogDoing),
+	row := feature("email-ops-workspace",
 		withProgress(func(progress *PlanProgress) {
 			progress.SubtasksTotal, progress.SubtasksCompleted = 90, 4
 		}))
