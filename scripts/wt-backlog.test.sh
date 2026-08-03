@@ -532,6 +532,44 @@ if [[ "$(print -r -- "$outside_output" | wc -l | tr -d ' ')" != "1" ]]; then
 fi
 rg -q -- "Git checkout" <<< "$outside_output"
 
+# --- what `wt` says about the commands that left it ---------------------------
+#
+# Both are signposts, not aliases. A generic unknown-command usage dump would
+# leave a reader guessing where the command went, and forwarding would keep the
+# old spelling alive indefinitely — so each names its replacement and fails.
+
+signpost_status=0
+wt backlog > "$fixture_root/backlog-signpost" 2>&1 || signpost_status=$?
+if [[ "$signpost_status" == "0" ]]; then
+  print -r -- "wt backlog succeeded; it must fail and point at the script" >&2
+  exit 1
+fi
+if [[ "$(<"$fixture_root/backlog-signpost")" != "wt backlog moved to ./scripts/backlog.sh" ]]; then
+  print -r -- "wt backlog said: $(<"$fixture_root/backlog-signpost")" >&2
+  exit 1
+fi
+
+signpost_status=0
+wt merge > "$fixture_root/merge-signpost" 2>&1 || signpost_status=$?
+if [[ "$signpost_status" == "0" ]]; then
+  print -r -- "wt merge succeeded; it must fail and name the workflow that replaced it" >&2
+  exit 1
+fi
+if [[ "$(<"$fixture_root/merge-signpost")" != "wt merge was removed — use wt pr, then wt done after the PR merges" ]]; then
+  print -r -- "wt merge said: $(<"$fixture_root/merge-signpost")" >&2
+  exit 1
+fi
+
+# Deleting the merge arm must not take its helpers with it: every one of these
+# is shared with go, rm, and status, which are still live commands.
+for shared_helper in wt_get_dev_worktree wt_load_worktrees wt_color_init \
+  wt_compute_widths wt_render_header wt_branch_status wt_render_row; do
+  if ! typeset -f "$shared_helper" > /dev/null 2>&1; then
+    print -r -- "$shared_helper was deleted; go, rm, and status share it" >&2
+    exit 1
+  fi
+done
+
 # The rest of the dispatcher is unaffected by the backlog leaving it.
 wt help > "$fixture_root/help-output" 2>&1
 rg -q "wt status" "$fixture_root/help-output"
