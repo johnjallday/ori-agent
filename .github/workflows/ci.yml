@@ -12,10 +12,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read  # required by golangci-lint-action's only-new-issues diff lookup
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          # Full history so --new-from-merge-base can resolve origin/dev
+          # locally. The alternative, golangci-lint-action's only-new-issues,
+          # depends on the GitHub PR-diff API for pull_request events, which
+          # has a size ceiling this repo's larger PRs (e.g. a mechanical
+          # Prettier-baseline commit touching ~200 files) can exceed - when
+          # that happens the action silently reports the full, unfiltered
+          # backlog instead of just what the PR changed.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -41,7 +49,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version-file: .golangci-lint-version
-          only-new-issues: true
+          args: --new-from-merge-base=origin/dev
 
   frontend-lint:
     name: Frontend Lint
