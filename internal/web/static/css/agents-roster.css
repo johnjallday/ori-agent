@@ -11,34 +11,78 @@
  * deterministic avatar variables, which agent-avatar.js supplies per element.
  */
 
-.agents-roster-page {
+/*
+ * The page's own token names are kept and re-pointed at the shared cozy palette
+ * (cozy-character.css), the same way Home's --hc-* were. Every rule below
+ * already reads through these names, so warming the surface is a change of
+ * VALUES, not of structure — no layout, no selector, and no behaviour moves
+ * (PRD FR-1/FR-4).
+ *
+ * The result is that the Gallery, the Inspector, the picker, and the guide all
+ * sit on one palette instead of four that merely look similar.
+ */
+body.agents-roster-page {
   --collection-gap: 18px;
   --inspector-width: clamp(360px, 30vw, 420px);
-  --roster-radius: 14px;
-  /* Accent used for small text/links. Lightened on dark so the brand primary
-     (which may be dark) still clears AA contrast on near-black surfaces. */
-  --roster-accent: var(--primary-color, #4f46e5);
-  --card-line: var(--border-color, #e5e7eb);
-  --card-surface: var(--bg-primary, #fff);
-  --card-soft: var(--bg-secondary, #f9fafb);
-  /* Muted text one step stronger than --text-secondary, whose dark value
-     (#8A8A8A) only reaches 4.03:1 on --bg-tertiary. */
-  --card-muted: #5b6472;
+  --roster-radius: var(--cozy-radius-lg, 14px);
+  /* Moss is the page accent, matching Home's signal colour. Both themes are
+     defined in the shared layer, so this needs no per-theme override. */
+  --roster-accent: var(--cozy-moss, #3f6b45);
+  --card-line: var(--cozy-line, #e5e7eb);
+  --card-surface: var(--cozy-paper-raised, #fff);
+  --card-soft: var(--cozy-paper, #f9fafb);
+  --card-muted: var(--cozy-ink-dim, #5b6472);
+  /* Page-level surfaces the roster paints itself onto. */
+  --bg-primary: var(--cozy-paper-raised, #fff);
+  --bg-secondary: var(--cozy-paper, #f9fafb);
+  /* Left unmapped, this stayed the app's cool #c9ccd1 behind muted-ink pills
+     such as the progression slot count — 4.06:1, an axe violation. */
+  --bg-tertiary: var(--cozy-paper, #f3f4f6);
+  --text-primary: var(--cozy-ink, #111827);
+  --border-color: var(--cozy-line, #e5e7eb);
+  --roster-grid: rgb(90 74 46 / 8%);
+  --roster-grid-soft: rgb(90 74 46 / 4%);
+  /* Paper grid, same 24px rhythm and warm ink as Home (home-command.css), so
+     the two main surfaces read as one room.
+     !important is required, not decorative: ui-refresh.css paints `body` with
+     an !important cool-grey gradient, which silently beat a plain declaration
+     here — the page kept rendering on the old canvas while every token above
+     was already warm. */
+  background-color: var(--cozy-paper-deep) !important;
+  background-image:
+    linear-gradient(var(--roster-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--roster-grid-soft) 1px, transparent 1px) !important;
+  background-position: -1px -1px;
+  background-size:
+    24px 24px,
+    24px 24px;
 }
 
-[data-bs-theme="dark"] .agents-roster-page,
-.agents-roster-page[data-bs-theme="dark"] {
-  --roster-accent: color-mix(in srgb, var(--primary-color, #4f46e5) 38%, white);
-  --card-surface: var(--bg-primary, #1f2430);
-  --card-soft: rgba(255, 255, 255, 0.04);
-  --card-muted: #aab3c0;
+/* Dark is dusk on the same materials. Two things need restating here: the brand
+   accent (moss is tuned for text on paper, not for a filled control) and the
+   grid ink. The canvas has to be repeated too — ui-refresh.css overrides it
+   again at `[data-bs-theme="dark"] body`, so this selector matches that
+   specificity and loads after it. */
+[data-bs-theme="dark"] body.agents-roster-page {
+  --roster-accent: var(--cozy-moss-bright, #9ccb9f);
+  --roster-grid: rgb(214 196 160 / 7%);
+  --roster-grid-soft: rgb(214 196 160 / 4%);
+  background-color: var(--cozy-paper-deep) !important;
+  background-image:
+    linear-gradient(var(--roster-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--roster-grid-soft) 1px, transparent 1px) !important;
 }
 
 .roster-layout {
   display: flex;
   flex-direction: column;
   gap: var(--collection-gap);
-  padding: 20px;
+  /* Extra bottom room so the last control on the page can never come to rest
+     underneath the fixed Ori launcher. Scrolled to the end there is nowhere
+     further to go, so without this the final row's right-hand side is visible
+     but not clickable — the same failure the bulk bar's horizontal clearance
+     fixes. */
+  padding: 20px 20px calc(20px + var(--ori-launcher-clearance-y, 88px));
   max-width: 1600px;
   margin: 0 auto;
   min-width: 0;
@@ -412,7 +456,12 @@
 /* ---- Agent card ----------------------------------------------------------- */
 
 .roster-card {
-  --role-accent: var(--primary-color, #4f46e5);
+  /* Fallback for agents whose role has no catalog accent — chiefly the built-in
+     CLI agents. It resolves through --roster-accent rather than the raw brand
+     primary because the brand green is fixed across themes and gives only
+     2.39:1 on the dark paper surface, which axe flags as a serious contrast
+     violation on the role line (FR-119). --roster-accent is lifted per theme. */
+  --role-accent: var(--roster-accent, var(--primary-color, #4f46e5));
   position: relative;
   display: flex;
   min-width: 0;
@@ -630,7 +679,7 @@
   min-width: 0;
   margin-top: 4px;
   overflow: hidden;
-  color: var(--muted, #6b7280);
+  color: var(--card-muted);
   font-size: 11px;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -665,8 +714,11 @@
 .agent-card__purpose.is-missing,
 .agent-card__model.is-missing,
 .agent-card__activity.is-missing {
+  /* The italics and the wording ("No description yet") already say this is
+     missing. The 0.85 opacity that used to sit here as well pushed the muted
+     ink to 4.42:1 on the warm card surface — a serious axe violation — for a
+     third cue nobody needed (FR-119). */
   font-style: italic;
-  opacity: 0.85;
 }
 
 .agent-card__section,
@@ -2366,7 +2418,9 @@ body.inspector-sheet-open {
 
 @media (max-width: 860px) {
   .roster-layout {
-    padding: 14px;
+    /* Narrow is where the launcher clearance matters most — the collection is a
+       single column, so the last card lands directly under it. */
+    padding: 14px 14px calc(14px + var(--ori-launcher-clearance-y, 88px));
     gap: 14px;
   }
   .collection-head {
@@ -2450,4 +2504,71 @@ body.inspector-sheet-open {
   .roster-card:hover {
     transform: none;
   }
+}
+
+/* ---- Cozy surface treatment ------------------------------------------------ */
+
+/*
+ * Re-pointing the token block above changed the page's COLOURS; this section
+ * changes its MATERIAL. Both are needed: a warm palette applied to floating
+ * rectangles with soft blur still reads as a dashboard.
+ *
+ * The treatment is deliberately narrow — corner rounding onto the shared 4px
+ * step grid, and a flat bottom edge in place of a blurred drop shadow, so a
+ * card reads as a stacked physical thing. Nothing here changes size, spacing,
+ * position, or any state class, so every focus/checked/attention/read-only cue
+ * defined earlier survives untouched (FR-1/FR-4, FR-41, FR-90).
+ *
+ * It lives at the end of the file rather than being threaded through each
+ * component so the cozy layer stays one reviewable block — and so reverting the
+ * look is a single deletion.
+ */
+
+/* Cards and the Inspector are already on --roster-radius, which the token block
+   above now derives from --cozy-radius-lg; only the smaller controls needed
+   moving onto the step grid. */
+.roster-stat,
+.collection-search input,
+.collection-select select,
+.collection-chip,
+.view-toggle,
+.bulk-bar {
+  border-radius: var(--cozy-radius);
+}
+
+/* The bulk bar is excluded from the flat bottom edge on purpose: it is sticky,
+   and its existing upward shadow is what says "this floats above the list you
+   are still scrolling". A bottom edge would flatten it into the content. */
+.roster-card,
+.roster-stat,
+.collection-search input,
+.collection-select select,
+.collection-chip,
+.view-toggle,
+.stage {
+  box-shadow: var(--cozy-shadow-sm);
+}
+
+/* Warm-toned rather than the slate-blue blur this replaced; the 1px rise
+   defined earlier still carries the actual hover feedback.
+   Focused and checked cards are excluded: their rings ARE box-shadows, and this
+   rule sits later in the file at equal specificity, so without the guard simply
+   hovering the focused card would erase the ring that says which agent the
+   Inspector is showing (FR-41/FR-95). */
+.roster-card:hover:not(.is-focused):not(.is-checked) {
+  box-shadow: var(--cozy-shadow);
+}
+
+.collection-head__new {
+  border-radius: var(--cozy-radius);
+  box-shadow: var(--cozy-shadow-sm);
+}
+
+/* Loading and empty states are surfaces too — left transparent, they were the
+   one place the page fell back to a bare dashed rectangle. The error variant is
+   excluded: its red-tinted fill is the state cue, and this rule would sit after
+   it in the cascade and quietly erase it. */
+.collection-state:not(.collection-state--error),
+.roster-empty {
+  background: var(--card-soft);
 }

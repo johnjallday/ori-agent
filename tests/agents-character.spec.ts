@@ -279,4 +279,62 @@ test.describe('identity does not disturb the rest of the page', () => {
     // about what an agent looks like (FR-99).
     expect(listSrc).toBe(gallerySrc);
   });
+
+  // The fixed Ori launcher has now covered a page control four separate times
+  // during this feature (the Agents bulk bar, the map's retry button, the
+  // Inspector hero actions, and the roster's last row). Every one of those was
+  // found by looking at a screenshot, which is not a repeatable check — so the
+  // rule gets asserted instead of re-discovered.
+  test('the Ori launcher never covers the end of the roster', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/agents');
+    await expect(page.locator('.roster-card').first()).toBeVisible();
+
+    // Scroll to the true end of the page. mouse.wheel is used rather than
+    // window.scrollTo because it goes through the browser's real scrolling
+    // machinery, which is what a user's last flick does too.
+    for (let i = 0; i < 40; i++) await page.mouse.wheel(0, 2000);
+    await page.waitForTimeout(300);
+
+    // Measured in the page with getBoundingClientRect so both rects are in the
+    // same viewport-relative space as the fixed launcher.
+    const geom = await page.evaluate(() => {
+      const cards = document.querySelectorAll('.roster-card');
+      const last = cards[cards.length - 1].getBoundingClientRect();
+      const launcher = document.querySelector('.ori-guide__launcher')!.getBoundingClientRect();
+      return { cardBottom: last.bottom, launcherTop: launcher.top };
+    });
+
+    // Scrolled to the very bottom there is nowhere further to go, so anything
+    // still under the launcher is permanently unclickable.
+    expect(geom.cardBottom).toBeLessThanOrEqual(geom.launcherTop);
+  });
+
+  // 320px is the narrowest layout the PRD commits to, and a 200%-zoomed 1440
+  // desktop lands in roughly the same place — both are where a warm restyle
+  // most easily reintroduces a sideways scroll (FR-115–FR-119).
+  for (const [label, width, height] of [
+    ['320px', 320, 800],
+    ['1440 at 200% zoom', 720, 475]
+  ] as const) {
+    test(`the collection never scrolls sideways at ${label}`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await page.goto('/agents');
+      await expect(page.locator('.roster-card').first()).toBeVisible();
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      expect(overflow, `page overflows by ${overflow}px`).toBeLessThanOrEqual(1);
+
+      // The Inspector is the widest thing on the page, so check it too rather
+      // than only the collection behind it.
+      await page.locator('.roster-card').first().locator('.roster-card__open').click();
+      await expect(page.locator('#inspector')).toBeVisible();
+      const withInspector = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      expect(withInspector, `Inspector overflows by ${withInspector}px`).toBeLessThanOrEqual(1);
+    });
+  }
 });

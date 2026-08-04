@@ -6,7 +6,11 @@
 <link rel="stylesheet" href="/css/agents-roster.css">
 <link rel="stylesheet" href="/css/character-picker.css">
 
-<body class="bg-light agents-roster-page" data-sidebar-default="hidden">
+<!-- Bootstrap's .bg-light was dropped from the markup so the page does not flash
+     the cool grey canvas before the theme script runs. It is not the whole fix:
+     the theme script re-adds .bg-light/.bg-dark at runtime, so the cozy canvas
+     in agents-roster.css has to out-specify it as well. -->
+<body class="agents-roster-page" data-sidebar-default="hidden">
   <a class="skip-link" href="#roster-main">Skip to Main Content</a>
 
   {{template "navbar.tmpl" .}}

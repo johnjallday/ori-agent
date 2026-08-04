@@ -20,6 +20,11 @@
  */
 :root {
   --ori-launcher-clearance: 176px;
+  /* The vertical companion. A bar can dodge the launcher sideways, but the last
+     row of a scrolling page cannot — once you reach the bottom there is nowhere
+     further to scroll, so whatever lands in that corner stays covered. Pages end
+     their scroll content this far above the viewport floor. */
+  --ori-launcher-clearance-y: 88px;
 }
 
 @media (max-width: 560px) {
@@ -318,7 +323,7 @@
   display: block;
 }
 
-[data-bs-theme='dark'] .cockpit-map-ori {
+[data-bs-theme="dark"] .cockpit-map-ori {
   border-color: #574a38;
   background: #2f2820;
   color: #f2e7d5;
