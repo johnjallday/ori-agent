@@ -53,7 +53,11 @@ type characterDTO struct {
 	IdleBehavior string   `json:"idle_behavior"`
 	ToneTraits   []string `json:"tone_traits"`
 	SampleLine   string   `json:"sample_line"`
-	Palette      struct {
+	// Ordering hint for the picker only. Omitted when empty so a client cannot
+	// read an absent list as "compatible with nothing" — every character stays
+	// selectable for every agent (FR-65).
+	Roles   []string `json:"roles,omitempty"`
+	Palette struct {
 		Base   string `json:"base"`
 		Accent string `json:"accent"`
 		Ink    string `json:"ink"`
@@ -80,6 +84,9 @@ func toDTO(ch charactercatalog.Character) characterDTO {
 	d.IdleBehavior = ch.IdleBehavior
 	d.ToneTraits = append([]string{}, ch.ToneTraits...)
 	d.SampleLine = ch.SampleLine
+	for _, r := range ch.Roles {
+		d.Roles = append(d.Roles, string(r))
+	}
 	d.Palette.Base = ch.Palette.Base
 	d.Palette.Accent = ch.Palette.Accent
 	d.Palette.Ink = ch.Palette.Ink

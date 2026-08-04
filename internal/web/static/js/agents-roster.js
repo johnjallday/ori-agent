@@ -2343,7 +2343,10 @@
         trigger: btn,
         selectedId: createCharacter ? createCharacter.catalogId : '',
         voiceEnabled: createCharacter ? createCharacter.voiceEnabled : false,
-        taken: takenCharacterIds()
+        taken: takenCharacterIds(),
+        // Read at click time, not at wire time: the user may have changed the
+        // Role select since the form was built.
+        role: val('cr-role')
       }).then(function (result) {
         if (result.action === 'cancel') return;
         createCharacter = result.action === 'choose' ? result : null;
@@ -3945,6 +3948,7 @@
           selectedId: (md.character && md.character.catalog_id) || '',
           voiceEnabled: !!(md.character && md.character.voice_enabled),
           taken: takenCharacterIds(),
+          role: detail && detail.role,
           showSkip: false
         }).then(function (result) {
           if (result.action !== 'choose') return;

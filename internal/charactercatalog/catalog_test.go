@@ -5,6 +5,8 @@ import (
 	"maps"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 /* ---- the shipped catalog -------------------------------------------------- */
@@ -391,6 +393,73 @@ func TestRejectsZeroEntryVersion(t *testing.T) {
 	m["characters"].([]any)[1].(map[string]any)["entry_version"] = 0
 	if _, err := parseMap(t, m); err == nil {
 		t.Fatal("expected entry_version 0 to be rejected")
+	}
+}
+
+func TestRejectsUnknownRole(t *testing.T) {
+	m := base(t)
+	// A typo would silently stop a character from ever being recommended —
+	// exactly the kind of failure that goes unnoticed in production.
+	m["characters"].([]any)[1].(map[string]any)["roles"] = []any{"resercher"}
+	_, err := parseMap(t, m)
+	if err == nil || !strings.Contains(err.Error(), "roles") {
+		t.Fatalf("expected an unknown-role error, got: %v", err)
+	}
+}
+
+func TestRejectsCLIAgentRoleAffinity(t *testing.T) {
+	m := base(t)
+	// Built-in CLI agents are read-only and can never be assigned a character,
+	// so an affinity for them could never be acted on (FR-70).
+	m["characters"].([]any)[1].(map[string]any)["roles"] = []any{"cli_agent"}
+	if _, err := parseMap(t, m); err == nil {
+		t.Fatal("expected cli_agent to be rejected as an unassignable role")
+	}
+}
+
+func TestRejectsDuplicateRole(t *testing.T) {
+	m := base(t)
+	m["characters"].([]any)[1].(map[string]any)["roles"] = []any{"researcher", "researcher"}
+	if _, err := parseMap(t, m); err == nil {
+		t.Fatal("expected a duplicate role to be rejected")
+	}
+}
+
+// Roles are an ordering hint, so an entry without them must still load. Nothing
+// downstream may treat "no roles" as "not selectable" (FR-65).
+func TestRolesAreOptional(t *testing.T) {
+	m := base(t)
+	delete(m["characters"].([]any)[1].(map[string]any), "roles")
+	if _, err := parseMap(t, m); err != nil {
+		t.Fatalf("roles must be optional, got: %v", err)
+	}
+}
+
+// Every assignable role should have at least one character that suits it,
+// otherwise the recommendation silently degrades to "first unused" for agents
+// in that role and nobody finds out.
+func TestEveryAssignableRoleHasACharacter(t *testing.T) {
+	c := MustLoad()
+	covered := map[types.AgentRole]bool{}
+	for _, ch := range c.Working() {
+		for _, r := range ch.Roles {
+			covered[r] = true
+		}
+	}
+	// RoleGeneral is deliberately uncovered: "general" states no preference, so
+	// pinning characters to it would make one of them the default for every
+	// unspecialised agent.
+	for _, r := range []types.AgentRole{
+		types.RoleOrchestrator,
+		types.RoleResearcher,
+		types.RoleAnalyzer,
+		types.RoleSynthesizer,
+		types.RoleValidator,
+		types.RoleSpecialist,
+	} {
+		if !covered[r] {
+			t.Errorf("no catalog character declares an affinity for role %q", r)
+		}
 	}
 }
 

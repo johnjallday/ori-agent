@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -361,6 +362,47 @@ func TestVoiceCanBeToggledWithoutRestatingTheCharacter(t *testing.T) {
 }
 
 // A PATCH that says nothing about the character must leave it untouched.
+/* ---- no bulk path may set a character ------------------------------------- */
+
+// Character choice is deliberately one-agent-at-a-time: assigning the same
+// identity to a whole batch would produce exactly the interchangeable roster the
+// feature exists to avoid (FR-102).
+//
+// Asserted structurally rather than by absence. "The UI has no bulk button" is
+// not a guarantee — a direct POST is one curl away — and "the request struct has
+// no character field" is only true until someone adds one. This pins both: the
+// wire type cannot carry a character, and a request that smuggles one changes
+// nothing.
+func TestNoBulkOperationCanSetACharacter(t *testing.T) {
+	rt := reflect.TypeFor[bulkRequest]()
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		name := strings.ToLower(f.Name + " " + f.Tag.Get("json"))
+		if strings.Contains(name, "character") || strings.Contains(name, "catalog") {
+			t.Fatalf("bulkRequest.%s would let a batch assign an identity", f.Name)
+		}
+	}
+
+	// And the same at the wire level: unknown fields are ignored, so a caller
+	// who guesses the field name gets a no-op rather than a mass assignment.
+	h, st := characterTestHandlers(t, "Solo")
+	id := firstWorkingID(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/bulk", strings.NewReader(
+		`{"agent_names":["Solo"],"operation":"set_favorite","favorite":true,`+
+			`"character":{"catalog_id":"`+id+`","display_mode":"character"}}`))
+	rec := httptest.NewRecorder()
+	h.HandleBulk(rec, req)
+
+	ag, ok := st.GetAgent("Solo")
+	if !ok {
+		t.Fatal("agent disappeared")
+	}
+	if got := ag.Metadata.CharacterCatalogID(); got != "" {
+		t.Fatalf("a bulk request assigned character %q", got)
+	}
+}
+
 func TestUnrelatedPatchLeavesTheCharacterAlone(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	id := firstWorkingID(t)

@@ -21,6 +21,7 @@ function character(overrides = {}) {
     idleBehavior: 'Straightens a stack of notes',
     toneTraits: ['measured', 'precise'],
     sampleLine: 'I indexed the sources.',
+    roles: ['researcher', 'validator'],
     assets: { portrait: '/characters/research-archivist/portrait.svg' },
     ...overrides
   };
@@ -35,6 +36,7 @@ const CATALOG = [
     familyLabel: 'Resident',
     purpose: 'Practical maker who favors narrow slices.',
     toneTraits: ['practical', 'direct'],
+    roles: ['specialist'],
     assets: { portrait: '/characters/product-builder/portrait.svg' }
   }),
   character({
@@ -44,6 +46,7 @@ const CATALOG = [
     familyLabel: 'Familiar',
     purpose: 'Sharp advisor who compares paths.',
     toneTraits: ['candid', 'economical'],
+    roles: ['analyzer', 'synthesizer'],
     assets: { portrait: '/characters/decision-strategist/portrait.svg' }
   })
 ];
@@ -186,6 +189,34 @@ test('an empty taken-list recommends the first character', () => {
   const { picker } = load();
   assert.equal(picker._recommendedId([], CATALOG), 'research-archivist');
   assert.equal(picker._recommendedId(null, CATALOG), 'research-archivist');
+});
+
+test('a role-matching character is recommended over an earlier non-matching one', () => {
+  const { picker } = load();
+  // Research Archivist is first in the list and unused, so it would win on
+  // position alone; the analyst role is what moves the strategist ahead.
+  assert.equal(picker._recommendedId([], CATALOG, 'analyzer'), 'decision-strategist');
+  assert.equal(picker._recommendedId([], CATALOG, 'specialist'), 'product-builder');
+});
+
+test('being unused outranks matching the role', () => {
+  const { picker } = load();
+  // The strategist matches "analyzer" but is already assigned. A duplicate
+  // identity is what a user notices; a slightly-off affinity is not.
+  const rec = picker._recommendedId(['decision-strategist'], CATALOG, 'analyzer');
+  assert.equal(rec, 'research-archivist');
+});
+
+test('an unknown role falls back to plain unused-first ordering', () => {
+  const { picker } = load();
+  assert.equal(picker._recommendedId([], CATALOG, 'not-a-role'), 'research-archivist');
+  assert.equal(picker._recommendedId([], CATALOG, ''), 'research-archivist');
+});
+
+test('a character with no declared roles is still recommendable', () => {
+  const { picker } = load();
+  const noRoles = [character({ id: 'plain-one', roles: undefined })];
+  assert.equal(picker._recommendedId([], noRoles, 'analyzer'), 'plain-one');
 });
 
 /* ---- search matches only visible labels (FR-98) --------------------------------- */

@@ -132,6 +132,49 @@ test.describe('Ori Guide explanations and destinations', () => {
     await expect(page).toHaveURL(/\/agents$/);
   });
 
+  // "It's an <a>, so guards apply" is a claim about the browser, not a
+  // demonstration. This dirties a real form and proves the page's own
+  // unsaved-changes guard actually fires when the guide navigates away
+  // (FR-24/FR-36/FR-49).
+  test('a guide destination cannot skip an unsaved-changes guard', async ({ page, request }) => {
+    // A built-in agent has no editable form, so the fixture needs one of its
+    // own rather than whichever card happens to sort first.
+    const name = `PWGuard${Date.now()}`;
+    const made = await request.post('/api/agents', {
+      data: { name, type: 'tool-calling', model: 'gpt-4o-mini' }
+    });
+    expect(made.ok()).toBeTruthy();
+
+    await skipOnboarding(page);
+    await page.goto(`/agents?agent=${encodeURIComponent(name)}`, {
+      waitUntil: 'domcontentloaded'
+    });
+    await expect(page.locator('#oriGuideLauncher')).toBeVisible();
+    await expect(page.locator('#ov-description')).toBeVisible();
+
+    await page.locator('#ov-description').fill('an edit nobody saved');
+    await page.locator('#ov-description').blur();
+
+    let beforeUnloadFired = false;
+    page.on('dialog', async d => {
+      if (d.type() === 'beforeunload') beforeUnloadFired = true;
+      await d.dismiss();
+    });
+
+    await openGuide(page);
+    await ask(page, 'what is a vault');
+    await page.locator('.ori-guide__action', { hasText: 'Vaults' }).click();
+    // Give the navigation attempt a moment to raise the guard.
+    await page.waitForTimeout(500);
+
+    expect(beforeUnloadFired, 'navigating from the guide bypassed the unsaved-changes guard').toBe(
+      true
+    );
+    // Dismissed, so the user is still on the page with their edit intact.
+    await expect(page).toHaveURL(/\/agents/);
+    await expect(page.locator('#ov-description')).toHaveValue('an edit nobody saved');
+  });
+
   test('an unknown question says so and offers approved topics instead', async ({ page }) => {
     await gotoPage(page, '/');
     await openGuide(page);

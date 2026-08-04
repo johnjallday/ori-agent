@@ -52,7 +52,8 @@
         "sprite": "characters/research-archivist/sprite.svg",
         "static": "characters/research-archivist/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#research-archivist"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#research-archivist",
+      "roles": ["researcher", "validator"]
     },
     {
       "id": "project-coordinator",
@@ -78,7 +79,8 @@
         "sprite": "characters/project-coordinator/sprite.svg",
         "static": "characters/project-coordinator/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#project-coordinator"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#project-coordinator",
+      "roles": ["orchestrator"]
     },
     {
       "id": "product-builder",
@@ -104,7 +106,8 @@
         "sprite": "characters/product-builder/sprite.svg",
         "static": "characters/product-builder/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#product-builder"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#product-builder",
+      "roles": ["specialist"]
     },
     {
       "id": "team-caretaker",
@@ -130,7 +133,8 @@
         "sprite": "characters/team-caretaker/sprite.svg",
         "static": "characters/team-caretaker/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#team-caretaker"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#team-caretaker",
+      "roles": ["orchestrator"]
     },
     {
       "id": "insight-researcher",
@@ -156,7 +160,8 @@
         "sprite": "characters/insight-researcher/sprite.svg",
         "static": "characters/insight-researcher/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#insight-researcher"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#insight-researcher",
+      "roles": ["researcher", "analyzer"]
     },
     {
       "id": "decision-strategist",
@@ -182,7 +187,8 @@
         "sprite": "characters/decision-strategist/sprite.svg",
         "static": "characters/decision-strategist/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#decision-strategist"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#decision-strategist",
+      "roles": ["analyzer", "synthesizer"]
     },
     {
       "id": "operations-keeper",
@@ -208,7 +214,8 @@
         "sprite": "characters/operations-keeper/sprite.svg",
         "static": "characters/operations-keeper/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#operations-keeper"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#operations-keeper",
+      "roles": ["validator"]
     },
     {
       "id": "automation-specialist",
@@ -234,7 +241,8 @@
         "sprite": "characters/automation-specialist/sprite.svg",
         "static": "characters/automation-specialist/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#automation-specialist"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#automation-specialist",
+      "roles": ["specialist"]
     }
   ]
 }

@@ -66,19 +66,44 @@
 
   /* ---- recommendation --------------------------------------------------------- */
 
-  // Suggest a character no other agent is using yet, so a fresh roster spreads
-  // out instead of everyone landing on the first card. Reuse stays allowed —
-  // this only changes what is offered first (FR-65).
-  function recommendedId(taken, list) {
+  // Suggest a character that suits the agent's role and that no other agent is
+  // using yet, so a fresh roster spreads out instead of everyone landing on the
+  // first card.
+  //
+  // Two deterministic preferences, in order: unused beats used, and
+  // role-matching beats not. Both come from data already on the client — the
+  // roster's assigned IDs and the catalog's own `roles` hint — so the same
+  // inputs always produce the same suggestion and nothing is fetched to compute
+  // it.
+  //
+  // This only changes what is offered FIRST. Every character stays selectable
+  // for every agent, and a character with no declared roles is never excluded —
+  // it just does not get the role bonus (FR-65).
+  function recommendedId(taken, list, role) {
     var characters = list || state.characters;
+    if (!characters.length) return '';
+
     var used = {};
     (taken || []).forEach(function (id) {
       if (id) used[String(id)] = true;
     });
+    var wanted = role ? String(role) : '';
+
+    var best = null;
+    var bestScore = -1;
     for (var i = 0; i < characters.length; i++) {
-      if (!used[characters[i].id]) return characters[i].id;
+      var ch = characters[i];
+      var roles = ch.roles || [];
+      var matches = wanted && roles.indexOf(wanted) !== -1;
+      // Unused is worth more than a role match: a duplicate identity is the
+      // thing a user notices, a slightly-off affinity is not.
+      var score = (used[ch.id] ? 0 : 2) + (matches ? 1 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = ch;
+      }
     }
-    return characters.length ? characters[0].id : '';
+    return best ? best.id : characters[0].id;
   }
 
   /* ---- rendering --------------------------------------------------------------- */
@@ -271,7 +296,7 @@
     state.characters = catalog ? catalog.working() : [];
     state.family = '';
     state.voiceEnabled = !!opts.voiceEnabled;
-    state.recommendedId = recommendedId(opts.taken);
+    state.recommendedId = recommendedId(opts.taken, null, opts.role);
     // Pre-select what the agent already has, else the recommendation.
     state.selectedId = opts.selectedId || state.recommendedId;
     state.lastTrigger = opts.trigger || document.activeElement || null;

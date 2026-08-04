@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 //go:embed catalog.json
@@ -89,6 +91,13 @@ type Character struct {
 	Palette      Palette  `json:"palette"`
 	Assets       Assets   `json:"assets"`
 	Provenance   string   `json:"provenance"`
+	// Roles this character reads well beside — an ordering hint for the picker's
+	// recommendation, nothing more. It is emphatically NOT a restriction: any
+	// character can be chosen for any agent, and nothing downstream reads this
+	// field. It lives in the catalog rather than in the browser so the affinity
+	// stays server-owned data alongside the purpose text it was derived from
+	// (FR-65).
+	Roles []types.AgentRole `json:"roles,omitempty"`
 }
 
 // CharacterID is a stable catalog identifier. It is a distinct type so an agent
@@ -297,7 +306,37 @@ func validateEntry(ch Character) error {
 	if !strings.Contains(ch.Provenance, "#") {
 		return fmt.Errorf("provenance %q must link to a specific record anchor", ch.Provenance)
 	}
+
+	seenRole := map[types.AgentRole]bool{}
+	for _, r := range ch.Roles {
+		// A typo here would silently stop a character from ever being
+		// recommended, which is the kind of failure nobody notices.
+		if !assignableRole(r) {
+			return fmt.Errorf("roles contains unknown or unassignable role %q", r)
+		}
+		if seenRole[r] {
+			return fmt.Errorf("roles lists %q twice", r)
+		}
+		seenRole[r] = true
+	}
 	return nil
+}
+
+// assignableRole reports whether a role can be given to a user-created agent.
+// cli_agent is excluded on purpose: those agents are built-in and read-only, so
+// a character affinity for them could never be acted on (FR-70).
+func assignableRole(r types.AgentRole) bool {
+	switch r {
+	case types.RoleOrchestrator,
+		types.RoleResearcher,
+		types.RoleAnalyzer,
+		types.RoleSynthesizer,
+		types.RoleValidator,
+		types.RoleSpecialist,
+		types.RoleGeneral:
+		return true
+	}
+	return false
 }
 
 // validateAssetPath keeps every asset inside the embedded static tree. It
