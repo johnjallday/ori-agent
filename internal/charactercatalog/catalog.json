@@ -9,7 +9,6 @@
       "name": "Ori",
       "family": "guide",
       "family_label": "Guide",
-      "archetype": "Navigation Companion",
       "purpose": "Helps you set up Ori and find your way around it.",
       "description": "A duck with a broad bill and a crown tuft, standing in an open navigator pose with a folded map held at its side.",
       "silhouette": "Broad bill, crown tuft, open navigator stance",
@@ -30,13 +29,12 @@
       "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#ori-guide"
     },
     {
-      "id": "sable",
+      "id": "research-archivist",
       "entry_version": 1,
       "kind": "working",
-      "name": "Sable",
+      "name": "Research Archivist",
       "family": "resident",
       "family_label": "Resident",
-      "archetype": "Research Archivist",
       "purpose": "Patient source-finder who makes uncertainty visible.",
       "description": "A broad-browed resident in a feathered cape, standing squarely with a pocket ledger open in one hand.",
       "silhouette": "Wide brow, feather cape, grounded stance",
@@ -50,20 +48,19 @@
         "ink": "#0f1a0e"
       },
       "assets": {
-        "portrait": "characters/sable/portrait.svg",
-        "sprite": "characters/sable/sprite.svg",
-        "static": "characters/sable/static.svg"
+        "portrait": "characters/research-archivist/portrait.svg",
+        "sprite": "characters/research-archivist/sprite.svg",
+        "static": "characters/research-archivist/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#sable"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#research-archivist"
     },
     {
-      "id": "piko",
+      "id": "project-coordinator",
       "entry_version": 1,
       "kind": "working",
-      "name": "Piko",
+      "name": "Project Coordinator",
       "family": "resident",
       "family_label": "Resident",
-      "archetype": "Project Coordinator",
       "purpose": "Upbeat organizer who keeps handoffs and next steps warm.",
       "description": "A round-tailed resident leaning slightly forward with an open expression and a cross-body satchel.",
       "silhouette": "Round tail, forward stance, open expression",
@@ -77,20 +74,19 @@
         "ink": "#2a1006"
       },
       "assets": {
-        "portrait": "characters/piko/portrait.svg",
-        "sprite": "characters/piko/sprite.svg",
-        "static": "characters/piko/static.svg"
+        "portrait": "characters/project-coordinator/portrait.svg",
+        "sprite": "characters/project-coordinator/sprite.svg",
+        "static": "characters/project-coordinator/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#piko"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#project-coordinator"
     },
     {
-      "id": "rivet",
+      "id": "product-builder",
       "entry_version": 1,
       "kind": "working",
-      "name": "Rivet",
+      "name": "Product Builder",
       "family": "resident",
       "family_label": "Resident",
-      "archetype": "Product Builder",
       "purpose": "Practical maker who favors narrow, testable product slices.",
       "description": "A compact resident with broad hands and planted feet, wearing a modular tool belt.",
       "silhouette": "Compact body, broad hands, planted feet",
@@ -104,20 +100,19 @@
         "ink": "#12200a"
       },
       "assets": {
-        "portrait": "characters/rivet/portrait.svg",
-        "sprite": "characters/rivet/sprite.svg",
-        "static": "characters/rivet/static.svg"
+        "portrait": "characters/product-builder/portrait.svg",
+        "sprite": "characters/product-builder/sprite.svg",
+        "static": "characters/product-builder/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#rivet"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#product-builder"
     },
     {
-      "id": "moss",
+      "id": "team-caretaker",
       "entry_version": 1,
       "kind": "working",
-      "name": "Moss",
+      "name": "Team Caretaker",
       "family": "resident",
       "family_label": "Resident",
-      "archetype": "Team Caretaker",
       "purpose": "Calm steward who notices overload, gaps, and neglected follow-ups.",
       "description": "A soft rectangular resident with relaxed shoulders, carrying a messenger pouch with a living sprout tucked into it.",
       "silhouette": "Soft rectangular shape, relaxed shoulders",
@@ -131,20 +126,19 @@
         "ink": "#171e07"
       },
       "assets": {
-        "portrait": "characters/moss/portrait.svg",
-        "sprite": "characters/moss/sprite.svg",
-        "static": "characters/moss/static.svg"
+        "portrait": "characters/team-caretaker/portrait.svg",
+        "sprite": "characters/team-caretaker/sprite.svg",
+        "static": "characters/team-caretaker/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#moss"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#team-caretaker"
     },
     {
-      "id": "luma",
+      "id": "insight-researcher",
       "entry_version": 1,
       "kind": "working",
-      "name": "Luma",
+      "name": "Insight Researcher",
       "family": "familiar",
       "family_label": "Familiar",
-      "archetype": "Insight Researcher",
       "purpose": "Curious pattern-finder for ambiguous and exploratory work.",
       "description": "A light-framed familiar with tall ears and folded crescent wings, holding a tabbed field notebook.",
       "silhouette": "Tall ears, folded moon wings, light frame",
@@ -158,20 +152,19 @@
         "ink": "#1c1220"
       },
       "assets": {
-        "portrait": "characters/luma/portrait.svg",
-        "sprite": "characters/luma/sprite.svg",
-        "static": "characters/luma/static.svg"
+        "portrait": "characters/insight-researcher/portrait.svg",
+        "sprite": "characters/insight-researcher/sprite.svg",
+        "static": "characters/insight-researcher/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#luma"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#insight-researcher"
     },
     {
-      "id": "nox",
+      "id": "decision-strategist",
       "entry_version": 1,
       "kind": "working",
-      "name": "Nox",
+      "name": "Decision Strategist",
       "family": "familiar",
       "family_label": "Familiar",
-      "archetype": "Decision Strategist",
       "purpose": "Sharp advisor who compares paths without taking the decision away.",
       "description": "An alert familiar with tall ears and a diagonal cape, holding a map tube and a flat decision token.",
       "silhouette": "Tall ears, diagonal cape, alert posture",
@@ -185,20 +178,19 @@
         "ink": "#170e19"
       },
       "assets": {
-        "portrait": "characters/nox/portrait.svg",
-        "sprite": "characters/nox/sprite.svg",
-        "static": "characters/nox/static.svg"
+        "portrait": "characters/decision-strategist/portrait.svg",
+        "sprite": "characters/decision-strategist/sprite.svg",
+        "static": "characters/decision-strategist/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#nox"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#decision-strategist"
     },
     {
-      "id": "cairn",
+      "id": "operations-keeper",
       "entry_version": 1,
       "kind": "working",
-      "name": "Cairn",
+      "name": "Operations Keeper",
       "family": "construct",
       "family_label": "Construct",
-      "archetype": "Operations Keeper",
       "purpose": "Dependable systems helper who makes process health tangible.",
       "description": "A stack of heavy rounded stones with a bright core at its centre and small utility pouches strapped around it.",
       "silhouette": "Heavy rounded stones, bright central core",
@@ -212,20 +204,19 @@
         "ink": "#07211f"
       },
       "assets": {
-        "portrait": "characters/cairn/portrait.svg",
-        "sprite": "characters/cairn/sprite.svg",
-        "static": "characters/cairn/static.svg"
+        "portrait": "characters/operations-keeper/portrait.svg",
+        "sprite": "characters/operations-keeper/sprite.svg",
+        "static": "characters/operations-keeper/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#cairn"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#operations-keeper"
     },
     {
-      "id": "tock",
+      "id": "automation-specialist",
       "entry_version": 1,
       "kind": "working",
-      "name": "Tock",
+      "name": "Automation Specialist",
       "family": "construct",
       "family_label": "Construct",
-      "archetype": "Automation Specialist",
       "purpose": "Precise helper for repeatable routines and scheduled work.",
       "description": "A narrow bird-profiled construct with visible mechanical joints, a wind-up key at its back and a lens for one eye.",
       "silhouette": "Narrow bird profile, mechanical joints",
@@ -239,11 +230,11 @@
         "ink": "#241505"
       },
       "assets": {
-        "portrait": "characters/tock/portrait.svg",
-        "sprite": "characters/tock/sprite.svg",
-        "static": "characters/tock/static.svg"
+        "portrait": "characters/automation-specialist/portrait.svg",
+        "sprite": "characters/automation-specialist/sprite.svg",
+        "static": "characters/automation-specialist/static.svg"
       },
-      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#tock"
+      "provenance": "docs/CHARACTER_ASSET_PROVENANCE.md#automation-specialist"
     }
   ]
 }

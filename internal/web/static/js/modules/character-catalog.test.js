@@ -49,19 +49,18 @@ const payload = {
   },
   characters: [
     {
-      id: 'sable',
+      id: 'research-archivist',
       kind: 'working',
-      name: 'Sable',
+      name: 'Research Archivist',
       entry_version: 1,
       family: 'resident',
       family_label: 'Resident',
-      archetype: 'Research Archivist',
       tone_traits: ['measured', 'precise'],
       sample_line: 'Here is what I found.',
       assets: {
-        portrait: '/characters/sable/portrait.svg',
-        sprite: '/characters/sable/sprite.svg',
-        static: '/characters/sable/static.svg'
+        portrait: '/characters/research-archivist/portrait.svg',
+        sprite: '/characters/research-archivist/sprite.svg',
+        static: '/characters/research-archivist/static.svg'
       },
       palette: { base: '#4f744a', accent: '#4f744a', ink: '#0f1a0e' }
     }
@@ -77,16 +76,16 @@ function ready(extra) {
 /* ---- lookup ---------------------------------------------------------------- */
 
 test('a known character resolves with its assets and tone data', () => {
-  const sable = ready().get('sable');
-  assert.equal(sable.name, 'Sable');
-  assert.equal(sable.archetype, 'Research Archivist');
-  assert.equal(sable.assets.portrait, '/characters/sable/portrait.svg');
-  assert.deepEqual(sable.toneTraits, ['measured', 'precise']);
+  const archivist = ready().get('research-archivist');
+  assert.equal(archivist.name, 'Research Archivist');
+  assert.equal(archivist.familyLabel, 'Resident');
+  assert.equal(archivist.assets.portrait, '/characters/research-archivist/portrait.svg');
+  assert.deepEqual(archivist.toneTraits, ['measured', 'precise']);
 });
 
 test('an unknown or withdrawn character resolves to null so the caller falls back', () => {
   const cat = ready();
-  for (const id of ['nope', '', null, undefined, '   ', 'Sable']) {
+  for (const id of ['nope', '', null, undefined, '   ', 'Research Archivist']) {
     assert.equal(cat.get(id), null, `expected null for ${JSON.stringify(id)}`);
   }
 });
@@ -94,7 +93,7 @@ test('an unknown or withdrawn character resolves to null so the caller falls bac
 test('lookups before the catalog loads return null rather than throwing', () => {
   const cat = load();
   assert.equal(cat.status(), 'idle');
-  assert.equal(cat.get('sable'), null);
+  assert.equal(cat.get('research-archivist'), null);
 });
 
 /* ---- the reserved guide identity (FR-19/FR-71) ------------------------------ */
@@ -103,14 +102,14 @@ test('the guide is not offered among the assignable characters', () => {
   const cat = ready();
   const list = ids(cat.working());
   assert.ok(!list.includes('ori-guide'));
-  assert.deepEqual(list, ['sable']);
+  assert.deepEqual(list, ['research-archivist']);
 });
 
 test('the guide identity is reachable on its own, and reported as reserved', () => {
   const cat = ready();
   assert.equal(cat.guide().name, 'Ori');
   assert.ok(cat.isReserved('ori-guide'));
-  assert.ok(!cat.isReserved('sable'));
+  assert.ok(!cat.isReserved('research-archivist'));
   assert.ok(!cat.isReserved(''));
 });
 
@@ -118,16 +117,16 @@ test('the guide identity is reachable on its own, and reported as reserved', () 
 
 test('a reduced-motion viewer gets the static sprite, not a frozen animation', () => {
   const cat = ready();
-  const sable = cat.get('sable');
-  assert.equal(cat.assetFor(sable, 'sprite', false), '/characters/sable/sprite.svg');
-  assert.equal(cat.assetFor(sable, 'sprite', true), '/characters/sable/static.svg');
+  const archivist = cat.get('research-archivist');
+  assert.equal(cat.assetFor(archivist, 'sprite', false), '/characters/research-archivist/sprite.svg');
+  assert.equal(cat.assetFor(archivist, 'sprite', true), '/characters/research-archivist/static.svg');
 });
 
 test('portraits need no motion variant', () => {
   const cat = ready();
-  const sable = cat.get('sable');
-  assert.equal(cat.assetFor(sable, 'portrait', true), '/characters/sable/portrait.svg');
-  assert.equal(cat.assetFor(sable, 'portrait', false), '/characters/sable/portrait.svg');
+  const archivist = cat.get('research-archivist');
+  assert.equal(cat.assetFor(archivist, 'portrait', true), '/characters/research-archivist/portrait.svg');
+  assert.equal(cat.assetFor(archivist, 'portrait', false), '/characters/research-archivist/portrait.svg');
 });
 
 test('assetFor degrades safely for a missing character or variant', () => {
@@ -135,8 +134,8 @@ test('assetFor degrades safely for a missing character or variant', () => {
   assert.equal(cat.assetFor(null, 'portrait', false), '');
   assert.equal(cat.assetFor({}, 'portrait', false), '');
   assert.equal(
-    cat.assetFor(cat.get('sable'), 'unknown-variant', false),
-    '/characters/sable/portrait.svg'
+    cat.assetFor(cat.get('research-archivist'), 'unknown-variant', false),
+    '/characters/research-archivist/portrait.svg'
   );
 });
 
@@ -160,7 +159,7 @@ test('a failed catalog request resolves rather than rejecting', async () => {
   await cat.load();
   // The page must still render: every agent simply uses its fallback identity.
   assert.equal(cat.status(), 'error');
-  assert.equal(cat.get('sable'), null);
+  assert.equal(cat.get('research-archivist'), null);
   assert.equal(cat.working().length, 0);
 });
 
@@ -181,7 +180,7 @@ test('the catalog is fetched once however many surfaces ask for it', async () =>
   await Promise.all([cat.load(), cat.load(), cat.load()]);
   assert.equal(calls, 1);
   assert.equal(cat.status(), 'ready');
-  assert.equal(cat.get('sable').name, 'Sable');
+  assert.equal(cat.get('research-archivist').name, 'Research Archivist');
 });
 
 test('subscribers are notified once the catalog arrives so portraits can fill in', async () => {
@@ -249,5 +248,5 @@ test('an empty payload leaves the catalog usable and empty', () => {
   cat._ingest({});
   assert.equal(cat.working().length, 0);
   assert.equal(cat.guide(), null);
-  assert.equal(cat.get('sable'), null);
+  assert.equal(cat.get('research-archivist'), null);
 });

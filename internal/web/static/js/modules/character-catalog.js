@@ -61,7 +61,6 @@
       name: String(raw.name || '').trim() || id,
       family: String(raw.family || '').trim(),
       familyLabel: String(raw.family_label || '').trim(),
-      archetype: String(raw.archetype || '').trim(),
       purpose: String(raw.purpose || '').trim(),
       description: String(raw.description || '').trim(),
       silhouette: String(raw.silhouette || '').trim(),

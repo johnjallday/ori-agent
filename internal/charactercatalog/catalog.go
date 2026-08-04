@@ -72,20 +72,23 @@ type Character struct {
 	ID           CharacterID `json:"id"`
 	EntryVersion int         `json:"entry_version"`
 	Kind         Kind        `json:"kind"`
-	Name         string      `json:"name"`
-	Family       string      `json:"family"`
-	FamilyLabel  string      `json:"family_label"`
-	Archetype    string      `json:"archetype"`
-	Purpose      string      `json:"purpose"`
-	Description  string      `json:"description"`
-	Silhouette   string      `json:"silhouette"`
-	Prop         string      `json:"signature_prop"`
-	IdleBehavior string      `json:"idle_behavior"`
-	ToneTraits   []string    `json:"tone_traits"`
-	SampleLine   string      `json:"sample_line"`
-	Palette      Palette     `json:"palette"`
-	Assets       Assets      `json:"assets"`
-	Provenance   string      `json:"provenance"`
+	// Name is a descriptive role, not a proper noun. Invented character names
+	// were dropped: a single common word is exactly where trademark collisions
+	// cluster, and the role reads more usefully beside an agent's own name
+	// anyway (see docs/CHARACTER_ASSET_PROVENANCE.md).
+	Name         string   `json:"name"`
+	Family       string   `json:"family"`
+	FamilyLabel  string   `json:"family_label"`
+	Purpose      string   `json:"purpose"`
+	Description  string   `json:"description"`
+	Silhouette   string   `json:"silhouette"`
+	Prop         string   `json:"signature_prop"`
+	IdleBehavior string   `json:"idle_behavior"`
+	ToneTraits   []string `json:"tone_traits"`
+	SampleLine   string   `json:"sample_line"`
+	Palette      Palette  `json:"palette"`
+	Assets       Assets   `json:"assets"`
+	Provenance   string   `json:"provenance"`
 }
 
 // CharacterID is a stable catalog identifier. It is a distinct type so an agent
@@ -247,7 +250,6 @@ func validateEntry(ch Character) error {
 		"name":           ch.Name,
 		"family":         ch.Family,
 		"family_label":   ch.FamilyLabel,
-		"archetype":      ch.Archetype,
 		"purpose":        ch.Purpose,
 		"description":    ch.Description,
 		"silhouette":     ch.Silhouette,

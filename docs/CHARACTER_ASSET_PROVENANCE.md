@@ -29,30 +29,60 @@ Consequences for the FR-103–FR-114 checklist:
 | FR-105 — generation provider terms | **N/A** | No generation provider was used, so no provider terms govern these files. |
 | FR-106 — provenance record | **Complete** | This register; one anchored record per asset below. |
 | FR-107 — reverse-image + semantic search | **NOT PERFORMED** | See "Outstanding checks" below. Recorded as an absence of evidence, not a clean result. |
-| FR-109 — trademark/name search | **OUTSTANDING — owed by project owner** | See "Outstanding checks" below. |
+| FR-109 — trademark/name search | **OUTSTANDING for `Ori` only** | The eight working characters are named for their roles in ordinary English, so there is no distinctive mark to search. See the naming decision below. |
 | FR-111 — third-party licenses | **None used** | Enforced mechanically: `validateAssetPath` rejects any URL, absolute path, or path outside `characters/`, so no external asset can enter the catalog. |
 | FR-112 — post-optimization hash | **Complete** | SHA-256 of each shipped file recorded below; regenerate with `scripts/character-asset-hashes.sh`. |
 | FR-113 — concept art is not production art | **Enforced** | The concept PNGs under the gitignored `docs/design/` are never referenced by the catalog or shipped; production assets are the tracked SVGs under `internal/web/static/characters/`. |
 | FR-114 — assignment by ID, not filename | **Complete** | Agents store a catalog ID. Replacing an asset is a file swap plus a hash update here; no agent record changes. |
 
+## Naming decision (2026-08-04)
+
+**Working characters are named for the role they depict, not with invented
+proper nouns.** The catalog originally used single-word names — Sable, Piko,
+Rivet, Moss, Luma, Nox, Cairn, Tock — carried over from the concept lineup.
+Those were dropped before any search was run, for two reasons:
+
+1. Single common words are exactly where trademark collisions cluster, and a
+   quick look at the entertainment category surfaced plausible conflicts for
+   most of that set (existing game titles and named game characters). Each one
+   would have needed the FR-110 "rename or professionally clear" conversation.
+2. A role reads more usefully next to an agent's own name. `Character: Research
+   Archivist` tells a user something; `Character: Sable` does not.
+
+The names are now the roles themselves, and the catalog IDs are their slugs.
+`internal/charactercatalog/catalog_test.go` enforces both, so the policy cannot
+erode one entry at a time.
+
+This removes the FR-109 obligation for eight of the nine names outright: a
+descriptive role phrase in ordinary English is not a distinctive mark, and none
+of them is being used as a brand.
+
 ## Outstanding checks (block FR-128 acceptance)
 
-These cannot be completed from the build environment and are owed by the project
-owner before this feature is accepted:
+1. **FR-109 trademark / name search — the name `Ori` only.** This is the
+   product's own name as well as the guide character's, so the decision sits
+   above this feature. Search USPTO (and EUIPO/WIPO for other launch markets)
+   in Nice classes 9 (downloadable software), 42 (SaaS), and 41 (entertainment,
+   which is where a character name matters); add 25/28 only if merchandise is
+   ever in scope. Record the register searched, date, classes, and result below,
+   phrased per FR-108 as "no concerning match found in the searched index" —
+   never as "cleared". A conflict blocks the name until renamed or
+   professionally cleared (FR-110).
 
-1. **FR-109 trademark / name search** — for the name **Ori** and for each
-   user-visible character name (**Sable, Piko, Rivet, Moss, Luma, Nox, Cairn,
-   Tock**), across software, entertainment, and merchandise categories in the
-   intended launch markets. Record the register/date/result per name in the
-   "Name review" column below. A conflicting name blocks that character until
-   renamed (FR-110).
-2. **FR-107 reverse-image and semantic-similarity search** — optional for
-   hand-authored vector marks, but if raster exports are ever published (app
-   store art, marketing, merchandise) run TinEye or equivalent plus one semantic
-   visual search on the exported raster and record results here.
+   Known context worth capturing in the record: *Ori and the Blind Forest* /
+   *Ori and the Will of the Wisps* (Moon Studios / Xbox Game Studios) use **Ori**
+   as a named game character. That is a different category from productivity
+   software, but it is exactly the kind of match FR-110 expects to be
+   documented and reasoned about rather than passed over.
 
-Until item 1 is complete, no character name in this register should be treated as
-cleared, and FR-128 remains unsatisfied.
+2. **FR-107 reverse-image and semantic-similarity search** — not applicable to
+   hand-authored vector marks and recorded as not performed. If raster exports
+   are ever published (app-store art, marketing, merchandise), run TinEye or
+   equivalent plus one semantic visual search on the exported raster and record
+   the results here.
+
+Until item 1 is complete, the name `Ori` should not be treated as cleared, and
+FR-128 remains unsatisfied.
 
 ## Review template
 
@@ -104,53 +134,50 @@ Common to every V1 record below, stated once rather than repeated:
 - **Name review:** OUTSTANDING — "Ori" is also this application's own product name; the search must cover both the product and character use.
 - **Assets:** see `scripts/character-asset-hashes.sh` output committed below.
 
-### sable
+The eight working characters below share one name review, because they share one
+reason: each is named for the role it depicts, in ordinary English. **Name
+review: N/A — descriptive role phrase, not a distinctive mark, and not used as a
+brand.** See the naming decision above for what was dropped and why.
 
-- **Catalog ID:** `sable` · **Entry version:** 1
+### research-archivist
+
+- **Catalog ID:** `research-archivist` · **Entry version:** 1
 - **Brief:** wide-browed resident in a feather cape with a grounded stance, carrying a pocket ledger and reading lenses. Measured, precise, gently skeptical.
-- **Name review:** OUTSTANDING
 
-### piko
+### project-coordinator
 
-- **Catalog ID:** `piko` · **Entry version:** 1
+- **Catalog ID:** `project-coordinator` · **Entry version:** 1
 - **Brief:** round-tailed resident with a forward stance and open expression, wearing a cross-body planner satchel. Upbeat, concise, socially aware.
-- **Name review:** OUTSTANDING
 
-### rivet
+### product-builder
 
-- **Catalog ID:** `rivet` · **Entry version:** 1
+- **Catalog ID:** `product-builder` · **Entry version:** 1
 - **Brief:** compact resident with broad hands and planted feet, wearing a modular tool belt. Practical, direct, quietly playful.
-- **Name review:** OUTSTANDING
 
-### moss
+### team-caretaker
 
-- **Catalog ID:** `moss` · **Entry version:** 1
+- **Catalog ID:** `team-caretaker` · **Entry version:** 1
 - **Brief:** soft rectangular resident with relaxed shoulders, carrying a messenger pouch and a living sprout. Calm, reassuring, never vague.
-- **Name review:** OUTSTANDING
 
-### luma
+### insight-researcher
 
-- **Catalog ID:** `luma` · **Entry version:** 1
+- **Catalog ID:** `insight-researcher` · **Entry version:** 1
 - **Brief:** light-framed familiar with tall ears and folded crescent wings, holding a tabbed field notebook. Curious, lyrical, evidence-grounded.
-- **Name review:** OUTSTANDING
 
-### nox
+### decision-strategist
 
-- **Catalog ID:** `nox` · **Entry version:** 1
+- **Catalog ID:** `decision-strategist` · **Entry version:** 1
 - **Brief:** alert familiar with tall ears and a diagonal cape, holding a map tube and a decision token. Candid, economical, respectfully challenging.
-- **Name review:** OUTSTANDING
 
-### cairn
+### operations-keeper
 
-- **Catalog ID:** `cairn` · **Entry version:** 1
+- **Catalog ID:** `operations-keeper` · **Entry version:** 1
 - **Brief:** stacked rounded stones with a bright central core and modular utility pouches. Steady, transparent, low-drama.
-- **Name review:** OUTSTANDING
 
-### tock
+### automation-specialist
 
-- **Catalog ID:** `tock` · **Entry version:** 1
+- **Catalog ID:** `automation-specialist` · **Entry version:** 1
 - **Brief:** narrow bird-profiled construct with mechanical joints, a wind-up key, and a status lens. Exact, brisk, surprisingly personable.
-- **Name review:** OUTSTANDING
 
 ## Asset hashes
 

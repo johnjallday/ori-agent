@@ -34,14 +34,13 @@ const { FALLBACK, UPLOADED, CHARACTER } = AgentAvatar.MODES;
 
 function character(overrides = {}) {
   return {
-    id: 'sable',
-    name: 'Sable',
-    archetype: 'Research Archivist',
-    palette: { base: '#4f744a', accent: '#4f744a', ink: '#0f1a0e' },
+    id: 'research-archivist',
+    name: 'Research Archivist',
+        palette: { base: '#4f744a', accent: '#4f744a', ink: '#0f1a0e' },
     assets: {
-      portrait: '/characters/sable/portrait.svg',
-      sprite: '/characters/sable/sprite.svg',
-      static: '/characters/sable/static.svg'
+      portrait: '/characters/research-archivist/portrait.svg',
+      sprite: '/characters/research-archivist/sprite.svg',
+      static: '/characters/research-archivist/static.svg'
     },
     ...overrides
   };
@@ -59,7 +58,7 @@ test('an explicit character mode wins even when an upload is present', () => {
   );
   assert.equal(res.mode, CHARACTER);
   assert.equal(res.reason, 'ok');
-  assert.equal(res.character.id, 'sable');
+  assert.equal(res.character.id, 'research-archivist');
 });
 
 test('an explicit uploaded mode wins even when a character is selected', () => {
@@ -136,7 +135,7 @@ test('a curated portrait renders as a lazily decoded image', () => {
     size: 72
   });
   assert.ok(html.includes('agent-avatar--character'));
-  assert.ok(html.includes('/characters/sable/portrait.svg'));
+  assert.ok(html.includes('/characters/research-archivist/portrait.svg'));
   assert.ok(html.includes('loading="lazy"'));
   assert.ok(html.includes('decoding="async"'));
 });
@@ -168,7 +167,7 @@ test('the character portrait is decorative for assistive technology', () => {
 
 test('the catalog id travels with the element for debugging and styling', () => {
   const html = AgentAvatar.markup(agent({ displayMode: CHARACTER, character: character() }), {});
-  assert.ok(html.includes('data-aa-character="sable"'));
+  assert.ok(html.includes('data-aa-character="research-archivist"'));
 });
 
 /* ---- safety ----------------------------------------------------------------- */
@@ -223,7 +222,7 @@ test('the same agent resolves identically at every size and on every surface', (
 
   // Home and the Gallery differ only in size, never in identity.
   for (const size of [54, 72, 88]) {
-    assert.ok(AgentAvatar.markup(input, { size }).includes('/characters/sable/portrait.svg'));
+    assert.ok(AgentAvatar.markup(input, { size }).includes('/characters/research-archivist/portrait.svg'));
   }
 });
 
@@ -246,7 +245,7 @@ test('switching modes never discards the other identity source', () => {
 
 test('a failed character portrait is replaced in place by the deterministic identity', () => {
   const host = {
-    dataset: { aaName: 'Atlas', aaSource: 'user', aaCharacter: 'sable' },
+    dataset: { aaName: 'Atlas', aaSource: 'user', aaCharacter: 'research-archivist' },
     className: 'agent-avatar agent-avatar--character agent-avatar--md',
     attributes: {},
     innerHTML: '<img>',

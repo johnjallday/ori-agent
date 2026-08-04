@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Decision Strategist">
+  <!-- Reduced-motion variant of sprite.svg: tail at rest (FR-120). -->
+  <circle cx="24" cy="24" r="24" fill="#e2d9e6"/>
+  <g stroke="#170e19" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M32 38 q13 -1 11 -12" fill="none" stroke-width="5.6"/>
+    <path d="M32 38 q13 -1 11 -12" fill="none" stroke="#6c4b74" stroke-width="3"/>
+    <path d="M14 46 q0-17 10-17 q10 0 10 17 z" fill="#f6f1f7"/>
+    <path d="M13 30 q11 -6 22 1 l-3 15 q-8 3 -16 0 z" fill="#6c4b74"/>
+    <circle cx="24" cy="19" r="11" fill="#f6f1f7"/>
+    <path d="M16 11 l-2 -13 l11 7 z" fill="#f6f1f7"/>
+    <path d="M32 11 l2 -13 l-11 7 z" fill="#f6f1f7"/>
+  </g>
+  <path d="M18 18 q2.5 -3 5 0" fill="none" stroke="#170e19" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M26 18 q2.5 -3 5 0" fill="none" stroke="#170e19" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

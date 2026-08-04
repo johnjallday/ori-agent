@@ -105,6 +105,42 @@ func TestCharacterCarriesNoCapabilityFields(t *testing.T) {
 	}
 }
 
+// Working characters are named for the role they depict, not with invented
+// proper nouns.
+//
+// Invented names were dropped deliberately: a single common word is exactly
+// where trademark collisions cluster, and a role reads more usefully next to
+// the agent's own name anyway. This test keeps the policy from eroding one
+// entry at a time (PRD FR-109, and the naming decision in
+// docs/CHARACTER_ASSET_PROVENANCE.md).
+func TestWorkingCharacterNamesAreDescriptiveRoles(t *testing.T) {
+	for _, ch := range MustLoad().Working() {
+		if !strings.Contains(ch.Name, " ") {
+			t.Errorf("character %q is named %q — working characters use a descriptive "+
+				"role such as \"Research Archivist\", not a single invented name", ch.ID, ch.Name)
+		}
+		// The id should read as the slug of the name, so the two cannot drift.
+		slug := strings.ReplaceAll(strings.ToLower(ch.Name), " ", "-")
+		if string(ch.ID) != slug {
+			t.Errorf("character %q has id %q; expected %q to match its name", ch.Name, ch.ID, slug)
+		}
+	}
+}
+
+// Ori is the one proper noun in the catalog, and it is the product's own name
+// rather than an invented character name.
+func TestOnlyTheGuideUsesAProperName(t *testing.T) {
+	c := MustLoad()
+	if c.Guide().Name != "Ori" {
+		t.Fatalf("expected the guide to be Ori, got %q", c.Guide().Name)
+	}
+	for _, ch := range c.Working() {
+		if ch.Name == "Ori" {
+			t.Errorf("working character %q must not be called Ori", ch.ID)
+		}
+	}
+}
+
 func TestEveryShippedCharacterLinksAProvenanceRecord(t *testing.T) {
 	for _, ch := range MustLoad().Characters {
 		if !strings.Contains(ch.Provenance, "#") {
@@ -138,7 +174,6 @@ func base(t *testing.T) map[string]any {
 			"name":           strings.ToUpper(id[:1]) + id[1:],
 			"family":         "resident",
 			"family_label":   "Resident",
-			"archetype":      "Archivist",
 			"purpose":        "Finds sources.",
 			"description":    "A resident holding a ledger.",
 			"silhouette":     "Wide brow",
@@ -212,7 +247,7 @@ func TestRejectsWorkingCharacterClaimingTheReservedGuideID(t *testing.T) {
 
 func TestRejectsMissingRequiredFields(t *testing.T) {
 	for _, field := range []string{
-		"name", "family", "family_label", "archetype", "purpose",
+		"name", "family", "family_label", "purpose",
 		"description", "silhouette", "signature_prop", "idle_behavior",
 		"sample_line", "provenance",
 	} {

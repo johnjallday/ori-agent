@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Operations Keeper">
+  <!--
+    Operations Keeper idle: the core brightens and dims. Decorative only — this pulse is a
+    fixed loop and never reflects real system state (FR-72, FR-7).
+  -->
+  <style>
+    .cairn-core { animation: cairn-pulse 3.8s ease-in-out infinite; }
+    @keyframes cairn-pulse { 0%,100% { opacity: .82; } 50% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .cairn-core { animation: none; opacity: 1; } }
+  </style>
+  <circle cx="24" cy="24" r="24" fill="#d6e5e3"/>
+  <g stroke="#07211f" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="10" y="32" width="28" height="14" rx="6" fill="#9db4b2"/>
+    <rect x="13" y="19" width="22" height="15" rx="7" fill="#b6c9c7"/>
+    <rect x="16" y="6" width="16" height="15" rx="6" fill="#c9d9d7"/>
+    <path d="M18 7 q4 -4 7 -1 q3 -3 6 1 z" fill="#6f9a52"/>
+    <circle class="cairn-core" cx="24" cy="26" r="5.4" fill="#43b8b0"/>
+  </g>
+  <circle class="cairn-core" cx="24" cy="26" r="2.4" fill="#c8f2ee"/>
+  <circle cx="21" cy="14" r="2" fill="#07211f"/>
+  <circle cx="28" cy="14" r="2" fill="#07211f"/>
+</svg>

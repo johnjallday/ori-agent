@@ -46,7 +46,6 @@ type characterDTO struct {
 	Name         string   `json:"name"`
 	Family       string   `json:"family"`
 	FamilyLabel  string   `json:"family_label"`
-	Archetype    string   `json:"archetype"`
 	Purpose      string   `json:"purpose"`
 	Description  string   `json:"description"`
 	Silhouette   string   `json:"silhouette"`
@@ -74,7 +73,6 @@ func toDTO(ch charactercatalog.Character) characterDTO {
 	d.Name = ch.Name
 	d.Family = ch.Family
 	d.FamilyLabel = ch.FamilyLabel
-	d.Archetype = ch.Archetype
 	d.Purpose = ch.Purpose
 	d.Description = ch.Description
 	d.Silhouette = ch.Silhouette

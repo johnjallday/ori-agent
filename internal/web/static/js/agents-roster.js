@@ -1063,12 +1063,9 @@
     // Only label the character when it is the identity actually being shown;
     // a retained-but-inactive choice would otherwise contradict the portrait.
     if (vm.displayMode && vm.displayMode !== window.AgentAvatar.MODES.CHARACTER) return '';
-    return (
-      '<span class="agent-card__character">Character: ' +
-      esc(entry.name) +
-      (entry.archetype ? ' · ' + esc(entry.archetype) : '') +
-      '</span>'
-    );
+    // The character name is already the descriptive role, so there is nothing
+    // to append after it.
+    return '<span class="agent-card__character">Character: ' + esc(entry.name) + '</span>';
   }
 
   // Concise spoken summary for the open control (PRD FR84). The card's own text
@@ -3794,7 +3791,7 @@
 
     if (res.mode === window.AgentAvatar.MODES.CHARACTER && res.character) {
       text = 'Character: ' + res.character.name;
-      if (res.character.archetype) text += ' · ' + res.character.archetype;
+      if (res.character.familyLabel) text += ' · ' + res.character.familyLabel;
     } else if (res.reason === 'character-asset-missing' || res.reason === 'character-missing') {
       text = 'Character art unavailable — showing the generated identity';
     }
