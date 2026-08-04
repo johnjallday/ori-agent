@@ -209,6 +209,14 @@ func (h *GuideHandler) answer(question, route string) GuideResponse {
 		return resp
 	}
 
+	// A named real record beats a generic topic: someone asking about "the
+	// Launch workspace" wants that workspace, not the definition of the word
+	// (FR-32). Checked after the work-request test so "delete the Launch
+	// workspace" is still a handoff rather than an invitation to open it.
+	if dyn, ok := h.dynamicWorkspaceResponse(question, route); ok {
+		return dyn
+	}
+
 	topic, ok := FindGuideTopic(question)
 	if !ok {
 		// An honest miss. The approved topics are offered instead of a guess.

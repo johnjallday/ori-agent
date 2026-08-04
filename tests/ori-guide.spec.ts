@@ -28,6 +28,10 @@ async function skipOnboarding(page: Page) {
 async function openGuide(page: Page) {
   await page.locator('#oriGuideLauncher').click();
   await expect(page.locator('#oriGuidePanel')).toBeVisible();
+  // Opening fires its own greeting request. Wait for it to land before asking
+  // anything: otherwise its late response can satisfy the next wait, and the
+  // assertions run against the greeting instead of the answer.
+  await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', /.+/);
 }
 
 async function ask(page: Page, question: string) {
@@ -146,6 +150,38 @@ test.describe('Ori Guide explanations and destinations', () => {
     const topic = page.locator('.ori-guide__topic', { hasText: 'Agent' }).first();
     await topic.click();
     await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'answered');
+  });
+});
+
+test.describe('Ori Guide dynamic destinations', () => {
+  test('naming a real workspace offers to open that workspace', async ({ page, request }) => {
+    const name = `PW Guide WS ${Date.now()}`;
+    const created = await request.post(`/api/workspaces`, {
+      data: { name, workspace_preset: 'general' }
+    });
+    expect(created.ok()).toBeTruthy();
+    const id = (await created.json())?.folder?.id;
+    expect(id).toBeTruthy();
+
+    await gotoPage(page, '/');
+    await openGuide(page);
+    await ask(page, `where is my ${name} workspace`);
+
+    const action = page.locator('.ori-guide__action', { hasText: name });
+    await expect(action).toHaveAttribute('href', `/workspace/${id}`);
+  });
+
+  test('a workspace that does not exist yields no destination', async ({ page }) => {
+    await gotoPage(page, '/');
+    await openGuide(page);
+    await ask(page, 'open my Nonexistent Zeta Workspace');
+
+    const hrefs = await page
+      .locator('.ori-guide__action')
+      .evaluateAll(els => els.map(el => el.getAttribute('href') || ''));
+    for (const href of hrefs) {
+      expect(href).not.toMatch(/^\/workspace\//);
+    }
   });
 });
 

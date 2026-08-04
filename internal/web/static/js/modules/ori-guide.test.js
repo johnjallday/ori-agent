@@ -176,6 +176,40 @@ test('every registered coachmark key is a plain token, never a selector', () => 
   }
 });
 
+// Mirrors registeredCoachmarkKeys in internal/agenthttp/ori_guide_topics.go.
+// A key on one side and not the other means either a coachmark the browser
+// cannot resolve, or a selector no topic will ever ask for.
+test('the registry matches the keys the server knows about', () => {
+  const { coachmarks } = load();
+  const expected = [
+    'new_agent',
+    'workspace_manager',
+    'quick_capture',
+    'view_toggle',
+    'new_workspace',
+    'agent_toolbox',
+    'action_center_review',
+    'add_mcp_server'
+  ].sort();
+
+  assert.deepEqual([...coachmarks.keys()].sort(), expected);
+});
+
+test('every registry entry names at least one route and a selector', () => {
+  const { coachmarks } = load();
+  for (const key of coachmarks.keys()) {
+    const entry = coachmarks.REGISTRY[key];
+    assert.ok(Array.isArray(entry.routes) && entry.routes.length > 0, `${key} has no routes`);
+    assert.ok(entry.selector && entry.selector.length > 0, `${key} has no selector`);
+    // A human-readable label so the panel can name the control it is pointing
+    // at, rather than relying on the highlight alone (FR-118).
+    assert.ok(entry.label && entry.label.length > 0, `${key} has no label`);
+    for (const route of entry.routes) {
+      assert.ok(route.startsWith('/'), `${key} route ${route} is not an absolute path`);
+    }
+  }
+});
+
 test('a key is only supported on the routes that own its control', () => {
   const { coachmarks } = load();
   assert.ok(coachmarks.supports('new_agent', '/agents'));

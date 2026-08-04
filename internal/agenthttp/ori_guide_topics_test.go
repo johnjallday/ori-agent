@@ -54,6 +54,34 @@ func TestApprovedConceptCatalogCoversTheRequiredConcepts(t *testing.T) {
 	}
 }
 
+// A topic pointing at a coachmark the browser cannot resolve would offer a
+// "Show me where" that does nothing. The mirrored list in
+// ori-guide-coachmarks.test.js checks the other direction.
+func TestEveryTopicCoachmarkIsRegistered(t *testing.T) {
+	known := map[CoachmarkKey]bool{}
+	for _, k := range registeredCoachmarkKeys {
+		known[k] = true
+	}
+	for _, topic := range GuideTopics() {
+		if topic.Coachmark == "" {
+			continue
+		}
+		if !known[topic.Coachmark] {
+			t.Errorf("topic %q uses unregistered coachmark %q", topic.Key, topic.Coachmark)
+		}
+	}
+}
+
+func TestCoachmarkKeysArePlainTokens(t *testing.T) {
+	for _, key := range registeredCoachmarkKeys {
+		for _, bad := range []string{"#", ".", "[", " ", ">", "/"} {
+			if strings.Contains(string(key), bad) {
+				t.Errorf("coachmark key %q looks like a selector", key)
+			}
+		}
+	}
+}
+
 func TestTopicsHaveStableKeysAndUsableCopy(t *testing.T) {
 	seen := map[string]bool{}
 	for _, topic := range GuideTopics() {

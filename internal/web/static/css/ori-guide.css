@@ -32,7 +32,13 @@
   --ori-paper: #f6ead6;
   --ori-paper-deep: #e8d6b4;
   --ori-ink: #3b2a12;
+  /* Decorative accent: borders, outlines, the coachmark ring. Never sits behind
+     text. */
   --ori-accent: #bd7c24;
+  /* Text-bearing accent. The decorative amber gives only 3.45:1 against white,
+     which fails WCAG AA; this darker amber reaches 5.9:1. Anything that puts
+     light text on the accent must use this one (FR-119). */
+  --ori-accent-strong: #8a5a15;
   --ori-line: #d8c19b;
   --ori-surface: #fffaf1;
 
@@ -190,9 +196,9 @@
 .ori-guide__send {
   flex: none;
   padding: 8px 14px;
-  border: 1px solid var(--ori-accent);
+  border: 1px solid var(--ori-accent-strong);
   border-radius: 9px;
-  background: var(--ori-accent);
+  background: var(--ori-accent-strong);
   color: #fff;
   font-weight: 600;
   cursor: pointer;

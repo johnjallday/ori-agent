@@ -47,7 +47,36 @@
       routes: ['/agents'],
       selector: '#newAgentBtn',
       label: 'New Agent'
+    },
+    agent_toolbox: {
+      routes: ['/agents'],
+      // The Inspector's Toolbox tab. Present only once an agent is open, which
+      // resolve() handles: an absent target degrades to the destination rather
+      // than marking nothing.
+      selector: '#tab-toolbox',
+      label: "an agent's Toolbox tab"
+    },
+    action_center_review: {
+      routes: ['/action-center'],
+      selector: '#action-center-list',
+      label: 'the Action Center review list'
+    },
+    add_mcp_server: {
+      routes: ['/mcp'],
+      selector: '#addServerBtn',
+      label: 'Add MCP Server'
     }
+    // Deliberately absent:
+    //
+    // /vaults — its controls are rendered by page script with no stable ids, so
+    // any selector here would be a guess that breaks silently.
+    //
+    // account connection — the connect control lives on /settings, but the
+    // Connection topic's canonical destination is /vaults, and the server only
+    // offers a coachmark on a topic's own route. An entry here would never fire.
+    //
+    // Both fall back to the canonical destination, which is the documented
+    // behaviour rather than a missing feature (PRD FR-43).
   };
 
   function normalizeRoute(route) {

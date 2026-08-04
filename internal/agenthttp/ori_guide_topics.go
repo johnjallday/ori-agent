@@ -23,7 +23,25 @@ const (
 	CoachmarkQuickCapture    CoachmarkKey = "quick_capture"
 	CoachmarkViewToggle      CoachmarkKey = "view_toggle"
 	CoachmarkNewWorkspace    CoachmarkKey = "new_workspace"
+	CoachmarkAgentToolbox    CoachmarkKey = "agent_toolbox"
+	CoachmarkActionCenter    CoachmarkKey = "action_center_review"
+	CoachmarkAddMCPServer    CoachmarkKey = "add_mcp_server"
 )
+
+// registeredCoachmarkKeys is the complete set the browser knows how to resolve.
+// It mirrors the REGISTRY in ori-guide-coachmarks.js; the two are checked
+// against each other by tests on both sides, so a key added to one and not the
+// other fails rather than silently producing a coachmark that never appears.
+var registeredCoachmarkKeys = []CoachmarkKey{
+	CoachmarkNewAgent,
+	CoachmarkWorkspaceManger,
+	CoachmarkQuickCapture,
+	CoachmarkViewToggle,
+	CoachmarkNewWorkspace,
+	CoachmarkAgentToolbox,
+	CoachmarkActionCenter,
+	CoachmarkAddMCPServer,
+}
 
 // SetupStep is the closed set of app-setup actions Ori may offer.
 //
@@ -128,8 +146,9 @@ var guideTopics = []GuideTopic{
 		Label: "Toolbox",
 		Explanation: "An agent's Toolbox is the exact set of skills and tools that agent can use. " +
 			"It is per-agent: giving one agent a tool does not give it to the others.",
-		NavKey:  "agents",
-		Aliases: []string{"toolbox", "tools an agent has", "agent tools", "capabilities"},
+		NavKey:    "agents",
+		Coachmark: CoachmarkAgentToolbox,
+		Aliases:   []string{"toolbox", "tools an agent has", "agent tools", "capabilities"},
 	},
 	{
 		Key:   "skill",
@@ -144,9 +163,10 @@ var guideTopics = []GuideTopic{
 		Label: "Tool",
 		Explanation: "A tool is a concrete capability an agent can call, usually provided by an MCP server. " +
 			"Tools are configured once and then bound to the agents and workspaces that should have them.",
-		NavKey:  "mcp",
-		Setup:   SetupOpenToolCatalog,
-		Aliases: []string{"tool", "tools", "mcp", "mcp server", "connectors", "what is a tool"},
+		NavKey:    "mcp",
+		Setup:     SetupOpenToolCatalog,
+		Coachmark: CoachmarkAddMCPServer,
+		Aliases:   []string{"tool", "tools", "mcp", "mcp server", "connectors", "what is a tool"},
 	},
 	{
 		Key:   "vault",
@@ -179,8 +199,9 @@ var guideTopics = []GuideTopic{
 		Label: "Action Center",
 		Explanation: "Action Center collects findings your workspaces surfaced and lets you triage them in " +
 			"one place, so nothing important stays buried in a single workspace.",
-		NavKey:  "action-center",
-		Aliases: []string{"action center", "action centre", "actions", "opportunities", "triage"},
+		NavKey:    "action-center",
+		Coachmark: CoachmarkActionCenter,
+		Aliases:   []string{"action center", "action centre", "actions", "opportunities", "triage"},
 	},
 	{
 		Key:   "personal-hq",
