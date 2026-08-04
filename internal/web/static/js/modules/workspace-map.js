@@ -90,14 +90,78 @@
     return multiIds().length;
   }
 
-  // curated, distinct building palettes (picked by stable id hash)
+  // Curated cottage palettes, picked by stable id hash so a workspace keeps its
+  // colour across refresh, add, and remove.
+  //
+  // Warm and earthy — plaster walls under a tiled roof — to match the cozy
+  // visual language (PRD FR-3). Colour is decoration only: it is derived from
+  // the workspace id and says nothing about status, which is carried by the
+  // text flag and LED beside the tile (FR-6/FR-7).
+  //
+  // `wall`/`wallShade` are the two lit sides, `roof`/`roofShade` the two roof
+  // planes, `trim` the door and window frame, `plot` the ground the cottage
+  // sits on.
   var PALETTE = [
-    { key: '#4f9bf0', floor: '#0c2238', top: '#2a5da0', l: '#16365e', r: '#0e2748' }, // blue
-    { key: '#e8b54b', floor: '#332708', top: '#caa23f', l: '#5e4a16', r: '#48380e' }, // gold
-    { key: '#e2864d', floor: '#3a1f08', top: '#c66a34', l: '#6e3a18', r: '#522c12' }, // orange
-    { key: '#7b6cf0', floor: '#241c44', top: '#6457c4', l: '#3a306b', r: '#2b2452' }, // purple
-    { key: '#46d39a', floor: '#0c3326', top: '#2f9d72', l: '#15503c', r: '#0f3d2e' }, // green
-    { key: '#4ec5e6', floor: '#0b2a33', top: '#2f8ba6', l: '#134350', r: '#0d3540' } // teal
+    // slate blue
+    {
+      key: '#6f96b8',
+      plot: '#3a4a52',
+      wall: '#cfd8de',
+      wallShade: '#a8b6bf',
+      roof: '#4d6f88',
+      roofShade: '#3a566b',
+      trim: '#2f4657'
+    },
+    // gold
+    {
+      key: '#d3a44a',
+      plot: '#4d4126',
+      wall: '#ecdfc2',
+      wallShade: '#c8b795',
+      roof: '#a8762c',
+      roofShade: '#835b20',
+      trim: '#5b3f16'
+    },
+    // clay
+    {
+      key: '#c0714c',
+      plot: '#4c3428',
+      wall: '#eddbcd',
+      wallShade: '#c9b0a0',
+      roof: '#a2543a',
+      roofShade: '#7d3f2b',
+      trim: '#57291c'
+    },
+    // plum
+    {
+      key: '#8f78ad',
+      plot: '#3f3550',
+      wall: '#ded6e6',
+      wallShade: '#b8adc4',
+      roof: '#6b568a',
+      roofShade: '#52416b',
+      trim: '#3a2d4d'
+    },
+    // moss
+    {
+      key: '#6a9a5f',
+      plot: '#33452f',
+      wall: '#dde6d3',
+      wallShade: '#b5c2aa',
+      roof: '#4c7444',
+      roofShade: '#3a5a34',
+      trim: '#2a4125'
+    },
+    // teal
+    {
+      key: '#5c9aa3',
+      plot: '#2f474a',
+      wall: '#d5e4e4',
+      wallShade: '#adc2c3',
+      roof: '#417078',
+      roofShade: '#32565c',
+      trim: '#24403f'
+    }
   ];
 
   function escapeHtml(value) {
@@ -310,22 +374,57 @@
     );
   }
 
+  // One workspace, drawn as a cottage on its own plot.
+  //
+  // Isometric, viewed corner-on: two plaster walls below, a hip roof above
+  // meeting at a front ridge, with a door and a shuttered window. The footprint
+  // and viewBox are unchanged from the block it replaces, so tile geometry,
+  // spacing, and the selection ellipse all still line up (PRD FR-3/FR-9).
+  //
+  // Nothing here encodes state. The building never changes with activity,
+  // attention, or setup — those are carried by the text flag and LED beside the
+  // tile, so a lit window can never imply an agent is working (FR-6/FR-7).
   function structSVG(pal) {
     return (
       '<svg class="ws-map-struct" width="112" height="92" viewBox="0 0 118 96" aria-hidden="true">' +
+      // plot
       '<polygon points="59,86 110,60 59,34 8,60" fill="' +
-      pal.floor +
+      pal.plot +
       '" stroke="' +
       pal.key +
-      '" stroke-opacity=".5"/>' +
-      '<polygon points="34,54 59,68 59,40 34,26" fill="' +
-      pal.l +
+      '" stroke-opacity=".45"/>' +
+      // left wall (shaded) and right wall (lit)
+      '<polygon points="34,40 34,54 59,68 59,54" fill="' +
+      pal.wallShade +
       '"/>' +
-      '<polygon points="84,54 59,68 59,40 84,26" fill="' +
-      pal.r +
+      '<polygon points="84,40 84,54 59,68 59,54" fill="' +
+      pal.wall +
       '"/>' +
-      '<polygon points="59,26 84,40 59,54 34,40" fill="' +
-      pal.top +
+      // hip roof: two visible planes meeting at the front ridge
+      '<polygon points="34,40 59,54 59,16" fill="' +
+      pal.roofShade +
+      '"/>' +
+      '<polygon points="84,40 59,54 59,16" fill="' +
+      pal.roof +
+      '"/>' +
+      // roof eaves, a thin lip that reads as overhang at small sizes
+      '<polyline points="34,40 59,54 84,40" fill="none" stroke="' +
+      pal.trim +
+      '" stroke-opacity=".55" stroke-width="1.5"/>' +
+      // door on the shaded wall
+      '<polygon points="42,48 50,52 50,63 42,59" fill="' +
+      pal.trim +
+      '"/>' +
+      // shuttered window on the lit wall
+      '<polygon points="66,52 74,48 74,56 66,60" fill="' +
+      pal.trim +
+      '" fill-opacity=".85"/>' +
+      // chimney
+      '<polygon points="70,25 76,28 76,36 70,33" fill="' +
+      pal.roofShade +
+      '"/>' +
+      '<polygon points="70,25 76,28 79,26 73,23" fill="' +
+      pal.trim +
       '"/>' +
       '</svg>'
     );
