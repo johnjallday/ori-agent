@@ -11,7 +11,9 @@ let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
 let systemModelPreferencePromise = null;
 let cachedSystemModelPreference = null;
-const SYSTEM_ASSISTANT_AGENT_NAME = 'Ori';
+// The working system assistant. Renamed from "Ori" when that name was reserved
+// for the app guide, which is a character identity rather than an agent record.
+const SYSTEM_ASSISTANT_AGENT_NAME = 'Workspace Manager';
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 const agentCreationCapabilityState = {
   mcpServers: [],

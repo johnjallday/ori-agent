@@ -85,7 +85,7 @@
       preferredPlugins: [],
       preferredTypes: ['general'],
       defaultType: 'general',
-      suggestedName: 'Ori',
+      suggestedName: 'Workspace Manager',
       tags: ['activity', 'introspection']
     },
     app_navigation: {
@@ -95,7 +95,7 @@
       preferredPlugins: [],
       preferredTypes: ['general'],
       defaultType: 'general',
-      suggestedName: 'Ori',
+      suggestedName: 'Workspace Manager',
       tags: ['navigation']
     }
   };
@@ -1108,7 +1108,7 @@
     var label = els.identityName ? String(els.identityName.textContent || '').trim() : '';
     if (label) return label;
     if (homeAssistantState.workspaceEntryAgentName) return getWorkspaceHomeAssistantDisplayName();
-    return 'Ori';
+    return 'Workspace Manager';
   }
 
   function syncHomeAssistantModalHeading() {
@@ -1324,7 +1324,10 @@
     button.classList.toggle('modern-btn-primary', active);
     button.classList.toggle('modern-btn-secondary', !active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    button.setAttribute('title', active ? 'Reopen Ask Ori activity' : 'Open Ask Ori activity');
+    button.setAttribute(
+      'title',
+      active ? 'Reopen Workspace Manager activity' : 'Open Workspace Manager activity'
+    );
 
     var label = button.querySelector('[data-home-assistant-launcher-label]');
     if (label) {
@@ -1468,7 +1471,7 @@
 
   function buildHomeAssistantPlaceholder(routeContext) {
     if (!routeContext) {
-      return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Ask Ori to do something…';
+      return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Give Workspace Manager something to do…';
     }
     var displayName = getWorkspaceHomeAssistantDisplayName();
     var workspaceMode = getWorkspacePromptMode();
@@ -1482,7 +1485,7 @@
       if (workspaceMode === 'note') return 'Save a workspace note… (/task creates a task, /ask asks)';
       return 'Create a task for ' + displayName + '… (/ask asks, /note saves a note)';
     }
-    return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Ask Ori to do something…';
+    return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Give Workspace Manager something to do…';
   }
 
   function renderHomeAssistantWorkspaceIdentity(routeContext) {

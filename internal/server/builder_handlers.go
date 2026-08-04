@@ -501,6 +501,10 @@ func (b *ServerBuilder) initializeHandlers() {
 	// manifest. Log it and leave the handler nil rather than refusing to boot:
 	// characters are presentation, and every surface falls back to the
 	// deterministic avatar identity without them (FR-14/FR-74).
+	// Ori Guide. Its workspace store is attached in the workspace phase; nothing
+	// it does today needs one.
+	b.oriGuideHandler = agenthttp.NewGuideHandler()
+
 	if characterHandler, err := characterhttp.New(); err != nil {
 		logger.Error("Character catalog failed to load; portraits will fall back to generated identities", logger.Fields{"error": err})
 	} else {

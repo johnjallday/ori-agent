@@ -1,0 +1,329 @@
+/*
+ * Ori Guide — launcher and panel.
+ *
+ * The guide is visually distinct from the Home command box on purpose: that box
+ * is Workspace Manager and it does real work, while this is navigation and
+ * explanation. Warm paper tones and the character portrait mark the guide;
+ * the work surface keeps the app's operational styling (PRD FR-27/FR-81).
+ *
+ * Wide layouts get a non-blocking panel so the destination Ori is describing
+ * stays visible; narrow layouts get a bottom sheet (FR-79).
+ */
+
+.ori-guide {
+  --ori-paper: #f6ead6;
+  --ori-paper-deep: #e8d6b4;
+  --ori-ink: #3b2a12;
+  --ori-accent: #bd7c24;
+  --ori-line: #d8c19b;
+  --ori-surface: #fffaf1;
+
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1040;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  font-size: 14px;
+}
+
+/* ---- launcher -------------------------------------------------------------- */
+
+.ori-guide__launcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  cursor: pointer;
+}
+
+.ori-guide__launcher:hover {
+  background: var(--ori-surface);
+}
+
+.ori-guide__launcher:focus-visible,
+.ori-guide__close:focus-visible,
+.ori-guide__send:focus-visible,
+.ori-guide__action:focus-visible,
+.ori-guide__topic:focus-visible {
+  outline: 3px solid var(--ori-accent);
+  outline-offset: 2px;
+}
+
+.ori-guide__sprite,
+.ori-guide__portrait {
+  display: block;
+  flex: none;
+}
+
+.ori-guide__launcher-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+
+.ori-guide__launcher-name {
+  font-weight: 700;
+}
+
+/* The role is stated on the launcher itself, so a user knows this is a guide
+   before opening it (FR-22). */
+.ori-guide__launcher-role {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* ---- panel ------------------------------------------------------------------- */
+
+.ori-guide__panel {
+  width: min(380px, calc(100vw - 40px));
+  max-height: min(560px, calc(100vh - 120px));
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--ori-line);
+  border-radius: 14px;
+  background: var(--ori-surface);
+  color: var(--ori-ink);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 26%);
+}
+
+.ori-guide__panel[hidden] {
+  display: none;
+}
+
+.ori-guide__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.ori-guide__ident {
+  flex: 1;
+  min-width: 0;
+}
+
+.ori-guide__title {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.ori-guide__role {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.ori-guide__close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ori-line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The boundary statement is part of the panel, not a tooltip: it has to be
+   readable before the user asks anything (FR-22/FR-27). */
+.ori-guide__boundary {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-left: 3px solid var(--ori-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--ori-paper);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ori-guide__form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ori-guide__input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--ori-ink);
+  font: inherit;
+}
+
+.ori-guide__send {
+  flex: none;
+  padding: 8px 14px;
+  border: 1px solid var(--ori-accent);
+  border-radius: 9px;
+  background: var(--ori-accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ori-guide__send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ori-guide__location {
+  margin: 0 0 6px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.ori-guide__answer {
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+
+.ori-guide__answer--note {
+  padding-top: 8px;
+  border-top: 1px dashed var(--ori-line);
+  font-size: 12.5px;
+  opacity: 0.9;
+}
+
+.ori-guide__answer.is-pending {
+  opacity: 0.7;
+}
+
+.ori-guide__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ori-guide__action {
+  padding: 7px 12px;
+  border: 1px solid var(--ori-accent);
+  border-radius: 9px;
+  background: var(--ori-paper);
+  color: var(--ori-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ori-guide__action:hover {
+  background: var(--ori-paper-deep);
+  color: var(--ori-ink);
+}
+
+.ori-guide__suggest-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.ori-guide__topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ori-guide__topic {
+  padding: 5px 10px;
+  border: 1px solid var(--ori-line);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ori-guide__topic:hover {
+  background: var(--ori-paper);
+}
+
+/* ---- coachmark ---------------------------------------------------------------- */
+
+/* Marks a control without touching it. The outline plus offset reads on any
+   background, and the accompanying panel text names the control, so the
+   spotlight never has to carry the meaning by colour alone (FR-118). */
+.is-ori-coachmark {
+  outline: 3px solid var(--ori-accent, #bd7c24) !important;
+  outline-offset: 3px !important;
+  border-radius: 6px;
+  animation: ori-coachmark-pulse 1.6s ease-in-out 3;
+}
+
+@keyframes ori-coachmark-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(189 124 36 / 45%);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgb(189 124 36 / 0%);
+  }
+}
+
+/* ---- dark theme ----------------------------------------------------------------- */
+
+[data-bs-theme="dark"] .ori-guide {
+  --ori-paper: #2f2820;
+  --ori-paper-deep: #3b3227;
+  --ori-ink: #f2e7d5;
+  --ori-line: #574a38;
+  --ori-surface: #241f19;
+}
+
+[data-bs-theme="dark"] .ori-guide__input {
+  background: #1b1712;
+  color: var(--ori-ink);
+}
+
+/* ---- narrow layout ---------------------------------------------------------------- */
+
+/* Below this width the panel becomes a bottom sheet spanning the viewport,
+   because a floating 380px card leaves no usable room beside it (FR-79). */
+@media (max-width: 560px) {
+  .ori-guide {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    align-items: stretch;
+  }
+
+  .ori-guide__launcher {
+    align-self: flex-end;
+  }
+
+  .ori-guide__panel {
+    width: 100%;
+    max-height: min(70vh, calc(100vh - 100px));
+  }
+}
+
+/* ---- reduced motion ----------------------------------------------------------------- */
+
+/* The coachmark's pulse is decoration; the outline alone still identifies the
+   control, so nothing is lost by removing the animation (FR-120). */
+@media (prefers-reduced-motion: reduce) {
+  .is-ori-coachmark {
+    animation: none;
+  }
+}

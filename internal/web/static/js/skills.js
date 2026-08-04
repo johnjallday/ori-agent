@@ -489,7 +489,9 @@ async function loadAgents() {
     }
     const data = await response.json();
     const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
-    const assistantAgent = (data.agents || []).find(agent => getAgentDisplayName(agent) === 'Ori');
+    const assistantAgent = (data.agents || []).find(
+      agent => getAgentDisplayName(agent) === 'Workspace Manager'
+    );
     const selected = sessionAgent || defaultAgentName || getAgentDisplayName(assistantAgent);
     populateAgentSelect(data.agents || [], selected);
   } catch (error) {

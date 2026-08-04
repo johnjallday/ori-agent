@@ -283,6 +283,10 @@ type ServerBuilder struct {
 
 	// characterHandler serves the read-only curated character catalog.
 	characterHandler *characterhttp.Handler
+	// oriGuideHandler serves the setup-and-navigation guide. Built with the
+	// other handlers; its workspace store is attached in the later phase that
+	// creates it.
+	oriGuideHandler *agenthttp.GuideHandler
 
 	// Daily Brief configuration, generation, and scheduling
 	dailyBriefService          *dailybrief.Service
@@ -505,6 +509,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		PersonalHQ:            b.personalHQHandler,
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,
+		OriGuide:              b.oriGuideHandler,
 		DownloadsJanitor:      b.downloadsJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		SetupWizard:           b.setupWizardHandler,

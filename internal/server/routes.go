@@ -958,6 +958,16 @@ func registerSkillsRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Characters != nil {
 		mux.HandleFunc("/api/characters", s.Handlers.Characters.ServeCatalog)
 	}
+
+	// =============================================================================
+	// Ori Guide (setup and navigation only)
+	// =============================================================================
+	// Separate from the Home work surface by construction: this handler's action
+	// type cannot express a mutation and it holds no dependency able to perform
+	// one. Work requests come back as a handoff, never as an execution.
+	if s.Handlers.OriGuide != nil {
+		mux.Handle("/api/ori-guide", s.Handlers.OriGuide)
+	}
 }
 
 // registerPluginRoutes registers plugin bundle endpoints.
