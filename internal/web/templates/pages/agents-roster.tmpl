@@ -4,6 +4,7 @@
 {{template "head.tmpl" .}}
 <link rel="stylesheet" href="/css/tag-input.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
+<link rel="stylesheet" href="/css/character-picker.css">
 
 <body class="bg-light agents-roster-page" data-sidebar-default="hidden">
   <a class="skip-link" href="#roster-main">Skip to Main Content</a>
@@ -290,6 +291,10 @@
     </main>
   </div>
 
+  <!-- Mount point for the character picker. It is built on open and torn down
+       on close, so there is never a hidden copy of it in the page. -->
+  <div id="charPickerHost"></div>
+
   {{template "theme-init.tmpl" .}}
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/app.js"></script>
@@ -305,6 +310,7 @@
        before the roster controller so first paint already uses one identity. -->
   <script defer src="/js/modules/agent-avatar.js"></script>
   <script defer src="/js/modules/character-catalog.js"></script>
+  <script defer src="/js/modules/character-picker.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 
