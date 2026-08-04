@@ -5,6 +5,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
+	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -163,6 +164,10 @@ type HandlerFacade struct {
 	User        *userhttp.Handler
 	PersonalHQ  *personalhqhttp.Handler
 	DailyBrief  *dailybriefhttp.Handler
+	// Characters serves the read-only curated character catalog. It holds no
+	// store and exposes no mutation route; identity assignment is validated by
+	// the agent endpoints against the same catalog.
+	Characters *characterhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

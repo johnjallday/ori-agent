@@ -300,6 +300,10 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		// prompt/skills come from the entry. Domain is Specialist-only.
 		CatalogRole string `json:"catalog_role,omitempty"`
 		Domain      string `json:"domain,omitempty"`
+		// Character is the optional curated identity chosen during creation.
+		// Skipping it is a first-class path: the agent simply renders the
+		// deterministic fallback until someone picks one (FR-56/FR-69).
+		Character *characterIdentityRequest `json:"character,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -333,6 +337,14 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the character choice before the agent exists, so a bad selection
+	// is a clean 400 rather than a half-configured agent left behind.
+	createMeta := &types.AgentMetadata{}
+	if err := applyCharacterIdentity(createMeta, req.Character); err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
+	}
+
 	// Build config from request
 	config := &store.CreateAgentConfig{
 		Type:            req.Type,
@@ -354,7 +366,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set metadata if provided
-	if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" || req.Favorite || req.RoutingProfile != nil {
+	if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" || req.Favorite || req.RoutingProfile != nil || createMeta.Character != nil {
 		agent, ok := h.State.GetAgent(req.Name)
 		if ok && agent != nil {
 			if agent.Metadata == nil {
@@ -365,6 +377,10 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 			agent.Metadata.AvatarColor = req.AvatarColor
 			agent.Metadata.Favorite = req.Favorite
 			agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
+			// Persisted in the same successful creation flow as the rest of the
+			// configuration, so a chosen character is never lost between
+			// creating the agent and opening it (FR-93).
+			agent.Metadata.Character = createMeta.Character
 			if err := h.State.SetAgent(req.Name, agent); err != nil {
 				logger.Error("Failed to set metadata", logger.Fields{"err": err})
 			}
@@ -435,6 +451,10 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		// ExpertMode lifts stage-based skill slot caps for this agent (PRD FR13).
 		// Metadata-only; does not touch model/prompt/skills.
 		ExpertMode *bool `json:"expert_mode,omitempty"`
+		// Character selects the agent's curated visual identity and optional
+		// tone layer. Presentation only: it never changes role, model, tools,
+		// skills, permissions, or the uploaded avatar file (FR-64).
+		Character *characterIdentityRequest `json:"character,omitempty"`
 		// ExpectedVersion is the optimistic-concurrency token the client received
 		// from GET /api/agents/{name}. When present and no longer matching the
 		// stored agent, the update is rejected as stale (PRD FR13). Omitted =
@@ -476,10 +496,13 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// definition affects every attached workspace. When attached to more than
 	// one workspace, require explicit confirmation and re-check here so a direct
 	// PATCH cannot skip the warning.
+	// A character lives on the shared definition, so changing it is visible in
+	// every workspace the agent is attached to — the same reason avatar_color is
+	// already on this list (FR-92).
 	touchesSharedDefinition := req.SystemPrompt != nil || req.Model != nil || req.LLMProvider != nil ||
 		req.Type != nil || req.Role != nil || req.Tags != nil || req.AvatarColor != nil ||
 		req.RoutingProfile != nil || req.Temperature != nil || req.ReasoningEffort != nil ||
-		req.MaxTokens != nil || req.AllowWebSearch != nil
+		req.MaxTokens != nil || req.AllowWebSearch != nil || req.Character != nil
 	confirmed := req.ConfirmSharedEdit != nil && *req.ConfirmSharedEdit
 	if guardsApply && membership.Count > 1 && touchesSharedDefinition && !confirmed {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
@@ -553,6 +576,12 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.ExpertMode != nil {
 		expert := *req.ExpertMode
 		agent.Metadata.ExpertMode = &expert
+	}
+	// Applied after the other metadata so a rejected character choice fails the
+	// whole request before anything is written, rather than half-applying.
+	if err := applyCharacterIdentity(agent.Metadata, req.Character); err != nil {
+		orihttp.BadRequest(w, err.Error())
+		return
 	}
 
 	newName := agentName

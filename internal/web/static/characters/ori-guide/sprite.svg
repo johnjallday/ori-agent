@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Ori the duck guide">
+  <!--
+    Ori launcher sprite. Hand-authored; see
+    docs/CHARACTER_ASSET_PROVENANCE.md#ori-guide.
+    Deliberately coarser than the portrait: at 48px only the bill, crown tuft,
+    and head silhouette survive, so those carry the recognition.
+    Idle motion is decorative and never encodes state (FR-72). The renderer
+    swaps in static.svg under reduced motion; the media query below is a second
+    line of defence wherever this file is embedded directly.
+  -->
+  <style>
+    .ori-head { transform-origin: 24px 30px; animation: ori-tilt 3.2s ease-in-out infinite; }
+    @keyframes ori-tilt {
+      0%, 62%, 100% { transform: rotate(0deg); }
+      74% { transform: rotate(-6deg); }
+      86% { transform: rotate(3deg); }
+    }
+    @media (prefers-reduced-motion: reduce) { .ori-head { animation: none; } }
+  </style>
+  <circle cx="24" cy="24" r="24" fill="#f0dcb8"/>
+  <g stroke="#3b2a12" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <!-- body -->
+    <ellipse cx="22" cy="34" rx="13" ry="10" fill="#fbf3e4"/>
+    <g class="ori-head">
+      <!-- head -->
+      <circle cx="23" cy="19" r="11" fill="#fbf3e4"/>
+      <!-- broad bill -->
+      <path d="M33 16 h10 q3 0 3 3 q0 3 -3 3 h-10 z" fill="#bd7c24"/>
+      <!-- crown tuft -->
+      <path d="M15 8 l2 -7 l4 5 l3 -7 l3 8 z" fill="#bd7c24"/>
+    </g>
+  </g>
+  <circle cx="27" cy="17" r="2.1" fill="#3b2a12"/>
+  <circle cx="27.8" cy="16.2" r="0.8" fill="#fbf3e4"/>
+</svg>

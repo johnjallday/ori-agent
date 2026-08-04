@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Piko">
+  <!-- Piko idle: checks a list, taps the next item. Decorative only (FR-72). -->
+  <style>
+    .piko-tail { transform-origin: 34px 34px; animation: piko-flick 3s ease-in-out infinite; }
+    @keyframes piko-flick { 0%,60%,100% { transform: rotate(0deg); } 75% { transform: rotate(7deg); } }
+    @media (prefers-reduced-motion: reduce) { .piko-tail { animation: none; } }
+  </style>
+  <circle cx="24" cy="24" r="24" fill="#f4ded1"/>
+  <g stroke="#2a1006" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <path class="piko-tail" d="M33 40 q13 -3 11 -15 q-2 -12 -13 -9 q7 3 6 11 q-1 8 -6 10 z" fill="#b75d34"/>
+    <path d="M11 44 q-1-15 13-16 q14 -1 13 16 z" fill="#fbf0e2"/>
+    <circle cx="23" cy="19" r="12" fill="#fbf0e2"/>
+    <path d="M14 9 q-3 -9 3 -10 q5 -1 4 7" fill="#fbf0e2"/>
+    <path d="M32 9 q3 -9 -3 -10 q-5 -1 -4 7" fill="#fbf0e2"/>
+  </g>
+  <circle cx="18" cy="18" r="2.2" fill="#2a1006"/>
+  <circle cx="28" cy="18" r="2.2" fill="#2a1006"/>
+  <path d="M20 25 q3 3 6 0" fill="none" stroke="#2a1006" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Luma, a light-framed familiar with tall ears and folded crescent wings holding a field notebook">
+  <!-- Luma — Insight Researcher. Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#luma -->
+  <defs><clipPath id="luma-frame"><rect width="160" height="160" rx="16"/></clipPath></defs>
+  <g clip-path="url(#luma-frame)">
+    <rect width="160" height="160" fill="#e7ddec"/>
+    <circle cx="80" cy="74" r="54" fill="#f3ecf6"/>
+    <rect x="0" y="144" width="160" height="16" fill="#cbbcd3"/>
+
+    <g stroke="#1c1220" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M66 130 v10 l-8 6 h18 z" fill="#5f4468"/>
+      <path d="M94 130 v10 l-8 6 h18 z" fill="#5f4468"/>
+
+      <!-- folded crescent wings, scalloped so they never read as hair -->
+      <path d="M54 80 q-26 8 -24 34 q10 -8 14 2 q6 -10 12 0 q-6 -18 -2 -36 z" fill="#83618a"/>
+      <path d="M106 80 q26 8 24 34 q-10 -8 -14 2 q-6 -10 -12 0 q6 -18 2 -36 z" fill="#9a77a1"/>
+
+      <!-- light frame body, tinted lavender so the silhouette is not read as a
+           second cream resident at a glance -->
+      <path d="M58 132 q-2-40 22-42 q24 -2 22 42 z" fill="#e6dcec"/>
+
+      <!-- head -->
+      <circle cx="80" cy="58" r="24" fill="#e6dcec"/>
+      <!-- tall, narrow, splayed ears with antenna curls -->
+      <path d="M68 40 q-12 -30 -4 -34 q9 -3 12 28" fill="#e6dcec"/>
+      <path d="M92 40 q12 -30 4 -34 q-9 -3 -12 28" fill="#e6dcec"/>
+      <path d="M62 10 q-8 -6 -2 -12" fill="none" stroke-width="3.5"/>
+      <path d="M98 10 q8 -6 2 -12" fill="none" stroke-width="3.5"/>
+
+      <!-- field notebook with specimen tabs -->
+      <rect x="88" y="104" width="30" height="26" rx="3" fill="#fdfaf2"/>
+    </g>
+
+    <rect x="114" y="108" width="6" height="5" fill="#7fae4a"/>
+    <rect x="114" y="116" width="6" height="5" fill="#d9a83c"/>
+    <path d="M94 112 h16 M94 120 h12" stroke="#c2b3c8" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- inner-ear tint -->
+    <path d="M70 36 q-7 -21 -3 -25 q4 -1 6 19" fill="#c8abd1"/>
+    <path d="M90 36 q7 -21 3 -25 q-4 -1 -6 19" fill="#c8abd1"/>
+
+    <circle cx="71" cy="56" r="4.5" fill="#1c1220"/>
+    <circle cx="89" cy="56" r="4.5" fill="#1c1220"/>
+    <circle cx="72.5" cy="54.5" r="1.6" fill="#f7f2f9"/>
+    <circle cx="90.5" cy="54.5" r="1.6" fill="#f7f2f9"/>
+    <!-- drifting mote it follows -->
+    <circle cx="118" cy="52" r="4" fill="#c9a4d1"/>
+    <circle cx="128" cy="42" r="2.5" fill="#dcc3e2"/>
+  </g>
+</svg>

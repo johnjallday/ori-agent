@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Ori the duck guide">
+  <!--
+    Ori launcher sprite, reduced-motion variant: identical composition to
+    sprite.svg with the idle tilt removed, so nothing the animation conveys is
+    lost (FR-120). Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#ori-guide.
+  -->
+  <circle cx="24" cy="24" r="24" fill="#f0dcb8"/>
+  <g stroke="#3b2a12" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <ellipse cx="22" cy="34" rx="13" ry="10" fill="#fbf3e4"/>
+    <circle cx="23" cy="19" r="11" fill="#fbf3e4"/>
+    <path d="M33 16 h10 q3 0 3 3 q0 3 -3 3 h-10 z" fill="#bd7c24"/>
+    <path d="M15 8 l2 -7 l4 5 l3 -7 l3 8 z" fill="#bd7c24"/>
+  </g>
+  <circle cx="27" cy="17" r="2.1" fill="#3b2a12"/>
+  <circle cx="27.8" cy="16.2" r="0.8" fill="#fbf3e4"/>
+</svg>
