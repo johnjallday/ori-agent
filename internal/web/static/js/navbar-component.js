@@ -6,7 +6,8 @@
 function createNavbar(activePage = '') {
   const navbar = document.createElement('nav');
   navbar.className = 'navbar navbar-expand-lg glassmorphism';
-  navbar.style.cssText = 'z-index: 1030; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color);';
+  navbar.style.cssText =
+    'z-index: 1030; backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color);';
 
   navbar.innerHTML = `
         <div class="container-fluid px-4">
@@ -81,7 +82,7 @@ function insertNavbar(targetSelector) {
 }
 
 // Auto-insert if there's a #navbar-container element
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   const container = document.getElementById('navbar-container');
   if (container) {
     const navbar = initNavbar();

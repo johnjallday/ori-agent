@@ -39,7 +39,7 @@ class SidebarResizer {
     document.addEventListener('touchend', this.stopResize.bind(this));
 
     // Prevent text selection during resize
-    resizeHandle.addEventListener('selectstart', (e) => e.preventDefault());
+    resizeHandle.addEventListener('selectstart', e => e.preventDefault());
   }
 
   startResize(e) {
@@ -86,9 +86,11 @@ class SidebarResizer {
     this.updateResponsiveLayout(width);
 
     // Optional: Dispatch resize event for other components
-    window.dispatchEvent(new CustomEvent('sidebarResize', {
-      detail: { width: width }
-    }));
+    window.dispatchEvent(
+      new CustomEvent('sidebarResize', {
+        detail: { width: width }
+      })
+    );
   }
 
   updateResponsiveLayout(width) {

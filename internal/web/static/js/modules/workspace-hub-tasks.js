@@ -4,10 +4,11 @@
  *
  * @module workspace-hub-tasks
  */
-(function() {
+(function () {
   'use strict';
 
-  const { formatDate, buildTaskHierarchy, getDisplayStatus, getDisplayResult, computeTaskStats } = window.WorkspaceHubUtils;
+  const { formatDate, buildTaskHierarchy, getDisplayStatus, getDisplayResult, computeTaskStats } =
+    window.WorkspaceHubUtils;
 
   // Persistent filter state for the Tasks panel. Survives realtime
   // refreshes within a workspace; resetTaskFilters() is called on
@@ -47,7 +48,9 @@
   }
 
   function statusBucket(task) {
-    const status = String(task?.status || 'pending').trim().toLowerCase();
+    const status = String(task?.status || 'pending')
+      .trim()
+      .toLowerCase();
     if (status === 'completed') return 'completed';
     if (status === 'in_progress') return 'in_progress';
     if (status === 'failed') return 'failed';
@@ -63,9 +66,13 @@
 
   function countNeedsReviewRuns(task) {
     const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
-    return history.filter((entry) => {
+    return history.filter(entry => {
       const validation = entry?.validation_result || entry?.validation || null;
-      return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+      return (
+        String(validation?.validation_status || '')
+          .trim()
+          .toLowerCase() === 'needs_review'
+      );
     }).length;
   }
 
@@ -79,10 +86,12 @@
   function applyTaskFilters(tasks) {
     if (!Array.isArray(tasks) || tasks.length === 0) return [];
     const status = taskFilterState.status;
-    const query = String(taskFilterState.query || '').trim().toLowerCase();
+    const query = String(taskFilterState.query || '')
+      .trim()
+      .toLowerCase();
     if (status === 'all' && !query) return tasks.slice();
 
-    const matchesFilter = (task) => {
+    const matchesFilter = task => {
       if (status === 'needs_attention') {
         if (!isNeedsAttentionTask(task)) return false;
       } else if (status === 'scheduled') {
@@ -91,7 +100,8 @@
         if (statusBucket(task) !== status) return false;
       }
       if (query) {
-        const haystack = `${task?.name || ''} ${task?.description || ''} ${task?.details || ''} ${task?.to || ''}`.toLowerCase();
+        const haystack =
+          `${task?.name || ''} ${task?.description || ''} ${task?.details || ''} ${task?.to || ''}`.toLowerCase();
         if (!haystack.includes(query)) return false;
       }
       return true;
@@ -99,7 +109,7 @@
 
     // First pass: collect direct matches.
     const matchedIds = new Set();
-    tasks.forEach((task) => {
+    tasks.forEach(task => {
       if (matchesFilter(task)) matchedIds.add(task.id);
     });
 
@@ -109,9 +119,9 @@
     // subtasks so the surfaced rows still render under their parent
     // group. Without this a "failed" filter that catches a single
     // subtask would orphan it visually.
-    const taskById = new Map(tasks.map((t) => [t.id, t]));
+    const taskById = new Map(tasks.map(t => [t.id, t]));
     const includeIds = new Set(matchedIds);
-    matchedIds.forEach((id) => {
+    matchedIds.forEach(id => {
       let cursor = taskById.get(id);
       while (cursor && cursor.parent_task_id && taskById.has(cursor.parent_task_id)) {
         includeIds.add(cursor.parent_task_id);
@@ -119,11 +129,13 @@
       }
     });
 
-    return tasks.filter((task) => includeIds.has(task.id));
+    return tasks.filter(task => includeIds.has(task.id));
   }
 
   function formatTaskStatusLabel(status) {
-    const normalized = String(status || 'pending').trim().toLowerCase();
+    const normalized = String(status || 'pending')
+      .trim()
+      .toLowerCase();
     if (normalized === 'waiting_for_choice') return 'waiting for choice';
     return normalized.replace(/_/g, ' ');
   }
@@ -149,7 +161,7 @@
     const seen = new Set();
     const candidates = [];
 
-    const addCandidate = (name) => {
+    const addCandidate = name => {
       const normalized = String(name || '').trim();
       if (!normalized || normalized === 'unassigned' || seen.has(normalized)) return;
       seen.add(normalized);
@@ -157,11 +169,11 @@
     };
 
     if (Array.isArray(workspace.agent_instances)) {
-      workspace.agent_instances.forEach((instance) => addCandidate(instance && instance.name));
+      workspace.agent_instances.forEach(instance => addCandidate(instance && instance.name));
     }
 
     if (Array.isArray(workspace.agents)) {
-      workspace.agents.forEach((name) => addCandidate(name));
+      workspace.agents.forEach(name => addCandidate(name));
     }
 
     return candidates[0] || '';
@@ -205,23 +217,29 @@
 
         if (choice === 'delete_all') {
           for (const subtask of subtasks) {
-            const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(subtask.id)}`, {
-              method: 'DELETE'
-            });
+            const response = await fetch(
+              `/api/orchestration/tasks?id=${encodeURIComponent(subtask.id)}`,
+              {
+                method: 'DELETE'
+              }
+            );
             if (!response.ok) {
               throw new Error('Failed to delete a subtask');
             }
           }
         } else if (choice === 'ungroup') {
           for (const subtask of subtasks) {
-            const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(subtask.id)}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                parent_task_id: '',
-                subtask_index: 0
-              })
-            });
+            const response = await fetch(
+              `/api/orchestration/tasks/${encodeURIComponent(subtask.id)}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  parent_task_id: '',
+                  subtask_index: 0
+                })
+              }
+            );
             if (!response.ok) {
               throw new Error('Failed to ungroup a subtask');
             }
@@ -254,14 +272,14 @@
    */
   async function executeTask(taskId) {
     const state = window.WorkspaceHubState.getState();
-    const task = state.tasks.find((item) => item.id === taskId);
+    const task = state.tasks.find(item => item.id === taskId);
     if (!task) return;
 
     const subtasks = getSubtasksForParent(taskId);
     const isParent = subtasks.length > 0;
 
     if (isParent) {
-      const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      const hasUnassigned = subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
       if (hasUnassigned) {
         if (window.Toast) {
           window.Toast.error('Assign agents to all subtasks before executing this workflow.');
@@ -271,7 +289,7 @@
         return;
       }
 
-      const hasRunning = subtasks.some((subtask) => subtask.status === 'in_progress');
+      const hasRunning = subtasks.some(subtask => subtask.status === 'in_progress');
       if (hasRunning) {
         if (window.Toast) {
           window.Toast.error('A subtask is already running.');
@@ -287,7 +305,9 @@
       const fallbackAgent = getWorkspaceFallbackAgent(state);
       if (!fallbackAgent) {
         if (window.Toast) {
-          window.Toast.error('No agent is available in this workspace. Add an agent or assign this task first.');
+          window.Toast.error(
+            'No agent is available in this workspace. Add an agent or assign this task first.'
+          );
         } else {
           alert('No agent is available in this workspace. Add an agent or assign this task first.');
         }
@@ -300,7 +320,10 @@
         message: `This task is unassigned. I can assign it to "${fallbackAgent}" and start execution immediately.`,
         confirmLabel: 'Assign and Execute',
         metaItems: [getTaskLabel(task), fallbackAgent, 'Workspace agent'],
-        details: ['The task will be updated before dispatch.', 'The task list will refresh after execution starts.']
+        details: [
+          'The task will be updated before dispatch.',
+          'The task list will refresh after execution starts.'
+        ]
       });
       if (!assignAndRun) return;
 
@@ -329,7 +352,10 @@
       metaItems: isParent
         ? [getTaskLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
         : [getTaskLabel(task), assignedAgent || 'Unassigned', 'Ready to run'],
-      details: ['The task list will refresh after dispatch.', 'Use the task details panel to re-run or inspect results later.']
+      details: [
+        'The task list will refresh after dispatch.',
+        'Use the task details panel to re-run or inspect results later.'
+      ]
     });
     if (!confirmed) return;
 
@@ -381,7 +407,12 @@
 
         const task = await response.json();
         const status = task.status;
-        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+        if (
+          status === 'completed' ||
+          status === 'failed' ||
+          status === 'cancelled' ||
+          status === 'timeout'
+        ) {
           await loadTasks(state.selectedId);
           return;
         }
@@ -458,7 +489,9 @@
 
       const result = await response.json();
       if (window.Toast) {
-        window.Toast.success(`Deleted ${result.success_count} task${result.success_count !== 1 ? 's' : ''}`);
+        window.Toast.success(
+          `Deleted ${result.success_count} task${result.success_count !== 1 ? 's' : ''}`
+        );
       }
 
       window.WorkspaceHubSelection.toggleSelectionMode('tasks', () => renderTasksList(state.tasks));
@@ -492,9 +525,12 @@
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`, {
-        signal: controller.signal
-      });
+      const response = await fetch(
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          signal: controller.signal
+        }
+      );
       if (!response.ok) throw new Error('Failed to load tasks');
 
       const data = await response.json();
@@ -517,10 +553,12 @@
       if (state.selectedId !== workspaceId) return;
 
       if (elements.tasksList) {
-        elements.tasksList.innerHTML = '<div class="hub-empty">Unable to load tasks right now.</div>';
+        elements.tasksList.innerHTML =
+          '<div class="hub-empty">Unable to load tasks right now.</div>';
       }
       if (elements.schedulesList) {
-        elements.schedulesList.innerHTML = '<div class="hub-empty">Unable to load schedules right now.</div>';
+        elements.schedulesList.innerHTML =
+          '<div class="hub-empty">Unable to load schedules right now.</div>';
       }
     }
   }
@@ -537,7 +575,8 @@
     if (elements.statInProgress) elements.statInProgress.textContent = stats.in_progress || 0;
     if (elements.statFailed) elements.statFailed.textContent = stats.failed || 0;
     if (elements.statScheduled) elements.statScheduled.textContent = stats.scheduled || 0;
-    if (elements.statNeedsAttention) elements.statNeedsAttention.textContent = stats.needs_attention || 0;
+    if (elements.statNeedsAttention)
+      elements.statNeedsAttention.textContent = stats.needs_attention || 0;
     if (elements.statNeedsAttentionBtn) {
       // Hide the tile when there's nothing to act on; this keeps the
       // stat row focused on routine counts and only surfaces the
@@ -558,7 +597,7 @@
     const elements = window.WorkspaceHubState.getElements();
     if (!elements.schedulesList) return;
 
-    const scheduled = (tasks || []).filter((task) => task.schedule_enabled);
+    const scheduled = (tasks || []).filter(task => task.schedule_enabled);
 
     if (scheduled.length === 0) {
       elements.schedulesList.innerHTML = '<div class="hub-empty">No scheduled tasks yet.</div>';
@@ -574,7 +613,7 @@
     const showAll = taskFilterState.schedulesShowAll || sorted.length <= SCHEDULES_COLLAPSED_LIMIT;
     const visible = showAll ? sorted : sorted.slice(0, SCHEDULES_COLLAPSED_LIMIT);
 
-    const items = visible.map((task) => {
+    const items = visible.map(task => {
       const nextRun = task.next_run ? formatDate(task.next_run) : 'Not scheduled';
       return `
         <div class="hub-schedule-item">
@@ -590,9 +629,7 @@
     let html = items.join('');
     if (sorted.length > SCHEDULES_COLLAPSED_LIMIT) {
       const hiddenCount = sorted.length - SCHEDULES_COLLAPSED_LIMIT;
-      const label = showAll
-        ? 'Show fewer'
-        : `Show all (${sorted.length})`;
+      const label = showAll ? 'Show fewer' : `Show all (${sorted.length})`;
       html += `<button type="button" class="hub-schedules-toggle" id="hubSchedulesToggle" aria-expanded="${showAll ? 'true' : 'false'}">${escapeHtml(label)}${showAll ? '' : ` <span class="hub-schedules-toggle-hint">${hiddenCount} more</span>`}</button>`;
     }
 
@@ -626,7 +663,8 @@
     }
 
     if (totalCount === 0) {
-      elements.tasksList.innerHTML = '<div class="hub-empty">No tasks yet. Create the first one to get started.</div>';
+      elements.tasksList.innerHTML =
+        '<div class="hub-empty">No tasks yet. Create the first one to get started.</div>';
       if (elements.tasksSubtitle) {
         elements.tasksSubtitle.textContent = 'No tasks created yet.';
       }
@@ -636,7 +674,7 @@
     const filtered = applyTaskFilters(tasks);
 
     if (filtered.length === 0) {
-      const activeChip = FILTER_DEFINITIONS.find((d) => d.key === taskFilterState.status);
+      const activeChip = FILTER_DEFINITIONS.find(d => d.key === taskFilterState.status);
       const filterLabel = activeChip ? activeChip.label.toLowerCase() : 'this filter';
       const queryActive = String(taskFilterState.query || '').trim().length > 0;
       const message = queryActive
@@ -658,8 +696,11 @@
 
     state.taskHierarchy = buildTaskHierarchy(filtered);
     const { rootTasks, subtasksByParent, taskById } = state.taskHierarchy;
-    const parentCount = rootTasks.filter((task) => subtasksByParent.has(task.id)).length;
-    const subtaskCount = Array.from(subtasksByParent.values()).reduce((total, list) => total + list.length, 0);
+    const parentCount = rootTasks.filter(task => subtasksByParent.has(task.id)).length;
+    const subtaskCount = Array.from(subtasksByParent.values()).reduce(
+      (total, list) => total + list.length,
+      0
+    );
     const standaloneCount = rootTasks.length - parentCount;
 
     if (elements.tasksSubtitle) {
@@ -667,51 +708,74 @@
       if (parentCount) parts.push(`${parentCount} workflow${parentCount === 1 ? '' : 's'}`);
       if (standaloneCount) parts.push(`${standaloneCount} task${standaloneCount === 1 ? '' : 's'}`);
       if (subtaskCount) parts.push(`${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`);
-      elements.tasksSubtitle.textContent = parts.length > 0
-        ? `${parts.join(' | ')} in this workspace.`
-        : `${tasks.length} task${tasks.length === 1 ? '' : 's'} queued for this workspace.`;
+      elements.tasksSubtitle.textContent =
+        parts.length > 0
+          ? `${parts.join(' | ')} in this workspace.`
+          : `${tasks.length} task${tasks.length === 1 ? '' : 's'} queued for this workspace.`;
     }
 
     const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('tasks');
     const selectedSet = state.selectedItems.tasks;
 
-    const renderTaskCard = (task, { isParent = false, isSubtask = false, subtasks = [], stepNumber = null, parentId = '' } = {}) => {
-      const status = isParent ? getDisplayStatus(task, subtasks) : (task.status || 'pending');
+    const renderTaskCard = (
+      task,
+      { isParent = false, isSubtask = false, subtasks = [], stepNumber = null, parentId = '' } = {}
+    ) => {
+      const status = isParent ? getDisplayStatus(task, subtasks) : task.status || 'pending';
       const statusLabel = formatTaskStatusLabel(status);
       const scheduleLabel = isParent
         ? 'Workflow container'
-        : task.schedule_enabled ? `Next run: ${formatDate(task.next_run)}` : 'Not scheduled';
+        : task.schedule_enabled
+          ? `Next run: ${formatDate(task.next_run)}`
+          : 'Not scheduled';
       const assignedAgent = task.to && task.to !== 'unassigned' ? task.to : '';
-      const assignment = isParent ? `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}` : (assignedAgent || 'unassigned');
+      const assignment = isParent
+        ? `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`
+        : assignedAgent || 'unassigned';
       const inputCount = Array.isArray(task.input_task_ids) ? task.input_task_ids.length : 0;
-      const inputBadge = inputCount > 0
-        ? `<span class="hub-task-inputs" title="Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}">Inputs: ${inputCount}</span>`
-        : '';
+      const inputBadge =
+        inputCount > 0
+          ? `<span class="hub-task-inputs" title="Uses results from ${inputCount} task${inputCount === 1 ? '' : 's'}">Inputs: ${inputCount}</span>`
+          : '';
       const needsReviewBadge = renderNeedsReviewBadge(task);
       const isSelected = selectedSet.has(task.id);
-      const hasUnassignedSubtasks = isParent && subtasks.some((s) => !s.to || s.to === 'unassigned');
-      const hasRunningSubtasks = isParent && subtasks.some((s) => s.status === 'in_progress');
+      const hasUnassignedSubtasks = isParent && subtasks.some(s => !s.to || s.to === 'unassigned');
+      const hasRunningSubtasks = isParent && subtasks.some(s => s.status === 'in_progress');
       const canExecute = isParent
         ? subtasks.length > 0 && !hasUnassignedSubtasks && !hasRunningSubtasks
         : status !== 'in_progress' && status !== 'waiting_for_choice';
-      const executeLabel = status === 'completed' || status === 'failed' ? 'Re-run' : (isParent ? 'Run All' : 'Execute');
+      const executeLabel =
+        status === 'completed' || status === 'failed' ? 'Re-run' : isParent ? 'Run All' : 'Execute';
       const executeTitle = isParent
-        ? hasUnassignedSubtasks ? 'Assign agents to all subtasks before executing'
-          : hasRunningSubtasks ? 'A subtask is already running'
-            : executeLabel === 'Re-run' ? 'Re-run workflow' : 'Execute workflow now'
-        : !assignedAgent ? 'Will auto-assign a workspace agent before execution'
-          : status === 'waiting_for_choice' ? 'Open the task to choose the next step'
-          : status === 'in_progress' ? 'Task is already running'
-            : executeLabel === 'Re-run' ? 'Re-execute task' : 'Execute task now';
+        ? hasUnassignedSubtasks
+          ? 'Assign agents to all subtasks before executing'
+          : hasRunningSubtasks
+            ? 'A subtask is already running'
+            : executeLabel === 'Re-run'
+              ? 'Re-run workflow'
+              : 'Execute workflow now'
+        : !assignedAgent
+          ? 'Will auto-assign a workspace agent before execution'
+          : status === 'waiting_for_choice'
+            ? 'Open the task to choose the next step'
+            : status === 'in_progress'
+              ? 'Task is already running'
+              : executeLabel === 'Re-run'
+                ? 'Re-execute task'
+                : 'Execute task now';
       const executeAriaLabel = isParent
-        ? executeLabel === 'Re-run' ? 'Re-run workflow'
+        ? executeLabel === 'Re-run'
+          ? 'Re-run workflow'
           : 'Run workflow'
-        : executeLabel === 'Re-run' ? 'Re-run task'
+        : executeLabel === 'Re-run'
+          ? 'Re-run task'
           : 'Run task';
       const resultData = getDisplayResult(task, isParent ? subtasks : null);
       const stepBadge = isSubtask
         ? `<span class="hub-task-step">Step ${escapeHtml(stepNumber || '')}</span>`
-        : isParent ? '<span class="hub-task-badge">Workflow</span>' : '';
+        : isParent
+          ? '<span class="hub-task-badge">Workflow</span>'
+          : '';
       const toggleButton = isParent
         ? `<button class="hub-task-toggle" data-action="toggle-subtasks" aria-label="Toggle subtasks">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -753,12 +817,16 @@
               ${isParent ? '<button class="modern-btn modern-btn-secondary" data-action="save-workflow" title="Save to Workflows library">Save</button>' : ''}
               ${isParent ? '<button class="modern-btn modern-btn-secondary" data-action="export" title="Export workflow to file">Export</button>' : ''}
             </div>
-            ${resultData ? `
+            ${
+              resultData
+                ? `
             <details class="hub-task-result">
               <summary>${escapeHtml(resultData.label)}</summary>
               <pre>${escapeHtml(resultData.text)}</pre>
             </details>
-            ` : ''}
+            `
+                : ''
+            }
           </div>
           <button class="hub-item-delete-btn" data-action="delete" title="Delete task">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -769,7 +837,7 @@
       `;
     };
 
-    const items = rootTasks.map((task) => {
+    const items = rootTasks.map(task => {
       const subtasks = subtasksByParent.get(task.id) || [];
       const isParent = subtasks.length > 0;
       const parentCard = renderTaskCard(task, { isParent, subtasks });
@@ -804,44 +872,44 @@
     const state = window.WorkspaceHubState.getState();
     const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('tasks');
 
-    elements.tasksList.querySelectorAll('.hub-task-card').forEach((card) => {
+    elements.tasksList.querySelectorAll('.hub-task-card').forEach(card => {
       const taskId = card.dataset.taskId;
       const task = taskById.get(taskId);
 
       // Handle checkbox click in selection mode
       const checkbox = card.querySelector('input[type="checkbox"]');
       if (checkbox) {
-        checkbox.addEventListener('change', (event) => {
+        checkbox.addEventListener('change', event => {
           event.stopPropagation();
           window.WorkspaceHubSelection.toggleItemSelection('tasks', taskId);
         });
       }
 
       // Handle card click in selection mode
-      card.addEventListener('click', (event) => {
+      card.addEventListener('click', event => {
         if (inSelectionMode && !event.target.closest('button') && !event.target.closest('input')) {
           window.WorkspaceHubSelection.toggleItemSelection('tasks', taskId);
         }
       });
 
       // Delete button
-      card.querySelectorAll('[data-action="delete"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="delete"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           deleteTask(taskId);
         });
       });
 
-      card.querySelectorAll('[data-action="toggle-subtasks"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="toggle-subtasks"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           const group = card.closest('.hub-task-group');
           if (group) group.classList.toggle('is-collapsed');
         });
       });
 
-      card.querySelectorAll('[data-action="edit"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="edit"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           if (window.taskModalController && task) {
             window.taskModalController.openForEdit(task, () => loadTasks(state.selectedId));
@@ -849,29 +917,29 @@
         });
       });
 
-      card.querySelectorAll('[data-action="execute"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="execute"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           if (task && !btn.disabled) executeTask(taskId);
         });
       });
 
-      card.querySelectorAll('[data-action="export"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="export"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           if (task) exportWorkflowTask(task, taskId);
         });
       });
 
-      card.querySelectorAll('[data-action="save-workflow"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="save-workflow"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           if (task) saveTaskAsWorkflow(task, taskId);
         });
       });
 
-      card.querySelectorAll('[data-action="view-canvas"]').forEach((btn) => {
-        btn.addEventListener('click', (event) => {
+      card.querySelectorAll('[data-action="view-canvas"]').forEach(btn => {
+        btn.addEventListener('click', event => {
           event.stopPropagation();
           if (task && state.selectedId) {
             window.location.href = `/workspaces/${state.selectedId}/canvas?workflow=${taskId}`;
@@ -973,9 +1041,11 @@
     descInput.value = task.description || '';
     categoryInput.value = 'workspace';
     stepCountEl.textContent = subtasks.length;
-    stepsEl.innerHTML = subtasks.map((s, i) =>
-      `<div>${i + 1}. ${escapeHtml(s.name || s.description || 'Unnamed step')}</div>`
-    ).join('');
+    stepsEl.innerHTML = subtasks
+      .map(
+        (s, i) => `<div>${i + 1}. ${escapeHtml(s.name || s.description || 'Unnamed step')}</div>`
+      )
+      .join('');
     errorEl.style.display = 'none';
 
     const newConfirmBtn = confirmBtn.cloneNode(true);
@@ -990,7 +1060,8 @@
       }
 
       newConfirmBtn.disabled = true;
-      newConfirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+      newConfirmBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
       errorEl.style.display = 'none';
 
       try {
@@ -1032,7 +1103,8 @@
         errorEl.style.display = 'block';
       } finally {
         newConfirmBtn.disabled = false;
-        newConfirmBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/></svg> Save to Library';
+        newConfirmBtn.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M17,3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V7L17,3M19,19H5V5H16.17L19,7.83V19M12,12C10.34,12 9,13.34 9,15C9,16.66 10.34,18 12,18C13.66,18 15,16.66 15,15C15,13.34 13.66,12 12,12M6,6H15V10H6V6Z"/></svg> Save to Library';
       }
     });
 
@@ -1046,7 +1118,12 @@
     if (!elements.taskFilterChips) return;
 
     const counts = {
-      all: (stats?.completed || 0) + (stats?.in_progress || 0) + (stats?.pending || 0) + (stats?.blocked || 0) + (stats?.failed || 0),
+      all:
+        (stats?.completed || 0) +
+        (stats?.in_progress || 0) +
+        (stats?.pending || 0) +
+        (stats?.blocked || 0) +
+        (stats?.failed || 0),
       needs_attention: stats?.needs_attention || 0,
       in_progress: stats?.in_progress || 0,
       pending: stats?.pending || 0,
@@ -1060,8 +1137,8 @@
       // Drop chips that have no matches AND aren't the active filter.
       // This keeps the bar tight on small workspaces while still
       // showing a chip the user has explicitly selected.
-      .filter((def) => def.key === 'all' || counts[def.key] > 0 || def.key === taskFilterState.status)
-      .map((def) => {
+      .filter(def => def.key === 'all' || counts[def.key] > 0 || def.key === taskFilterState.status)
+      .map(def => {
         const active = def.key === taskFilterState.status;
         const count = counts[def.key] || 0;
         const dangerClass = def.danger ? ' hub-task-filter-chip--danger' : '';
@@ -1079,7 +1156,7 @@
       .join('');
 
     elements.taskFilterChips.innerHTML = chips;
-    elements.taskFilterChips.querySelectorAll('[data-task-filter]').forEach((btn) => {
+    elements.taskFilterChips.querySelectorAll('[data-task-filter]').forEach(btn => {
       btn.addEventListener('click', () => setTaskFilter(btn.getAttribute('data-task-filter')));
     });
   }
@@ -1087,7 +1164,7 @@
   function syncStatTileActiveState() {
     const elements = window.WorkspaceHubState.getElements();
     if (!elements.statButtons) return;
-    elements.statButtons.forEach((btn) => {
+    elements.statButtons.forEach(btn => {
       const filter = btn.getAttribute('data-task-filter');
       btn.classList.toggle('is-active', filter === taskFilterState.status);
     });
@@ -1121,7 +1198,7 @@
     if (!elements.taskSearchInput && !elements.statButtons) return;
 
     if (elements.taskSearchInput) {
-      elements.taskSearchInput.addEventListener('input', (event) => {
+      elements.taskSearchInput.addEventListener('input', event => {
         const value = event.target.value;
         if (elements.taskSearchClearBtn) {
           elements.taskSearchClearBtn.hidden = !value;
@@ -1135,7 +1212,7 @@
           renderTasksList(state.tasks || []);
         }, 200);
       });
-      elements.taskSearchInput.addEventListener('keydown', (event) => {
+      elements.taskSearchInput.addEventListener('keydown', event => {
         if (event.key === 'Escape' && taskFilterState.query) {
           event.preventDefault();
           clearTaskFilter();
@@ -1148,7 +1225,7 @@
     }
 
     if (elements.statButtons) {
-      elements.statButtons.forEach((btn) => {
+      elements.statButtons.forEach(btn => {
         btn.addEventListener('click', () => {
           const filter = btn.getAttribute('data-task-filter');
           // Clicking an already-active stat tile clears the filter — gives

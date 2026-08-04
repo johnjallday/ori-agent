@@ -7,7 +7,7 @@ import {
   parseWikilinks,
   renderWikilinkHTML,
   applyWikilinksToHtml,
-  invalidateNotesCache,
+  invalidateNotesCache
 } from './note-wikilinks.js';
 
 // invalidateNotesCache is the contract note-page.js calls after creating an
@@ -144,14 +144,17 @@ test('renderWikilinkHTML: escapes attributes and text', () => {
 
 test('applyWikilinksToHtml: rewrites all [[…]] occurrences', () => {
   const html = '<p>See [[Brand Kit]] and [[Roadmap]].</p>';
-  const out = applyWikilinksToHtml(html, (t) => t === 'Brand Kit' ? 'note-1' : null);
+  const out = applyWikilinksToHtml(html, t => (t === 'Brand Kit' ? 'note-1' : null));
   assert.match(out, /class="note-wikilink"[^>]*>Brand Kit<\/a>/);
   assert.match(out, /class="note-wikilink note-wikilink-broken"[^>]*>Roadmap<\/a>/);
 });
 
 test('applyWikilinksToHtml: no-op when there are no wikilinks', () => {
   const html = '<p>Plain text without any references.</p>';
-  assert.equal(applyWikilinksToHtml(html, () => null), html);
+  assert.equal(
+    applyWikilinksToHtml(html, () => null),
+    html
+  );
 });
 
 test('applyWikilinksToHtml: handles pipe form', () => {

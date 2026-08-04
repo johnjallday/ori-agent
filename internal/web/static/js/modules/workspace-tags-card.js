@@ -61,7 +61,7 @@ function wtcInit() {
   wtcEnsureWidget();
   // The unified Template picker emits its selection (with the template's tags);
   // show which tags the selected template will contribute automatically.
-  els.modal?.addEventListener('workspace-template-selected', (event) => {
+  els.modal?.addEventListener('workspace-template-selected', event => {
     const template = event?.detail?.template || null;
     wtcRenderTemplateTagsHint(Array.isArray(template?.tags) ? template.tags : []);
   });

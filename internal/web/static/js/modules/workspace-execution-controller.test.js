@@ -60,7 +60,12 @@ function makeHarness(scripts = {}) {
   };
 }
 
-const running = { id: 't1', status: 'in_progress', to: 'agent-a', updated_at: '2026-06-01T00:00:00Z' };
+const running = {
+  id: 't1',
+  status: 'in_progress',
+  to: 'agent-a',
+  updated_at: '2026-06-01T00:00:00Z'
+};
 
 test('track() starts a run and resolves presentation from the first poll', async () => {
   const h = makeHarness({ t1: running });
@@ -133,7 +138,11 @@ test('a failed poll enters reconnecting and retains activity, then resumes (FR58
 
   await h.tick(); // poll 1 -> throws -> reconnecting
   assert.equal(h.controller.getRun('t1').phase, RUN_PHASE.RECONNECTING);
-  assert.equal(h.controller.getRun('t1').activity.length, before, 'activity retained across reconnect');
+  assert.equal(
+    h.controller.getRun('t1').activity.length,
+    before,
+    'activity retained across reconnect'
+  );
 
   await h.tick(); // poll 2 -> running -> live again
   assert.equal(h.controller.getRun('t1').phase, RUN_PHASE.LIVE);
@@ -154,7 +163,13 @@ test('a status change appends a new de-duped activity entry', async () => {
     t1: n =>
       n === 0
         ? { id: 't1', status: 'in_progress', to: 'a', updated_at: '2026-06-01T00:00:00Z' }
-        : { id: 't1', status: 'completed', to: 'a', updated_at: '2026-06-02T00:00:00Z', result: 'ok' }
+        : {
+            id: 't1',
+            status: 'completed',
+            to: 'a',
+            updated_at: '2026-06-02T00:00:00Z',
+            result: 'ok'
+          }
   });
   h.controller.track('t1');
   await flush(); // running
@@ -214,5 +229,8 @@ test('monitoring is independent of any modal/view — no view coupling in the AP
   ['track', 'untrack', 'select', 'subscribe', 'dispose'].forEach(m =>
     assert.ok(api.includes(m), `controller exposes ${m}`)
   );
-  assert.ok(!api.some(m => /modal|collapse|hide|show/i.test(m)), 'no modal/collapse lifecycle in the controller');
+  assert.ok(
+    !api.some(m => /modal|collapse|hide|show/i.test(m)),
+    'no modal/collapse lifecycle in the controller'
+  );
 });

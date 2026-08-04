@@ -32,11 +32,13 @@ const _pendingQueries = new Map();
 
 function postMessage(payload) {
   if (!_channel) return;
-  try { _channel.postMessage(payload); } catch (_) {}
+  try {
+    _channel.postMessage(payload);
+  } catch (_) {}
 }
 
 if (_channel) {
-  _channel.addEventListener('message', (ev) => {
+  _channel.addEventListener('message', ev => {
     const msg = ev?.data;
     if (!msg || typeof msg !== 'object') return;
     if (msg.tabId === TAB_ID) return; // ignore our own
@@ -54,7 +56,7 @@ function handleIncoming(msg) {
           tabId: TAB_ID,
           surface: msg.surface || 'page',
           requesterTabId: msg.tabId,
-          noteId: msg.noteId,
+          noteId: msg.noteId
         });
       }
       return;
@@ -108,14 +110,17 @@ export function isOpenElsewhere(noteId, timeoutMs = 150) {
   if (existing) return existing.promise;
 
   const pending = { hits: [], resolved: false };
-  pending.promise = new Promise((resolve) => {
+  pending.promise = new Promise(resolve => {
     pending.resolve = resolve;
-    pending.timer = setTimeout(() => {
-      if (pending.resolved) return;
-      pending.resolved = true;
-      _pendingQueries.delete(noteId);
-      resolve({ open: false });
-    }, Math.max(50, Math.min(2000, timeoutMs)));
+    pending.timer = setTimeout(
+      () => {
+        if (pending.resolved) return;
+        pending.resolved = true;
+        _pendingQueries.delete(noteId);
+        resolve({ open: false });
+      },
+      Math.max(50, Math.min(2000, timeoutMs))
+    );
   });
   _pendingQueries.set(noteId, pending);
   postMessage({ type: 'who-has-note', tabId: TAB_ID, noteId });
@@ -125,7 +130,7 @@ export function isOpenElsewhere(noteId, timeoutMs = 150) {
 // For tests.
 export function _resetForTesting() {
   _heldNotes.clear();
-  _pendingQueries.forEach((p) => clearTimeout(p.timer));
+  _pendingQueries.forEach(p => clearTimeout(p.timer));
   _pendingQueries.clear();
 }
 
@@ -135,12 +140,12 @@ if (typeof window !== 'undefined') {
     releaseOpenNote,
     isOpenElsewhere,
     supported: _supported,
-    tabId: TAB_ID,
+    tabId: TAB_ID
   };
 }
 
 export default {
   claimOpenNote,
   releaseOpenNote,
-  isOpenElsewhere,
+  isOpenElsewhere
 };

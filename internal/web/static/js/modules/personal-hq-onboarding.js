@@ -255,8 +255,7 @@ export function followUpView(f) {
   // or the Map-first Home cockpit (#homeCockpit). Gating on the launcher alone
   // would silently drop the Personal HQ map site and every optional HQ mount
   // once Home became the canonical launcher (PRD FR28, FR115).
-  const host =
-    document.getElementById('workspaceHub') || document.getElementById('homeCockpit');
+  const host = document.getElementById('workspaceHub') || document.getElementById('homeCockpit');
   if (!host) return;
 
   let statusPromise = null;
@@ -994,7 +993,9 @@ export function followUpView(f) {
     // these (Mail spin-off FR20). Best-effort — omit the link if no Email Ops
     // workspace exists.
     try {
-      const res = await fetch('/api/personal-hq/email-ops', { headers: { Accept: 'application/json' } });
+      const res = await fetch('/api/personal-hq/email-ops', {
+        headers: { Accept: 'application/json' }
+      });
       if (res.ok) {
         const eo = (await res.json()).status || {};
         if (eo.exists && eo.workspace_id) {

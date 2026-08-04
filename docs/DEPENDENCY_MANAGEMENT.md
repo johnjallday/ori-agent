@@ -179,10 +179,13 @@ For more advanced automation, consider [Renovate](https://github.com/renovatebot
 make deps-why DEP=google.golang.org/grpc
 ```
 
-Shows the dependency chain:
+Shows the dependency chain. `google.golang.org/grpc` is indirect, required by
+the Google API client's option package that `internal/mailbox` uses (Ori has
+no owned gRPC service or plugin runtime of its own - the legacy gRPC plugin
+system was fully removed):
 ```
-github.com/johnjallday/ori-agent
-github.com/johnjallday/ori-agent/internal/pluginloader
+github.com/johnjallday/ori-agent/internal/mailbox
+google.golang.org/api/option
 google.golang.org/grpc
 ```
 
@@ -235,7 +238,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.25.12'
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest

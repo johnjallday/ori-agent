@@ -378,7 +378,7 @@ func (s *SQLiteStore) ListHistory(ctx context.Context, workspaceID string, limit
 	if err != nil {
 		return nil, fmt.Errorf("failed to list daily brief history: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []HistorySummary
 	for rows.Next() {

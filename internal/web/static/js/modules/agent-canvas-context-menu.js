@@ -14,7 +14,11 @@ export class AgentCanvasContextMenu {
    * Toggle assignment mode for connecting tasks to agents/combiners
    */
   toggleAssignmentMode(task) {
-    if (this.parent.assignmentMode && this.parent.assignmentSourceTask && this.parent.assignmentSourceTask.id === task.id) {
+    if (
+      this.parent.assignmentMode &&
+      this.parent.assignmentSourceTask &&
+      this.parent.assignmentSourceTask.id === task.id
+    ) {
       // Cancel assignment mode
       this.parent.assignmentMode = false;
       this.parent.assignmentSourceTask = null;
@@ -54,11 +58,17 @@ export class AgentCanvasContextMenu {
 
       case 'remove': {
         // Remove agent (with confirmation)
-        const displayName = agent.instanceNumber ? `${agent.name} #${agent.instanceNumber}` : agent.name;
+        const displayName = agent.instanceNumber
+          ? `${agent.name} #${agent.instanceNumber}`
+          : agent.name;
         if (confirm(`Remove agent "${displayName}"?`)) {
           // Call backend to remove agent from workspace, sending instance number if available
-          const agentId = agent.instanceNumber ? `${agent.name}:${agent.instanceNumber}` : agent.name;
-          apiDelete(`/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/agents/${encodeURIComponent(agentId)}`)
+          const agentId = agent.instanceNumber
+            ? `${agent.name}:${agent.instanceNumber}`
+            : agent.name;
+          apiDelete(
+            `/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/agents/${encodeURIComponent(agentId)}`
+          )
             .then(() => {
               // Remove only THIS specific agent node from local state (by nodeId)
               const filteredAgents = this.state.agents.filter(a => a.nodeId !== agent.nodeId);
@@ -76,8 +86,8 @@ export class AgentCanvasContextMenu {
 
               // Remove only workflow connections involving this specific agent instance (by nodeId)
               // Don't remove connections for other instances with the same name
-              this.parent.connections = this.parent.connections.filter(c =>
-                c.from !== agent.nodeId && c.to !== agent.nodeId
+              this.parent.connections = this.parent.connections.filter(
+                c => c.from !== agent.nodeId && c.to !== agent.nodeId
               );
 
               this.parent.notifications.showNotification('Agent removed', 'success');
@@ -86,7 +96,10 @@ export class AgentCanvasContextMenu {
             })
             .catch(err => {
               console.error('Failed to remove agent:', err);
-              this.parent.notifications.showNotification(`Failed to remove agent: ${err.message}`, 'error');
+              this.parent.notifications.showNotification(
+                `Failed to remove agent: ${err.message}`,
+                'error'
+              );
             });
         }
         break;
@@ -168,7 +181,8 @@ export class AgentCanvasContextMenu {
    */
   collectSelectionData(selectedNodes) {
     // Calculate center of selection for relative positioning
-    let sumX = 0, sumY = 0;
+    let sumX = 0,
+      sumY = 0;
     selectedNodes.forEach(sel => {
       const node = sel.node;
       sumX += node.x || 0;
@@ -190,7 +204,10 @@ export class AgentCanvasContextMenu {
     });
 
     // Calculate layout dimensions
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
     nodes.forEach(n => {
       minX = Math.min(minX, n.relative_x);
       maxX = Math.max(maxX, n.relative_x);
@@ -264,7 +281,9 @@ export class AgentCanvasContextMenu {
     if (count === 0) return;
 
     // Show confirmation dialog
-    const confirmed = confirm(`Delete ${count} selected node${count > 1 ? 's' : ''}?\n\nThis action cannot be undone.`);
+    const confirmed = confirm(
+      `Delete ${count} selected node${count > 1 ? 's' : ''}?\n\nThis action cannot be undone.`
+    );
     if (!confirmed) return;
 
     let deletedCount = 0;
@@ -275,10 +294,12 @@ export class AgentCanvasContextMenu {
 
     // Delete agents
     if (nodesByType.agent && nodesByType.agent.length > 0) {
-      for (const {  node } of nodesByType.agent) {
+      for (const { node } of nodesByType.agent) {
         try {
           const agentId = node.instanceNumber ? `${node.name}:${node.instanceNumber}` : node.name;
-          await apiDelete(`/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/agents/${encodeURIComponent(agentId)}`);
+          await apiDelete(
+            `/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/agents/${encodeURIComponent(agentId)}`
+          );
 
           // Remove from local state
           const filteredAgents = this.state.agents.filter(a => a.nodeId !== node.nodeId);
@@ -305,7 +326,9 @@ export class AgentCanvasContextMenu {
     if (nodesByType.task && nodesByType.task.length > 0) {
       for (const { id } of nodesByType.task) {
         try {
-          await apiDelete(`/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/tasks/${encodeURIComponent(id)}`);
+          await apiDelete(
+            `/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/tasks/${encodeURIComponent(id)}`
+          );
 
           // Remove from local state
           const filteredTasks = this.state.tasks.filter(t => t.id !== id);
@@ -323,7 +346,9 @@ export class AgentCanvasContextMenu {
     if (nodesByType.store && nodesByType.store.length > 0) {
       for (const { id } of nodesByType.store) {
         try {
-          await apiDelete(`/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/stores/${encodeURIComponent(id)}`);
+          await apiDelete(
+            `/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/stores/${encodeURIComponent(id)}`
+          );
 
           // Remove from local state
           const filteredStores = this.state.storeNodes.filter(s => s.id !== id);
@@ -341,7 +366,9 @@ export class AgentCanvasContextMenu {
     if (nodesByType.attachment && nodesByType.attachment.length > 0) {
       for (const { id } of nodesByType.attachment) {
         try {
-          await apiDelete(`/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/attachments/${encodeURIComponent(id)}`);
+          await apiDelete(
+            `/api/workspaces/${encodeURIComponent(this.parent.workspaceId)}/attachments/${encodeURIComponent(id)}`
+          );
 
           // Remove from local state
           const filteredAttachments = this.state.attachments.filter(a => a.id !== id);
@@ -384,9 +411,6 @@ export class AgentCanvasContextMenu {
     const count = selectedNodes.length;
 
     // For now, show a notification about the planned feature
-    this.parent.notifications.showNotification(
-      `Grouping ${count} nodes - Coming soon!`,
-      'info'
-    );
+    this.parent.notifications.showNotification(`Grouping ${count} nodes - Coming soon!`, 'info');
   }
 }

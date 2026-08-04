@@ -22,8 +22,8 @@ export const taskResultActionsMethods = {
     if (!container) return;
     this._resultSelectionActionsBound = true;
 
-    this.boundResultSelectionEvent = (event) => this.handleResultSelectionEvent(event);
-    this.boundResultSelectionDismiss = (event) => {
+    this.boundResultSelectionEvent = event => this.handleResultSelectionEvent(event);
+    this.boundResultSelectionDismiss = event => {
       if (this.resultSelectionPopover && this.resultSelectionPopover.contains(event.target)) return;
       this.closeResultActionPopover();
     };
@@ -51,7 +51,9 @@ export const taskResultActionsMethods = {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
 
-    const text = String(selection.toString() || '').replace(/\u00a0/g, ' ').trim();
+    const text = String(selection.toString() || '')
+      .replace(/\u00a0/g, ' ')
+      .trim();
     if (text.length < 3) return null;
 
     const container = this.elements.output;
@@ -59,7 +61,8 @@ export const taskResultActionsMethods = {
 
     const range = selection.getRangeAt(0);
     const anchor = range.commonAncestorContainer;
-    const anchorEl = anchor && anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
+    const anchorEl =
+      anchor && anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor?.parentElement;
     if (!anchorEl || !container.contains(anchorEl)) return null;
 
     const rect = range.getBoundingClientRect();
@@ -69,10 +72,11 @@ export const taskResultActionsMethods = {
   },
 
   deriveSelectionTitle(text) {
-    const firstLine = String(text || '')
-      .split('\n')
-      .map((line) => line.trim())
-      .find(Boolean) || String(text || '');
+    const firstLine =
+      String(text || '')
+        .split('\n')
+        .map(line => line.trim())
+        .find(Boolean) || String(text || '');
     return summarizeText(firstLine, 80);
   },
 
@@ -89,14 +93,16 @@ export const taskResultActionsMethods = {
     if (!prose) return;
 
     const candidates = [];
-    prose.querySelectorAll('li').forEach((li) => candidates.push(li));
-    prose.querySelectorAll(':scope > p').forEach((p) => {
+    prose.querySelectorAll('li').forEach(li => candidates.push(li));
+    prose.querySelectorAll(':scope > p').forEach(p => {
       if (p.firstElementChild && p.firstElementChild.tagName === 'STRONG') candidates.push(p);
     });
 
-    candidates.forEach((item) => {
+    candidates.forEach(item => {
       if (item.dataset.resultItemEnhanced === 'true') return;
-      const text = String(item.textContent || '').replace(/\s+/g, ' ').trim();
+      const text = String(item.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim();
       if (text.length < 8) return; // skip trivial markers / empty wrappers
 
       item.dataset.resultItemEnhanced = 'true';
@@ -112,10 +118,10 @@ export const taskResultActionsMethods = {
       // Stop the button's mouse events from reaching the result container's
       // selection listener — otherwise its mouseup would see a collapsed
       // selection and immediately close the popover we just opened.
-      ['mousedown', 'mouseup'].forEach((type) => {
-        button.addEventListener(type, (event) => event.stopPropagation());
+      ['mousedown', 'mouseup'].forEach(type => {
+        button.addEventListener(type, event => event.stopPropagation());
       });
-      button.addEventListener('click', (event) => {
+      button.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
         const rect = button.getBoundingClientRect();
@@ -155,7 +161,7 @@ export const taskResultActionsMethods = {
     this.resultSelectionPopover = menu;
     this.positionResultActionPopover(menu, rect);
 
-    menu.querySelectorAll('[data-selection-action]').forEach((btn) => {
+    menu.querySelectorAll('[data-selection-action]').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.getAttribute('data-selection-action') || '';
         this.closeResultActionPopover();
@@ -227,7 +233,10 @@ export const taskResultActionsMethods = {
   // modal/submit path accepts a null section (sectionId becomes ''), so no
   // DOM section element is required.
   researchResultSelection(text, title) {
-    if (typeof this.buildResultResearchDraft !== 'function' || typeof this.openResultResearchModal !== 'function') {
+    if (
+      typeof this.buildResultResearchDraft !== 'function' ||
+      typeof this.openResultResearchModal !== 'function'
+    ) {
       this.notify('error', 'Research is not available on this page.');
       return;
     }
@@ -242,19 +251,26 @@ export const taskResultActionsMethods = {
       return;
     }
     const name = (title || this.deriveSelectionTitle(text) || 'Result excerpt').trim();
-    const sourceLabel = typeof this.getTaskDisplayLabel === 'function' ? this.getTaskDisplayLabel() : '';
+    const sourceLabel =
+      typeof this.getTaskDisplayLabel === 'function' ? this.getTaskDisplayLabel() : '';
     const sourceId = String(this.task?.id || this.taskId || '').trim();
-    const footerParts = [sourceLabel ? `From task: ${sourceLabel}` : '', sourceId ? `(${sourceId})` : '']
+    const footerParts = [
+      sourceLabel ? `From task: ${sourceLabel}` : '',
+      sourceId ? `(${sourceId})` : ''
+    ]
       .filter(Boolean)
       .join(' ');
     const content = footerParts ? `${text}\n\n---\n${footerParts}` : text;
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, content })
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, content })
+        }
+      );
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(this.parseResponseError(errorText, 'Failed to save selection as note.'));
@@ -279,15 +295,18 @@ export const taskResultActionsMethods = {
 
   buildSelectionDialogAgentOptions(selectedAgent = '') {
     const normalizedSelected = String(selectedAgent || '').trim();
-    const names = typeof this.getAssignableAgentNames === 'function'
-      ? this.getAssignableAgentNames(normalizedSelected)
-      : [];
+    const names =
+      typeof this.getAssignableAgentNames === 'function'
+        ? this.getAssignableAgentNames(normalizedSelected)
+        : [];
     const options = ['<option value="">Unassigned (manual task)</option>'];
-    names.forEach((agentName) => {
+    names.forEach(agentName => {
       const name = String(agentName || '').trim();
       if (!name) return;
       const selected = name.toLowerCase() === normalizedSelected.toLowerCase() ? ' selected' : '';
-      options.push(`<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(name)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(name)}"${selected}>${this.escapeHtml(name)}</option>`
+      );
     });
     return options.join('');
   },
@@ -306,7 +325,8 @@ export const taskResultActionsMethods = {
 
     const isAsk = mode === 'ask';
     const currentAgent = String(this.task?.to || '').trim();
-    const defaultAgent = currentAgent && currentAgent.toLowerCase() !== 'unassigned' ? currentAgent : '';
+    const defaultAgent =
+      currentAgent && currentAgent.toLowerCase() !== 'unassigned' ? currentAgent : '';
     // A question is usually standalone; an extracted action usually belongs to
     // this task. Default accordingly, but the choice is always shown.
     const defaultRelationship = isAsk ? 'followup' : 'subtask';
@@ -338,12 +358,16 @@ export const taskResultActionsMethods = {
           </div>
         </div>
 
-        ${isAsk ? `
+        ${
+          isAsk
+            ? `
         <div class="workspace-task-selection-dialog-presets" role="group" aria-label="Question presets">
           <button type="button" class="workspace-task-selection-dialog-preset" data-preset="Explain this in more detail.">Explain</button>
           <button type="button" class="workspace-task-selection-dialog-preset" data-preset="Verify this and cite sources.">Verify</button>
           <button type="button" class="workspace-task-selection-dialog-preset" data-preset="Summarize this concisely.">Summarize</button>
-        </div>` : ''}
+        </div>`
+            : ''
+        }
 
         <label class="workspace-task-selection-dialog-field">
           <span class="workspace-task-selection-dialog-label">${isAsk ? 'What do you want to ask?' : 'What should the task do?'}</span>
@@ -377,7 +401,7 @@ export const taskResultActionsMethods = {
     const descriptionInput = backdrop.querySelector('[data-dialog-field="description"]');
     if (descriptionInput && !isAsk) descriptionInput.value = selection;
 
-    backdrop.querySelectorAll('[data-preset]').forEach((btn) => {
+    backdrop.querySelectorAll('[data-preset]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (descriptionInput) {
           descriptionInput.value = btn.getAttribute('data-preset') || '';
@@ -386,17 +410,17 @@ export const taskResultActionsMethods = {
       });
     });
 
-    backdrop.querySelectorAll('[data-dialog-action="cancel"]').forEach((btn) => {
+    backdrop.querySelectorAll('[data-dialog-action="cancel"]').forEach(btn => {
       btn.addEventListener('click', () => this.closeSelectionTaskDialog());
     });
     backdrop.querySelector('[data-dialog-action="submit"]')?.addEventListener('click', () => {
       void this.submitSelectionTaskDialog(selection, mode);
     });
 
-    backdrop.addEventListener('mousedown', (event) => {
+    backdrop.addEventListener('mousedown', event => {
       if (event.target === backdrop) this.closeSelectionTaskDialog();
     });
-    this.boundSelectionDialogKeydown = (event) => {
+    this.boundSelectionDialogKeydown = event => {
       if (event.key === 'Escape') this.closeSelectionTaskDialog();
     };
     document.addEventListener('keydown', this.boundSelectionDialogKeydown, true);
@@ -433,9 +457,13 @@ export const taskResultActionsMethods = {
     const dialog = this.selectionTaskDialog;
     if (!dialog) return;
 
-    const description = String(dialog.querySelector('[data-dialog-field="description"]')?.value || '').trim();
+    const description = String(
+      dialog.querySelector('[data-dialog-field="description"]')?.value || ''
+    ).trim();
     if (!description) {
-      this.setSelectionDialogError(mode === 'ask' ? 'Type a question first.' : 'Describe what the task should do.');
+      this.setSelectionDialogError(
+        mode === 'ask' ? 'Type a question first.' : 'Describe what the task should do.'
+      );
       dialog.querySelector('[data-dialog-field="description"]')?.focus();
       return;
     }
@@ -445,12 +473,15 @@ export const taskResultActionsMethods = {
     }
     this.setSelectionDialogError('');
 
-    const relationship = String(dialog.querySelector('input[name="selection-task-relationship"]:checked')?.value || 'subtask');
+    const relationship = String(
+      dialog.querySelector('input[name="selection-task-relationship"]:checked')?.value || 'subtask'
+    );
     const isSubtask = relationship === 'subtask';
     const agent = String(dialog.querySelector('[data-dialog-field="agent"]')?.value || '').trim();
     const runNow = Boolean(dialog.querySelector('[data-dialog-field="run-now"]')?.checked);
 
-    const sourceLabel = typeof this.getTaskDisplayLabel === 'function' ? this.getTaskDisplayLabel() : '';
+    const sourceLabel =
+      typeof this.getTaskDisplayLabel === 'function' ? this.getTaskDisplayLabel() : '';
     const sourceId = String(this.task.id);
     const details = [
       `Created from a highlighted excerpt of ${sourceLabel ? `"${sourceLabel}"` : 'a task'} (${sourceId}):`,
@@ -499,7 +530,9 @@ export const taskResultActionsMethods = {
         });
         if (!executeResponse.ok) {
           const text = await executeResponse.text();
-          throw new Error(this.parseResponseError(text, 'Task was created but could not be started.'));
+          throw new Error(
+            this.parseResponseError(text, 'Task was created but could not be started.')
+          );
         }
       }
 
@@ -528,5 +561,5 @@ export const taskResultActionsMethods = {
       if (submitBtn) submitBtn.disabled = false;
       if (submitText) submitText.textContent = originalText;
     }
-  },
+  }
 };

@@ -8,8 +8,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Fetches all workspaces from the server
-     */
+   * Fetches all workspaces from the server
+   */
   async fetchWorkspaces() {
     try {
       const response = await fetch('/api/orchestration/workspace');
@@ -36,11 +36,13 @@ export class WorkspaceManager {
   }
 
   /**
-     * Fetches workflow status for a specific workspace
-     */
+   * Fetches workflow status for a specific workspace
+   */
   async fetchWorkflowStatus(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/workflow/status?workspace_id=${workspaceId}`);
+      const response = await fetch(
+        `/api/orchestration/workflow/status?workspace_id=${workspaceId}`
+      );
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -52,8 +54,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Fetches tasks for a specific workspace
-     */
+   * Fetches tasks for a specific workspace
+   */
   async fetchTasks(workspaceId) {
     try {
       const response = await fetch(`/api/orchestration/tasks?workspace_id=${workspaceId}`);
@@ -68,8 +70,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Starts monitoring a workspace with periodic updates
-     */
+   * Starts monitoring a workspace with periodic updates
+   */
   startMonitoring(workspaceId, callback, intervalMs = 2000) {
     this.currentWorkspaceId = workspaceId;
     this.stopMonitoring(); // Stop any existing monitoring
@@ -89,8 +91,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Stops monitoring the current workspace
-     */
+   * Stops monitoring the current workspace
+   */
   stopMonitoring() {
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
@@ -103,8 +105,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Starts monitoring with real-time SSE updates
-     */
+   * Starts monitoring with real-time SSE updates
+   */
   startMonitoringSSE(workspaceId, callback) {
     this.currentWorkspaceId = workspaceId;
     this.stopMonitoring(); // Stop any existing monitoring
@@ -112,7 +114,7 @@ export class WorkspaceManager {
     const url = `/api/orchestration/workflow/stream?workspace_id=${workspaceId}`;
     this.eventSource = new EventSource(url);
 
-    this.eventSource.onmessage = (event) => {
+    this.eventSource.onmessage = event => {
       try {
         const status = JSON.parse(event.data);
         if (callback) {
@@ -123,7 +125,7 @@ export class WorkspaceManager {
       }
     };
 
-    this.eventSource.addEventListener('complete', (event) => {
+    this.eventSource.addEventListener('complete', event => {
       this.stopMonitoring();
       if (callback) {
         // Fetch final status
@@ -135,14 +137,14 @@ export class WorkspaceManager {
       }
     });
 
-    this.eventSource.addEventListener('error', (event) => {
+    this.eventSource.addEventListener('error', event => {
       console.error('SSE error:', event);
       if (callback) {
         callback({ error: 'Connection lost' });
       }
     });
 
-    this.eventSource.onerror = (error) => {
+    this.eventSource.onerror = error => {
       console.error('SSE connection error:', error);
       this.stopMonitoring();
       // Fall back to polling
@@ -151,8 +153,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Renders workspace list to a container element
-     */
+   * Renders workspace list to a container element
+   */
   renderWorkspaceList(containerEl, workspaces) {
     if (!containerEl) return;
 
@@ -190,8 +192,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Renders workflow status with progress information
-     */
+   * Renders workflow status with progress information
+   */
   renderWorkflowStatus(containerEl, status) {
     if (!containerEl || !status) return;
 
@@ -233,14 +235,16 @@ export class WorkspaceManager {
   }
 
   /**
-     * Renders task list
-     */
+   * Renders task list
+   */
   renderTaskList(tasks) {
     if (!tasks || Object.keys(tasks).length === 0) {
       return '<p class="text-muted">No tasks</p>';
     }
 
-    return Object.entries(tasks).map(([, task]) => `
+    return Object.entries(tasks)
+      .map(
+        ([, task]) => `
             <div class="task-item">
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="task-agent">${this.escapeHtml(task.agent)}</span>
@@ -248,67 +252,69 @@ export class WorkspaceManager {
                 </div>
                 <small class="task-desc text-muted">${this.escapeHtml(task.description)}</small>
             </div>
-        `).join('');
+        `
+      )
+      .join('');
   }
 
   /**
-     * Helper: Get status badge color
-     */
+   * Helper: Get status badge color
+   */
   getStatusColor(status) {
     const colors = {
-      'active': 'primary',
-      'completed': 'success',
-      'failed': 'danger',
-      'cancelled': 'secondary'
+      active: 'primary',
+      completed: 'success',
+      failed: 'danger',
+      cancelled: 'secondary'
     };
     return colors[status] || 'secondary';
   }
 
   /**
-     * Helper: Get task status color
-     */
+   * Helper: Get task status color
+   */
   getTaskStatusColor(status) {
     const colors = {
-      'pending': 'secondary',
-      'assigned': 'info',
-      'in_progress': 'warning',
-      'completed': 'success',
-      'failed': 'danger',
-      'cancelled': 'secondary',
-      'timeout': 'danger'
+      pending: 'secondary',
+      assigned: 'info',
+      in_progress: 'warning',
+      completed: 'success',
+      failed: 'danger',
+      cancelled: 'secondary',
+      timeout: 'danger'
     };
     return colors[status] || 'secondary';
   }
 
   /**
-     * Helper: Get phase emoji
-     */
+   * Helper: Get phase emoji
+   */
   getPhaseEmoji(phase) {
     const emojis = {
-      'initializing': '🔄',
-      'executing': '⚡',
-      'finalizing': '🏁',
-      'completed': '✅'
+      initializing: '🔄',
+      executing: '⚡',
+      finalizing: '🏁',
+      completed: '✅'
     };
     return emojis[phase] || '📊';
   }
 
   /**
-     * Helper: Get phase color class
-     */
+   * Helper: Get phase color class
+   */
   getPhaseColor(phase) {
     const colors = {
-      'initializing': 'bg-info',
-      'executing': 'bg-warning',
-      'finalizing': 'bg-primary',
-      'completed': 'bg-success'
+      initializing: 'bg-info',
+      executing: 'bg-warning',
+      finalizing: 'bg-primary',
+      completed: 'bg-success'
     };
     return colors[phase] || 'bg-secondary';
   }
 
   /**
-     * Helper: Escape HTML to prevent XSS
-     */
+   * Helper: Escape HTML to prevent XSS
+   */
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -316,8 +322,8 @@ export class WorkspaceManager {
   }
 
   /**
-     * Selects a workspace for monitoring
-     */
+   * Selects a workspace for monitoring
+   */
   selectWorkspace(workspaceId) {
     const event = new CustomEvent('workspace-selected', {
       detail: { workspaceId }

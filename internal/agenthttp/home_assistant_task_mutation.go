@@ -297,7 +297,6 @@ func extractBacklogDescription(prompt, wsName string) string {
 	for _, phrase := range homeBacklogConnectivePhrases {
 		if idx := strings.Index(lower, phrase); idx >= 0 {
 			s = s[:idx]
-			lower = lower[:idx]
 			break
 		}
 	}

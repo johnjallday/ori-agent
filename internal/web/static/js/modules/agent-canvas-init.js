@@ -100,7 +100,10 @@ export class AgentCanvasInitialization {
           return normalized;
         });
         // Ensure tasks are placed in the current viewport if missing or off-screen
-        if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureTaskPosition === 'function') {
+        if (
+          this.parent.eventHandler &&
+          typeof this.parent.eventHandler.ensureTaskPosition === 'function'
+        ) {
           tasks.forEach(t => this.parent.eventHandler.ensureTaskPosition(t));
         }
         // Preserve assigned_node_id hints from existing state (if any)
@@ -112,7 +115,10 @@ export class AgentCanvasInitialization {
         });
         this.state.setTasks(tasks);
         // Seed agent lastResult based on any completed tasks with results
-        if (this.parent.eventHandler && typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function') {
+        if (
+          this.parent.eventHandler &&
+          typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function'
+        ) {
           this.parent.eventHandler.updateAgentResultsFromTasks(tasks);
         }
       }
@@ -127,7 +133,10 @@ export class AgentCanvasInitialization {
         }));
 
         // Ensure positions exist
-        if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureAttachmentPosition === 'function') {
+        if (
+          this.parent.eventHandler &&
+          typeof this.parent.eventHandler.ensureAttachmentPosition === 'function'
+        ) {
           attachments.forEach(a => this.parent.eventHandler.ensureAttachmentPosition(a));
         }
 
@@ -217,7 +226,6 @@ export class AgentCanvasInitialization {
 
       // Update canvas info
       this.updateCanvasInfo();
-
     } catch (error) {
       console.error('Failed to initialize canvas:', error);
       document.getElementById('canvas-info').textContent = 'Error loading workspace';
@@ -253,10 +261,14 @@ export class AgentCanvasInitialization {
     const folderEntries = files
       .filter(item => item?.is_dir && item?.folder_id)
       .sort((left, right) =>
-        String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
-          sensitivity: 'base',
-          numeric: true
-        })
+        String(left.relative_path || '').localeCompare(
+          String(right.relative_path || ''),
+          undefined,
+          {
+            sensitivity: 'base',
+            numeric: true
+          }
+        )
       );
     const threshold = 6;
 
@@ -268,18 +280,21 @@ export class AgentCanvasInitialization {
       const childFolderCount = children.filter(child => child.is_dir).length;
       const childFileCount = children.length - childFolderCount;
       const collapsed =
-        existing?.collapsed !== undefined
-          ? existing.collapsed
-          : children.length > threshold;
+        existing?.collapsed !== undefined ? existing.collapsed : children.length > threshold;
 
       return {
         id,
         folder_id: id,
-        name: folder.name || String(folder.relative_path || '').split('/').pop() || 'Folder',
+        name:
+          folder.name ||
+          String(folder.relative_path || '')
+            .split('/')
+            .pop() ||
+          'Folder',
         path: folder.relative_path || '',
         relative_path: folder.relative_path || '',
-        x: savedPosition?.x ?? existing?.x ?? (520 + (index % 3) * 240),
-        y: savedPosition?.y ?? existing?.y ?? (220 + Math.floor(index / 3) * 170),
+        x: savedPosition?.x ?? existing?.x ?? 520 + (index % 3) * 240,
+        y: savedPosition?.y ?? existing?.y ?? 220 + Math.floor(index / 3) * 170,
         width: existing?.width || 220,
         height: existing?.height || 96,
         collapsed,
@@ -302,7 +317,12 @@ export class AgentCanvasInitialization {
         id: item.id || item.attachment_id || item.folder_id || item.relative_path,
         attachment_id: item.attachment_id || '',
         folder_id: item.folder_id || '',
-        name: item.name || String(item.relative_path || '').split('/').pop() || 'Item',
+        name:
+          item.name ||
+          String(item.relative_path || '')
+            .split('/')
+            .pop() ||
+          'Item',
         relative_path: item.relative_path || '',
         is_dir: Boolean(item.is_dir),
         size: Number(item.size || 0)
@@ -355,10 +375,10 @@ export class AgentCanvasInitialization {
 
         return {
           name: instance.name,
-          id: instance.id,                    // Stable UUID
-          nodeId: instance.node_id,            // Stable node ID (e.g., "default-node-1")
+          id: instance.id, // Stable UUID
+          nodeId: instance.node_id, // Stable node ID (e.g., "default-node-1")
           instanceNumber: instance.instance_number,
-          x: startX + (index * spacing),
+          x: startX + index * spacing,
           y: centerY,
           width: 120,
           height: 70,
@@ -409,7 +429,7 @@ export class AgentCanvasInitialization {
         name: agentName,
         nodeId: nodeId,
         instanceNumber: instanceNumber,
-        x: startX + (index * spacing),
+        x: startX + index * spacing,
         y: centerY,
         width: 120,
         height: 70,
@@ -473,8 +493,8 @@ export class AgentCanvasInitialization {
     // For each combiner node, find its corresponding task
     this.state.combinerNodes.forEach(combiner => {
       // Find task with matching combiner_node_id
-      const task = this.state.tasks.find(t =>
-        t.combiner_node_id === combiner.id || t.combinerNodeID === combiner.id
+      const task = this.state.tasks.find(
+        t => t.combiner_node_id === combiner.id || t.combinerNodeID === combiner.id
       );
 
       if (task) {
@@ -529,7 +549,10 @@ export class AgentCanvasInitialization {
     });
 
     // Ensure tasks have positions
-    if (this.parent.eventHandler && typeof this.parent.eventHandler.ensureTaskPosition === 'function') {
+    if (
+      this.parent.eventHandler &&
+      typeof this.parent.eventHandler.ensureTaskPosition === 'function'
+    ) {
       tasks.forEach(t => this.parent.eventHandler.ensureTaskPosition(t));
     }
 
@@ -558,8 +581,7 @@ export class AgentCanvasInitialization {
     if (!infoEl) return;
 
     const workflowLabel = this.state.selectedWorkflowId ? ' (filtered)' : '';
-    infoEl.textContent =
-      `Workspace: ${this.parent.workspace?.name || this.parent.workspaceId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
+    infoEl.textContent = `Workspace: ${this.parent.workspace?.name || this.parent.workspaceId} | Agents: ${this.state.agents.length} | Tasks: ${this.state.tasks.length}${workflowLabel} | Attachments: ${this.state.attachments.length} | Stores: ${this.state.storeNodes.length}`;
   }
 
   /**
@@ -581,8 +603,10 @@ export class AgentCanvasInitialization {
 
       const data = await response.json();
 
-      if (this.parent.eventHandler &&
-          typeof this.parent.eventHandler.processWorkspacePayload === 'function') {
+      if (
+        this.parent.eventHandler &&
+        typeof this.parent.eventHandler.processWorkspacePayload === 'function'
+      ) {
         this.parent.eventHandler.processWorkspacePayload(
           { ...data, type: data.type || 'workspace.progress' },
           { setTasks: true, source: 'initial.fetch' }
@@ -595,8 +619,11 @@ export class AgentCanvasInitialization {
         this.parent.workspaceProgress = data.workspace_progress;
       }
 
-      if (data.agent_stats && this.parent.eventHandler &&
-          typeof this.parent.eventHandler.updateAgentStats === 'function') {
+      if (
+        data.agent_stats &&
+        this.parent.eventHandler &&
+        typeof this.parent.eventHandler.updateAgentStats === 'function'
+      ) {
         this.parent.eventHandler.updateAgentStats(data.agent_stats);
       }
 
@@ -625,8 +652,10 @@ export class AgentCanvasInitialization {
           };
 
           // Ensure task has a position
-          if (this.parent.eventHandler &&
-              typeof this.parent.eventHandler.ensureTaskPosition === 'function') {
+          if (
+            this.parent.eventHandler &&
+            typeof this.parent.eventHandler.ensureTaskPosition === 'function'
+          ) {
             this.parent.eventHandler.ensureTaskPosition(mapped);
           }
 
@@ -648,15 +677,16 @@ export class AgentCanvasInitialization {
         this.state.setTasks(tasks);
 
         // Update agent results from tasks
-        if (this.parent.eventHandler &&
-            typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function') {
+        if (
+          this.parent.eventHandler &&
+          typeof this.parent.eventHandler.updateAgentResultsFromTasks === 'function'
+        ) {
           this.parent.eventHandler.updateAgentResultsFromTasks(tasks);
         }
       }
 
       // Redraw canvas with updated data
       this.parent.draw();
-
     } catch (error) {
       console.error('❌ Failed to fetch initial progress data:', error);
     }

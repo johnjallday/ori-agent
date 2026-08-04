@@ -19,8 +19,10 @@ export class AgentCanvasLayoutManager {
    * Returns { minX, maxX, minY, maxY, centerX, centerY } or null if no positioned content
    */
   getContentBounds() {
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      maxX = -Infinity;
+    let minY = Infinity,
+      maxY = -Infinity;
     let hasContent = false;
 
     // Include agents
@@ -92,7 +94,10 @@ export class AgentCanvasLayoutManager {
     if (!hasContent) return null;
 
     return {
-      minX, maxX, minY, maxY,
+      minX,
+      maxX,
+      minY,
+      maxY,
       centerX: (minX + maxX) / 2,
       centerY: (minY + maxY) / 2
     };
@@ -108,8 +113,6 @@ export class AgentCanvasLayoutManager {
     const levels = this.calculateTaskLevels();
 
     // Get canvas dimensions
-    
-    
 
     // Vertical flow layout: tasks on the left, agents on the right
     const taskColumnX = 300; // X position for tasks (left side)
@@ -119,7 +122,7 @@ export class AgentCanvasLayoutManager {
 
     // Position tasks level by level (vertically)
     levels.forEach((taskGroup, levelIndex) => {
-      const baseY = startY + (levelIndex * verticalSpacing);
+      const baseY = startY + levelIndex * verticalSpacing;
 
       taskGroup.forEach((task, taskIndex) => {
         // Tasks in same level: stack vertically with slight offset
@@ -167,8 +170,10 @@ export class AgentCanvasLayoutManager {
     }
 
     // Calculate bounding box of all content
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      maxX = -Infinity;
+    let minY = Infinity,
+      maxY = -Infinity;
 
     // Include tasks
     this.state.tasks.forEach(task => {
@@ -257,8 +262,8 @@ export class AgentCanvasLayoutManager {
     this.state.scale = Math.max(0.3, Math.min(1.0, newScale));
 
     // Calculate offset to center content
-    this.state.offsetX = (this.parent.width / 2) - (contentCenterX * this.state.scale);
-    this.state.offsetY = (this.parent.height / 2) - (contentCenterY * this.state.scale);
+    this.state.offsetX = this.parent.width / 2 - contentCenterX * this.state.scale;
+    this.state.offsetY = this.parent.height / 2 - contentCenterY * this.state.scale;
   }
 
   /**
@@ -271,7 +276,7 @@ export class AgentCanvasLayoutManager {
     const taskMap = new Map(this.state.tasks.map(t => [t.id, t]));
 
     // Helper to calculate task level recursively
-    const getLevel = (task) => {
+    const getLevel = task => {
       if (visited.has(task.id)) {
         return task.level || 0;
       }
@@ -596,7 +601,12 @@ export class AgentCanvasLayoutManager {
       // Ensure combiner port state matches restored connections
       this.state.connections.forEach(conn => {
         const targetNode = this.parent.getNodeById(conn.to);
-        if (targetNode && targetNode.type === 'combiner' && conn.toPort && conn.toPort.startsWith('input')) {
+        if (
+          targetNode &&
+          targetNode.type === 'combiner' &&
+          conn.toPort &&
+          conn.toPort.startsWith('input')
+        ) {
           this.parent.ensureCombinerInputPort(targetNode.node, conn.toPort);
         }
       });

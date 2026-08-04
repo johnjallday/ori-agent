@@ -41,7 +41,7 @@ class CollapsibleChat {
     this.syncSessionAgent();
 
     // Keyboard shortcut: Ctrl+J to toggle
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'j') {
         e.preventDefault();
         this.toggle();
@@ -53,10 +53,9 @@ class CollapsibleChat {
     });
 
     // Listen for new messages
-    window.addEventListener('chatMessage', (e) => {
+    window.addEventListener('chatMessage', e => {
       this.handleNewMessage(e.detail);
     });
-
   }
 
   /**
@@ -80,7 +79,7 @@ class CollapsibleChat {
 
     // Send message on Enter
     if (this.chatInput) {
-      this.chatInput.addEventListener('keydown', (e) => {
+      this.chatInput.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           this.sendMessage();
@@ -199,7 +198,6 @@ class CollapsibleChat {
           timestamp: new Date().toISOString()
         });
       }
-
     } catch (error) {
       console.error('CollapsibleChat: Failed to send message', error);
       this.addMessage({

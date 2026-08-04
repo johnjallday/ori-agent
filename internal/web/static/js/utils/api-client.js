@@ -22,7 +22,7 @@
  *   });
  */
 
-const API = (function() {
+const API = (function () {
   'use strict';
 
   // Default configuration
@@ -121,7 +121,7 @@ const API = (function() {
 
     for (const interceptor of requestInterceptors) {
       try {
-        currentConfig = await interceptor(currentConfig) || currentConfig;
+        currentConfig = (await interceptor(currentConfig)) || currentConfig;
       } catch (error) {
         console.error('Request interceptor error:', error);
       }
@@ -138,7 +138,7 @@ const API = (function() {
 
     for (const interceptor of responseInterceptors) {
       try {
-        currentResponse = await interceptor(currentResponse, config) || currentResponse;
+        currentResponse = (await interceptor(currentResponse, config)) || currentResponse;
       } catch (error) {
         console.error('Response interceptor error:', error);
       }
@@ -193,10 +193,7 @@ const API = (function() {
     });
 
     // Create abort controller
-    const controller = createAbortController(
-      finalConfig.timeout,
-      finalConfig.requestId
-    );
+    const controller = createAbortController(finalConfig.timeout, finalConfig.requestId);
 
     // Build fetch options
     const fetchOptions = {
@@ -207,9 +204,8 @@ const API = (function() {
 
     // Add body for non-GET requests
     if (finalConfig.body !== undefined && finalConfig.method !== 'GET') {
-      fetchOptions.body = typeof finalConfig.body === 'string'
-        ? finalConfig.body
-        : JSON.stringify(finalConfig.body);
+      fetchOptions.body =
+        typeof finalConfig.body === 'string' ? finalConfig.body : JSON.stringify(finalConfig.body);
     }
 
     // Retry logic
@@ -230,7 +226,8 @@ const API = (function() {
 
         // Check for HTTP errors
         if (!response.ok) {
-          const errorMessage = data?.error || data?.message || response.statusText || 'Request failed';
+          const errorMessage =
+            data?.error || data?.message || response.statusText || 'Request failed';
           throw new APIError(errorMessage, response.status, data, fullUrl);
         }
 
@@ -238,7 +235,6 @@ const API = (function() {
         const finalResponse = await runResponseInterceptors(data, finalConfig);
 
         return finalResponse;
-
       } catch (error) {
         lastError = error;
 
@@ -254,19 +250,16 @@ const API = (function() {
         // Retry on network or server errors
         if (attempt < maxAttempts) {
           const delay = finalConfig.retryDelay * attempt;
-          console.warn(`API request failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms...`);
+          console.warn(
+            `API request failed (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms...`
+          );
           await sleep(delay);
           continue;
         }
 
         // Convert regular errors to APIError
         if (!(error instanceof APIError)) {
-          throw new APIError(
-            error.message || 'Network error',
-            0,
-            null,
-            fullUrl
-          );
+          throw new APIError(error.message || 'Network error', 0, null, fullUrl);
         }
 
         throw error;

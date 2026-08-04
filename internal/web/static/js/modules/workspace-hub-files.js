@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-files
  */
-(function() {
+(function () {
   'use strict';
 
   const { formatFileSize, getFileIcon } = window.WorkspaceHubUtils;
@@ -24,9 +24,12 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`, {
-        method: 'PATCH'
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/trash`,
+        {
+          method: 'PATCH'
+        }
+      );
       if (!response.ok) throw new Error('Failed to move file to trash');
 
       if (window.Toast) window.Toast.success('File moved to trash');
@@ -53,16 +56,21 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attachment_ids: ids })
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/bulk-trash`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attachment_ids: ids })
+        }
+      );
       if (!response.ok) throw new Error('Failed to move files to trash');
 
       const result = await response.json();
       if (window.Toast) {
-        window.Toast.success(`Moved ${result.success_count} file${result.success_count !== 1 ? 's' : ''} to trash`);
+        window.Toast.success(
+          `Moved ${result.success_count} file${result.success_count !== 1 ? 's' : ''} to trash`
+        );
       }
 
       window.WorkspaceHubSelection.toggleSelectionMode('files', () => renderFiles(state.files));
@@ -83,12 +91,16 @@
     const input = document.createElement('input');
     input.type = 'file';
     input.style.display = 'none';
-    input.addEventListener('change', async () => {
-      const selected = input.files && input.files[0];
-      input.remove();
-      if (!selected) return;
-      await relinkFile(fileId, selected);
-    }, { once: true });
+    input.addEventListener(
+      'change',
+      async () => {
+        const selected = input.files && input.files[0];
+        input.remove();
+        if (!selected) return;
+        await relinkFile(fileId, selected);
+      },
+      { once: true }
+    );
 
     document.body.appendChild(input);
     input.click();
@@ -107,10 +119,13 @@
     formData.append('file', file);
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/relink`, {
-        method: 'POST',
-        body: formData
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(state.selectedId)}/attachments/${encodeURIComponent(fileId)}/relink`,
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(result.error || result.message || 'Failed to relink file');
@@ -181,7 +196,8 @@
       elements.filesList.innerHTML = '<div class="hub-loading">Loading files...</div>';
     }
     if (elements.directoriesList) {
-      elements.directoriesList.innerHTML = '<div class="hub-loading">Loading linked folders...</div>';
+      elements.directoriesList.innerHTML =
+        '<div class="hub-loading">Loading linked folders...</div>';
     }
 
     try {
@@ -196,7 +212,9 @@
         const tree = await treeResponse.json();
         state.files = Array.isArray(tree.files) ? tree.files : [];
       } else {
-        state.files = (workspace.attachments || []).filter(a => a.file_meta || a.type === 'image' || a.type === 'other');
+        state.files = (workspace.attachments || []).filter(
+          a => a.file_meta || a.type === 'image' || a.type === 'other'
+        );
       }
       state.directories = workspace.directory_references || [];
       renderFiles(state.files);
@@ -207,7 +225,8 @@
         elements.filesList.innerHTML = '<div class="hub-empty">Unable to load files.</div>';
       }
       if (elements.directoriesList) {
-        elements.directoriesList.innerHTML = '<div class="hub-empty">Unable to load linked folders.</div>';
+        elements.directoriesList.innerHTML =
+          '<div class="hub-empty">Unable to load linked folders.</div>';
       }
     }
   }
@@ -230,18 +249,24 @@
     const _inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('files');
     const selectedSet = state.selectedItems.files;
 
-    const items = files.slice(0, 8).map((file) => {
+    const items = files.slice(0, 8).map(file => {
       const isFolder = Boolean(file.is_dir);
       const attachmentId = file.attachment_id || (!isFolder && file.file_meta ? file.id : '');
       const itemId = attachmentId || file.id || file.relative_path || '';
-      const title = file.title || file.name || (file.file_meta && file.file_meta.name) || 'Untitled File';
-      const size = file.file_meta ? formatFileSize(file.file_meta.size) : (!isFolder ? formatFileSize(file.size) : '');
+      const title =
+        file.title || file.name || (file.file_meta && file.file_meta.name) || 'Untitled File';
+      const size = file.file_meta
+        ? formatFileSize(file.file_meta.size)
+        : !isFolder
+          ? formatFileSize(file.size)
+          : '';
       const icon = isFolder
         ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>'
         : getFileIcon(file.type, file.file_meta?.mime);
       const isSelected = attachmentId ? selectedSet.has(attachmentId) : false;
       const isMissing = file.file_meta?.status === 'missing';
-      const relativePath = file.relative_path || (file.file_meta && file.file_meta.relative_path) || '';
+      const relativePath =
+        file.relative_path || (file.file_meta && file.file_meta.relative_path) || '';
       const pathText = relativePath && relativePath !== title ? relativePath : '';
       const metaText = [isMissing ? 'Missing from disk' : '', size].filter(Boolean).join(' · ');
 
@@ -256,25 +281,37 @@
             ${metaText || pathText ? `<div class="hub-file-meta">${isMissing ? '<span class="hub-file-status-badge is-missing">Missing</span>' : ''}${escapeHtml(metaText || pathText)}</div>` : ''}
           </div>
           <div class="hub-file-actions">
-            ${relativePath ? `
+            ${
+              relativePath
+                ? `
               <button class="hub-item-secondary-btn" data-action="reveal" title="Reveal in File Manager">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M16.5,12C19,12 21,14 21,16.5C21,17.38 20.75,18.21 20.31,18.9L23.39,22L22,23.39L18.88,20.32C18.19,20.75 17.37,21 16.5,21C14,21 12,19 12,16.5C12,14 14,12 16.5,12M16.5,14A2.5,2.5 0 0,0 14,16.5A2.5,2.5 0 0,0 16.5,19A2.5,2.5 0 0,0 19,16.5A2.5,2.5 0 0,0 16.5,14M9,4L11,6H21A2,2 0 0,1 23,8V11.81C22.39,11.26 21.7,10.8 20.93,10.5L20,9.97V8H10.17L8.17,6H4V18H10.06C10.16,18.7 10.38,19.37 10.68,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4H9Z"/>
                 </svg>
               </button>
-            ` : ''}
-            ${isMissing && attachmentId ? `
+            `
+                : ''
+            }
+            ${
+              isMissing && attachmentId
+                ? `
               <button class="hub-item-secondary-btn" data-action="relink" title="Relink missing file">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41Z"/>
                 </svg>
               </button>
-            ` : ''}
-            ${attachmentId ? `<button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
+            `
+                : ''
+            }
+            ${
+              attachmentId
+                ? `<button class="hub-item-delete-btn" data-action="trash" title="Move to trash">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
               </svg>
-            </button>` : ''}
+            </button>`
+                : ''
+            }
           </div>
         </div>
       `;
@@ -298,7 +335,7 @@
       return;
     }
 
-    const items = directories.slice(0, 5).map((directory) => {
+    const items = directories.slice(0, 5).map(directory => {
       const title = directory.name || 'Untitled Linked Folder';
       const path = directory.path || 'Path unavailable';
       return `
@@ -332,36 +369,36 @@
     const elements = window.WorkspaceHubState.getElements();
     const inSelectionMode = window.WorkspaceHubSelection.isSelectionModeEnabled('files');
 
-    elements.filesList.querySelectorAll('.hub-file-item').forEach((item) => {
+    elements.filesList.querySelectorAll('.hub-file-item').forEach(item => {
       const fileId = item.dataset.attachmentId || '';
       const isFolder = item.dataset.isFolder === 'true';
 
       const checkbox = item.querySelector('input[type="checkbox"]');
       if (checkbox) {
-        checkbox.addEventListener('change', (event) => {
+        checkbox.addEventListener('change', event => {
           event.stopPropagation();
           window.WorkspaceHubSelection.toggleItemSelection('files', fileId);
         });
       }
 
-      item.querySelector('[data-action="trash"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="trash"]')?.addEventListener('click', event => {
         event.stopPropagation();
         if (!fileId) return;
         moveFileToTrash(fileId);
       });
 
-      item.querySelector('[data-action="relink"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="relink"]')?.addEventListener('click', event => {
         event.stopPropagation();
         if (!fileId) return;
         promptRelinkFile(fileId);
       });
 
-      item.querySelector('[data-action="reveal"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="reveal"]')?.addEventListener('click', event => {
         event.stopPropagation();
         osFileAction('reveal', item.dataset.relativePath || '');
       });
 
-      item.addEventListener('click', (event) => {
+      item.addEventListener('click', event => {
         if (event.target.closest('button') || event.target.closest('input')) return;
 
         if (inSelectionMode && fileId) {
@@ -398,9 +435,12 @@
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`, {
-        method: 'DELETE'
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(state.selectedId)}/directories/${encodeURIComponent(directoryId)}`,
+        {
+          method: 'DELETE'
+        }
+      );
       if (!response.ok) throw new Error('Failed to remove directory reference');
 
       if (window.Toast) window.Toast.success('Linked folder removed');
@@ -419,10 +459,10 @@
 
     if (!elements.directoriesList) return;
 
-    elements.directoriesList.querySelectorAll('.hub-directory-item').forEach((item) => {
+    elements.directoriesList.querySelectorAll('.hub-directory-item').forEach(item => {
       const directoryId = item.dataset.directoryId;
 
-      item.querySelector('[data-action="delete-directory"]')?.addEventListener('click', (event) => {
+      item.querySelector('[data-action="delete-directory"]')?.addEventListener('click', event => {
         event.stopPropagation();
         deleteDirectory(directoryId);
       });
@@ -478,7 +518,8 @@
     elements.selectedFilesPreview.style.display = 'block';
     if (elements.addFileSubmitBtn) elements.addFileSubmitBtn.disabled = false;
 
-    const items = state.pendingFiles.map((file, index) => `
+    const items = state.pendingFiles.map(
+      (file, index) => `
       <div class="hub-selected-file-item" data-index="${index}">
         <div class="hub-selected-file-info">
           <span class="hub-selected-file-name">${escapeHtml(file.name)}</span>
@@ -490,13 +531,14 @@
           </svg>
         </button>
       </div>
-    `);
+    `
+    );
 
     elements.selectedFilesList.innerHTML = items.join('');
 
     // Bind remove button handlers
-    elements.selectedFilesList.querySelectorAll('.hub-selected-file-remove').forEach((btn) => {
-      btn.addEventListener('click', (event) => {
+    elements.selectedFilesList.querySelectorAll('.hub-selected-file-remove').forEach(btn => {
+      btn.addEventListener('click', event => {
         event.stopPropagation();
         const index = parseInt(btn.dataset.index, 10);
         state.pendingFiles.splice(index, 1);
@@ -569,11 +611,11 @@
     const state = window.WorkspaceHubState.getState();
     const maxSize = 10 * 1024 * 1024; // 10MB
 
-    files.forEach((file) => {
+    files.forEach(file => {
       // Check if this is likely a folder
       const hasExtension = file.name.includes('.');
-      const isLikelyFolder = (!file.type && file.size === 0) ||
-                             (!file.type && !hasExtension && file.size < 4096);
+      const isLikelyFolder =
+        (!file.type && file.size === 0) || (!file.type && !hasExtension && file.size < 4096);
 
       if (isLikelyFolder) {
         if (window.Toast) {
@@ -593,7 +635,7 @@
       }
 
       // Avoid duplicates
-      if (!state.pendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+      if (!state.pendingFiles.some(f => f.name === file.name && f.size === file.size)) {
         state.pendingFiles.push(file);
       }
     });
@@ -616,7 +658,8 @@
 
     if (elements.addFileSubmitBtn) {
       elements.addFileSubmitBtn.disabled = true;
-      elements.addFileSubmitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Uploading...';
+      elements.addFileSubmitBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1"></span>Uploading...';
     }
 
     if (elements.fileUploadProgress) {
@@ -720,9 +763,9 @@
     const elements = window.WorkspaceHubState.getElements();
     return String(
       elements.fileFolderPath?.value ||
-      elements.fileFolderSelect?.value ||
-      elements.fileDestinationFolder?.value ||
-      ''
+        elements.fileFolderSelect?.value ||
+        elements.fileDestinationFolder?.value ||
+        ''
     ).trim();
   }
 
@@ -775,10 +818,14 @@
       const folders = (Array.isArray(payload.files) ? payload.files : [])
         .filter(item => item?.is_dir && item?.relative_path)
         .sort((left, right) =>
-          String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
-            sensitivity: 'base',
-            numeric: true
-          })
+          String(left.relative_path || '').localeCompare(
+            String(right.relative_path || ''),
+            undefined,
+            {
+              sensitivity: 'base',
+              numeric: true
+            }
+          )
         );
 
       select.innerHTML = [
@@ -929,7 +976,9 @@
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         try {
-          await launchFolderPicker({ successMessage: 'Folder picker opened. Select a folder to add it.' });
+          await launchFolderPicker({
+            successMessage: 'Folder picker opened. Select a folder to add it.'
+          });
         } finally {
           button.disabled = false;
           button.innerHTML = original;

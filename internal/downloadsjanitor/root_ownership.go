@@ -104,16 +104,6 @@ func (s *Service) currentRootID(workspaceID string) string {
 	return settings.RootID
 }
 
-// activeRootFor returns a workspace's currently managed root, or "" when it has
-// none. Used by the conflict reporter and by tests.
-func (s *Service) activeRootFor(workspaceID string) string {
-	settings, err := s.store.LoadSettings(workspaceID)
-	if err != nil || !settings.IsSetUp() {
-		return ""
-	}
-	return settings.RootPath
-}
-
 // Compile-time reminder that the workspace store type is the one this file
 // type-asserts against.
 var _ = (*workspace.Workspace)(nil)

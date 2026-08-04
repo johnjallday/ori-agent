@@ -96,7 +96,15 @@ func (e *Engine) HandleEvent(ev ws.Event) {
 	}
 	dirty := len(completed) > 0
 	if dirty {
-		e.persistLocked()
+		if err := e.persistLocked(); err != nil {
+			// The completions are already reflected in e.state, so they are
+			// not lost - the next successful persist (triggered by any
+			// engine call) will include them. What must not happen is a live
+			// "completed" notification for something that was not actually
+			// saved, so withhold it here. persistLocked already logs the
+			// failure.
+			completed = nil
+		}
 	}
 	e.mu.Unlock()
 
@@ -122,8 +130,16 @@ func (e *Engine) Complete(questID string) bool {
 		return false
 	}
 	e.markLocked(questID)
-	e.persistLocked()
+	err := e.persistLocked()
 	e.mu.Unlock()
+
+	if err != nil {
+		// As in HandleEvent: the completion stays in e.state (durable on the
+		// next successful persist) but is not yet saved, so report failure
+		// and withhold the callback rather than claim a success that did not
+		// happen. persistLocked already logs the failure.
+		return false
+	}
 
 	if e.onComplete != nil {
 		e.onComplete(q)

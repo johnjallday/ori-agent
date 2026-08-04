@@ -15,7 +15,8 @@ export class DashboardUI {
         statusBadge.innerHTML = '<span class="status-indicator status-online"></span> Live';
         statusBadge.className = 'modern-badge badge-success';
       } else if (status === 'error') {
-        statusBadge.innerHTML = '<span class="status-indicator status-offline"></span> Disconnected';
+        statusBadge.innerHTML =
+          '<span class="status-indicator status-offline"></span> Disconnected';
         statusBadge.className = 'modern-badge badge-danger';
         if (message) {
           this.showToast('Connection Error', message, 'error');
@@ -96,10 +97,14 @@ export class DashboardUI {
   }
 
   getStatusIcon(status) {
-    const iconColor = status === 'completed' ? 'var(--success-color)' :
-      status === 'failed' ? 'var(--danger-color)' :
-        status === 'in_progress' ? 'var(--info-color)' :
-          'var(--text-muted)';
+    const iconColor =
+      status === 'completed'
+        ? 'var(--success-color)'
+        : status === 'failed'
+          ? 'var(--danger-color)'
+          : status === 'in_progress'
+            ? 'var(--info-color)'
+            : 'var(--text-muted)';
 
     let path = '';
     switch (status) {
@@ -107,13 +112,15 @@ export class DashboardUI {
         path = 'M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z';
         break;
       case 'failed':
-        path = 'M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z';
+        path =
+          'M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z';
         break;
       case 'in_progress':
         path = 'M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z';
         break;
       default:
-        path = 'M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20Z';
+        path =
+          'M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20Z';
     }
 
     return `
@@ -146,5 +153,4 @@ export class DashboardUI {
     div.textContent = text;
     return div.innerHTML;
   }
-
 }

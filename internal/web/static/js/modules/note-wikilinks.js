@@ -104,7 +104,7 @@ export function parseWikilinks(content) {
         out.push({
           target: m.target,
           display: m.display,
-          position: offset + m.start,
+          position: offset + m.start
         });
       }
     }
@@ -128,14 +128,13 @@ export function renderWikilinkHTML(target, display, isBroken = false) {
 }
 
 function escapeAttr(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 function escapeText(s) {
-  return String(s ?? '').replace(/[&<>]/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
-  ));
+  return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 }
 
 // applyWikilinksToHtml takes Markdown-rendered HTML and rewrites any `[[…]]`
@@ -186,10 +185,10 @@ export function setWorkspaceContext(fn) {
 let _workspaceNotesCache = new Map(); // workspaceId → notes[]
 
 function resolveTarget(target, notes) {
-  const exact = notes.find((n) => n.name === target);
+  const exact = notes.find(n => n.name === target);
   if (exact) return exact;
   const lc = target.toLowerCase();
-  return notes.find((n) => (n.name || '').toLowerCase() === lc) || null;
+  return notes.find(n => (n.name || '').toLowerCase() === lc) || null;
 }
 
 // invalidateNotesCache drops the cached note list for a workspace so the next
@@ -221,7 +220,7 @@ async function createNoteWithName(workspaceId, name) {
     const r = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, content: '' }),
+      body: JSON.stringify({ name, content: '' })
     });
     if (!r.ok) return null;
     const data = await r.json();
@@ -236,7 +235,7 @@ function installClickHandler() {
   if (typeof document === 'undefined' || installClickHandler._installed) return;
   installClickHandler._installed = true;
 
-  document.addEventListener('click', async (event) => {
+  document.addEventListener('click', async event => {
     const link = event.target?.closest?.('.note-wikilink');
     if (!link) return;
     event.preventDefault();
@@ -292,7 +291,7 @@ if (typeof window !== 'undefined') {
     renderWikilinkHTML,
     applyWikilinksToHtml,
     setWorkspaceContext,
-    invalidateNotesCache,
+    invalidateNotesCache
   };
 }
 
@@ -301,7 +300,7 @@ export default {
   renderWikilinkHTML,
   applyWikilinksToHtml,
   setWorkspaceContext,
-  invalidateNotesCache,
+  invalidateNotesCache
 };
 
 export { invalidateNotesCache };

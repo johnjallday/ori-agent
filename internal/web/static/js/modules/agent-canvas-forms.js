@@ -150,7 +150,12 @@ export class AgentCanvasForms {
     ctx.fillText('×', closeBtnX + closeBtnSize / 2, closeBtnY + 22);
     ctx.textAlign = 'left';
 
-    this.createTaskCloseButtonBounds = { x: closeBtnX, y: closeBtnY, width: closeBtnSize, height: closeBtnSize };
+    this.createTaskCloseButtonBounds = {
+      x: closeBtnX,
+      y: closeBtnY,
+      width: closeBtnSize,
+      height: closeBtnSize
+    };
 
     currentY += 50;
 
@@ -172,7 +177,11 @@ export class AgentCanvasForms {
 
     ctx.fillStyle = '#6b7280';
     ctx.font = '12px system-ui';
-    ctx.fillText('Creates a task without assigning to a specific agent.', formX + padding, currentY);
+    ctx.fillText(
+      'Creates a task without assigning to a specific agent.',
+      formX + padding,
+      currentY
+    );
     currentY += 25;
 
     // Description field label
@@ -207,7 +216,10 @@ export class AgentCanvasForms {
     } else {
       ctx.fillStyle = '#1f2937';
       ctx.font = '12px system-ui';
-      const descLines = this.canvas.wrapText(this.createTaskDescription, formWidth - padding * 2 - 20);
+      const descLines = this.canvas.wrapText(
+        this.createTaskDescription,
+        formWidth - padding * 2 - 20
+      );
       descLines.slice(0, 5).forEach((line, i) => {
         ctx.fillText(line, formX + padding + 10, currentY + 18 + i * 15);
       });
@@ -244,7 +256,13 @@ export class AgentCanvasForms {
 
     if (this.createTaskAssignToAgent) {
       ctx.fillStyle = '#3b82f6';
-      this.canvas.roundRect(formX + padding + 3, currentY - 10, checkboxSize - 6, checkboxSize - 6, 2);
+      this.canvas.roundRect(
+        formX + padding + 3,
+        currentY - 10,
+        checkboxSize - 6,
+        checkboxSize - 6,
+        2
+      );
       ctx.fill();
     }
 
@@ -252,7 +270,12 @@ export class AgentCanvasForms {
     ctx.font = 'bold 13px system-ui';
     ctx.fillText('Assign to specific agent', formX + padding + checkboxSize + 10, currentY);
 
-    this.createTaskCheckboxBounds = { x: formX + padding, y: currentY - 13, width: checkboxSize, height: checkboxSize };
+    this.createTaskCheckboxBounds = {
+      x: formX + padding,
+      y: currentY - 13,
+      width: checkboxSize,
+      height: checkboxSize
+    };
 
     currentY += 30;
 
@@ -267,7 +290,13 @@ export class AgentCanvasForms {
         ctx.fillStyle = isSelected ? '#dbeafe' : '#f3f4f6';
         ctx.strokeStyle = isSelected ? '#3b82f6' : '#d1d5db';
         ctx.lineWidth = isSelected ? 2 : 1;
-        this.canvas.roundRect(formX + padding, currentY, formWidth - padding * 2, agentButtonHeight, 6);
+        this.canvas.roundRect(
+          formX + padding,
+          currentY,
+          formWidth - padding * 2,
+          agentButtonHeight,
+          6
+        );
         ctx.fill();
         ctx.stroke();
 
@@ -307,7 +336,12 @@ export class AgentCanvasForms {
     ctx.fillText('Create', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2 + 1);
     ctx.textAlign = 'left';
 
-    this.createTaskSubmitButtonBounds = { x: buttonX, y: buttonY, width: buttonWidth, height: buttonHeight };
+    this.createTaskSubmitButtonBounds = {
+      x: buttonX,
+      y: buttonY,
+      width: buttonWidth,
+      height: buttonHeight
+    };
 
     ctx.restore();
   }
@@ -366,7 +400,10 @@ export class AgentCanvasForms {
 
       this.hideAddAgentForm();
       await this.canvas.init();
-      this.canvas.addNotification(`✅ Agent "${this.selectedAgentToAdd}" added successfully!`, 'success');
+      this.canvas.addNotification(
+        `✅ Agent "${this.selectedAgentToAdd}" added successfully!`,
+        'success'
+      );
     } catch (error) {
       console.error('❌ Error adding agent:', error);
       alert('Failed to add agent: ' + error.message);
@@ -421,7 +458,12 @@ export class AgentCanvasForms {
     ctx.fillText('×', closeBtnX + closeBtnSize / 2, closeBtnY + 22);
     ctx.textAlign = 'left';
 
-    this.addAgentCloseButtonBounds = { x: closeBtnX, y: closeBtnY, width: closeBtnSize, height: closeBtnSize };
+    this.addAgentCloseButtonBounds = {
+      x: closeBtnX,
+      y: closeBtnY,
+      width: closeBtnSize,
+      height: closeBtnSize
+    };
 
     currentY += 50;
 
@@ -446,7 +488,13 @@ export class AgentCanvasForms {
         ctx.fillStyle = isSelected ? '#dbeafe' : '#f3f4f6';
         ctx.strokeStyle = isSelected ? '#3b82f6' : '#d1d5db';
         ctx.lineWidth = isSelected ? 2 : 1;
-        this.canvas.roundRect(formX + padding, currentY, formWidth - padding * 2, agentButtonHeight, 6);
+        this.canvas.roundRect(
+          formX + padding,
+          currentY,
+          formWidth - padding * 2,
+          agentButtonHeight,
+          6
+        );
         ctx.fill();
         ctx.stroke();
 
@@ -491,7 +539,12 @@ export class AgentCanvasForms {
     ctx.fillText('Add Agent', buttonX + buttonWidth / 2, buttonY + buttonHeight / 2 + 1);
     ctx.textAlign = 'left';
 
-    this.addAgentSubmitButtonBounds = { x: buttonX, y: buttonY, width: buttonWidth, height: buttonHeight };
+    this.addAgentSubmitButtonBounds = {
+      x: buttonX,
+      y: buttonY,
+      width: buttonWidth,
+      height: buttonHeight
+    };
 
     ctx.restore();
   }

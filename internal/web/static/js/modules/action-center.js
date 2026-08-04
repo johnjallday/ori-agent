@@ -10,8 +10,8 @@
   'use strict';
 
   // --- DOM helpers ---
-  const $ = (sel) => document.querySelector(sel);
-  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => Array.from(document.querySelectorAll(sel));
 
   // --- State ---
   // Optional workspace scope from the URL (?workspace=<id>). When set, the list
@@ -28,7 +28,7 @@
     high: 'background: #e67e22; color: white;',
     medium: 'background: #f1c40f; color: #333;',
     low: 'background: #95a5a6; color: white;',
-    '': 'background: var(--surface-2, #e0e0e0); color: var(--text-secondary, #666);',
+    '': 'background: var(--surface-2, #e0e0e0); color: var(--text-secondary, #666);'
   };
 
   function escapeHtml(s) {
@@ -61,7 +61,13 @@
   }
 
   function statusChip(s) {
-    const labels = { new: 'New', snoozed: 'Snoozed', resolved: 'Resolved', dismissed: 'Dismissed', planned: 'Planned' };
+    const labels = {
+      new: 'New',
+      snoozed: 'Snoozed',
+      resolved: 'Resolved',
+      dismissed: 'Dismissed',
+      planned: 'Planned'
+    };
     const muted = s === 'resolved' || s === 'dismissed' || s === 'planned';
     return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; opacity: ${muted ? 0.6 : 1}; border: 1px solid var(--border-color, #ddd);">${escapeHtml(labels[s] || s || '')}</span>`;
   }
@@ -135,7 +141,7 @@
     }
     // Prefer the human-readable workspace name from a returned item; fall back
     // to the id when the filtered workspace currently has no findings.
-    const match = items.find((i) => i.workspace_id === workspaceFilter);
+    const match = items.find(i => i.workspace_id === workspaceFilter);
     const name = (match && match.workspace_name) || workspaceFilter;
     el.style.display = '';
     el.innerHTML = `Showing findings for <strong>${escapeHtml(name)}</strong>. <a href="/action-center">Show all findings</a>`;
@@ -145,7 +151,8 @@
     const el = $('#action-center-status');
     if (!el) return;
     el.textContent = msg || '';
-    el.style.color = kind === 'error' ? 'var(--danger-color, #c0392b)' : 'var(--text-secondary, #666)';
+    el.style.color =
+      kind === 'error' ? 'var(--danger-color, #c0392b)' : 'var(--text-secondary, #666)';
   }
 
   // Success message with a clickable link to the created/linked item, so the
@@ -242,10 +249,11 @@
     if (action === 'open') {
       // Mark seen via the GET-single endpoint (it sets SeenAt). Then take
       // the user to the source workspace.
-      fetch(`/api/action-center/opportunities/${encodeURIComponent(workspaceID)}/${encodeURIComponent(opportunityID)}`)
-        .finally(() => {
-          window.location.href = `/workspaces/${encodeURIComponent(workspaceID)}`;
-        });
+      fetch(
+        `/api/action-center/opportunities/${encodeURIComponent(workspaceID)}/${encodeURIComponent(opportunityID)}`
+      ).finally(() => {
+        window.location.href = `/workspaces/${encodeURIComponent(workspaceID)}`;
+      });
       return;
     }
 
@@ -257,7 +265,7 @@
     if (action === 'resolve') {
       callMutation(workspaceID, opportunityID, 'resolve')
         .then(reload)
-        .catch((e) => setStatus(`Resolve failed: ${e.message}`, 'error'));
+        .catch(e => setStatus(`Resolve failed: ${e.message}`, 'error'));
       return;
     }
     if (action === 'dismiss') {
@@ -285,10 +293,17 @@
     if (dismissBtn) {
       dismissBtn.addEventListener('click', async () => {
         if (!activeTarget) return;
-        const reasonEl = document.querySelector('input[name="action-center-dismiss-reason"]:checked');
+        const reasonEl = document.querySelector(
+          'input[name="action-center-dismiss-reason"]:checked'
+        );
         const reason = reasonEl ? reasonEl.value : '';
         try {
-          await callMutation(activeTarget.workspaceID, activeTarget.opportunityID, 'dismiss', reason ? { reason } : null);
+          await callMutation(
+            activeTarget.workspaceID,
+            activeTarget.opportunityID,
+            'dismiss',
+            reason ? { reason } : null
+          );
           if (typeof bootstrap !== 'undefined') {
             bootstrap.Modal.getInstance($('#action-center-dismiss-modal'))?.hide();
           }
@@ -299,12 +314,12 @@
       });
     }
 
-    $$('#action-center-snooze-modal [data-snooze-preset]').forEach((btn) => {
+    $$('#action-center-snooze-modal [data-snooze-preset]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!activeTarget) return;
         try {
           await callMutation(activeTarget.workspaceID, activeTarget.opportunityID, 'snooze', {
-            preset: btn.dataset.snoozePreset,
+            preset: btn.dataset.snoozePreset
           });
           if (typeof bootstrap !== 'undefined') {
             bootstrap.Modal.getInstance($('#action-center-snooze-modal'))?.hide();
@@ -324,7 +339,9 @@
         if (!raw) return;
         const until = new Date(raw).toISOString();
         try {
-          await callMutation(activeTarget.workspaceID, activeTarget.opportunityID, 'snooze', { until });
+          await callMutation(activeTarget.workspaceID, activeTarget.opportunityID, 'snooze', {
+            until
+          });
           if (typeof bootstrap !== 'undefined') {
             bootstrap.Modal.getInstance($('#action-center-snooze-modal'))?.hide();
           }

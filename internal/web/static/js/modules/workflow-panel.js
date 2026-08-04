@@ -111,12 +111,13 @@ class WorkflowPanel {
    */
   applyFilters() {
     this.filteredWorkflows = this.workflows.filter(workflow => {
-      const matchesSearch = !this.searchQuery ||
+      const matchesSearch =
+        !this.searchQuery ||
         workflow.name.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-        (workflow.description && workflow.description.toLowerCase().includes(this.searchQuery.toLowerCase()));
+        (workflow.description &&
+          workflow.description.toLowerCase().includes(this.searchQuery.toLowerCase()));
 
-      const matchesCategory = !this.categoryFilter ||
-        workflow.category === this.categoryFilter;
+      const matchesCategory = !this.categoryFilter || workflow.category === this.categoryFilter;
 
       return matchesSearch && matchesCategory;
     });
@@ -237,8 +238,14 @@ class WorkflowPanel {
     if (categorySelect) {
       const categories = this.getCategories();
       const currentValue = categorySelect.value;
-      categorySelect.innerHTML = `<option value="">All Categories</option>` +
-        categories.map(cat => `<option value="${this.escapeHtml(cat)}" ${cat === currentValue ? 'selected' : ''}>${this.escapeHtml(cat)}</option>`).join('');
+      categorySelect.innerHTML =
+        `<option value="">All Categories</option>` +
+        categories
+          .map(
+            cat =>
+              `<option value="${this.escapeHtml(cat)}" ${cat === currentValue ? 'selected' : ''}>${this.escapeHtml(cat)}</option>`
+          )
+          .join('');
     }
 
     if (this.isLoading) {
@@ -261,7 +268,9 @@ class WorkflowPanel {
       return;
     }
 
-    listContainer.innerHTML = this.filteredWorkflows.map(workflow => this.renderWorkflowItem(workflow)).join('');
+    listContainer.innerHTML = this.filteredWorkflows
+      .map(workflow => this.renderWorkflowItem(workflow))
+      .join('');
   }
 
   /**
@@ -275,24 +284,28 @@ class WorkflowPanel {
     const nodeCount = workflow.nodes ? workflow.nodes.length : 0;
     const hasWarning = workflow.missingAgents && workflow.missingAgents.length > 0;
 
-    const warningTooltip = hasWarning
-      ? `Missing agents: ${workflow.missingAgents.join(', ')}`
-      : '';
+    const warningTooltip = hasWarning ? `Missing agents: ${workflow.missingAgents.join(', ')}` : '';
 
     return `
       <div class="workflow-item p-2 mb-2" style="background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
         <div class="d-flex justify-content-between align-items-start mb-1">
           <div class="d-flex align-items-center gap-1" style="flex: 1; min-width: 0;">
-            ${hasWarning ? `
+            ${
+              hasWarning
+                ? `
               <svg width="14" height="14" viewBox="0 0 24 24" fill="#f59e0b" title="${this.escapeHtml(warningTooltip)}" style="flex-shrink: 0;">
                 <path d="M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16"/>
               </svg>
-            ` : ''}
+            `
+                : ''
+            }
             <strong style="color: var(--text-primary); font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
               ${this.escapeHtml(workflow.name)}
             </strong>
           </div>
-          ${isCustom ? `
+          ${
+            isCustom
+              ? `
             <button class="btn btn-link btn-sm p-0 ms-1"
                     onclick="workflowPanel.deleteWorkflow('${workflow.id}')"
                     title="Delete workflow"
@@ -301,14 +314,20 @@ class WorkflowPanel {
                 <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
               </svg>
             </button>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
 
-        ${workflow.description ? `
+        ${
+          workflow.description
+            ? `
           <p class="mb-1" style="color: var(--text-secondary); font-size: 0.75rem; line-height: 1.3; margin: 0;">
             ${this.escapeHtml(workflow.description.substring(0, 80))}${workflow.description.length > 80 ? '...' : ''}
           </p>
-        ` : ''}
+        `
+            : ''
+        }
 
         <div class="d-flex justify-content-between align-items-center mt-2">
           <div class="d-flex gap-1 flex-wrap">
@@ -365,7 +384,6 @@ class WorkflowPanel {
       }
 
       this.showNotification(`Workflow "${workflow.name}" added to canvas`, 'success');
-
     } catch (error) {
       console.error('Error instantiating workflow:', error);
       this.showNotification('Failed to add workflow: ' + error.message, 'error');
@@ -551,7 +569,9 @@ class WorkflowPanel {
       return;
     }
 
-    const confirmed = confirm(`Delete workflow "${workflow.name}"?\n\nThis action cannot be undone.`);
+    const confirmed = confirm(
+      `Delete workflow "${workflow.name}"?\n\nThis action cannot be undone.`
+    );
     if (!confirmed) return;
 
     try {
@@ -566,7 +586,6 @@ class WorkflowPanel {
 
       this.showNotification('Workflow deleted', 'success');
       await this.loadWorkflows();
-
     } catch (error) {
       console.error('Error deleting workflow:', error);
       this.showNotification('Failed to delete workflow: ' + error.message, 'error');

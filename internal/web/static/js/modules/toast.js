@@ -1,9 +1,9 @@
 // Toast Notification Module
 // Provides user feedback for success, error, warning, and info messages
 
-const Toast = (function() {
+const Toast = (function () {
   let container = null;
-  
+
   const maxToasts = 5;
 
   // Initialize toast container
@@ -60,9 +60,10 @@ const Toast = (function() {
 
     // Optional inline action (e.g. "Undo"). Rendered as a button the caller
     // wires up in show(); see options.action = { label, onClick }.
-    const actionHtml = options.action && options.action.label
-      ? `<button type="button" class="toast-action">${escapeHtml(options.action.label)}</button>`
-      : '';
+    const actionHtml =
+      options.action && options.action.label
+        ? `<button type="button" class="toast-action">${escapeHtml(options.action.label)}</button>`
+        : '';
 
     toast.innerHTML = `
       <div class="toast-icon">${icon}</div>
@@ -210,7 +211,12 @@ if (typeof window !== 'undefined') {
   window.Toast = Toast;
   window.notifyToast = function notifyToast(message, type = 'info', options = {}) {
     const normalizedType = String(type || 'info').toLowerCase();
-    const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
+    const toastType =
+      normalizedType === 'danger'
+        ? 'error'
+        : normalizedType === 'warn'
+          ? 'warning'
+          : normalizedType;
 
     if (window.Toast) {
       const toastFn = window.Toast[toastType];

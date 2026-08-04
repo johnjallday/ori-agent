@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-test-maintenance lint lint-fix lint-js lint-js-fix fmt fmt-js check-js vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
+.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages test-test-maintenance lint lint-fix lint-new lint-js lint-js-fix fmt fmt-js check-js check-wails-modes vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
 
 # Default target
 .DEFAULT_GOAL := help
@@ -125,29 +125,23 @@ prune-test-cache: ## Prune stale Ori artifacts and an oversized Go build cache
 cache-report: ## Preview automatic test artifact and Go cache pruning
 	@./scripts/prune-test-cache.sh --dry-run
 
-clean-state: ## Delete all configuration and state files (fresh start)
-	@echo "$(YELLOW)⚠️  WARNING: This will delete ALL configuration, agents, workspaces, and settings!$(NC)"
-	@echo "$(YELLOW)You will need to reconfigure the app from scratch.$(NC)"
+clean-state: ## Show how to reset app state (points to the canonical selective reset)
+	@echo "$(YELLOW)clean-state no longer deletes files itself.$(NC)"
 	@echo ""
-	@read -p "Are you sure? [y/N]: " -n 1 -r && echo && \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		echo "$(BLUE)Cleaning state files...$(NC)"; \
-		rm -rf agents/; \
-		rm -rf workspaces/; \
-		rm -rf sessions/; \
-		rm -f settings.json; \
-		rm -f agents.json; \
-		rm -f app_state.json; \
-		rm -f mcp_registry.json; \
-		rm -f locations.json; \
-		rm -f .feature-sessions.json; \
-		echo "$(GREEN)✓ All state files cleaned - app will start fresh$(NC)"; \
-	else \
-		echo "$(YELLOW)Cancelled$(NC)"; \
-		exit 1; \
-	fi
+	@echo "Ori resolves all state to one canonical data directory (ORI_DATA_DIR,"
+	@echo "or the platform default under your home directory - see"
+	@echo "config.DefaultDataDir()), not this Makefile's working directory. A"
+	@echo "second, cwd-relative deletion list here would drift from the real one"
+	@echo "and could silently target the wrong path."
+	@echo ""
+	@echo "To reset app state, use the canonical selective reset instead:"
+	@echo "  1. In the app: Settings -> Reset, choose what to reset, confirm."
+	@echo "  2. Scripted, with the server running on port 8765 (adjust for PORT):"
+	@echo "     curl -X POST http://localhost:8765/api/reset \\"
+	@echo "       -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' \\"
+	@echo "       -d '{\"settings\":true,\"agents\":true,\"sessions\":true,\"onboarding\":true,\"confirmation\":\"RESET\"}'"
 
-reset: clean-state ## Alias for clean-state (fresh start)
+reset: clean-state ## Alias for clean-state
 
 ## Run targets
 
@@ -171,14 +165,19 @@ run-menubar: menubar ## Build and run the menu bar app
 
 ## Test targets
 
-test: ## Run all tests (unit + integration)
+test: ## Run all tests (unit + integration; excludes node_modules)
 	@echo "$(BLUE)Running all tests...$(NC)"
-	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/tests$$')
+	$(TEST_RUNNER) $(GOTEST) -v $$(go list ./... | grep -v '/node_modules/')
 	@echo "$(GREEN)✓ All tests passed$(NC)"
 
-test-unit: ## Run unit tests only
+test-unit: ## Run unit tests only (concise; see test-unit-verbose for -v)
 	@echo "$(BLUE)Running unit tests...$(NC)"
-	$(TEST_RUNNER) $(GOTEST) -v -short $$(go list ./... | grep -v '/tests$$')
+	$(TEST_RUNNER) $(GOTEST) -short $$(./scripts/list-unit-packages.sh)
+	@echo "$(GREEN)✓ Unit tests passed$(NC)"
+
+test-unit-verbose: ## Run unit tests with -v output, for focused diagnosis
+	@echo "$(BLUE)Running unit tests (verbose)...$(NC)"
+	$(TEST_RUNNER) $(GOTEST) -v -short $$(./scripts/list-unit-packages.sh)
 	@echo "$(GREEN)✓ Unit tests passed$(NC)"
 
 test-herdr-devflow-cross: ## Cross-compile the local Herdr helper for supported targets
@@ -197,21 +196,21 @@ test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge 
 	@$(TEST_RUNNER) zsh scripts/wt-backlog.test.sh
 	@$(TEST_RUNNER) zsh scripts/check-backlog-docs.sh
 
-test-integration: ## Run integration tests
+test-integration: ## Run integration tests (needs OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running integration tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping integration tests (OPENAI_API_KEY not set)$(NC)"; \
 	else \
-		$(TEST_RUNNER) $(GOTEST) -v -run Integration ./...; \
+		ORI_RUN_PROVIDER_INTEGRATION=1 $(TEST_RUNNER) $(GOTEST) -v -run Integration ./...; \
 		echo "$(GREEN)✓ Integration tests passed$(NC)"; \
 	fi
 
-test-e2e: build ## Run end-to-end tests
+test-e2e: build ## Run end-to-end tests (needs OPENAI_API_KEY; sets the provider opt-in)
 	@echo "$(BLUE)Running E2E tests...$(NC)"
 	@if [ -z "$$OPENAI_API_KEY" ]; then \
 		echo "$(YELLOW)Skipping E2E tests (OPENAI_API_KEY not set)$(NC)"; \
 	else \
-		$(TEST_RUNNER) $(GOTEST) -v ./tests/e2e/...; \
+		ORI_RUN_PROVIDER_INTEGRATION=1 $(TEST_RUNNER) $(GOTEST) -v ./tests/e2e/...; \
 		echo "$(GREEN)✓ E2E tests passed$(NC)"; \
 	fi
 
@@ -272,7 +271,7 @@ vet: ## Run go vet
 	$(GOVET) ./...
 	@echo "$(GREEN)✓ Vet passed$(NC)"
 
-lint: ## Run linter (requires golangci-lint)
+lint: ## Run the full linter (includes the pre-existing legacy baseline; see lint-new)
 	@echo "$(BLUE)Running linter...$(NC)"
 	@if ! command -v golangci-lint > /dev/null; then \
 		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
@@ -280,6 +279,15 @@ lint: ## Run linter (requires golangci-lint)
 	fi
 	golangci-lint run ./...
 	@echo "$(GREEN)✓ Lint passed$(NC)"
+
+lint-new: ## Run the ratcheted linter: only issues new vs origin/dev (mirrors the CI gate)
+	@echo "$(BLUE)Running linter (new issues vs origin/dev only)...$(NC)"
+	@if ! command -v golangci-lint > /dev/null; then \
+		echo "$(YELLOW)golangci-lint not found. Install from: https://golangci-lint.run/usage/install/$(NC)"; \
+		exit 1; \
+	fi
+	golangci-lint run --new-from-merge-base=origin/dev ./...
+	@echo "$(GREEN)✓ No new lint findings$(NC)"
 
 lint-fix: ## Auto-fix lint issues where possible (gofmt rewrites + golangci-lint --fix)
 	@echo "$(BLUE)Auto-fixing Go lint issues...$(NC)"
@@ -305,7 +313,10 @@ test-prune-test-cache: ## Test automatic cache pruning in isolated fixtures
 test-run-test-command: ## Test run-owned sandbox cleanup and opt-outs
 	@./scripts/run-test-command.test.sh
 
-test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command ## Test all test-maintenance helpers
+test-list-unit-packages: ## Test the shared unit-package selection contract
+	@./scripts/list-unit-packages.test.sh
+
+test-test-maintenance: test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages ## Test all test-maintenance helpers
 
 lint-js: ## Run ESLint on JavaScript files (requires npm install)
 	@echo "$(BLUE)Running ESLint on JavaScript...$(NC)"
@@ -351,6 +362,9 @@ check-cross-platform: ## Check builds for all platforms (Linux, Windows, macOS)
 	@./scripts/check-cross-platform.sh
 	@echo "$(GREEN)✓ All platforms build successfully$(NC)"
 
+check-wails-modes: ## Verify generated Wails bindings are tracked as regular files, not executable
+	@./scripts/check-wails-binding-modes.sh
+
 
 ## Docker targets
 
@@ -376,9 +390,9 @@ dev-setup: deps build ## Initial development setup
 	@echo "  2. Run the server: make run"
 	@echo "  3. Visit: http://localhost:8765"
 
-install-tools: ## Install development tools
+install-tools: ## Install development tools (golangci-lint pinned to .golangci-lint-version)
 	@echo "$(BLUE)Installing development tools...$(NC)"
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$(cat .golangci-lint-version)
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "$(GREEN)✓ Tools installed$(NC)"
 

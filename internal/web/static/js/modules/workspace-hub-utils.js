@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-utils
  */
-(function() {
+(function () {
   'use strict';
 
   /**
@@ -56,7 +56,7 @@
    */
   function flattenWorkspaces(workspaces, depth = 0, path = []) {
     const rows = [];
-    workspaces.forEach((workspace) => {
+    workspaces.forEach(workspace => {
       const currentPath = [...path, workspace.name || 'Untitled'];
       rows.push({
         ...workspace,
@@ -87,11 +87,19 @@
       needs_attention: 0
     };
 
-    (tasks || []).forEach((task) => {
-      const status = String(task.status || 'pending').trim().toLowerCase();
-      const hasNeedsReview = (Array.isArray(task.execution_history) ? task.execution_history : []).some((entry) => {
+    (tasks || []).forEach(task => {
+      const status = String(task.status || 'pending')
+        .trim()
+        .toLowerCase();
+      const hasNeedsReview = (
+        Array.isArray(task.execution_history) ? task.execution_history : []
+      ).some(entry => {
         const validation = entry?.validation_result || entry?.validation || null;
-        return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+        return (
+          String(validation?.validation_status || '')
+            .trim()
+            .toLowerCase() === 'needs_review'
+        );
       });
       if (status === 'completed') stats.completed += 1;
       if (status === 'in_progress') stats.in_progress += 1;
@@ -101,7 +109,12 @@
       if (task.schedule_enabled) stats.scheduled += 1;
       // Needs attention combines blocked-ish + failed so users have one
       // pill to scan when they open the hub looking for "what needs me".
-      if (status === 'blocked' || status === 'waiting_for_choice' || status === 'failed' || hasNeedsReview) {
+      if (
+        status === 'blocked' ||
+        status === 'waiting_for_choice' ||
+        status === 'failed' ||
+        hasNeedsReview
+      ) {
         stats.needs_attention += 1;
       }
     });
@@ -119,13 +132,13 @@
     const subtasksByParent = new Map();
     const rootTasks = [];
 
-    (tasks || []).forEach((task) => {
+    (tasks || []).forEach(task => {
       if (task && task.id) {
         taskById.set(task.id, task);
       }
     });
 
-    (tasks || []).forEach((task) => {
+    (tasks || []).forEach(task => {
       if (!task || !task.id) return;
       const parentId = task.parent_task_id;
       if (parentId && taskById.has(parentId)) {
@@ -139,10 +152,16 @@
     });
 
     // Sort subtasks by index, then by created_at
-    subtasksByParent.forEach((list) => {
+    subtasksByParent.forEach(list => {
       list.sort((a, b) => {
-        const aIndex = Number.isFinite(a.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
-        const bIndex = Number.isFinite(b.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        const aIndex =
+          Number.isFinite(a.subtask_index) && a.subtask_index > 0
+            ? a.subtask_index
+            : Number.MAX_SAFE_INTEGER;
+        const bIndex =
+          Number.isFinite(b.subtask_index) && b.subtask_index > 0
+            ? b.subtask_index
+            : Number.MAX_SAFE_INTEGER;
         if (aIndex !== bIndex) return aIndex - bIndex;
         const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -163,14 +182,14 @@
   function getDisplayStatus(task, subtasks) {
     if (!subtasks || subtasks.length === 0) return task.status || 'pending';
 
-    const statuses = subtasks.map((subtask) => subtask.status || 'pending');
-    if (statuses.some((status) => status === 'in_progress')) return 'in_progress';
-    if (statuses.some((status) => status === 'failed')) return 'failed';
-    if (statuses.some((status) => status === 'waiting_for_choice')) return 'waiting_for_choice';
-    if (statuses.some((status) => status === 'timeout')) return 'timeout';
-    if (statuses.some((status) => status === 'cancelled')) return 'cancelled';
-    if (statuses.every((status) => status === 'completed')) return 'completed';
-    if (statuses.some((status) => status === 'assigned')) return 'assigned';
+    const statuses = subtasks.map(subtask => subtask.status || 'pending');
+    if (statuses.some(status => status === 'in_progress')) return 'in_progress';
+    if (statuses.some(status => status === 'failed')) return 'failed';
+    if (statuses.some(status => status === 'waiting_for_choice')) return 'waiting_for_choice';
+    if (statuses.some(status => status === 'timeout')) return 'timeout';
+    if (statuses.some(status => status === 'cancelled')) return 'cancelled';
+    if (statuses.every(status => status === 'completed')) return 'completed';
+    if (statuses.some(status => status === 'assigned')) return 'assigned';
     return task.status || 'pending';
   }
 
@@ -217,14 +236,14 @@
   function groupTasksByKanbanColumn(tasks, columns, fallback = 'backlog') {
     const groups = new Map();
     const known = new Set();
-    (columns || []).forEach((col) => {
+    (columns || []).forEach(col => {
       if (col && col.id) {
         groups.set(col.id, []);
         known.add(col.id);
       }
     });
 
-    (tasks || []).forEach((task) => {
+    (tasks || []).forEach(task => {
       let columnId = getTaskKanbanColumnId(task, fallback);
       if (known.size > 0 && !known.has(columnId)) {
         columnId = fallback;
@@ -251,7 +270,7 @@
     if (!rootId) return ids;
 
     function walk(nodes, inSubtree) {
-      (nodes || []).forEach((node) => {
+      (nodes || []).forEach(node => {
         if (!node || !node.id) return;
 
         const isRoot = node.id === rootId;

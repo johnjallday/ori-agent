@@ -31,13 +31,12 @@ class CommandBar {
     this.loadWorkspaceContext();
 
     // Global keyboard shortcut
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         this.focus();
       }
     });
-
   }
 
   /**
@@ -45,7 +44,7 @@ class CommandBar {
    */
   setupEventListeners() {
     // Input handling
-    this.input.addEventListener('keydown', (e) => {
+    this.input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.dispatch();
@@ -118,7 +117,8 @@ class CommandBar {
     try {
       // Try to get current workspace from session storage or URL
       const urlParams = new URLSearchParams(window.location.search);
-      this.currentWorkspaceId = urlParams.get('workspace') || sessionStorage.getItem('currentWorkspaceId');
+      this.currentWorkspaceId =
+        urlParams.get('workspace') || sessionStorage.getItem('currentWorkspaceId');
 
       if (!this.currentWorkspaceId) {
         // Get first available workspace
@@ -128,7 +128,8 @@ class CommandBar {
           const workspaces = data.workspaces || data.folders || (Array.isArray(data) ? data : []);
           // Prefer a concrete workspace as the implicit command context; only
           // fall back to a group when nothing else exists.
-          const preferred = workspaces.find(ws => String(ws.kind || '').toLowerCase() !== 'group') || workspaces[0];
+          const preferred =
+            workspaces.find(ws => String(ws.kind || '').toLowerCase() !== 'group') || workspaces[0];
           if (preferred) {
             this.currentWorkspaceId = preferred.id;
             sessionStorage.setItem('currentWorkspaceId', this.currentWorkspaceId);
@@ -173,12 +174,12 @@ class CommandBar {
       const priorityValue = priorityMatch[1].toLowerCase();
       // Map keywords to numbers
       const priorityMap = {
-        'urgent': 1,
-        'highest': 1,
-        'high': 2,
-        'normal': 3,
-        'low': 4,
-        'lowest': 5
+        urgent: 1,
+        highest: 1,
+        high: 2,
+        normal: 3,
+        low: 4,
+        lowest: 5
       };
       result.priority = priorityMap[priorityValue] || parseInt(priorityValue, 10) || 3;
       result.description = text.replace(/\/priority:\S+\s*/, '').trim();
@@ -253,7 +254,6 @@ class CommandBar {
 
       // Emit event for other components
       window.dispatchEvent(new CustomEvent('taskCreated', { detail: task }));
-
     } catch (error) {
       console.error('CommandBar: Failed to dispatch task', error);
       this.showFeedback('error', error.message);

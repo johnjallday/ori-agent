@@ -1,4 +1,4 @@
-(function() {
+(function () {
   'use strict';
 
   const CATALOG_AGENT = '__workspace_bootstrap_catalog__';
@@ -20,9 +20,41 @@
     'workspace'
   ]);
   const STOPWORDS = new Set([
-    'a', 'an', 'and', 'app', 'apps', 'be', 'build', 'create', 'for', 'from', 'goal', 'help',
-    'in', 'into', 'is', 'it', 'its', 'later', 'manage', 'need', 'of', 'on', 'or', 'project',
-    'setup', 'system', 'systems', 'the', 'this', 'to', 'use', 'using', 'with', 'work', 'workspace'
+    'a',
+    'an',
+    'and',
+    'app',
+    'apps',
+    'be',
+    'build',
+    'create',
+    'for',
+    'from',
+    'goal',
+    'help',
+    'in',
+    'into',
+    'is',
+    'it',
+    'its',
+    'later',
+    'manage',
+    'need',
+    'of',
+    'on',
+    'or',
+    'project',
+    'setup',
+    'system',
+    'systems',
+    'the',
+    'this',
+    'to',
+    'use',
+    'using',
+    'with',
+    'work',
+    'workspace'
   ]);
 
   const state = {
@@ -59,12 +91,17 @@
       return;
     }
     if (typeof window.showToast === 'function') {
-      window.showToast(message, level === 'warning' ? 'warning' : (level === 'error' ? 'error' : 'success'));
+      window.showToast(
+        message,
+        level === 'warning' ? 'warning' : level === 'error' ? 'error' : 'success'
+      );
     }
   }
 
   function normalizeText(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '')
+      .trim()
+      .toLowerCase();
   }
 
   function slugifyWords(value) {
@@ -79,14 +116,14 @@
   function tokenize(value) {
     return normalizeText(value)
       .split(/[^a-z0-9]+/)
-      .map((token) => token.trim())
-      .filter((token) => token && token.length > 2 && !STOPWORDS.has(token));
+      .map(token => token.trim())
+      .filter(token => token && token.length > 2 && !STOPWORDS.has(token));
   }
 
   function uniqueList(values) {
     const seen = new Set();
     const result = [];
-    (Array.isArray(values) ? values : []).forEach((value) => {
+    (Array.isArray(values) ? values : []).forEach(value => {
       const trimmed = String(value || '').trim();
       if (!trimmed) return;
       const key = trimmed.toLowerCase();
@@ -108,7 +145,10 @@
     const importPath = String(input.importPath || '').trim();
     const systemsList = uniqueList(
       systems
-        ? systems.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean)
+        ? systems
+            .split(/[\n,;]+/)
+            .map(value => value.trim())
+            .filter(Boolean)
         : []
     );
 
@@ -153,23 +193,23 @@
   }
 
   function getReviewCard() {
-    return state.host ? (state.host.card || null) : getElement('folderBootstrapReviewCard');
+    return state.host ? state.host.card || null : getElement('folderBootstrapReviewCard');
   }
 
   function getReviewSummary() {
-    return state.host ? (state.host.summary || null) : getElement('folderBootstrapReviewSummary');
+    return state.host ? state.host.summary || null : getElement('folderBootstrapReviewSummary');
   }
 
   function getReviewMeta() {
-    return state.host ? (state.host.meta || null) : getElement('folderBootstrapReviewMeta');
+    return state.host ? state.host.meta || null : getElement('folderBootstrapReviewMeta');
   }
 
   function getReviewLoading() {
-    return state.host ? (state.host.loading || null) : getElement('folderBootstrapReviewLoading');
+    return state.host ? state.host.loading || null : getElement('folderBootstrapReviewLoading');
   }
 
   function getReviewContent() {
-    return state.host ? (state.host.content || null) : getElement('folderBootstrapReviewContent');
+    return state.host ? state.host.content || null : getElement('folderBootstrapReviewContent');
   }
 
   function getModalElement() {
@@ -233,7 +273,9 @@
     const createBtn = getCreateButton();
     if (!createBtn || state.applying) return;
 
-    createBtn.textContent = state.reviewedFingerprint ? getCommitActionLabel() : getBaseActionLabel();
+    createBtn.textContent = state.reviewedFingerprint
+      ? getCommitActionLabel()
+      : getBaseActionLabel();
   }
 
   function setReviewVisibility(visible) {
@@ -257,7 +299,11 @@
     if (content) content.hidden = isLoading;
     if (createBtn && !state.applying) {
       createBtn.disabled = isLoading;
-      createBtn.textContent = isLoading ? 'Reviewing...' : (state.reviewedFingerprint ? getCommitActionLabel() : getBaseActionLabel());
+      createBtn.textContent = isLoading
+        ? 'Reviewing...'
+        : state.reviewedFingerprint
+          ? getCommitActionLabel()
+          : getBaseActionLabel();
     }
     if (backBtn) backBtn.disabled = isLoading;
   }
@@ -276,7 +322,8 @@
     const meta = getReviewMeta();
     const content = getReviewContent();
     if (summary) {
-      summary.textContent = 'Search the marketplaces for tools matching this workspace’s description.';
+      summary.textContent =
+        'Search the marketplaces for tools matching this workspace’s description.';
     }
     if (meta) {
       meta.textContent = '';
@@ -319,9 +366,12 @@
       body: options.body ? JSON.stringify(options.body) : undefined
     });
     const isJSON = String(response.headers.get('content-type') || '').includes('application/json');
-    const payload = isJSON ? await response.json().catch(() => ({})) : await response.text().catch(() => '');
+    const payload = isJSON
+      ? await response.json().catch(() => ({}))
+      : await response.text().catch(() => '');
     if (!response.ok) {
-      const message = payload?.error || payload?.message || payload || `Request failed (${response.status})`;
+      const message =
+        payload?.error || payload?.message || payload || `Request failed (${response.status})`;
       throw new Error(String(message));
     }
     return payload;
@@ -401,7 +451,7 @@
   async function searchMCPRegistry(query) {
     try {
       const data = await apiRequest(`/api/mcp/search?q=${encodeURIComponent(query)}`);
-      return Array.isArray(data) ? data : (Array.isArray(data?.servers) ? data.servers : []);
+      return Array.isArray(data) ? data : Array.isArray(data?.servers) ? data.servers : [];
     } catch (_error) {
       return [];
     }
@@ -424,24 +474,20 @@
 
   function deriveSearchQueries(input) {
     const queries = [];
-    input.systemsList.forEach((system) => {
+    input.systemsList.forEach(system => {
       if (queries.length < 3) queries.push(system);
     });
 
-    const fallbackChunks = [
-      input.description || input.goal,
-      input.goal,
-      input.capabilities
-    ]
-      .map((value) => String(value || '').trim())
+    const fallbackChunks = [input.description || input.goal, input.goal, input.capabilities]
+      .map(value => String(value || '').trim())
       .filter(Boolean)
-      .flatMap((value) => value.split(/[.;,\n]+/))
-      .map((value) => value.trim())
-      .filter((value) => value.length >= 4);
+      .flatMap(value => value.split(/[.;,\n]+/))
+      .map(value => value.trim())
+      .filter(value => value.length >= 4);
 
-    fallbackChunks.forEach((chunk) => {
+    fallbackChunks.forEach(chunk => {
       if (queries.length >= 3) return;
-      if (!queries.some((existing) => normalizeText(existing) === normalizeText(chunk))) {
+      if (!queries.some(existing => normalizeText(existing) === normalizeText(chunk))) {
         queries.push(chunk);
       }
     });
@@ -469,13 +515,13 @@
     if (!haystack) return 0;
 
     let score = 0;
-    queries.forEach((query) => {
+    queries.forEach(query => {
       const normalizedQuery = normalizeText(query);
       if (!normalizedQuery) return;
       if (haystack.includes(normalizedQuery)) {
         score += 14;
       }
-      tokenize(query).forEach((token) => {
+      tokenize(query).forEach(token => {
         if (haystack.includes(token)) {
           score += 4;
         }
@@ -493,7 +539,7 @@
     if (haystack.includes(normalizedSystem)) {
       score += 18;
     }
-    tokenize(system).forEach((token) => {
+    tokenize(system).forEach(token => {
       if (haystack.includes(token)) {
         score += 5;
       }
@@ -507,7 +553,9 @@
   }
 
   function buildPrimaryAgentName(input) {
-    const base = slugifyWords(input.workspaceName || input.importPath.split(/[\\/]/).filter(Boolean).pop() || 'Workspace');
+    const base = slugifyWords(
+      input.workspaceName || input.importPath.split(/[\\/]/).filter(Boolean).pop() || 'Workspace'
+    );
     return `${base} Manager`.trim();
   }
 
@@ -516,9 +564,14 @@
   }
 
   function buildPrimaryAgentDescription(input) {
-    const systems = input.systemsList.length > 0 ? `Primary systems: ${input.systemsList.join(', ')}.` : '';
-    const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
-    const capabilities = String(input.capabilities || '').trim().replace(/[.]+$/, '');
+    const systems =
+      input.systemsList.length > 0 ? `Primary systems: ${input.systemsList.join(', ')}.` : '';
+    const objective = String(input.description || input.goal || 'Support the workspace goals')
+      .trim()
+      .replace(/[.]+$/, '');
+    const capabilities = String(input.capabilities || '')
+      .trim()
+      .replace(/[.]+$/, '');
     return uniqueList([
       `Lead the "${input.workspaceName || 'workspace'}" workspace.`,
       `Primary objective: ${objective}.`,
@@ -528,8 +581,12 @@
   }
 
   function buildSpecialistDescription(input, system) {
-    const objective = String(input.description || input.goal || 'Support the workspace goals').trim().replace(/[.]+$/, '');
-    const capabilities = String(input.capabilities || '').trim().replace(/[.]+$/, '');
+    const objective = String(input.description || input.goal || 'Support the workspace goals')
+      .trim()
+      .replace(/[.]+$/, '');
+    const capabilities = String(input.capabilities || '')
+      .trim()
+      .replace(/[.]+$/, '');
     return uniqueList([
       `Handle ${system} work inside the "${input.workspaceName || 'workspace'}" workspace.`,
       `Primary objective: ${objective}.`,
@@ -542,7 +599,7 @@
     const result = [];
     const seen = new Set();
 
-    source.forEach((agent) => {
+    source.forEach(agent => {
       const name = String(agent?.name || agent || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
@@ -562,11 +619,14 @@
     const searchCorpus = buildSearchCorpus(input);
     const normalizedAgents = normalizeAgentEntries(agents);
     const ranked = normalizedAgents
-      .map((agent) => ({
+      .map(agent => ({
         ...agent,
-        score: scoreTextAgainstQueries(`${agent.name} ${agent.description}`, [searchCorpus, ...input.systemsList])
+        score: scoreTextAgainstQueries(`${agent.name} ${agent.description}`, [
+          searchCorpus,
+          ...input.systemsList
+        ])
       }))
-      .filter((agent) => agent.score > 0)
+      .filter(agent => agent.score > 0)
       .sort((left, right) => right.score - left.score);
 
     const selectedAgentKeys = new Set();
@@ -578,7 +638,8 @@
       planAgents.push({
         id: `agent-primary-${primaryExisting.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
         name: primaryExisting.name,
-        summary: primaryExisting.description || 'Existing agent matched from the workspace description.',
+        summary:
+          primaryExisting.description || 'Existing agent matched from the workspace description.',
         action: 'invite',
         role: 'lead',
         selected: true,
@@ -600,9 +661,9 @@
       });
     }
 
-    input.systemsList.slice(0, 2).forEach((system) => {
+    input.systemsList.slice(0, 2).forEach(system => {
       let specialist = null;
-      ranked.forEach((agent) => {
+      ranked.forEach(agent => {
         if (specialist || selectedAgentKeys.has(agent.name.toLowerCase())) return;
         const score = scoreSystemMatch(`${agent.name} ${agent.description}`, system);
         if (score >= 18) {
@@ -657,7 +718,7 @@
     const candidates = [];
     const seen = new Set();
 
-    (Array.isArray(installedSkills) ? installedSkills : []).forEach((skill) => {
+    (Array.isArray(installedSkills) ? installedSkills : []).forEach(skill => {
       const name = String(skill?.name || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
@@ -681,7 +742,7 @@
       });
     });
 
-    (Array.isArray(marketplaceResults) ? marketplaceResults : []).forEach((skill) => {
+    (Array.isArray(marketplaceResults) ? marketplaceResults : []).forEach(skill => {
       const skillName = String(skill?.skill || skill?.name || '').trim();
       const packageName = String(skill?.package || '').trim();
       const url = String(skill?.url || '').trim();
@@ -710,16 +771,14 @@
       });
     });
 
-    return candidates
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 4);
+    return candidates.sort((left, right) => right.score - left.score).slice(0, 4);
   }
 
   function normalizeMCPCandidates(configuredServers, registryResults, queries) {
     const candidates = [];
     const seen = new Set();
 
-    (Array.isArray(configuredServers) ? configuredServers : []).forEach((server) => {
+    (Array.isArray(configuredServers) ? configuredServers : []).forEach(server => {
       const name = String(server?.name || '').trim();
       if (!name || /^ws:/i.test(name) || normalizeText(name) === 'filesystem') return;
       const key = name.toLowerCase();
@@ -739,13 +798,16 @@
       });
     });
 
-    (Array.isArray(registryResults) ? registryResults : []).forEach((server) => {
+    (Array.isArray(registryResults) ? registryResults : []).forEach(server => {
       const name = String(server?.name || '').trim();
       if (!name || normalizeText(name) === 'filesystem') return;
       const key = name.toLowerCase();
       if (seen.has(key)) return;
       const description = String(server?.description || '').trim();
-      const score = scoreTextAgainstQueries(`${name} ${description} ${(server?.tags || []).join(' ')}`, queries);
+      const score = scoreTextAgainstQueries(
+        `${name} ${description} ${(server?.tags || []).join(' ')}`,
+        queries
+      );
       if (score <= 0) return;
       seen.add(key);
       candidates.push({
@@ -763,22 +825,22 @@
       });
     });
 
-    return candidates
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 4);
+    return candidates.sort((left, right) => right.score - left.score).slice(0, 4);
   }
 
   function normalizePluginCandidates(installedPlugins, marketplaces, queries) {
     const candidates = [];
     const seen = new Set();
 
-    (Array.isArray(installedPlugins) ? installedPlugins : []).forEach((plugin) => {
+    (Array.isArray(installedPlugins) ? installedPlugins : []).forEach(plugin => {
       const name = String(plugin?.name || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
       if (seen.has(key)) return;
       const description = String(plugin?.description || '').trim();
-      const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(Boolean);
+      const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(
+        Boolean
+      );
       const skills = (Array.isArray(plugin?.skills) ? plugin.skills : []).filter(Boolean);
       const score = scoreTextAgainstQueries(
         `${name} ${description} ${mcpServers.join(' ')} ${skills.join(' ')}`,
@@ -800,9 +862,9 @@
       });
     });
 
-    (Array.isArray(marketplaces) ? marketplaces : []).forEach((marketplace) => {
+    (Array.isArray(marketplaces) ? marketplaces : []).forEach(marketplace => {
       const marketplaceName = String(marketplace?.name || '').trim();
-      (Array.isArray(marketplace?.plugins) ? marketplace.plugins : []).forEach((entry) => {
+      (Array.isArray(marketplace?.plugins) ? marketplace.plugins : []).forEach(entry => {
         const name = String(entry?.name || '').trim();
         if (!name) return;
         const key = name.toLowerCase();
@@ -814,7 +876,8 @@
         candidates.push({
           id: `plugin-market-${key.replace(/[^a-z0-9]+/g, '-')}`,
           name,
-          description: description || `Suggested from the ${marketplaceName || 'plugin'} marketplace.`,
+          description:
+            description || `Suggested from the ${marketplaceName || 'plugin'} marketplace.`,
           source: 'marketplace',
           action: 'install_attach',
           selected: false,
@@ -827,32 +890,33 @@
       });
     });
 
-    return candidates
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 4);
+    return candidates.sort((left, right) => right.score - left.score).slice(0, 4);
   }
 
   async function buildPlan(input) {
     const normalizedInput = normalizeReviewInput(input);
     const queries = deriveSearchQueries(normalizedInput);
-    const [agents, installedSkills, configuredMCPs, installedPlugins, pluginMarketplaces] = await Promise.all([
-      fetchAgents(),
-      fetchInstalledSkills(),
-      fetchConfiguredMCPServers(),
-      fetchInstalledPlugins(),
-      fetchPluginMarketplaces()
-    ]);
+    const [agents, installedSkills, configuredMCPs, installedPlugins, pluginMarketplaces] =
+      await Promise.all([
+        fetchAgents(),
+        fetchInstalledSkills(),
+        fetchConfiguredMCPServers(),
+        fetchInstalledPlugins(),
+        fetchPluginMarketplaces()
+      ]);
 
     const marketplaceSkillResults = [];
     const registryMCPResults = [];
-    await Promise.all(queries.map(async (query) => {
-      const [skillResults, mcpResults] = await Promise.all([
-        searchMarketplaceSkills(query),
-        searchMCPRegistry(query)
-      ]);
-      marketplaceSkillResults.push(...(Array.isArray(skillResults) ? skillResults : []));
-      registryMCPResults.push(...(Array.isArray(mcpResults) ? mcpResults : []));
-    }));
+    await Promise.all(
+      queries.map(async query => {
+        const [skillResults, mcpResults] = await Promise.all([
+          searchMarketplaceSkills(query),
+          searchMCPRegistry(query)
+        ]);
+        marketplaceSkillResults.push(...(Array.isArray(skillResults) ? skillResults : []));
+        registryMCPResults.push(...(Array.isArray(mcpResults) ? mcpResults : []));
+      })
+    );
 
     const planAgents = buildAgentPlan(normalizedInput, agents);
     const goalQueries = uniqueList([
@@ -861,9 +925,17 @@
       normalizedInput.goal,
       normalizedInput.capabilities
     ]).slice(0, 5);
-    const planSkills = normalizeSkillCandidates(installedSkills, marketplaceSkillResults, goalQueries);
+    const planSkills = normalizeSkillCandidates(
+      installedSkills,
+      marketplaceSkillResults,
+      goalQueries
+    );
     const planMCPs = normalizeMCPCandidates(configuredMCPs, registryMCPResults, goalQueries);
-    const planPlugins = normalizePluginCandidates(installedPlugins, pluginMarketplaces, goalQueries);
+    const planPlugins = normalizePluginCandidates(
+      installedPlugins,
+      pluginMarketplaces,
+      goalQueries
+    );
 
     return {
       summary: buildPlanSummary(planMCPs, planSkills, planPlugins),
@@ -882,8 +954,10 @@
     const skillList = Array.isArray(skills) ? skills : [];
     const pluginList = Array.isArray(plugins) ? plugins : [];
     if (mcpList.length > 0) parts.push(`${mcpList.length} MCP${mcpList.length === 1 ? '' : 's'}`);
-    if (skillList.length > 0) parts.push(`${skillList.length} skill${skillList.length === 1 ? '' : 's'}`);
-    if (pluginList.length > 0) parts.push(`${pluginList.length} plugin${pluginList.length === 1 ? '' : 's'}`);
+    if (skillList.length > 0)
+      parts.push(`${skillList.length} skill${skillList.length === 1 ? '' : 's'}`);
+    if (pluginList.length > 0)
+      parts.push(`${pluginList.length} plugin${pluginList.length === 1 ? '' : 's'}`);
     return `Searched the marketplaces from this workspace’s description and found ${parts.join(', ') || 'no matching tools'}.`;
   }
 
@@ -892,26 +966,32 @@
     const skillList = Array.isArray(skills) ? skills : [];
     const pluginList = Array.isArray(plugins) ? plugins : [];
     const notes = [];
-    if (mcpList.some((item) => item.action === 'install_bind')) {
-      notes.push('Registry MCP results are installed globally before they are bound to this workspace.');
+    if (mcpList.some(item => item.action === 'install_bind')) {
+      notes.push(
+        'Registry MCP results are installed globally before they are bound to this workspace.'
+      );
     }
-    if (skillList.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace skill results require a global install before they are attached to this workspace.');
+    if (skillList.some(item => item.action === 'install_attach')) {
+      notes.push(
+        'Marketplace skill results require a global install before they are attached to this workspace.'
+      );
     }
-    if (pluginList.some((item) => item.action === 'install_attach')) {
-      notes.push('Marketplace plugin results are installed globally (running their local commands) before their components are added to this workspace.');
+    if (pluginList.some(item => item.action === 'install_attach')) {
+      notes.push(
+        'Marketplace plugin results are installed globally (running their local commands) before their components are added to this workspace.'
+      );
     }
     if (pluginList.length > 0) {
       notes.push('Selecting a plugin binds all of its MCP servers and skills to this workspace.');
     }
-    notes.push('Only the add-ons you select are added, and they are shared with this workspace’s agents.');
+    notes.push(
+      'Only the add-ons you select are added, and they are shared with this workspace’s agents.'
+    );
     return notes;
   }
 
   function countSelections(selector) {
-    return Array.from(document.querySelectorAll(selector))
-      .filter((input) => input.checked)
-      .length;
+    return Array.from(document.querySelectorAll(selector)).filter(input => input.checked).length;
   }
 
   function updateRenderedSummary() {
@@ -922,30 +1002,37 @@
     const mcpCount = countSelections('input[data-workspace-bootstrap-mcp]');
     const skillCount = countSelections('input[data-workspace-bootstrap-skill]');
     const pluginCount = countSelections('input[data-workspace-bootstrap-plugin]');
-    const totalFound = (Array.isArray(state.plan.mcps) ? state.plan.mcps.length : 0)
-      + (Array.isArray(state.plan.skills) ? state.plan.skills.length : 0)
-      + (Array.isArray(state.plan.plugins) ? state.plan.plugins.length : 0);
+    const totalFound =
+      (Array.isArray(state.plan.mcps) ? state.plan.mcps.length : 0) +
+      (Array.isArray(state.plan.skills) ? state.plan.skills.length : 0) +
+      (Array.isArray(state.plan.plugins) ? state.plan.plugins.length : 0);
     const selectedCount = mcpCount + skillCount + pluginCount;
 
     if (totalFound === 0) {
-      summary.textContent = 'No matching tools found. Try editing this workspace’s description, then search again.';
+      summary.textContent =
+        'No matching tools found. Try editing this workspace’s description, then search again.';
     } else {
       const parts = [];
       if (mcpCount > 0) parts.push(`${mcpCount} MCP${mcpCount === 1 ? '' : 's'}`);
       if (skillCount > 0) parts.push(`${skillCount} skill${skillCount === 1 ? '' : 's'}`);
       if (pluginCount > 0) parts.push(`${pluginCount} plugin${pluginCount === 1 ? '' : 's'}`);
-      summary.textContent = `${totalFound} tool${totalFound === 1 ? '' : 's'} found from your description`
-        + (selectedCount > 0 ? ` — ${parts.join(', ')} selected.` : '. Select any to add to this workspace.');
+      summary.textContent =
+        `${totalFound} tool${totalFound === 1 ? '' : 's'} found from your description` +
+        (selectedCount > 0
+          ? ` — ${parts.join(', ')} selected.`
+          : '. Select any to add to this workspace.');
     }
-    meta.textContent = 'Add-ons are optional — they’re only added when you select them and click Add selected.';
+    meta.textContent =
+      'Add-ons are optional — they’re only added when you select them and click Add selected.';
     meta.hidden = false;
   }
 
   function renderAgentCards(agents) {
-    const lead = agents.find((agent) => agent.role === 'lead');
-    const optionalAgents = agents.filter((agent) => agent.role !== 'lead');
+    const lead = agents.find(agent => agent.role === 'lead');
+    const optionalAgents = agents.filter(agent => agent.role !== 'lead');
 
-    const leadHtml = lead ? `
+    const leadHtml = lead
+      ? `
       <div class="modern-card p-3 mb-2" style="border: 1px solid var(--border-color); background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);">
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
@@ -956,9 +1043,14 @@
           <span class="workspace-detail-mcp-chip status">${lead.action === 'create' ? 'Create' : 'Invite'}</span>
         </div>
       </div>
-    ` : '';
+    `
+      : '';
 
-    const optionalHtml = optionalAgents.length > 0 ? optionalAgents.map((agent) => `
+    const optionalHtml =
+      optionalAgents.length > 0
+        ? optionalAgents
+            .map(
+              agent => `
       <label class="workspace-setup-option modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
         <input type="checkbox"
                data-workspace-bootstrap-agent="true"
@@ -972,7 +1064,10 @@
           <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(agent.summary)}</span>
         </span>
       </label>
-    `).join('') : `
+    `
+            )
+            .join('')
+        : `
       <div class="workspace-detail-empty">
         Ori did not find additional agents worth inviting yet.
       </div>
@@ -996,8 +1091,11 @@
       `;
     }
 
-    const attribute = kind === 'mcp' ? 'data-workspace-bootstrap-mcp' : 'data-workspace-bootstrap-skill';
-    return items.map((item) => `
+    const attribute =
+      kind === 'mcp' ? 'data-workspace-bootstrap-mcp' : 'data-workspace-bootstrap-skill';
+    return items
+      .map(
+        item => `
       <div class="modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
         <input type="checkbox"
                id="${escapeHtml(`workspace-bootstrap-${kind}-${item.id}`)}"
@@ -1009,16 +1107,20 @@
             <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.name)}</span>
               <span class="workspace-detail-mcp-chip ${item.action.indexOf('install') >= 0 ? 'source' : 'status'}">
-                ${item.action.indexOf('install') >= 0 ? (kind === 'mcp' ? 'Install Globally + Bind' : 'Install Globally + Attach') : (kind === 'mcp' ? 'Bind' : 'Attach')}
+                ${item.action.indexOf('install') >= 0 ? (kind === 'mcp' ? 'Install Globally + Bind' : 'Install Globally + Attach') : kind === 'mcp' ? 'Bind' : 'Attach'}
               </span>
-              ${(
+              ${
                 (kind === 'mcp' && item.source === 'configured') ||
                 (kind === 'skill' && item.source !== 'marketplace')
-              ) ? '<span class="workspace-detail-mcp-chip local">Local</span>' : ''}
+                  ? '<span class="workspace-detail-mcp-chip local">Local</span>'
+                  : ''
+              }
             </span>
             <span style="display: block; margin-top: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.description || (kind === 'mcp' ? 'Suggested MCP connector.' : 'Suggested workspace skill.'))}</span>
           </label>
-          ${kind === 'skill' && item.url ? `
+          ${
+            kind === 'skill' && item.url
+              ? `
             <a href="${escapeHtml(item.url)}"
                target="_blank"
                rel="noopener noreferrer"
@@ -1026,10 +1128,14 @@
                style="display: inline-block; margin-top: 8px; font-size: 12px; color: var(--text-secondary); text-decoration: underline; word-break: break-all;">
               ${escapeHtml(item.url)}
             </a>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   function renderPluginCards(items) {
@@ -1041,22 +1147,25 @@
       `;
     }
 
-    return items.map((item) => {
-      const isMarketplace = item.action === 'install_attach';
-      const bundleBits = [];
-      if (Array.isArray(item.mcpServers) && item.mcpServers.length > 0) {
-        bundleBits.push(`${item.mcpServers.length} MCP server${item.mcpServers.length === 1 ? '' : 's'}`);
-      }
-      if (Array.isArray(item.skills) && item.skills.length > 0) {
-        bundleBits.push(`${item.skills.length} skill${item.skills.length === 1 ? '' : 's'}`);
-      }
-      const bundleNote = isMarketplace
-        ? 'Installs globally, then adds its MCP servers and skills to this workspace.'
-        : (bundleBits.length > 0
-          ? `Bundles ${bundleBits.join(' and ')} — all added to this workspace.`
-          : "Adds this plugin's components to the workspace.");
+    return items
+      .map(item => {
+        const isMarketplace = item.action === 'install_attach';
+        const bundleBits = [];
+        if (Array.isArray(item.mcpServers) && item.mcpServers.length > 0) {
+          bundleBits.push(
+            `${item.mcpServers.length} MCP server${item.mcpServers.length === 1 ? '' : 's'}`
+          );
+        }
+        if (Array.isArray(item.skills) && item.skills.length > 0) {
+          bundleBits.push(`${item.skills.length} skill${item.skills.length === 1 ? '' : 's'}`);
+        }
+        const bundleNote = isMarketplace
+          ? 'Installs globally, then adds its MCP servers and skills to this workspace.'
+          : bundleBits.length > 0
+            ? `Bundles ${bundleBits.join(' and ')} — all added to this workspace.`
+            : "Adds this plugin's components to the workspace.";
 
-      return `
+        return `
         <div class="modern-card p-3 d-flex align-items-start gap-2 mb-2" style="border: 1px solid var(--border-color);">
           <input type="checkbox"
                  id="${escapeHtml(`workspace-bootstrap-plugin-${item.id}`)}"
@@ -1078,15 +1187,18 @@
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   function bindRenderedSelectionListeners() {
-    document.querySelectorAll(
-      'input[data-workspace-bootstrap-agent], input[data-workspace-bootstrap-mcp], input[data-workspace-bootstrap-skill], input[data-workspace-bootstrap-plugin]'
-    ).forEach((input) => {
-      input.addEventListener('change', updateRenderedSummary);
-    });
+    document
+      .querySelectorAll(
+        'input[data-workspace-bootstrap-agent], input[data-workspace-bootstrap-mcp], input[data-workspace-bootstrap-skill], input[data-workspace-bootstrap-plugin]'
+      )
+      .forEach(input => {
+        input.addEventListener('change', updateRenderedSummary);
+      });
   }
 
   function renderPlan(plan) {
@@ -1115,7 +1227,7 @@
         <div class="workspace-setup-preview">
           <div class="workspace-setup-label">What gets added</div>
           <ul class="workspace-setup-preview-list">
-            ${plan.notes.map((note) => `<li>${escapeHtml(note)}</li>`).join('')}
+            ${plan.notes.map(note => `<li>${escapeHtml(note)}</li>`).join('')}
           </ul>
         </div>
       </div>
@@ -1128,7 +1240,7 @@
   function getSelectedPlan() {
     if (!state.plan) return null;
 
-    const lead = state.plan.agents.find((agent) => agent.role === 'lead');
+    const lead = state.plan.agents.find(agent => agent.role === 'lead');
     const selectedAgents = [];
     // The workspace-page "Find tools" panel is add-ons only — entry-agent
     // creation is the existing post-create prompt's job, so never apply agents
@@ -1137,32 +1249,32 @@
       selectedAgents.push(lead);
     }
 
-    document.querySelectorAll('input[data-workspace-bootstrap-agent]').forEach((input) => {
+    document.querySelectorAll('input[data-workspace-bootstrap-agent]').forEach(input => {
       if (!input.checked) return;
-      const match = state.plan.agents.find((agent) => agent.id === input.value);
+      const match = state.plan.agents.find(agent => agent.id === input.value);
       if (match) {
         selectedAgents.push(match);
       }
     });
 
     const selectedMCPs = [];
-    document.querySelectorAll('input[data-workspace-bootstrap-mcp]').forEach((input) => {
+    document.querySelectorAll('input[data-workspace-bootstrap-mcp]').forEach(input => {
       if (!input.checked) return;
-      const match = state.plan.mcps.find((item) => item.id === input.value);
+      const match = state.plan.mcps.find(item => item.id === input.value);
       if (match) selectedMCPs.push(match);
     });
 
     const selectedSkills = [];
-    document.querySelectorAll('input[data-workspace-bootstrap-skill]').forEach((input) => {
+    document.querySelectorAll('input[data-workspace-bootstrap-skill]').forEach(input => {
       if (!input.checked) return;
-      const match = state.plan.skills.find((item) => item.id === input.value);
+      const match = state.plan.skills.find(item => item.id === input.value);
       if (match) selectedSkills.push(match);
     });
 
     const selectedPlugins = [];
-    document.querySelectorAll('input[data-workspace-bootstrap-plugin]').forEach((input) => {
+    document.querySelectorAll('input[data-workspace-bootstrap-plugin]').forEach(input => {
       if (!input.checked) return;
-      const match = (state.plan.plugins || []).find((item) => item.id === input.value);
+      const match = (state.plan.plugins || []).find(item => item.id === input.value);
       if (match) selectedPlugins.push(match);
     });
 
@@ -1243,7 +1355,10 @@
       return agentPlan?.name || '';
     }
 
-    const requestConfig = await maybeAutoConfigureAgent(agentPlan.autoDescription || agentPlan.summary || '', agentPlan.type);
+    const requestConfig = await maybeAutoConfigureAgent(
+      agentPlan.autoDescription || agentPlan.summary || '',
+      agentPlan.type
+    );
     const plannedType = String(agentPlan.type || '').trim();
     const type = requestConfig?.agent_type || plannedType || 'general';
     const payload = {
@@ -1258,7 +1373,7 @@
     // auto-config LLM suggested. Skip inheritance when the configured
     // system model is not currently usable, otherwise workspace setup can
     // create an agent that immediately fails at runtime.
-    if (isEntryAgent && await checkAutoConfigAvailability()) {
+    if (isEntryAgent && (await checkAutoConfigAvailability())) {
       const systemPref = await getSystemModelPreference();
       const systemModel = String(systemPref?.model || '').trim();
       const systemProvider = String(systemPref?.provider || '').trim();
@@ -1323,10 +1438,12 @@
 
   function findConfiguredMCPServer(servers, candidate) {
     const candidateName = normalizeText(candidate?.name);
-    return (Array.isArray(servers) ? servers : []).find((server) => {
-      const serverName = normalizeText(server?.name);
-      return serverName && serverName === candidateName;
-    }) || null;
+    return (
+      (Array.isArray(servers) ? servers : []).find(server => {
+        const serverName = normalizeText(server?.name);
+        return serverName && serverName === candidateName;
+      }) || null
+    );
   }
 
   async function ensureGlobalMCPReady(candidate) {
@@ -1337,7 +1454,9 @@
     let configured = findConfiguredMCPServer(await fetchConfiguredMCPServers(), candidate);
     if (configured) {
       if (configured.enabled === false) {
-        await apiRequest(`/api/mcp/servers/${encodeURIComponent(configured.name)}/enable`, { method: 'POST' });
+        await apiRequest(`/api/mcp/servers/${encodeURIComponent(configured.name)}/enable`, {
+          method: 'POST'
+        });
       }
       return String(configured.name || candidate.name || '').trim();
     }
@@ -1364,7 +1483,9 @@
     configured = findConfiguredMCPServer(await fetchConfiguredMCPServers(), candidate);
     if (configured) {
       if (configured.enabled === false) {
-        await apiRequest(`/api/mcp/servers/${encodeURIComponent(configured.name)}/enable`, { method: 'POST' });
+        await apiRequest(`/api/mcp/servers/${encodeURIComponent(configured.name)}/enable`, {
+          method: 'POST'
+        });
       }
       return String(configured.name || payload.name).trim();
     }
@@ -1375,7 +1496,9 @@
   async function ensureWorkspaceMCPBinding(workspaceId, workspaceState, candidate) {
     const serverName = await ensureGlobalMCPReady(candidate);
     const bindings = Array.isArray(workspaceState?.mcp_bindings) ? workspaceState.mcp_bindings : [];
-    const existing = bindings.find((binding) => normalizeText(binding?.server_name) === normalizeText(serverName));
+    const existing = bindings.find(
+      binding => normalizeText(binding?.server_name) === normalizeText(serverName)
+    );
 
     if (existing && existing.enabled !== false) {
       return String(existing.id || '').trim();
@@ -1390,17 +1513,22 @@
         }
       );
       const binding = updated?.binding || { ...existing, enabled: true };
-      workspaceState.mcp_bindings = bindings.map((item) => (item?.id === binding.id ? binding : item));
+      workspaceState.mcp_bindings = bindings.map(item =>
+        item?.id === binding.id ? binding : item
+      );
       return String(binding.id || '').trim();
     }
 
-    const created = await apiRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-bindings`, {
-      method: 'POST',
-      body: {
-        server_name: serverName,
-        enabled: true
+    const created = await apiRequest(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-bindings`,
+      {
+        method: 'POST',
+        body: {
+          server_name: serverName,
+          enabled: true
+        }
       }
-    });
+    );
     const binding = created?.binding || null;
     if (binding) {
       workspaceState.mcp_bindings = [...bindings, binding];
@@ -1410,13 +1538,23 @@
   }
 
   function getMCPAccessEntry(workspaceState, agentInstanceId) {
-    const entries = Array.isArray(workspaceState?.agent_mcp_access) ? workspaceState.agent_mcp_access : [];
-    return entries.find((entry) => String(entry?.agent_instance_id || '').trim() === agentInstanceId) || null;
+    const entries = Array.isArray(workspaceState?.agent_mcp_access)
+      ? workspaceState.agent_mcp_access
+      : [];
+    return (
+      entries.find(entry => String(entry?.agent_instance_id || '').trim() === agentInstanceId) ||
+      null
+    );
   }
 
   function getSkillAccessEntry(workspaceState, agentInstanceId) {
-    const entries = Array.isArray(workspaceState?.agent_skill_access) ? workspaceState.agent_skill_access : [];
-    return entries.find((entry) => String(entry?.agent_instance_id || '').trim() === agentInstanceId) || null;
+    const entries = Array.isArray(workspaceState?.agent_skill_access)
+      ? workspaceState.agent_skill_access
+      : [];
+    return (
+      entries.find(entry => String(entry?.agent_instance_id || '').trim() === agentInstanceId) ||
+      null
+    );
   }
 
   function mergeBindingIDs(values, nextValue) {
@@ -1435,9 +1573,16 @@
           body: { enabled_binding_ids: enabledBindingIds }
         }
       );
-      const entries = Array.isArray(workspaceState.agent_mcp_access) ? workspaceState.agent_mcp_access.slice() : [];
-      const nextEntry = { agent_instance_id: agentInstanceId, enabled_binding_ids: enabledBindingIds };
-      const index = entries.findIndex((entry) => String(entry?.agent_instance_id || '').trim() === agentInstanceId);
+      const entries = Array.isArray(workspaceState.agent_mcp_access)
+        ? workspaceState.agent_mcp_access.slice()
+        : [];
+      const nextEntry = {
+        agent_instance_id: agentInstanceId,
+        enabled_binding_ids: enabledBindingIds
+      };
+      const index = entries.findIndex(
+        entry => String(entry?.agent_instance_id || '').trim() === agentInstanceId
+      );
       if (index >= 0) {
         entries[index] = nextEntry;
       } else {
@@ -1463,11 +1608,15 @@
 
   function resolveInstalledSkillName(installedSkills, candidate) {
     const requestedName = normalizeText(candidate?.name);
-    const packageSkillName = normalizeText(parseMarketplaceSkillPackage(candidate?.packageName).skillName);
-    const match = (Array.isArray(installedSkills) ? installedSkills : []).find((skill) => {
+    const packageSkillName = normalizeText(
+      parseMarketplaceSkillPackage(candidate?.packageName).skillName
+    );
+    const match = (Array.isArray(installedSkills) ? installedSkills : []).find(skill => {
       const installedName = normalizeText(skill?.name);
       if (!installedName) return false;
-      return installedName === requestedName || (packageSkillName && installedName === packageSkillName);
+      return (
+        installedName === requestedName || (packageSkillName && installedName === packageSkillName)
+      );
     });
     return String(match?.name || '').trim();
   }
@@ -1514,8 +1663,13 @@
 
   async function ensureWorkspaceSkillBinding(workspaceId, workspaceState, candidate) {
     const skillName = await ensureInstalledSkill(candidate);
-    const bindings = Array.isArray(workspaceState?.skill_bindings) ? workspaceState.skill_bindings : [];
-    const existing = bindings.find((binding) => normalizeText(binding?.skill_name || binding?.skillName) === normalizeText(skillName));
+    const bindings = Array.isArray(workspaceState?.skill_bindings)
+      ? workspaceState.skill_bindings
+      : [];
+    const existing = bindings.find(
+      binding =>
+        normalizeText(binding?.skill_name || binding?.skillName) === normalizeText(skillName)
+    );
 
     if (existing && existing.enabled !== false) {
       return String(existing.id || '').trim();
@@ -1530,19 +1684,24 @@
         }
       );
       const binding = updated?.binding || { ...existing, enabled: true, trusted: true };
-      workspaceState.skill_bindings = bindings.map((item) => (item?.id === binding.id ? binding : item));
+      workspaceState.skill_bindings = bindings.map(item =>
+        item?.id === binding.id ? binding : item
+      );
       return String(binding.id || '').trim();
     }
 
-    const created = await apiRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/skill-bindings`, {
-      method: 'POST',
-      body: {
-        skill_name: skillName,
-        enabled: true,
-        trusted: candidate.trusted !== false,
-        config: {}
+    const created = await apiRequest(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/skill-bindings`,
+      {
+        method: 'POST',
+        body: {
+          skill_name: skillName,
+          enabled: true,
+          trusted: candidate.trusted !== false,
+          config: {}
+        }
       }
-    });
+    );
     const binding = created?.binding || null;
     if (binding) {
       workspaceState.skill_bindings = [...bindings, binding];
@@ -1563,9 +1722,16 @@
           body: { enabled_binding_ids: enabledBindingIds }
         }
       );
-      const entries = Array.isArray(workspaceState.agent_skill_access) ? workspaceState.agent_skill_access.slice() : [];
-      const nextEntry = { agent_instance_id: agentInstanceId, enabled_binding_ids: enabledBindingIds };
-      const index = entries.findIndex((entry) => String(entry?.agent_instance_id || '').trim() === agentInstanceId);
+      const entries = Array.isArray(workspaceState.agent_skill_access)
+        ? workspaceState.agent_skill_access.slice()
+        : [];
+      const nextEntry = {
+        agent_instance_id: agentInstanceId,
+        enabled_binding_ids: enabledBindingIds
+      };
+      const index = entries.findIndex(
+        entry => String(entry?.agent_instance_id || '').trim() === agentInstanceId
+      );
       if (index >= 0) {
         entries[index] = nextEntry;
       } else {
@@ -1577,9 +1743,11 @@
 
   function findInstalledPlugin(plugins, candidate) {
     const candidateName = normalizeText(candidate?.name);
-    return (Array.isArray(plugins) ? plugins : []).find(
-      (plugin) => normalizeText(plugin?.name) === candidateName
-    ) || null;
+    return (
+      (Array.isArray(plugins) ? plugins : []).find(
+        plugin => normalizeText(plugin?.name) === candidateName
+      ) || null
+    );
   }
 
   // ensurePluginInstalled returns the installed plugin record (with its
@@ -1625,14 +1793,18 @@
 
     if (plugin.enabled === false && pluginName) {
       try {
-        await apiRequest(`/api/plugins/${encodeURIComponent(pluginName)}/enable`, { method: 'POST' });
+        await apiRequest(`/api/plugins/${encodeURIComponent(pluginName)}/enable`, {
+          method: 'POST'
+        });
       } catch (_error) {
         // Enabling the plugin record is best-effort; binding its components below
         // enables the underlying MCP servers regardless.
       }
     }
 
-    const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(Boolean);
+    const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(
+      Boolean
+    );
     for (const serverName of mcpServers) {
       const bindingId = await ensureWorkspaceMCPBinding(workspaceId, workspaceState, {
         name: serverName,
@@ -1698,12 +1870,18 @@
       try {
         workspaceState = await loadWorkspaceState(workspaceId);
       } catch (error) {
-        summary.failures.push(`Workspace load: ${error.message || 'failed to load workspace state'}`);
+        summary.failures.push(
+          `Workspace load: ${error.message || 'failed to load workspace state'}`
+        );
         return summary;
       }
       const existingAgentNames = new Set(
         (Array.isArray(workspaceState?.agent_instances) ? workspaceState.agent_instances : [])
-          .map((agent) => String(agent?.name || '').trim().toLowerCase())
+          .map(agent =>
+            String(agent?.name || '')
+              .trim()
+              .toLowerCase()
+          )
           .filter(Boolean)
       );
 
@@ -1712,7 +1890,9 @@
         try {
           const isEntryAgent = agentPlan.role === 'lead';
           const agentName = await ensureAgentExists(agentPlan, isEntryAgent);
-          const normalizedAgentName = String(agentName || '').trim().toLowerCase();
+          const normalizedAgentName = String(agentName || '')
+            .trim()
+            .toLowerCase();
           if (normalizedAgentName && existingAgentNames.has(normalizedAgentName)) {
             continue;
           }
@@ -1725,13 +1905,19 @@
           }
           summary.invitedAgents += 1;
         } catch (error) {
-          summary.failures.push(`Agent ${agentPlan.name}: ${error.message || 'failed to add to workspace'}`);
+          summary.failures.push(
+            `Agent ${agentPlan.name}: ${error.message || 'failed to add to workspace'}`
+          );
         }
       }
 
       for (const mcpCandidate of selectedPlan.mcps) {
         try {
-          const bindingId = await ensureWorkspaceMCPBinding(workspaceId, workspaceState, mcpCandidate);
+          const bindingId = await ensureWorkspaceMCPBinding(
+            workspaceId,
+            workspaceState,
+            mcpCandidate
+          );
           if (bindingId && agentInstanceIds.length > 0) {
             await grantMCPAccess(workspaceId, workspaceState, bindingId, agentInstanceIds);
           }
@@ -1743,22 +1929,37 @@
 
       for (const skillCandidate of selectedPlan.skills) {
         try {
-          const bindingId = await ensureWorkspaceSkillBinding(workspaceId, workspaceState, skillCandidate);
+          const bindingId = await ensureWorkspaceSkillBinding(
+            workspaceId,
+            workspaceState,
+            skillCandidate
+          );
           if (bindingId && agentInstanceIds.length > 0) {
             await grantSkillAccess(workspaceId, workspaceState, bindingId, agentInstanceIds);
           }
           summary.attachedSkills += 1;
         } catch (error) {
-          summary.failures.push(`Skill ${skillCandidate.name}: ${error.message || 'failed to attach'}`);
+          summary.failures.push(
+            `Skill ${skillCandidate.name}: ${error.message || 'failed to attach'}`
+          );
         }
       }
 
-      for (const pluginCandidate of (Array.isArray(selectedPlan.plugins) ? selectedPlan.plugins : [])) {
+      for (const pluginCandidate of Array.isArray(selectedPlan.plugins)
+        ? selectedPlan.plugins
+        : []) {
         try {
-          await applyPluginToWorkspace(workspaceId, workspaceState, pluginCandidate, agentInstanceIds);
+          await applyPluginToWorkspace(
+            workspaceId,
+            workspaceState,
+            pluginCandidate,
+            agentInstanceIds
+          );
           summary.addedPlugins += 1;
         } catch (error) {
-          summary.failures.push(`Plugin ${pluginCandidate.name}: ${error.message || 'failed to add'}`);
+          summary.failures.push(
+            `Plugin ${pluginCandidate.name}: ${error.message || 'failed to add'}`
+          );
         }
       }
 
@@ -1795,10 +1996,11 @@
       'folderImportPathInput'
     ];
 
-    dirtyIds.forEach((id) => {
+    dirtyIds.forEach(id => {
       const element = getElement(id);
       if (!element) return;
-      const eventName = element.tagName === 'SELECT' || element.type === 'checkbox' ? 'change' : 'input';
+      const eventName =
+        element.tagName === 'SELECT' || element.type === 'checkbox' ? 'change' : 'input';
       element.addEventListener(eventName, markDirty);
     });
 
@@ -1871,10 +2073,14 @@
         if (state.applying) return;
         const result = await applyPlan(workspaceId);
         const parts = [];
-        if (result.boundMCPs) parts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'}`);
-        if (result.attachedSkills) parts.push(`${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'}`);
-        if (result.addedPlugins) parts.push(`${result.addedPlugins} plugin${result.addedPlugins === 1 ? '' : 's'}`);
-        if (result.invitedAgents) parts.push(`${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'}`);
+        if (result.boundMCPs)
+          parts.push(`${result.boundMCPs} MCP${result.boundMCPs === 1 ? '' : 's'}`);
+        if (result.attachedSkills)
+          parts.push(`${result.attachedSkills} skill${result.attachedSkills === 1 ? '' : 's'}`);
+        if (result.addedPlugins)
+          parts.push(`${result.addedPlugins} plugin${result.addedPlugins === 1 ? '' : 's'}`);
+        if (result.invitedAgents)
+          parts.push(`${result.invitedAgents} agent${result.invitedAgents === 1 ? '' : 's'}`);
         if (Array.isArray(result.failures) && result.failures.length > 0) {
           showToast(`Added ${parts.join(', ') || 'nothing'}. ${result.failures[0]}`, 'warning');
         } else if (parts.length > 0) {
@@ -1906,7 +2112,7 @@
     applyPlan,
     applySelectedPlan,
     mountWorkspaceToolsPanel,
-    reviewWorkspaceInput: async (input) => buildPlan(normalizeReviewInput(input)),
+    reviewWorkspaceInput: async input => buildPlan(normalizeReviewInput(input)),
     reset,
     markDirty,
     refreshPrimaryActionLabel

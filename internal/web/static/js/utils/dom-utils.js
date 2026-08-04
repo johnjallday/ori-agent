@@ -14,7 +14,7 @@
  *   const safe = escapeHtml(userInput);
  */
 
-const DOMUtils = (function() {
+const DOMUtils = (function () {
   'use strict';
 
   /**

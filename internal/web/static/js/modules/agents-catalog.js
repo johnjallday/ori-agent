@@ -83,16 +83,28 @@
   function renderCatalogGrid() {
     const grid = byId('catalogGrid');
     if (!grid) return;
-    grid.innerHTML = catalogEntries.map(function (entry) {
-      return (
-        '<button type="button" class="catalog-card" role="radio" aria-checked="false" ' +
-        'data-slug="' + escapeAttr(entry.slug) + '" style="--catalog-accent: ' + escapeAttr(entry.accent_color) + ';">' +
-        '<span class="catalog-card-emblem"><i class="bi bi-' + escapeAttr(entry.emblem) + '" aria-hidden="true"></i></span>' +
-        '<span class="catalog-card-name">' + escapeHtml(entry.display_name) + '</span>' +
-        '<span class="catalog-card-tagline">' + escapeHtml(entry.tagline) + '</span>' +
-        '</button>'
-      );
-    }).join('');
+    grid.innerHTML = catalogEntries
+      .map(function (entry) {
+        return (
+          '<button type="button" class="catalog-card" role="radio" aria-checked="false" ' +
+          'data-slug="' +
+          escapeAttr(entry.slug) +
+          '" style="--catalog-accent: ' +
+          escapeAttr(entry.accent_color) +
+          ';">' +
+          '<span class="catalog-card-emblem"><i class="bi bi-' +
+          escapeAttr(entry.emblem) +
+          '" aria-hidden="true"></i></span>' +
+          '<span class="catalog-card-name">' +
+          escapeHtml(entry.display_name) +
+          '</span>' +
+          '<span class="catalog-card-tagline">' +
+          escapeHtml(entry.tagline) +
+          '</span>' +
+          '</button>'
+        );
+      })
+      .join('');
 
     grid.querySelectorAll('.catalog-card').forEach(function (card) {
       card.addEventListener('click', function () {
@@ -102,7 +114,10 @@
   }
 
   function selectEntry(slug) {
-    selectedEntry = catalogEntries.find(function (e) { return e.slug === slug; }) || null;
+    selectedEntry =
+      catalogEntries.find(function (e) {
+        return e.slug === slug;
+      }) || null;
     if (!selectedEntry) return;
 
     document.querySelectorAll('#catalogGrid .catalog-card').forEach(function (card) {
@@ -129,24 +144,37 @@
 
   function tierLabel(tier) {
     switch (tier) {
-      case 'fast': return 'Fast';
-      case 'balanced': return 'Balanced';
-      case 'deep': return 'Deep reasoning';
-      default: return tier;
+      case 'fast':
+        return 'Fast';
+      case 'balanced':
+        return 'Balanced';
+      case 'deep':
+        return 'Deep reasoning';
+      default:
+        return tier;
     }
   }
 
   function renderPresetSummary() {
     const summary = byId('catalogPresetSummary');
     if (!summary || !selectedEntry) return;
-    const skillsLine = (selectedEntry.starter_skills && selectedEntry.starter_skills.length > 0)
-      ? escapeHtml(selectedEntry.starter_skills.join(', '))
-      : 'none — starts with an empty loadout';
+    const skillsLine =
+      selectedEntry.starter_skills && selectedEntry.starter_skills.length > 0
+        ? escapeHtml(selectedEntry.starter_skills.join(', '))
+        : 'none — starts with an empty loadout';
     summary.innerHTML =
-      '<div><strong>Role:</strong> ' + escapeHtml(selectedEntry.display_name) + '</div>' +
-      '<div><strong>Model tier:</strong> ' + escapeHtml(tierLabel(selectedEntry.model_tier)) + '</div>' +
-      '<div><strong>Starter skills:</strong> ' + skillsLine + '</div>' +
-      '<div>' + escapeHtml(selectedEntry.description) + '</div>';
+      '<div><strong>Role:</strong> ' +
+      escapeHtml(selectedEntry.display_name) +
+      '</div>' +
+      '<div><strong>Model tier:</strong> ' +
+      escapeHtml(tierLabel(selectedEntry.model_tier)) +
+      '</div>' +
+      '<div><strong>Starter skills:</strong> ' +
+      skillsLine +
+      '</div>' +
+      '<div>' +
+      escapeHtml(selectedEntry.description) +
+      '</div>';
   }
 
   function showCatalogModelNotice(message) {
@@ -188,7 +216,7 @@
     if (nameInput) nameInput.classList.remove('is-invalid');
 
     const domainInput = byId('catalogDomain');
-    const domain = (selectedEntry.supports_domain && domainInput) ? domainInput.value.trim() : '';
+    const domain = selectedEntry.supports_domain && domainInput ? domainInput.value.trim() : '';
 
     const createBtn = byId('catalogCreateBtn');
     if (createBtn) createBtn.disabled = true;
@@ -205,13 +233,18 @@
         })
       });
 
-      const result = await response.json().catch(function () { return {}; });
+      const result = await response.json().catch(function () {
+        return {};
+      });
       if (!response.ok) {
         throw new Error(result.error || 'Failed to create agent');
       }
 
       if (result.model_category_fallback) {
-        showCatalogModelNotice(result.notice || 'Used your default model — the selected tier has no configured model yet.');
+        showCatalogModelNotice(
+          result.notice ||
+            'Used your default model — the selected tier has no configured model yet.'
+        );
       }
 
       window.location.href = '/agents';

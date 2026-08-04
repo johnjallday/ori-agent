@@ -1,28 +1,27 @@
 /* global escapeHtml */
 
-import {
-  taskExecutionViewsMethods,
-  TRACE_PAGE_SIZE,
-} from './workspace-task-execution-views.js';
+import { taskExecutionViewsMethods, TRACE_PAGE_SIZE } from './workspace-task-execution-views.js';
 import {
   artifactToCSVFence,
   buildTaskResultArtifact,
   parseDelimitedRecords,
-  rowsToCSV,
+  rowsToCSV
 } from './task-result-artifacts.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 import { resolveTaskState, PRESENTATION_STATE } from './task-presentation.js';
 
-const escapeTaskHtml = window.escapeHtml || function fallbackEscapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-};
+const escapeTaskHtml =
+  window.escapeHtml ||
+  function fallbackEscapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
 
 export function _formatRelativeDate(dateString) {
   if (!dateString) return '—';
@@ -54,13 +53,16 @@ export function formatDateTime(dateString) {
 }
 
 export function getStatusClass(status) {
-  const normalized = String(status || '').trim().toLowerCase();
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase();
   if (normalized === 'completed' || normalized === 'success') return 'completed';
   if (normalized === 'in_progress') return 'in_progress';
   if (normalized === 'blocked' || normalized === 'waiting_for_choice') return 'blocked';
   if (normalized === 'cancelled') return 'cancelled';
   if (normalized === 'skipped') return 'cancelled';
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'timeout') return 'failed';
+  if (normalized === 'failed' || normalized === 'error' || normalized === 'timeout')
+    return 'failed';
   return 'pending';
 }
 
@@ -80,7 +82,9 @@ const KNOWN_STATUS_LABELS = {
 };
 
 export function getDisplayStatus(status) {
-  const normalized = String(status || '').trim().toLowerCase();
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase();
   if (KNOWN_STATUS_LABELS[normalized]) return KNOWN_STATUS_LABELS[normalized];
   // Shared resolver (FR110) decides only the fallback: a genuinely
   // unrecognized status is labeled "Unknown", never silently "Pending" (FR38)
@@ -90,15 +94,16 @@ export function getDisplayStatus(status) {
 }
 
 export function summarizeText(value, maxLength = 220) {
-  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  const normalized = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalized) return '';
   if (normalized.length <= maxLength) return normalized;
 
   const candidate = normalized.slice(0, maxLength - 1);
   const boundary = candidate.lastIndexOf(' ');
-  const trimmed = boundary >= Math.floor(maxLength * 0.55)
-    ? candidate.slice(0, boundary)
-    : candidate;
+  const trimmed =
+    boundary >= Math.floor(maxLength * 0.55) ? candidate.slice(0, boundary) : candidate;
   return `${trimmed.trim()}...`;
 }
 
@@ -130,9 +135,8 @@ export function trimTaskSkillText(value, maxLength = 900) {
 
   const candidate = normalized.slice(0, maxLength - 1);
   const boundary = candidate.lastIndexOf(' ');
-  const trimmed = boundary >= Math.floor(maxLength * 0.55)
-    ? candidate.slice(0, boundary)
-    : candidate;
+  const trimmed =
+    boundary >= Math.floor(maxLength * 0.55) ? candidate.slice(0, boundary) : candidate;
   return `${trimmed.trim()}...`;
 }
 
@@ -166,7 +170,10 @@ export function extractGeneratedSkillPrompt(raw) {
     text = text.slice('prompt:'.length).trim();
   }
 
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'"))
+  ) {
     text = text.slice(1, -1).trim();
   }
 
@@ -208,11 +215,15 @@ function cleanAssistText(value) {
 }
 
 function cleanAssistFieldLabel(value) {
-  return cleanAssistText(value).replace(/[,:;.!?]+$/g, '').trim();
+  return cleanAssistText(value)
+    .replace(/[,:;.!?]+$/g, '')
+    .trim();
 }
 
 function ensureAssistQuestion(value) {
-  const cleaned = cleanAssistText(value).replace(/[.!]+$/g, '').trim();
+  const cleaned = cleanAssistText(value)
+    .replace(/[.!]+$/g, '')
+    .trim();
   if (!cleaned) return '';
   return cleaned.endsWith('?') ? cleaned : `${cleaned}?`;
 }
@@ -244,9 +255,10 @@ function splitAssistOptionEvidence(value) {
 
   return {
     label,
-    description: description.endsWith('.') || description.endsWith('!') || description.endsWith('?')
-      ? description
-      : `${description}.`
+    description:
+      description.endsWith('.') || description.endsWith('!') || description.endsWith('?')
+        ? description
+        : `${description}.`
   };
 }
 
@@ -261,7 +273,8 @@ function extractAssistInlineOptions(question) {
   const left = cleanAssistFieldLabel(parts[0]);
   const right = cleanAssistFieldLabel(parts[1]);
   if (!left || !right) return [];
-  if (left.toLowerCase().includes('should i') || left.toLowerCase().includes('want me to')) return [];
+  if (left.toLowerCase().includes('should i') || left.toLowerCase().includes('want me to'))
+    return [];
 
   return [
     { value: left, label: left, description: '', key: 'A' },
@@ -288,12 +301,14 @@ function buildDerivedAssistField(question, index, options = []) {
 
   if (options.length >= 2) {
     field.type = 'select';
-    field.options = options.map((option, optionIndex) => ({
-      value: cleanAssistText(option.value || option.label),
-      label: cleanAssistText(option.label || option.value),
-      description: cleanAssistText(option.description),
-      key: String(option.key || String.fromCharCode(65 + (optionIndex % 26))).trim()
-    })).filter((option) => option.value && option.label);
+    field.options = options
+      .map((option, optionIndex) => ({
+        value: cleanAssistText(option.value || option.label),
+        label: cleanAssistText(option.label || option.value),
+        description: cleanAssistText(option.description),
+        key: String(option.key || String.fromCharCode(65 + (optionIndex % 26))).trim()
+      }))
+      .filter(option => option.value && option.label);
     return field.options.length >= 2 ? field : null;
   }
 
@@ -331,7 +346,7 @@ function extractAssistQuestionBlocks(text) {
   const lines = String(text || '').split(/\r?\n/);
   const blocks = [];
 
-  for (let index = 0; index < lines.length;) {
+  for (let index = 0; index < lines.length; ) {
     const promptMatch = lines[index].match(assistQuestionPromptPattern);
     if (!promptMatch || promptMatch.length < 2) {
       index += 1;
@@ -395,7 +410,7 @@ function extractAssistQuestionsFromText(text) {
   const seen = new Set();
   const lines = String(text || '').split(/\r?\n/);
 
-  const addQuestion = (value) => {
+  const addQuestion = value => {
     const normalized = ensureAssistQuestion(value);
     if (!normalized) return;
     const key = normalized.toLowerCase();
@@ -404,7 +419,7 @@ function extractAssistQuestionsFromText(text) {
     questions.push(normalized);
   };
 
-  lines.forEach((rawLine) => {
+  lines.forEach(rawLine => {
     const trimmed = String(rawLine || '').trim();
     if (!trimmed) return;
 
@@ -412,7 +427,7 @@ function extractAssistQuestionsFromText(text) {
     const candidate = promptMatch && promptMatch.length >= 2 ? promptMatch[1] : trimmed;
     if (!candidate.includes('?')) return;
 
-    candidate.split('?').forEach((part) => {
+    candidate.split('?').forEach(part => {
       const fragment = cleanAssistText(part);
       if (fragment.length < 8 || fragment.length > 180) return;
       addQuestion(fragment);
@@ -423,17 +438,19 @@ function extractAssistQuestionsFromText(text) {
     return questions;
   }
 
-  cleanAssistText(text).split('?').forEach((part) => {
-    const fragment = cleanAssistText(part);
-    if (fragment.length < 8 || fragment.length > 180) return;
-    addQuestion(fragment);
-  });
+  cleanAssistText(text)
+    .split('?')
+    .forEach(part => {
+      const fragment = cleanAssistText(part);
+      if (fragment.length < 8 || fragment.length > 180) return;
+      addQuestion(fragment);
+    });
 
   return questions;
 }
 
 function deriveAssistWorkflowStepFromText(...texts) {
-  const sources = texts.map((value) => String(value || '').trim()).filter(Boolean);
+  const sources = texts.map(value => String(value || '').trim()).filter(Boolean);
   if (sources.length === 0) return null;
 
   for (const source of sources) {
@@ -458,8 +475,8 @@ function deriveAssistWorkflowStepFromText(...texts) {
 
   const seen = new Set();
   const questions = [];
-  sources.forEach((source) => {
-    extractAssistQuestionsFromText(source).forEach((question) => {
+  sources.forEach(source => {
+    extractAssistQuestionsFromText(source).forEach(question => {
       const key = question.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
@@ -504,13 +521,15 @@ function normalizeAssistOptionToken(value) {
 function isAssistOtherOption(option) {
   const normalized = normalizeAssistOptionToken(option?.label || option?.value || '');
   if (!normalized) return false;
-  return normalized === 'other' ||
+  return (
+    normalized === 'other' ||
     normalized === 'something else' ||
     normalized === 'custom' ||
     normalized === 'another option' ||
     normalized === 'not listed' ||
     normalized.startsWith('other ') ||
-    normalized.endsWith(' other');
+    normalized.endsWith(' other')
+  );
 }
 
 /**
@@ -537,11 +556,15 @@ function buildAssistSelectState(workflowStep, selectedFieldValues = {}) {
   const optionValues = {};
   const customValues = {};
 
-  if (!workflowStep || workflowStep.stepType !== 'ask_form' || !Array.isArray(workflowStep.fields)) {
+  if (
+    !workflowStep ||
+    workflowStep.stepType !== 'ask_form' ||
+    !Array.isArray(workflowStep.fields)
+  ) {
     return { optionValues, customValues };
   }
 
-  workflowStep.fields.forEach((field) => {
+  workflowStep.fields.forEach(field => {
     if (field?.type !== 'select' || !Array.isArray(field.options) || field.options.length === 0) {
       return;
     }
@@ -549,16 +572,17 @@ function buildAssistSelectState(workflowStep, selectedFieldValues = {}) {
     const savedValue = String(selectedFieldValues[field.id] || '').trim();
     if (!savedValue) return;
 
-    const matchedOption = field.options.find((option) => (
-      String(option?.value || '').trim() === savedValue ||
-      String(option?.label || '').trim() === savedValue
-    ));
+    const matchedOption = field.options.find(
+      option =>
+        String(option?.value || '').trim() === savedValue ||
+        String(option?.label || '').trim() === savedValue
+    );
     if (matchedOption) {
       optionValues[field.id] = String(matchedOption.value || matchedOption.label || '').trim();
       return;
     }
 
-    const otherOption = field.options.find((option) => isAssistOtherOption(option));
+    const otherOption = field.options.find(option => isAssistOtherOption(option));
     if (!otherOption) return;
 
     optionValues[field.id] = String(otherOption.value || otherOption.label || '').trim();
@@ -609,16 +633,16 @@ function trimResultWorkflowLabel(value, maxLength = 180) {
   if (!cleaned || cleaned.length <= maxLength) return cleaned;
   const candidate = cleaned.slice(0, maxLength - 1);
   const boundary = candidate.lastIndexOf(' ');
-  const trimmed = boundary >= Math.floor(maxLength * 0.55)
-    ? candidate.slice(0, boundary)
-    : candidate;
+  const trimmed =
+    boundary >= Math.floor(maxLength * 0.55) ? candidate.slice(0, boundary) : candidate;
   return `${trimmed.trim()}...`;
 }
 
 function isResultWorkflowReferenceSection(value) {
   const token = normalizeResultWorkflowToken(value);
   if (!token) return false;
-  return token.includes('note') ||
+  return (
+    token.includes('note') ||
     token.includes('tip') ||
     token.includes('material') ||
     token.includes('supply') ||
@@ -627,7 +651,8 @@ function isResultWorkflowReferenceSection(value) {
     token.includes('measurement') ||
     token.includes('reference') ||
     token.includes('budget') ||
-    token.includes('cost');
+    token.includes('cost')
+  );
 }
 
 function buildResultWorkflowDraftTitle(taskLabel) {
@@ -638,7 +663,12 @@ function buildResultWorkflowDraftTitle(taskLabel) {
   return trimResultWorkflowLabel(`${cleaned} - Workflow`, 120) || 'Workflow Draft';
 }
 
-function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAssignmentValue = '') {
+function buildResultWorkflowDraft(
+  taskLabel,
+  resultText,
+  sourceTaskId,
+  defaultAssignmentValue = ''
+) {
   const lines = String(resultText || '').split(/\r?\n/);
   if (lines.length === 0) return null;
 
@@ -651,7 +681,7 @@ function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAs
   let lastAction = null;
   let lastNoteIndex = -1;
 
-  const rememberSection = (section) => {
+  const rememberSection = section => {
     const cleaned = trimResultWorkflowLabel(section, 96);
     if (!cleaned) return;
     const key = cleaned.toLowerCase();
@@ -660,7 +690,7 @@ function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAs
     sectionLabels.push(cleaned);
   };
 
-  const pushNote = (value) => {
+  const pushNote = value => {
     const cleaned = cleanResultWorkflowText(value);
     if (!cleaned) return;
     notes.push(cleaned);
@@ -668,7 +698,7 @@ function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAs
     lastAction = null;
   };
 
-  const pushAction = (value) => {
+  const pushAction = value => {
     const cleaned = trimResultWorkflowLabel(value, 220);
     if (!cleaned) return;
     const action = {
@@ -683,7 +713,7 @@ function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAs
     lastNoteIndex = -1;
   };
 
-  lines.forEach((rawLine) => {
+  lines.forEach(rawLine => {
     const line = String(rawLine || '').replace(/\t/g, '  ');
     const trimmed = line.trim();
 
@@ -760,7 +790,10 @@ function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAs
     if (!continuation) return;
 
     if (!currentSectionIsReference && lastAction) {
-      lastAction.text = trimResultWorkflowLabel(appendResultWorkflowText(lastAction.text, continuation), 220);
+      lastAction.text = trimResultWorkflowLabel(
+        appendResultWorkflowText(lastAction.text, continuation),
+        220
+      );
       return;
     }
 
@@ -814,16 +847,20 @@ function buildResultWorkflowDraft(taskLabel, resultText, sourceTaskId, defaultAs
 
   if (notes.length > 0) {
     detailsParts.push('Reference notes from the result:');
-    notes.slice(0, 6).forEach((note) => {
+    notes.slice(0, 6).forEach(note => {
       detailsParts.push(`- ${note}`);
     });
     if (notes.length > 6) {
-      detailsParts.push(`- ${notes.length - 6} more note${notes.length - 6 === 1 ? '' : 's'} remain in the original result.`);
+      detailsParts.push(
+        `- ${notes.length - 6} more note${notes.length - 6 === 1 ? '' : 's'} remain in the original result.`
+      );
     }
   }
 
   if (truncatedCount > 0) {
-    detailsParts.push(`${truncatedCount} additional step${truncatedCount === 1 ? '' : 's'} were omitted from the draft to keep the workflow reviewable.`);
+    detailsParts.push(
+      `${truncatedCount} additional step${truncatedCount === 1 ? '' : 's'} were omitted from the draft to keep the workflow reviewable.`
+    );
   }
 
   return {
@@ -897,11 +934,11 @@ export class WorkspaceTaskPage {
     // open at a time. _followupSubmitting prevents double-submits.
     this._followupOpen = false;
     this._followupSubmitting = false;
-    this.boundResultSectionMenuDocumentClick = (event) => {
+    this.boundResultSectionMenuDocumentClick = event => {
       if (!this.resultSectionMenu || this.resultSectionMenu.contains(event.target)) return;
       this.closeResultSectionMenu();
     };
-    this.boundResultSectionMenuKeydown = (event) => {
+    this.boundResultSectionMenuKeydown = event => {
       if (event.key === 'Escape') {
         this.closeResultSectionMenu();
       }
@@ -1016,14 +1053,22 @@ export class WorkspaceTaskPage {
       resultPromoteGroups: document.getElementById('workspace-task-result-promote-groups'),
       resultPromoteSubmitBtn: document.getElementById('workspace-task-result-promote-submit'),
       resultResearchModal: document.getElementById('workspace-task-result-research-modal'),
-      resultResearchSectionMeta: document.getElementById('workspace-task-result-research-section-meta'),
+      resultResearchSectionMeta: document.getElementById(
+        'workspace-task-result-research-section-meta'
+      ),
       resultResearchTitleInput: document.getElementById('workspace-task-result-research-title'),
       resultResearchAgentSelect: document.getElementById('workspace-task-result-research-agent'),
       resultResearchDetailsInput: document.getElementById('workspace-task-result-research-details'),
-      resultResearchSectionInput: document.getElementById('workspace-task-result-research-section-text'),
-      resultResearchLinkInput: document.getElementById('workspace-task-result-research-link-source'),
+      resultResearchSectionInput: document.getElementById(
+        'workspace-task-result-research-section-text'
+      ),
+      resultResearchLinkInput: document.getElementById(
+        'workspace-task-result-research-link-source'
+      ),
       resultResearchRunInput: document.getElementById('workspace-task-result-research-run-now'),
-      resultResearchOpenInput: document.getElementById('workspace-task-result-research-open-after-create'),
+      resultResearchOpenInput: document.getElementById(
+        'workspace-task-result-research-open-after-create'
+      ),
       resultResearchSubmitBtn: document.getElementById('workspace-task-result-research-submit'),
       workflowCard: document.getElementById('workspace-task-workflow-card'),
       workflowActions: document.getElementById('workspace-task-workflow-actions'),
@@ -1109,7 +1154,7 @@ export class WorkspaceTaskPage {
   }
 
   bindEvents() {
-    this.elements.title?.addEventListener('click', (event) => {
+    this.elements.title?.addEventListener('click', event => {
       // Don't hijack the user's text-selection drag — only treat a plain
       // click with no selection as an "open editor" intent.
       if (window.getSelection && String(window.getSelection() || '').length > 0) return;
@@ -1120,21 +1165,21 @@ export class WorkspaceTaskPage {
     // Keyboard parity for the removed pencil button: tabindex=0 + role=button
     // on the <h1> means keyboard users land here in tab order; Enter or Space
     // opens the inline editor.
-    this.elements.title?.addEventListener('keydown', (event) => {
+    this.elements.title?.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         this.startTitleEdit();
       }
     });
     this.elements.detailsEditBtn?.addEventListener('click', () => this.startHeroDetailsEdit());
-    this.elements.subtitle?.addEventListener('click', (event) => {
+    this.elements.subtitle?.addEventListener('click', event => {
       if (window.getSelection && String(window.getSelection() || '').length > 0) return;
       if (event.detail > 1) return;
       this.startHeroDetailsEdit();
     });
     this.elements.subtitle?.addEventListener('dblclick', () => this.startHeroDetailsEdit());
     if (this.elements.runsTabs && this.elements.runsTabs.forEach) {
-      this.elements.runsTabs.forEach((btn) => {
+      this.elements.runsTabs.forEach(btn => {
         btn.addEventListener('click', () => {
           const next = btn.getAttribute('data-runs-tab') || 'runs';
           this.setRunsTab(next);
@@ -1142,7 +1187,7 @@ export class WorkspaceTaskPage {
       });
     }
     if (this.elements.heroAgent) {
-      this.elements.heroAgent.addEventListener('change', async (event) => {
+      this.elements.heroAgent.addEventListener('change', async event => {
         const value = event.target.value || '';
         try {
           await this.updateTaskFields({ to: value });
@@ -1152,11 +1197,17 @@ export class WorkspaceTaskPage {
         }
       });
     }
-    this.elements.outputFollowupBtn?.addEventListener('click', () => this.toggleFollowupPanel(true));
+    this.elements.outputFollowupBtn?.addEventListener('click', () =>
+      this.toggleFollowupPanel(true)
+    );
     this.elements.followupCancel?.addEventListener('click', () => this.toggleFollowupPanel(false));
     this.elements.followupSubmit?.addEventListener('click', () => this.submitFollowupTask());
-    this.elements.followupDetailsToggle?.addEventListener('click', () => this.toggleFollowupDetails());
-    this.elements.copyIdBtn?.addEventListener('click', () => this.copyToClipboard(this.taskId, 'Task ID copied'));
+    this.elements.followupDetailsToggle?.addEventListener('click', () =>
+      this.toggleFollowupDetails()
+    );
+    this.elements.copyIdBtn?.addEventListener('click', () =>
+      this.copyToClipboard(this.taskId, 'Task ID copied')
+    );
     this.elements.copyLinkBtn?.addEventListener('click', () => {
       this.copyToClipboard(window.location.href, 'Link copied');
       this.setHeroOverflowOpen(false);
@@ -1165,16 +1216,16 @@ export class WorkspaceTaskPage {
       this.setHeroOverflowOpen(false);
       this.deleteTask();
     });
-    this.elements.heroOverflowToggle?.addEventListener('click', (event) => {
+    this.elements.heroOverflowToggle?.addEventListener('click', event => {
       event.stopPropagation();
       this.setHeroOverflowOpen(this.elements.heroOverflow?.dataset.open !== 'true');
     });
-    document.addEventListener('click', (event) => {
+    document.addEventListener('click', event => {
       if (this.elements.heroOverflow?.dataset.open !== 'true') return;
       if (this.elements.heroOverflow.contains(event.target)) return;
       this.setHeroOverflowOpen(false);
     });
-    document.addEventListener('keydown', (event) => {
+    document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && this.elements.heroOverflow?.dataset.open === 'true') {
         this.setHeroOverflowOpen(false);
         this.elements.heroOverflowToggle?.focus();
@@ -1184,7 +1235,9 @@ export class WorkspaceTaskPage {
       this.copyCurrentResult();
       this.setOutputOverflowOpen(false);
     });
-    this.elements.outputSaveNoteBtn?.addEventListener('click', () => this.saveCurrentResultAsNote());
+    this.elements.outputSaveNoteBtn?.addEventListener('click', () =>
+      this.saveCurrentResultAsNote()
+    );
     this.initResultSelectionActions();
     this.elements.outputCreateSkillBtn?.addEventListener('click', () => {
       this.openSkillDraftModal();
@@ -1194,23 +1247,25 @@ export class WorkspaceTaskPage {
       this.previewResultPromotion();
       this.setOutputOverflowOpen(false);
     });
-    this.elements.outputOverflowToggle?.addEventListener('click', (event) => {
+    this.elements.outputOverflowToggle?.addEventListener('click', event => {
       event.stopPropagation();
       this.setOutputOverflowOpen(this.elements.outputOverflow?.dataset.open !== 'true');
     });
-    document.addEventListener('click', (event) => {
+    document.addEventListener('click', event => {
       if (!this.elements.outputOverflow) return;
       if (this.elements.outputOverflow.dataset.open !== 'true') return;
       if (this.elements.outputOverflow.contains(event.target)) return;
       this.setOutputOverflowOpen(false);
     });
-    document.addEventListener('keydown', (event) => {
+    document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && this.elements.outputOverflow?.dataset.open === 'true') {
         this.setOutputOverflowOpen(false);
         this.elements.outputOverflowToggle?.focus();
       }
     });
-    this.elements.skillGenerateBtn?.addEventListener('click', () => this.generateSkillPromptFromTask(true));
+    this.elements.skillGenerateBtn?.addEventListener('click', () =>
+      this.generateSkillPromptFromTask(true)
+    );
     this.elements.skillSubmitBtn?.addEventListener('click', () => this.submitTaskSkillDraft());
     this.elements.skillModal?.addEventListener('hidden.bs.modal', () => {
       if (this.skillDraftSubmitting) return;
@@ -1221,25 +1276,39 @@ export class WorkspaceTaskPage {
       this.skillDraftGenerating = false;
       this.updateSkillDraftButtons();
     });
-    this.elements.resultPromoteSubmitBtn?.addEventListener('click', () => this.submitResultPromotion());
+    this.elements.resultPromoteSubmitBtn?.addEventListener('click', () =>
+      this.submitResultPromotion()
+    );
     this.elements.resultPromoteModal?.addEventListener('hidden.bs.modal', () => {
       if (this.resultPromotionSubmitting) return;
       this.resultPromotionDraft = null;
     });
-    this.elements.resultResearchSubmitBtn?.addEventListener('click', () => this.submitResultResearchDraft());
-    this.elements.resultResearchRunInput?.addEventListener('change', () => this.updateResultResearchSubmitLabel());
+    this.elements.resultResearchSubmitBtn?.addEventListener('click', () =>
+      this.submitResultResearchDraft()
+    );
+    this.elements.resultResearchRunInput?.addEventListener('change', () =>
+      this.updateResultResearchSubmitLabel()
+    );
     this.elements.resultResearchModal?.addEventListener('hidden.bs.modal', () => {
       if (this.resultResearchSubmitting) return;
       this.resultResearchDraft = null;
     });
-    this.elements.blockedRequestToggle?.addEventListener('click', () => this.toggleAssistResponseExpanded());
+    this.elements.blockedRequestToggle?.addEventListener('click', () =>
+      this.toggleAssistResponseExpanded()
+    );
     this.elements.workflowGenerateBtn?.addEventListener('click', () => this.handleGenerateSteps());
     this.elements.workflowAddStepBtn?.addEventListener('click', () => this.handleAddStep());
     this.elements.workflowRunAllBtn?.addEventListener('click', () => this.handleRunAllSteps());
     this.elements.scheduleCardEditBtn?.addEventListener('click', () => this.openScheduleModal());
-    this.elements.scheduleOpenFolderBtn?.addEventListener('click', () => this.openWorkspaceOutputDir());
-    this.elements.scheduleTypeInput?.addEventListener('change', () => this.updateScheduleModalFields());
-    this.elements.scheduleWakeMacInput?.addEventListener('change', () => this.updateScheduleModalFields());
+    this.elements.scheduleOpenFolderBtn?.addEventListener('click', () =>
+      this.openWorkspaceOutputDir()
+    );
+    this.elements.scheduleTypeInput?.addEventListener('change', () =>
+      this.updateScheduleModalFields()
+    );
+    this.elements.scheduleWakeMacInput?.addEventListener('change', () =>
+      this.updateScheduleModalFields()
+    );
     [
       this.elements.scheduleEnabledInput,
       this.elements.scheduleNameInput,
@@ -1253,17 +1322,25 @@ export class WorkspaceTaskPage {
       this.elements.scheduleWakeMacInput,
       this.elements.scheduleWakeLeadInput,
       this.elements.scheduleWakeFallbackInput
-    ].forEach((element) => {
+    ].forEach(element => {
       element?.addEventListener('input', () => this.updateSchedulePreview());
       element?.addEventListener('change', () => this.updateSchedulePreview());
     });
     this.elements.scheduleSubmitBtn?.addEventListener('click', () => this.saveSchedule());
     this.elements.scheduleRemoveBtn?.addEventListener('click', () => this.removeSchedule());
     this.elements.assistRetryBtn?.addEventListener('click', () => this.submitTaskAssist('retry'));
-    this.elements.assistContinueBtn?.addEventListener('click', () => this.submitTaskAssist('continue_with_instruction'));
-    this.elements.assistSwitchBtn?.addEventListener('click', () => this.submitTaskAssist('switch_agent_retry'));
-    this.elements.assistFailBtn?.addEventListener('click', () => this.submitTaskAssist('mark_failed'));
-    this.elements.assistAgent?.addEventListener('change', () => this.updateAssistSwitchButtonState());
+    this.elements.assistContinueBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('continue_with_instruction')
+    );
+    this.elements.assistSwitchBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('switch_agent_retry')
+    );
+    this.elements.assistFailBtn?.addEventListener('click', () =>
+      this.submitTaskAssist('mark_failed')
+    );
+    this.elements.assistAgent?.addEventListener('change', () =>
+      this.updateAssistSwitchButtonState()
+    );
   }
 
   async loadData() {
@@ -1285,7 +1362,7 @@ export class WorkspaceTaskPage {
       this.availableAgents = Array.isArray(agents) ? agents : [];
       this.taskEvents = Array.isArray(taskEvents) ? taskEvents : [];
 
-      const workspaceTask = this.tasks.find((item) => String(item?.id || '') === this.taskId) || null;
+      const workspaceTask = this.tasks.find(item => String(item?.id || '') === this.taskId) || null;
       this.task = taskResponse || workspaceTask;
 
       if (!this.task || String(this.task.workspace_id || this.workspaceId) !== this.workspaceId) {
@@ -1321,7 +1398,9 @@ export class WorkspaceTaskPage {
   // this workspace (<workspace>/outputs), used to show where "Default output
   // folder" actually writes.
   async fetchWorkspaceOutputDir() {
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`);
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/output-dir`
+    );
     if (!response.ok) return '';
     const data = await response.json();
     return String(data?.output_dir || '').trim();
@@ -1363,7 +1442,9 @@ export class WorkspaceTaskPage {
     const normalizedRunId = String(runId || '').trim();
     if (!normalizedRunId) return null;
 
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(normalizedRunId)}`);
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(normalizedRunId)}`
+    );
     if (response.status === 404) return null;
     if (!response.ok) {
       throw new Error('Failed to load latest workspace run.');
@@ -1376,7 +1457,7 @@ export class WorkspaceTaskPage {
     const currentRunId = String(task?.current_run_id || '').trim();
     if (currentRunId) runIds.add(currentRunId);
 
-    (Array.isArray(task?.execution_history) ? task.execution_history : []).forEach((entry) => {
+    (Array.isArray(task?.execution_history) ? task.execution_history : []).forEach(entry => {
       const runId = String(entry?.run_id || '').trim();
       if (runId) runIds.add(runId);
     });
@@ -1384,7 +1465,7 @@ export class WorkspaceTaskPage {
     if (!runIds.size) return [];
 
     const runs = await Promise.all(
-      [...runIds].map((runId) => this.fetchCurrentRun(runId).catch(() => null))
+      [...runIds].map(runId => this.fetchCurrentRun(runId).catch(() => null))
     );
 
     return runs
@@ -1395,17 +1476,28 @@ export class WorkspaceTaskPage {
   findWorkspaceRun(runId) {
     const normalizedRunId = String(runId || '').trim();
     if (!normalizedRunId) return null;
-    return (Array.isArray(this.workspaceRuns) ? this.workspaceRuns : []).find((run) => run?.id === normalizedRunId) || null;
+    return (
+      (Array.isArray(this.workspaceRuns) ? this.workspaceRuns : []).find(
+        run => run?.id === normalizedRunId
+      ) || null
+    );
   }
 
   setupRealtime() {
-    if (this.workspaceRealtimeUnsubscribe || !window.workspaceRealtime || typeof window.workspaceRealtime.subscribeToWorkspace !== 'function') {
+    if (
+      this.workspaceRealtimeUnsubscribe ||
+      !window.workspaceRealtime ||
+      typeof window.workspaceRealtime.subscribeToWorkspace !== 'function'
+    ) {
       return;
     }
 
-    this.workspaceRealtimeUnsubscribe = window.workspaceRealtime.subscribeToWorkspace(this.workspaceId, (event) => {
-      this.handleRealtimeEvent(event);
-    });
+    this.workspaceRealtimeUnsubscribe = window.workspaceRealtime.subscribeToWorkspace(
+      this.workspaceId,
+      event => {
+        this.handleRealtimeEvent(event);
+      }
+    );
   }
 
   handleRealtimeEvent(event) {
@@ -1429,12 +1521,11 @@ export class WorkspaceTaskPage {
     // task is not yet in this.tasks so eventTaskIsNeighbor would return
     // false; let these through unconditionally and rely on the render
     // diff to no-op when they really are unrelated.
-    const isStructuralEvent = (
+    const isStructuralEvent =
       eventType === 'task.created' ||
       eventType === 'task.delegated' ||
       eventType === 'task.deleted' ||
-      eventType === 'task.assigned'
-    );
+      eventType === 'task.assigned';
     if (!isSelfEvent && !isStructuralEvent && !this.eventTaskIsNeighbor(eventTaskId)) {
       return;
     }
@@ -1481,7 +1572,7 @@ export class WorkspaceTaskPage {
   // label (callers decide whether to ignore the event entirely or just
   // refresh the timestamp).
   activityLabelFor(eventType, payload) {
-    const data = (payload && typeof payload === 'object') ? payload : {};
+    const data = payload && typeof payload === 'object' ? payload : {};
     switch (eventType) {
       case 'task.thinking': {
         const phase = String(data.phase || '').trim();
@@ -1576,7 +1667,10 @@ export class WorkspaceTaskPage {
     const pill = this.elements.status;
     if (!pill) return;
 
-    const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+    const isRunning =
+      String(this.task?.status || '')
+        .trim()
+        .toLowerCase() === 'in_progress';
     const isLive = isRunning && this.workspaceRealtimeUnsubscribe;
     if (!isLive) {
       pill.removeAttribute('data-live');
@@ -1601,7 +1695,10 @@ export class WorkspaceTaskPage {
     // 2s cadence keeps the "Xs ago" counter live without burning CPU; the
     // badge text only changes once per second of real wall-clock anyway.
     this._activityTickHandle = window.setInterval(() => {
-      const isRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+      const isRunning =
+        String(this.task?.status || '')
+          .trim()
+          .toLowerCase() === 'in_progress';
       if (!isRunning) {
         this.stopActivityTick();
         return;
@@ -1628,12 +1725,16 @@ export class WorkspaceTaskPage {
     const t = this.task;
     if (!t) return false;
     if (String(t.parent_task_id || '').trim() === id) return true;
-    if (Array.isArray(t.input_task_ids) && t.input_task_ids.some((x) => String(x || '').trim() === id)) return true;
+    if (
+      Array.isArray(t.input_task_ids) &&
+      t.input_task_ids.some(x => String(x || '').trim() === id)
+    )
+      return true;
     for (const sibling of this.tasks) {
       if (!sibling || sibling.id === t.id) continue;
       if (String(sibling.parent_task_id || '').trim() === t.id && sibling.id === id) return true;
       const inputs = Array.isArray(sibling.input_task_ids) ? sibling.input_task_ids : [];
-      if (sibling.id === id && inputs.some((x) => String(x || '').trim() === t.id)) return true;
+      if (sibling.id === id && inputs.some(x => String(x || '').trim() === t.id)) return true;
     }
     return false;
   }
@@ -1659,7 +1760,9 @@ export class WorkspaceTaskPage {
     if (this.titleEditInProgress || !this.elements.title) return;
 
     const titleElement = this.elements.title;
-    const actionsContainer = titleElement.parentElement?.querySelector('.workspace-task-page-title-actions');
+    const actionsContainer = titleElement.parentElement?.querySelector(
+      '.workspace-task-page-title-actions'
+    );
     const currentValue = this.getTaskDisplayLabel();
     this.titleEditInProgress = true;
 
@@ -1690,7 +1793,7 @@ export class WorkspaceTaskPage {
     input.focus();
     input.select();
 
-    const finishEdit = async (save) => {
+    const finishEdit = async save => {
       if (!this.titleEditInProgress) return;
       this.titleEditInProgress = false;
 
@@ -1718,17 +1821,21 @@ export class WorkspaceTaskPage {
       }
     };
 
-    editActions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      finishEdit(true);
-    });
-    editActions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      finishEdit(false);
-    });
+    editActions
+      .querySelector('.workspace-task-page-edit-save')
+      ?.addEventListener('mousedown', e => {
+        e.preventDefault();
+        finishEdit(true);
+      });
+    editActions
+      .querySelector('.workspace-task-page-edit-cancel')
+      ?.addEventListener('mousedown', e => {
+        e.preventDefault();
+        finishEdit(false);
+      });
 
     input.addEventListener('input', syncHeight);
-    input.addEventListener('keydown', (event) => {
+    input.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.preventDefault();
         finishEdit(false);
@@ -1740,7 +1847,7 @@ export class WorkspaceTaskPage {
         finishEdit(true);
       }
     });
-    input.addEventListener('blur', (e) => {
+    input.addEventListener('blur', e => {
       if (editActions.contains(e.relatedTarget)) return;
       finishEdit(true);
     });
@@ -1751,7 +1858,8 @@ export class WorkspaceTaskPage {
 
     const subtitle = this.elements.subtitle;
     const editButton = this.elements.detailsEditBtn;
-    const subtitleRow = subtitle.closest('.workspace-task-page-subtitle-row') || subtitle.parentElement;
+    const subtitleRow =
+      subtitle.closest('.workspace-task-page-subtitle-row') || subtitle.parentElement;
     const currentValue = String(this.task?.details || '').trim();
 
     this.detailsEditInProgress = true;
@@ -1763,7 +1871,8 @@ export class WorkspaceTaskPage {
     textarea.className = 'workspace-task-page-subtitle-input';
     textarea.rows = 4;
     textarea.value = currentValue;
-    textarea.placeholder = 'Add source preferences, constraints, context, or anything the agent should know before running this task.';
+    textarea.placeholder =
+      'Add source preferences, constraints, context, or anything the agent should know before running this task.';
     textarea.setAttribute('aria-label', 'Edit additional task details');
 
     const editActions = document.createElement('div');
@@ -1790,7 +1899,7 @@ export class WorkspaceTaskPage {
     textarea.focus();
     textarea.select();
 
-    const finishEdit = async (save) => {
+    const finishEdit = async save => {
       if (!this.detailsEditInProgress) return;
       this.detailsEditInProgress = false;
 
@@ -1806,7 +1915,10 @@ export class WorkspaceTaskPage {
 
       try {
         await this.updateTaskFields({ details: nextValue });
-        this.notify('success', nextValue ? 'Additional details updated' : 'Additional details cleared');
+        this.notify(
+          'success',
+          nextValue ? 'Additional details updated' : 'Additional details cleared'
+        );
       } catch (error) {
         console.error('Failed to update task details:', error);
         this.notify('error', error?.message || 'Failed to update additional details');
@@ -1815,17 +1927,21 @@ export class WorkspaceTaskPage {
 
     if (subtitleRow) subtitleRow.classList.add('is-editing');
 
-    editActions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      finishEdit(true);
-    });
-    editActions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      finishEdit(false);
-    });
+    editActions
+      .querySelector('.workspace-task-page-edit-save')
+      ?.addEventListener('mousedown', e => {
+        e.preventDefault();
+        finishEdit(true);
+      });
+    editActions
+      .querySelector('.workspace-task-page-edit-cancel')
+      ?.addEventListener('mousedown', e => {
+        e.preventDefault();
+        finishEdit(false);
+      });
 
     textarea.addEventListener('input', syncHeight);
-    textarea.addEventListener('keydown', (event) => {
+    textarea.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.preventDefault();
         finishEdit(false);
@@ -1837,7 +1953,7 @@ export class WorkspaceTaskPage {
         finishEdit(true);
       }
     });
-    textarea.addEventListener('blur', (event) => {
+    textarea.addEventListener('blur', event => {
       if (editActions.contains(event.relatedTarget)) return;
       finishEdit(true);
     });
@@ -1860,11 +1976,11 @@ export class WorkspaceTaskPage {
     const updatedTask = payload?.task || (payload?.id ? payload : null);
     this.task = updatedTask ? { ...this.task, ...updatedTask } : { ...this.task, ...patch };
     if (Array.isArray(this.tasks)) {
-      this.tasks = this.tasks.map((task) => (
+      this.tasks = this.tasks.map(task =>
         String(task?.id || '') === String(this.taskId)
           ? { ...task, ...(updatedTask || patch) }
           : task
-      ));
+      );
     }
     // The synchronous render() pipeline runs 14 sub-renders (markdown, trace,
     // schedule, etc.) and on a task with sizeable execution history can stall
@@ -1970,7 +2086,9 @@ export class WorkspaceTaskPage {
     const next = Boolean(open);
     container.dataset.open = next ? 'true' : 'false';
     toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-    container.closest('.workspace-task-page-card-header')?.classList.toggle('is-output-menu-open', next);
+    container
+      .closest('.workspace-task-page-card-header')
+      ?.classList.toggle('is-output-menu-open', next);
 
     if (next) {
       menu.hidden = false;
@@ -2021,7 +2139,10 @@ export class WorkspaceTaskPage {
   bindOutputOverflowDismissHandlers() {
     if (this._outputOverflowDismissBound) return;
     this._outputOverflowDismiss = () => this.setOutputOverflowOpen(false);
-    window.addEventListener('scroll', this._outputOverflowDismiss, { passive: true, capture: true });
+    window.addEventListener('scroll', this._outputOverflowDismiss, {
+      passive: true,
+      capture: true
+    });
     window.addEventListener('resize', this._outputOverflowDismiss);
     this._outputOverflowDismissBound = true;
   }
@@ -2211,10 +2332,15 @@ export class WorkspaceTaskPage {
 
   getTaskStatusPresentation(task = this.task) {
     const humanLoop = this.getTaskHumanLoop(task);
-    const status = String(task?.status || '').trim().toLowerCase();
-    const humanLoopState = String(humanLoop?.state || '').trim().toLowerCase();
+    const status = String(task?.status || '')
+      .trim()
+      .toLowerCase();
+    const humanLoopState = String(humanLoop?.state || '')
+      .trim()
+      .toLowerCase();
     const waiting = status === 'waiting_for_choice' || humanLoopState === 'waiting_for_choice';
-    const blocked = status === 'blocked' ||
+    const blocked =
+      status === 'blocked' ||
       waiting ||
       humanLoopState === 'blocked' ||
       Boolean(humanLoop?.reason) ||
@@ -2222,7 +2348,11 @@ export class WorkspaceTaskPage {
 
     return {
       isBlocked: blocked,
-      label: waiting ? 'Waiting for Choice' : (blocked ? 'Needs Input' : getDisplayStatus(task?.status)),
+      label: waiting
+        ? 'Waiting for Choice'
+        : blocked
+          ? 'Needs Input'
+          : getDisplayStatus(task?.status),
       className: blocked ? 'blocked' : getStatusClass(task?.status),
       reason: String(humanLoop?.reason || '').trim()
     };
@@ -2232,7 +2362,7 @@ export class WorkspaceTaskPage {
     const result = {};
     if (!Array.isArray(value)) return result;
 
-    value.forEach((item) => {
+    value.forEach(item => {
       const id = String(item?.id || '').trim();
       const fieldValue = String(item?.value || '').trim();
       if (id && fieldValue) {
@@ -2246,7 +2376,9 @@ export class WorkspaceTaskPage {
   normalizeAssistWorkflowStep(value) {
     if (!value || typeof value !== 'object') return null;
 
-    const stepType = String(value.step_type || value.stepType || '').trim().toLowerCase();
+    const stepType = String(value.step_type || value.stepType || '')
+      .trim()
+      .toLowerCase();
     if (stepType !== 'ask_choice' && stepType !== 'ask_form') return null;
 
     const normalized = {
@@ -2280,14 +2412,19 @@ export class WorkspaceTaskPage {
         .map((field, index) => {
           const id = String(field?.id || '').trim() || `field-${index + 1}`;
           const label = String(field?.label || '').trim() || `Question ${index + 1}`;
-          const type = String(field?.type || 'text').trim().toLowerCase();
+          const type = String(field?.type || 'text')
+            .trim()
+            .toLowerCase();
           const options = Array.isArray(field?.options)
-            ? field.options.map((option, optionIndex) => ({
-              value: String(option?.value || '').trim(),
-              label: String(option?.label || option?.value || '').trim(),
-              description: String(option?.description || '').trim(),
-              key: String(option?.key || '').trim() || String.fromCharCode(65 + (optionIndex % 26))
-            })).filter((option) => option.value && option.label)
+            ? field.options
+                .map((option, optionIndex) => ({
+                  value: String(option?.value || '').trim(),
+                  label: String(option?.label || option?.value || '').trim(),
+                  description: String(option?.description || '').trim(),
+                  key:
+                    String(option?.key || '').trim() || String.fromCharCode(65 + (optionIndex % 26))
+                }))
+                .filter(option => option.value && option.label)
             : [];
 
           return {
@@ -2309,11 +2446,13 @@ export class WorkspaceTaskPage {
 
   buildBlockedTaskState(task = this.task) {
     const humanLoop = this.getTaskHumanLoop(task) || {};
-    const workflowStep = this.normalizeAssistWorkflowStep(
-      humanLoop?.workflow_step || task?.context?.planning_workflow_step
-    ) || this.normalizeAssistWorkflowStep(
-      deriveAssistWorkflowStepFromText(humanLoop?.question, humanLoop?.agent_response)
-    );
+    const workflowStep =
+      this.normalizeAssistWorkflowStep(
+        humanLoop?.workflow_step || task?.context?.planning_workflow_step
+      ) ||
+      this.normalizeAssistWorkflowStep(
+        deriveAssistWorkflowStepFromText(humanLoop?.question, humanLoop?.agent_response)
+      );
     const selectedFieldValues = this.normalizeAssistFieldValues(humanLoop?.field_values);
     const selectState = buildAssistSelectState(workflowStep, selectedFieldValues);
 
@@ -2321,12 +2460,16 @@ export class WorkspaceTaskPage {
       taskId: String(task?.id || '').trim(),
       blockId: String(humanLoop?.block_id || '').trim(),
       currentAgent: String(task?.to || '').trim(),
-      reasonCode: String(humanLoop?.reason_code || '').trim().toLowerCase(),
-      reason: String(humanLoop?.reason || 'This task needs your input before it can continue.').trim(),
+      reasonCode: String(humanLoop?.reason_code || '')
+        .trim()
+        .toLowerCase(),
+      reason: String(
+        humanLoop?.reason || 'This task needs your input before it can continue.'
+      ).trim(),
       question: String(humanLoop?.question || '').trim(),
       response: String(humanLoop?.agent_response || '').trim(),
       suggestedActions: Array.isArray(humanLoop?.suggested_actions)
-        ? humanLoop.suggested_actions.map((action) => String(action || '').trim()).filter(Boolean)
+        ? humanLoop.suggested_actions.map(action => String(action || '').trim()).filter(Boolean)
         : [],
       // A structured repair marks this block as repair-gated: the failure cannot
       // be fixed by running the task again, so the view offers the repair and
@@ -2346,10 +2489,9 @@ export class WorkspaceTaskPage {
     const names = new Set();
 
     if (Array.isArray(this.availableAgents)) {
-      this.availableAgents.forEach((item) => {
-        const name = typeof item === 'string'
-          ? String(item || '').trim()
-          : String(item?.name || '').trim();
+      this.availableAgents.forEach(item => {
+        const name =
+          typeof item === 'string' ? String(item || '').trim() : String(item?.name || '').trim();
         if (name) names.add(name);
       });
     }
@@ -2358,10 +2500,15 @@ export class WorkspaceTaskPage {
   }
 
   isRunnableAgentName(agentName) {
-    const normalizedTarget = String(agentName || '').trim().toLowerCase();
+    const normalizedTarget = String(agentName || '')
+      .trim()
+      .toLowerCase();
     if (!normalizedTarget || normalizedTarget === 'unassigned') return true;
 
-    const matches = (name) => String(name || '').trim().toLowerCase() === normalizedTarget;
+    const matches = name =>
+      String(name || '')
+        .trim()
+        .toLowerCase() === normalizedTarget;
     if (this.getAvailableAgentNames().some(matches)) return true;
 
     // A workspace-scoped agent (declared in the workspace, with a local
@@ -2371,7 +2518,9 @@ export class WorkspaceTaskPage {
     // would mask a genuinely-missing assignment.
     const declared = [
       ...(this.workspace?.agents || []),
-      ...((this.workspace?.agent_instances || []).map((instance) => instance?.role || instance?.name || '')),
+      ...(this.workspace?.agent_instances || []).map(
+        instance => instance?.role || instance?.name || ''
+      )
     ];
     return declared.some(matches);
   }
@@ -2385,13 +2534,15 @@ export class WorkspaceTaskPage {
     // assignment as a normal option (it's shown as a disabled "(Unavailable)"
     // entry instead).
     const names = new Set();
-    const add = (name) => {
+    const add = name => {
       const trimmed = String(name || '').trim();
       if (trimmed) names.add(trimmed);
     };
     this.getAvailableAgentNames().forEach(add);
     (this.workspace?.agents || []).forEach(add);
-    (this.workspace?.agent_instances || []).forEach((instance) => add(instance?.role || instance?.name || ''));
+    (this.workspace?.agent_instances || []).forEach(instance =>
+      add(instance?.role || instance?.name || '')
+    );
     return Array.from(names).sort((left, right) => left.localeCompare(right));
   }
 
@@ -2399,14 +2550,14 @@ export class WorkspaceTaskPage {
     const names = new Set();
 
     if (Array.isArray(this.workspace?.agent_instances)) {
-      this.workspace.agent_instances.forEach((instance) => {
+      this.workspace.agent_instances.forEach(instance => {
         const name = String(instance?.role || instance?.name || '').trim();
         if (name) names.add(name);
       });
     }
 
     if (Array.isArray(this.workspace?.agents)) {
-      this.workspace.agents.forEach((name) => {
+      this.workspace.agents.forEach(name => {
         const normalized = String(name || '').trim();
         if (normalized) names.add(normalized);
       });
@@ -2430,7 +2581,7 @@ export class WorkspaceTaskPage {
   getParentTask() {
     const parentTaskId = String(this.task?.parent_task_id || '').trim();
     if (!parentTaskId) return null;
-    return this.tasks.find((item) => String(item?.id || '') === parentTaskId) || null;
+    return this.tasks.find(item => String(item?.id || '') === parentTaskId) || null;
   }
 
   getSubtasks() {
@@ -2442,7 +2593,10 @@ export class WorkspaceTaskPage {
     if (inputIds.length === 0) return [];
 
     return inputIds
-      .map((taskId) => this.tasks.find((item) => String(item?.id || '') === String(taskId || '').trim()) || null)
+      .map(
+        taskId =>
+          this.tasks.find(item => String(item?.id || '') === String(taskId || '').trim()) || null
+      )
       .filter(Boolean);
   }
 
@@ -2459,10 +2613,10 @@ export class WorkspaceTaskPage {
   getDependentTasks() {
     const myId = String(this.task?.id || '').trim();
     if (!myId) return [];
-    return this.tasks.filter((item) => {
+    return this.tasks.filter(item => {
       if (String(item?.id || '').trim() === myId) return false;
       const inputs = Array.isArray(item?.input_task_ids) ? item.input_task_ids : [];
-      return inputs.some((id) => String(id || '').trim() === myId);
+      return inputs.some(id => String(id || '').trim() === myId);
     });
   }
 
@@ -2530,7 +2684,7 @@ export class WorkspaceTaskPage {
       statusInfo?.label,
       statusInfo?.className,
       statusInfo?.isBlocked,
-      statusInfo?.waiting,
+      statusInfo?.waiting
     ]);
     const sigBlocked = blocked
       ? JSON.stringify([
@@ -2542,7 +2696,7 @@ export class WorkspaceTaskPage {
           blocked.workflowStep?.stepType,
           blocked.currentAgent,
           blocked.suggestedActions,
-          blocked.selectedChoiceId,
+          blocked.selectedChoiceId
         ])
       : 'null';
     const sigGraphNeighbors = this._taskGraphNeighborsFingerprint();
@@ -2560,38 +2714,59 @@ export class WorkspaceTaskPage {
       Boolean(this.resultContractSaving),
       Boolean(this.automationStorageToggleBusy),
       Boolean(this.automationStorageSaving),
-      (this.workspace?.store_nodes || []).map((node) => [
+      (this.workspace?.store_nodes || []).map(node => [
         node?.id,
         node?.canvas_node_id,
         node?.name,
-        node?.base_dir,
-      ]),
+        node?.base_dir
+      ])
     ]);
 
     return {
       hero: JSON.stringify([
-        t.id, t.status, t.description, t.details, t.priority,
-        this.workspace?.name, sigStatusInfo,
+        t.id,
+        t.status,
+        t.description,
+        t.details,
+        t.priority,
+        this.workspace?.name,
+        sigStatusInfo
       ]),
       heroActions: JSON.stringify([t.id, t.status, t.execution_mode, sigStatusInfo]),
       heroAgent: JSON.stringify([
-        t.id, t.to, t.status,
-        (this.availableAgents || []).map((a) => a?.name || '').sort().join('|'),
+        t.id,
+        t.to,
+        t.status,
+        (this.availableAgents || [])
+          .map(a => a?.name || '')
+          .sort()
+          .join('|')
       ]),
       overview: JSON.stringify([
-        t.id, t.from, t.to, t.execution_mode, t.orchestration_mode,
-        t.template_ref, t.timeout, t.progress?.percentage, t.current_run_id, t.details,
+        t.id,
+        t.from,
+        t.to,
+        t.execution_mode,
+        t.orchestration_mode,
+        t.template_ref,
+        t.timeout,
+        t.progress?.percentage,
+        t.current_run_id,
+        t.details,
         t.result_storage,
-        this.getSubtasks().map((step) => [step?.id, step?.subtask_index, step?.result_storage]),
-        this.currentRun?.id, this.currentRun?.status, this.currentRun?.profile_snapshot?.id,
-        this.currentRun?.report?.validation_status, this.currentRun?.started_at,
-        (this.workspace?.store_nodes || []).map((node) => [
+        this.getSubtasks().map(step => [step?.id, step?.subtask_index, step?.result_storage]),
+        this.currentRun?.id,
+        this.currentRun?.status,
+        this.currentRun?.profile_snapshot?.id,
+        this.currentRun?.report?.validation_status,
+        this.currentRun?.started_at,
+        (this.workspace?.store_nodes || []).map(node => [
           node?.id,
           node?.canvas_node_id,
           node?.name,
-          node?.base_dir,
+          node?.base_dir
         ]),
-        sigStatusInfo,
+        sigStatusInfo
       ]),
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
       workflow: JSON.stringify([t.id, sigWorkflowSubtree, this.workflowDraftPending]),
@@ -2606,21 +2781,21 @@ export class WorkspaceTaskPage {
         t.execution_history?.[t.execution_history.length - 1]?.executed_at || '',
         t.execution_history?.[t.execution_history.length - 1]?.status || '',
         t.execution_history?.[t.execution_history.length - 1]?.summary || '',
-        t.execution_history?.[t.execution_history.length - 1]?.result || '',
+        t.execution_history?.[t.execution_history.length - 1]?.result || ''
       ]),
       outputShape: JSON.stringify([
         t.id,
         t.output_spec || null,
         t.output_schema || null,
-        t.output_contract || null,
+        t.output_contract || null
       ]),
       workspaceRuns: JSON.stringify([
         t.id,
         t.current_run_id,
         Array.isArray(t.execution_history)
-          ? t.execution_history.map((entry) => entry?.run_id || '').join('|')
+          ? t.execution_history.map(entry => entry?.run_id || '').join('|')
           : '',
-        this.workspaceRuns.map((run) => [
+        this.workspaceRuns.map(run => [
           run?.id,
           run?.status,
           run?.profile_snapshot?.id,
@@ -2630,17 +2805,25 @@ export class WorkspaceTaskPage {
           run?.report?.summary,
           run?.created_at,
           run?.started_at,
-          run?.finished_at,
-        ]),
+          run?.finished_at
+        ])
       ]),
       runs: JSON.stringify([
-        t.id, t.execution_steps, t.execution_history?.length,
-        t.execution_trace, sigWorkflowSubtree,
-        this._runsTab || 'runs',
+        t.id,
+        t.execution_steps,
+        t.execution_history?.length,
+        t.execution_trace,
+        sigWorkflowSubtree,
+        this._runsTab || 'runs'
       ]),
       schedule: JSON.stringify([
-        t.id, t.schedule, t.schedule_enabled, t.next_run, t.last_run,
-        t.execution_count, t.failure_count,
+        t.id,
+        t.schedule,
+        t.schedule_enabled,
+        t.next_run,
+        t.last_run,
+        t.execution_count,
+        t.failure_count,
         // Include the run-history length and the latest entry's identity so a
         // newly-recorded run forces the schedule card to re-render (otherwise
         // the cached fingerprint would skip rendering until something else on
@@ -2652,10 +2835,12 @@ export class WorkspaceTaskPage {
         // this task declares a structured output shape, so a spec change must
         // re-run renderSchedule (sigAutomation tracks the storage owner's spec,
         // which can differ from this.task's on a workflow parent).
-        t.output_spec || null, t.output_schema || null, t.output_contract || null,
+        t.output_spec || null,
+        t.output_schema || null,
+        t.output_contract || null
       ]),
       context: JSON.stringify([t.id, t.context || {}]),
-      blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked]),
+      blockedState: JSON.stringify([t.id, sigStatusInfo, sigBlocked])
     };
   }
 
@@ -2669,13 +2854,13 @@ export class WorkspaceTaskPage {
     if (!t) return '';
     const neighborIds = new Set();
     if (t.parent_task_id) neighborIds.add(String(t.parent_task_id).trim());
-    for (const id of (Array.isArray(t.input_task_ids) ? t.input_task_ids : [])) {
+    for (const id of Array.isArray(t.input_task_ids) ? t.input_task_ids : []) {
       if (id) neighborIds.add(String(id).trim());
     }
     for (const sibling of this.tasks) {
       if (!sibling || sibling.id === t.id) continue;
       const inputs = Array.isArray(sibling.input_task_ids) ? sibling.input_task_ids : [];
-      if (inputs.some((id) => String(id || '').trim() === t.id)) {
+      if (inputs.some(id => String(id || '').trim() === t.id)) {
         neighborIds.add(String(sibling.id).trim());
       }
       if (String(sibling.parent_task_id || '').trim() === t.id) {
@@ -2683,8 +2868,8 @@ export class WorkspaceTaskPage {
       }
     }
     const sortedIds = [...neighborIds].sort();
-    const stamps = sortedIds.map((id) => {
-      const s = this.tasks.find((x) => x?.id === id);
+    const stamps = sortedIds.map(id => {
+      const s = this.tasks.find(x => x?.id === id);
       if (!s) return [id, null];
       return [id, s.status, s.description, s.to, s.subtask_index];
     });
@@ -2699,15 +2884,19 @@ export class WorkspaceTaskPage {
     if (!t) return '';
     const visited = new Set();
     const stamps = [];
-    const collect = (parentId) => {
+    const collect = parentId => {
       if (!parentId || visited.has(parentId)) return;
       visited.add(parentId);
       for (const item of this.tasks) {
         if (!item) continue;
         if (String(item.parent_task_id || '').trim() !== parentId) continue;
         stamps.push([
-          item.id, item.status, item.description, item.subtask_index,
-          item.to, item.result ? item.result.length : 0,
+          item.id,
+          item.status,
+          item.description,
+          item.subtask_index,
+          item.to,
+          item.result ? item.result.length : 0
         ]);
         collect(String(item.id || '').trim());
       }
@@ -2718,10 +2907,14 @@ export class WorkspaceTaskPage {
 
   renderHero(statusInfo) {
     const taskTitle = this.getTaskDisplayLabel();
-    const detailsSummary = summarizeText(this.task?.details || this.currentBlockedTask?.reason || '', 280);
+    const detailsSummary = summarizeText(
+      this.task?.details || this.currentBlockedTask?.reason || '',
+      280
+    );
 
     if (this.elements.workspaceName) {
-      this.elements.workspaceName.textContent = String(this.workspace?.name || 'Workspace').trim() || 'Workspace';
+      this.elements.workspaceName.textContent =
+        String(this.workspace?.name || 'Workspace').trim() || 'Workspace';
     }
     if (this.elements.title) {
       this.elements.title.textContent = taskTitle;
@@ -2766,11 +2959,14 @@ export class WorkspaceTaskPage {
       this.taskTagsWidget = window.OriTagInput.createTagInput({
         container: mount,
         initialTags: tags,
-        onChange: (next) => { void this.saveTaskTags(next); }
+        onChange: next => {
+          void this.saveTaskTags(next);
+        }
       });
     } else if (this.taskTagsWidget) {
       const current = this.taskTagsWidget.getTags();
-      const same = current.length === tags.length && current.every((tag, index) => tag === tags[index]);
+      const same =
+        current.length === tags.length && current.every((tag, index) => tag === tags[index]);
       if (!same && !this._taskTagsSaving) this.taskTagsWidget.setTags(tags);
     }
     row.hidden = !this.taskTagsWidget;
@@ -2798,13 +2994,18 @@ export class WorkspaceTaskPage {
     // fires; status changes during the prompt invalidate the confirm and
     // we drop back to the normal action row.
     if (this._cancelConfirmActive) {
-      const stillRunning = String(this.task?.status || '').trim().toLowerCase() === 'in_progress';
+      const stillRunning =
+        String(this.task?.status || '')
+          .trim()
+          .toLowerCase() === 'in_progress';
       if (!stillRunning) {
         this._cancelConfirmActive = false;
       }
     }
 
-    const status = String(this.task?.status || '').trim().toLowerCase();
+    const status = String(this.task?.status || '')
+      .trim()
+      .toLowerCase();
     const hasAgent = Boolean(this.task?.to) && this.task.to !== 'unassigned';
     const buttons = [];
     const hasSchedule = Boolean(this.task?.schedule);
@@ -2844,7 +3045,10 @@ export class WorkspaceTaskPage {
     // Blocked (waiting_for_choice) is excluded because the server's status
     // transition table doesn't permit a direct jump to completed - the
     // task has to go through its resolution flow first.
-    if ((status === 'pending' || status === 'assigned' || status === 'in_progress') && !statusInfo.isBlocked) {
+    if (
+      (status === 'pending' || status === 'assigned' || status === 'in_progress') &&
+      !statusInfo.isBlocked
+    ) {
       buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
       </button>`);
@@ -2871,7 +3075,7 @@ export class WorkspaceTaskPage {
 
     this.elements.heroActions.innerHTML = buttons.join('');
 
-    this.elements.heroActions.querySelectorAll('[data-action]').forEach((btn) => {
+    this.elements.heroActions.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.action;
         if (action === 'execute') this.executeTask();
@@ -2903,7 +3107,9 @@ export class WorkspaceTaskPage {
     const select = this.elements.heroAgent;
     if (!wrap || !select) return;
 
-    const status = String(this.task?.status || '').trim().toLowerCase();
+    const status = String(this.task?.status || '')
+      .trim()
+      .toLowerCase();
     const reassignable = status !== 'in_progress' && !statusInfo.isBlocked;
     if (!reassignable) {
       wrap.hidden = true;
@@ -2925,7 +3131,8 @@ export class WorkspaceTaskPage {
     for (const name of agentNames) {
       const trimmed = String(name || '').trim();
       if (!trimmed) continue;
-      const isCurrent = !currentAgentUnavailable && trimmed.toLowerCase() === currentAgent.toLowerCase();
+      const isCurrent =
+        !currentAgentUnavailable && trimmed.toLowerCase() === currentAgent.toLowerCase();
       options.push(
         `<option value="${this.escapeHtml(trimmed)}" ${isCurrent ? 'selected' : ''}>${this.escapeHtml(trimmed)}</option>`
       );
@@ -2976,7 +3183,9 @@ export class WorkspaceTaskPage {
 
     const progress = this.task?.progress;
     const isBlocked = Boolean(this.currentBlockedTask);
-    const status = String(this.task?.status || '').trim().toLowerCase();
+    const status = String(this.task?.status || '')
+      .trim()
+      .toLowerCase();
 
     // Keep the overview to the essentials a non-technical user cares about.
     // Configuration internals (execution mode, orchestration mode, template
@@ -3004,12 +3213,16 @@ export class WorkspaceTaskPage {
 
     if (progress && (progress.current_step || Number.isFinite(progress.percentage))) {
       const progressLabel = [
-        Number.isFinite(Number(progress.percentage)) ? `${Number(progress.percentage)}% complete` : '',
+        Number.isFinite(Number(progress.percentage))
+          ? `${Number(progress.percentage)}% complete`
+          : '',
         String(progress.current_step || '').trim(),
         Number(progress.total_steps) > 0
           ? `${Number(progress.completed_steps || 0)}/${Number(progress.total_steps)} steps`
           : ''
-      ].filter(Boolean).join(' • ');
+      ]
+        .filter(Boolean)
+        .join(' • ');
       items.push({
         title: 'Progress',
         value: progressLabel || 'Progress available'
@@ -3068,7 +3281,7 @@ export class WorkspaceTaskPage {
     const detailsValue = String(this.task?.details || '').trim();
     const blockedDetailsRedundant = this.isBlockedDetailsRedundant(detailsValue);
 
-    const renderEditButton = (item) => {
+    const renderEditButton = item => {
       if (!item.editable) return '';
       const editField = item.editField || 'details';
       const editLabel = item.editLabel || `Edit ${item.title || 'field'}`;
@@ -3093,8 +3306,8 @@ export class WorkspaceTaskPage {
     // The brief ("what this task does") leads the card so a reader starts with
     // intent; the run metadata (status, reference URL, agent, …) collapses into
     // a compact meta row beneath it instead of a tall stack of labelled rows.
-    const briefItem = items.find((item) => item.isBrief);
-    const metaItems = items.filter((item) => !item.isBrief);
+    const briefItem = items.find(item => item.isBrief);
+    const metaItems = items.filter(item => !item.isBrief);
 
     const renderBriefLead = () => {
       if (!briefItem) return '';
@@ -3128,7 +3341,7 @@ export class WorkspaceTaskPage {
       `;
     };
 
-    const renderMetaEntry = (item) => {
+    const renderMetaEntry = item => {
       const valueHtml = item.href
         ? `<a href="${this.escapeHtml(item.href)}" class="workspace-task-overview-link"${item.external ? ' target="_blank" rel="noopener noreferrer"' : ''}>${this.escapeHtml(item.value)}</a>`
         : this.escapeHtml(item.value);
@@ -3147,7 +3360,7 @@ export class WorkspaceTaskPage {
 
     this.elements.overview.innerHTML = renderBriefLead() + metaHtml;
 
-    this.elements.overview.querySelectorAll('[data-edit-field]').forEach((btn) => {
+    this.elements.overview.querySelectorAll('[data-edit-field]').forEach(btn => {
       btn.addEventListener('click', () => {
         const field = btn.getAttribute('data-edit-field') || '';
         if (field === 'details') this.startDetailsEdit(btn);
@@ -3164,9 +3377,13 @@ export class WorkspaceTaskPage {
 
   countTaskNeedsReviewRuns(task = this.task) {
     const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
-    return history.filter((entry) => {
+    return history.filter(entry => {
       const validation = entry?.validation_result || entry?.validation || null;
-      return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+      return (
+        String(validation?.validation_status || '')
+          .trim()
+          .toLowerCase() === 'needs_review'
+      );
     }).length;
   }
 
@@ -3175,11 +3392,17 @@ export class WorkspaceTaskPage {
       return 'Not saving automatically.\nEdit this to save each run or append future runs to a CSV file.';
     }
 
-    const writeMode = String(storage.write_mode || '').trim().toLowerCase();
-    const format = String(storage.format || 'text').trim().toLowerCase() || 'text';
-    const modeLabel = writeMode === 'append'
-      ? 'Append each run to CSV'
-      : `Save each run as a new ${format.toUpperCase()} file`;
+    const writeMode = String(storage.write_mode || '')
+      .trim()
+      .toLowerCase();
+    const format =
+      String(storage.format || 'text')
+        .trim()
+        .toLowerCase() || 'text';
+    const modeLabel =
+      writeMode === 'append'
+        ? 'Append each run to CSV'
+        : `Save each run as a new ${format.toUpperCase()} file`;
 
     const defaultOutputDir = String(this.workspaceOutputDir || '').trim();
     let target = defaultOutputDir
@@ -3199,17 +3422,22 @@ export class WorkspaceTaskPage {
 
     const sourceTaskId = String(sourceTask?.id || '').trim();
     const currentTaskId = String(this.task?.id || '').trim();
-    const sourceLabel = sourceTaskId && currentTaskId && sourceTaskId !== currentTaskId
-      ? `Final workflow step: ${summarizeText(sourceTask?.description || sourceTaskId, 72)}`
-      : '';
+    const sourceLabel =
+      sourceTaskId && currentTaskId && sourceTaskId !== currentTaskId
+        ? `Final workflow step: ${summarizeText(sourceTask?.description || sourceTaskId, 72)}`
+        : '';
     const contractColumns = Array.isArray(sourceTask?.output_contract?.columns)
       ? sourceTask.output_contract.columns
       : [];
-    const contractLabel = writeMode === 'append'
-      ? (contractColumns.length > 0
-        ? `Output contract: ${contractColumns.map((column) => String(column?.name || '').trim()).filter(Boolean).join(', ')}`
-        : 'No output contract defined. Runs will save without validation.')
-      : '';
+    const contractLabel =
+      writeMode === 'append'
+        ? contractColumns.length > 0
+          ? `Output contract: ${contractColumns
+              .map(column => String(column?.name || '').trim())
+              .filter(Boolean)
+              .join(', ')}`
+          : 'No output contract defined. Runs will save without validation.'
+        : '';
 
     return [modeLabel, target, contractLabel, sourceLabel].filter(Boolean).join('\n');
   }
@@ -3218,10 +3446,11 @@ export class WorkspaceTaskPage {
     const normalized = String(storeNodeId || '').trim();
     if (!normalized) return 'Unknown store node';
     const nodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
-    const node = nodes.find((item) => (
-      String(item?.id || '').trim() === normalized ||
-      String(item?.canvas_node_id || '').trim() === normalized
-    ));
+    const node = nodes.find(
+      item =>
+        String(item?.id || '').trim() === normalized ||
+        String(item?.canvas_node_id || '').trim() === normalized
+    );
     if (!node) return normalized;
 
     const name = String(node.name || '').trim();
@@ -3231,7 +3460,10 @@ export class WorkspaceTaskPage {
   }
 
   async openTaskStorageEditor() {
-    if (!window.taskModalController || typeof window.taskModalController.openForEdit !== 'function') {
+    if (
+      !window.taskModalController ||
+      typeof window.taskModalController.openForEdit !== 'function'
+    ) {
       this.notify('error', 'Task editor is not available on this page.');
       return;
     }
@@ -3248,7 +3480,10 @@ export class WorkspaceTaskPage {
   }
 
   async openReferenceURLEditor() {
-    if (!window.taskModalController || typeof window.taskModalController.openForEdit !== 'function') {
+    if (
+      !window.taskModalController ||
+      typeof window.taskModalController.openForEdit !== 'function'
+    ) {
       this.notify('error', 'Task editor is not available on this page.');
       return;
     }
@@ -3281,11 +3516,16 @@ export class WorkspaceTaskPage {
     const automationSection = document.querySelector('.task-modal-automation');
     const autoSaveEnabled = document.getElementById('taskModalAutoSaveEnabled');
     const writeModeSelect = document.getElementById('taskModalAutoSaveWriteMode');
-    const appendContractInput = document.querySelector('#taskModalOutputContractRows [data-output-contract-name]');
+    const appendContractInput = document.querySelector(
+      '#taskModalOutputContractRows [data-output-contract-name]'
+    );
     const resultStorage = this.getTaskResultStorageTask()?.result_storage;
-    const target = resultStorage?.write_mode === 'append' && appendContractInput
-      ? appendContractInput
-      : (resultStorage?.enabled ? writeModeSelect : autoSaveEnabled);
+    const target =
+      resultStorage?.write_mode === 'append' && appendContractInput
+        ? appendContractInput
+        : resultStorage?.enabled
+          ? writeModeSelect
+          : autoSaveEnabled;
 
     automationSection?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     window.setTimeout(() => {
@@ -3296,13 +3536,18 @@ export class WorkspaceTaskPage {
   }
 
   normalizeComparableText(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
   }
 
   formatWorkspaceRunStatus(status) {
-    const normalized = String(status || '').trim().replace(/_/g, ' ');
+    const normalized = String(status || '')
+      .trim()
+      .replace(/_/g, ' ');
     if (!normalized) return '';
-    return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
+    return normalized.replace(/\b\w/g, char => char.toUpperCase());
   }
 
   workspaceRunTimestamp(run) {
@@ -3317,10 +3562,9 @@ export class WorkspaceTaskPage {
     const normalizedDetails = this.normalizeComparableText(detailsValue);
     if (!normalizedDetails) return false;
 
-    return [
-      this.currentBlockedTask.reason,
-      this.currentBlockedTask.question
-    ].some((candidate) => normalizedDetails === this.normalizeComparableText(candidate));
+    return [this.currentBlockedTask.reason, this.currentBlockedTask.question].some(
+      candidate => normalizedDetails === this.normalizeComparableText(candidate)
+    );
   }
 
   startDetailsEdit(triggerBtn) {
@@ -3353,7 +3597,7 @@ export class WorkspaceTaskPage {
     valueEl.insertAdjacentElement('afterend', textarea);
     textarea.focus();
 
-    const finish = async (save) => {
+    const finish = async save => {
       if (!this.detailsEditInProgress) return;
       this.detailsEditInProgress = false;
 
@@ -3373,12 +3617,21 @@ export class WorkspaceTaskPage {
       }
     };
 
-    actions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', (e) => { e.preventDefault(); finish(true); });
-    actions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', (e) => { e.preventDefault(); finish(false); });
-    textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    actions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', e => {
+      e.preventDefault();
+      finish(true);
     });
-    textarea.addEventListener('blur', (e) => {
+    actions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', e => {
+      e.preventDefault();
+      finish(false);
+    });
+    textarea.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    textarea.addEventListener('blur', e => {
       if (actions.contains(e.relatedTarget)) return;
       finish(true);
     });
@@ -3435,20 +3688,23 @@ export class WorkspaceTaskPage {
     this.elements.relationshipsCard.hidden = false;
     const graphHtml = this.renderRelationshipsGraph({
       parentTask,
-      inputTasks: groups.find((g) => g.direction === 'in')?.tasks || [],
-      dependentTasks: groups.find((g) => g.direction === 'out')?.tasks || []
+      inputTasks: groups.find(g => g.direction === 'in')?.tasks || [],
+      dependentTasks: groups.find(g => g.direction === 'out')?.tasks || []
     });
-    const groupsHtml = groups.map((group) => `
+    const groupsHtml = groups
+      .map(
+        group => `
       <section class="workspace-task-relationship-group" data-direction="${this.escapeHtml(group.direction)}">
         <div class="workspace-task-relationship-title">
           <span class="workspace-task-relationship-arrow" aria-hidden="true">${this.escapeHtml(group.arrow)}</span>
           ${this.escapeHtml(group.title)}
         </div>
         <div class="workspace-task-related-links">
-          ${group.tasks.map((task) => {
-            const statusClass = getStatusClass(task?.status);
-            const assignee = String(task?.to || 'Unassigned').trim() || 'Unassigned';
-            return `
+          ${group.tasks
+            .map(task => {
+              const statusClass = getStatusClass(task?.status);
+              const assignee = String(task?.to || 'Unassigned').trim() || 'Unassigned';
+              return `
             <a href="${this.getTaskHref(task.id)}" class="workspace-task-related-link" data-status="${this.escapeHtml(statusClass)}">
               <span class="workspace-task-related-link-title">
                 <span class="workspace-task-related-link-dot" data-state="${this.escapeHtml(statusClass)}" aria-hidden="true"></span>
@@ -3457,10 +3713,13 @@ export class WorkspaceTaskPage {
               <span class="workspace-task-related-link-meta">${this.escapeHtml(getDisplayStatus(task.status))} · ${this.escapeHtml(assignee)}</span>
             </a>
           `;
-          }).join('')}
+            })
+            .join('')}
         </div>
       </section>
-    `).join('');
+    `
+      )
+      .join('');
     this.elements.relationships.innerHTML = graphHtml + groupsHtml;
   }
 
@@ -3486,15 +3745,21 @@ export class WorkspaceTaskPage {
     const sideX = 60;
     const r = 11;
 
-    const colorForStatus = (status) => {
+    const colorForStatus = status => {
       const cls = getStatusClass(status);
       switch (cls) {
-        case 'completed': return '#157347';
-        case 'in_progress': return '#0c63e7';
-        case 'failed': return '#c23b3b';
-        case 'blocked': return '#b45309';
-        case 'cancelled': return '#6b7280';
-        default: return '#9ca3af';
+        case 'completed':
+          return '#157347';
+        case 'in_progress':
+          return '#0c63e7';
+        case 'failed':
+          return '#c23b3b';
+        case 'blocked':
+          return '#b45309';
+        case 'cancelled':
+          return '#6b7280';
+        default:
+          return '#9ca3af';
       }
     };
 
@@ -3520,7 +3785,8 @@ export class WorkspaceTaskPage {
       `;
     };
 
-    const edge = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="workspace-task-relgraph-edge"></line>`;
+    const edge = (x1, y1, x2, y2) =>
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="workspace-task-relgraph-edge"></line>`;
 
     const stackY = (count, idx) => {
       if (count === 1) return cy;
@@ -3550,9 +3816,10 @@ export class WorkspaceTaskPage {
 
     parts.push(nodeMarkup(this.task, cx, cy, { labelBelow: true, isCurrent: true }));
 
-    const truncatedNote = (inputTasks?.length || 0) > inputs.length || (dependentTasks?.length || 0) > consumers.length
-      ? '<div class="workspace-task-relgraph-truncated">Showing first 4 in each direction.</div>'
-      : '';
+    const truncatedNote =
+      (inputTasks?.length || 0) > inputs.length || (dependentTasks?.length || 0) > consumers.length
+        ? '<div class="workspace-task-relgraph-truncated">Showing first 4 in each direction.</div>'
+        : '';
 
     return `
       <div class="workspace-task-relgraph-wrap">
@@ -3566,8 +3833,14 @@ export class WorkspaceTaskPage {
 
   sortWorkflowTasks(tasks) {
     return [...tasks].sort((a, b) => {
-      const aIndex = Number.isFinite(a?.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
-      const bIndex = Number.isFinite(b?.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+      const aIndex =
+        Number.isFinite(a?.subtask_index) && a.subtask_index > 0
+          ? a.subtask_index
+          : Number.MAX_SAFE_INTEGER;
+      const bIndex =
+        Number.isFinite(b?.subtask_index) && b.subtask_index > 0
+          ? b.subtask_index
+          : Number.MAX_SAFE_INTEGER;
       if (aIndex !== bIndex) return aIndex - bIndex;
       const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
       const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
@@ -3580,7 +3853,7 @@ export class WorkspaceTaskPage {
     const id = String(parentTaskId || '').trim();
     if (!id) return [];
     return this.sortWorkflowTasks(
-      this.tasks.filter((item) => String(item?.parent_task_id || '').trim() === id)
+      this.tasks.filter(item => String(item?.parent_task_id || '').trim() === id)
     );
   }
 
@@ -3595,7 +3868,7 @@ export class WorkspaceTaskPage {
 
     const children = this.getChildTasks(id);
     const out = [];
-    children.forEach((child) => {
+    children.forEach(child => {
       const childId = String(child?.id || '').trim();
       if (!childId || visited.has(childId)) return;
       out.push(child);
@@ -3632,8 +3905,8 @@ export class WorkspaceTaskPage {
     }
     if (this.elements.workflowRunAllBtn) {
       const visibleSteps = this.getWorkflowDescendantTasks(this.task?.id || '');
-      const anyRunning = visibleSteps.some((step) => String(step?.status || '') === 'in_progress');
-      const anyUnassigned = visibleSteps.some((step) => {
+      const anyRunning = visibleSteps.some(step => String(step?.status || '') === 'in_progress');
+      const anyUnassigned = visibleSteps.some(step => {
         const assignee = String(step?.to || '').trim();
         const assigned = Boolean(assignee) && assignee !== 'unassigned';
         const completed = getStatusClass(step?.status) === 'completed';
@@ -3697,24 +3970,27 @@ export class WorkspaceTaskPage {
     }
 
     visited.add(stepId);
-    const localNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
-      ? step.subtask_index
-      : fallbackNumber;
+    const localNumber =
+      Number.isFinite(step?.subtask_index) && step.subtask_index > 0
+        ? step.subtask_index
+        : fallbackNumber;
     const numberLabel = options.parentNumber
       ? `${options.parentNumber}.${localNumber}`
       : String(localNumber);
-    const children = this.getChildTasks(stepId).filter((child) => {
+    const children = this.getChildTasks(stepId).filter(child => {
       const childId = String(child?.id || '').trim();
       return childId && !visited.has(childId);
     });
     const childMarkup = children.length
       ? `<div class="workspace-task-workflow-substeps">
           ${children
-            .map((child, childIndex) => this.renderStepTree(child, childIndex + 1, {
-              visited,
-              depth: (options.depth || 0) + 1,
-              parentNumber: numberLabel
-            }))
+            .map((child, childIndex) =>
+              this.renderStepTree(child, childIndex + 1, {
+                visited,
+                depth: (options.depth || 0) + 1,
+                parentNumber: numberLabel
+              })
+            )
             .join('')}
         </div>`
       : '';
@@ -3734,11 +4010,14 @@ export class WorkspaceTaskPage {
     const isCompleted = status === 'completed';
     const isFailed = status === 'failed';
     const isCancelled = status === 'cancelled';
-    const stepNumber = Number.isFinite(step?.subtask_index) && step.subtask_index > 0
-      ? step.subtask_index
-      : fallbackNumber;
+    const stepNumber =
+      Number.isFinite(step?.subtask_index) && step.subtask_index > 0
+        ? step.subtask_index
+        : fallbackNumber;
     const numberLabel = String(options.numberLabel || stepNumber);
-    const title = String(step?.description || step?.name || `Step ${stepNumber}`).trim() || `Step ${stepNumber}`;
+    const title =
+      String(step?.description || step?.name || `Step ${stepNumber}`).trim() ||
+      `Step ${stepNumber}`;
     const agentName = String(step?.to || '').trim();
     const isAssigned = agentName && agentName !== 'unassigned';
     const result = normalizeResultText(step?.result).trim();
@@ -3758,18 +4037,28 @@ export class WorkspaceTaskPage {
     const actionLabel = isRunning
       ? '■ Stop'
       : isCompleted
-        ? (isAssigned ? '↻ Re-run' : 'Done')
+        ? isAssigned
+          ? '↻ Re-run'
+          : 'Done'
         : isFailed
-          ? (isAssigned ? '↻ Retry' : 'Mark done')
-          : (isAssigned ? '▶ Run' : 'Mark done');
-    const actionName = isRunning ? 'cancel-step' : (isAssigned ? 'run-step' : 'complete-step');
+          ? isAssigned
+            ? '↻ Retry'
+            : 'Mark done'
+          : isAssigned
+            ? '▶ Run'
+            : 'Mark done';
+    const actionName = isRunning ? 'cancel-step' : isAssigned ? 'run-step' : 'complete-step';
     const actionDisabled = !isRunning && !isAssigned && isCompleted;
     const actionTitle = isRunning
       ? 'Stop this running step'
       : isCompleted
-        ? (isAssigned ? 'Run this step again' : 'This checklist item is complete')
+        ? isAssigned
+          ? 'Run this step again'
+          : 'This checklist item is complete'
         : isAssigned
-          ? (isFailed ? 'Retry this step' : 'Run this step now')
+          ? isFailed
+            ? 'Retry this step'
+            : 'Run this step now'
           : 'Mark this checklist item done';
     const actionButtonClass = isRunning ? 'modern-btn-danger' : 'modern-btn-secondary';
 
@@ -3779,12 +4068,13 @@ export class WorkspaceTaskPage {
         ? 'Step is already running'
         : 'Mark this step done';
 
-    const resultBlock = result || error
-      ? `<details class="workspace-task-workflow-step-result"${(isRunning || isFailed) ? ' open' : ''}>
+    const resultBlock =
+      result || error
+        ? `<details class="workspace-task-workflow-step-result"${isRunning || isFailed ? ' open' : ''}>
            <summary>${error ? 'Show error' : 'Show result'}</summary>
            <pre class="workspace-task-workflow-step-result-body${error ? ' workspace-task-workflow-step-error' : ''}">${this.escapeHtml(error || result)}</pre>
          </details>`
-      : '';
+        : '';
 
     const stepHref = this.getTaskHref(stepId);
 
@@ -3837,23 +4127,25 @@ export class WorkspaceTaskPage {
 
   bindStepRowEvents() {
     if (!this.elements.workflowSteps) return;
-    this.elements.workflowSteps.querySelectorAll('[data-step-action-id][data-action]').forEach((button) => {
-      const stepId = button.getAttribute('data-step-action-id');
-      if (!stepId) return;
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        const action = button.getAttribute('data-action');
-        if (action === 'run-step') {
-          this.handleRunStep(stepId);
-        } else if (action === 'cancel-step') {
-          this.handleCancelStep(stepId);
-        } else if (action === 'complete-step') {
-          this.handleCompleteStep(stepId);
-        } else if (action === 'delete-step') {
-          this.handleDeleteStep(stepId);
-        }
+    this.elements.workflowSteps
+      .querySelectorAll('[data-step-action-id][data-action]')
+      .forEach(button => {
+        const stepId = button.getAttribute('data-step-action-id');
+        if (!stepId) return;
+        button.addEventListener('click', event => {
+          event.preventDefault();
+          const action = button.getAttribute('data-action');
+          if (action === 'run-step') {
+            this.handleRunStep(stepId);
+          } else if (action === 'cancel-step') {
+            this.handleCancelStep(stepId);
+          } else if (action === 'complete-step') {
+            this.handleCompleteStep(stepId);
+          } else if (action === 'delete-step') {
+            this.handleDeleteStep(stepId);
+          }
+        });
       });
-    });
   }
 
   async handleRunStep(stepId) {
@@ -3975,11 +4267,17 @@ export class WorkspaceTaskPage {
       if (attempts > maxAttempts) return;
       try {
         await this.refreshAfterStepChange();
-        const target = String(this.task?.id || '') === id
-          ? this.task
-          : this.tasks.find((t) => String(t?.id || '') === id);
+        const target =
+          String(this.task?.id || '') === id
+            ? this.task
+            : this.tasks.find(t => String(t?.id || '') === id);
         const status = String(target?.status || '');
-        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'timeout') {
+        if (
+          status === 'completed' ||
+          status === 'failed' ||
+          status === 'cancelled' ||
+          status === 'timeout'
+        ) {
           this.workflowPollTimer = null;
           return;
         }
@@ -4050,9 +4348,16 @@ export class WorkspaceTaskPage {
 
   isStructuredData(text) {
     const trimmed = text.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try { JSON.parse(trimmed); return true; } catch (_e) { /* not json */ }
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        JSON.parse(trimmed);
+        return true;
+      } catch (_e) {
+        /* not json */
+      }
     }
     return false;
   }
@@ -4061,7 +4366,11 @@ export class WorkspaceTaskPage {
     if (this.isStructuredData(text)) {
       return `<pre class="workspace-task-page-code-block">${this.escapeHtml(text)}</pre>`;
     }
-    if (typeof marked !== 'undefined' && typeof marked.parse === 'function' && typeof DOMPurify !== 'undefined') {
+    if (
+      typeof marked !== 'undefined' &&
+      typeof marked.parse === 'function' &&
+      typeof DOMPurify !== 'undefined'
+    ) {
       const safeHtml = DOMPurify.sanitize(marked.parse(text));
       return `<div class="workspace-task-page-prose">${safeHtml}</div>`;
     }
@@ -4069,7 +4378,9 @@ export class WorkspaceTaskPage {
   }
 
   getArtifactSourceLabel(source) {
-    const normalized = String(source || '').trim().toLowerCase();
+    const normalized = String(source || '')
+      .trim()
+      .toLowerCase();
     const labels = {
       run_history: 'Run history',
       output_schema: 'Structured output',
@@ -4094,12 +4405,27 @@ export class WorkspaceTaskPage {
     // is still written to the CSV but dropped from the on-page preview, where
     // it was audit noise that buried the real data off-screen.
     const metaNames = new Set(
-      this.getOutputSpecMetadataFields().map((field) => String(field.name || '').trim().toLowerCase())
+      this.getOutputSpecMetadataFields().map(field =>
+        String(field.name || '')
+          .trim()
+          .toLowerCase()
+      )
     );
-    ['run_id', 'executed_at', 'status', 'duration_ms', 'validation_status', 'storage_status']
-      .forEach((name) => metaNames.add(name));
-    const isRunMetaColumn = (column) => metaNames.has(String(column || '').trim().toLowerCase());
-    const dataColumns = rawColumns.filter((column) => !isRunMetaColumn(column));
+    [
+      'run_id',
+      'executed_at',
+      'status',
+      'duration_ms',
+      'validation_status',
+      'storage_status'
+    ].forEach(name => metaNames.add(name));
+    const isRunMetaColumn = column =>
+      metaNames.has(
+        String(column || '')
+          .trim()
+          .toLowerCase()
+      );
+    const dataColumns = rawColumns.filter(column => !isRunMetaColumn(column));
     // Guard: if a task somehow declares only run metadata, keep showing every
     // column rather than rendering an empty table.
     const columns = dataColumns.length > 0 ? dataColumns : rawColumns;
@@ -4115,19 +4441,23 @@ export class WorkspaceTaskPage {
     const savingLabel = this.resultArtifactNoteSaving ? 'Saving...' : 'Save CSV note';
 
     const truncationParts = [];
-    if (hiddenRows > 0) truncationParts.push(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'}`);
-    if (hiddenMetaCount > 0) truncationParts.push(`${hiddenMetaCount} run-info column${hiddenMetaCount === 1 ? '' : 's'}`);
+    if (hiddenRows > 0)
+      truncationParts.push(`${hiddenRows} more row${hiddenRows === 1 ? '' : 's'}`);
+    if (hiddenMetaCount > 0)
+      truncationParts.push(`${hiddenMetaCount} run-info column${hiddenMetaCount === 1 ? '' : 's'}`);
     const truncationNote = truncationParts.length ? `${truncationParts.join(' · ')} in CSV` : '';
 
     const headHtml = columns
-      .map((column) => `<th scope="col">${this.escapeHtml(column)}</th>`)
+      .map(column => `<th scope="col">${this.escapeHtml(column)}</th>`)
       .join('');
     const rowsHtml = previewRows
-      .map((row) => `
+      .map(
+        row => `
         <tr>
-          ${columns.map((column) => `<td>${this.escapeHtml(row?.[column] ?? '')}</td>`).join('')}
+          ${columns.map(column => `<td>${this.escapeHtml(row?.[column] ?? '')}</td>`).join('')}
         </tr>
-      `)
+      `
+      )
       .join('');
 
     const appendCtx = this.getAppendCSVContext();
@@ -4136,7 +4466,7 @@ export class WorkspaceTaskPage {
       : 'Append to CSV...';
     const appendButtonTitle = appendCtx.configured
       ? `Append this run's rows to ${appendCtx.label || 'the configured CSV file'}`
-      : 'Choose a CSV destination to append this run\'s rows';
+      : "Choose a CSV destination to append this run's rows";
     const appendBusy = Boolean(this.resultArtifactAppendBusy);
     const appendButton = `
       <button
@@ -4148,7 +4478,8 @@ export class WorkspaceTaskPage {
         <span data-role="append-label">${this.escapeHtml(appendBusy ? 'Appending...' : appendButtonLabel)}</span>
       </button>`;
 
-    const chipHtml = appendCtx.configured ? `
+    const chipHtml = appendCtx.configured
+      ? `
       <div class="workspace-task-result-artifact-chip" data-role="append-chip">
         <span class="workspace-task-result-artifact-chip-icon" aria-hidden="true">
           <i class="bi bi-arrow-down-circle"></i>
@@ -4163,11 +4494,12 @@ export class WorkspaceTaskPage {
             <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
           </svg>
         </button>
-      </div>` : '';
+      </div>`
+      : '';
 
     const storeNodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
     const storeNodeOptions = storeNodes
-      .map((node) => {
+      .map(node => {
         const id = String(node?.id || '').trim();
         if (!id) return '';
         const label = this.getStoreNodeDisplayLabel(id);
@@ -4179,7 +4511,9 @@ export class WorkspaceTaskPage {
     const appendDefaultPathHint = appendDefaultPath
       ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(appendDefaultPath)}">${this.escapeHtml(appendDefaultPath)}</span>`
       : '';
-    const chooserHtml = appendCtx.configured ? '' : `
+    const chooserHtml = appendCtx.configured
+      ? ''
+      : `
       <div class="workspace-task-result-artifact-chooser" data-role="append-chooser" hidden>
         <div class="workspace-task-result-artifact-chooser-header">
           <div class="workspace-task-page-mini-label">Append destination</div>
@@ -4293,25 +4627,27 @@ export class WorkspaceTaskPage {
   getOutputSpecSchemaFields(spec = this.getActiveOutputSpec()) {
     const fields = Array.isArray(spec?.schema?.fields) ? spec.schema.fields : [];
     return fields
-      .map((field) => ({
+      .map(field => ({
         name: String(field?.name || '').trim(),
         type: String(field?.type || 'string').trim() || 'string',
         required: field?.required === true,
-        description: String(field?.description || '').trim(),
+        description: String(field?.description || '').trim()
       }))
-      .filter((field) => field.name);
+      .filter(field => field.name);
   }
 
   getOutputSpecMappingsByColumn(spec = this.getActiveOutputSpec()) {
     const mappings = Array.isArray(spec?.mappings) ? spec.mappings : [];
     const byColumn = new Map();
-    mappings.forEach((mapping) => {
+    mappings.forEach(mapping => {
       const csvColumn = String(mapping?.csv_column || '').trim();
       if (!csvColumn) return;
       byColumn.set(csvColumn.toLowerCase(), {
         schemaField: String(mapping?.schema_field || '').trim(),
-        transform: ['identity', 'json_string'].includes(mapping?.transform) ? mapping.transform : 'identity',
-        defaultValue: String(mapping?.default_value || '').trim(),
+        transform: ['identity', 'json_string'].includes(mapping?.transform)
+          ? mapping.transform
+          : 'identity',
+        defaultValue: String(mapping?.default_value || '').trim()
       });
     });
     return byColumn;
@@ -4321,29 +4657,35 @@ export class WorkspaceTaskPage {
     const defaults = ['run_id', 'executed_at', 'status', 'duration_ms'];
     const fields = Array.isArray(spec?.metadata_policy?.fields) ? spec.metadata_policy.fields : [];
     const byName = new Map();
-    fields.forEach((field) => {
+    fields.forEach(field => {
       const name = String(field?.name || '').trim();
       if (!name) return;
       byName.set(name, { name, include: field?.include !== false });
     });
-    defaults.forEach((name) => {
+    defaults.forEach(name => {
       if (!byName.has(name)) byName.set(name, { name, include: true });
     });
     return Array.from(byName.values());
   }
 
   renderOutputSpecMetadataEditor() {
-    const fields = this.getOutputSpecMetadataFields(this.resultOutputSpecDraft || this.getActiveOutputSpec());
+    const fields = this.getOutputSpecMetadataFields(
+      this.resultOutputSpecDraft || this.getActiveOutputSpec()
+    );
     return `
       <div class="workspace-task-output-spec-metadata-editor">
         <div class="workspace-task-page-mini-label">Run info saved with each row</div>
         <div class="workspace-task-output-spec-metadata-list">
-          ${fields.map((field) => `
+          ${fields
+            .map(
+              field => `
             <label class="workspace-task-output-spec-metadata-item">
               <input type="checkbox" data-role="result-metadata-field" data-field-name="${this.escapeHtml(field.name)}"${field.include ? ' checked' : ''} />
               <span>${this.escapeHtml(field.name)}</span>
             </label>
-          `).join('')}
+          `
+            )
+            .join('')}
         </div>
       </div>`;
   }
@@ -4357,7 +4699,7 @@ export class WorkspaceTaskPage {
     const columns = this.getResultContractColumns();
     if (!editing && columns.length > 0) {
       const preview = columns
-        .map((column) => String(column?.name || '').trim())
+        .map(column => String(column?.name || '').trim())
         .filter(Boolean)
         .slice(0, 6)
         .join(', ');
@@ -4427,14 +4769,20 @@ export class WorkspaceTaskPage {
   renderResultContractRow(column, index) {
     const types = ['string', 'number', 'boolean', 'date'];
     const optionsHtml = types
-      .map((type) => `<option value="${type}"${column?.type === type ? ' selected' : ''}>${type}</option>`)
+      .map(
+        type =>
+          `<option value="${type}"${column?.type === type ? ' selected' : ''}>${type}</option>`
+      )
       .join('');
     const required = column?.required !== false;
     const schemaField = String(column?.schema_field || column?.schemaField || column?.name || '');
     const transforms = ['identity', 'json_string'];
     const transform = transforms.includes(column?.transform) ? column.transform : 'identity';
     const transformOptions = transforms
-      .map((value) => `<option value="${value}"${transform === value ? ' selected' : ''}>${value === 'json_string' ? 'JSON string' : 'Identity'}</option>`)
+      .map(
+        value =>
+          `<option value="${value}"${transform === value ? ' selected' : ''}>${value === 'json_string' ? 'JSON string' : 'Identity'}</option>`
+      )
       .join('');
     return `
       <div class="workspace-task-result-contract-row" data-result-contract-row="${index}">
@@ -4474,24 +4822,32 @@ export class WorkspaceTaskPage {
   renderResultFormatPreview(columns = []) {
     const usableColumns = Array.isArray(columns)
       ? columns
-        .map((column) => ({
-          name: String(column?.name || '').trim(),
-          type: String(column?.type || 'string').trim() || 'string',
-        }))
-        .filter((column) => column.name)
+          .map(column => ({
+            name: String(column?.name || '').trim(),
+            type: String(column?.type || 'string').trim() || 'string'
+          }))
+          .filter(column => column.name)
       : [];
     if (usableColumns.length === 0) return '';
-    const metadataFields = this.getResultMetadataPolicyDraft(this.resultOutputSpecDraft || this.getActiveOutputSpec()).fields
-      .filter((field) => field.include !== false)
-      .map((field) => ({ name: field.name, type: 'run_info', metadata: true }));
+    const metadataFields = this.getResultMetadataPolicyDraft(
+      this.resultOutputSpecDraft || this.getActiveOutputSpec()
+    )
+      .fields.filter(field => field.include !== false)
+      .map(field => ({ name: field.name, type: 'run_info', metadata: true }));
     const previewColumns = [...metadataFields, ...usableColumns].slice(0, 10);
-    const hiddenCount = Math.max(0, metadataFields.length + usableColumns.length - previewColumns.length);
+    const hiddenCount = Math.max(
+      0,
+      metadataFields.length + usableColumns.length - previewColumns.length
+    );
     const sampleRow = this.getResultFormatPreviewRow(usableColumns);
     const headerHtml = previewColumns
-      .map((column) => `<th scope="col"${column.metadata ? ' data-kind="metadata"' : ''}>${this.escapeHtml(column.name)}</th>`)
+      .map(
+        column =>
+          `<th scope="col"${column.metadata ? ' data-kind="metadata"' : ''}>${this.escapeHtml(column.name)}</th>`
+      )
       .join('');
     const rowHtml = previewColumns
-      .map((column) => {
+      .map(column => {
         const value = column.metadata
           ? this.previewMetadataValue(column.name)
           : sampleRow[column.name] || this.previewValueForType(column.type);
@@ -4519,9 +4875,9 @@ export class WorkspaceTaskPage {
   getResultFormatPreviewRow(columns = []) {
     const artifact = this.currentResultArtifact || buildTaskResultArtifact(this.task);
     const rows = Array.isArray(artifact?.rows) ? artifact.rows : [];
-    const candidate = rows.find((row) => row && typeof row === 'object') || {};
+    const candidate = rows.find(row => row && typeof row === 'object') || {};
     const row = {};
-    columns.forEach((column) => {
+    columns.forEach(column => {
       const value = this.getCaseInsensitiveValue(candidate, column.name);
       if (value !== undefined && value !== null && String(value).trim() !== '') {
         row[column.name] = String(value);
@@ -4534,29 +4890,35 @@ export class WorkspaceTaskPage {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     const latest = history.length ? history[history.length - 1] : null;
     switch (String(name || '').trim()) {
-    case 'run_id':
-      return latest?.run_id ? String(latest.run_id).slice(0, 8) : 'run_1234';
-    case 'executed_at':
-      return latest?.executed_at ? String(latest.executed_at).slice(0, 10) : '2026-05-22';
-    case 'status':
-      return latest?.status ? String(latest.status) : 'success';
-    case 'duration_ms':
-      return latest?.duration !== undefined && latest?.duration !== null ? String(latest.duration) : '1200';
-    default:
-      return '';
+      case 'run_id':
+        return latest?.run_id ? String(latest.run_id).slice(0, 8) : 'run_1234';
+      case 'executed_at':
+        return latest?.executed_at ? String(latest.executed_at).slice(0, 10) : '2026-05-22';
+      case 'status':
+        return latest?.status ? String(latest.status) : 'success';
+      case 'duration_ms':
+        return latest?.duration !== undefined && latest?.duration !== null
+          ? String(latest.duration)
+          : '1200';
+      default:
+        return '';
     }
   }
 
   previewValueForType(type) {
-    switch (String(type || '').trim().toLowerCase()) {
-    case 'number':
-      return '9.7';
-    case 'boolean':
-      return 'true';
-    case 'date':
-      return '2026-05-22';
-    default:
-      return 'parsed from result';
+    switch (
+      String(type || '')
+        .trim()
+        .toLowerCase()
+    ) {
+      case 'number':
+        return '9.7';
+      case 'boolean':
+        return 'true';
+      case 'date':
+        return '2026-05-22';
+      default:
+        return 'parsed from result';
     }
   }
 
@@ -4570,7 +4932,9 @@ export class WorkspaceTaskPage {
     const configured = Boolean(
       storage &&
       storage.enabled === true &&
-      String(storage.write_mode || '').trim().toLowerCase() === 'append'
+      String(storage.write_mode || '')
+        .trim()
+        .toLowerCase() === 'append'
     );
     if (!configured) {
       return { configured: false, label: '', locationHint: '' };
@@ -4620,12 +4984,12 @@ export class WorkspaceTaskPage {
       ?.addEventListener('click', () => this.submitAppendChooser());
     root
       .querySelectorAll('[data-action="edit-append-storage"]')
-      .forEach((btn) => btn.addEventListener('click', () => this.openTaskStorageEditor()));
+      .forEach(btn => btn.addEventListener('click', () => this.openTaskStorageEditor()));
     // This action can appear in more than one place (review panel + result
     // CTA), so bind every match rather than just the first.
     root
       .querySelectorAll('[data-action="design-output-columns-from-result"]')
-      .forEach((btn) => btn.addEventListener('click', () => this.designOutputColumnsFromResult()));
+      .forEach(btn => btn.addEventListener('click', () => this.designOutputColumnsFromResult()));
   }
 
   // bindAutomationColumnsActions wires events on the column-designer DOM
@@ -4642,26 +5006,22 @@ export class WorkspaceTaskPage {
     root
       .querySelector('[data-action="add-result-contract-row"]')
       ?.addEventListener('click', () => this.addResultContractRow());
-    root
-      .querySelector('[data-action="suggest-result-contract"]')
-      ?.addEventListener('click', () => {
-        if (Array.isArray(this.resultContractDraft)) {
-          this.suggestResultContractColumns();
-          return;
-        }
-        this.startResultContractEdit({ suggest: true });
-      });
+    root.querySelector('[data-action="suggest-result-contract"]')?.addEventListener('click', () => {
+      if (Array.isArray(this.resultContractDraft)) {
+        this.suggestResultContractColumns();
+        return;
+      }
+      this.startResultContractEdit({ suggest: true });
+    });
     root
       .querySelector('[data-action="save-result-contract"]')
       ?.addEventListener('click', () => this.saveResultContractDraft());
-    root
-      .querySelectorAll('[data-action="remove-result-contract-row"]')
-      .forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const idx = Number(btn.getAttribute('data-row-index') || '-1');
-          this.removeResultContractRow(idx);
-        });
+    root.querySelectorAll('[data-action="remove-result-contract-row"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-row-index') || '-1');
+        this.removeResultContractRow(idx);
       });
+    });
   }
 
   // Read the live DOM rows back into the draft state so re-renders preserve
@@ -4672,13 +5032,18 @@ export class WorkspaceTaskPage {
     const rows = this._designerRoot()?.querySelectorAll?.('[data-result-contract-row]');
     if (!rows || rows.length === 0) return;
     const next = [];
-    rows.forEach((row) => {
+    rows.forEach(row => {
       const name = row.querySelector('[data-role="result-contract-name"]')?.value?.trim() || '';
       const type = row.querySelector('[data-role="result-contract-type"]')?.value || 'string';
-      const schemaField = row.querySelector('[data-role="result-contract-schema-field"]')?.value?.trim() || name;
-      const transform = row.querySelector('[data-role="result-contract-transform"]')?.value || 'identity';
-      const required = Boolean(row.querySelector('[data-role="result-contract-required"]')?.checked);
-      const description = row.querySelector('[data-role="result-contract-description"]')?.value?.trim() || '';
+      const schemaField =
+        row.querySelector('[data-role="result-contract-schema-field"]')?.value?.trim() || name;
+      const transform =
+        row.querySelector('[data-role="result-contract-transform"]')?.value || 'identity';
+      const required = Boolean(
+        row.querySelector('[data-role="result-contract-required"]')?.checked
+      );
+      const description =
+        row.querySelector('[data-role="result-contract-description"]')?.value?.trim() || '';
       next.push({ name, type, schema_field: schemaField, transform, required, description });
     });
     this.resultContractDraft = next;
@@ -4689,15 +5054,38 @@ export class WorkspaceTaskPage {
     this.resultOutputSpecDraft = this.getActiveOutputSpec();
     const mappingsByColumn = this.getOutputSpecMappingsByColumn(this.resultOutputSpecDraft);
     this.resultContractDraft = existing.length
-      ? existing.map((column) => ({
-        name: String(column?.name || ''),
-        type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
-        schema_field: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.schemaField || String(column?.name || ''),
-        transform: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.transform || 'identity',
-        required: column?.required !== false,
-        description: String(column?.description || ''),
-      }))
-      : (suggest ? [] : [{ name: '', type: 'string', schema_field: '', transform: 'identity', required: true, description: '' }]);
+      ? existing.map(column => ({
+          name: String(column?.name || ''),
+          type: ['string', 'number', 'boolean', 'date'].includes(column?.type)
+            ? column.type
+            : 'string',
+          schema_field:
+            mappingsByColumn.get(
+              String(column?.name || '')
+                .trim()
+                .toLowerCase()
+            )?.schemaField || String(column?.name || ''),
+          transform:
+            mappingsByColumn.get(
+              String(column?.name || '')
+                .trim()
+                .toLowerCase()
+            )?.transform || 'identity',
+          required: column?.required !== false,
+          description: String(column?.description || '')
+        }))
+      : suggest
+        ? []
+        : [
+            {
+              name: '',
+              type: 'string',
+              schema_field: '',
+              transform: 'identity',
+              required: true,
+              description: ''
+            }
+          ];
     this.resultContractSuggesting = false;
     this.setResultContractError('');
     this.refreshResultRender();
@@ -4726,7 +5114,14 @@ export class WorkspaceTaskPage {
     if (!Array.isArray(this.resultContractDraft)) {
       this.resultContractDraft = [];
     }
-    this.resultContractDraft.push({ name: '', type: 'string', schema_field: '', transform: 'identity', required: true, description: '' });
+    this.resultContractDraft.push({
+      name: '',
+      type: 'string',
+      schema_field: '',
+      transform: 'identity',
+      required: true,
+      description: ''
+    });
     this.refreshResultRender();
   }
 
@@ -4757,10 +5152,13 @@ export class WorkspaceTaskPage {
     // When the column-designer modal is open, the designer lives in the modal
     // body — re-render there and rebind, leaving the inline card untouched.
     if (this.columnDesignerModalOpen && this.columnModalBody) {
-      this.columnModalBody.innerHTML = this.renderResultContractBlock() + this.renderSuggestionInputsPreview();
+      this.columnModalBody.innerHTML =
+        this.renderResultContractBlock() + this.renderSuggestionInputsPreview();
       this.bindAutomationColumnsActions(this.columnModalBody);
       const preview = this.columnModalBody.querySelector('.workspace-task-suggestion-preview');
-      preview?.addEventListener('toggle', () => { this.suggestionPreviewOpen = preview.open; });
+      preview?.addEventListener('toggle', () => {
+        this.suggestionPreviewOpen = preview.open;
+      });
       return;
     }
     if (typeof this.renderSchedule === 'function' && this.elements.scheduleCard) {
@@ -4805,16 +5203,23 @@ export class WorkspaceTaskPage {
   // summary of the backend system prompt (kept short to avoid drift).
   renderSuggestionInputsPreview() {
     const busy = Boolean(this.resultContractSuggesting);
-    const line = (label, value) => value
-      ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><span>${this.escapeHtml(value)}</span></div>`
-      : '';
-    const block = (label, value) => `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><pre class="workspace-task-suggestion-sample">${this.escapeHtml(value)}</pre></div>`;
+    const line = (label, value) =>
+      value
+        ? `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><span>${this.escapeHtml(value)}</span></div>`
+        : '';
+    const block = (label, value) =>
+      `<div class="workspace-task-suggestion-input"><span class="workspace-task-suggestion-input-label">${this.escapeHtml(label)}</span><pre class="workspace-task-suggestion-sample">${this.escapeHtml(value)}</pre></div>`;
 
     // Once a suggestion has run, show the exact prompt the backend echoed back.
     const echo = this.suggestionPromptEcho;
     if (echo && (echo.system || echo.user)) {
-      const meta = [echo.provider, echo.model, echo.reasoning_effort ? `reasoning ${echo.reasoning_effort}` : '']
-        .filter(Boolean).join(' · ');
+      const meta = [
+        echo.provider,
+        echo.model,
+        echo.reasoning_effort ? `reasoning ${echo.reasoning_effort}` : ''
+      ]
+        .filter(Boolean)
+        .join(' · ');
       return `
         <details class="workspace-task-suggestion-preview"${this.suggestionPreviewOpen ? ' open' : ''}>
           <summary>Exact prompt sent${busy ? ' <span class="workspace-task-suggestion-busy"><span class="workspace-task-spinner" aria-hidden="true"></span> suggesting</span>' : ''}</summary>
@@ -4835,7 +5240,8 @@ export class WorkspaceTaskPage {
     const scheduleEnabled = Boolean(owner?.schedule_enabled || this.task?.schedule_enabled);
     const scheduleName = String(owner?.schedule_name || this.task?.schedule_name || '').trim();
 
-    const instruction = 'Reads the latest result below and proposes the structured fields it contains (3–8) that this task can produce every run. You review and edit them before saving. Run info (run_id, executed_at, status, duration_ms) is added automatically.';
+    const instruction =
+      'Reads the latest result below and proposes the structured fields it contains (3–8) that this task can produce every run. You review and edit them before saving. Run info (run_id, executed_at, status, duration_ms) is added automatically.';
 
     // The latest result is the primary basis for the suggestion, so show it
     // first; task/details/schedule are supporting context.
@@ -4863,7 +5269,7 @@ export class WorkspaceTaskPage {
   // Automation-card container. Render/read/error helpers route through this so
   // the same designer logic drives both surfaces.
   _designerRoot() {
-    return (this.columnDesignerModalOpen && this.columnModalBody)
+    return this.columnDesignerModalOpen && this.columnModalBody
       ? this.columnModalBody
       : this.elements.automationColumns;
   }
@@ -4892,12 +5298,13 @@ export class WorkspaceTaskPage {
     this.columnModalBody = overlay.querySelector('[data-role="column-modal-body"]');
     this.columnDesignerModalOpen = true;
 
-    overlay.addEventListener('mousedown', (event) => {
+    overlay.addEventListener('mousedown', event => {
       if (event.target === overlay) this.closeColumnDesignerModal();
     });
-    overlay.querySelector('[data-action="close-column-modal"]')
+    overlay
+      .querySelector('[data-action="close-column-modal"]')
       ?.addEventListener('click', () => this.closeColumnDesignerModal());
-    this._columnModalKeydown = (event) => {
+    this._columnModalKeydown = event => {
       if (event.key === 'Escape') this.closeColumnDesignerModal();
     };
     document.addEventListener('keydown', this._columnModalKeydown);
@@ -4944,7 +5351,7 @@ export class WorkspaceTaskPage {
       file_path: String(existing.file_path || ''),
       store_node_id: String(existing.store_node_id || ''),
       storage_target: String(existing.storage_target || ''),
-      workspace_folder: String(existing.workspace_folder || ''),
+      workspace_folder: String(existing.workspace_folder || '')
     };
 
     if (checked) {
@@ -4957,7 +5364,7 @@ export class WorkspaceTaskPage {
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ result_storage: nextStorage }),
+          body: JSON.stringify({ result_storage: nextStorage })
         }
       );
       if (!response.ok) {
@@ -5011,7 +5418,7 @@ export class WorkspaceTaskPage {
     this.bindAutomationColumnsActions();
     container
       .querySelector('[data-action="toggle-csv-storage"]')
-      ?.addEventListener('change', (event) => {
+      ?.addEventListener('change', event => {
         const target = event?.target;
         if (!target) return;
         void this.setCsvStorageEnabled(target.checked, target);
@@ -5032,7 +5439,9 @@ export class WorkspaceTaskPage {
     }
     const owner = this.getTaskResultStorageTask();
     const storage = owner?.result_storage || {};
-    const enabled = Boolean(storage.enabled && String(storage.write_mode || '').toLowerCase() === 'append');
+    const enabled = Boolean(
+      storage.enabled && String(storage.write_mode || '').toLowerCase() === 'append'
+    );
 
     if (!enabled) {
       container.innerHTML = `
@@ -5057,7 +5466,7 @@ export class WorkspaceTaskPage {
     else if (filePath) target = 'custom';
 
     const storeOptions = storeNodes
-      .map((node) => {
+      .map(node => {
         const id = String(node?.id || '').trim();
         if (!id) return '';
         const label = this.getStoreNodeDisplayLabel(id);
@@ -5068,13 +5477,15 @@ export class WorkspaceTaskPage {
       .join('');
     const folderOptions = [
       '<option value="">Workspace files</option>',
-      ...workspaceFolders.map((folder) => {
+      ...workspaceFolders.map(folder => {
         const path = String(folder?.path || '').trim();
         if (!path) return '';
         const selected = path === workspaceFolder ? ' selected' : '';
         return `<option value="${this.escapeHtml(path)}"${selected}>${this.escapeHtml(path)}</option>`;
       })
-    ].filter(Boolean).join('');
+    ]
+      .filter(Boolean)
+      .join('');
     const saving = Boolean(this.automationStorageSaving);
     const defaultPath = String(this.workspaceOutputDir || '').trim();
     const defaultPathHint = defaultPath
@@ -5086,7 +5497,8 @@ export class WorkspaceTaskPage {
         <i class="bi bi-folder2-open" aria-hidden="true"></i>
         <span>${this.escapeHtml(openFolderLabel)}</span>
       </button>`;
-    const fileName = this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner);
+    const fileName =
+      this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner);
 
     container.innerHTML = `
       <div class="workspace-task-automation-storage-block" data-state="on">
@@ -5129,13 +5541,11 @@ export class WorkspaceTaskPage {
     container
       .querySelector('[data-action="open-automation-storage-modal"]')
       ?.addEventListener('click', () => this.openTaskStorageEditor());
-    container
-      .querySelector('[data-action="open-output-dir"]')
-      ?.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.openWorkspaceOutputDir();
-      });
+    container.querySelector('[data-action="open-output-dir"]')?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openWorkspaceOutputDir();
+    });
   }
 
   // fileManagerActionLabel returns a platform-appropriate label for buttons
@@ -5187,13 +5597,19 @@ export class WorkspaceTaskPage {
     if (this.automationStorageSaving) return;
     const container = this.elements.automationStorage;
     if (!container) return;
-    const target = container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')?.value || 'default';
-    const storeNodeId = container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
-    const workspaceFolder = container.querySelector('[data-role="automation-storage-workspace-folder"]')?.value || '';
-    const customPath = container.querySelector('[data-role="automation-storage-path"]')?.value?.trim() || '';
-    const fileNameInput = container.querySelector('[data-role="automation-storage-filename"]')?.value?.trim() || '';
+    const target =
+      container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')
+        ?.value || 'default';
+    const storeNodeId =
+      container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
+    const workspaceFolder =
+      container.querySelector('[data-role="automation-storage-workspace-folder"]')?.value || '';
+    const customPath =
+      container.querySelector('[data-role="automation-storage-path"]')?.value?.trim() || '';
+    const fileNameInput =
+      container.querySelector('[data-role="automation-storage-filename"]')?.value?.trim() || '';
 
-    const setError = (message) => {
+    const setError = message => {
       const error = container.querySelector('[data-role="automation-storage-error"]');
       if (!error) return;
       if (!message) {
@@ -5224,9 +5640,10 @@ export class WorkspaceTaskPage {
     // carries its own filename, so file_name doesn't apply there.
     const derivedFileName = this.defaultAppendCsvFilename(owner);
     const normalizedFileName = this.normalizeDatasetFileName(fileNameInput);
-    const customFileName = (target !== 'custom' && normalizedFileName && normalizedFileName !== derivedFileName)
-      ? normalizedFileName
-      : '';
+    const customFileName =
+      target !== 'custom' && normalizedFileName && normalizedFileName !== derivedFileName
+        ? normalizedFileName
+        : '';
     const nextStorage = {
       enabled: true,
       format: 'jsonl',
@@ -5235,7 +5652,7 @@ export class WorkspaceTaskPage {
       store_node_id: target === 'store' ? storeNodeId : '',
       storage_target: target === 'workspace_folder' ? 'workspace_folder' : '',
       workspace_folder: target === 'workspace_folder' ? workspaceFolder : '',
-      file_name: customFileName,
+      file_name: customFileName
     };
     // No-op if nothing changed; avoids a needless PATCH + reload roundtrip.
     if (
@@ -5259,7 +5676,7 @@ export class WorkspaceTaskPage {
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ result_storage: nextStorage }),
+          body: JSON.stringify({ result_storage: nextStorage })
         }
       );
       if (!response.ok) {
@@ -5307,11 +5724,12 @@ export class WorkspaceTaskPage {
     const filePath = String(storage.file_path || '').trim();
     const storageTarget = String(storage.storage_target || '').trim();
     const workspaceFolder = String(storage.workspace_folder || '').trim();
-    const filePathIsFile = filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
+    const filePathIsFile =
+      filePath && !filePath.endsWith('/') && this.basename(filePath).includes('.');
     const filename = filePathIsFile
       ? this.basename(filePath)
-      : (this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner));
-    const joinFile = (dir) => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
+      : this.normalizeDatasetFileName(storage.file_name) || this.defaultAppendCsvFilename(owner);
+    const joinFile = dir => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
 
     let dest;
     if (storeNodeId) {
@@ -5328,12 +5746,14 @@ export class WorkspaceTaskPage {
     }
 
     container.innerHTML =
-      '<span>Saves each run to:</span>'
-      + `<span class="workspace-task-automation-summary-path" title="${this.escapeHtml(dest)}">${this.escapeHtml(dest)}</span>`;
+      '<span>Saves each run to:</span>' +
+      `<span class="workspace-task-automation-summary-path" title="${this.escapeHtml(dest)}">${this.escapeHtml(dest)}</span>`;
   }
 
   basename(path) {
-    const parts = String(path || '').replace(/\/+$/, '').split('/');
+    const parts = String(path || '')
+      .replace(/\/+$/, '')
+      .split('/');
     return parts[parts.length - 1] || '';
   }
 
@@ -5379,16 +5799,18 @@ export class WorkspaceTaskPage {
     const captured = String(this.lastSuggestionResultSample || '').trim();
     if (captured) return captured.slice(0, 4000);
     const candidate = this.task?.result || this.currentResultArtifact?.csv || '';
-    return String(candidate || '').trim().slice(0, 4000);
+    return String(candidate || '')
+      .trim()
+      .slice(0, 4000);
   }
 
   getRecentExecutionSamplesForSuggestion(limit = 5) {
     const history = Array.isArray(this.task?.execution_history) ? this.task.execution_history : [];
     return history
       .slice(-limit)
-      .map((entry) => String(entry?.result || entry?.summary || entry?.error || '').trim())
+      .map(entry => String(entry?.result || entry?.summary || entry?.error || '').trim())
       .filter(Boolean)
-      .map((sample) => sample.slice(0, 1200));
+      .map(sample => sample.slice(0, 1200));
   }
 
   suggestFallbackResultContractColumns() {
@@ -5397,14 +5819,15 @@ export class WorkspaceTaskPage {
     if (artifactColumns.length > 0) {
       const rows = Array.isArray(artifact?.rows) ? artifact.rows.slice(0, 25) : [];
       return artifactColumns
-        .map((column) => String(column || '').trim())
+        .map(column => String(column || '').trim())
         .filter(Boolean)
         .slice(0, 8)
-        .map((name) => ({
+        .map(name => ({
           name,
           type: this.inferResultContractColumnType(name, rows),
-          required: rows.length > 0 ? rows.every((row) => String(row?.[name] ?? '').trim() !== '') : true,
-          description: 'Column from the latest task result',
+          required:
+            rows.length > 0 ? rows.every(row => String(row?.[name] ?? '').trim() !== '') : true,
+          description: 'Column from the latest task result'
         }));
     }
 
@@ -5416,7 +5839,7 @@ export class WorkspaceTaskPage {
 
     return [
       { name: 'date', type: 'date', required: true, description: 'Run date' },
-      { name: 'summary', type: 'string', required: true, description: 'Short result summary' },
+      { name: 'summary', type: 'string', required: true, description: 'Short result summary' }
     ];
   }
 
@@ -5425,7 +5848,9 @@ export class WorkspaceTaskPage {
   // each label into a slug field with a best-guess type. Lines that are URLs,
   // questions, or have no value are skipped.
   parseFieldsFromResultText(text) {
-    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+    const lines = String(text || '')
+      .replace(/\r\n/g, '\n')
+      .split('\n');
     const fields = [];
     const seen = new Set();
     for (const raw of lines) {
@@ -5435,7 +5860,8 @@ export class WorkspaceTaskPage {
       if (idx <= 0) continue;
       const label = line.slice(0, idx).trim();
       const value = line.slice(idx + 1).trim();
-      if (!value || /^https?:\/\//i.test(value) || label.length > 40 || label.endsWith('?')) continue;
+      if (!value || /^https?:\/\//i.test(value) || label.length > 40 || label.endsWith('?'))
+        continue;
       // Slugify the label into a field name.
       const slug = label
         .toLowerCase()
@@ -5456,14 +5882,14 @@ export class WorkspaceTaskPage {
 
   inferResultContractColumnType(columnName, rows = []) {
     const values = rows
-      .map((row) => String(row?.[columnName] ?? '').trim())
+      .map(row => String(row?.[columnName] ?? '').trim())
       .filter(Boolean)
       .slice(0, 12);
     if (values.length === 0) return 'string';
     const booleanValues = new Set(['true', 'false', 'yes', 'no']);
-    if (values.every((value) => booleanValues.has(value.toLowerCase()))) return 'boolean';
-    if (values.every((value) => Number.isFinite(Number(value.replace(/,/g, ''))))) return 'number';
-    if (values.every((value) => !Number.isNaN(Date.parse(value)))) return 'date';
+    if (values.every(value => booleanValues.has(value.toLowerCase()))) return 'boolean';
+    if (values.every(value => Number.isFinite(Number(value.replace(/,/g, ''))))) return 'number';
+    if (values.every(value => !Number.isNaN(Date.parse(value)))) return 'date';
     return 'string';
   }
 
@@ -5500,11 +5926,11 @@ export class WorkspaceTaskPage {
             format: 'jsonl',
             write_mode: 'append',
             file_path: String(storage.file_path || ''),
-            store_node_id: String(storage.store_node_id || ''),
+            store_node_id: String(storage.store_node_id || '')
           },
           result_sample: this.getResultSampleForSuggestion(),
-          recent_execution_samples: this.getRecentExecutionSamplesForSuggestion(),
-        }),
+          recent_execution_samples: this.getRecentExecutionSamplesForSuggestion()
+        })
       });
       const text = await response.text();
       if (!response.ok) {
@@ -5524,27 +5950,49 @@ export class WorkspaceTaskPage {
       }
       this.resultOutputSpecDraft = parsed?.output_spec || null;
       const mappingsByColumn = this.getOutputSpecMappingsByColumn(this.resultOutputSpecDraft);
-      this.resultContractDraft = columns.map((column) => ({
+      this.resultContractDraft = columns.map(column => ({
         name: String(column?.name || ''),
-        type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
-        schema_field: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.schemaField || String(column?.name || ''),
-        transform: mappingsByColumn.get(String(column?.name || '').trim().toLowerCase())?.transform || 'identity',
+        type: ['string', 'number', 'boolean', 'date'].includes(column?.type)
+          ? column.type
+          : 'string',
+        schema_field:
+          mappingsByColumn.get(
+            String(column?.name || '')
+              .trim()
+              .toLowerCase()
+          )?.schemaField || String(column?.name || ''),
+        transform:
+          mappingsByColumn.get(
+            String(column?.name || '')
+              .trim()
+              .toLowerCase()
+          )?.transform || 'identity',
         required: column?.required !== false,
-        description: String(column?.description || ''),
+        description: String(column?.description || '')
       }));
-      this.notify('success', `Suggested ${columns.length} output field${columns.length === 1 ? '' : 's'}.`);
+      this.notify(
+        'success',
+        `Suggested ${columns.length} output field${columns.length === 1 ? '' : 's'}.`
+      );
     } catch (error) {
       console.error('Failed to suggest result contract:', error);
       const timedOut = error?.name === 'AbortError';
-      const hasDraftColumns = Array.isArray(this.resultContractDraft) && this.resultContractDraft.some((column) => String(column?.name || '').trim());
+      const hasDraftColumns =
+        Array.isArray(this.resultContractDraft) &&
+        this.resultContractDraft.some(column => String(column?.name || '').trim());
       if (!hasDraftColumns) {
         this.resultContractDraft = this.suggestFallbackResultContractColumns();
         this.resultOutputSpecDraft = null;
-        this.notify('warning', timedOut
-          ? 'The assistant took too long, so a local result format draft was created from the result. Edit it or try again.'
-          : 'Assistant suggestion was unavailable, so a local result format draft was created from the result.');
+        this.notify(
+          'warning',
+          timedOut
+            ? 'The assistant took too long, so a local result format draft was created from the result. Edit it or try again.'
+            : 'Assistant suggestion was unavailable, so a local result format draft was created from the result.'
+        );
       } else {
-        const message = timedOut ? 'The assistant took too long. Edit the draft or try again.' : (error?.message || 'Could not suggest columns.');
+        const message = timedOut
+          ? 'The assistant took too long. Edit the draft or try again.'
+          : error?.message || 'Could not suggest columns.';
         this.setResultContractError(message);
         this.notify(timedOut ? 'warning' : 'error', message);
       }
@@ -5560,15 +6008,21 @@ export class WorkspaceTaskPage {
     this.syncResultContractDraftFromDOM();
     const draft = Array.isArray(this.resultContractDraft) ? this.resultContractDraft : [];
     const cleaned = draft
-      .map((column) => ({
+      .map(column => ({
         name: String(column?.name || '').trim(),
-        type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
-        schema_field: String(column?.schema_field || column?.schemaField || column?.name || '').trim(),
-        transform: ['identity', 'json_string'].includes(column?.transform) ? column.transform : 'identity',
+        type: ['string', 'number', 'boolean', 'date'].includes(column?.type)
+          ? column.type
+          : 'string',
+        schema_field: String(
+          column?.schema_field || column?.schemaField || column?.name || ''
+        ).trim(),
+        transform: ['identity', 'json_string'].includes(column?.transform)
+          ? column.transform
+          : 'identity',
         required: Boolean(column?.required),
-        description: String(column?.description || '').trim(),
+        description: String(column?.description || '').trim()
       }))
-      .filter((column) => column.name);
+      .filter(column => column.name);
 
     if (cleaned.length === 0) {
       this.setResultContractError('Add at least one column with a name.');
@@ -5593,7 +6047,7 @@ export class WorkspaceTaskPage {
       format: 'jsonl',
       write_mode: 'append',
       file_path: String(existingStorage.file_path || ''),
-      store_node_id: String(existingStorage.store_node_id || ''),
+      store_node_id: String(existingStorage.store_node_id || '')
     };
 
     this.resultContractSaving = true;
@@ -5608,8 +6062,8 @@ export class WorkspaceTaskPage {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             output_spec: outputSpec,
-            overwrite: true,
-          }),
+            overwrite: true
+          })
         }
       );
       const draftText = await draftResponse.text();
@@ -5630,15 +6084,18 @@ export class WorkspaceTaskPage {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            result_storage: nextStorage,
-          }),
+            result_storage: nextStorage
+          })
         }
       );
       const storageText = await storageResponse.text();
       if (!storageResponse.ok) {
         throw new Error(storageText || `Storage save failed (HTTP ${storageResponse.status})`);
       }
-      this.notify('success', `Saved ${cleaned.length} output field${cleaned.length === 1 ? '' : 's'}. Future runs will return them.`);
+      this.notify(
+        'success',
+        `Saved ${cleaned.length} output field${cleaned.length === 1 ? '' : 's'}. Future runs will return them.`
+      );
       this.resultContractDraft = null;
       this.resultOutputSpecDraft = null;
       this.resultContractSaving = false;
@@ -5654,36 +6111,41 @@ export class WorkspaceTaskPage {
   }
 
   buildOutputSpecDraftFromColumns(columns) {
-    const existingSpec = this.resultOutputSpecDraft && typeof this.resultOutputSpecDraft === 'object'
-      ? JSON.parse(JSON.stringify(this.resultOutputSpecDraft))
-      : null;
-    const normalizedColumns = columns.map((column) => ({
+    const existingSpec =
+      this.resultOutputSpecDraft && typeof this.resultOutputSpecDraft === 'object'
+        ? JSON.parse(JSON.stringify(this.resultOutputSpecDraft))
+        : null;
+    const normalizedColumns = columns.map(column => ({
       name: String(column?.name || '').trim(),
       type: ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string',
-      schema_field: String(column?.schema_field || column?.schemaField || column?.name || '').trim(),
-      transform: ['identity', 'json_string'].includes(column?.transform) ? column.transform : 'identity',
+      schema_field: String(
+        column?.schema_field || column?.schemaField || column?.name || ''
+      ).trim(),
+      transform: ['identity', 'json_string'].includes(column?.transform)
+        ? column.transform
+        : 'identity',
       required: column?.required !== false,
-      description: String(column?.description || '').trim(),
+      description: String(column?.description || '').trim()
     }));
-    const columnNames = normalizedColumns.map((column) => column.name);
-    const contractColumns = normalizedColumns.map((column) => ({
+    const columnNames = normalizedColumns.map(column => column.name);
+    const contractColumns = normalizedColumns.map(column => ({
       name: column.name,
       type: column.type,
       required: column.required,
-      description: column.description,
+      description: column.description
     }));
     const existingContractNames = Array.isArray(existingSpec?.contract?.columns)
-      ? existingSpec.contract.columns.map((column) => String(column?.name || '').trim())
+      ? existingSpec.contract.columns.map(column => String(column?.name || '').trim())
       : [];
     const fieldsByName = new Map();
-    normalizedColumns.forEach((column) => {
+    normalizedColumns.forEach(column => {
       const name = column.schema_field || column.name;
       if (!name || fieldsByName.has(name.toLowerCase())) return;
       fieldsByName.set(name.toLowerCase(), {
         name,
         type: column.type === 'number' || column.type === 'boolean' ? column.type : 'string',
         required: column.required,
-        description: column.description,
+        description: column.description
       });
     });
     const fields = Array.from(fieldsByName.values());
@@ -5696,19 +6158,19 @@ export class WorkspaceTaskPage {
       existingSpec.contract = {
         ...(existingSpec.contract || {}),
         source: existingSpec.contract?.source || existingSpec.source || 'manual',
-        columns: contractColumns,
+        columns: contractColumns
       };
       existingSpec.schema = {
         ...(existingSpec.schema || {}),
         name: existingSpec.schema?.name || 'task_result',
         description: existingSpec.schema?.description || 'One normalized task result row.',
         strict: existingSpec.schema?.strict !== false,
-        fields,
+        fields
       };
-      existingSpec.mappings = normalizedColumns.map((column) => ({
+      existingSpec.mappings = normalizedColumns.map(column => ({
         schema_field: column.schema_field || column.name,
         csv_column: column.name,
-        transform: column.transform || 'identity',
+        transform: column.transform || 'identity'
       }));
       existingSpec.metadata_policy = this.getResultMetadataPolicyDraft(existingSpec);
       return existingSpec;
@@ -5719,32 +6181,38 @@ export class WorkspaceTaskPage {
         name: 'task_result',
         description: 'One normalized task result row.',
         strict: true,
-        fields,
+        fields
       },
       contract: {
         source: existingSpec?.contract?.source || existingSpec?.source || 'manual',
-        columns: contractColumns,
+        columns: contractColumns
       },
-      mappings: normalizedColumns.map((column) => ({
+      mappings: normalizedColumns.map(column => ({
         schema_field: column.schema_field || column.name,
         csv_column: column.name,
-        transform: column.transform || 'identity',
+        transform: column.transform || 'identity'
       })),
-      metadata_policy: this.getResultMetadataPolicyDraft(existingSpec),
+      metadata_policy: this.getResultMetadataPolicyDraft(existingSpec)
     };
   }
 
   getResultMetadataPolicyDraft(existingSpec = null) {
-    const fieldsFromDOM = Array.from(this._designerRoot()?.querySelectorAll?.('[data-role="result-metadata-field"]') || []);
+    const fieldsFromDOM = Array.from(
+      this._designerRoot()?.querySelectorAll?.('[data-role="result-metadata-field"]') || []
+    );
     if (fieldsFromDOM.length > 0) {
       return {
-        fields: fieldsFromDOM.map((input) => ({
-          name: String(input.getAttribute('data-field-name') || '').trim(),
-          include: Boolean(input.checked),
-        })).filter((field) => field.name),
+        fields: fieldsFromDOM
+          .map(input => ({
+            name: String(input.getAttribute('data-field-name') || '').trim(),
+            include: Boolean(input.checked)
+          }))
+          .filter(field => field.name)
       };
     }
-    const fields = this.getOutputSpecMetadataFields(existingSpec || this.resultOutputSpecDraft || this.getActiveOutputSpec());
+    const fields = this.getOutputSpecMetadataFields(
+      existingSpec || this.resultOutputSpecDraft || this.getActiveOutputSpec()
+    );
     return { fields };
   }
 
@@ -5767,8 +6235,7 @@ export class WorkspaceTaskPage {
     chooser.hidden = !show;
     if (show) {
       this.setAppendChooserError('');
-      chooser.querySelector('input[name="workspace-task-append-target"]:checked')
-        ?.focus?.();
+      chooser.querySelector('input[name="workspace-task-append-target"]:checked')?.focus?.();
     }
   }
 
@@ -5787,9 +6254,12 @@ export class WorkspaceTaskPage {
   async submitAppendChooser() {
     const chooser = this.elements.output?.querySelector?.('[data-role="append-chooser"]');
     if (!chooser) return;
-    const target = chooser.querySelector('input[name="workspace-task-append-target"]:checked')?.value || 'default';
+    const target =
+      chooser.querySelector('input[name="workspace-task-append-target"]:checked')?.value ||
+      'default';
     const storeNodeId = chooser.querySelector('[data-role="append-store-node"]')?.value || '';
-    const customPath = chooser.querySelector('[data-role="append-custom-path"]')?.value?.trim() || '';
+    const customPath =
+      chooser.querySelector('[data-role="append-custom-path"]')?.value?.trim() || '';
     const automate = Boolean(chooser.querySelector('[data-role="append-automate"]')?.checked);
 
     if (target === 'store' && !storeNodeId) {
@@ -5815,7 +6285,9 @@ export class WorkspaceTaskPage {
 
   setResultArtifactAppendBusy(busy) {
     this.resultArtifactAppendBusy = Boolean(busy);
-    const button = this.elements.output?.querySelector?.('[data-action="append-result-artifact-csv"]');
+    const button = this.elements.output?.querySelector?.(
+      '[data-action="append-result-artifact-csv"]'
+    );
     if (!button) return;
     button.disabled = this.resultArtifactAppendBusy;
     const label = button.querySelector('[data-role="append-label"]');
@@ -5850,8 +6322,8 @@ export class WorkspaceTaskPage {
             csv,
             use_storage: Boolean(useStorage),
             file_path: filePath,
-            store_node_id: storeNodeId,
-          }),
+            store_node_id: storeNodeId
+          })
         }
       );
 
@@ -5860,7 +6332,11 @@ export class WorkspaceTaskPage {
         throw new Error(text || `Append failed (HTTP ${response.status})`);
       }
       let parsed = {};
-      try { parsed = text ? JSON.parse(text) : {}; } catch (_e) { /* ignore */ }
+      try {
+        parsed = text ? JSON.parse(text) : {};
+      } catch (_e) {
+        /* ignore */
+      }
       const rows = Number(parsed.appended_rows || 0);
       const label = parsed.label || parsed.file_path || 'CSV';
       const rowsLabel = rows === 1 ? '1 row' : `${rows} rows`;
@@ -5919,7 +6395,9 @@ export class WorkspaceTaskPage {
 
   setResultArtifactNoteSaving(saving) {
     this.resultArtifactNoteSaving = Boolean(saving);
-    const button = this.elements.output?.querySelector?.('[data-action="save-result-artifact-note"]');
+    const button = this.elements.output?.querySelector?.(
+      '[data-action="save-result-artifact-note"]'
+    );
     if (!button) return;
     button.disabled = this.resultArtifactNoteSaving;
     const label = button.querySelector('span');
@@ -5952,7 +6430,7 @@ export class WorkspaceTaskPage {
       '',
       '## CSV',
       '',
-      csvFence,
+      csvFence
     ].join('\n');
   }
 
@@ -5965,11 +6443,14 @@ export class WorkspaceTaskPage {
     this.setResultArtifactNoteSaving(true);
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: title, content })
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: title, content })
+        }
+      );
 
       if (!response.ok) {
         const text = await response.text();
@@ -5993,7 +6474,7 @@ export class WorkspaceTaskPage {
 
   pickResultSectionHeadingLevel(headings) {
     const counts = new Map();
-    headings.forEach((heading) => {
+    headings.forEach(heading => {
       const level = this.getResultHeadingLevel(heading);
       if (!level) return;
       counts.set(level, (counts.get(level) || 0) + 1);
@@ -6023,7 +6504,11 @@ export class WorkspaceTaskPage {
     const explicit = String(section?.dataset?.resultSectionTitle || '').trim();
     if (explicit) return explicit;
     const heading = section?.querySelector?.('h1, h2, h3, h4, h5, h6');
-    return String(heading?.textContent || '').replace(/\s+/g, ' ').trim() || 'Result section';
+    return (
+      String(heading?.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim() || 'Result section'
+    );
   }
 
   getResultSectionText(section) {
@@ -6037,7 +6522,9 @@ export class WorkspaceTaskPage {
     const button = section?.querySelector?.('[data-action="research-result-section"]');
     if (!button) return;
 
-    const createdTaskId = String(state.createdTaskId || section.dataset.followUpTaskId || '').trim();
+    const createdTaskId = String(
+      state.createdTaskId || section.dataset.followUpTaskId || ''
+    ).trim();
     const isPending = Boolean(state.pending);
     const icon = button.querySelector('i');
     const label = button.querySelector('.visually-hidden');
@@ -6073,8 +6560,9 @@ export class WorkspaceTaskPage {
     button.dataset.tooltip = 'Draft research follow-up';
     button.title = button.dataset.tooltip;
     button.setAttribute('aria-label', button.dataset.tooltip);
-    button.innerHTML = '<i class="bi bi-search" aria-hidden="true"></i><span class="visually-hidden">Draft research follow-up</span>';
-    button.addEventListener('click', (event) => {
+    button.innerHTML =
+      '<i class="bi bi-search" aria-hidden="true"></i><span class="visually-hidden">Draft research follow-up</span>';
+    button.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
       void this.handleResearchResultSection(section);
@@ -6098,13 +6586,16 @@ export class WorkspaceTaskPage {
     let currentSectionBody = null;
     let sectionIndex = 0;
 
-    nodes.forEach((node) => {
+    nodes.forEach(node => {
       const headingLevel = this.getResultHeadingLevel(node);
       const startsSection = headingLevel > 0 && headingLevel <= sectionHeadingLevel;
 
       if (startsSection) {
         sectionIndex += 1;
-        const title = String(node.textContent || '').replace(/\s+/g, ' ').trim() || `Section ${sectionIndex}`;
+        const title =
+          String(node.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim() || `Section ${sectionIndex}`;
         const section = document.createElement('section');
         section.className = 'workspace-task-result-section';
         section.dataset.resultSectionId = this.buildResultSectionId(title, sectionIndex);
@@ -6131,8 +6622,8 @@ export class WorkspaceTaskPage {
     if (sections.length === 0) return;
 
     prose.classList.add('is-sectioned');
-    sections.forEach((section) => {
-      section.addEventListener('contextmenu', (event) => {
+    sections.forEach(section => {
+      section.addEventListener('contextmenu', event => {
         event.preventDefault();
         this.showResultSectionMenu(section, event.clientX, event.clientY);
       });
@@ -6201,7 +6692,10 @@ export class WorkspaceTaskPage {
   }
 
   buildResultResearchTitle(sectionTitle) {
-    const title = String(sectionTitle || 'Result section').replace(/\s+/g, ' ').trim() || 'Result section';
+    const title =
+      String(sectionTitle || 'Result section')
+        .replace(/\s+/g, ' ')
+        .trim() || 'Result section';
     const combined = `Research further: ${title}`;
     return combined.length > 160 ? `${combined.slice(0, 157).trim()}...` : combined;
   }
@@ -6240,13 +6734,25 @@ export class WorkspaceTaskPage {
     const normalizedSelected = String(selectedAgent || '').trim();
     const options = ['<option value="">Unassigned manual task</option>'];
     const names = this.getAssignableAgentNames(normalizedSelected);
-    if (normalizedSelected && !names.some((name) => String(name || '').trim().toLowerCase() === normalizedSelected.toLowerCase())) {
-      options.push(`<option value="${this.escapeHtml(normalizedSelected)}" selected>${this.escapeHtml(`${normalizedSelected} (Current)`)}</option>`);
+    if (
+      normalizedSelected &&
+      !names.some(
+        name =>
+          String(name || '')
+            .trim()
+            .toLowerCase() === normalizedSelected.toLowerCase()
+      )
+    ) {
+      options.push(
+        `<option value="${this.escapeHtml(normalizedSelected)}" selected>${this.escapeHtml(`${normalizedSelected} (Current)`)}</option>`
+      );
     }
-    names.forEach((agentName) => {
+    names.forEach(agentName => {
       const normalized = String(agentName || '').trim();
       if (!normalized) return;
-      options.push(`<option value="${this.escapeHtml(normalized)}" ${normalized.toLowerCase() === normalizedSelected.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(normalized)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(normalized)}" ${normalized.toLowerCase() === normalizedSelected.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(normalized)}</option>`
+      );
     });
     this.elements.resultResearchAgentSelect.innerHTML = options.join('');
   }
@@ -6316,7 +6822,8 @@ export class WorkspaceTaskPage {
     if (!String(draft.title || '').trim()) return 'Task title is required.';
     if (!String(draft.details || '').trim()) return 'Instructions are required.';
     if (!String(draft.sectionText || '').trim()) return 'Selected section text is required.';
-    if (draft.runNow && !String(draft.agent || '').trim()) return 'Choose an agent before running now, or turn off Run immediately.';
+    if (draft.runNow && !String(draft.agent || '').trim())
+      return 'Choose an agent before running now, or turn off Run immediately.';
     return '';
   }
 
@@ -6326,19 +6833,27 @@ export class WorkspaceTaskPage {
       '',
       'Selected section text:',
       String(draft.sectionText || '').trim()
-    ].join('\n').trim();
+    ]
+      .join('\n')
+      .trim();
     const payload = {
       workspace_id: this.workspaceId,
       description: draft.title,
       details,
       priority: Number.isFinite(this.task?.priority) ? this.task.priority : 3,
       to: draft.agent || undefined,
-      input_task_ids: draft.linkSource ? [draft.sourceTaskId || this.task?.id || this.taskId].filter(Boolean) : []
+      input_task_ids: draft.linkSource
+        ? [draft.sourceTaskId || this.task?.id || this.taskId].filter(Boolean)
+        : []
     };
 
     const currentAgent = String(this.task?.to || '').trim();
     const currentAssignedNode = String(this.task?.assigned_node_id || '').trim();
-    if (currentAssignedNode && draft.agent && draft.agent.toLowerCase() === currentAgent.toLowerCase()) {
+    if (
+      currentAssignedNode &&
+      draft.agent &&
+      draft.agent.toLowerCase() === currentAgent.toLowerCase()
+    ) {
       payload.assigned_node_id = currentAssignedNode;
     }
 
@@ -6434,8 +6949,9 @@ export class WorkspaceTaskPage {
     }
 
     const section = draft.sectionId
-      ? Array.from(this.elements.output?.querySelectorAll?.('[data-result-section-id]') || [])
-        .find((item) => String(item?.dataset?.resultSectionId || '') === String(draft.sectionId))
+      ? Array.from(this.elements.output?.querySelectorAll?.('[data-result-section-id]') || []).find(
+          item => String(item?.dataset?.resultSectionId || '') === String(draft.sectionId)
+        )
       : null;
 
     this.resultResearchPendingSectionId = String(draft.sectionId || '').trim();
@@ -6450,7 +6966,10 @@ export class WorkspaceTaskPage {
       }
       section?.classList.add('has-follow-up');
       this.updateResultSectionResearchButton(section, { createdTaskId });
-      this.notify('success', draft.runNow ? 'Research follow-up started' : 'Research follow-up created');
+      this.notify(
+        'success',
+        draft.runNow ? 'Research follow-up started' : 'Research follow-up created'
+      );
       if (this.elements.resultResearchModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.resultResearchModal)?.hide();
       }
@@ -6524,21 +7043,25 @@ export class WorkspaceTaskPage {
     // the schema. The old separate "CSV columns" and "Run info" tables are
     // gone — CSV is derived from these fields at export time, so repeating them
     // here was the duplication.
-    const shapeFields = (schemaFields.length ? schemaFields : contractColumns).map((field) => ({
+    const shapeFields = (schemaFields.length ? schemaFields : contractColumns).map(field => ({
       name: String(field?.name || ''),
       type: String(field?.type || 'string'),
       required: Boolean(field?.required),
-      description: String(field?.description || ''),
+      description: String(field?.description || '')
     }));
 
-    const rowsHtml = shapeFields.map((field) => `
+    const rowsHtml = shapeFields
+      .map(
+        field => `
       <tr>
         <td>${this.escapeHtml(field.name)}</td>
         <td class="workspace-task-output-shape-col-type">${this.escapeHtml(field.type)}</td>
         <td class="workspace-task-output-shape-col-required ${field.required ? '' : 'is-optional'}">${field.required ? 'required' : 'optional'}</td>
         <td>${this.escapeHtml(field.description)}</td>
       </tr>
-    `).join('');
+    `
+      )
+      .join('');
 
     this.elements.outputShape.innerHTML = `
       <p class="workspace-task-output-shape-note">Each run is stored as a JSON record with these fields. Use <strong>Export CSV</strong> on the dataset for a spreadsheet — its columns are derived from these fields, plus run info (run_id, executed_at, status…).</p>
@@ -6570,7 +7093,12 @@ export class WorkspaceTaskPage {
       return;
     }
 
-    if (this.savedResultNote && result && this.savedResultNoteResult && this.savedResultNoteResult !== result) {
+    if (
+      this.savedResultNote &&
+      result &&
+      this.savedResultNoteResult &&
+      this.savedResultNoteResult !== result
+    ) {
       this.savedResultNote = null;
       this.savedResultNoteResult = '';
     }
@@ -6600,8 +7128,10 @@ export class WorkspaceTaskPage {
       const datasetCols = Array.isArray(artifact.columns) ? artifact.columns.length : 0;
       const datasetMeta = [
         datasetRows ? `${datasetRows} row${datasetRows === 1 ? '' : 's'}` : '',
-        datasetCols ? `${datasetCols} column${datasetCols === 1 ? '' : 's'}` : '',
-      ].filter(Boolean).join(' · ');
+        datasetCols ? `${datasetCols} column${datasetCols === 1 ? '' : 's'}` : ''
+      ]
+        .filter(Boolean)
+        .join(' · ');
       blocks.push(`
         <details class="workspace-task-result-artifact-disclosure"${result ? '' : ' open'}>
           <summary class="workspace-task-result-artifact-summary">
@@ -6668,7 +7198,9 @@ export class WorkspaceTaskPage {
 
   renderLatestStorageStatus() {
     const sourceTask = this.getTaskResultStorageTask();
-    const history = Array.isArray(sourceTask?.execution_history) ? sourceTask.execution_history : [];
+    const history = Array.isArray(sourceTask?.execution_history)
+      ? sourceTask.execution_history
+      : [];
     const latest = history.length > 0 ? history[history.length - 1] : null;
     const validation = latest?.validation_result || latest?.validation || null;
     const label = this.getValidationStatusLabel(validation);
@@ -6682,15 +7214,25 @@ export class WorkspaceTaskPage {
   }
 
   getValidationStatusLabel(validation) {
-    const validationStatus = String(validation?.validation_status || '').trim().toLowerCase();
-    const storageStatus = String(validation?.storage_status || '').trim().toLowerCase();
+    const validationStatus = String(validation?.validation_status || '')
+      .trim()
+      .toLowerCase();
+    const storageStatus = String(validation?.storage_status || '')
+      .trim()
+      .toLowerCase();
     if (!validationStatus || validationStatus === 'not_applicable') return '';
     if (validationStatus === 'dismissed') return 'Dismissed';
-    if (validationStatus === 'manually_approved' || storageStatus === 'manually_appended') return 'Manually Approved';
-    if (validationStatus === 'needs_review' || storageStatus === 'skipped_invalid') return 'Needs Review';
-    if (validationStatus === 'passed' && (storageStatus === 'saved' || storageStatus === 'appended')) return 'Saved';
+    if (validationStatus === 'manually_approved' || storageStatus === 'manually_appended')
+      return 'Manually Approved';
+    if (validationStatus === 'needs_review' || storageStatus === 'skipped_invalid')
+      return 'Needs Review';
+    if (
+      validationStatus === 'passed' &&
+      (storageStatus === 'saved' || storageStatus === 'appended')
+    )
+      return 'Saved';
     if (validationStatus === 'passed') return 'Validated';
-    return validationStatus.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+    return validationStatus.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
   }
 
   getNeedsReviewEntries(task = this.getTaskResultStorageTask()) {
@@ -6699,37 +7241,47 @@ export class WorkspaceTaskPage {
       .map((entry, index) => ({ entry, index }))
       .filter(({ entry }) => {
         const validation = entry?.validation_result || entry?.validation || null;
-        return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+        return (
+          String(validation?.validation_status || '')
+            .trim()
+            .toLowerCase() === 'needs_review'
+        );
       });
   }
 
   getReviewContractColumns(task = this.getTaskResultStorageTask(), validation = null) {
     const columns =
-      (Array.isArray(validation?.output_spec_snapshot?.contract?.columns) ? validation.output_spec_snapshot.contract.columns : null) ||
-      (Array.isArray(task?.output_spec?.contract?.columns) ? task.output_spec.contract.columns : null) ||
+      (Array.isArray(validation?.output_spec_snapshot?.contract?.columns)
+        ? validation.output_spec_snapshot.contract.columns
+        : null) ||
+      (Array.isArray(task?.output_spec?.contract?.columns)
+        ? task.output_spec.contract.columns
+        : null) ||
       (Array.isArray(task?.output_contract?.columns) ? task.output_contract.columns : []);
     return columns
-      .map((column) => ({
+      .map(column => ({
         name: String(column?.name || '').trim(),
         type: String(column?.type || 'string').trim() || 'string',
         required: column?.required !== false,
         description: String(column?.description || '').trim()
       }))
-      .filter((column) => column.name);
+      .filter(column => column.name);
   }
 
   getCaseInsensitiveValue(row, columnName) {
     if (!row || typeof row !== 'object') return '';
     if (Object.prototype.hasOwnProperty.call(row, columnName)) return row[columnName];
     const target = String(columnName || '').toLowerCase();
-    const key = Object.keys(row).find((candidate) => String(candidate || '').toLowerCase() === target);
+    const key = Object.keys(row).find(
+      candidate => String(candidate || '').toLowerCase() === target
+    );
     return key ? row[key] : '';
   }
 
   parseReviewDraftRow(rawOutput, columns = []) {
     const raw = String(rawOutput || '').trim();
     const emptyRow = {};
-    columns.forEach((column) => {
+    columns.forEach(column => {
       emptyRow[column.name] = '';
     });
     if (!raw || columns.length === 0) {
@@ -6749,7 +7301,7 @@ export class WorkspaceTaskPage {
         }
         if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
           const row = {};
-          columns.forEach((column) => {
+          columns.forEach(column => {
             const value = this.getCaseInsensitiveValue(candidate, column.name);
             row[column.name] = value === undefined || value === null ? '' : String(value);
           });
@@ -6762,14 +7314,14 @@ export class WorkspaceTaskPage {
 
     const records = parseDelimitedRecords(raw, ',');
     if (records.length >= 2) {
-      const header = records[0].map((value) => String(value || '').trim());
+      const header = records[0].map(value => String(value || '').trim());
       const values = records[1] || [];
       const rowByHeader = {};
       header.forEach((name, index) => {
         if (name) rowByHeader[name] = values[index] ?? '';
       });
       const row = {};
-      columns.forEach((column) => {
+      columns.forEach(column => {
         row[column.name] = this.getCaseInsensitiveValue(rowByHeader, column.name);
       });
       return { row, parsed: true };
@@ -6783,10 +7335,14 @@ export class WorkspaceTaskPage {
     const { row } = this.parseReviewDraftRow(rawOutput, columns);
     const rawLabel = outputFormat === 'json' ? 'Raw JSON' : 'Raw CSV';
     const headerHtml = columns
-      .map((column) => `<th scope="col">${this.escapeHtml(column.name)}<small>${this.escapeHtml(column.type)}${column.required ? ' required' : ''}</small></th>`)
+      .map(
+        column =>
+          `<th scope="col">${this.escapeHtml(column.name)}<small>${this.escapeHtml(column.type)}${column.required ? ' required' : ''}</small></th>`
+      )
       .join('');
     const rowHtml = columns
-      .map((column) => `
+      .map(
+        column => `
         <td>
           <input
             type="text"
@@ -6796,7 +7352,8 @@ export class WorkspaceTaskPage {
             aria-label="${this.escapeHtml(column.name)}"
           >
         </td>
-      `)
+      `
+      )
       .join('');
 
     return `
@@ -6823,30 +7380,56 @@ export class WorkspaceTaskPage {
     const latest = entries[entries.length - 1];
     const validation = latest.entry?.validation_result || latest.entry?.validation || {};
     const errors = Array.isArray(validation.errors) ? validation.errors : [];
-    const errorList = errors.length > 0
-      ? errors.map((error) => {
-        const expected = Array.isArray(error?.expected) && error.expected.length ? ` Expected: ${error.expected.join(', ')}.` : '';
-        const actual = Array.isArray(error?.actual) && error.actual.length ? ` Actual: ${error.actual.join(', ')}.` : '';
-        return `<li>${this.escapeHtml(`${error?.message || error?.code || 'Validation failed'}${expected}${actual}`)}</li>`;
-      }).join('')
-      : '<li>Result did not match the output contract.</li>';
-    const rawOutput = String(latest.entry?.result || latest.entry?.summary || this.task?.result || '').trim();
-    const normalizedRow = validation?.normalized_row && typeof validation.normalized_row === 'object' ? validation.normalized_row : null;
+    const errorList =
+      errors.length > 0
+        ? errors
+            .map(error => {
+              const expected =
+                Array.isArray(error?.expected) && error.expected.length
+                  ? ` Expected: ${error.expected.join(', ')}.`
+                  : '';
+              const actual =
+                Array.isArray(error?.actual) && error.actual.length
+                  ? ` Actual: ${error.actual.join(', ')}.`
+                  : '';
+              return `<li>${this.escapeHtml(`${error?.message || error?.code || 'Validation failed'}${expected}${actual}`)}</li>`;
+            })
+            .join('')
+        : '<li>Result did not match the output contract.</li>';
+    const rawOutput = String(
+      latest.entry?.result || latest.entry?.summary || this.task?.result || ''
+    ).trim();
+    const normalizedRow =
+      validation?.normalized_row && typeof validation.normalized_row === 'object'
+        ? validation.normalized_row
+        : null;
     const reviewDraft = normalizedRow ? JSON.stringify(normalizedRow, null, 2) : rawOutput;
     const sourceTaskId = String(sourceTask?.id || this.taskId || '').trim();
     const outputSpecSnapshot = validation?.output_spec_snapshot || sourceTask?.output_spec || null;
     const contractColumns = this.getReviewContractColumns(sourceTask, validation);
-    const reviewColumns = outputSpecSnapshot ? this.getOutputSpecSchemaFields(outputSpecSnapshot) : contractColumns;
-    const contractColumnNames = contractColumns.map((column) => column.name);
-    const tableEditor = this.renderReviewTableEditor(reviewDraft, reviewColumns, outputSpecSnapshot ? 'json' : 'csv');
+    const reviewColumns = outputSpecSnapshot
+      ? this.getOutputSpecSchemaFields(outputSpecSnapshot)
+      : contractColumns;
+    const contractColumnNames = contractColumns.map(column => column.name);
+    const tableEditor = this.renderReviewTableEditor(
+      reviewDraft,
+      reviewColumns,
+      outputSpecSnapshot ? 'json' : 'csv'
+    );
     const rawHidden = tableEditor ? ' hidden' : '';
-    const currentContractVersion = String(sourceTask?.output_spec?.version || sourceTask?.output_contract?.version || '').trim();
+    const currentContractVersion = String(
+      sourceTask?.output_spec?.version || sourceTask?.output_contract?.version || ''
+    ).trim();
     const runContractVersion = String(validation?.contract_version || '').trim();
-    const contractMismatchWarning = currentContractVersion && runContractVersion && currentContractVersion !== runContractVersion
-      ? `<div class="workspace-task-review-warning">This run used contract ${this.escapeHtml(runContractVersion)}. The task now uses ${this.escapeHtml(currentContractVersion)}, so re-running may be cleaner than approving the old output.</div>`
-      : '';
-    const headerMismatch = errors.find((error) => String(error?.code || '') === 'csv_header_mismatch');
-    const headerMismatchHtml = headerMismatch ? `
+    const contractMismatchWarning =
+      currentContractVersion && runContractVersion && currentContractVersion !== runContractVersion
+        ? `<div class="workspace-task-review-warning">This run used contract ${this.escapeHtml(runContractVersion)}. The task now uses ${this.escapeHtml(currentContractVersion)}, so re-running may be cleaner than approving the old output.</div>`
+        : '';
+    const headerMismatch = errors.find(
+      error => String(error?.code || '') === 'csv_header_mismatch'
+    );
+    const headerMismatchHtml = headerMismatch
+      ? `
       <div class="workspace-task-review-reconcile">
         <div>
           <strong>Destination CSV uses different columns</strong>
@@ -6861,12 +7444,15 @@ export class WorkspaceTaskPage {
           <button type="button" class="modern-btn modern-btn-secondary" data-action="edit-append-storage">Change destination</button>
           <button type="button" class="modern-btn modern-btn-secondary" data-action="design-output-columns-from-result">Edit format</button>
         </div>
-      </div>` : '';
-    const normalizedPreviewHtml = normalizedRow ? `
+      </div>`
+      : '';
+    const normalizedPreviewHtml = normalizedRow
+      ? `
       <details class="workspace-task-review-normalized" open>
         <summary>Normalized row</summary>
         <pre>${this.escapeHtml(JSON.stringify(normalizedRow, null, 2))}</pre>
-      </details>` : '';
+      </details>`
+      : '';
     const repairStatus = String(validation?.repair_status || '').trim();
     const storageStatus = String(validation?.storage_status || '').trim();
 
@@ -6905,16 +7491,16 @@ export class WorkspaceTaskPage {
   }
 
   bindOutputReviewActions() {
-    this.elements.output?.querySelectorAll('[data-review-view-toggle]').forEach((button) => {
+    this.elements.output?.querySelectorAll('[data-review-view-toggle]').forEach(button => {
       button.addEventListener('click', () => this.setReviewEditorMode(button));
     });
-    this.elements.output?.querySelectorAll('[data-review-table-input]').forEach((input) => {
+    this.elements.output?.querySelectorAll('[data-review-table-input]').forEach(input => {
       input.addEventListener('input', () => {
         const panel = input.closest('[data-review-task-id]');
         this.syncReviewRawFromTable(panel);
       });
     });
-    this.elements.output?.querySelectorAll('[data-review-action]').forEach((button) => {
+    this.elements.output?.querySelectorAll('[data-review-action]').forEach(button => {
       button.addEventListener('click', () => this.handleOutputReviewAction(button));
     });
   }
@@ -6934,7 +7520,7 @@ export class WorkspaceTaskPage {
       if (tablePane) tablePane.hidden = true;
       if (rawPane) rawPane.hidden = false;
     }
-    panel.querySelectorAll('[data-review-view-toggle]').forEach((tab) => {
+    panel.querySelectorAll('[data-review-view-toggle]').forEach(tab => {
       tab.classList.toggle('is-active', tab === button);
     });
   }
@@ -6945,13 +7531,15 @@ export class WorkspaceTaskPage {
     if (inputs.length === 0) return panel.querySelector('[data-review-draft]')?.value || '';
     const row = {};
     const columns = [];
-    inputs.forEach((input) => {
+    inputs.forEach(input => {
       const column = input.getAttribute('data-review-column') || '';
       if (!column) return;
       columns.push(column);
       row[column] = input.value || '';
     });
-    const format = panel.querySelector('[data-review-table-pane]')?.getAttribute('data-review-output-format') || 'csv';
+    const format =
+      panel.querySelector('[data-review-table-pane]')?.getAttribute('data-review-output-format') ||
+      'csv';
     const csv = format === 'json' ? JSON.stringify(row, null, 2) : rowsToCSV(columns, [row]);
     const textarea = panel.querySelector('[data-review-draft]');
     if (textarea) textarea.value = csv;
@@ -6962,15 +7550,17 @@ export class WorkspaceTaskPage {
     if (!panel) return false;
     const inputs = Array.from(panel.querySelectorAll('[data-review-table-input]'));
     if (inputs.length === 0) return false;
-    const columns = inputs.map((input) => ({
-      name: input.getAttribute('data-review-column') || '',
-      type: 'string',
-      required: false
-    })).filter((column) => column.name);
+    const columns = inputs
+      .map(input => ({
+        name: input.getAttribute('data-review-column') || '',
+        type: 'string',
+        required: false
+      }))
+      .filter(column => column.name);
     const textarea = panel.querySelector('[data-review-draft]');
     const { row, parsed } = this.parseReviewDraftRow(textarea?.value || '', columns);
     if (!parsed) return false;
-    inputs.forEach((input) => {
+    inputs.forEach(input => {
       const column = input.getAttribute('data-review-column') || '';
       input.value = row[column] || '';
     });
@@ -6995,14 +7585,17 @@ export class WorkspaceTaskPage {
 
     if (action === 'rerun') {
       try {
-        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'rerun',
-            history_index: historyIndex
-          })
-        });
+        const response = await fetch(
+          `/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'rerun',
+              history_index: historyIndex
+            })
+          }
+        );
         if (!response.ok) {
           const text = await response.text();
           throw new Error(text || 'Failed to re-run task');
@@ -7019,18 +7612,25 @@ export class WorkspaceTaskPage {
     if (action === 'retry_normalization') {
       button.disabled = true;
       try {
-        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'retry_normalization',
-            history_index: historyIndex
-          })
-        });
+        const response = await fetch(
+          `/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'retry_normalization',
+              history_index: historyIndex
+            })
+          }
+        );
         const payloadText = await response.text();
         let payload = null;
         if (payloadText) {
-          try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+          try {
+            payload = JSON.parse(payloadText);
+          } catch (_error) {
+            payload = null;
+          }
         }
         if (!response.ok) {
           throw new Error(payload?.message || payloadText || 'Failed to retry normalization');
@@ -7039,10 +7639,15 @@ export class WorkspaceTaskPage {
         const updatedEntry = Array.isArray(updatedTask?.execution_history)
           ? updatedTask.execution_history[historyIndex]
           : null;
-        const status = String(updatedEntry?.validation_result?.validation_status || '').trim().toLowerCase();
-        this.notify(status === 'needs_review' ? 'warning' : 'success', status === 'needs_review'
-          ? 'Normalization retried; review is still needed.'
-          : 'Normalization retried and stored.');
+        const status = String(updatedEntry?.validation_result?.validation_status || '')
+          .trim()
+          .toLowerCase();
+        this.notify(
+          status === 'needs_review' ? 'warning' : 'success',
+          status === 'needs_review'
+            ? 'Normalization retried; review is still needed.'
+            : 'Normalization retried and stored.'
+        );
         await this.loadData();
       } catch (error) {
         console.error('Failed to retry normalization:', error);
@@ -7059,26 +7664,36 @@ export class WorkspaceTaskPage {
       // known fields, via the assistant for the rest) and append it.
       button.disabled = true;
       try {
-        const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'reproject_to_destination',
-            history_index: historyIndex
-          })
-        });
+        const response = await fetch(
+          `/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'reproject_to_destination',
+              history_index: historyIndex
+            })
+          }
+        );
         const payloadText = await response.text();
         let payload = null;
         if (payloadText) {
-          try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+          try {
+            payload = JSON.parse(payloadText);
+          } catch (_error) {
+            payload = null;
+          }
         }
         if (!response.ok) {
           throw new Error(payload?.message || payloadText || 'Failed to reorganize result');
         }
         const stored = Boolean(payload?.stored);
-        this.notify(stored ? 'success' : 'warning', stored
-          ? 'Reorganized to match the destination and saved.'
-          : 'Reorganized, but the row still needs review.');
+        this.notify(
+          stored ? 'success' : 'warning',
+          stored
+            ? 'Reorganized to match the destination and saved.'
+            : 'Reorganized, but the row still needs review.'
+        );
         await this.loadData();
       } catch (error) {
         console.error('Failed to reorganize result:', error);
@@ -7098,23 +7713,33 @@ export class WorkspaceTaskPage {
 
     button.disabled = true;
     try {
-      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          history_index: historyIndex,
-          result: draft
-        })
-      });
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(taskId)}/review`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            history_index: historyIndex,
+            result: draft
+          })
+        }
+      );
       const payloadText = await response.text();
       let payload = null;
       if (payloadText) {
-        try { payload = JSON.parse(payloadText); } catch (_error) { payload = null; }
+        try {
+          payload = JSON.parse(payloadText);
+        } catch (_error) {
+          payload = null;
+        }
       }
       if (!response.ok) {
         const validationErrors = Array.isArray(payload?.validation_result?.errors)
-          ? payload.validation_result.errors.map((error) => error?.message || error?.code).filter(Boolean).join(' ')
+          ? payload.validation_result.errors
+              .map(error => error?.message || error?.code)
+              .filter(Boolean)
+              .join(' ')
           : '';
         throw new Error(validationErrors || payload?.message || payloadText || `${label} failed`);
       }
@@ -7122,12 +7747,17 @@ export class WorkspaceTaskPage {
       const updatedEntry = Array.isArray(updatedTask?.execution_history)
         ? updatedTask.execution_history[historyIndex]
         : null;
-      const status = String(updatedEntry?.validation_result?.validation_status || '').trim().toLowerCase();
-      this.notify(status === 'needs_review' ? 'warning' : 'success', action === 'dismiss'
-        ? 'Review dismissed'
-        : status === 'needs_review'
-          ? 'Append blocked; review is still needed.'
-          : 'Approved result appended');
+      const status = String(updatedEntry?.validation_result?.validation_status || '')
+        .trim()
+        .toLowerCase();
+      this.notify(
+        status === 'needs_review' ? 'warning' : 'success',
+        action === 'dismiss'
+          ? 'Review dismissed'
+          : status === 'needs_review'
+            ? 'Append blocked; review is still needed.'
+            : 'Approved result appended'
+      );
       await this.loadData();
     } catch (error) {
       console.error('Failed to resolve output review:', error);
@@ -7152,7 +7782,8 @@ export class WorkspaceTaskPage {
             ? 'Saved'
             : 'Save as Note';
       }
-      this.elements.outputSaveNoteBtn.disabled = !canSaveNote || this.resultNoteSaving || Boolean(this.savedResultNote);
+      this.elements.outputSaveNoteBtn.disabled =
+        !canSaveNote || this.resultNoteSaving || Boolean(this.savedResultNote);
       this.elements.outputSaveNoteBtn.classList.toggle('is-saved', Boolean(this.savedResultNote));
     }
 
@@ -7167,7 +7798,8 @@ export class WorkspaceTaskPage {
             : 'Create Skill';
       }
       this.elements.outputCreateSkillBtn.hidden = !canCreateSkill;
-      this.elements.outputCreateSkillBtn.disabled = !canCreateSkill || this.skillDraftGenerating || this.skillDraftSubmitting;
+      this.elements.outputCreateSkillBtn.disabled =
+        !canCreateSkill || this.skillDraftGenerating || this.skillDraftSubmitting;
     }
 
     if (this.elements.outputPromoteBtn) {
@@ -7188,11 +7820,18 @@ export class WorkspaceTaskPage {
 
   canPromoteResultToWorkflow(task = this.task) {
     if (!task || typeof task !== 'object') return false;
-    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (
+      String(task.status || '')
+        .trim()
+        .toLowerCase() !== 'completed'
+    )
+      return false;
     if (!normalizeResultText(task.result).trim()) return false;
     if (String(task.error || '').trim()) return false;
 
-    const resultType = String(task.result_type || '').trim().toLowerCase();
+    const resultType = String(task.result_type || '')
+      .trim()
+      .toLowerCase();
     if (resultType === 'task_list') return true;
 
     const structuredResult = task.structured_result;
@@ -7200,7 +7839,7 @@ export class WorkspaceTaskPage {
       structuredResult &&
       typeof structuredResult === 'object' &&
       Array.isArray(structuredResult.groups) &&
-      structuredResult.groups.some((group) => Array.isArray(group?.items) && group.items.length > 0)
+      structuredResult.groups.some(group => Array.isArray(group?.items) && group.items.length > 0)
     ) {
       return true;
     }
@@ -7210,9 +7849,10 @@ export class WorkspaceTaskPage {
 
   countTaskListItems(taskList) {
     if (!taskList || !Array.isArray(taskList.groups)) return 0;
-    return taskList.groups.reduce((count, group) => (
-      count + (Array.isArray(group?.items) ? group.items.length : 0)
-    ), 0);
+    return taskList.groups.reduce(
+      (count, group) => count + (Array.isArray(group?.items) ? group.items.length : 0),
+      0
+    );
   }
 
   formatTaskListGroupPreviewTitle(title, groupIndex) {
@@ -7249,7 +7889,9 @@ export class WorkspaceTaskPage {
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.error || payload?.message || 'This result is not a task list yet.');
+        throw new Error(
+          payload?.error || payload?.message || 'This result is not a task list yet.'
+        );
       }
 
       const taskList = payload?.task_list;
@@ -7283,7 +7925,9 @@ export class WorkspaceTaskPage {
     this.resultPromotionSubmitting = Boolean(isSubmitting);
     if (this.elements.resultPromoteSubmitBtn) {
       this.elements.resultPromoteSubmitBtn.disabled = this.resultPromotionSubmitting;
-      this.elements.resultPromoteSubmitBtn.textContent = this.resultPromotionSubmitting ? 'Creating...' : 'Create';
+      this.elements.resultPromoteSubmitBtn.textContent = this.resultPromotionSubmitting
+        ? 'Creating...'
+        : 'Create';
     }
     this.updateResultActionButtons(this.getCurrentResultText(), true);
   }
@@ -7305,14 +7949,16 @@ export class WorkspaceTaskPage {
     this.elements.resultPromoteMeta.textContent = `${itemCount} subtask${itemCount === 1 ? '' : 's'}`;
 
     const groups = Array.isArray(taskList.groups) ? taskList.groups : [];
-    this.elements.resultPromoteGroups.innerHTML = groups.map((group, groupIndex) => {
-      const title = String(group?.title || `Group ${groupIndex + 1}`).trim();
-      const displayTitle = this.formatTaskListGroupPreviewTitle(title, groupIndex);
-      const items = Array.isArray(group?.items) ? group.items : [];
-      const itemMarkup = items.map((item, itemIndex) => {
-        const itemTitle = String(item?.title || '').trim();
-        const assignee = String(item?.assignee || '').trim();
-        return `
+    this.elements.resultPromoteGroups.innerHTML = groups
+      .map((group, groupIndex) => {
+        const title = String(group?.title || `Group ${groupIndex + 1}`).trim();
+        const displayTitle = this.formatTaskListGroupPreviewTitle(title, groupIndex);
+        const items = Array.isArray(group?.items) ? group.items : [];
+        const itemMarkup = items
+          .map((item, itemIndex) => {
+            const itemTitle = String(item?.title || '').trim();
+            const assignee = String(item?.assignee || '').trim();
+            return `
           <label class="workspace-task-result-promote-item">
             <span class="workspace-task-result-promote-index">${groupIndex + 1}.${itemIndex + 1}</span>
             <input type="text"
@@ -7323,15 +7969,17 @@ export class WorkspaceTaskPage {
             ${assignee ? `<span class="workspace-task-result-promote-assignee">@${this.escapeHtml(assignee)}</span>` : ''}
           </label>
         `;
-      }).join('');
+          })
+          .join('');
 
-      return `
+        return `
         <section class="workspace-task-result-promote-group">
           <div class="workspace-task-result-promote-group-title">${this.escapeHtml(displayTitle)}</div>
           <div class="workspace-task-result-promote-items">${itemMarkup}</div>
         </section>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   collectResultPromotionDraft() {
@@ -7339,14 +7987,16 @@ export class WorkspaceTaskPage {
     if (!draft) return null;
 
     draft.parent_title = String(this.elements.resultPromoteTitleInput?.value || '').trim();
-    this.elements.resultPromoteGroups?.querySelectorAll('[data-group-index][data-item-index]').forEach((input) => {
-      const groupIndex = Number(input.getAttribute('data-group-index'));
-      const itemIndex = Number(input.getAttribute('data-item-index'));
-      if (!Number.isInteger(groupIndex) || !Number.isInteger(itemIndex)) return;
-      const item = draft.groups?.[groupIndex]?.items?.[itemIndex];
-      if (!item) return;
-      item.title = String(input.value || '').trim();
-    });
+    this.elements.resultPromoteGroups
+      ?.querySelectorAll('[data-group-index][data-item-index]')
+      .forEach(input => {
+        const groupIndex = Number(input.getAttribute('data-group-index'));
+        const itemIndex = Number(input.getAttribute('data-item-index'));
+        if (!Number.isInteger(groupIndex) || !Number.isInteger(itemIndex)) return;
+        const item = draft.groups?.[groupIndex]?.items?.[itemIndex];
+        if (!item) return;
+        item.title = String(input.value || '').trim();
+      });
 
     return draft;
   }
@@ -7394,7 +8044,10 @@ export class WorkspaceTaskPage {
       }
 
       const subtaskCount = this.countTaskListItems(taskList);
-      this.notify('success', `Created workflow task with ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`);
+      this.notify(
+        'success',
+        `Created workflow task with ${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`
+      );
 
       if (this.elements.resultPromoteModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.resultPromoteModal)?.hide();
@@ -7448,11 +8101,10 @@ export class WorkspaceTaskPage {
     return this.getCurrentResultText() || String(this.task?.error || '').trim();
   }
 
-
   buildResultNoteTitle(resultText) {
     const heading = String(resultText || '')
       .split(/\r?\n/)
-      .map((line) => {
+      .map(line => {
         const match = line.match(/^\s{0,3}#{1,3}\s+(.+?)\s*#*\s*$/);
         return match ? String(match[1] || '').trim() : '';
       })
@@ -7518,11 +8170,14 @@ export class WorkspaceTaskPage {
     this.updateResultActionButtons(resultText, true);
 
     try {
-      const response = await fetch(`/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: title, content })
-      });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/notes`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: title, content })
+        }
+      );
 
       if (!response.ok) {
         const text = await response.text();
@@ -7548,7 +8203,11 @@ export class WorkspaceTaskPage {
     if (!id) return;
 
     const modalEl = document.getElementById('noteEditorModal');
-    if (modalEl && window.sessionManager && typeof window.sessionManager.openNoteEditor === 'function') {
+    if (
+      modalEl &&
+      window.sessionManager &&
+      typeof window.sessionManager.openNoteEditor === 'function'
+    ) {
       try {
         await window.sessionManager.openNoteEditor(id);
         return;
@@ -7618,10 +8277,12 @@ export class WorkspaceTaskPage {
     });
 
     const subtasks = limitedSteps.map((step, index) => {
-      const dependsOn = Array.isArray(step?.depends_on) ? step.depends_on.map((value) => String(value || '').trim()).filter(Boolean) : [];
+      const dependsOn = Array.isArray(step?.depends_on)
+        ? step.depends_on.map(value => String(value || '').trim()).filter(Boolean)
+        : [];
       const inputTaskIds = [];
 
-      dependsOn.forEach((stepId) => {
+      dependsOn.forEach(stepId => {
         const ref = stepRefById.get(stepId);
         if (ref && !inputTaskIds.includes(ref)) {
           inputTaskIds.push(ref);
@@ -7645,9 +8306,14 @@ export class WorkspaceTaskPage {
       }
 
       return {
-        description: trimResultWorkflowLabel(step?.title || step?.description || `Step ${index + 1}`, 180) || `Step ${index + 1}`,
+        description:
+          trimResultWorkflowLabel(step?.title || step?.description || `Step ${index + 1}`, 180) ||
+          `Step ${index + 1}`,
         details: detailParts.join('\n'),
-        assignmentValue: this.buildAssignmentValueForAgentName(step?.agent_name, fallbackAssignmentValue),
+        assignmentValue: this.buildAssignmentValueForAgentName(
+          step?.agent_name,
+          fallbackAssignmentValue
+        ),
         inputTaskIds
       };
     });
@@ -7661,14 +8327,19 @@ export class WorkspaceTaskPage {
     }
     detailParts.push('Review the generated steps, assignments, and dependencies before saving.');
     if (steps.length > RESULT_WORKFLOW_MAX_SUBTASKS) {
-      detailParts.push(`${steps.length - RESULT_WORKFLOW_MAX_SUBTASKS} additional parsed step${steps.length - RESULT_WORKFLOW_MAX_SUBTASKS === 1 ? '' : 's'} were omitted from the draft.`);
+      detailParts.push(
+        `${steps.length - RESULT_WORKFLOW_MAX_SUBTASKS} additional parsed step${steps.length - RESULT_WORKFLOW_MAX_SUBTASKS === 1 ? '' : 's'} were omitted from the draft.`
+      );
     }
 
     return {
       title: buildResultWorkflowDraftTitle(parsed?.title || this.getTaskDisplayLabel()),
       details: detailParts.filter(Boolean).join('\n'),
       priority: Number.isInteger(parsed?.priority) ? parsed.priority : 3,
-      assignmentValue: this.buildAssignmentValueForAgentName(parsed?.agent_name, fallbackAssignmentValue),
+      assignmentValue: this.buildAssignmentValueForAgentName(
+        parsed?.agent_name,
+        fallbackAssignmentValue
+      ),
       subtasks
     };
   }
@@ -7687,7 +8358,10 @@ export class WorkspaceTaskPage {
     }
 
     try {
-      const autoParsedDraft = await this.buildWorkflowDraftFromAutoParse(resultText, fallbackAssignmentValue);
+      const autoParsedDraft = await this.buildWorkflowDraftFromAutoParse(
+        resultText,
+        fallbackAssignmentValue
+      );
       if (autoParsedDraft && autoParsedDraft.subtasks.length > 0) {
         return autoParsedDraft;
       }
@@ -7743,7 +8417,8 @@ export class WorkspaceTaskPage {
         const description = String(subtask?.description || '').trim() || `Step ${index + 1}`;
         const details = String(subtask?.details || '').trim();
         const agentFromDraft = this.agentNameFromAssignmentValue(subtask?.assignmentValue);
-        const to = agentFromDraft || (fallbackAgent && fallbackAgent !== 'unassigned' ? fallbackAgent : '');
+        const to =
+          agentFromDraft || (fallbackAgent && fallbackAgent !== 'unassigned' ? fallbackAgent : '');
         return {
           id: this._generateClientTaskId(),
           description,
@@ -7769,13 +8444,17 @@ export class WorkspaceTaskPage {
       }
 
       const createdCount = subtaskPayloads.length;
-      this.notify('success', `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this task.`);
+      this.notify(
+        'success',
+        `Added ${createdCount} step${createdCount === 1 ? '' : 's'} to this task.`
+      );
       await this.refreshAfterStepChange();
     } catch (error) {
       console.error('Failed to generate steps from result:', error);
-      const summary = Array.isArray(error?.issues) && error.issues.length > 0
-        ? error.issues[0]?.message || error.message
-        : error?.message;
+      const summary =
+        Array.isArray(error?.issues) && error.issues.length > 0
+          ? error.issues[0]?.message || error.message
+          : error?.message;
       this.notify('error', summary || 'Failed to generate steps');
     } finally {
       this.workflowDraftPending = false;
@@ -7791,7 +8470,10 @@ export class WorkspaceTaskPage {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
     }
-    const part = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    const part = () =>
+      Math.floor(Math.random() * 0xffffffff)
+        .toString(16)
+        .padStart(8, '0');
     return `${part()}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part()}${part().slice(0, 4)}`;
   }
 
@@ -7801,10 +8483,18 @@ export class WorkspaceTaskPage {
    */
   async _parseGraphError(response, fallbackMessage) {
     let body = '';
-    try { body = await response.text(); } catch (_e) { body = ''; }
+    try {
+      body = await response.text();
+    } catch (_e) {
+      body = '';
+    }
     let parsed = null;
     if (body) {
-      try { parsed = JSON.parse(body); } catch (_e) { parsed = null; }
+      try {
+        parsed = JSON.parse(body);
+      } catch (_e) {
+        parsed = null;
+      }
     }
     const message = (parsed && (parsed.error || parsed.message)) || body || fallbackMessage;
     const err = new Error(message || fallbackMessage);
@@ -7838,14 +8528,18 @@ export class WorkspaceTaskPage {
     this.setScheduleError('');
 
     if (this.elements.scheduleModalHeading) {
-      this.elements.scheduleModalHeading.textContent = hasSchedule ? 'Edit Repeat Schedule' : 'Repeat Task';
+      this.elements.scheduleModalHeading.textContent = hasSchedule
+        ? 'Edit Repeat Schedule'
+        : 'Repeat Task';
     }
     if (this.elements.scheduleModalMeta) {
       const taskLabel = summarizeText(this.getTaskDisplayLabel(), 90);
       this.elements.scheduleModalMeta.textContent = `Runs "${taskLabel}" again on a schedule. The task keeps its history and latest output updates after each run.`;
     }
     if (this.elements.scheduleEnabledInput) {
-      this.elements.scheduleEnabledInput.checked = hasSchedule ? Boolean(this.task?.schedule_enabled) : true;
+      this.elements.scheduleEnabledInput.checked = hasSchedule
+        ? Boolean(this.task?.schedule_enabled)
+        : true;
     }
     if (this.elements.scheduleNameInput) {
       this.elements.scheduleNameInput.value = this.task?.schedule_name || '';
@@ -7855,18 +8549,18 @@ export class WorkspaceTaskPage {
     }
     if (this.elements.scheduleTimeInput) {
       this.elements.scheduleTimeInput.value =
-        weekdayCron?.time ||
-        schedule?.time ||
-        schedule?.time_of_day ||
-        '09:00';
+        weekdayCron?.time || schedule?.time || schedule?.time_of_day || '09:00';
     }
     if (this.elements.scheduleDayInput) {
       const day = Number(schedule?.day_of_week);
-      this.elements.scheduleDayInput.value = Number.isInteger(day) && day >= 0 && day <= 6 ? String(day) : '1';
+      this.elements.scheduleDayInput.value =
+        Number.isInteger(day) && day >= 0 && day <= 6 ? String(day) : '1';
     }
     this.populateScheduleIntervalFields(this.getScheduleIntervalMinutes(schedule) || 60);
     if (this.elements.scheduleOnceInput) {
-      this.elements.scheduleOnceInput.value = this.formatLocalDatetimeInput(schedule?.run_at || schedule?.execute_at || '');
+      this.elements.scheduleOnceInput.value = this.formatLocalDatetimeInput(
+        schedule?.run_at || schedule?.execute_at || ''
+      );
     }
     if (this.elements.scheduleCronInput) {
       this.elements.scheduleCronInput.value = schedule?.cron_expr || '0 9 * * *';
@@ -7881,7 +8575,8 @@ export class WorkspaceTaskPage {
       this.elements.scheduleWakeLeadInput.value = String(this.task?.wake_lead_minutes || 5);
     }
     if (this.elements.scheduleWakeFallbackInput) {
-      this.elements.scheduleWakeFallbackInput.value = this.task?.wake_fallback_policy || 'run_on_next_wake';
+      this.elements.scheduleWakeFallbackInput.value =
+        this.task?.wake_fallback_policy || 'run_on_next_wake';
     }
     if (this.elements.scheduleRemoveBtn) {
       this.elements.scheduleRemoveBtn.hidden = !hasSchedule;
@@ -7896,11 +8591,13 @@ export class WorkspaceTaskPage {
 
     if (this.elements.scheduleTimeField) this.elements.scheduleTimeField.hidden = !showTime;
     if (this.elements.scheduleDayField) this.elements.scheduleDayField.hidden = type !== 'weekly';
-    if (this.elements.scheduleIntervalField) this.elements.scheduleIntervalField.hidden = type !== 'interval';
+    if (this.elements.scheduleIntervalField)
+      this.elements.scheduleIntervalField.hidden = type !== 'interval';
     if (this.elements.scheduleOnceField) this.elements.scheduleOnceField.hidden = type !== 'once';
     if (this.elements.scheduleCronField) this.elements.scheduleCronField.hidden = type !== 'cron';
     if (this.elements.scheduleTimeLabel) {
-      this.elements.scheduleTimeLabel.textContent = type === 'weekdays' ? 'Weekday time' : 'Time of day';
+      this.elements.scheduleTimeLabel.textContent =
+        type === 'weekdays' ? 'Weekday time' : 'Time of day';
     }
     if (this.elements.scheduleWakeFields) {
       this.elements.scheduleWakeFields.hidden = !this.elements.scheduleWakeMacInput?.checked;
@@ -7928,7 +8625,8 @@ export class WorkspaceTaskPage {
         ? `This existing task will run ${summary}. ${sleepText}.${wakeText}`.trim()
         : `This schedule is paused. Ori will keep "${summary}" saved, but it will not run again until re-enabled.`;
     } catch (_error) {
-      this.elements.schedulePreview.textContent = 'Complete the schedule fields to preview the run cadence.';
+      this.elements.schedulePreview.textContent =
+        'Complete the schedule fields to preview the run cadence.';
     }
   }
 
@@ -7938,10 +8636,15 @@ export class WorkspaceTaskPage {
     const scheduleName = String(this.elements.scheduleNameInput?.value || '').trim();
     const schedule = { type };
     const wakeMacEnabled = Boolean(this.elements.scheduleWakeMacInput?.checked);
-    const sleepPolicy = String(this.elements.scheduleSleepPolicyInput?.value || 'run_once_on_wake').trim();
-    const wakeFallbackPolicy = String(this.elements.scheduleWakeFallbackInput?.value || 'run_on_next_wake').trim();
+    const sleepPolicy = String(
+      this.elements.scheduleSleepPolicyInput?.value || 'run_once_on_wake'
+    ).trim();
+    const wakeFallbackPolicy = String(
+      this.elements.scheduleWakeFallbackInput?.value || 'run_on_next_wake'
+    ).trim();
     const rawWakeLead = Number.parseInt(this.elements.scheduleWakeLeadInput?.value || '5', 10);
-    const wakeLeadMinutes = Number.isFinite(rawWakeLead) && rawWakeLead > 0 ? Math.min(rawWakeLead, 120) : 5;
+    const wakeLeadMinutes =
+      Number.isFinite(rawWakeLead) && rawWakeLead > 0 ? Math.min(rawWakeLead, 120) : 5;
 
     const assignee = String(this.task?.to || '').trim();
     if (enabled && validate && (!assignee || assignee === 'unassigned')) {
@@ -7965,12 +8668,20 @@ export class WorkspaceTaskPage {
       case 'weekly':
         schedule.time = requireTime();
         schedule.day_of_week = Number.parseInt(this.elements.scheduleDayInput?.value || '1', 10);
-        if (validate && (Number.isNaN(schedule.day_of_week) || schedule.day_of_week < 0 || schedule.day_of_week > 6)) {
+        if (
+          validate &&
+          (Number.isNaN(schedule.day_of_week) ||
+            schedule.day_of_week < 0 ||
+            schedule.day_of_week > 6)
+        ) {
           throw new Error('Choose a valid weekday.');
         }
         break;
       case 'interval': {
-        const rawValue = Number.parseInt(this.elements.scheduleIntervalValueInput?.value || '1', 10);
+        const rawValue = Number.parseInt(
+          this.elements.scheduleIntervalValueInput?.value || '1',
+          10
+        );
         if (validate && (!Number.isFinite(rawValue) || rawValue < 1)) {
           throw new Error('Interval must be at least 1.');
         }
@@ -7991,7 +8702,9 @@ export class WorkspaceTaskPage {
         break;
       }
       case 'cron': {
-        const cronExpr = String(this.elements.scheduleCronInput?.value || '').replace(/\s+/g, ' ').trim();
+        const cronExpr = String(this.elements.scheduleCronInput?.value || '')
+          .replace(/\s+/g, ' ')
+          .trim();
         if (validate && cronExpr.split(' ').filter(Boolean).length !== 5) {
           throw new Error('Cron schedules must use 5 fields: minute hour day month weekday.');
         }
@@ -8061,11 +8774,14 @@ export class WorkspaceTaskPage {
     if (removeBtn) removeBtn.disabled = true;
 
     try {
-      await this.updateTaskFields({
-        schedule: null,
-        schedule_enabled: false,
-        schedule_name: ''
-      }, { deferRender: true });
+      await this.updateTaskFields(
+        {
+          schedule: null,
+          schedule_enabled: false,
+          schedule_name: ''
+        },
+        { deferRender: true }
+      );
       if (this.elements.scheduleModal && typeof bootstrap !== 'undefined') {
         bootstrap.Modal.getInstance(this.elements.scheduleModal)?.hide();
       }
@@ -8087,19 +8803,30 @@ export class WorkspaceTaskPage {
   }
 
   inferScheduleFormType(schedule) {
-    const type = String(schedule?.type || '').trim().toLowerCase();
+    const type = String(schedule?.type || '')
+      .trim()
+      .toLowerCase();
     if (type === 'cron' && this.parseWeekdayCron(schedule?.cron_expr || '')) return 'weekdays';
     if (['daily', 'weekly', 'interval', 'once', 'cron'].includes(type)) return type;
     return 'daily';
   }
 
   parseWeekdayCron(cronExpr) {
-    const match = String(cronExpr || '').trim().match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(?:1-5|mon-fri)$/i);
+    const match = String(cronExpr || '')
+      .trim()
+      .match(/^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+(?:1-5|mon-fri)$/i);
     if (!match) return null;
 
     const minute = Number.parseInt(match[1], 10);
     const hour = Number.parseInt(match[2], 10);
-    if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    if (
+      !Number.isInteger(hour) ||
+      !Number.isInteger(minute) ||
+      hour < 0 ||
+      hour > 23 ||
+      minute < 0 ||
+      minute > 59
+    ) {
       return null;
     }
 
@@ -8124,12 +8851,16 @@ export class WorkspaceTaskPage {
 
     const interval = schedule.interval;
     if (typeof interval === 'number' && Number.isFinite(interval) && interval > 0) {
-      return interval > 1000000 ? Math.max(1, Math.round(interval / 60000000000)) : Math.round(interval);
+      return interval > 1000000
+        ? Math.max(1, Math.round(interval / 60000000000))
+        : Math.round(interval);
     }
     if (typeof interval === 'string') {
       const numeric = Number.parseFloat(interval);
       if (Number.isFinite(numeric) && numeric > 0) {
-        return numeric > 1000000 ? Math.max(1, Math.round(numeric / 60000000000)) : Math.round(numeric);
+        return numeric > 1000000
+          ? Math.max(1, Math.round(numeric / 60000000000))
+          : Math.round(numeric);
       }
     }
     return 0;
@@ -8162,12 +8893,11 @@ export class WorkspaceTaskPage {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
 
-    const pad = (number) => String(number).padStart(2, '0');
-    return [
-      date.getFullYear(),
-      pad(date.getMonth() + 1),
-      pad(date.getDate())
-    ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const pad = number => String(number).padStart(2, '0');
+    return (
+      [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('-') +
+      `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+    );
   }
 
   formatTimeOfDay(value) {
@@ -8186,7 +8916,9 @@ export class WorkspaceTaskPage {
   }
 
   describeSchedule(schedule) {
-    const type = String(schedule?.type || '').trim().toLowerCase();
+    const type = String(schedule?.type || '')
+      .trim()
+      .toLowerCase();
     switch (type) {
       case 'daily':
         return `daily at ${this.formatTimeOfDay(schedule?.time || schedule?.time_of_day || '09:00')}`;
@@ -8207,7 +8939,9 @@ export class WorkspaceTaskPage {
   }
 
   describeSleepPolicy(policy) {
-    const normalized = String(policy || '').trim().toLowerCase();
+    const normalized = String(policy || '')
+      .trim()
+      .toLowerCase();
     switch (normalized) {
       case 'skip':
         return 'If Ori was asleep, missed runs will be skipped';
@@ -8242,12 +8976,22 @@ export class WorkspaceTaskPage {
     // contract, configured storage destination, or a declared output shape is
     // enough to surface it even when the task has never run on a cadence.
     const storageOwner = this.getTaskResultStorageTask();
-    const hasContract = Array.isArray(storageOwner?.output_contract?.columns) && storageOwner.output_contract.columns.length > 0;
+    const hasContract =
+      Array.isArray(storageOwner?.output_contract?.columns) &&
+      storageOwner.output_contract.columns.length > 0;
     const hasStorage = Boolean(storageOwner?.result_storage?.enabled);
     const editingColumns = Array.isArray(this.resultContractDraft);
     const hasStructuredOutput = this.hasStructuredOutputShape();
 
-    if (!hasSchedule && history.length === 0 && executionCount === 0 && !hasContract && !hasStorage && !editingColumns && !hasStructuredOutput) {
+    if (
+      !hasSchedule &&
+      history.length === 0 &&
+      executionCount === 0 &&
+      !hasContract &&
+      !hasStorage &&
+      !editingColumns &&
+      !hasStructuredOutput
+    ) {
       this.elements.scheduleCard.hidden = true;
       this.elements.schedule.innerHTML = '';
       this.renderAutomationSections();
@@ -8263,10 +9007,11 @@ export class WorkspaceTaskPage {
     // control in Advanced > storage remains the right entry point.
     if (this.elements.scheduleOpenFolderBtn) {
       const storage = storageOwner?.result_storage || null;
-      const usesDefaultOutputDir = Boolean(storage?.enabled)
-        && !String(storage.store_node_id || '').trim()
-        && String(storage.storage_target || '').trim() !== 'workspace_folder'
-        && !String(storage.file_path || '').trim();
+      const usesDefaultOutputDir =
+        Boolean(storage?.enabled) &&
+        !String(storage.store_node_id || '').trim() &&
+        String(storage.storage_target || '').trim() !== 'workspace_folder' &&
+        !String(storage.file_path || '').trim();
       this.elements.scheduleOpenFolderBtn.hidden = !usesDefaultOutputDir;
       const labelSpan = this.elements.scheduleOpenFolderBtn.querySelector('span');
       if (labelSpan) labelSpan.textContent = this.fileManagerActionLabel();
@@ -8290,18 +9035,25 @@ export class WorkspaceTaskPage {
     // storage destination) hasn't run on a cadence, so a "Total Runs: 0 /
     // Failures: 0" block would just be noise.
     const showStats = hasSchedule || executionCount > 0 || failureCount > 0 || history.length > 0;
-    const statsHtml = showStats ? `
+    const statsHtml = showStats
+      ? `
       <div class="workspace-task-schedule-stats">
-        ${stats.map((s) => `
+        ${stats
+          .map(
+            s => `
           <div class="workspace-task-schedule-stat">
             <div class="workspace-task-schedule-stat-label">${this.escapeHtml(s.label)}</div>
             <div class="workspace-task-schedule-stat-value">${this.escapeHtml(s.value)}</div>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
-    ` : '';
+    `
+      : '';
 
-    const bannerHtml = hasSchedule ? `
+    const bannerHtml = hasSchedule
+      ? `
       <div class="workspace-task-schedule-banner" data-state="${scheduleEnabled ? 'enabled' : 'paused'}">
         <div class="workspace-task-schedule-banner-icon">
           <i class="bi ${scheduleEnabled ? 'bi-calendar-check' : 'bi-pause-circle'}" aria-hidden="true"></i>
@@ -8315,7 +9067,8 @@ export class WorkspaceTaskPage {
           </div>
         </div>
       </div>
-    ` : '';
+    `
+      : '';
 
     // Recent runs: a compact history list collapsed by default so it doesn't
     // add density to the Overview. The full friendly history also lives in the
@@ -8327,40 +9080,51 @@ export class WorkspaceTaskPage {
         <details class="workspace-task-advanced workspace-task-schedule-history-disclosure">
           <summary class="workspace-task-advanced-summary">Recent runs</summary>
           <div class="workspace-task-schedule-history">
-            ${recentRuns.map((run, idx) => {
-              const runStatus = String(run?.status || 'completed').trim().toLowerCase();
-              const statusClass = getStatusClass(runStatus);
-              // TaskExecution carries executed_at; completed_at/started_at are
-              // legacy fallbacks for any older history shape that may still be
-              // sitting in the workspace store.
-              const ts = run?.executed_at || run?.completed_at || run?.started_at;
-              const durationMs = Number(run?.duration) || 0;
-              const durationLabel = durationMs > 0
-                ? (durationMs >= 1000 ? `${(durationMs / 1000).toFixed(1)}s` : `${durationMs}ms`)
-                : '';
-              const summary = String(run?.summary || run?.error || '').trim();
-              // Result is the full body (capped server-side at 16 KiB). Older
-              // history rows recorded before that field existed only have
-              // summary; treat that as a "no full result available" case.
-              const fullResult = String(run?.result || '').trim();
-              const hasExpandable = fullResult && fullResult !== summary;
-              const panelId = `workspace-task-schedule-run-panel-${idx}`;
-              return `
+            ${recentRuns
+              .map((run, idx) => {
+                const runStatus = String(run?.status || 'completed')
+                  .trim()
+                  .toLowerCase();
+                const statusClass = getStatusClass(runStatus);
+                // TaskExecution carries executed_at; completed_at/started_at are
+                // legacy fallbacks for any older history shape that may still be
+                // sitting in the workspace store.
+                const ts = run?.executed_at || run?.completed_at || run?.started_at;
+                const durationMs = Number(run?.duration) || 0;
+                const durationLabel =
+                  durationMs > 0
+                    ? durationMs >= 1000
+                      ? `${(durationMs / 1000).toFixed(1)}s`
+                      : `${durationMs}ms`
+                    : '';
+                const summary = String(run?.summary || run?.error || '').trim();
+                // Result is the full body (capped server-side at 16 KiB). Older
+                // history rows recorded before that field existed only have
+                // summary; treat that as a "no full result available" case.
+                const fullResult = String(run?.result || '').trim();
+                const hasExpandable = fullResult && fullResult !== summary;
+                const panelId = `workspace-task-schedule-run-panel-${idx}`;
+                return `
                 <div class="workspace-task-schedule-run">
                   <div class="workspace-task-schedule-run-row">
                     <span class="workspace-task-schedule-run-meta">${this.escapeHtml(formatDateTime(ts))}${durationLabel ? ` <span class="workspace-task-schedule-run-duration">· ${this.escapeHtml(durationLabel)}</span>` : ''}${summary ? `<div class="workspace-task-schedule-run-summary" title="${this.escapeHtml(summary)}">${this.escapeHtml(summary)}</div>` : ''}</span>
                     <div class="workspace-task-schedule-run-trail">
                       <span class="workspace-task-schedule-run-status" data-state="${this.escapeHtml(statusClass)}">${this.escapeHtml(getDisplayStatus(runStatus))}</span>
-                      ${hasExpandable ? `<button type="button" class="workspace-task-schedule-run-toggle" data-task-run-toggle aria-expanded="false" aria-controls="${panelId}" title="Show full result">
+                      ${
+                        hasExpandable
+                          ? `<button type="button" class="workspace-task-schedule-run-toggle" data-task-run-toggle aria-expanded="false" aria-controls="${panelId}" title="Show full result">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7,10L12,15L17,10H7Z"/></svg>
                         <span>Result</span>
-                      </button>` : ''}
+                      </button>`
+                          : ''
+                      }
                     </div>
                   </div>
                   ${hasExpandable ? `<div id="${panelId}" class="workspace-task-schedule-run-panel" hidden><pre class="workspace-task-schedule-run-result">${this.escapeHtml(fullResult)}</pre></div>` : ''}
                 </div>
               `;
-            }).join('')}
+              })
+              .join('')}
           </div>
         </details>
       `;
@@ -8371,8 +9135,8 @@ export class WorkspaceTaskPage {
 
     // Wire expand/collapse for run rows that captured a full result. The
     // chevron flips and the <pre> below toggles between hidden and visible.
-    this.elements.schedule.querySelectorAll('[data-task-run-toggle]').forEach((btn) => {
-      btn.addEventListener('click', (event) => {
+    this.elements.schedule.querySelectorAll('[data-task-run-toggle]').forEach(btn => {
+      btn.addEventListener('click', event => {
         event.stopPropagation();
         const panelId = btn.getAttribute('aria-controls');
         const panel = panelId ? document.getElementById(panelId) : null;
@@ -8385,7 +9149,6 @@ export class WorkspaceTaskPage {
       });
     });
   }
-
 
   // renderRunsCard owns the visibility + active-tab state of the merged
   // Runs/Trace card. It delegates the inner HTML to renderExecutionBreakdown
@@ -8432,12 +9195,19 @@ export class WorkspaceTaskPage {
     }
     if (this.elements.runsTabTrace) {
       this.elements.runsTabTrace.classList.toggle('is-active', active === 'trace');
-      this.elements.runsTabTrace.setAttribute('aria-selected', active === 'trace' ? 'true' : 'false');
+      this.elements.runsTabTrace.setAttribute(
+        'aria-selected',
+        active === 'trace' ? 'true' : 'false'
+      );
     }
 
     const setCount = (el, count) => {
       if (!el) return;
-      if (!count) { el.hidden = true; el.textContent = ''; return; }
+      if (!count) {
+        el.hidden = true;
+        el.textContent = '';
+        return;
+      }
       el.hidden = false;
       el.textContent = String(count);
     };
@@ -8472,19 +9242,22 @@ export class WorkspaceTaskPage {
     }
 
     this.elements.workspaceRunsCard.hidden = false;
-    this.elements.workspaceRuns.innerHTML = runs.map((run) => {
-      const status = String(run?.status || '').trim();
-      const validationStatus = String(run?.report?.validation_status || '').trim().toLowerCase();
-      const summary = String(run?.report?.summary || '').trim();
-      // Read like a history entry: when it ran is the clickable title. The
-      // profile snapshot, executor kind/worker ref, validation status, and
-      // raw run id are developer details — they live on the run page and the
-      // Developer tab, not in this friendly list.
-      const when = run?.started_at || run?.created_at || run?.finished_at;
-      const title = when ? formatDateTime(when) : 'Run';
-      const needsReview = validationStatus === 'needs_review';
+    this.elements.workspaceRuns.innerHTML = runs
+      .map(run => {
+        const status = String(run?.status || '').trim();
+        const validationStatus = String(run?.report?.validation_status || '')
+          .trim()
+          .toLowerCase();
+        const summary = String(run?.report?.summary || '').trim();
+        // Read like a history entry: when it ran is the clickable title. The
+        // profile snapshot, executor kind/worker ref, validation status, and
+        // raw run id are developer details — they live on the run page and the
+        // Developer tab, not in this friendly list.
+        const when = run?.started_at || run?.created_at || run?.finished_at;
+        const title = when ? formatDateTime(when) : 'Run';
+        const needsReview = validationStatus === 'needs_review';
 
-      return `
+        return `
         <article class="workspace-task-workspace-run">
           <div class="workspace-task-workspace-run-head">
             <div class="workspace-task-workspace-run-title">
@@ -8496,7 +9269,8 @@ export class WorkspaceTaskPage {
           ${summary ? `<div class="workspace-task-workspace-run-summary">${this.escapeHtml(summary)}</div>` : ''}
         </article>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   setRunsTab(name) {
@@ -8507,18 +9281,14 @@ export class WorkspaceTaskPage {
     this.renderRunsCard();
   }
 
-
   renderContext() {
     if (!this.elements.context || !this.elements.contextCard) return;
 
-    const context = this.task?.context && typeof this.task.context === 'object'
-      ? { ...this.task.context }
-      : {};
+    const context =
+      this.task?.context && typeof this.task.context === 'object' ? { ...this.task.context } : {};
     delete context.human_loop;
 
-    const contextText = Object.keys(context).length > 0
-      ? normalizeResultText(context)
-      : '';
+    const contextText = Object.keys(context).length > 0 ? normalizeResultText(context) : '';
 
     if (!contextText) {
       this.elements.contextCard.hidden = true;
@@ -8556,7 +9326,8 @@ export class WorkspaceTaskPage {
 
     this.elements.blockedContextCard.hidden = false;
     if (this.elements.blockedReason) {
-      this.elements.blockedReason.textContent = this.currentBlockedTask?.reason || 'This task is waiting for your input.';
+      this.elements.blockedReason.textContent =
+        this.currentBlockedTask?.reason || 'This task is waiting for your input.';
     }
 
     if (this.elements.blockedRequestWrap) {
@@ -8568,13 +9339,21 @@ export class WorkspaceTaskPage {
     }
     if (this.elements.blockedRequest) {
       this.elements.blockedRequest.textContent = response || '';
-      this.elements.blockedRequest.classList.toggle('d-none', !this.taskAssistResponseExpanded || !response);
+      this.elements.blockedRequest.classList.toggle(
+        'd-none',
+        !this.taskAssistResponseExpanded || !response
+      );
     }
     if (this.elements.blockedRequestToggle) {
       const hasLongResponse = response.length > 0 && response !== responsePreview;
       this.elements.blockedRequestToggle.classList.toggle('d-none', !hasLongResponse);
-      this.elements.blockedRequestToggle.textContent = this.taskAssistResponseExpanded ? 'Hide full request' : 'View full request';
-      this.elements.blockedRequestToggle.setAttribute('aria-expanded', this.taskAssistResponseExpanded ? 'true' : 'false');
+      this.elements.blockedRequestToggle.textContent = this.taskAssistResponseExpanded
+        ? 'Hide full request'
+        : 'View full request';
+      this.elements.blockedRequestToggle.setAttribute(
+        'aria-expanded',
+        this.taskAssistResponseExpanded ? 'true' : 'false'
+      );
     }
   }
 
@@ -8584,10 +9363,13 @@ export class WorkspaceTaskPage {
     const workflowStep = this.currentBlockedTask?.workflowStep || null;
 
     if (this.elements.assistKnown) {
-      this.elements.assistKnown.textContent = summarizeText(
-        this.currentBlockedTask?.response || this.currentBlockedTask?.reason || 'The task is paused waiting on your input.',
-        190
-      ) || 'The task is paused waiting on your input.';
+      this.elements.assistKnown.textContent =
+        summarizeText(
+          this.currentBlockedTask?.response ||
+            this.currentBlockedTask?.reason ||
+            'The task is paused waiting on your input.',
+          190
+        ) || 'The task is paused waiting on your input.';
     }
     if (this.elements.assistNeeds) {
       this.elements.assistNeeds.textContent = this.getAssistNeedsSummary(workflowStep);
@@ -8596,7 +9378,8 @@ export class WorkspaceTaskPage {
       this.elements.assistNext.textContent = this.getAssistNextSummary(workflowStep);
     }
     if (this.elements.assistQuestionWrap) {
-      const showQuestion = Boolean(this.currentBlockedTask?.question) && workflowStep?.stepType !== 'ask_form';
+      const showQuestion =
+        Boolean(this.currentBlockedTask?.question) && workflowStep?.stepType !== 'ask_form';
       this.elements.assistQuestionWrap.classList.toggle('d-none', !showQuestion);
     }
     if (this.elements.assistQuestion) {
@@ -8606,7 +9389,9 @@ export class WorkspaceTaskPage {
       const primaryLabel = this.getAssistPrimaryActionLabel(workflowStep);
       this.elements.assistContinueBtn.textContent = primaryLabel;
       this.elements.assistContinueBtn.setAttribute('aria-label', primaryLabel);
-      this.elements.assistContinueBtn.hidden = !this.isAssistActionSuggested('continue_with_instruction');
+      this.elements.assistContinueBtn.hidden = !this.isAssistActionSuggested(
+        'continue_with_instruction'
+      );
     }
     if (this.elements.assistMessage) {
       this.elements.assistMessage.placeholder = this.getAssistMessagePlaceholder(workflowStep);
@@ -8621,7 +9406,8 @@ export class WorkspaceTaskPage {
       this.elements.assistSwitchWrap.hidden = !this.isAssistActionSuggested('switch_agent_retry');
     }
     if (this.elements.assistMoreActions) {
-      const hasMoreActions = this.isAssistActionSuggested('switch_agent_retry') ||
+      const hasMoreActions =
+        this.isAssistActionSuggested('switch_agent_retry') ||
         this.isAssistActionSuggested('retry') ||
         this.isAssistActionSuggested('mark_failed');
       this.elements.assistMoreActions.hidden = !hasMoreActions;
@@ -8636,10 +9422,18 @@ export class WorkspaceTaskPage {
     if (this.currentBlockedTask?.reasonCode === 'assigned_agent_missing') {
       return 'Pick a runnable agent for this task before you retry execution.';
     }
-    if (workflowStep?.stepType === 'ask_form' && Array.isArray(workflowStep.fields) && workflowStep.fields.length > 0) {
+    if (
+      workflowStep?.stepType === 'ask_form' &&
+      Array.isArray(workflowStep.fields) &&
+      workflowStep.fields.length > 0
+    ) {
       return `Answer ${workflowStep.fields.length} question${workflowStep.fields.length === 1 ? '' : 's'} so the agent can continue.`;
     }
-    if (workflowStep?.stepType === 'ask_choice' && Array.isArray(workflowStep.choices) && workflowStep.choices.length > 0) {
+    if (
+      workflowStep?.stepType === 'ask_choice' &&
+      Array.isArray(workflowStep.choices) &&
+      workflowStep.choices.length > 0
+    ) {
       return `Choose 1 of ${workflowStep.choices.length} next-step options or add your own guidance.`;
     }
     if (this.currentBlockedTask?.question) {
@@ -8666,7 +9460,9 @@ export class WorkspaceTaskPage {
       return 'Send Answers';
     }
     if (workflowStep?.stepType === 'ask_choice') {
-      return this.currentBlockedTask?.selectedChoiceId ? 'Continue With Selected Path' : 'Send Choice Or Guidance';
+      return this.currentBlockedTask?.selectedChoiceId
+        ? 'Continue With Selected Path'
+        : 'Send Choice Or Guidance';
     }
     if (this.currentBlockedTask?.question) {
       return 'Send Guidance';
@@ -8691,7 +9487,8 @@ export class WorkspaceTaskPage {
     if (!this.elements.assistAgent) return;
 
     const currentNormalized = String(currentAgent || '').trim();
-    const currentUnavailable = Boolean(currentNormalized) && !this.isRunnableAgentName(currentNormalized);
+    const currentUnavailable =
+      Boolean(currentNormalized) && !this.isRunnableAgentName(currentNormalized);
     const options = [
       currentUnavailable
         ? '<option value="" selected>Select an available agent</option>'
@@ -8699,13 +9496,17 @@ export class WorkspaceTaskPage {
     ];
 
     if (currentUnavailable) {
-      options.push(`<option value="${this.escapeHtml(currentNormalized)}" disabled>${this.escapeHtml(`${currentNormalized} (Current assignment unavailable)`)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(currentNormalized)}" disabled>${this.escapeHtml(`${currentNormalized} (Current assignment unavailable)`)}</option>`
+      );
     }
 
-    this.getAssignableAgentNames(currentAgent).forEach((agentName) => {
+    this.getAssignableAgentNames(currentAgent).forEach(agentName => {
       const normalized = String(agentName || '').trim();
       if (!normalized || normalized.toLowerCase() === currentNormalized.toLowerCase()) return;
-      options.push(`<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(normalized)}</option>`);
+      options.push(
+        `<option value="${this.escapeHtml(normalized)}">${this.escapeHtml(normalized)}</option>`
+      );
     });
 
     this.elements.assistAgent.innerHTML = options.join('');
@@ -8744,7 +9545,9 @@ export class WorkspaceTaskPage {
     const selectedChoiceId = String(this.currentBlockedTask?.selectedChoiceId || '').trim();
     this.elements.assistFormFields.innerHTML = `
       <div class="workspace-task-assist-option-group" role="radiogroup" aria-label="Choose a next step">
-        ${workflowStep.choices.map((choice, index) => `
+        ${workflowStep.choices
+          .map(
+            (choice, index) => `
           <button
             type="button"
             class="workspace-task-assist-option${selectedChoiceId === choice.id ? ' is-selected' : ''}"
@@ -8759,14 +9562,16 @@ export class WorkspaceTaskPage {
               </span>
             </span>
           </button>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     `;
 
-    this.elements.assistFormFields.querySelectorAll('[data-assist-choice-id]').forEach((button) => {
+    this.elements.assistFormFields.querySelectorAll('[data-assist-choice-id]').forEach(button => {
       button.addEventListener('click', () => {
         const choiceId = String(button.getAttribute('data-assist-choice-id') || '').trim();
-        const choice = workflowStep.choices.find((item) => item.id === choiceId);
+        const choice = workflowStep.choices.find(item => item.id === choiceId);
         if (!choice || !this.currentBlockedTask) return;
         this.currentBlockedTask.selectedChoiceId = choice.id;
         this.currentBlockedTask.selectedChoiceLabel = choice.label;
@@ -8786,14 +9591,22 @@ export class WorkspaceTaskPage {
       return;
     }
 
-    const currentFieldIndex = fields.findIndex((field) => field.id === this.assistActiveFieldId);
-    const firstUnansweredIndex = fields.findIndex((field) => !String(selectedValues[field.id] || '').trim());
-    const activeIndex = currentFieldIndex >= 0
-      ? currentFieldIndex
-      : (firstUnansweredIndex >= 0 ? firstUnansweredIndex : 0);
+    const currentFieldIndex = fields.findIndex(field => field.id === this.assistActiveFieldId);
+    const firstUnansweredIndex = fields.findIndex(
+      field => !String(selectedValues[field.id] || '').trim()
+    );
+    const activeIndex =
+      currentFieldIndex >= 0
+        ? currentFieldIndex
+        : firstUnansweredIndex >= 0
+          ? firstUnansweredIndex
+          : 0;
     const activeField = fields[activeIndex];
-    const answeredCount = fields.filter((field) => String(selectedValues[field.id] || '').trim()).length;
-    const progressPercent = fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
+    const answeredCount = fields.filter(field =>
+      String(selectedValues[field.id] || '').trim()
+    ).length;
+    const progressPercent =
+      fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
     const reviewMode = fields.length > 1 && this.assistReviewMode;
 
     this.assistActiveFieldId = activeField?.id || '';
@@ -8809,19 +9622,21 @@ export class WorkspaceTaskPage {
       this.elements.assistFormFields.innerHTML = `
         <div class="workspace-task-assist-deck">
           <div class="workspace-task-assist-deck-rail" aria-label="Blocked task questions">
-            ${fields.map((field, index) => {
-              const fieldValue = String(selectedValues[field.id] || '').trim();
-              const isActive = index === activeIndex;
-              const isAnswered = Boolean(fieldValue);
-              const meta = field.type === 'select' && Array.isArray(field.options)
-                ? `${field.options.length} choice${field.options.length === 1 ? '' : 's'}`
-                : field.type === 'number'
-                  ? 'Number'
-                  : field.type === 'textarea'
-                    ? 'Detailed answer'
-                    : 'Short answer';
+            ${fields
+              .map((field, index) => {
+                const fieldValue = String(selectedValues[field.id] || '').trim();
+                const isActive = index === activeIndex;
+                const isAnswered = Boolean(fieldValue);
+                const meta =
+                  field.type === 'select' && Array.isArray(field.options)
+                    ? `${field.options.length} choice${field.options.length === 1 ? '' : 's'}`
+                    : field.type === 'number'
+                      ? 'Number'
+                      : field.type === 'textarea'
+                        ? 'Detailed answer'
+                        : 'Short answer';
 
-              return `
+                return `
                 <button
                   type="button"
                   class="workspace-task-assist-deck-tab${isActive ? ' is-active' : ''}${isAnswered ? ' is-answered' : ''}"
@@ -8835,49 +9650,60 @@ export class WorkspaceTaskPage {
                   <span class="workspace-task-assist-deck-tab-state">${isAnswered ? 'Answered' : 'Open'}</span>
                 </button>
               `;
-            }).join('')}
+              })
+              .join('')}
           </div>
 
           <div class="workspace-task-assist-deck-panel">
             <div class="workspace-task-assist-deck-progress-row">
               <div>
                 <div class="workspace-task-assist-deck-kicker">${reviewMode ? 'Final Review' : `Question ${activeIndex + 1} of ${fields.length}`}</div>
-                <div class="workspace-task-assist-deck-progress-copy" data-assist-progress-count>${reviewMode
-                  ? (answeredCount === fields.length ? 'All answers captured' : `${fields.length - answeredCount} answers still missing`)
-                  : `${answeredCount} answered so far`}</div>
+                <div class="workspace-task-assist-deck-progress-copy" data-assist-progress-count>${
+                  reviewMode
+                    ? answeredCount === fields.length
+                      ? 'All answers captured'
+                      : `${fields.length - answeredCount} answers still missing`
+                    : `${answeredCount} answered so far`
+                }</div>
               </div>
               <div class="workspace-task-assist-deck-progress-bar" aria-hidden="true">
                 <span data-assist-progress-fill style="width: ${progressPercent}%"></span>
               </div>
             </div>
 
-            ${reviewMode
-              ? this.renderAssistReviewMarkup(fields)
-              : `<div class="workspace-task-assist-deck-stage">
+            ${
+              reviewMode
+                ? this.renderAssistReviewMarkup(fields)
+                : `<div class="workspace-task-assist-deck-stage">
                   ${this.renderAssistFieldMarkup(activeField, activeIndex, String(selectedValues[activeField.id] || '').trim(), { active: true })}
-                </div>`}
+                </div>`
+            }
 
             <div class="workspace-task-assist-deck-nav">
-              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="${reviewMode ? 'review-back' : 'prev'}" ${reviewMode ? '' : (activeIndex === 0 ? 'disabled' : '')}>${reviewMode ? 'Back To Questions' : 'Previous'}</button>
-              ${reviewMode
-                ? '<div class="workspace-task-assist-deck-nav-note">Use Send Answers below or edit any item in this review.</div>'
-                : `<button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="next">${activeIndex === fields.length - 1 ? 'Review Answers' : 'Next Question'}</button>`}
+              <button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="${reviewMode ? 'review-back' : 'prev'}" ${reviewMode ? '' : activeIndex === 0 ? 'disabled' : ''}>${reviewMode ? 'Back To Questions' : 'Previous'}</button>
+              ${
+                reviewMode
+                  ? '<div class="workspace-task-assist-deck-nav-note">Use Send Answers below or edit any item in this review.</div>'
+                  : `<button type="button" class="modern-btn modern-btn-secondary" data-assist-field-nav="next">${activeIndex === fields.length - 1 ? 'Review Answers' : 'Next Question'}</button>`
+              }
             </div>
           </div>
         </div>
       `;
     }
 
-    this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach((button) => {
+    this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach(button => {
       button.addEventListener('click', () => {
         this.assistReviewMode = false;
-        this.assistActiveFieldId = String(button.getAttribute('data-assist-field-tab') || '').trim();
+        this.assistActiveFieldId = String(
+          button.getAttribute('data-assist-field-tab') || ''
+        ).trim();
         this.renderFormWorkflow(workflowStep);
         this.focusActiveAssistField();
       });
     });
 
-    this.elements.assistFormFields.querySelectorAll('[data-assist-field-nav]').forEach((button) => {
+    this.elements.assistFormFields.querySelectorAll('[data-assist-field-nav]').forEach(button => {
       button.addEventListener('click', () => {
         const direction = String(button.getAttribute('data-assist-field-nav') || '').trim();
         if (direction === 'review-back') {
@@ -8901,58 +9727,78 @@ export class WorkspaceTaskPage {
       });
     });
 
-    this.elements.assistFormFields.querySelectorAll('[data-assist-review-edit-id]').forEach((button) => {
-      button.addEventListener('click', () => {
-        this.assistReviewMode = false;
-        this.assistActiveFieldId = String(button.getAttribute('data-assist-review-edit-id') || '').trim();
-        this.renderFormWorkflow(workflowStep);
-        this.focusActiveAssistField();
-      });
-    });
-
-    this.elements.assistFormFields.querySelectorAll('[data-assist-field-id]').forEach((fieldElement) => {
-      const syncValue = () => {
-        const fieldId = String(fieldElement.getAttribute('data-assist-field-id') || '').trim();
-        if (!fieldId) return;
-        if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio' && !fieldElement.checked) {
-          return;
-        }
-        if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio') {
-          const optionValue = String(fieldElement.getAttribute('data-assist-option-value') || fieldElement.value || '').trim();
-          const isCustomOption = String(fieldElement.getAttribute('data-assist-custom-option') || '').trim() === 'true';
-          this.setAssistFormFieldOptionValue(fieldId, optionValue);
-          if (isCustomOption) {
-            const existingCustomValue = String(this.currentBlockedTask?.selectedFieldCustomValues?.[fieldId] || '').trim();
-            this.setAssistFormFieldValue(fieldId, existingCustomValue);
-          } else {
-            this.setAssistFormCustomFieldValue(fieldId, '');
-            this.setAssistFormFieldValue(fieldId, optionValue);
-          }
+    this.elements.assistFormFields
+      .querySelectorAll('[data-assist-review-edit-id]')
+      .forEach(button => {
+        button.addEventListener('click', () => {
+          this.assistReviewMode = false;
+          this.assistActiveFieldId = String(
+            button.getAttribute('data-assist-review-edit-id') || ''
+          ).trim();
           this.renderFormWorkflow(workflowStep);
-          this.syncAssistFormProgress(workflowStep);
           this.focusActiveAssistField();
-          return;
-        }
-        this.setAssistFormFieldValue(fieldId, fieldElement.value);
-        this.syncAssistFormProgress(workflowStep);
-      };
+        });
+      });
 
-      fieldElement.addEventListener('input', syncValue);
-      fieldElement.addEventListener('change', syncValue);
-    });
+    this.elements.assistFormFields
+      .querySelectorAll('[data-assist-field-id]')
+      .forEach(fieldElement => {
+        const syncValue = () => {
+          const fieldId = String(fieldElement.getAttribute('data-assist-field-id') || '').trim();
+          if (!fieldId) return;
+          if (
+            fieldElement instanceof HTMLInputElement &&
+            fieldElement.type === 'radio' &&
+            !fieldElement.checked
+          ) {
+            return;
+          }
+          if (fieldElement instanceof HTMLInputElement && fieldElement.type === 'radio') {
+            const optionValue = String(
+              fieldElement.getAttribute('data-assist-option-value') || fieldElement.value || ''
+            ).trim();
+            const isCustomOption =
+              String(fieldElement.getAttribute('data-assist-custom-option') || '').trim() ===
+              'true';
+            this.setAssistFormFieldOptionValue(fieldId, optionValue);
+            if (isCustomOption) {
+              const existingCustomValue = String(
+                this.currentBlockedTask?.selectedFieldCustomValues?.[fieldId] || ''
+              ).trim();
+              this.setAssistFormFieldValue(fieldId, existingCustomValue);
+            } else {
+              this.setAssistFormCustomFieldValue(fieldId, '');
+              this.setAssistFormFieldValue(fieldId, optionValue);
+            }
+            this.renderFormWorkflow(workflowStep);
+            this.syncAssistFormProgress(workflowStep);
+            this.focusActiveAssistField();
+            return;
+          }
+          this.setAssistFormFieldValue(fieldId, fieldElement.value);
+          this.syncAssistFormProgress(workflowStep);
+        };
 
-    this.elements.assistFormFields.querySelectorAll('[data-assist-custom-field-id]').forEach((fieldElement) => {
-      const syncCustomValue = () => {
-        const fieldId = String(fieldElement.getAttribute('data-assist-custom-field-id') || '').trim();
-        if (!fieldId) return;
-        this.setAssistFormCustomFieldValue(fieldId, fieldElement.value);
-        this.setAssistFormFieldValue(fieldId, fieldElement.value);
-        this.syncAssistFormProgress(workflowStep);
-      };
+        fieldElement.addEventListener('input', syncValue);
+        fieldElement.addEventListener('change', syncValue);
+      });
 
-      fieldElement.addEventListener('input', syncCustomValue);
-      fieldElement.addEventListener('change', syncCustomValue);
-    });
+    this.elements.assistFormFields
+      .querySelectorAll('[data-assist-custom-field-id]')
+      .forEach(fieldElement => {
+        const syncCustomValue = () => {
+          const fieldId = String(
+            fieldElement.getAttribute('data-assist-custom-field-id') || ''
+          ).trim();
+          if (!fieldId) return;
+          this.setAssistFormCustomFieldValue(fieldId, fieldElement.value);
+          this.setAssistFormFieldValue(fieldId, fieldElement.value);
+          this.syncAssistFormProgress(workflowStep);
+        };
+
+        fieldElement.addEventListener('input', syncCustomValue);
+        fieldElement.addEventListener('change', syncCustomValue);
+      });
   }
 
   renderAssistFieldMarkup(field, index, value, { active = false } = {}) {
@@ -8964,18 +9810,24 @@ export class WorkspaceTaskPage {
         <span class="workspace-task-assist-field-number">${index + 1}</span>
         <div>
           <div class="workspace-task-assist-field-prompt">${this.escapeHtml(this.getAssistFieldPrompt(field))}</div>
-          ${field.description && this.getAssistFieldPrompt(field) !== field.description
-            ? `<div class="workspace-task-assist-field-hint">${this.escapeHtml(field.description)}</div>`
-            : ''}
+          ${
+            field.description && this.getAssistFieldPrompt(field) !== field.description
+              ? `<div class="workspace-task-assist-field-hint">${this.escapeHtml(field.description)}</div>`
+              : ''
+          }
           ${field.evidence ? `<div class="workspace-task-assist-field-evidence">${this.escapeHtml(field.evidence)}</div>` : ''}
         </div>
       </div>
     `;
 
     if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
-      const selectedOptionValue = String(this.currentBlockedTask?.selectedFieldOptionValues?.[field.id] || '').trim();
-      const customValue = String(this.currentBlockedTask?.selectedFieldCustomValues?.[field.id] || '').trim();
-      const otherOption = field.options.find((option) => isAssistOtherOption(option));
+      const selectedOptionValue = String(
+        this.currentBlockedTask?.selectedFieldOptionValues?.[field.id] || ''
+      ).trim();
+      const customValue = String(
+        this.currentBlockedTask?.selectedFieldCustomValues?.[field.id] || ''
+      ).trim();
+      const otherOption = field.options.find(option => isAssistOtherOption(option));
       const otherOptionValue = String(otherOption?.value || otherOption?.label || '').trim();
       const showCustomInput = Boolean(otherOptionValue) && selectedOptionValue === otherOptionValue;
 
@@ -8983,7 +9835,9 @@ export class WorkspaceTaskPage {
         <article class="workspace-task-assist-field${active ? ' is-active' : ''}">
           ${questionIntro}
           <div class="workspace-task-assist-option-group" role="radiogroup" aria-label="${this.escapeHtml(field.label)}">
-            ${field.options.map((option) => `
+            ${field.options
+              .map(
+                option => `
               <label class="workspace-task-assist-option">
                 <input
                   class="workspace-task-assist-option-input"
@@ -9002,9 +9856,13 @@ export class WorkspaceTaskPage {
                   </span>
                 </span>
               </label>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
-          ${showCustomInput ? `
+          ${
+            showCustomInput
+              ? `
             <div class="workspace-task-assist-custom-input">
               <label class="form-label" for="workspace-task-custom-field-${this.escapeHtml(field.id)}">Tell the agent the right answer</label>
               <input
@@ -9015,7 +9873,9 @@ export class WorkspaceTaskPage {
                 value="${this.escapeHtml(customValue)}"
                 placeholder="Type the custom answer here...">
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </article>
       `;
     }
@@ -9041,21 +9901,26 @@ export class WorkspaceTaskPage {
   }
 
   renderAssistReviewMarkup(fields) {
-    const answeredCount = fields.filter((field) => Boolean(this.getAssistFieldAnswerValue(field))).length;
+    const answeredCount = fields.filter(field =>
+      Boolean(this.getAssistFieldAnswerValue(field))
+    ).length;
 
     return `
       <div class="workspace-task-assist-review">
         <div class="workspace-task-assist-review-banner">
           <div class="workspace-task-assist-review-title">Review what will be sent back to the agent.</div>
-          <div class="workspace-task-assist-review-copy">${answeredCount === fields.length
-            ? 'Everything requested has an answer. You can send this now or edit any item below.'
-            : `${fields.length - answeredCount} item${fields.length - answeredCount === 1 ? '' : 's'} still need attention before you continue.`}</div>
+          <div class="workspace-task-assist-review-copy">${
+            answeredCount === fields.length
+              ? 'Everything requested has an answer. You can send this now or edit any item below.'
+              : `${fields.length - answeredCount} item${fields.length - answeredCount === 1 ? '' : 's'} still need attention before you continue.`
+          }</div>
         </div>
         <div class="workspace-task-assist-review-list">
-          ${fields.map((field, index) => {
-            const answerValue = this.getAssistFieldAnswerValue(field);
-            const answered = Boolean(answerValue);
-            return `
+          ${fields
+            .map((field, index) => {
+              const answerValue = this.getAssistFieldAnswerValue(field);
+              const answered = Boolean(answerValue);
+              return `
               <article class="workspace-task-assist-review-item${answered ? ' is-answered' : ''}">
                 <div class="workspace-task-assist-review-item-top">
                   <div class="workspace-task-assist-review-item-title">
@@ -9069,7 +9934,8 @@ export class WorkspaceTaskPage {
                 </div>
               </article>
             `;
-          }).join('')}
+            })
+            .join('')}
         </div>
       </div>
     `;
@@ -9078,11 +9944,13 @@ export class WorkspaceTaskPage {
   getAssistFieldAnswerValue(field) {
     if (!field || !this.currentBlockedTask) return '';
 
-    const selectedValue = String(this.currentBlockedTask.selectedFieldValues?.[field.id] || '').trim();
+    const selectedValue = String(
+      this.currentBlockedTask.selectedFieldValues?.[field.id] || ''
+    ).trim();
     if (!selectedValue) return '';
 
     if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
-      const option = field.options.find((item) => String(item?.value || '').trim() === selectedValue);
+      const option = field.options.find(item => String(item?.value || '').trim() === selectedValue);
       if (option) {
         return String(option.label || option.value || '').trim();
       }
@@ -9092,16 +9960,20 @@ export class WorkspaceTaskPage {
   }
 
   syncAssistFormProgress(workflowStep) {
-    if (!workflowStep || workflowStep.stepType !== 'ask_form' || !this.elements.assistFormFields) return;
+    if (!workflowStep || workflowStep.stepType !== 'ask_form' || !this.elements.assistFormFields)
+      return;
 
     const fields = Array.isArray(workflowStep.fields) ? workflowStep.fields : [];
     if (fields.length <= 1) return;
 
     const selectedValues = this.currentBlockedTask?.selectedFieldValues || {};
-    const answeredCount = fields.filter((field) => String(selectedValues[field.id] || '').trim()).length;
-    const progressPercent = fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
+    const answeredCount = fields.filter(field =>
+      String(selectedValues[field.id] || '').trim()
+    ).length;
+    const progressPercent =
+      fields.length > 0 ? Math.round((answeredCount / fields.length) * 100) : 0;
 
-    this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach((button) => {
+    this.elements.assistFormFields.querySelectorAll('[data-assist-field-tab]').forEach(button => {
       const fieldId = String(button.getAttribute('data-assist-field-tab') || '').trim();
       const isAnswered = Boolean(String(selectedValues[fieldId] || '').trim());
       button.classList.toggle('is-answered', isAnswered);
@@ -9111,14 +9983,20 @@ export class WorkspaceTaskPage {
       }
     });
 
-    const progressCopy = this.elements.assistFormFields.querySelector('[data-assist-progress-count]');
+    const progressCopy = this.elements.assistFormFields.querySelector(
+      '[data-assist-progress-count]'
+    );
     if (progressCopy) {
       progressCopy.textContent = this.assistReviewMode
-        ? (answeredCount === fields.length ? 'All answers captured' : `${fields.length - answeredCount} answers still missing`)
+        ? answeredCount === fields.length
+          ? 'All answers captured'
+          : `${fields.length - answeredCount} answers still missing`
         : `${answeredCount} answered so far`;
     }
 
-    const progressFill = this.elements.assistFormFields.querySelector('[data-assist-progress-fill]');
+    const progressFill = this.elements.assistFormFields.querySelector(
+      '[data-assist-progress-fill]'
+    );
     if (progressFill) {
       progressFill.style.width = `${progressPercent}%`;
     }
@@ -9127,7 +10005,9 @@ export class WorkspaceTaskPage {
   focusActiveAssistField() {
     if (!this.elements.assistFormFields) return;
 
-    const stage = this.elements.assistFormFields.querySelector('.workspace-task-assist-deck-stage') || this.elements.assistFormFields;
+    const stage =
+      this.elements.assistFormFields.querySelector('.workspace-task-assist-deck-stage') ||
+      this.elements.assistFormFields;
     const target = stage.querySelector(
       '[data-assist-review-edit-id], [data-assist-custom-field-id], textarea[data-assist-field-id], input[data-assist-field-id]:not([type="radio"]), input[type="radio"]:checked, input[data-assist-field-id][type="radio"]'
     );
@@ -9153,7 +10033,10 @@ export class WorkspaceTaskPage {
     if (!this.currentBlockedTask || !fieldId) return;
 
     const normalizedValue = String(value || '').trim();
-    if (!this.currentBlockedTask.selectedFieldValues || typeof this.currentBlockedTask.selectedFieldValues !== 'object') {
+    if (
+      !this.currentBlockedTask.selectedFieldValues ||
+      typeof this.currentBlockedTask.selectedFieldValues !== 'object'
+    ) {
       this.currentBlockedTask.selectedFieldValues = {};
     }
 
@@ -9169,7 +10052,10 @@ export class WorkspaceTaskPage {
     if (!this.currentBlockedTask || !fieldId) return;
 
     const normalizedValue = String(value || '').trim();
-    if (!this.currentBlockedTask.selectedFieldOptionValues || typeof this.currentBlockedTask.selectedFieldOptionValues !== 'object') {
+    if (
+      !this.currentBlockedTask.selectedFieldOptionValues ||
+      typeof this.currentBlockedTask.selectedFieldOptionValues !== 'object'
+    ) {
       this.currentBlockedTask.selectedFieldOptionValues = {};
     }
 
@@ -9185,7 +10071,10 @@ export class WorkspaceTaskPage {
     if (!this.currentBlockedTask || !fieldId) return;
 
     const normalizedValue = String(value || '').trim();
-    if (!this.currentBlockedTask.selectedFieldCustomValues || typeof this.currentBlockedTask.selectedFieldCustomValues !== 'object') {
+    if (
+      !this.currentBlockedTask.selectedFieldCustomValues ||
+      typeof this.currentBlockedTask.selectedFieldCustomValues !== 'object'
+    ) {
       this.currentBlockedTask.selectedFieldCustomValues = {};
     }
 
@@ -9199,13 +10088,17 @@ export class WorkspaceTaskPage {
 
   collectAssistFormFieldValues() {
     const workflowStep = this.currentBlockedTask?.workflowStep;
-    if (!workflowStep || workflowStep.stepType !== 'ask_form' || !Array.isArray(workflowStep.fields)) {
+    if (
+      !workflowStep ||
+      workflowStep.stepType !== 'ask_form' ||
+      !Array.isArray(workflowStep.fields)
+    ) {
       return [];
     }
 
     const selectedValues = this.currentBlockedTask?.selectedFieldValues || {};
     return workflowStep.fields
-      .map((field) => {
+      .map(field => {
         const value = String(selectedValues[field.id] || '').trim();
         if (!value) return null;
         return {
@@ -9234,7 +10127,7 @@ export class WorkspaceTaskPage {
       this.elements.assistContinueBtn,
       this.elements.assistSwitchBtn,
       this.elements.assistFailBtn
-    ].forEach((button) => {
+    ].forEach(button => {
       if (button) button.disabled = disabled;
     });
   }
@@ -9260,7 +10153,9 @@ export class WorkspaceTaskPage {
   }
 
   async executeTask() {
-    const status = String(this.task?.status || '').trim().toLowerCase();
+    const status = String(this.task?.status || '')
+      .trim()
+      .toLowerCase();
     const isRerun = status === 'completed' || status === 'failed';
     const label = isRerun ? 'Re-run' : 'Run';
 
@@ -9348,9 +10243,7 @@ export class WorkspaceTaskPage {
    */
   getAssignableAgentOptions() {
     const names = this.getAssignableAgentNames('');
-    return names
-      .filter((name) => name && name !== 'unassigned')
-      .map((name) => ({ name }));
+    return names.filter(name => name && name !== 'unassigned').map(name => ({ name }));
   }
 
   async completeTask() {
@@ -9361,7 +10254,9 @@ export class WorkspaceTaskPage {
     // user opt in explicitly. The other allowed source statuses
     // (pending / assigned / waiting_for_choice) don't risk losing
     // execution work, so they skip the prompt.
-    const status = String(this.task?.status || '').trim().toLowerCase();
+    const status = String(this.task?.status || '')
+      .trim()
+      .toLowerCase();
     if (status === 'in_progress') {
       const proceed = window.confirm(
         'This task is currently running. Marking it complete now will override the live execution and may discard any work the agent is mid-way through. Continue?'
@@ -9417,26 +10312,34 @@ export class WorkspaceTaskPage {
       return;
     }
 
-    if (action === 'switch_agent_retry' &&
-        selectedAgent.toLowerCase() === String(this.currentBlockedTask.currentAgent || '').trim().toLowerCase()) {
+    if (
+      action === 'switch_agent_retry' &&
+      selectedAgent.toLowerCase() ===
+        String(this.currentBlockedTask.currentAgent || '')
+          .trim()
+          .toLowerCase()
+    ) {
       this.notify('warning', 'Choose a different agent before switching.');
       return;
     }
 
-    if (action === 'continue_with_instruction' &&
-        workflowStep?.stepType === 'ask_choice' &&
-        !selectedChoiceId &&
-        !message) {
+    if (
+      action === 'continue_with_instruction' &&
+      workflowStep?.stepType === 'ask_choice' &&
+      !selectedChoiceId &&
+      !message
+    ) {
       this.notify('warning', 'Choose a next step or add guidance before continuing.');
       return;
     }
 
-    if (action === 'continue_with_instruction' &&
-        workflowStep?.stepType === 'ask_form') {
+    if (action === 'continue_with_instruction' && workflowStep?.stepType === 'ask_form') {
       const requiredFields = Array.isArray(workflowStep.fields)
-        ? workflowStep.fields.filter((field) => field?.required !== false)
+        ? workflowStep.fields.filter(field => field?.required !== false)
         : [];
-      const missingRequired = requiredFields.filter((field) => !fieldValues.some((item) => item.id === field.id));
+      const missingRequired = requiredFields.filter(
+        field => !fieldValues.some(item => item.id === field.id)
+      );
       if (missingRequired.length > 0) {
         this.notify('warning', 'Answer the required questions before continuing.');
         return;
@@ -9463,11 +10366,14 @@ export class WorkspaceTaskPage {
     this.setAlert('');
 
     try {
-      const response = await fetch(`/api/orchestration/tasks/${encodeURIComponent(this.currentBlockedTask.taskId)}/assist`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const response = await fetch(
+        `/api/orchestration/tasks/${encodeURIComponent(this.currentBlockedTask.taskId)}/assist`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }
+      );
 
       if (!response.ok) {
         const text = await response.text();
@@ -9499,5 +10405,5 @@ Object.assign(
   WorkspaceTaskPage.prototype,
   taskExecutionViewsMethods,
   taskSkillDraftMethods,
-  taskResultActionsMethods,
+  taskResultActionsMethods
 );

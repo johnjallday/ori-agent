@@ -69,7 +69,8 @@ test('workspace detail consumes a scoped project-open failure notice once', () =
       'oriProjectOpenNotice:workspace-1',
       JSON.stringify({
         workspace_id: 'workspace-1',
-        message: 'Workspace created, but the project could not be opened. Use Open Project to try again.'
+        message:
+          'Workspace created, but the project could not be opened. Use Open Project to try again.'
       })
     ]
   ]);
@@ -108,10 +109,7 @@ test('workspace detail detects project entries only from complete persisted meta
     [{ project_path: 'song', shared_data: { project_entry_path: 42 } }, false],
     [{ project_path: 'song', shared_data: { project_entry_path: '   ' } }, false],
     [{ project_path: '', shared_data: { project_entry_path: 'song.rpp' } }, false],
-    [
-      { project_path: 'song', shared_data: { project_entry_path: 'song.rpp' } },
-      true
-    ]
+    [{ project_path: 'song', shared_data: { project_entry_path: 'song.rpp' } }, true]
   ];
 
   for (const [workspace, expected] of cases) {
@@ -435,7 +433,7 @@ test('workspace detail entity loaders refresh Command view after completion', as
       }
     }
   };
-  global.fetch = async (url) => {
+  global.fetch = async url => {
     const href = String(url);
     if (href.startsWith('/api/sessions')) {
       return { ok: true, json: async () => ({ sessions: [{ id: 's1' }] }) };
@@ -499,7 +497,9 @@ test('workspace detail reusable identity and tag saves update workspace state', 
     if (String(url).endsWith('/rename')) {
       return {
         ok: true,
-        json: async () => ({ folder: { id: 'workspace-1', name: 'New Name', folder_slug: 'new-name' } })
+        json: async () => ({
+          folder: { id: 'workspace-1', name: 'New Name', folder_slug: 'new-name' }
+        })
       };
     }
     return {
@@ -785,8 +785,14 @@ test('workspace detail routes missing entry agents to workspace recovery', () =>
   assert.equal(target.kind, 'missing-entry');
   assert.equal(target.interactive, true);
   assert.equal(target.href, '/workspaces/workspace-1?addAgent=1&seedAgentName=Missing+Manager');
-  assert.match(frontMarkup, /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/);
-  assert.match(backMarkup, /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/);
+  assert.match(
+    frontMarkup,
+    /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
+  );
+  assert.match(
+    backMarkup,
+    /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
+  );
   assert.doesNotMatch(frontMarkup, /\/agents\/Missing%20Manager/);
   assert.doesNotMatch(backMarkup, /\/agents\/Missing%20Manager/);
 });
@@ -985,7 +991,10 @@ test('workspace-local model save posts to the workspace-scoped endpoint', async 
     currentProvider: ''
   };
   page.elements = {
-    agentModelSelect: { value: 'claude-opus-4', selectedOptions: [{ getAttribute: () => 'claude' }] },
+    agentModelSelect: {
+      value: 'claude-opus-4',
+      selectedOptions: [{ getAttribute: () => 'claude' }]
+    },
     agentModelSubmitBtn: { disabled: false, textContent: '' },
     agentModelModal: null
   };
@@ -1056,7 +1065,12 @@ test('showAddTaskModalForAgent with no agent opens the modal without an assignee
 
 test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding access set', async () => {
   const page = new WorkspaceDetailPage('ws-1');
-  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }, { id: 'inst-B', name: 'Bolt' }] };
+  page.workspace = {
+    agent_instances: [
+      { id: 'inst-A', name: 'Atlas' },
+      { id: 'inst-B', name: 'Bolt' }
+    ]
+  };
   const persisted = [];
   page.skillsManager.getWorkspaceSkillAgentAccessSelections = () => [
     { id: 'inst-A', checked: false },
@@ -1077,7 +1091,12 @@ test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding acces
 
 test('setAgentWorkspaceCapabilityEnabled removes the agent when disabling', async () => {
   const page = new WorkspaceDetailPage('ws-1');
-  page.workspace = { agent_instances: [{ id: 'inst-A', name: 'Atlas' }, { id: 'inst-B', name: 'Bolt' }] };
+  page.workspace = {
+    agent_instances: [
+      { id: 'inst-A', name: 'Atlas' },
+      { id: 'inst-B', name: 'Bolt' }
+    ]
+  };
   const persisted = [];
   page.mcpManager.getWorkspaceMCPAgentAccessSelections = () => [
     { id: 'inst-A', checked: true },

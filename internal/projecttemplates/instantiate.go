@@ -96,13 +96,6 @@ func (values templateTokenValues) substitute(name string) string {
 	return name
 }
 
-// substituteTokens replaces the supported tokens in a path name. Replacement
-// values are slug/date strings (lowercase alphanumerics and hyphens), so
-// substitution can never introduce path separators.
-func substituteTokens(name, projectSlug string) string {
-	return newTemplateTokenValues(projectSlug).substitute(name)
-}
-
 // InstantiationResult carries the fatal scaffold result separately from the
 // optional project-entry warning. A project can be fully created even when its
 // declared entry file cannot be verified.

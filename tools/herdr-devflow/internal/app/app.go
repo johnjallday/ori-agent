@@ -390,7 +390,7 @@ func (a *App) wakeInstall(
 		a.writeError(err, asJSON)
 		return 1
 	}
-	defer prepared.Cleanup()
+	defer func() { _ = prepared.Cleanup() }()
 
 	preview := wakeInstallPreview(prepared)
 	if asJSON {
@@ -2720,7 +2720,7 @@ func buildHelper(ctx context.Context, repoRoot, destination string) error {
 		_ = os.Remove(temporaryPath)
 		return err
 	}
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	// #nosec G204 -- fixed go subcommand/package; temporaryPath is created in the private stable runtime directory above.
 	command := exec.CommandContext(ctx, "go", "build", "-o", temporaryPath, "./tools/herdr-devflow/cmd/herdr-devflow")
 	command.Dir = repoRoot
@@ -2746,7 +2746,7 @@ func copyFileAtomic(source, destination string, mode os.FileMode) error {
 		return err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(mode); err != nil {
 		_ = temporary.Close()
 		return err

@@ -49,7 +49,6 @@ export class DashboardState {
     }
   }
 
-
   handleRealtimeEvent(event) {
     switch (event.type) {
       case 'workspace.status':
@@ -116,5 +115,4 @@ export class DashboardState {
     await this.loadTasks();
     this.render();
   }
-
 }

@@ -136,11 +136,11 @@ const deviceCapabilities = {
 
     // Set tier badge color based on tier
     const tierColors = {
-      'Basic': '#6c757d',
-      'Standard': '#17a2b8',
-      'Advanced': '#28a745',
-      'Professional': '#ffc107',
-      'Enterprise': '#dc3545'
+      Basic: '#6c757d',
+      Standard: '#17a2b8',
+      Advanced: '#28a745',
+      Professional: '#ffc107',
+      Enterprise: '#dc3545'
     };
     tierBadgeEl.style.background = tierColors[data.memory_tier] || 'var(--bg-tertiary)';
     tierBadgeEl.style.color = data.memory_tier === 'Professional' ? '#000' : '#fff';
@@ -148,7 +148,9 @@ const deviceCapabilities = {
     // Recommended models
     const modelsEl = document.getElementById('deviceRecommendedModels');
     if (data.recommended_models && data.recommended_models.length > 0) {
-      modelsEl.innerHTML = data.recommended_models.map(model => `
+      modelsEl.innerHTML = data.recommended_models
+        .map(
+          model => `
         <a href="https://ollama.com/library/${model.split(':')[0]}"
            target="_blank"
            rel="noopener noreferrer"
@@ -156,9 +158,12 @@ const deviceCapabilities = {
            style="background: var(--bg-tertiary); color: var(--text-primary); text-decoration: none; padding: 0.5rem 0.75rem; font-weight: 500;">
           ${model}
         </a>
-      `).join('');
+      `
+        )
+        .join('');
     } else {
-      modelsEl.innerHTML = '<span style="color: var(--text-secondary);">No model recommendations available</span>';
+      modelsEl.innerHTML =
+        '<span style="color: var(--text-secondary);">No model recommendations available</span>';
     }
 
     // Ollama link
@@ -204,13 +209,16 @@ const deviceCapabilities = {
     };
 
     if (badge) {
-      badge.textContent = status.permission_label || (supported ? 'Needs Admin Approval' : 'Unsupported');
+      badge.textContent =
+        status.permission_label || (supported ? 'Needs Admin Approval' : 'Unsupported');
       badge.style.background = badgeColors[state] || 'var(--bg-tertiary)';
       badge.style.color = '#fff';
     }
     if (detail) {
       const baseDetail = status.permission_detail || 'macOS wake scheduling status is unavailable.';
-      detail.textContent = status.last_error ? `${baseDetail} Last error: ${status.last_error}` : baseDetail;
+      detail.textContent = status.last_error
+        ? `${baseDetail} Last error: ${status.last_error}`
+        : baseDetail;
     }
     if (grantBtn) {
       grantBtn.disabled = !supported || state === 'ready';
@@ -235,10 +243,13 @@ const deviceCapabilities = {
       nextWake.textContent = wakeText;
     }
     if (systemEvents) {
-      const events = Array.isArray(status.system_scheduled_events) ? status.system_scheduled_events : [];
-      systemEvents.textContent = events.length > 0
-        ? `macOS currently reports ${events.length} scheduled power event${events.length === 1 ? '' : 's'}.`
-        : 'macOS reports no scheduled power events.';
+      const events = Array.isArray(status.system_scheduled_events)
+        ? status.system_scheduled_events
+        : [];
+      systemEvents.textContent =
+        events.length > 0
+          ? `macOS currently reports ${events.length} scheduled power event${events.length === 1 ? '' : 's'}.`
+          : 'macOS reports no scheduled power events.';
     }
   },
 

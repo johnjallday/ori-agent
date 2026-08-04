@@ -38,9 +38,7 @@ test('collectWorkspaceGroupOptions returns only groups with nesting depth', () =
           id: 'group-2',
           kind: 'group',
           name: 'Archive',
-          children: [
-            { id: 'workspace-2', kind: 'workspace', name: 'Old Work' }
-          ]
+          children: [{ id: 'workspace-2', kind: 'workspace', name: 'Old Work' }]
         }
       ]
     },
@@ -67,13 +65,21 @@ test('renderWorkspaceParentOptions escapes names and indents nested groups', () 
 
 test('setWorkspaceParentSelectState toggles disabled without aria-disabled', () => {
   const helpAttrs = {};
-  const helpEl = { set textContent(value) { helpAttrs.text = value; } };
-  const helpers = loadGroupOptions({ getElementById: (id) => (id === 'folderParentHelp' ? helpEl : null) });
+  const helpEl = {
+    set textContent(value) {
+      helpAttrs.text = value;
+    }
+  };
+  const helpers = loadGroupOptions({
+    getElementById: id => (id === 'folderParentHelp' ? helpEl : null)
+  });
 
   const attrs = {};
   const select = {
     disabled: false,
-    setAttribute: (name, value) => { attrs[name] = value; }
+    setAttribute: (name, value) => {
+      attrs[name] = value;
+    }
   };
 
   helpers.setWorkspaceParentSelectState(select, 0);

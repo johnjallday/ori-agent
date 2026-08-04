@@ -12,7 +12,7 @@ export class DashboardRenderer {
     const tasks = this.data.tasks || [];
     const completedTasks = tasks.filter(t => t.status === 'completed').length;
     const failedTasks = tasks.filter(t => t.status === 'failed').length;
-    
+
     const inProgressTasks = tasks.filter(t => t.status === 'in_progress').length;
 
     return `
@@ -418,5 +418,4 @@ export class DashboardRenderer {
       }
     }
   }
-
 }

@@ -3,7 +3,7 @@
  * All CSS custom properties for the Ori Agent design system
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
 :root {
   /* Sidebar */
@@ -26,19 +26,19 @@
   --app-modal-backdrop-layer: 20190;
 
   /* Palette swatches (single source of truth) */
-  --swatch-black: #0A0A0A;
-  --swatch-charred: #0D140D;
-  --swatch-oxidized: #1F2128;
-  --swatch-concrete: #5C5C5E;
-  --swatch-grey: #8A8A8A;
-  --swatch-silver: #C9CCD1;
-  --swatch-emerald: #1F6B4E;
+  --swatch-black: #0a0a0a;
+  --swatch-charred: #0d140d;
+  --swatch-oxidized: #1f2128;
+  --swatch-concrete: #5c5c5e;
+  --swatch-grey: #8a8a8a;
+  --swatch-silver: #c9ccd1;
+  --swatch-emerald: #1f6b4e;
 
   /* Primary Colors - Emerald accent */
-  --primary-color: #1F6B4E;
-  --primary-light: #2A8762;
+  --primary-color: #1f6b4e;
+  --primary-light: #2a8762;
   --primary-dark: #155039;
-  --secondary-color: #5C5C5E;
+  --secondary-color: #5c5c5e;
 
   /* Status Colors */
   --success-color: #10b981;
@@ -47,18 +47,18 @@
   --info-color: #06b6d4;
 
   /* Backgrounds - Light variant derived from silver/concrete */
-  --bg-primary: #F5F6F7;
-  --bg-secondary: #E8EAED;
-  --bg-tertiary: #C9CCD1;
+  --bg-primary: #f5f6f7;
+  --bg-secondary: #e8eaed;
+  --bg-tertiary: #c9ccd1;
 
   /* Text - Black/oxidized on light */
-  --text-primary: #0A0A0A;
-  --text-secondary: #1F2128;
-  --text-muted: #5C5C5E;
+  --text-primary: #0a0a0a;
+  --text-secondary: #1f2128;
+  --text-muted: #5c5c5e;
 
   /* Borders */
-  --border-color: #C9CCD1;
-  --border-light: #E8EAED;
+  --border-color: #c9ccd1;
+  --border-light: #e8eaed;
 
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
@@ -90,17 +90,17 @@
 
 /* Dark Mode - Palette applied directly */
 [data-bs-theme="dark"] {
-  --bg-primary: #0A0A0A;        /* black */
-  --bg-secondary: #1F2128;      /* oxidized — cool neutral, was charred (green) */
-  --bg-tertiary: #2A2C33;       /* elevated oxidized step */
-  --bg-organic: #0D140D;        /* charred — reserve for ~5–10% "organic-cool" surfaces */
+  --bg-primary: #0a0a0a; /* black */
+  --bg-secondary: #1f2128; /* oxidized — cool neutral, was charred (green) */
+  --bg-tertiary: #2a2c33; /* elevated oxidized step */
+  --bg-organic: #0d140d; /* charred — reserve for ~5–10% "organic-cool" surfaces */
 
-  --text-primary: #C9CCD1;
-  --text-secondary: #8A8A8A;
-  --text-muted: #5C5C5E;
+  --text-primary: #c9ccd1;
+  --text-secondary: #8a8a8a;
+  --text-muted: #5c5c5e;
 
-  --border-color: #383B43;      /* slightly lighter so it reads against bg-tertiary */
-  --border-light: #5C5C5E;
+  --border-color: #383b43; /* slightly lighter so it reads against bg-tertiary */
+  --border-light: #5c5c5e;
 
   /* Slightly stronger shadows for dark mode */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
@@ -111,5 +111,11 @@
 
 /* Global font family */
 * {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
 }

@@ -10,13 +10,18 @@
  * for two dialogs would be heavier than the dialog itself.
  */
 
-const ESCAPE_HTML = (value) => String(value || '').replace(/[&<>"']/g, (ch) => ({
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;'
-}[ch]));
+const ESCAPE_HTML = value =>
+  String(value || '').replace(
+    /[&<>"']/g,
+    ch =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[ch]
+  );
 
 let stylesInjected = false;
 function ensureDialogStyles() {
@@ -133,7 +138,7 @@ function ensureDialogStyles() {
 function mountDialog({ render, onResolve }) {
   ensureDialogStyles();
 
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const backdrop = document.createElement('div');
     backdrop.className = 'canvas-dialog-backdrop';
     backdrop.setAttribute('role', 'dialog');
@@ -144,7 +149,7 @@ function mountDialog({ render, onResolve }) {
     backdrop.appendChild(card);
 
     let resolved = false;
-    const finish = (value) => {
+    const finish = value => {
       if (resolved) return;
       resolved = true;
       document.removeEventListener('keydown', onKey);
@@ -153,7 +158,7 @@ function mountDialog({ render, onResolve }) {
       resolve(value);
     };
 
-    const onKey = (event) => {
+    const onKey = event => {
       if (event.key === 'Escape') {
         event.preventDefault();
         finish(null);
@@ -161,7 +166,7 @@ function mountDialog({ render, onResolve }) {
     };
     document.addEventListener('keydown', onKey);
 
-    backdrop.addEventListener('click', (event) => {
+    backdrop.addEventListener('click', event => {
       if (event.target === backdrop) finish(null);
     });
 
@@ -170,7 +175,9 @@ function mountDialog({ render, onResolve }) {
 
     // Focus the first interactive element so keyboard users land in the
     // dialog without an extra Tab.
-    const focusTarget = card.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const focusTarget = card.querySelector(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
     if (focusTarget) focusTarget.focus();
   });
 }
@@ -179,7 +186,12 @@ function mountDialog({ render, onResolve }) {
  * Show a yes/no confirmation. Resolves to `true` if the user picked the
  * primary action, `false` for cancel / Escape / backdrop-click.
  */
-export function showCanvasConfirm({ title, message, confirmLabel = 'Confirm', cancelLabel = 'Cancel' } = {}) {
+export function showCanvasConfirm({
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel'
+} = {}) {
   return mountDialog({
     render: (card, finish) => {
       card.innerHTML = `
@@ -190,11 +202,15 @@ export function showCanvasConfirm({ title, message, confirmLabel = 'Confirm', ca
           <button type="button" class="canvas-dialog-btn canvas-dialog-btn-primary" data-canvas-dialog-action="confirm">${ESCAPE_HTML(confirmLabel)}</button>
         </div>
       `;
-      card.querySelector('[data-canvas-dialog-action="confirm"]').addEventListener('click', () => finish(true));
-      card.querySelector('[data-canvas-dialog-action="cancel"]').addEventListener('click', () => finish(false));
+      card
+        .querySelector('[data-canvas-dialog-action="confirm"]')
+        .addEventListener('click', () => finish(true));
+      card
+        .querySelector('[data-canvas-dialog-action="cancel"]')
+        .addEventListener('click', () => finish(false));
     },
-    onResolve: (value) => value === null && false
-  }).then((value) => Boolean(value));
+    onResolve: value => value === null && false
+  }).then(value => Boolean(value));
 }
 
 /**
@@ -208,16 +224,20 @@ export function showCanvasAgentPicker({ title, message, agents } = {}) {
   }
   return mountDialog({
     render: (card, finish) => {
-      const optionsHtml = agents.map((agent, index) => {
-        const name = ESCAPE_HTML(agent?.name || `Agent ${index + 1}`);
-        const instance = agent?.instanceNumber ? `<span class="canvas-dialog-option-instance">#${ESCAPE_HTML(agent.instanceNumber)}</span>` : '';
-        return `
+      const optionsHtml = agents
+        .map((agent, index) => {
+          const name = ESCAPE_HTML(agent?.name || `Agent ${index + 1}`);
+          const instance = agent?.instanceNumber
+            ? `<span class="canvas-dialog-option-instance">#${ESCAPE_HTML(agent.instanceNumber)}</span>`
+            : '';
+          return `
           <button type="button" class="canvas-dialog-option" data-canvas-agent-index="${index}">
             <span class="canvas-dialog-option-name">${name}</span>
             ${instance}
           </button>
         `;
-      }).join('');
+        })
+        .join('');
       card.innerHTML = `
         <h3 class="canvas-dialog-title">${ESCAPE_HTML(title || 'Pick an agent')}</h3>
         ${message ? `<p class="canvas-dialog-message">${ESCAPE_HTML(message)}</p>` : ''}
@@ -226,7 +246,7 @@ export function showCanvasAgentPicker({ title, message, agents } = {}) {
           <button type="button" class="canvas-dialog-btn canvas-dialog-btn-cancel" data-canvas-dialog-action="cancel">Cancel</button>
         </div>
       `;
-      card.querySelectorAll('[data-canvas-agent-index]').forEach((btn) => {
+      card.querySelectorAll('[data-canvas-agent-index]').forEach(btn => {
         btn.addEventListener('click', () => {
           const idx = Number.parseInt(btn.getAttribute('data-canvas-agent-index') || '-1', 10);
           if (idx >= 0 && idx < agents.length) {
@@ -236,7 +256,9 @@ export function showCanvasAgentPicker({ title, message, agents } = {}) {
           }
         });
       });
-      card.querySelector('[data-canvas-dialog-action="cancel"]').addEventListener('click', () => finish(null));
+      card
+        .querySelector('[data-canvas-dialog-action="cancel"]')
+        .addEventListener('click', () => finish(null));
     }
   });
 }

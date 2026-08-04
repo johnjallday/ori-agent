@@ -136,7 +136,7 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 	b.onboardingHandler = onboardinghttp.NewHandler(b.onboardingMgr)
 	b.deviceHandler = devicehttp.NewHandler(b.onboardingMgr)
-	b.resetHandler = settingshttp.NewResetHandler(b.onboardingMgr, b.st, ".")
+	b.resetHandler = settingshttp.NewResetHandler(b.onboardingMgr, b.st, config.DefaultDataDir())
 
 	// Initialize auto-config handler for agent creation
 	b.autoConfigHandler = agenthttp.NewAutoConfigHandler(b.llmFactory, b.configManager)

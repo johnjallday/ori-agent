@@ -76,13 +76,24 @@ export class RendererUI {
 
     // Background
     this.ctx.fillStyle = '#e5e7eb';
-    this.primitives.roundRect(panelX + padding, progressBarY, progressBarWidth, progressBarHeight, 6);
+    this.primitives.roundRect(
+      panelX + padding,
+      progressBarY,
+      progressBarWidth,
+      progressBarHeight,
+      6
+    );
     this.ctx.fill();
 
     // Progress fill
     const fillWidth = (progressBarWidth * this.state.workspaceProgress.percentage) / 100;
     if (fillWidth > 0) {
-      const gradient = this.ctx.createLinearGradient(panelX + padding, progressBarY, panelX + padding + fillWidth, progressBarY);
+      const gradient = this.ctx.createLinearGradient(
+        panelX + padding,
+        progressBarY,
+        panelX + padding + fillWidth,
+        progressBarY
+      );
       gradient.addColorStop(0, '#10b981');
       gradient.addColorStop(1, '#059669');
       this.ctx.fillStyle = gradient;
@@ -95,7 +106,11 @@ export class RendererUI {
     this.ctx.font = 'bold 9px system-ui';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    this.ctx.fillText(`${this.state.workspaceProgress.percentage}%`, panelX + padding + progressBarWidth / 2, progressBarY + progressBarHeight / 2);
+    this.ctx.fillText(
+      `${this.state.workspaceProgress.percentage}%`,
+      panelX + padding + progressBarWidth / 2,
+      progressBarY + progressBarHeight / 2
+    );
 
     // Bottom row: Agent status and estimated time
     const bottomY = panelY + padding + 58;
@@ -109,7 +124,10 @@ export class RendererUI {
     this.ctx.fillText(agentText, panelX + padding, bottomY);
 
     // Estimated time remaining
-    if (this.state.workspaceProgress.remaining_time_ms && this.state.workspaceProgress.remaining_time_ms > 0) {
+    if (
+      this.state.workspaceProgress.remaining_time_ms &&
+      this.state.workspaceProgress.remaining_time_ms > 0
+    ) {
       this.ctx.textAlign = 'right';
       const minutes = Math.ceil(this.state.workspaceProgress.remaining_time_ms / 60000);
       const seconds = Math.ceil((this.state.workspaceProgress.remaining_time_ms % 60000) / 1000);
@@ -130,7 +148,6 @@ export class RendererUI {
 
     // Calculate center of canvas in world coordinates
     const centerX = this.state.width / 2;
-    
 
     // Draw mission background box
     this.ctx.save();
@@ -272,10 +289,10 @@ export class RendererUI {
 
       // Background color based on type
       const colors = {
-        'info': { bg: '#3b82f6', border: '#1e40af' },
-        'success': { bg: '#10b981', border: '#059669' },
-        'warning': { bg: '#f59e0b', border: '#d97706' },
-        'error': { bg: '#ef4444', border: '#dc2626' }
+        info: { bg: '#3b82f6', border: '#1e40af' },
+        success: { bg: '#10b981', border: '#059669' },
+        warning: { bg: '#f59e0b', border: '#d97706' },
+        error: { bg: '#ef4444', border: '#dc2626' }
       };
       const color = colors[notification.type] || colors['info'];
 
@@ -295,10 +312,10 @@ export class RendererUI {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.font = '20px system-ui';
       const icons = {
-        'info': 'ℹ️',
-        'success': '✓',
-        'warning': '⚠️',
-        'error': '✗'
+        info: 'ℹ️',
+        success: '✓',
+        warning: '⚠️',
+        error: '✗'
       };
       const icon = icons[notification.type] || 'ℹ️';
       this.ctx.fillText(icon, x + padding, y + 28);
@@ -511,13 +528,13 @@ export class RendererUI {
     this.ctx.save();
     this.ctx.font = '13px Inter, sans-serif';
     items.forEach((item, i) => {
-      const itemY = y + padding + 30 + (i * itemHeight);
+      const itemY = y + padding + 30 + i * itemHeight;
 
       // Check if mouse is hovering over this item
       const mouseX = this.state.lastMouseX || 0;
       const mouseY = this.state.lastMouseY || 0;
-      const isHovered = mouseX >= x && mouseX <= x + menuWidth &&
-                       mouseY >= itemY && mouseY <= itemY + itemHeight;
+      const isHovered =
+        mouseX >= x && mouseX <= x + menuWidth && mouseY >= itemY && mouseY <= itemY + itemHeight;
 
       // Draw hover background
       if (isHovered) {
@@ -536,8 +553,12 @@ export class RendererUI {
       // Store item bounds for click detection
       if (!this.state.contextMenuItems) this.state.contextMenuItems = [];
       this.state.contextMenuItems[i] = {
-        x, y: itemY, width: menuWidth, height: itemHeight,
-        action: item.action, agent: this.state.contextMenuAgent
+        x,
+        y: itemY,
+        width: menuWidth,
+        height: itemHeight,
+        action: item.action,
+        agent: this.state.contextMenuAgent
       };
     });
     this.ctx.restore();
@@ -617,13 +638,13 @@ export class RendererUI {
     this.ctx.save();
     this.ctx.font = '13px Inter, sans-serif';
     items.forEach((item, i) => {
-      const itemY = y + padding + 32 + (i * itemHeight);
+      const itemY = y + padding + 32 + i * itemHeight;
 
       // Check if mouse is hovering over this item
       const mouseX = this.state.lastMouseX || 0;
       const mouseY = this.state.lastMouseY || 0;
-      const isHovered = mouseX >= x && mouseX <= x + menuWidth &&
-                       mouseY >= itemY && mouseY <= itemY + itemHeight;
+      const isHovered =
+        mouseX >= x && mouseX <= x + menuWidth && mouseY >= itemY && mouseY <= itemY + itemHeight;
 
       // Draw hover background
       if (isHovered) {
@@ -641,7 +662,10 @@ export class RendererUI {
 
       // Store item bounds for click detection
       this.state.multiSelectMenuItems.push({
-        x, y: itemY, width: menuWidth, height: itemHeight,
+        x,
+        y: itemY,
+        width: menuWidth,
+        height: itemHeight,
         action: item.action
       });
     });
@@ -715,7 +739,13 @@ export class RendererUI {
     this.ctx.lineTo(x + overlayWidth - radius, y);
     this.ctx.arcTo(x + overlayWidth, y, x + overlayWidth, y + radius, radius);
     this.ctx.lineTo(x + overlayWidth, y + overlayHeight - radius);
-    this.ctx.arcTo(x + overlayWidth, y + overlayHeight, x + overlayWidth - radius, y + overlayHeight, radius);
+    this.ctx.arcTo(
+      x + overlayWidth,
+      y + overlayHeight,
+      x + overlayWidth - radius,
+      y + overlayHeight,
+      radius
+    );
     this.ctx.lineTo(x + radius, y + overlayHeight);
     this.ctx.arcTo(x, y + overlayHeight, x, y + overlayHeight - radius, radius);
     this.ctx.lineTo(x, y + radius);
@@ -784,11 +814,29 @@ export class RendererUI {
         this.ctx.beginPath();
         this.ctx.moveTo(badgeX + badgeRadius, badgeY);
         this.ctx.lineTo(badgeX + keyWidth - badgeRadius, badgeY);
-        this.ctx.arcTo(badgeX + keyWidth, badgeY, badgeX + keyWidth, badgeY + badgeRadius, badgeRadius);
+        this.ctx.arcTo(
+          badgeX + keyWidth,
+          badgeY,
+          badgeX + keyWidth,
+          badgeY + badgeRadius,
+          badgeRadius
+        );
         this.ctx.lineTo(badgeX + keyWidth, badgeY + badgeHeight - badgeRadius);
-        this.ctx.arcTo(badgeX + keyWidth, badgeY + badgeHeight, badgeX + keyWidth - badgeRadius, badgeY + badgeHeight, badgeRadius);
+        this.ctx.arcTo(
+          badgeX + keyWidth,
+          badgeY + badgeHeight,
+          badgeX + keyWidth - badgeRadius,
+          badgeY + badgeHeight,
+          badgeRadius
+        );
         this.ctx.lineTo(badgeX + badgeRadius, badgeY + badgeHeight);
-        this.ctx.arcTo(badgeX, badgeY + badgeHeight, badgeX, badgeY + badgeHeight - badgeRadius, badgeRadius);
+        this.ctx.arcTo(
+          badgeX,
+          badgeY + badgeHeight,
+          badgeX,
+          badgeY + badgeHeight - badgeRadius,
+          badgeRadius
+        );
         this.ctx.lineTo(badgeX, badgeY + badgeRadius);
         this.ctx.arcTo(badgeX, badgeY, badgeX + badgeRadius, badgeY, badgeRadius);
         this.ctx.closePath();
@@ -810,5 +858,4 @@ export class RendererUI {
     });
     this.ctx.restore();
   }
-
 }

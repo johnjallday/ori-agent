@@ -63,7 +63,7 @@ class WorkspaceRealtime {
       });
     });
 
-    eventSource.addEventListener('error', (e) => {
+    eventSource.addEventListener('error', e => {
       console.error(`❌ Error in workspace ${workspaceId} event stream:`, e);
 
       // Handle reconnection
@@ -71,12 +71,18 @@ class WorkspaceRealtime {
       if (attempts < this.maxReconnectAttempts) {
         this.reconnectAttempts.set(workspaceId, attempts + 1);
 
-        setTimeout(() => {
-          if (this.eventListeners.has(workspaceId) && this.eventListeners.get(workspaceId).size > 0) {
-            this.disconnectFromWorkspace(workspaceId);
-            this.connectToWorkspace(workspaceId);
-          }
-        }, this.reconnectDelay * Math.pow(2, attempts)); // Exponential backoff
+        setTimeout(
+          () => {
+            if (
+              this.eventListeners.has(workspaceId) &&
+              this.eventListeners.get(workspaceId).size > 0
+            ) {
+              this.disconnectFromWorkspace(workspaceId);
+              this.connectToWorkspace(workspaceId);
+            }
+          },
+          this.reconnectDelay * Math.pow(2, attempts)
+        ); // Exponential backoff
       } else {
         console.error(`❌ Max reconnection attempts reached for workspace ${workspaceId}`);
         this.notifyListeners(workspaceId, {
@@ -88,7 +94,7 @@ class WorkspaceRealtime {
     });
 
     // Listen for status updates
-    eventSource.addEventListener('status', (e) => {
+    eventSource.addEventListener('status', e => {
       try {
         const data = JSON.parse(e.data);
         this.notifyListeners(workspaceId, {
@@ -102,97 +108,97 @@ class WorkspaceRealtime {
     });
 
     // Listen for task events
-    eventSource.addEventListener('task.created', (e) => {
+    eventSource.addEventListener('task.created', e => {
       this.handleTaskEvent(workspaceId, 'task.created', e);
     });
 
-    eventSource.addEventListener('task.assigned', (e) => {
+    eventSource.addEventListener('task.assigned', e => {
       this.handleTaskEvent(workspaceId, 'task.assigned', e);
     });
 
-    eventSource.addEventListener('task.started', (e) => {
+    eventSource.addEventListener('task.started', e => {
       this.handleTaskEvent(workspaceId, 'task.started', e);
     });
 
-    eventSource.addEventListener('task.thinking', (e) => {
+    eventSource.addEventListener('task.thinking', e => {
       this.handleTaskEvent(workspaceId, 'task.thinking', e);
     });
 
-    eventSource.addEventListener('task.tool_call', (e) => {
+    eventSource.addEventListener('task.tool_call', e => {
       this.handleTaskEvent(workspaceId, 'task.tool_call', e);
     });
 
-    eventSource.addEventListener('task.tool_result', (e) => {
+    eventSource.addEventListener('task.tool_result', e => {
       this.handleTaskEvent(workspaceId, 'task.tool_result', e);
     });
 
-    eventSource.addEventListener('task.completed', (e) => {
+    eventSource.addEventListener('task.completed', e => {
       this.handleTaskEvent(workspaceId, 'task.completed', e);
     });
 
-    eventSource.addEventListener('task.failed', (e) => {
+    eventSource.addEventListener('task.failed', e => {
       this.handleTaskEvent(workspaceId, 'task.failed', e);
     });
 
-    eventSource.addEventListener('task.blocked', (e) => {
+    eventSource.addEventListener('task.blocked', e => {
       this.handleTaskEvent(workspaceId, 'task.blocked', e);
     });
 
-    eventSource.addEventListener('task.resumed', (e) => {
+    eventSource.addEventListener('task.resumed', e => {
       this.handleTaskEvent(workspaceId, 'task.resumed', e);
     });
 
-    eventSource.addEventListener('task.deleted', (e) => {
+    eventSource.addEventListener('task.deleted', e => {
       this.handleTaskEvent(workspaceId, 'task.deleted', e);
     });
 
     // Backlog lifecycle events (PRD workspace-backlog FR31, 47, 54) — Backlog
     // items are Task records, so these reuse handleTaskEvent's plumbing.
-    eventSource.addEventListener('task.backlog.captured', (e) => {
+    eventSource.addEventListener('task.backlog.captured', e => {
       this.handleTaskEvent(workspaceId, 'task.backlog.captured', e);
     });
 
-    eventSource.addEventListener('task.backlog.updated', (e) => {
+    eventSource.addEventListener('task.backlog.updated', e => {
       this.handleTaskEvent(workspaceId, 'task.backlog.updated', e);
     });
 
-    eventSource.addEventListener('task.backlog.reordered', (e) => {
+    eventSource.addEventListener('task.backlog.reordered', e => {
       this.handleTaskEvent(workspaceId, 'task.backlog.reordered', e);
     });
 
-    eventSource.addEventListener('task.backlog.promoted', (e) => {
+    eventSource.addEventListener('task.backlog.promoted', e => {
       this.handleTaskEvent(workspaceId, 'task.backlog.promoted', e);
     });
 
     // Listen for workspace events
-    eventSource.addEventListener('workspace.updated', (e) => {
+    eventSource.addEventListener('workspace.updated', e => {
       this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);
     });
 
-    eventSource.addEventListener('workspace.updated', (e) => {
+    eventSource.addEventListener('workspace.updated', e => {
       this.handleWorkspaceEvent(workspaceId, 'workspace.updated', e);
     });
 
-    eventSource.addEventListener('workspace.completed', (e) => {
+    eventSource.addEventListener('workspace.completed', e => {
       this.handleWorkspaceEvent(workspaceId, 'workspace.completed', e);
       // Auto-disconnect when workspace completes
       setTimeout(() => this.disconnectFromWorkspace(workspaceId), 1000);
     });
 
     // Listen for workflow events
-    eventSource.addEventListener('workflow.started', (e) => {
+    eventSource.addEventListener('workflow.started', e => {
       this.handleWorkflowEvent(workspaceId, 'workflow.started', e);
     });
 
-    eventSource.addEventListener('workflow.completed', (e) => {
+    eventSource.addEventListener('workflow.completed', e => {
       this.handleWorkflowEvent(workspaceId, 'workflow.completed', e);
     });
 
-    eventSource.addEventListener('step.started', (e) => {
+    eventSource.addEventListener('step.started', e => {
       this.handleWorkflowEvent(workspaceId, 'step.started', e);
     });
 
-    eventSource.addEventListener('step.completed', (e) => {
+    eventSource.addEventListener('step.completed', e => {
       this.handleWorkflowEvent(workspaceId, 'step.completed', e);
     });
 
@@ -314,15 +320,14 @@ class WorkspaceRealtime {
     const url = `/api/orchestration/notifications/stream?agent=${encodeURIComponent(agentName)}`;
     const eventSource = new EventSource(url);
 
-    eventSource.addEventListener('open', () => {
-    });
+    eventSource.addEventListener('open', () => {});
 
-    eventSource.addEventListener('error', (e) => {
+    eventSource.addEventListener('error', e => {
       console.error('❌ Error in notification stream:', e);
     });
 
     // Listen for initial unread notifications
-    eventSource.addEventListener('initial', (e) => {
+    eventSource.addEventListener('initial', e => {
       try {
         const data = JSON.parse(e.data);
         this.notificationCallbacks.forEach(callback => {
@@ -337,7 +342,7 @@ class WorkspaceRealtime {
     });
 
     // Listen for new notifications
-    eventSource.addEventListener('notification', (e) => {
+    eventSource.addEventListener('notification', e => {
       try {
         const notification = JSON.parse(e.data);
         this.notificationCallbacks.forEach(callback => {

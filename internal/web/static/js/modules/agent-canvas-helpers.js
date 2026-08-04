@@ -64,12 +64,19 @@ export class AgentCanvasHelpers {
     const num = parseInt(color.replace('#', ''), 16);
     const amt = Math.round(2.55 * percent);
     const R = (num >> 16) + amt;
-    const G = (num >> 8 & 0x00FF) + amt;
-    const B = (num & 0x0000FF) + amt;
-    return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
-      (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
-      (B < 255 ? B < 1 ? 0 : B : 255))
-      .toString(16).slice(1);
+    const G = ((num >> 8) & 0x00ff) + amt;
+    const B = (num & 0x0000ff) + amt;
+    return (
+      '#' +
+      (
+        0x1000000 +
+        (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+        (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+        (B < 255 ? (B < 1 ? 0 : B) : 255)
+      )
+        .toString(16)
+        .slice(1)
+    );
   }
 
   /**
@@ -79,12 +86,14 @@ export class AgentCanvasHelpers {
     const num = parseInt(color.replace('#', ''), 16);
     const amt = Math.round(2.55 * percent);
     const R = (num >> 16) - amt;
-    const G = (num >> 8 & 0x00FF) - amt;
-    const B = (num & 0x0000FF) - amt;
-    return '#' + (0x1000000 + (R > 0 ? R : 0) * 0x10000 +
-      (G > 0 ? G : 0) * 0x100 +
-      (B > 0 ? B : 0))
-      .toString(16).slice(1);
+    const G = ((num >> 8) & 0x00ff) - amt;
+    const B = (num & 0x0000ff) - amt;
+    return (
+      '#' +
+      (0x1000000 + (R > 0 ? R : 0) * 0x10000 + (G > 0 ? G : 0) * 0x100 + (B > 0 ? B : 0))
+        .toString(16)
+        .slice(1)
+    );
   }
 
   /**
@@ -99,7 +108,7 @@ export class AgentCanvasHelpers {
       '#8b5cf6', // purple
       '#ec4899', // pink
       '#14b8a6', // teal
-      '#f97316'  // orange
+      '#f97316' // orange
     ];
     return colors[index % colors.length];
   }
@@ -109,7 +118,9 @@ export class AgentCanvasHelpers {
    */
   getNodeById(nodeId) {
     // Check if it's an agent (support both nodeId and legacy name lookups)
-    const agent = this.state.agents.find(a => a.nodeId === nodeId || a.name === nodeId || a.id === nodeId);
+    const agent = this.state.agents.find(
+      a => a.nodeId === nodeId || a.name === nodeId || a.id === nodeId
+    );
     if (agent) return { type: 'agent', node: agent };
 
     // Check if it's a task
@@ -120,7 +131,9 @@ export class AgentCanvasHelpers {
     if (attachment) return { type: 'attachment', node: attachment };
 
     // Check if it's a store node (search by canvas_node_id or id)
-    const storeNode = this.state.storeNodes.find(s => s.canvas_node_id === nodeId || s.id === nodeId);
+    const storeNode = this.state.storeNodes.find(
+      s => s.canvas_node_id === nodeId || s.id === nodeId
+    );
     if (storeNode) return { type: 'store', node: storeNode };
 
     const folder = this.state.workspaceFolders.find(f => f.id === nodeId || f.folder_id === nodeId);
@@ -219,8 +232,12 @@ export class AgentCanvasHelpers {
       }
 
       // If inside task card bounds, treat as an input port (for forgiving drops)
-      if (x >= task.cardBounds.x && x <= task.cardBounds.x + task.cardBounds.width &&
-          y >= task.cardBounds.y && y <= task.cardBounds.y + task.cardBounds.height) {
+      if (
+        x >= task.cardBounds.x &&
+        x <= task.cardBounds.x + task.cardBounds.width &&
+        y >= task.cardBounds.y &&
+        y <= task.cardBounds.y + task.cardBounds.height
+      ) {
         return {
           nodeId: task.id,
           nodeType: 'task',
@@ -234,7 +251,7 @@ export class AgentCanvasHelpers {
     for (const att of this.parent.attachments) {
       if (att.x == null || att.y == null) continue;
       const portX = att.x;
-      const portY = (att.cardBounds ? att.cardBounds.y + att.cardBounds.height : att.y + 35);
+      const portY = att.cardBounds ? att.cardBounds.y + att.cardBounds.height : att.y + 35;
       const dist = Math.sqrt((x - portX) ** 2 + (y - portY) ** 2);
       if (dist <= portRadius) {
         return {
@@ -321,15 +338,15 @@ export class AgentCanvasHelpers {
       return null;
     }
 
-    const candidates = this.state.tasks.filter(task =>
-      task && (task.to === agentName || task.from === agentName)
+    const candidates = this.state.tasks.filter(
+      task => task && (task.to === agentName || task.from === agentName)
     );
 
     if (candidates.length === 0) {
       return null;
     }
 
-    const getTimestamp = (task) => {
+    const getTimestamp = task => {
       const value = task.completed_at || task.started_at || task.created_at;
       const parsed = value ? new Date(value).getTime() : 0;
       return Number.isNaN(parsed) ? 0 : parsed;
@@ -344,9 +361,7 @@ export class AgentCanvasHelpers {
       return completedWithResult[0];
     }
 
-    const completed = candidates
-      .filter(task => task.status === 'completed')
-      .sort(sortByRecency);
+    const completed = candidates.filter(task => task.status === 'completed').sort(sortByRecency);
     if (completed.length > 0) {
       return completed[0];
     }

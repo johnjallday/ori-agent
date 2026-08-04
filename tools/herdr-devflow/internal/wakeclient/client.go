@@ -391,7 +391,7 @@ func (c *Client) request(
 			Cause:     ErrUnavailable,
 		}
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	_ = connection.SetDeadline(time.Now().Add(c.Timeout))
 	if err := wakeprotocol.WriteRequest(connection, partial); err != nil {
 		return wakeprotocol.Response{}, &OperationError{

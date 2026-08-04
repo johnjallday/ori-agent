@@ -16,7 +16,9 @@ function fakeController(runs, selectedId) {
     getRuns: () => runs,
     getActiveRuns: () => runs.filter(r => r.phase !== RUN_PHASE.SETTLED),
     getAttentionRuns: () =>
-      runs.filter(r => ['needs_input', 'failed', 'timed_out', 'blocked'].includes(r.presentation.state)),
+      runs.filter(r =>
+        ['needs_input', 'failed', 'timed_out', 'blocked'].includes(r.presentation.state)
+      ),
     select: id => {
       selected = id;
     }
@@ -88,7 +90,11 @@ test('closeTray hides the launcher but never clears the controller (FR52)', () =
   view.closeTray();
   assert.equal(view.trayOpen, false);
   assert.equal(view.trayEl.hidden, true);
-  assert.equal(view.execController, controller, 'controller (and its runs) survive closing the tray');
+  assert.equal(
+    view.execController,
+    controller,
+    'controller (and its runs) survive closing the tray'
+  );
   assert.ok(controller.getSelected(), 'the run is still tracked');
 });
 
@@ -117,7 +123,12 @@ test('run switcher lists every run and marks the selected one (FR53)', () => {
     runFixture({
       taskId: 't2',
       task: { description: 'Render intro' },
-      presentation: { state: 'needs_input', label: 'Needs Input', tone: 'attention', assignee: 'ed' }
+      presentation: {
+        state: 'needs_input',
+        label: 'Needs Input',
+        tone: 'attention',
+        assignee: 'ed'
+      }
     })
   ];
   view.execController = fakeController(runs, 't1');

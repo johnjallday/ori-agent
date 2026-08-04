@@ -28,20 +28,21 @@ type ReplyPayload struct {
 func (p ReplyPayload) Hash() string {
 	h := sha256.New()
 	// A NUL separator between fields avoids ambiguity (e.g. To vs Subject
-	// boundary) that simple concatenation would allow.
-	io.WriteString(h, p.AccountID)
+	// boundary) that simple concatenation would allow. Writes are discarded:
+	// hash.Hash.Write is documented to never return an error.
+	_, _ = io.WriteString(h, p.AccountID)
 	h.Write([]byte{0})
-	io.WriteString(h, p.SourceThreadID)
+	_, _ = io.WriteString(h, p.SourceThreadID)
 	h.Write([]byte{0})
-	io.WriteString(h, p.InReplyToMessageID)
+	_, _ = io.WriteString(h, p.InReplyToMessageID)
 	h.Write([]byte{0})
-	io.WriteString(h, p.References)
+	_, _ = io.WriteString(h, p.References)
 	h.Write([]byte{0})
-	io.WriteString(h, strings.Join(p.To, ","))
+	_, _ = io.WriteString(h, strings.Join(p.To, ","))
 	h.Write([]byte{0})
-	io.WriteString(h, p.Subject)
+	_, _ = io.WriteString(h, p.Subject)
 	h.Write([]byte{0})
-	io.WriteString(h, p.Body)
+	_, _ = io.WriteString(h, p.Body)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

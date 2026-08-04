@@ -641,7 +641,9 @@
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
 
-    const previous = button('Previous', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset - PAGE_SIZE));
+    const previous = button('Previous', 'dj-btn dj-btn-secondary', () =>
+      goToPage(pageOffset - PAGE_SIZE)
+    );
     previous.id = 'downloadsJanitorPagePrev';
     previous.disabled = pageOffset <= 0;
     const next = button('Next', 'dj-btn dj-btn-secondary', () => goToPage(pageOffset + PAGE_SIZE));
@@ -1367,7 +1369,9 @@
       );
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error((body.message || (body.error && body.error.message)) || 'Ori could not add a Curator.');
+        throw new Error(
+          body.message || (body.error && body.error.message) || 'Ori could not add a Curator.'
+        );
       }
       setSettingsMessage(
         body.already_present

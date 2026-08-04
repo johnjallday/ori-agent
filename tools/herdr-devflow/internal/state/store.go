@@ -74,7 +74,7 @@ func (s *Store) Save(state model.BridgeState) error {
 		return fmt.Errorf("create temporary state: %w", err)
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	defer func() { _ = os.Remove(tempPath) }()
 	if err := temp.Chmod(0600); err != nil {
 		_ = temp.Close()
 		return fmt.Errorf("set temporary state permissions: %w", err)

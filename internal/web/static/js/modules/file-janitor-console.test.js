@@ -1736,8 +1736,7 @@ test('the Settings tab reports whether it is the selected tab', () => {
   panel._setBatch(null, [], CATEGORIES);
   openConsole(statusFixture());
 
-  const tabFor = name =>
-    surface(doc).all(n => n.getAttribute('data-fj-tab') === name)[0];
+  const tabFor = name => surface(doc).all(n => n.getAttribute('data-fj-tab') === name)[0];
 
   assert.equal(tabFor('settings').getAttribute('role'), 'tab');
   assert.equal(tabFor('settings').getAttribute('aria-selected'), 'false');
@@ -1863,7 +1862,9 @@ test('cancelling the confirmation returns focus to the control that opened it', 
   approve.click();
   await new Promise(r => setTimeout(r, 0));
 
-  const cancel = surface(doc).all(node => node.tagName === 'BUTTON' && node.textContent === 'Cancel')[0];
+  const cancel = surface(doc).all(
+    node => node.tagName === 'BUTTON' && node.textContent === 'Cancel'
+  )[0];
   assert.ok(cancel, 'expected a cancel control');
   cancel.click();
 
@@ -2352,7 +2353,9 @@ test('opening twice leaves exactly one console', () => {
   renderReview(doc);
   panel.open({ source: 'map-station' });
   panel.open({ source: 'workspace-details' });
-  const dialogs = doc.getElementById('fileJanitorConsole').all(n => n.getAttribute('role') === 'dialog');
+  const dialogs = doc
+    .getElementById('fileJanitorConsole')
+    .all(n => n.getAttribute('role') === 'dialog');
   assert.equal(dialogs.length, 1, 'every entry point shares one console');
 });
 
@@ -2450,7 +2453,10 @@ test('the console re-reads status on the way in', async () => {
   let asked = 0;
   globalThis.fetch = async url => {
     if (String(url).endsWith('/file-janitor')) asked += 1;
-    return { ok: true, json: async () => ({ status: statusFixture(), batch: null, candidates: [] }) };
+    return {
+      ok: true,
+      json: async () => ({ status: statusFixture(), batch: null, candidates: [] })
+    };
   };
   panel.open({ source: 'map-station' });
   await settle();
@@ -2708,7 +2714,9 @@ test('selections survive a page change', async () => {
   panel._select('c1');
   assert.deepEqual(panel._selected().sort(), ['c0', 'c1']);
 
-  surface(doc).all(n => n.id === 'downloadsJanitorPageNext')[0].click();
+  surface(doc)
+    .all(n => n.id === 'downloadsJanitorPageNext')[0]
+    .click();
   await settle();
 
   assert.deepEqual(
@@ -2891,7 +2899,12 @@ test('Settings states the folder, the watching state, and every readiness check'
       readiness: {
         state: 'needs_attention',
         checks: [
-          { component: 'directory_access', status: 'failed', message: 'Folder is missing.', repair: 'relink_folder' },
+          {
+            component: 'directory_access',
+            status: 'failed',
+            message: 'Folder is missing.',
+            repair: 'relink_folder'
+          },
           { component: 'watcher', status: 'ok' }
         ]
       }
@@ -3139,7 +3152,8 @@ test('an adopted Curator is described as left alone, with no checkbox', async ()
         companion: {
           agent_instance_id: 'agent-1',
           removable: false,
-          reason: 'This agent existed before File Janitor was installed, so removing it leaves it alone.'
+          reason:
+            'This agent existed before File Janitor was installed, so removing it leaves it alone.'
         }
       }
     })

@@ -22,7 +22,11 @@
   --vault-page-note-bg: rgba(255, 255, 255, 0.52);
   --vault-page-meta-bg: rgba(255, 255, 255, 0.56);
   --vault-page-record-bg: rgba(255, 255, 255, 0.62);
-  --vault-page-record-selected-bg: linear-gradient(135deg, rgba(232, 234, 237, 0.9), rgba(201, 204, 209, 0.88));
+  --vault-page-record-selected-bg: linear-gradient(
+    135deg,
+    rgba(232, 234, 237, 0.9),
+    rgba(201, 204, 209, 0.88)
+  );
   --vault-page-empty-bg: rgba(255, 255, 255, 0.45);
   --vault-page-badge-bg: rgba(92, 92, 94, 0.08);
   --vault-page-shadow: 0 18px 45px rgba(10, 10, 10, 0.08);
@@ -57,7 +61,11 @@
   --vault-page-note-bg: rgba(31, 33, 40, 0.72);
   --vault-page-meta-bg: rgba(31, 33, 40, 0.72);
   --vault-page-record-bg: rgba(31, 33, 40, 0.72);
-  --vault-page-record-selected-bg: linear-gradient(135deg, rgba(31, 107, 78, 0.42), rgba(31, 33, 40, 0.78));
+  --vault-page-record-selected-bg: linear-gradient(
+    135deg,
+    rgba(31, 107, 78, 0.42),
+    rgba(31, 33, 40, 0.78)
+  );
   --vault-page-empty-bg: rgba(31, 33, 40, 0.56);
   --vault-page-badge-bg: rgba(42, 135, 98, 0.14);
   --vault-page-shadow: 0 24px 58px rgba(0, 0, 0, 0.42);
@@ -601,7 +609,11 @@ body.vault-page-dialog-open {
 .vault-page-record {
   padding: 0.95rem 1rem;
   text-align: left;
-  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    background 0.16s ease;
 }
 
 .vault-page-record:hover {
@@ -784,7 +796,6 @@ body.vault-page-dialog-open {
   .vault-page-explorer-grid {
     min-height: 0;
   }
-
 }
 
 @media (max-width: 640px) {

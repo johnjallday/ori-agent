@@ -5,7 +5,7 @@
 
 *   **Core Philosophy:** Local-first, privacy-centric. Agents and data stay local unless cloud LLMs are explicitly used.
 *   **Architecture:**
-    *   **Backend:** Go (v1.25.5+) using standard library HTTP server + Wails for desktop integration.
+    *   **Backend:** Go (v1.25.12+) using standard library HTTP server + Wails for desktop integration.
     *   **Frontend:** Web interface located in `internal/web/static`, served by the Go backend.
     *   **Tools:** MCP (Model Context Protocol) servers and Skills provide tool capabilities. MCP servers are external processes; Skills are reusable prompt-based capabilities.
     *   **Database:** SQLite (via `modernc.org/sqlite`) for local storage of agents, sessions, and history.
@@ -13,7 +13,7 @@
 ## Building and Running
 
 ### Prerequisites
-*   Go 1.25 or later.
+*   Go 1.25.12 or later.
 *   Node.js & npm (for frontend linting/testing).
 *   API Key (OpenAI `OPENAI_API_KEY` or Anthropic `ANTHROPIC_API_KEY`) OR Ollama running locally.
 
@@ -34,7 +34,7 @@
 ## Development Conventions
 
 ### Code Structure
-*   `cmd/`: Entry points (`server`, `menubar`, `ori-plugin-gen`).
+*   `cmd/`: Entry points (`server`, `menubar`, `folder-picker`, `readme-updater`, `test-cli`).
 *   `internal/`: Private application logic (server, core, agents, etc.).
 *   `internal/mcp/`: MCP server integration.
 *   `internal/skills/`: Skills management.
@@ -54,4 +54,4 @@
 
 ### State Management
 *   App state is stored in `ori-data` (or standard OS app data locations).
-*   To reset state completely: `make reset` (WARNING: Deletes all local agents and history).
+*   To reset state, use the in-app Settings > Reset panel (or `POST /api/reset`), which is confined to the resolved data directory. `make reset` only prints this guidance; it no longer deletes files itself.

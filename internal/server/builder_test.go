@@ -70,6 +70,10 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	// Isolate ORI_DATA_DIR so this full Build() never touches a real user's
+	// actual Ori data, and so config.DefaultDataDir() below resolves to a
+	// known, verifiable path rather than whatever happens to be on the host.
+	t.Setenv("ORI_DATA_DIR", t.TempDir())
 
 	builder, err := NewServerBuilder()
 	if err != nil {
@@ -116,6 +120,22 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	}
 	if builder.setupWizardService == nil || builder.setupWizardRegistry == nil {
 		t.Error("Setup Wizard service/registry not wired")
+	}
+	// The reset handler must be confined to the same resolved data directory
+	// every other store uses, not the process working directory. A cwd
+	// value here would mean a reset previewed/executed from a different
+	// launch directory (e.g. the menu-bar app) operates on the wrong files.
+	if builder.resetHandler == nil {
+		t.Fatal("reset handler not initialized")
+	}
+	wantDataDir := config.DefaultDataDir()
+	if got := builder.resetHandler.DataDir(); got != wantDataDir {
+		t.Errorf("reset handler data dir = %q, want %q (config.DefaultDataDir())", got, wantDataDir)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if got := builder.resetHandler.DataDir(); got == "." || got == cwd {
+			t.Errorf("reset handler data dir = %q, must not be the process working directory", got)
+		}
 	}
 }
 

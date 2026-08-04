@@ -22,15 +22,22 @@
   border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.2);
   border-radius: 16px;
   background:
-    linear-gradient(160deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.1), rgba(31, 33, 40, 0.72)),
+    linear-gradient(
+      160deg,
+      rgba(var(--primary-color-rgb, 255, 138, 86), 0.1),
+      rgba(31, 33, 40, 0.72)
+    ),
     rgba(31, 33, 40, 0.68);
   box-shadow:
     0 14px 32px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(14px);
-  color: #F5F6F7;
+  color: #f5f6f7;
   transform: translateX(-50%);
-  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease,
+    border-color 0.16s ease;
 }
 
 .ori-keyboard-nav-status.is-invalid {
@@ -67,7 +74,7 @@
 .ori-keyboard-nav-status-text {
   font-size: 0.88rem;
   line-height: 1.45;
-  color: #F5F6F7;
+  color: #f5f6f7;
 }
 
 .ori-keyboard-nav-status-value {
@@ -78,7 +85,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #F5F6F7;
+  color: #f5f6f7;
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -106,7 +113,7 @@
 .ori-keyboard-nav-status-pill.is-active {
   border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.38);
   background: rgba(var(--primary-color-rgb, 255, 138, 86), 0.16);
-  color: #F5F6F7;
+  color: #f5f6f7;
 }
 
 .ori-keyboard-nav-status-zones {
@@ -131,8 +138,11 @@
   position: fixed;
   border-radius: 20px;
   border: 1px solid rgba(var(--primary-color-rgb, 255, 138, 86), 0.58);
-  background:
-    linear-gradient(180deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.1), rgba(var(--primary-color-rgb, 255, 138, 86), 0.03));
+  background: linear-gradient(
+    180deg,
+    rgba(var(--primary-color-rgb, 255, 138, 86), 0.1),
+    rgba(var(--primary-color-rgb, 255, 138, 86), 0.03)
+  );
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.05),
     0 18px 40px rgba(0, 0, 0, 0.16),
@@ -180,8 +190,7 @@
   padding: 0 0.45rem;
   border-radius: 999px;
   border: 1px solid rgba(31, 33, 40, 0.42);
-  background:
-    linear-gradient(180deg, rgba(255, 247, 230, 0.98), rgba(201, 204, 209, 0.98));
+  background: linear-gradient(180deg, rgba(255, 247, 230, 0.98), rgba(201, 204, 209, 0.98));
   box-shadow:
     0 8px 18px rgba(10, 10, 10, 0.22),
     inset 0 -1px 0 rgba(92, 92, 94, 0.14);
@@ -215,14 +224,16 @@
 }
 
 .ori-keyboard-nav-hint[data-state="match"] {
-  background:
-    linear-gradient(180deg, rgba(201, 204, 209, 1), rgba(255, 203, 125, 1));
+  background: linear-gradient(180deg, rgba(201, 204, 209, 1), rgba(255, 203, 125, 1));
 }
 
 .ori-keyboard-nav-hint[data-state="exact"] {
-  background:
-    linear-gradient(180deg, rgba(var(--primary-color-rgb, 255, 138, 86), 0.98), rgba(var(--primary-color-rgb, 255, 138, 86), 0.88));
-  color: #F5F6F7;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--primary-color-rgb, 255, 138, 86), 0.98),
+    rgba(var(--primary-color-rgb, 255, 138, 86), 0.88)
+  );
+  color: #f5f6f7;
   border-color: rgba(var(--primary-color-rgb, 255, 138, 86), 0.7);
   box-shadow:
     0 10px 22px rgba(var(--primary-color-rgb, 255, 138, 86), 0.28),
@@ -230,32 +241,27 @@
 }
 
 .ori-keyboard-nav-hint[data-zone="navbar"]:not([data-state="exact"]) {
-  background:
-    linear-gradient(180deg, rgba(225, 241, 255, 0.98), rgba(181, 216, 255, 0.98));
+  background: linear-gradient(180deg, rgba(225, 241, 255, 0.98), rgba(181, 216, 255, 0.98));
   color: #09213b;
 }
 
 .ori-keyboard-nav-hint[data-zone="sidebar"]:not([data-state="exact"]) {
-  background:
-    linear-gradient(180deg, rgba(230, 250, 239, 0.98), rgba(180, 237, 205, 0.98));
+  background: linear-gradient(180deg, rgba(230, 250, 239, 0.98), rgba(180, 237, 205, 0.98));
   color: #0b2f1f;
 }
 
 .ori-keyboard-nav-hint[data-zone="panel"]:not([data-state="exact"]) {
-  background:
-    linear-gradient(180deg, rgba(224, 246, 246, 0.98), rgba(170, 225, 222, 0.98));
+  background: linear-gradient(180deg, rgba(224, 246, 246, 0.98), rgba(170, 225, 222, 0.98));
   color: #082a2d;
 }
 
 .ori-keyboard-nav-hint[data-zone="modal"]:not([data-state="exact"]) {
-  background:
-    linear-gradient(180deg, rgba(232, 234, 237, 0.98), rgba(255, 204, 184, 0.98));
+  background: linear-gradient(180deg, rgba(232, 234, 237, 0.98), rgba(255, 204, 184, 0.98));
   color: #3a1808;
 }
 
 .ori-keyboard-nav-hint[data-zone="chat"]:not([data-state="exact"]) {
-  background:
-    linear-gradient(180deg, rgba(238, 241, 247, 0.98), rgba(202, 213, 229, 0.98));
+  background: linear-gradient(180deg, rgba(238, 241, 247, 0.98), rgba(202, 213, 229, 0.98));
   color: #162235;
 }
 

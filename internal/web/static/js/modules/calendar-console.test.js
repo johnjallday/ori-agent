@@ -100,9 +100,16 @@ class FakeDocument {
 
 function setup() {
   const doc = new FakeDocument();
-  ['calendarConsoleChip', 'calendarConsoleRoot', 'calendarConsoleStatus', 'calendarConsoleToolbar', 'calendarConsoleBody', 'calendarConsoleDrawer', 'calendarConsoleLiveRegion', 'calendarConsoleFormHost'].forEach(
-    id => doc.register(id)
-  );
+  [
+    'calendarConsoleChip',
+    'calendarConsoleRoot',
+    'calendarConsoleStatus',
+    'calendarConsoleToolbar',
+    'calendarConsoleBody',
+    'calendarConsoleDrawer',
+    'calendarConsoleLiveRegion',
+    'calendarConsoleFormHost'
+  ].forEach(id => doc.register(id));
   globalThis.document = doc;
   globalThis.window = globalThis;
   globalThis.window.currentWorkspaceId = 'ws-1';
@@ -157,7 +164,10 @@ test('getViewRange week across a DST boundary is still exactly 7 calendar days',
   // In a timezone with a fall-back transition inside this week, the span in
   // milliseconds may exceed 7*24h by exactly one hour; assert calendar-day
   // correctness instead of a fixed millisecond count.
-  assert.ok(spanDays === 7 || Math.abs(spanDays - 7) < 0.05, `expected ~7 calendar days, got ${spanDays}`);
+  assert.ok(
+    spanDays === 7 || Math.abs(spanDays - 7) < 0.05,
+    `expected ~7 calendar days, got ${spanDays}`
+  );
   assert.equal(end.getDate() - start.getDate() === -24 ? true : true, true); // smoke: no throw across month boundary
 });
 
@@ -213,7 +223,12 @@ test('computeConflicts does not flag back-to-back (touching) events', () => {
 
 test('computeConflicts ignores all-day events', () => {
   const events = [
-    { id: 'a', all_day: true, start_time: '2026-07-20T00:00:00Z', end_time: '2026-07-21T00:00:00Z' },
+    {
+      id: 'a',
+      all_day: true,
+      start_time: '2026-07-20T00:00:00Z',
+      end_time: '2026-07-21T00:00:00Z'
+    },
     { id: 'b', start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z' }
   ];
   assert.equal(pure.computeConflicts(events).size, 0);
@@ -221,7 +236,12 @@ test('computeConflicts ignores all-day events', () => {
 
 test('computeConflicts ignores declined events', () => {
   const events = [
-    { id: 'a', response_status: 'declined', start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z' },
+    {
+      id: 'a',
+      response_status: 'declined',
+      start_time: '2026-07-20T10:00:00Z',
+      end_time: '2026-07-20T11:00:00Z'
+    },
     { id: 'b', start_time: '2026-07-20T10:30:00Z', end_time: '2026-07-20T11:30:00Z' }
   ];
   assert.equal(pure.computeConflicts(events).size, 0);
@@ -229,7 +249,12 @@ test('computeConflicts ignores declined events', () => {
 
 test('computeConflicts ignores canceled events', () => {
   const events = [
-    { id: 'a', canceled: true, start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z' },
+    {
+      id: 'a',
+      canceled: true,
+      start_time: '2026-07-20T10:00:00Z',
+      end_time: '2026-07-20T11:00:00Z'
+    },
     { id: 'b', start_time: '2026-07-20T10:30:00Z', end_time: '2026-07-20T11:30:00Z' }
   ];
   assert.equal(pure.computeConflicts(events).size, 0);
@@ -261,7 +286,9 @@ test('deriveEventFreeWindows returns the whole day when there are no events', ()
 test('deriveEventFreeWindows splits around a single busy block', () => {
   const start = new Date('2026-07-20T09:00:00Z');
   const end = new Date('2026-07-20T17:00:00Z');
-  const events = [{ id: 'a', start_time: '2026-07-20T12:00:00Z', end_time: '2026-07-20T13:00:00Z' }];
+  const events = [
+    { id: 'a', start_time: '2026-07-20T12:00:00Z', end_time: '2026-07-20T13:00:00Z' }
+  ];
   const windows = pure.deriveEventFreeWindows(events, start, end);
   assert.equal(windows.length, 2);
   assert.equal(windows[0].end_time, '2026-07-20T12:00:00.000Z');
@@ -285,9 +312,24 @@ test('deriveEventFreeWindows excludes all-day/declined/canceled events from bloc
   const start = new Date('2026-07-20T00:00:00Z');
   const end = new Date('2026-07-21T00:00:00Z');
   const events = [
-    { id: 'a', all_day: true, start_time: '2026-07-20T00:00:00Z', end_time: '2026-07-21T00:00:00Z' },
-    { id: 'b', canceled: true, start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z' },
-    { id: 'c', response_status: 'declined', start_time: '2026-07-20T12:00:00Z', end_time: '2026-07-20T13:00:00Z' }
+    {
+      id: 'a',
+      all_day: true,
+      start_time: '2026-07-20T00:00:00Z',
+      end_time: '2026-07-21T00:00:00Z'
+    },
+    {
+      id: 'b',
+      canceled: true,
+      start_time: '2026-07-20T10:00:00Z',
+      end_time: '2026-07-20T11:00:00Z'
+    },
+    {
+      id: 'c',
+      response_status: 'declined',
+      start_time: '2026-07-20T12:00:00Z',
+      end_time: '2026-07-20T13:00:00Z'
+    }
   ];
   const windows = pure.deriveEventFreeWindows(events, start, end);
   assert.equal(windows.length, 1);
@@ -317,11 +359,20 @@ test('attendeeImpactLabel: no attendees', () => {
 });
 
 test('attendeeImpactLabel: create_event phrases as invitation', () => {
-  assert.match(pure.attendeeImpactLabel([{ email: 'a@example.com' }], 'create_event'), /invitation/);
+  assert.match(
+    pure.attendeeImpactLabel([{ email: 'a@example.com' }], 'create_event'),
+    /invitation/
+  );
 });
 
 test('attendeeImpactLabel: update_event phrases as update notification', () => {
-  assert.match(pure.attendeeImpactLabel([{ email: 'a@example.com' }, { email: 'b@example.com' }], 'update_event'), /2 attendees.*update notification/);
+  assert.match(
+    pure.attendeeImpactLabel(
+      [{ email: 'a@example.com' }, { email: 'b@example.com' }],
+      'update_event'
+    ),
+    /2 attendees.*update notification/
+  );
 });
 
 // --- CSS color sanitization -------------------------------------------------
@@ -342,9 +393,28 @@ test('renderAgenda separates all-day events from a chronological timed list', ()
     capabilities: { display_time_zone: 'UTC', can_create: false },
     allCalendars: [{ id: 'cal-1', name: 'Work' }],
     currentEvents: [
-      { id: 'e1', calendar_id: 'cal-1', title: 'Later', start_time: '2026-07-20T15:00:00Z', end_time: '2026-07-20T16:00:00Z' },
-      { id: 'e2', calendar_id: 'cal-1', title: 'Earlier', start_time: '2026-07-20T09:00:00Z', end_time: '2026-07-20T10:00:00Z' },
-      { id: 'e3', calendar_id: 'cal-1', all_day: true, title: 'All Day Thing', start_time: '2026-07-20T00:00:00Z', end_time: '2026-07-21T00:00:00Z' }
+      {
+        id: 'e1',
+        calendar_id: 'cal-1',
+        title: 'Later',
+        start_time: '2026-07-20T15:00:00Z',
+        end_time: '2026-07-20T16:00:00Z'
+      },
+      {
+        id: 'e2',
+        calendar_id: 'cal-1',
+        title: 'Earlier',
+        start_time: '2026-07-20T09:00:00Z',
+        end_time: '2026-07-20T10:00:00Z'
+      },
+      {
+        id: 'e3',
+        calendar_id: 'cal-1',
+        all_day: true,
+        title: 'All Day Thing',
+        start_time: '2026-07-20T00:00:00Z',
+        end_time: '2026-07-21T00:00:00Z'
+      }
     ],
     lastRangeStartISO: '2026-07-20T00:00:00Z',
     lastRangeEndISO: '2026-07-21T00:00:00Z'
@@ -352,7 +422,9 @@ test('renderAgenda separates all-day events from a chronological timed list', ()
   const body = doc.getElementById('calendarConsoleBody');
   mod._internal.renderAgenda();
 
-  const daySection = body.children.find(c => c.tagName === 'SECTION' && c.className === 'calendar-console-day');
+  const daySection = body.children.find(
+    c => c.tagName === 'SECTION' && c.className === 'calendar-console-day'
+  );
   assert.ok(daySection, 'expected a day section to render');
   const allDayRow = daySection.children.find(c => c.className === 'calendar-console-allday-row');
   const timedList = daySection.children.find(c => c.tagName === 'OL');
@@ -419,25 +491,45 @@ test('renderToolbar only shows New event when can_create is true', () => {
   mod._internal.setTestState({ capabilities: { can_create: false }, allCalendars: [] });
   mod._internal.renderToolbar();
   let toolbar = doc.getElementById('calendarConsoleToolbar');
-  let labels = toolbar.children.flatMap(c => (c.children.length ? c.children.map(x => x.textContent) : [c.textContent]));
+  let labels = toolbar.children.flatMap(c =>
+    c.children.length ? c.children.map(x => x.textContent) : [c.textContent]
+  );
   assert.ok(!labels.includes('New event'));
 
   mod._internal.setTestState({ capabilities: { can_create: true }, allCalendars: [] });
   mod._internal.renderToolbar();
   toolbar = doc.getElementById('calendarConsoleToolbar');
-  labels = toolbar.children.flatMap(c => (c.children.length ? c.children.map(x => x.textContent) : [c.textContent]));
+  labels = toolbar.children.flatMap(c =>
+    c.children.length ? c.children.map(x => x.textContent) : [c.textContent]
+  );
   assert.ok(labels.includes('New event'));
 });
 
 test('the detail drawer only offers Edit when can_edit is true', () => {
   const doc = setup();
-  mod._internal.setTestState({ capabilities: { can_edit: false, display_time_zone: 'UTC' }, allCalendars: [] });
-  mod._internal.openDetailDrawer({ id: 'e1', title: 'Sync', start_time: '2026-07-20T09:00:00Z', end_time: '2026-07-20T10:00:00Z' });
+  mod._internal.setTestState({
+    capabilities: { can_edit: false, display_time_zone: 'UTC' },
+    allCalendars: []
+  });
+  mod._internal.openDetailDrawer({
+    id: 'e1',
+    title: 'Sync',
+    start_time: '2026-07-20T09:00:00Z',
+    end_time: '2026-07-20T10:00:00Z'
+  });
   let drawer = doc.getElementById('calendarConsoleDrawer');
   assert.ok(!drawer.textContent.includes('Edit'));
 
-  mod._internal.setTestState({ capabilities: { can_edit: true, display_time_zone: 'UTC' }, allCalendars: [] });
-  mod._internal.openDetailDrawer({ id: 'e1', title: 'Sync', start_time: '2026-07-20T09:00:00Z', end_time: '2026-07-20T10:00:00Z' });
+  mod._internal.setTestState({
+    capabilities: { can_edit: true, display_time_zone: 'UTC' },
+    allCalendars: []
+  });
+  mod._internal.openDetailDrawer({
+    id: 'e1',
+    title: 'Sync',
+    start_time: '2026-07-20T09:00:00Z',
+    end_time: '2026-07-20T10:00:00Z'
+  });
   drawer = doc.getElementById('calendarConsoleDrawer');
   assert.match(drawer.textContent, /Edit/);
 });
@@ -542,12 +634,21 @@ test('renderErrorState falls back to the raw error message for an unrecognized c
 // --- meeting prep gating and drawer rendering (task 6.2 / 6.6) --------------
 
 test('isPreparableEvent requires a stable id, title, and usable [start,end)', () => {
-  const base = { id: 'evt-1', title: 'Sync', start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z' };
+  const base = {
+    id: 'evt-1',
+    title: 'Sync',
+    start_time: '2026-07-20T10:00:00Z',
+    end_time: '2026-07-20T11:00:00Z'
+  };
   assert.equal(pure.isPreparableEvent(base), true);
   assert.equal(pure.isPreparableEvent({ ...base, id: '' }), false);
   assert.equal(pure.isPreparableEvent({ ...base, title: '' }), false);
   assert.equal(pure.isPreparableEvent({ ...base, start_time: 'garbage' }), false);
-  assert.equal(pure.isPreparableEvent({ ...base, end_time: base.start_time }), false, 'end must be strictly after start');
+  assert.equal(
+    pure.isPreparableEvent({ ...base, end_time: base.start_time }),
+    false,
+    'end must be strictly after start'
+  );
   assert.equal(pure.isPreparableEvent(null), false);
 });
 
@@ -556,8 +657,11 @@ test('opening the detail drawer for a preparable event shows a Prepare me action
   mockFetchJSON({ linked: false });
   mod._internal.setTestState({ capabilities: { display_time_zone: 'UTC' }, allCalendars: [] });
   mod._internal.openDetailDrawer({
-    id: 'evt-1', title: 'Sync', calendar_id: 'cal-1',
-    start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z'
+    id: 'evt-1',
+    title: 'Sync',
+    calendar_id: 'cal-1',
+    start_time: '2026-07-20T10:00:00Z',
+    end_time: '2026-07-20T11:00:00Z'
   });
   // renderPrepSection is async (awaits the prep-status fetch); flush microtasks.
   await new Promise(r => setTimeout(r, 0));
@@ -571,12 +675,19 @@ test('a private event never shows a Prepare me action even if otherwise preparab
   mockFetchJSON({ linked: false });
   mod._internal.setTestState({ capabilities: { display_time_zone: 'UTC' }, allCalendars: [] });
   mod._internal.openDetailDrawer({
-    id: 'evt-1', title: 'Secret', private: true, calendar_id: 'cal-1',
-    start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z'
+    id: 'evt-1',
+    title: 'Secret',
+    private: true,
+    calendar_id: 'cal-1',
+    start_time: '2026-07-20T10:00:00Z',
+    end_time: '2026-07-20T11:00:00Z'
   });
   await new Promise(r => setTimeout(r, 0));
   const drawer = doc.getElementById('calendarConsoleDrawer');
-  assert.ok(!drawer.textContent.includes('Prepare me'), 'a private event must never expose the prep action');
+  assert.ok(
+    !drawer.textContent.includes('Prepare me'),
+    'a private event must never expose the prep action'
+  );
 });
 
 test('a ready prep status renders a View prep note link using the /notes/{id} convention', async () => {
@@ -584,8 +695,11 @@ test('a ready prep status renders a View prep note link using the /notes/{id} co
   mockFetchJSON({ linked: true, status: 'ready', note_id: 'note-abc' });
   mod._internal.setTestState({ capabilities: { display_time_zone: 'UTC' }, allCalendars: [] });
   mod._internal.openDetailDrawer({
-    id: 'evt-1', title: 'Sync', calendar_id: 'cal-1',
-    start_time: '2026-07-20T10:00:00Z', end_time: '2026-07-20T11:00:00Z'
+    id: 'evt-1',
+    title: 'Sync',
+    calendar_id: 'cal-1',
+    start_time: '2026-07-20T10:00:00Z',
+    end_time: '2026-07-20T11:00:00Z'
   });
   await new Promise(r => setTimeout(r, 0));
   await new Promise(r => setTimeout(r, 0));
@@ -633,7 +747,10 @@ test('renderCheckpoint shows calendar/title/start/end/timezone/location/descript
 
 test('openCalendarTab shows the setup-incomplete error state when capabilities failed, instead of leaving the body blank', async () => {
   const doc = setup();
-  mockFetchJSON({ error: 'no calendar connector is configured for this workspace', code: 'connector_missing' }, false);
+  mockFetchJSON(
+    { error: 'no calendar connector is configured for this workspace', code: 'connector_missing' },
+    false
+  );
   await mod.init('ws-unfinished-setup');
   await new Promise(r => setTimeout(r, 0));
 

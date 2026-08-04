@@ -75,8 +75,5 @@ test('boundary: exactly 60 seconds past → "1m ago" not "just now"', () => {
 });
 
 test('accepts ISO string input', () => {
-  assert.equal(
-    formatRelativeTime('2026-05-14T11:00:00Z', { now: NOW }),
-    '1h ago',
-  );
+  assert.equal(formatRelativeTime('2026-05-14T11:00:00Z', { now: NOW }), '1h ago');
 });

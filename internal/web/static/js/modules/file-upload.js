@@ -41,8 +41,10 @@ function initFileUpload() {
   }
 
   if (notesSearchInput) {
-    notesSearchInput.addEventListener('input', (event) => {
-      chatNotesFilter = String(event?.target?.value || '').trim().toLowerCase();
+    notesSearchInput.addEventListener('input', event => {
+      chatNotesFilter = String(event?.target?.value || '')
+        .trim()
+        .toLowerCase();
       renderChatNotesPickerList();
     });
   }
@@ -119,16 +121,17 @@ async function openFolderPickerForChat() {
   }
 }
 
-const escapeFileUploadHtml = typeof window.escapeHtml === 'function'
-  ? window.escapeHtml.bind(window)
-  : function escapeFileUploadHtmlFallback(value) {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  };
+const escapeFileUploadHtml =
+  typeof window.escapeHtml === 'function'
+    ? window.escapeHtml.bind(window)
+    : function escapeFileUploadHtmlFallback(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      };
 
 function getActiveWorkspaceIdForChat() {
   return String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
@@ -189,9 +192,10 @@ function updateAttachNotesButton() {
   }
 
   if (button) {
-    button.title = count > 0
-      ? `Attach workspace notes to message (${count} selected)`
-      : 'Attach workspace notes to message';
+    button.title =
+      count > 0
+        ? `Attach workspace notes to message (${count} selected)`
+        : 'Attach workspace notes to message';
   }
 }
 
@@ -209,16 +213,20 @@ function updateAttachedNotesList() {
   }
 
   notesArea.style.display = 'block';
-  notesList.innerHTML = attachedNotes.map((note) => `
+  notesList.innerHTML = attachedNotes
+    .map(
+      note => `
     <div class="chat-note-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: rgba(255, 122, 68, 0.08); border: 1px solid rgba(255, 122, 68, 0.22); border-radius: 999px; font-size: 12px; color: var(--text-primary);">
       <span aria-hidden="true">📝</span>
       <span>${escapeFileUploadHtml(truncateNoteText(note.name, 30))}</span>
       <button type="button" class="btn-remove-note-chip" data-note-id="${escapeFileUploadHtml(note.id)}" aria-label="Remove note ${escapeFileUploadHtml(note.name)}" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0; margin-left: 2px; font-size: 14px; line-height: 1;">×</button>
     </div>
-  `).join('');
+  `
+    )
+    .join('');
 
-  notesList.querySelectorAll('.btn-remove-note-chip').forEach((button) => {
-    button.addEventListener('click', (event) => {
+  notesList.querySelectorAll('.btn-remove-note-chip').forEach(button => {
+    button.addEventListener('click', event => {
       const noteId = String(event.currentTarget?.dataset?.noteId || '').trim();
       if (noteId) {
         removeAttachedNote(noteId);
@@ -230,7 +238,7 @@ function updateAttachedNotesList() {
 }
 
 function removeAttachedNote(noteId) {
-  attachedNotes = attachedNotes.filter((note) => String(note.id) !== String(noteId));
+  attachedNotes = attachedNotes.filter(note => String(note.id) !== String(noteId));
   updateAttachedNotesList();
   renderChatNotesPickerList();
 }
@@ -252,7 +260,9 @@ function getAttachedChatNotes() {
     return [];
   }
 
-  const scopedNotes = attachedNotes.filter((note) => !note.workspace_id || note.workspace_id === workspaceId);
+  const scopedNotes = attachedNotes.filter(
+    note => !note.workspace_id || note.workspace_id === workspaceId
+  );
   if (scopedNotes.length !== attachedNotes.length) {
     attachedNotes = scopedNotes;
     updateAttachedNotesList();
@@ -269,7 +279,7 @@ function clearAttachedNotesAfterSend() {
 }
 
 function isNoteAttached(noteId) {
-  return attachedNotes.some((note) => String(note.id) === String(noteId));
+  return attachedNotes.some(note => String(note.id) === String(noteId));
 }
 
 function toggleAttachedNote(note) {
@@ -286,7 +296,8 @@ function toggleAttachedNote(note) {
     id: note.id,
     name: note.name || 'Untitled Note',
     preview: note.preview || '',
-    workspace_id: note.workspace_id || availableChatNotesWorkspaceId || getActiveWorkspaceIdForChat()
+    workspace_id:
+      note.workspace_id || availableChatNotesWorkspaceId || getActiveWorkspaceIdForChat()
   });
   updateAttachedNotesList();
   renderChatNotesPickerList();
@@ -298,7 +309,7 @@ function renderChatNotesPickerList() {
     return;
   }
 
-  const filteredNotes = availableChatNotes.filter((note) => {
+  const filteredNotes = availableChatNotes.filter(note => {
     if (!chatNotesFilter) return true;
     const haystack = `${note?.name || ''} ${note?.preview || ''}`.toLowerCase();
     return haystack.includes(chatNotesFilter);
@@ -322,10 +333,11 @@ function renderChatNotesPickerList() {
     attachedNotes.length > 0 ? 'success' : 'neutral'
   );
 
-  list.innerHTML = filteredNotes.map((note) => {
-    const selected = isNoteAttached(note.id);
-    const preview = truncateNoteText(note.preview || '', 140) || 'No preview available yet.';
-    return `
+  list.innerHTML = filteredNotes
+    .map(note => {
+      const selected = isNoteAttached(note.id);
+      const preview = truncateNoteText(note.preview || '', 140) || 'No preview available yet.';
+      return `
       <button
         type="button"
         class="chat-note-picker-item"
@@ -343,12 +355,13 @@ function renderChatNotesPickerList() {
         </div>
       </button>
     `;
-  }).join('');
+    })
+    .join('');
 
-  list.querySelectorAll('.chat-note-picker-item').forEach((button) => {
-    button.addEventListener('click', (event) => {
+  list.querySelectorAll('.chat-note-picker-item').forEach(button => {
+    button.addEventListener('click', event => {
       const noteId = String(event.currentTarget?.dataset?.noteId || '').trim();
-      const note = availableChatNotes.find((item) => String(item.id) === noteId);
+      const note = availableChatNotes.find(item => String(item.id) === noteId);
       toggleAttachedNote(note);
     });
   });
@@ -368,7 +381,9 @@ async function loadWorkspaceNotesForChat(options = {}) {
     return;
   }
 
-  const scopedNotes = attachedNotes.filter((note) => !note.workspace_id || note.workspace_id === workspaceId);
+  const scopedNotes = attachedNotes.filter(
+    note => !note.workspace_id || note.workspace_id === workspaceId
+  );
   if (scopedNotes.length !== attachedNotes.length) {
     attachedNotes = scopedNotes;
     updateAttachedNotesList();
@@ -438,7 +453,10 @@ async function openChatNotesModal() {
 
   const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
   modal.show();
-  await loadWorkspaceNotesForChat({ workspaceId, force: availableChatNotesWorkspaceId !== workspaceId });
+  await loadWorkspaceNotesForChat({
+    workspaceId,
+    force: availableChatNotesWorkspaceId !== workspaceId
+  });
 }
 
 // Initialize drag and drop functionality
@@ -463,12 +481,12 @@ function initDragAndDrop() {
   }
 
   // Prevent default on document to stop browser from opening files
-  document.addEventListener('dragover', (e) => e.preventDefault());
-  document.addEventListener('drop', (e) => e.preventDefault());
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => e.preventDefault());
 
   // Listen on chat container for drag events
   if (chatContainer) {
-    chatContainer.addEventListener('dragenter', (e) => {
+    chatContainer.addEventListener('dragenter', e => {
       e.preventDefault();
       if (e.dataTransfer.types.includes('Files')) {
         dragCounter++;
@@ -476,14 +494,14 @@ function initDragAndDrop() {
       }
     });
 
-    chatContainer.addEventListener('dragover', (e) => {
+    chatContainer.addEventListener('dragover', e => {
       e.preventDefault();
       if (e.dataTransfer.types.includes('Files')) {
         e.dataTransfer.dropEffect = 'copy';
       }
     });
 
-    chatContainer.addEventListener('dragleave', (e) => {
+    chatContainer.addEventListener('dragleave', e => {
       e.preventDefault();
       dragCounter--;
       if (dragCounter <= 0) {
@@ -491,7 +509,7 @@ function initDragAndDrop() {
       }
     });
 
-    chatContainer.addEventListener('drop', async (e) => {
+    chatContainer.addEventListener('drop', async e => {
       e.preventDefault();
       hideDropZone();
       const files = e.dataTransfer.files;
@@ -503,7 +521,7 @@ function initDragAndDrop() {
 
   // Listen on input container (the whole input card area)
   if (inputContainer) {
-    inputContainer.addEventListener('dragenter', (e) => {
+    inputContainer.addEventListener('dragenter', e => {
       e.preventDefault();
       if (e.dataTransfer.types.includes('Files')) {
         dragCounter++;
@@ -511,14 +529,14 @@ function initDragAndDrop() {
       }
     });
 
-    inputContainer.addEventListener('dragover', (e) => {
+    inputContainer.addEventListener('dragover', e => {
       e.preventDefault();
       if (e.dataTransfer.types.includes('Files')) {
         e.dataTransfer.dropEffect = 'copy';
       }
     });
 
-    inputContainer.addEventListener('dragleave', (e) => {
+    inputContainer.addEventListener('dragleave', e => {
       e.preventDefault();
       dragCounter--;
       if (dragCounter <= 0) {
@@ -526,7 +544,7 @@ function initDragAndDrop() {
       }
     });
 
-    inputContainer.addEventListener('drop', async (e) => {
+    inputContainer.addEventListener('drop', async e => {
       e.preventDefault();
       hideDropZone();
       const files = e.dataTransfer.files;
@@ -555,8 +573,14 @@ function isLikelyBase64(content) {
 function inferContentEncoding(fileData) {
   if (fileData.encoding) return fileData.encoding;
   const type = (fileData.type || '').toLowerCase();
-  if (type.startsWith('text/') || type.includes('json') || type.includes('xml') || type.includes('csv') ||
-      type.includes('markdown') || type.includes('html')) {
+  if (
+    type.startsWith('text/') ||
+    type.includes('json') ||
+    type.includes('xml') ||
+    type.includes('csv') ||
+    type.includes('markdown') ||
+    type.includes('html')
+  ) {
     return 'text';
   }
   return isLikelyBase64(fileData.content) ? 'base64' : 'text';
@@ -565,7 +589,29 @@ function inferContentEncoding(fileData) {
 // Process files (shared between file input and drag-drop)
 async function processFiles(files) {
   // Allowed file extensions
-  const allowedExtensions = ['txt', 'md', 'pdf', 'doc', 'docx', 'csv', 'json', 'xml', 'html', 'mp3', 'wav', 'flac', 'ogg', 'zip', 'pptx', 'xlsx', 'png', 'jpg', 'jpeg', 'gif', 'webp'];
+  const allowedExtensions = [
+    'txt',
+    'md',
+    'pdf',
+    'doc',
+    'docx',
+    'csv',
+    'json',
+    'xml',
+    'html',
+    'mp3',
+    'wav',
+    'flac',
+    'ogg',
+    'zip',
+    'pptx',
+    'xlsx',
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp'
+  ];
 
   let successCount = 0;
 
@@ -594,23 +640,23 @@ async function processFiles(files) {
       let mimeType = file.type;
       if (!mimeType) {
         const mimeMap = {
-          'pdf': 'application/pdf',
-          'wav': 'audio/wav',
-          'mp3': 'audio/mpeg',
-          'aiff': 'audio/aiff',
-          'aif': 'audio/aiff',
-          'flac': 'audio/flac',
-          'ogg': 'audio/ogg',
-          'mid': 'audio/midi',
-          'midi': 'audio/midi',
-          'zip': 'application/zip',
-          'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'png': 'image/png',
-          'jpg': 'image/jpeg',
-          'jpeg': 'image/jpeg',
-          'gif': 'image/gif',
-          'webp': 'image/webp'
+          pdf: 'application/pdf',
+          wav: 'audio/wav',
+          mp3: 'audio/mpeg',
+          aiff: 'audio/aiff',
+          aif: 'audio/aiff',
+          flac: 'audio/flac',
+          ogg: 'audio/ogg',
+          mid: 'audio/midi',
+          midi: 'audio/midi',
+          zip: 'application/zip',
+          pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          png: 'image/png',
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          gif: 'image/gif',
+          webp: 'image/webp'
         };
         mimeType = mimeMap[ext] || 'application/octet-stream';
       }
@@ -619,7 +665,7 @@ async function processFiles(files) {
         name: file.name,
         type: mimeType,
         size: file.size,
-        content: result.binaryContent || result.content,  // Prefer binary content for files that have it
+        content: result.binaryContent || result.content, // Prefer binary content for files that have it
         encoding: result.binaryContent ? 'base64' : 'text'
       });
 
@@ -646,7 +692,27 @@ async function processFiles(files) {
 // Check if file is binary (PDF, DOCX, DOC, audio, images, etc.)
 function isBinaryFile(filename) {
   const ext = filename.split('.').pop().toLowerCase();
-  return ['pdf', 'docx', 'doc', 'pptx', 'xlsx', 'wav', 'mp3', 'aiff', 'aif', 'flac', 'ogg', 'mid', 'midi', 'zip', 'png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+  return [
+    'pdf',
+    'docx',
+    'doc',
+    'pptx',
+    'xlsx',
+    'wav',
+    'mp3',
+    'aiff',
+    'aif',
+    'flac',
+    'ogg',
+    'mid',
+    'midi',
+    'zip',
+    'png',
+    'jpg',
+    'jpeg',
+    'gif',
+    'webp'
+  ].includes(ext);
 }
 
 // Check if file should be parsed for text (for LLM consumption)
@@ -660,7 +726,7 @@ async function readFileContent(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onload = async (e) => {
+    reader.onload = async e => {
       const content = e.target.result;
 
       // If it's a binary file, we need to handle it specially
@@ -710,7 +776,7 @@ async function readFileContent(file) {
       }
     };
 
-    reader.onerror = (e) => {
+    reader.onerror = e => {
       reject(e);
     };
 
@@ -769,7 +835,7 @@ function updateFilesList() {
 
   // Add click handlers for remove buttons
   document.querySelectorAll('.btn-remove-file').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', e => {
       const index = parseInt(e.target.dataset.index);
       removeFile(index);
     });
@@ -780,27 +846,27 @@ function updateFilesList() {
 function getFileIcon(filename) {
   const ext = filename.split('.').pop().toLowerCase();
   const iconMap = {
-    'txt': '📄',
-    'md': '📝',
-    'pdf': '📕',
-    'doc': '📘',
-    'docx': '📘',
-    'pptx': '📙',
-    'xlsx': '📊',
-    'csv': '📊',
-    'json': '📋',
-    'xml': '📋',
-    'html': '🌐',
-    'mp3': '🎵',
-    'wav': '🎵',
-    'flac': '🎵',
-    'ogg': '🎵',
-    'zip': '📦',
-    'png': '🖼️',
-    'jpg': '🖼️',
-    'jpeg': '🖼️',
-    'gif': '🖼️',
-    'webp': '🖼️'
+    txt: '📄',
+    md: '📝',
+    pdf: '📕',
+    doc: '📘',
+    docx: '📘',
+    pptx: '📙',
+    xlsx: '📊',
+    csv: '📊',
+    json: '📋',
+    xml: '📋',
+    html: '🌐',
+    mp3: '🎵',
+    wav: '🎵',
+    flac: '🎵',
+    ogg: '🎵',
+    zip: '📦',
+    png: '🖼️',
+    jpg: '🖼️',
+    jpeg: '🖼️',
+    gif: '🖼️',
+    webp: '🖼️'
   };
   return iconMap[ext] || '📎';
 }

@@ -123,7 +123,7 @@ function displayUpdateInfo(updateInfo) {
   const platform = detectPlatform();
   const asset = findAssetForPlatform(updateInfo.assets, platform);
   const assetName = asset ? asset.name || asset.Name || '' : '';
-  const assetSize = asset ? asset.size ?? asset.Size ?? 0 : 0;
+  const assetSize = asset ? (asset.size ?? asset.Size ?? 0) : 0;
   const assetURL = asset ? asset.url || asset.URL || '' : '';
 
   // Format release date
@@ -176,7 +176,9 @@ function displayUpdateInfo(updateInfo) {
         </div>
       </details>
 
-      ${asset ? `
+      ${
+        asset
+          ? `
         <div class="alert alert-success mb-0" role="alert">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
             <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
@@ -187,14 +189,16 @@ function displayUpdateInfo(updateInfo) {
             <small class="text-muted">File: ${assetName} (${fileSize})</small>
           </div>
         </div>
-      ` : `
+      `
+          : `
         <div class="alert alert-warning mb-0" role="alert">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
             <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
           </svg>
           No binary found for your platform (${platform}). Please visit the GitHub releases page.
         </div>
-      `}
+      `
+      }
     </div>
   `;
 
@@ -233,18 +237,25 @@ function detectPlatform() {
     os = 'windows';
   }
 
-  if (platform.includes('arm') || userAgent.includes('arm') ||
-      platform.includes('aarch64') || userAgent.includes('aarch64')) {
+  if (
+    platform.includes('arm') ||
+    userAgent.includes('arm') ||
+    platform.includes('aarch64') ||
+    userAgent.includes('aarch64')
+  ) {
     arch = 'arm64';
   }
 
   if (os === 'darwin' && arch === 'amd64') {
     if (navigator.userAgentData && navigator.userAgentData.platform === 'macOS') {
-      navigator.userAgentData.getHighEntropyValues(['architecture']).then(data => {
-        if (data.architecture === 'arm') {
-          window._detectedPlatform = 'darwin-arm64';
-        }
-      }).catch(() => {});
+      navigator.userAgentData
+        .getHighEntropyValues(['architecture'])
+        .then(data => {
+          if (data.architecture === 'arm') {
+            window._detectedPlatform = 'darwin-arm64';
+          }
+        })
+        .catch(() => {});
     }
 
     try {
@@ -288,27 +299,41 @@ function findAssetForPlatform(assets, platform) {
     arm64: ['arm64', 'aarch64', 'arm64v8']
   };
 
-  const matchesArch = (name) => archTokens[arch]?.some((token) => name.includes(token)) || false;
-  const matchesOS = (name) => osTokens[os]?.some((token) => name.includes(token)) || false;
+  const matchesArch = name => archTokens[arch]?.some(token => name.includes(token)) || false;
+  const matchesOS = name => osTokens[os]?.some(token => name.includes(token)) || false;
 
-  const candidates = assets.map((asset) => ({
+  const candidates = assets.map(asset => ({
     ...asset,
     _name: (asset.name || asset.Name || '').toLowerCase()
   }));
 
-  let asset = candidates.find((a) => a._name.includes(platform));
-  if (!asset) asset = candidates.find((a) => matchesOS(a._name) && matchesArch(a._name));
+  let asset = candidates.find(a => a._name.includes(platform));
+  if (!asset) asset = candidates.find(a => matchesOS(a._name) && matchesArch(a._name));
   if (!asset && os === 'darwin') {
-    asset = candidates.find((a) => matchesArch(a._name) && (a._name.endsWith('.dmg') || a._name.endsWith('.zip') || a._name.endsWith('.pkg')));
+    asset = candidates.find(
+      a =>
+        matchesArch(a._name) &&
+        (a._name.endsWith('.dmg') || a._name.endsWith('.zip') || a._name.endsWith('.pkg'))
+    );
   }
   if (!asset && os === 'windows') {
-    asset = candidates.find((a) => matchesArch(a._name) && (a._name.endsWith('.msi') || a._name.endsWith('.exe') || a._name.endsWith('.zip')));
+    asset = candidates.find(
+      a =>
+        matchesArch(a._name) &&
+        (a._name.endsWith('.msi') || a._name.endsWith('.exe') || a._name.endsWith('.zip'))
+    );
   }
   if (!asset && os === 'linux') {
-    asset = candidates.find((a) => matchesArch(a._name) && (a._name.endsWith('.deb') || a._name.endsWith('.rpm') || a._name.endsWith('.tar.gz')));
+    asset = candidates.find(
+      a =>
+        matchesArch(a._name) &&
+        (a._name.endsWith('.deb') || a._name.endsWith('.rpm') || a._name.endsWith('.tar.gz'))
+    );
   }
   if (!asset && platform === 'darwin-arm64') {
-    asset = candidates.find((a) => a._name.includes('darwin-amd64') || a._name.includes('macos-amd64'));
+    asset = candidates.find(
+      a => a._name.includes('darwin-amd64') || a._name.includes('macos-amd64')
+    );
   }
 
   return asset || null;
@@ -325,7 +350,10 @@ function formatFileSize(bytes) {
 function describeAsset(assetName, platform) {
   if (!assetName) return '';
   const lowerName = assetName.toLowerCase();
-  if (lowerName.endsWith('.dmg')) return platform.includes('arm64') ? 'macOS Apple Silicon installer (.dmg)' : 'macOS Intel installer (.dmg)';
+  if (lowerName.endsWith('.dmg'))
+    return platform.includes('arm64')
+      ? 'macOS Apple Silicon installer (.dmg)'
+      : 'macOS Intel installer (.dmg)';
   if (lowerName.endsWith('.msi')) return 'Windows installer (.msi)';
   if (lowerName.endsWith('.exe')) return 'Windows standalone (.exe)';
   if (lowerName.endsWith('.deb')) return 'Linux Debian/Ubuntu package (.deb)';
@@ -423,11 +451,18 @@ function ensureBootstrapModal() {
   if (!bootstrapReadyPromise) {
     bootstrapReadyPromise = new Promise((resolve, reject) => {
       let script = document.querySelector('script[data-ensure-bootstrap]');
-      const onReady = () => (window.bootstrap ? resolve(window.bootstrap) : reject(new Error('Bootstrap failed to load')));
+      const onReady = () =>
+        window.bootstrap
+          ? resolve(window.bootstrap)
+          : reject(new Error('Bootstrap failed to load'));
 
       if (script) {
         script.addEventListener('load', onReady, { once: true });
-        script.addEventListener('error', () => reject(new Error('Bootstrap script failed to load')), { once: true });
+        script.addEventListener(
+          'error',
+          () => reject(new Error('Bootstrap script failed to load')),
+          { once: true }
+        );
         return;
       }
 
@@ -436,7 +471,9 @@ function ensureBootstrapModal() {
       script.defer = true;
       script.setAttribute('data-ensure-bootstrap', 'true');
       script.addEventListener('load', onReady, { once: true });
-      script.addEventListener('error', () => reject(new Error('Bootstrap script failed to load')), { once: true });
+      script.addEventListener('error', () => reject(new Error('Bootstrap script failed to load')), {
+        once: true
+      });
       document.head.appendChild(script);
     });
   }

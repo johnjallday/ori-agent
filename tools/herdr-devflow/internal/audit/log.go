@@ -56,7 +56,7 @@ func (l Logger) Record(event Event) error {
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if err := file.Chmod(0600); err != nil {
 		return fmt.Errorf("secure audit log: %w", err)
 	}

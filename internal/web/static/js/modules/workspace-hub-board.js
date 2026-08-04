@@ -2,18 +2,14 @@
  * Workspace Hub Kanban Board
  * UI-only kanban columns backed by task.context.kanban_column_id
  */
-(function() {
+(function () {
   'use strict';
 
   const hubEl = document.getElementById('workspaceHub');
   if (!hubEl) return;
 
-  const {
-    
-    groupTasksByKanbanColumn,
-    collectWorkspaceDescendantIds,
-    formatDate
-  } = window.WorkspaceHubUtils;
+  const { groupTasksByKanbanColumn, collectWorkspaceDescendantIds, formatDate } =
+    window.WorkspaceHubUtils;
 
   let activeDetailsTask = null;
 
@@ -76,10 +72,13 @@
 
   function normalizeKanbanLabels(raw) {
     if (Array.isArray(raw)) {
-      return raw.map((label) => String(label || '').trim()).filter(Boolean);
+      return raw.map(label => String(label || '').trim()).filter(Boolean);
     }
     if (typeof raw === 'string') {
-      return raw.split(',').map((label) => label.trim()).filter(Boolean);
+      return raw
+        .split(',')
+        .map(label => label.trim())
+        .filter(Boolean);
     }
     return [];
   }
@@ -115,7 +114,9 @@
 
   function formatDueDate(value) {
     if (!value) return '';
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T00:00:00`)
+      : new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleDateString();
   }
@@ -138,10 +139,10 @@
   function buildAssignmentOptions(selectedValue, selectedLabel) {
     const state = getState();
     const base = Array.isArray(state.board.agentOptions) ? state.board.agentOptions.slice() : [];
-    if (!base.some((opt) => opt.value === '')) {
+    if (!base.some(opt => opt.value === '')) {
       base.unshift({ label: 'Unassigned', value: '' });
     }
-    if (selectedValue && !base.some((opt) => opt.value === selectedValue)) {
+    if (selectedValue && !base.some(opt => opt.value === selectedValue)) {
       base.push({ label: selectedLabel || selectedValue, value: selectedValue });
     }
     return base;
@@ -175,7 +176,9 @@
   }
 
   async function fetchTasksForWorkspace(workspaceId) {
-    const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`);
+    const response = await fetch(
+      `/api/orchestration/tasks?workspace_id=${encodeURIComponent(workspaceId)}`
+    );
     if (!response.ok) {
       throw new Error('Failed to load tasks');
     }
@@ -190,7 +193,7 @@
       if (!response.ok) return options;
       const data = await response.json();
       const agents = data.agents || [];
-      agents.forEach((agent) => {
+      agents.forEach(agent => {
         if (!agent || !agent.name) return;
         const nodeId = `${agent.name}-node-1`;
         options.push({ label: agent.name, value: `node:${nodeId}` });
@@ -213,7 +216,9 @@
 
   function getWorkspaceDescendantIds(workspaceId) {
     const state = getState();
-    return collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, { includeRoot: false });
+    return collectWorkspaceDescendantIds(state.workspaces || [], workspaceId, {
+      includeRoot: false
+    });
   }
 
   async function loadBoard(workspaceId) {
@@ -234,15 +239,16 @@
       state.board.columns = boardConfig.columns || [];
 
       const workspace = state.workspaceMap.get(workspaceId);
-      const descendantIds = workspace && Array.isArray(workspace.children) && workspace.children.length > 0
-        ? getWorkspaceDescendantIds(workspaceId)
-        : [];
+      const descendantIds =
+        workspace && Array.isArray(workspace.children) && workspace.children.length > 0
+          ? getWorkspaceDescendantIds(workspaceId)
+          : [];
 
       const idsToLoad = [workspaceId, ...descendantIds];
       const taskLists = await Promise.all(
-        idsToLoad.map((id) =>
-          fetchTasksForWorkspace(id).then((tasks) =>
-            tasks.map((task) => ({ ...task, __workspace_id: id }))
+        idsToLoad.map(id =>
+          fetchTasksForWorkspace(id).then(tasks =>
+            tasks.map(task => ({ ...task, __workspace_id: id }))
           )
         )
       );
@@ -258,7 +264,8 @@
     } catch (err) {
       console.error('Failed to load board:', err);
       if (elements.boardColumns) {
-        elements.boardColumns.innerHTML = '<div class="hub-empty">Unable to load board right now.</div>';
+        elements.boardColumns.innerHTML =
+          '<div class="hub-empty">Unable to load board right now.</div>';
       }
     } finally {
       setBoardLoading(false);
@@ -266,9 +273,7 @@
   }
 
   function getOrderedColumns(columns) {
-    return (columns || [])
-      .slice()
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
+    return (columns || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
   }
 
   function renderBoard() {
@@ -284,10 +289,11 @@
       elements.boardTaskCount.textContent = `${totalTasks} task${totalTasks === 1 ? '' : 's'}`;
     }
 
-    const html = columns.map((col) => {
-      const tasks = groups.get(col.id) || [];
-      const cards = tasks.map((task) => renderCard(task, col.id)).join('');
-      return `
+    const html = columns
+      .map(col => {
+        const tasks = groups.get(col.id) || [];
+        const cards = tasks.map(task => renderCard(task, col.id)).join('');
+        return `
         <div class="hub-board-column" data-column-id="${escapeHtml(col.id)}">
           <div class="hub-column-header">
             <div class="hub-column-title-wrap">
@@ -307,9 +313,10 @@
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
-    elements.boardColumns.querySelectorAll('.hub-board-card').forEach((card) => {
+    elements.boardColumns.querySelectorAll('.hub-board-card').forEach(card => {
       if (card._editOutsideHandler) {
         document.removeEventListener('click', card._editOutsideHandler);
         card._editOutsideHandler = null;
@@ -331,23 +338,28 @@
     const assignmentValue = getAssignmentValue(task);
     const assignmentLabel = getAssignmentLabel(task);
     const assignmentOptions = buildAssignmentOptions(assignmentValue, assignmentLabel);
-    const labelMarkup = labels.length > 0
-      ? `<div class="hub-card-labels">${labels.map((label) => `<span class="hub-card-label">${escapeHtml(label)}</span>`).join('')}</div>`
+    const labelMarkup =
+      labels.length > 0
+        ? `<div class="hub-card-labels">${labels.map(label => `<span class="hub-card-label">${escapeHtml(label)}</span>`).join('')}</div>`
+        : '';
+    const dueMarkup = dueDate
+      ? `<span class="hub-card-due">Due ${escapeHtml(formatDueDate(dueDate))}</span>`
       : '';
-    const dueMarkup = dueDate ? `<span class="hub-card-due">Due ${escapeHtml(formatDueDate(dueDate))}</span>` : '';
     const needsReviewCount = countNeedsReviewRuns(task);
-    const needsReviewMarkup = needsReviewCount > 0
-      ? `<span class="hub-card-due">Needs Review: ${escapeHtml(needsReviewCount)}</span>`
-      : '';
-    const assignedMarkup = assignmentLabel && assignmentLabel !== 'Unassigned'
-      ? `<span class="hub-card-assignee">${escapeHtml(assignmentLabel)}</span>`
-      : '<span class="hub-card-assignee is-muted">Unassigned</span>';
+    const needsReviewMarkup =
+      needsReviewCount > 0
+        ? `<span class="hub-card-due">Needs Review: ${escapeHtml(needsReviewCount)}</span>`
+        : '';
+    const assignedMarkup =
+      assignmentLabel && assignmentLabel !== 'Unassigned'
+        ? `<span class="hub-card-assignee">${escapeHtml(assignmentLabel)}</span>`
+        : '<span class="hub-card-assignee is-muted">Unassigned</span>';
     const editTitleValue = escapeHtml(getTaskTitle(task));
     const editDetailsValue = escapeHtml(task.details || '');
     const editLabelsValue = escapeHtml(formatLabelsInput(labels));
     const editDueValue = escapeHtml(normalizeDueInput(dueDate));
     const assignmentOptionsHtml = assignmentOptions
-      .map((opt) => {
+      .map(opt => {
         const selected = opt.value === assignmentValue ? ' selected' : '';
         return `<option value="${escapeHtml(opt.value)}"${selected}>${escapeHtml(opt.label)}</option>`;
       })
@@ -400,9 +412,13 @@
 
   function countNeedsReviewRuns(task) {
     const history = Array.isArray(task?.execution_history) ? task.execution_history : [];
-    return history.filter((entry) => {
+    return history.filter(entry => {
       const validation = entry?.validation_result || entry?.validation || null;
-      return String(validation?.validation_status || '').trim().toLowerCase() === 'needs_review';
+      return (
+        String(validation?.validation_status || '')
+          .trim()
+          .toLowerCase() === 'needs_review'
+      );
     }).length;
   }
 
@@ -413,8 +429,8 @@
     let dragged = null;
     let didDrag = false;
 
-    elements.boardColumns.querySelectorAll('.hub-board-card').forEach((card) => {
-      card.addEventListener('dragstart', (e) => {
+    elements.boardColumns.querySelectorAll('.hub-board-card').forEach(card => {
+      card.addEventListener('dragstart', e => {
         if (card.classList.contains('is-editing') || e.target.closest('.hub-card-edit')) {
           e.preventDefault();
           return;
@@ -434,24 +450,31 @@
         }, 0);
       });
 
-      card.addEventListener('click', (e) => {
+      card.addEventListener('click', e => {
         if (didDrag) return;
         if (e.target.closest('.hub-card-edit') || e.target.closest('.hub-card-edit-btn')) return;
-        if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input') || e.target.closest('textarea') || e.target.closest('select')) return;
+        if (
+          e.target.closest('button') ||
+          e.target.closest('a') ||
+          e.target.closest('input') ||
+          e.target.closest('textarea') ||
+          e.target.closest('select')
+        )
+          return;
 
         const state = getState();
         const taskId = card.dataset.taskId;
         if (!taskId) return;
 
-        const task = (state.board.tasks || []).find((t) => t && t.id === taskId);
+        const task = (state.board.tasks || []).find(t => t && t.id === taskId);
         if (!task) return;
 
         openTaskDetailsModal(task);
       });
     });
 
-    elements.boardColumns.querySelectorAll('.hub-column-cards').forEach((colEl) => {
-      colEl.addEventListener('dragover', (e) => {
+    elements.boardColumns.querySelectorAll('.hub-column-cards').forEach(colEl => {
+      colEl.addEventListener('dragover', e => {
         e.preventDefault();
         colEl.closest('.hub-board-column')?.classList.add('is-drag-over');
         e.dataTransfer.dropEffect = 'move';
@@ -459,7 +482,7 @@
       colEl.addEventListener('dragleave', () => {
         colEl.closest('.hub-board-column')?.classList.remove('is-drag-over');
       });
-      colEl.addEventListener('drop', async (e) => {
+      colEl.addEventListener('drop', async e => {
         e.preventDefault();
         const columnId = colEl.dataset.columnId;
         colEl.closest('.hub-board-column')?.classList.remove('is-drag-over');
@@ -539,7 +562,7 @@
     }
 
     setTimeout(() => {
-      const handler = (evt) => {
+      const handler = evt => {
         if (card.contains(evt.target)) return;
         saveCardEdits(card);
       };
@@ -600,17 +623,24 @@
     }
 
     const updated = await response.json();
-    const boardIdx = (state.board.tasks || []).findIndex((t) => t && t.id === taskId);
+    const boardIdx = (state.board.tasks || []).findIndex(t => t && t.id === taskId);
     if (boardIdx >= 0) {
       const existing = state.board.tasks[boardIdx];
-      state.board.tasks.splice(boardIdx, 1, { ...existing, ...updated, __workspace_id: existing.__workspace_id });
+      state.board.tasks.splice(boardIdx, 1, {
+        ...existing,
+        ...updated,
+        __workspace_id: existing.__workspace_id
+      });
     }
 
-    const listIdx = (state.tasks || []).findIndex((t) => t && t.id === taskId);
+    const listIdx = (state.tasks || []).findIndex(t => t && t.id === taskId);
     if (listIdx >= 0) {
       const existing = state.tasks[listIdx];
       state.tasks.splice(listIdx, 1, { ...existing, ...updated });
-      if (window.WorkspaceHubTasks && typeof window.WorkspaceHubTasks.renderTasksList === 'function') {
+      if (
+        window.WorkspaceHubTasks &&
+        typeof window.WorkspaceHubTasks.renderTasksList === 'function'
+      ) {
         window.WorkspaceHubTasks.renderTasksList(state.tasks);
       }
     }
@@ -658,10 +688,10 @@
     const elements = getElements();
     if (!elements.boardColumns) return;
 
-    elements.boardColumns.querySelectorAll('.hub-board-card').forEach((card) => {
+    elements.boardColumns.querySelectorAll('.hub-board-card').forEach(card => {
       const editBtn = card.querySelector('.hub-card-edit-btn');
       if (editBtn) {
-        editBtn.addEventListener('click', (e) => {
+        editBtn.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();
           enterCardEdit(card);
@@ -670,7 +700,7 @@
 
       const cancelBtn = card.querySelector('.hub-card-edit-cancel');
       if (cancelBtn) {
-        cancelBtn.addEventListener('click', (e) => {
+        cancelBtn.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();
           exitCardEdit(card, { reset: true });
@@ -679,16 +709,18 @@
 
       const saveBtn = card.querySelector('.hub-card-edit-save');
       if (saveBtn) {
-        saveBtn.addEventListener('click', (e) => {
+        saveBtn.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();
           saveCardEdits(card);
         });
       }
 
-      const inputs = card.querySelectorAll('.hub-card-edit input, .hub-card-edit textarea, .hub-card-edit select');
-      inputs.forEach((input) => {
-        input.addEventListener('keydown', (e) => {
+      const inputs = card.querySelectorAll(
+        '.hub-card-edit input, .hub-card-edit textarea, .hub-card-edit select'
+      );
+      inputs.forEach(input => {
+        input.addEventListener('keydown', e => {
           if (e.key === 'Escape') {
             e.preventDefault();
             exitCardEdit(card, { reset: true });
@@ -709,13 +741,13 @@
     const elements = getElements();
     if (!elements.boardColumns) return;
 
-    elements.boardColumns.querySelectorAll('.hub-column-header').forEach((headerEl) => {
+    elements.boardColumns.querySelectorAll('.hub-column-header').forEach(headerEl => {
       const titleEl = headerEl.querySelector('.hub-column-title');
       const textEl = titleEl ? titleEl.querySelector('.hub-column-title-text') : null;
       const editBtn = headerEl.querySelector('.hub-column-edit-btn');
       if (!titleEl || !textEl || !editBtn) return;
 
-      editBtn.addEventListener('click', (e) => {
+      editBtn.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
 
@@ -750,7 +782,7 @@
           const workspaceId = state.selectedId;
           if (!workspaceId) return;
 
-          const columns = (state.board.columns || []).map((col) => {
+          const columns = (state.board.columns || []).map(col => {
             if (col.id === columnId) {
               return { ...col, name: newName };
             }
@@ -773,7 +805,7 @@
         };
 
         input.addEventListener('blur', finishRename);
-        input.addEventListener('keydown', (evt) => {
+        input.addEventListener('keydown', evt => {
           if (evt.key === 'Enter') {
             evt.preventDefault();
             input.blur();
@@ -842,13 +874,15 @@
       elements.taskDetailsError.textContent = task.error || '--';
     }
 
-    const modal = bootstrap.Modal.getInstance(elements.taskDetailsModal) || new bootstrap.Modal(elements.taskDetailsModal);
+    const modal =
+      bootstrap.Modal.getInstance(elements.taskDetailsModal) ||
+      new bootstrap.Modal(elements.taskDetailsModal);
     modal.show();
   }
 
   function getSubtasksForParent(taskId) {
     const state = getState();
-    return (state.board.tasks || []).filter((t) => t && t.parent_task_id === taskId);
+    return (state.board.tasks || []).filter(t => t && t.parent_task_id === taskId);
   }
 
   function getTaskLabel(task) {
@@ -863,12 +897,13 @@
     const isParent = subtasks.length > 0;
 
     if (isParent) {
-      const hasUnassigned = subtasks.some((subtask) => !subtask.to || subtask.to === 'unassigned');
+      const hasUnassigned = subtasks.some(subtask => !subtask.to || subtask.to === 'unassigned');
       if (hasUnassigned) {
-        if (window.Toast) window.Toast.error('Assign agents to all subtasks before executing this workflow.');
+        if (window.Toast)
+          window.Toast.error('Assign agents to all subtasks before executing this workflow.');
         return;
       }
-      const hasRunning = subtasks.some((subtask) => subtask.status === 'in_progress');
+      const hasRunning = subtasks.some(subtask => subtask.status === 'in_progress');
       if (hasRunning) {
         if (window.Toast) window.Toast.error('A subtask is already running.');
         return;
@@ -892,7 +927,10 @@
       metaItems: isParent
         ? [getTaskLabel(task), `${subtasks.length} step${subtasks.length === 1 ? '' : 's'}`]
         : [getTaskLabel(task), assignedAgent || 'Assigned agent', 'Ready to run'],
-      details: ['The board and task list will refresh after dispatch.', 'Open task details again later to inspect the result.']
+      details: [
+        'The board and task list will refresh after dispatch.',
+        'Open task details again later to inspect the result.'
+      ]
     });
     if (!confirmed) return;
 
@@ -988,11 +1026,17 @@
         const modal = bootstrap.Modal.getInstance(elements.taskDetailsModal);
         if (modal) modal.hide();
 
-        if (window.taskModalController && typeof window.taskModalController.openForEdit === 'function') {
+        if (
+          window.taskModalController &&
+          typeof window.taskModalController.openForEdit === 'function'
+        ) {
           const state = getState();
           window.taskModalController.openForEdit(task, async () => {
             if (state.selectedId) {
-              if (window.WorkspaceHubTasks && typeof window.WorkspaceHubTasks.loadTasks === 'function') {
+              if (
+                window.WorkspaceHubTasks &&
+                typeof window.WorkspaceHubTasks.loadTasks === 'function'
+              ) {
                 window.WorkspaceHubTasks.loadTasks(state.selectedId);
               }
               await loadBoard(state.selectedId);
@@ -1028,7 +1072,7 @@
       }
 
       // Optimistic local update
-      const idx = (state.board.tasks || []).findIndex((t) => t.id === taskId);
+      const idx = (state.board.tasks || []).findIndex(t => t.id === taskId);
       if (idx >= 0) {
         const task = state.board.tasks[idx];
         const next = { ...task, context: { ...(task.context || {}), kanban_column_id: columnId } };
@@ -1057,8 +1101,9 @@
     if (!elements.boardColumnsList) return;
 
     const cols = getOrderedColumns(state.board.columns);
-    const html = cols.map((col) => {
-      return `
+    const html = cols
+      .map(col => {
+        return `
         <div class="hub-column-editor-item" draggable="true" data-column-id="${escapeHtml(col.id)}">
           <span class="hub-column-drag-handle" title="Drag to reorder">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -1073,15 +1118,16 @@
           </button>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     elements.boardColumnsList.innerHTML = html;
 
     // Delete handlers
-    elements.boardColumnsList.querySelectorAll('.hub-column-delete-btn').forEach((btn) => {
+    elements.boardColumnsList.querySelectorAll('.hub-column-delete-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.columnId;
-        const next = (state.board.columns || []).filter((c) => c.id !== id);
+        const next = (state.board.columns || []).filter(c => c.id !== id);
         state.board.columns = next;
         renderColumnsEditor();
       });
@@ -1097,8 +1143,8 @@
 
     let draggedId = null;
 
-    elements.boardColumnsList.querySelectorAll('.hub-column-editor-item').forEach((item) => {
-      item.addEventListener('dragstart', (e) => {
+    elements.boardColumnsList.querySelectorAll('.hub-column-editor-item').forEach(item => {
+      item.addEventListener('dragstart', e => {
         draggedId = item.dataset.columnId;
         item.classList.add('is-dragging');
         e.dataTransfer.effectAllowed = 'move';
@@ -1108,19 +1154,19 @@
         item.classList.remove('is-dragging');
         draggedId = null;
       });
-      item.addEventListener('dragover', (e) => {
+      item.addEventListener('dragover', e => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
       });
-      item.addEventListener('drop', (e) => {
+      item.addEventListener('drop', e => {
         e.preventDefault();
         const targetId = item.dataset.columnId;
         const sourceId = e.dataTransfer.getData('text/plain') || draggedId;
         if (!sourceId || !targetId || sourceId === targetId) return;
 
         const cols = getOrderedColumns(state.board.columns);
-        const fromIdx = cols.findIndex((c) => c.id === sourceId);
-        const toIdx = cols.findIndex((c) => c.id === targetId);
+        const fromIdx = cols.findIndex(c => c.id === sourceId);
+        const toIdx = cols.findIndex(c => c.id === targetId);
         if (fromIdx < 0 || toIdx < 0) return;
 
         const next = cols.slice();
@@ -1134,7 +1180,7 @@
 
   function addColumn() {
     const state = getState();
-    const existing = new Set((state.board.columns || []).map((c) => c.id));
+    const existing = new Set((state.board.columns || []).map(c => c.id));
 
     let base = 'new_column';
     let id = base;
@@ -1161,13 +1207,16 @@
 
     const nameInputs = Array.from(list.querySelectorAll('.hub-column-name-input'));
     const next = getOrderedColumns(state.board.columns).map((col, idx) => {
-      const input = nameInputs.find((it) => it.dataset.columnId === col.id);
+      const input = nameInputs.find(it => it.dataset.columnId === col.id);
       const name = (input ? input.value : col.name) || col.name;
       return { id: col.id, name: String(name).trim() || col.id, order: idx + 1 };
     });
 
     try {
-      const saved = await saveBoardConfig(workspaceId, { version: state.board.config?.version || 1, columns: next });
+      const saved = await saveBoardConfig(workspaceId, {
+        version: state.board.config?.version || 1,
+        columns: next
+      });
       state.board.config = saved;
       state.board.columns = saved.columns;
       if (window.Toast) window.Toast.success('Board updated');
@@ -1181,8 +1230,6 @@
       if (window.Toast) window.Toast.error('Failed to save columns');
     }
   }
-
-  
 
   function wireEvents() {
     const elements = getElements();

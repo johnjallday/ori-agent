@@ -38,7 +38,7 @@ export function describeDirectoryEntry(node) {
   return {
     isWorkspace,
     openHref: isWorkspace ? `/workspaces/${encodeURIComponent(node.workspaceId)}` : '',
-    label: isWorkspace && node.workspaceName ? node.workspaceName : fallback,
+    label: isWorkspace && node.workspaceName ? node.workspaceName : fallback
   };
 }
 
@@ -130,9 +130,10 @@ export class WorkspaceDirectoryExplorer {
         );
         const currentIndex = buttons.indexOf(nodeButton);
         if (currentIndex === -1) return;
-        const nextIndex = event.key === 'ArrowDown'
-          ? Math.min(currentIndex + 1, buttons.length - 1)
-          : Math.max(currentIndex - 1, 0);
+        const nextIndex =
+          event.key === 'ArrowDown'
+            ? Math.min(currentIndex + 1, buttons.length - 1)
+            : Math.max(currentIndex - 1, 0);
         if (nextIndex === currentIndex) return;
         const target = buttons[nextIndex];
         const targetPath = this.decodeDataPath(target.dataset.path);
@@ -263,13 +264,14 @@ export class WorkspaceDirectoryExplorer {
       source === 'owned' ? 'owned' : source === 'attachment' ? 'attachment' : 'reference';
     if (!directoryId && normalizedSource !== 'owned') return;
 
-    const directory = normalizedSource === 'owned'
-      ? {
-          id: '__workspace_files__',
-          name: 'Workspace files',
-          path: 'Managed files in this workspace'
-        }
-      : this.host.directories.find(entry => entry.id === directoryId);
+    const directory =
+      normalizedSource === 'owned'
+        ? {
+            id: '__workspace_files__',
+            name: 'Workspace files',
+            path: 'Managed files in this workspace'
+          }
+        : this.host.directories.find(entry => entry.id === directoryId);
     if (!directory) {
       if (window.Toast) window.Toast.error('Directory not found');
       return;
@@ -314,11 +316,7 @@ export class WorkspaceDirectoryExplorer {
 
   getModalInstance() {
     const elements = this.host.elements;
-    if (
-      !elements.directoryExplorerModal ||
-      typeof bootstrap === 'undefined' ||
-      !bootstrap.Modal
-    ) {
+    if (!elements.directoryExplorerModal || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
       return null;
     }
 
@@ -384,9 +382,10 @@ export class WorkspaceDirectoryExplorer {
     this.renderLoading(force ? 'Refreshing directory...' : 'Scanning directory...');
 
     try {
-      const endpoint = this.source === 'owned'
-        ? `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/files/tree`
-        : `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
+      const endpoint =
+        this.source === 'owned'
+          ? `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/files/tree`
+          : `/api/workspaces/${encodeURIComponent(this.host.workspaceId)}/directories/${encodeURIComponent(currentDirectory.id)}/files`;
       const response = await fetch(endpoint);
       if (!response.ok) {
         const errorText = await response.text();
@@ -483,8 +482,7 @@ export class WorkspaceDirectoryExplorer {
   }
 
   buildTree(files) {
-    const rootName =
-      this.directory?.name || this.directory?.path || 'Directory';
+    const rootName = this.directory?.name || this.directory?.path || 'Directory';
     const root = {
       type: 'dir',
       name: rootName,
@@ -588,9 +586,7 @@ export class WorkspaceDirectoryExplorer {
     // removed trashed/moved files) so highlights and counts stay accurate.
     if (this.selectedPaths.size > 0) {
       this.selectedPaths = new Set(
-        Array.from(this.selectedPaths).filter(
-          path => this.nodeIndex.get(path)?.type === 'file'
-        )
+        Array.from(this.selectedPaths).filter(path => this.nodeIndex.get(path)?.type === 'file')
       );
       if (this.selectedPaths.size === 0) {
         this.selectionAnchor = '';
@@ -603,12 +599,11 @@ export class WorkspaceDirectoryExplorer {
     // below will destroy it; we restore focus to the equivalent new button so
     // arrow-key navigation keeps working across re-renders.
     const treeEl = elements.directoryExplorerTree;
-    const focusedNode = treeEl && treeEl.contains(document.activeElement)
-      ? document.activeElement.closest('[data-path]')
-      : null;
-    const focusedPath = focusedNode
-      ? this.decodeDataPath(focusedNode.dataset.path || '')
-      : null;
+    const focusedNode =
+      treeEl && treeEl.contains(document.activeElement)
+        ? document.activeElement.closest('[data-path]')
+        : null;
+    const focusedPath = focusedNode ? this.decodeDataPath(focusedNode.dataset.path || '') : null;
 
     if (elements.directoryExplorerTitle) {
       elements.directoryExplorerTitle.textContent =
@@ -686,11 +681,12 @@ export class WorkspaceDirectoryExplorer {
     const fileCount = files.length - folderCount;
     const selectedFileCount = this.getSelectedFileNodes().length;
     const selectedNode = this.nodeIndex.get(this.selectedPath);
-    const selectedLabel = selectedFileCount > 1
-      ? `${selectedFileCount} files selected`
-      : selectedNode
-        ? `${selectedNode.type === 'dir' ? 'Folder' : 'File'} selected`
-        : 'No selection';
+    const selectedLabel =
+      selectedFileCount > 1
+        ? `${selectedFileCount} files selected`
+        : selectedNode
+          ? `${selectedNode.type === 'dir' ? 'Folder' : 'File'} selected`
+          : 'No selection';
 
     elements.directoryExplorerSummary.innerHTML = `
       <span class="workspace-directory-pill">${fileCount} file${fileCount === 1 ? '' : 's'}</span>
@@ -780,17 +776,14 @@ export class WorkspaceDirectoryExplorer {
 
   renderTreeChildren(children, depth, forceExpanded) {
     const sortedChildren = this.getSortedChildren(children);
-    return sortedChildren
-      .map(node => this.renderTreeNode(node, depth, forceExpanded))
-      .join('');
+    return sortedChildren.map(node => this.renderTreeNode(node, depth, forceExpanded)).join('');
   }
 
   renderTreeNode(node, depth, forceExpanded) {
     const encodedPath = this.encodeDataPath(node.path);
     const isDirectory = node.type === 'dir';
     const workspaceRef = describeDirectoryEntry(node);
-    const isExpanded =
-      isDirectory && (forceExpanded || this.expandedPaths.has(node.path));
+    const isExpanded = isDirectory && (forceExpanded || this.expandedPaths.has(node.path));
     const isSelected = isDirectory
       ? this.selectedPath === node.path
       : this.selectedPaths.has(node.path) || this.selectedPath === node.path;
@@ -961,9 +954,9 @@ export class WorkspaceDirectoryExplorer {
       return;
     }
 
-    const paths = Array.from(
-      treeEl.querySelectorAll('[data-action="select-node"]')
-    ).map(button => this.decodeDataPath(button.dataset.path));
+    const paths = Array.from(treeEl.querySelectorAll('[data-action="select-node"]')).map(button =>
+      this.decodeDataPath(button.dataset.path)
+    );
 
     const anchorIndex = paths.indexOf(anchorPath);
     const targetIndex = paths.indexOf(targetPath);
@@ -1127,10 +1120,13 @@ export class WorkspaceDirectoryExplorer {
     if (!nextPath || nextPath === folderNode.path) return;
 
     try {
-      const payload = await this.requestWorkspaceJSON(`/folders/${encodeURIComponent(folderNode.folderId)}`, {
-        method: 'PATCH',
-        body: { path: nextPath }
-      });
+      const payload = await this.requestWorkspaceJSON(
+        `/folders/${encodeURIComponent(folderNode.folderId)}`,
+        {
+          method: 'PATCH',
+          body: { path: nextPath }
+        }
+      );
       const updatedPath = this.normalizeRelativePath(payload?.folder?.path || nextPath);
       this.selectedPath = updatedPath;
       this.selectedType = 'dir';
@@ -1316,9 +1312,7 @@ export class WorkspaceDirectoryExplorer {
         method: 'POST',
         body: { attachment_ids: nodes.map(node => node.attachmentId) }
       });
-      const count = Number.isFinite(payload?.success_count)
-        ? payload.success_count
-        : nodes.length;
+      const count = Number.isFinite(payload?.success_count) ? payload.success_count : nodes.length;
       if (window.Toast) {
         window.Toast.success(`Moved ${count} file${count === 1 ? '' : 's'} to trash`);
       }
@@ -1340,8 +1334,7 @@ export class WorkspaceDirectoryExplorer {
 
     const path = this.decodeDataPath(main.dataset.path);
     const node = this.nodeIndex.get(path);
-    const attachmentId =
-      node?.attachmentId || this.decodeDataPath(main.dataset.attachmentId || '');
+    const attachmentId = node?.attachmentId || this.decodeDataPath(main.dataset.attachmentId || '');
 
     if (this.source !== 'owned' || !node || node.type !== 'file' || !attachmentId) {
       event.preventDefault();
@@ -1377,13 +1370,11 @@ export class WorkspaceDirectoryExplorer {
     // Highlight every dragged row, not just the grabbed one.
     const treeEl = this.host.elements.directoryExplorerTree;
     const draggedPaths = new Set(draggedFiles.map(file => file.path));
-    treeEl
-      ?.querySelectorAll('[data-action="select-node"][data-type="file"]')
-      .forEach(button => {
-        if (draggedPaths.has(this.decodeDataPath(button.dataset.path))) {
-          button.classList.add('is-dragging');
-        }
-      });
+    treeEl?.querySelectorAll('[data-action="select-node"][data-type="file"]').forEach(button => {
+      if (draggedPaths.has(this.decodeDataPath(button.dataset.path))) {
+        button.classList.add('is-dragging');
+      }
+    });
   }
 
   bindDropZone(element, resolver) {
@@ -1400,8 +1391,7 @@ export class WorkspaceDirectoryExplorer {
     if (!dragged || dragged.length === 0) return;
 
     const drop = resolver(event);
-    const anyWillMove =
-      drop && dragged.some(file => this.parentPathFor(file.path) !== drop.path);
+    const anyWillMove = drop && dragged.some(file => this.parentPathFor(file.path) !== drop.path);
     if (!drop || !anyWillMove) {
       this.setDropTarget(null);
       return;
@@ -1524,9 +1514,7 @@ export class WorkspaceDirectoryExplorer {
     this.draggedFiles = null;
     this.setDropTarget(null);
     const treeEl = this.host.elements.directoryExplorerTree;
-    treeEl
-      ?.querySelectorAll('.is-dragging')
-      .forEach(el => el.classList.remove('is-dragging'));
+    treeEl?.querySelectorAll('.is-dragging').forEach(el => el.classList.remove('is-dragging'));
   }
 
   async refreshOwnedTree() {
@@ -2076,10 +2064,7 @@ export class WorkspaceDirectoryExplorer {
         selected_path: this.selectedPath || '',
         selected_type: this.selectedType || ''
       };
-      localStorage.setItem(
-        this.getStateStorageKey(directoryId),
-        JSON.stringify(payload)
-      );
+      localStorage.setItem(this.getStateStorageKey(directoryId), JSON.stringify(payload));
     } catch (error) {
       console.warn('Failed to persist directory explorer state:', error);
     }

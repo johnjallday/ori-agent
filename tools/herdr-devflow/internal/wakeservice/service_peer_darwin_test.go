@@ -16,7 +16,7 @@ func TestDarwinPeerUIDComesFromKernelCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	accepted := make(chan net.Conn, 1)
 	acceptErrors := make(chan error, 1)
@@ -32,7 +32,7 @@ func TestDarwinPeerUIDComesFromKernelCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var server net.Conn
 	select {
@@ -42,7 +42,7 @@ func TestDarwinPeerUIDComesFromKernelCredentials(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out accepting peer test connection")
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	uid, err := peerUID(server)
 	if err != nil {
 		t.Fatal(err)

@@ -17,7 +17,7 @@
   function hashString(str) {
     var hash = 0;
     for (var i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash = (hash << 5) - hash + str.charCodeAt(i);
       hash |= 0;
     }
     return String(hash);
@@ -26,10 +26,14 @@
   function computeSyncHash(data) {
     var ids = [];
     if (data.unregistered) {
-      data.unregistered.forEach(function (ws) { ids.push('u:' + ws.id); });
+      data.unregistered.forEach(function (ws) {
+        ids.push('u:' + ws.id);
+      });
     }
     if (data.orphaned) {
-      data.orphaned.forEach(function (ws) { ids.push('o:' + ws.id + ':' + (ws.path || '')); });
+      data.orphaned.forEach(function (ws) {
+        ids.push('o:' + ws.id + ':' + (ws.path || ''));
+      });
     }
     ids.sort();
     return hashString(ids.join(','));
@@ -130,7 +134,9 @@
         })
       });
 
-      var result = await response.json().catch(function () { return {}; });
+      var result = await response.json().catch(function () {
+        return {};
+      });
       if (!response.ok || !result.success) {
         throw new Error(result.error || 'Failed to open folder picker');
       }
@@ -170,15 +176,23 @@
     if (data.unregistered && data.unregistered.length > 0) {
       html += '<div class="mb-3">';
       html += '<h6 style="color: var(--text-primary); margin-bottom: 4px;">Found on Disk</h6>';
-      html += '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">These workspace folders exist on disk but are not in the database. Select the ones you want to import.</p>';
+      html +=
+        '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">These workspace folders exist on disk but are not in the database. Select the ones you want to import.</p>';
       html += '<div class="list-group" style="gap: 4px;">';
       data.unregistered.forEach(function (ws) {
-        html += '<label class="list-group-item d-flex align-items-start" style="background: var(--bg-secondary); border-color: var(--border-color); cursor: pointer; padding: 8px 12px;">';
-        html += '<input type="checkbox" class="form-check-input me-2 mt-1 sync-import-cb" value="' + escapeHtml(ws.id) + '" checked>';
+        html +=
+          '<label class="list-group-item d-flex align-items-start" style="background: var(--bg-secondary); border-color: var(--border-color); cursor: pointer; padding: 8px 12px;">';
+        html +=
+          '<input type="checkbox" class="form-check-input me-2 mt-1 sync-import-cb" value="' +
+          escapeHtml(ws.id) +
+          '" checked>';
         html += '<div>';
         html += '<span style="color: var(--text-primary);">' + escapeHtml(ws.name) + '</span>';
         if (ws.path) {
-          html += '<small class="d-block" style="color: var(--text-secondary); word-break: break-all;">' + escapeHtml(ws.path) + '</small>';
+          html +=
+            '<small class="d-block" style="color: var(--text-secondary); word-break: break-all;">' +
+            escapeHtml(ws.path) +
+            '</small>';
         }
         html += '</div>';
         html += '</label>';
@@ -189,18 +203,27 @@
     if (data.orphaned && data.orphaned.length > 0) {
       html += '<div class="mb-3">';
       html += '<h6 style="color: var(--text-primary); margin-bottom: 4px;">Missing from Disk</h6>';
-      html += '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">These workspaces are still in the database, but their folders are missing. Keep them as missing, locate the moved folder, recreate the workspace folder from the database, or remove the database entry.</p>';
+      html +=
+        '<p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">These workspaces are still in the database, but their folders are missing. Keep them as missing, locate the moved folder, recreate the workspace folder from the database, or remove the database entry.</p>';
       html += '<div class="list-group" style="gap: 8px;">';
       data.orphaned.forEach(function (ws) {
-        html += '<div class="list-group-item sync-missing-row" data-workspace-id="' + escapeHtml(ws.id) + '" style="background: var(--bg-secondary); border-color: var(--border-color); padding: 10px 12px;">';
-        html += '<div class="d-flex flex-column flex-md-row align-items-md-start justify-content-between" style="gap: 8px;">';
+        html +=
+          '<div class="list-group-item sync-missing-row" data-workspace-id="' +
+          escapeHtml(ws.id) +
+          '" style="background: var(--bg-secondary); border-color: var(--border-color); padding: 10px 12px;">';
+        html +=
+          '<div class="d-flex flex-column flex-md-row align-items-md-start justify-content-between" style="gap: 8px;">';
         html += '<div style="min-width: 0;">';
         html += '<div style="color: var(--text-primary);">' + escapeHtml(ws.name) + '</div>';
         if (ws.path) {
-          html += '<small class="d-block" style="color: var(--text-secondary); word-break: break-all;">Last known folder: ' + escapeHtml(ws.path) + '</small>';
+          html +=
+            '<small class="d-block" style="color: var(--text-secondary); word-break: break-all;">Last known folder: ' +
+            escapeHtml(ws.path) +
+            '</small>';
         }
         html += '</div>';
-        html += '<select class="form-select form-select-sm sync-missing-action" style="max-width: 180px; background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border-color);">';
+        html +=
+          '<select class="form-select form-select-sm sync-missing-action" style="max-width: 180px; background: var(--bg-tertiary); color: var(--text-primary); border-color: var(--border-color);">';
         html += '<option value="keep" selected>Keep Missing</option>';
         html += '<option value="locate">Locate Folder</option>';
         html += '<option value="recreate">Recreate Folder</option>';
@@ -209,12 +232,18 @@
         html += '</div>';
         html += '<div class="sync-locate-controls mt-2" style="display: none;">';
         html += '<div class="d-flex flex-column flex-md-row" style="gap: 8px;">';
-        html += '<input type="text" class="form-control form-control-sm sync-locate-path" value="' + escapeHtml(ws.path || '') + '" placeholder="Select the current workspace folder" disabled>';
-        html += '<button type="button" class="modern-btn modern-btn-secondary sync-locate-browse" disabled>Browse</button>';
+        html +=
+          '<input type="text" class="form-control form-control-sm sync-locate-path" value="' +
+          escapeHtml(ws.path || '') +
+          '" placeholder="Select the current workspace folder" disabled>';
+        html +=
+          '<button type="button" class="modern-btn modern-btn-secondary sync-locate-browse" disabled>Browse</button>';
         html += '</div>';
-        html += '<small class="d-block mt-1" style="color: var(--text-secondary);">If the folder exists but is missing <code>workspace.json</code>, Ori will recreate the workspace scaffold there.</small>';
+        html +=
+          '<small class="d-block mt-1" style="color: var(--text-secondary);">If the folder exists but is missing <code>workspace.json</code>, Ori will recreate the workspace scaffold there.</small>';
         html += '</div>';
-        html += '<small class="d-block mt-2" style="color: var(--text-secondary);">Recreate Folder rebuilds <code>workspace.json</code>, <code>files/</code>, <code>notes/</code>, and note markdown files at the last known path. Uploaded file contents are not restored.</small>';
+        html +=
+          '<small class="d-block mt-2" style="color: var(--text-secondary);">Recreate Folder rebuilds <code>workspace.json</code>, <code>files/</code>, <code>notes/</code>, and note markdown files at the last known path. Uploaded file contents are not restored.</small>';
         html += '</div>';
       });
       html += '</div></div>';
@@ -287,12 +316,18 @@
         })
       });
 
-      var result = await resp.json().catch(function () { return {}; });
+      var result = await resp.json().catch(function () {
+        return {};
+      });
       if (!resp.ok) {
         throw new Error(result.error || 'Sync failed');
       }
 
-      var changed = (result.imported || 0) > 0 || (result.cleaned || 0) > 0 || (result.located || 0) > 0 || (result.recreated || 0) > 0;
+      var changed =
+        (result.imported || 0) > 0 ||
+        (result.cleaned || 0) > 0 ||
+        (result.located || 0) > 0 ||
+        (result.recreated || 0) > 0;
       var warnings = Array.isArray(result.warnings) ? result.warnings : [];
 
       if (!changed && warnings.length > 0) {
@@ -326,7 +361,9 @@
       }
 
       if (changed) {
-        setTimeout(function () { window.location.reload(); }, 600);
+        setTimeout(function () {
+          window.location.reload();
+        }, 600);
       }
     } catch (err) {
       console.error('[workspace-sync] Sync failed:', err);
@@ -362,17 +399,25 @@
 
       var dismissBtn = document.getElementById('syncDismissBtn');
       if (dismissBtn) {
-        dismissBtn.addEventListener('click', function () {
-          dismissSync(syncHash);
-        }, { once: true });
+        dismissBtn.addEventListener(
+          'click',
+          function () {
+            dismissSync(syncHash);
+          },
+          { once: true }
+        );
       }
 
       var applyBtn = document.getElementById('syncApplyBtn');
       if (applyBtn) {
         applyBtn.textContent = 'Apply Changes';
-        applyBtn.addEventListener('click', function () {
-          applySyncActions(syncHash);
-        }, { once: true });
+        applyBtn.addEventListener(
+          'click',
+          function () {
+            applySyncActions(syncHash);
+          },
+          { once: true }
+        );
       }
     } catch (err) {
       console.error('[workspace-sync] Failed to check sync status:', err);
