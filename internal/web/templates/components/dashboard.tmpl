@@ -50,6 +50,24 @@
           <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
         </div>
         <div class="cockpit-area-controls">
+          <!--
+            Ori in the cockpit (PRD FR-21). A second entry point to the *same*
+            guide: it drives the one controller and the one panel, so the two
+            can never disagree about open state. It is never used to represent
+            a running workspace agent (FR-78).
+
+            It sits in the header rather than floating over the map on purpose —
+            an absolutely-positioned character there covers the map's own empty
+            and error controls and silently eats their clicks.
+          -->
+          <button
+            type="button"
+            class="cockpit-map-ori"
+            id="oriGuideMapTrigger"
+            aria-label="Ask Ori — app guide">
+            <img src="/characters/ori-guide/sprite.svg" alt="" width="26" height="26" decoding="async">
+            <span class="cockpit-map-ori__label">Ask Ori</span>
+          </button>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
           <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">

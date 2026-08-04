@@ -26,6 +26,15 @@ func askGuide(t *testing.T, h *GuideHandler, question, route string) GuideRespon
 
 func newGuide() *GuideHandler { return NewGuideHandler() }
 
+// postGuideRaw sends a body verbatim, so malformed input can be exercised
+// without the encoder tidying it up first.
+func postGuideRaw(t *testing.T, h *GuideHandler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/ori-guide", strings.NewReader(body)))
+	return rec
+}
+
 /* ---- the safety boundary ---------------------------------------------------- */
 
 // The headline guarantee, asserted at the type level rather than by probing

@@ -283,6 +283,55 @@
   background: var(--ori-paper);
 }
 
+/* ---- Ori on the Home map -------------------------------------------------------- */
+
+/* A second door to the same guide, sitting in the cockpit header beside the
+   view toggle (PRD FR-21).
+
+   Deliberately in normal flow rather than floating over the map: an absolutely
+   positioned character there sits on top of the map's own empty-state and
+   retry controls and silently swallows their clicks. */
+.cockpit-map-ori {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border: 1px solid var(--ori-line, #d8c19b);
+  border-radius: 999px;
+  background: var(--ori-paper, #f6ead6);
+  color: var(--ori-ink, #3b2a12);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cockpit-map-ori:hover {
+  background: var(--ori-surface, #fffaf1);
+}
+
+.cockpit-map-ori:focus-visible {
+  outline: 3px solid var(--ori-accent, #bd7c24);
+  outline-offset: 2px;
+}
+
+.cockpit-map-ori img {
+  display: block;
+}
+
+[data-bs-theme='dark'] .cockpit-map-ori {
+  border-color: #574a38;
+  background: #2f2820;
+  color: #f2e7d5;
+}
+
+/* At narrow widths the header is tight, so this collapses to the sprite alone;
+   the fixed launcher is still available either way. */
+@media (max-width: 560px) {
+  .cockpit-map-ori__label {
+    display: none;
+  }
+}
+
 /* ---- coachmark ---------------------------------------------------------------- */
 
 /* Marks a control without touching it. The outline plus offset reads on any

@@ -178,7 +178,8 @@ func TestSuggestedTopicsAreDrawnOnlyFromTheApprovedCatalog(t *testing.T) {
 		approved[topic.Key] = true
 	}
 	routes := []string{"/", "/agents", "/vaults", "/mcp", "/settings", "/action-center",
-		"/workspace/abc", "/anything-else", ""}
+		"/skills", "/plugins", "/models", "/usage", "/profile",
+		"/workspace/abc", "/workspaces", "/anything-else", ""}
 	for _, route := range routes {
 		suggestions := suggestedTopicsFor(route)
 		if len(suggestions) == 0 {

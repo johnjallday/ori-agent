@@ -59,10 +59,25 @@ function makeElement(id, overrides = {}) {
   };
 }
 
-function load({ route = '/', elements = {} } = {}) {
+function load({ route = '/', elements = {}, session = {} } = {}) {
   const registry = {};
+  const store = { ...session };
   const sandbox = {
-    window: { location: { pathname: route } },
+    window: {
+      location: { pathname: route },
+      addEventListener() {},
+      sessionStorage: {
+        getItem: k => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
+        setItem: (k, v) => {
+          store[k] = String(v);
+        },
+        removeItem: k => {
+          delete store[k];
+        }
+      }
+    },
+    // Exposed so tests can inspect what the module parked for the next page.
+    _session: store,
     document: {
       _els: elements,
       getElementById(id) {
@@ -308,6 +323,112 @@ test('a handoff away from Home routes there rather than pretending it worked', (
   const ok = ctx.guide._handoff('do the thing');
   assert.equal(ok, false);
   assert.equal(ctx.sandbox.window.location.href, '/');
+});
+
+// The request survives the navigation instead of making the user retype it.
+test('a handoff from another page parks the request for Home to pick up', () => {
+  const ctx = load({ route: '/agents', elements: guideEls() });
+  ctx.guide._handoff('summarize the launch notes');
+
+  assert.equal(ctx.sandbox._session[ctx.guide.HANDOFF_KEY], 'summarize the launch notes');
+});
+
+test('Home consumes a parked handoff once, without submitting it', () => {
+  const els = guideEls();
+  let submitted = false;
+  els.homeAssistantInput = makeElement('homeAssistantInput', {
+    form: {
+      submit() {
+        submitted = true;
+      }
+    }
+  });
+
+  const ctx = load({
+    route: '/',
+    elements: els,
+    session: { 'ori-guide-handoff': 'summarize the launch notes' }
+  });
+
+  // init() runs on load and drains the parked request.
+  assert.equal(els.homeAssistantInput.value, 'summarize the launch notes');
+  assert.ok(els.homeAssistantInput.focused);
+  assert.equal(submitted, false, 'a carried-over handoff must not auto-submit either');
+
+  // Drained, so a later reload does not resurrect it.
+  assert.equal(ctx.sandbox._session[ctx.guide.HANDOFF_KEY], undefined);
+});
+
+// The user's words are their own: parking them in the URL would put them in
+// history, the address bar, and any referrer.
+test('a parked handoff never travels through the URL', () => {
+  const ctx = load({ route: '/agents', elements: guideEls() });
+  ctx.guide._handoff('something private');
+  assert.equal(ctx.sandbox.window.location.href, '/');
+  assert.ok(!String(ctx.sandbox.window.location.href).includes('something'));
+});
+
+test('storage being unavailable degrades to a plain navigation', () => {
+  const els = guideEls();
+  const ctx = load({ route: '/agents', elements: els });
+  ctx.sandbox.window.sessionStorage = {
+    getItem() {
+      throw new Error('denied');
+    },
+    setItem() {
+      throw new Error('denied');
+    },
+    removeItem() {
+      throw new Error('denied');
+    }
+  };
+
+  // Nothing thrown; the user simply retypes on the other side.
+  assert.doesNotThrow(() => ctx.guide._handoff('do the thing'));
+  assert.equal(ctx.sandbox.window.location.href, '/');
+});
+
+/* ---- stale coachmarks across route changes (FR-43) ---------------------------- */
+
+test('a coachmark made on one route is cleared when the route changes', () => {
+  const ctx = load({ route: '/agents', elements: guideEls() });
+  const target = makeElement('newAgentBtn');
+  ctx.registerSelector('#newAgentBtn', target);
+
+  ctx.guide._applyCoachmark('new_agent');
+  assert.ok(target.classList.contains('is-ori-coachmark'));
+
+  // The page changed the URL without reloading, as the Agents collection does
+  // when filters move into history.
+  ctx.sandbox.window.location.pathname = '/vaults';
+  ctx.guide._clearCoachmarkIfRouteChanged();
+
+  assert.ok(!target.classList.contains('is-ori-coachmark'));
+});
+
+test('a coachmark survives a history change that stays on the same route', () => {
+  const ctx = load({ route: '/agents', elements: guideEls() });
+  const target = makeElement('newAgentBtn');
+  ctx.registerSelector('#newAgentBtn', target);
+
+  ctx.guide._applyCoachmark('new_agent');
+  ctx.guide._clearCoachmarkIfRouteChanged();
+
+  // Filters change the query string, not the route; the mark is still valid.
+  assert.ok(target.classList.contains('is-ori-coachmark'));
+});
+
+test('a coachmark is cleared when its element is re-rendered away', () => {
+  const ctx = load({ route: '/agents', elements: guideEls() });
+  const target = makeElement('newAgentBtn');
+  ctx.registerSelector('#newAgentBtn', target);
+  ctx.guide._applyCoachmark('new_agent');
+
+  // The collection re-rendered and this node is no longer in the document.
+  ctx.sandbox.document.contains = () => false;
+  ctx.guide._clearCoachmarkIfRouteChanged();
+
+  assert.ok(!target.classList.contains('is-ori-coachmark'));
 });
 
 /* ---- escaping (FR-45) ------------------------------------------------------------ */

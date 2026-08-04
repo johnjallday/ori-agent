@@ -315,10 +315,21 @@ func suggestedTopicsFor(route string) []GuideTopic {
 		return pick("action-center", "workspace", "workspace-manager")
 	case strings.HasPrefix(route, "/mcp"):
 		return pick("tool", "toolbox", "skill")
+	case strings.HasPrefix(route, "/skills"):
+		return pick("skill", "toolbox", "agent")
+	case strings.HasPrefix(route, "/plugins"):
+		return pick("tool", "skill", "toolbox")
 	case strings.HasPrefix(route, "/settings"):
 		return pick("model-setup", "usage", "vault")
+	case strings.HasPrefix(route, "/models"):
+		return pick("model-setup", "usage", "agent")
+	case strings.HasPrefix(route, "/usage"):
+		return pick("usage", "model-setup", "agent")
+	case strings.HasPrefix(route, "/profile"):
+		return pick("home", "personal-hq", "workspace-manager")
+	// Matches both /workspace/<id> and /workspaces.
 	case strings.HasPrefix(route, "/workspace"):
-		return pick("workspace", "agent", "workspace-manager")
+		return pick("workspace", "agent", "workspace-manager", "action-center")
 	default:
 		return pick("home", "workspace", "agent", "workspace-manager")
 	}

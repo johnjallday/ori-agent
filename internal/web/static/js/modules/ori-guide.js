@@ -38,9 +38,28 @@
     seq: 0,
     lastTrigger: null,
     coachmarkEl: null,
+    coachmarkRoute: '',
     actions: [],
     els: null
   };
+
+  /* ---- test-visible events ------------------------------------------------------ */
+
+  // Coarse, local-only signals so browser tests can assert on guide behaviour
+  // without scraping the DOM. These are DOM events and nothing more: there is no
+  // network call, no storage, and no raw question in the payload — the PRD
+  // explicitly rules out building analytics or retaining prompts here
+  // (Technical Consideration 7.4).
+  function emit(name, detail) {
+    if (typeof document === 'undefined' || typeof CustomEvent !== 'function') return;
+    try {
+      document.dispatchEvent(
+        new CustomEvent('ori-guide:' + name, { detail: detail || {}, bubbles: true })
+      );
+    } catch (err) {
+      /* events are diagnostics; never let one break the guide */
+    }
+  }
 
   /* ---- escaping -------------------------------------------------------------- */
 
@@ -242,6 +261,12 @@
         if (seq !== state.seq) return; // superseded
         setPending(false, silent);
         render(resp);
+        // The topic *key* only — never the question the user typed.
+        emit('answer', {
+          status: String(resp.status || ''),
+          topic: String(resp.topic_key || ''),
+          actions: Array.isArray(resp.actions) ? resp.actions.length : 0
+        });
       })
       .catch(function () {
         if (seq !== state.seq) return; // superseded
@@ -253,6 +278,7 @@
             '<p class="ori-guide__answer">I could not reach the guide just now. ' +
             'The page behind me still works — try again in a moment.</p>';
         }
+        emit('fallback', { reason: 'unreachable' });
       });
   }
 
@@ -262,6 +288,20 @@
     if (state.coachmarkEl) {
       state.coachmarkEl.classList.remove('is-ori-coachmark');
       state.coachmarkEl = null;
+      state.coachmarkRoute = '';
+    }
+  }
+
+  // A mark made on one route must not survive onto another. Pages here change
+  // the URL without reloading (the Agents collection keeps filters in history),
+  // so a mark can outlive the view that justified it (FR-43).
+  function clearCoachmarkIfRouteChanged() {
+    if (!state.coachmarkEl) return;
+    if (state.coachmarkRoute && state.coachmarkRoute !== currentRoute()) {
+      clearCoachmark();
+    } else if (!document.contains(state.coachmarkEl)) {
+      // Or the element itself was re-rendered out from under the mark.
+      clearCoachmark();
     }
   }
 
@@ -282,11 +322,17 @@
             '</p>'
         );
       }
+      emit('coachmark', { key: key, resolved: false });
       return false;
     }
 
     el.classList.add('is-ori-coachmark');
     state.coachmarkEl = el;
+    // The route the mark belongs to. If the page's route changes underneath it,
+    // the mark is stale and gets cleared rather than left pointing at whatever
+    // now occupies that selector (FR-43).
+    state.coachmarkRoute = currentRoute();
+    emit('coachmark', { key: key, resolved: true });
     if (typeof el.focus === 'function') el.focus({ preventScroll: false });
     if (typeof el.scrollIntoView === 'function') {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -296,17 +342,14 @@
 
   /* ---- work handoff ---------------------------------------------------------------- */
 
-  // Opens the real Home work surface and fills in the user's own words. It
-  // deliberately stops there: the user presses send, so nothing is ever routed
-  // or executed on their behalf (FR-40/FR-84).
-  function handoff(text) {
-    var input = document.getElementById('homeAssistantInput');
-    if (!input) {
-      // Not on Home — send them there rather than pretending it worked.
-      window.location.href = '/';
-      return false;
-    }
-    close();
+  // Where a pending handoff is parked while the browser navigates to Home.
+  //
+  // sessionStorage rather than a query parameter: the user's words are their
+  // own, and a URL would put them in history, in the address bar, and in any
+  // referrer. It is read once and cleared.
+  var HANDOFF_KEY = 'ori-guide-handoff';
+
+  function prefillWorkSurface(input, text) {
     input.value = text || '';
     input.focus();
     // An input event so any listener bound to the work surface sees the change
@@ -316,7 +359,46 @@
     } catch (err) {
       /* older browsers: the value is set either way */
     }
-    return true;
+  }
+
+  // Opens the real Home work surface and fills in the user's own words. It
+  // deliberately stops there: the user presses send, so nothing is ever routed
+  // or executed on their behalf (FR-40/FR-84).
+  function handoff(text) {
+    var input = document.getElementById('homeAssistantInput');
+    if (input) {
+      close();
+      prefillWorkSurface(input, text);
+      emit('handoff', { onHome: true });
+      return true;
+    }
+
+    // Not on Home. Carry the request across the navigation rather than dropping
+    // it and making the user retype — still without submitting anything.
+    try {
+      window.sessionStorage.setItem(HANDOFF_KEY, String(text || ''));
+    } catch (err) {
+      /* private mode or storage disabled: the user retypes, nothing breaks */
+    }
+    emit('handoff', { onHome: false });
+    window.location.href = '/';
+    return false;
+  }
+
+  // Consumes a handoff parked by a previous page. Runs once on load; the value
+  // is removed immediately so a later reload does not resurrect it.
+  function consumePendingHandoff() {
+    var text = null;
+    try {
+      text = window.sessionStorage.getItem(HANDOFF_KEY);
+      if (text !== null) window.sessionStorage.removeItem(HANDOFF_KEY);
+    } catch (err) {
+      return;
+    }
+    if (!text) return;
+
+    var input = document.getElementById('homeAssistantInput');
+    if (input) prefillWorkSurface(input, text);
   }
 
   /* ---- open / close ------------------------------------------------------------------ */
@@ -336,6 +418,7 @@
     // Focus the input rather than the close button: the user opened this to ask
     // something.
     if (typeof els.input.focus === 'function') els.input.focus();
+    emit('open', { route: currentRoute() });
   }
 
   function close() {
@@ -356,6 +439,7 @@
     } else if (els.launcher && typeof els.launcher.focus === 'function') {
       els.launcher.focus();
     }
+    emit('dismiss', {});
   }
 
   function toggle(trigger) {
@@ -439,6 +523,11 @@
     panel.addEventListener('click', onActionClick);
     panel.addEventListener('click', onTopicClick);
     document.addEventListener('keydown', onKeydown);
+    window.addEventListener('popstate', clearCoachmarkIfRouteChanged);
+
+    // A work request made on another page is prefilled here, once, without
+    // being submitted.
+    consumePendingHandoff();
 
     // Home also shows Ori on the map. Both entry points drive this one
     // controller and one panel, so they can never disagree about open state
@@ -465,7 +554,10 @@
     _isSafeHref: isSafeHref,
     _handoff: handoff,
     _applyCoachmark: applyCoachmark,
-    _esc: esc
+    _clearCoachmarkIfRouteChanged: clearCoachmarkIfRouteChanged,
+    _consumePendingHandoff: consumePendingHandoff,
+    _esc: esc,
+    HANDOFF_KEY: HANDOFF_KEY
   };
 
   if (typeof window !== 'undefined') {

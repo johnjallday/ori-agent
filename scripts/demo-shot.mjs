@@ -40,8 +40,9 @@ try {
       if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`);
     });
 
-    await page.goto(`${baseUrl}${path}`, { waitUntil: "networkidle" });
-    await page.waitForTimeout(900);
+    // Home holds long-lived connections open, so networkidle never fires there.
+    await page.goto(`${baseUrl}${path}`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1400);
 
     const file = join(resolve(outDir), `${name}.png`);
     await page.screenshot({ path: file, fullPage: true });

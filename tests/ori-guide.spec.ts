@@ -153,6 +153,81 @@ test.describe('Ori Guide explanations and destinations', () => {
   });
 });
 
+test.describe('Ori on the Home map', () => {
+  test('the map character opens the same guide as the launcher', async ({ page }) => {
+    await gotoPage(page, '/');
+
+    const mapOri = page.locator('#oriGuideMapTrigger');
+    await expect(mapOri).toBeVisible();
+
+    await mapOri.click();
+    await expect(page.locator('#oriGuidePanel')).toBeVisible();
+    // One controller, one panel: the shared launcher reflects the state the map
+    // character just set (FR-21).
+    await expect(page.locator('#oriGuideLauncher')).toHaveAttribute('aria-expanded', 'true');
+
+    // Closing from the shared launcher closes what the map opened.
+    await page.locator('#oriGuideLauncher').click();
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await expect(page.locator('#oriGuideLauncher')).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('there is still exactly one panel with two entry points', async ({ page }) => {
+    await gotoPage(page, '/');
+    await expect(page.locator('#oriGuidePanel')).toHaveCount(1);
+    await expect(page.locator('#oriGuideMapTrigger')).toHaveCount(1);
+    await expect(page.locator('#oriGuideLauncher')).toHaveCount(1);
+  });
+
+  test('the map character does not appear away from Home', async ({ page }) => {
+    await gotoPage(page, '/agents');
+    await expect(page.locator('#oriGuideMapTrigger')).toHaveCount(0);
+    // The shared launcher is still there, so the guide is never unreachable.
+    await expect(page.locator('#oriGuideLauncher')).toBeVisible();
+  });
+});
+
+test.describe('Ori Guide work handoff across pages', () => {
+  test('a work request made elsewhere arrives on Home prefilled and unsent', async ({ page }) => {
+    await gotoPage(page, '/agents');
+    await openGuide(page);
+
+    const request = 'summarize the launch notes';
+    await ask(page, request);
+
+    await page.locator('.ori-guide__action', { hasText: 'Workspace Manager' }).click();
+
+    // The browser navigates to Home and the request survives the trip.
+    await expect(page).toHaveURL(/\/$/);
+    const input = page.locator('#homeAssistantInput');
+    await expect(input).toHaveValue(request);
+  });
+
+  test('the carried request never travels through the URL', async ({ page }) => {
+    await gotoPage(page, '/agents');
+    await openGuide(page);
+    await ask(page, 'send an email to the whole team');
+    await page.locator('.ori-guide__action', { hasText: 'Workspace Manager' }).click();
+
+    await expect(page).toHaveURL(/\/$/);
+    // The user's words are their own: a query parameter would put them in
+    // history and the address bar.
+    expect(page.url()).not.toContain('email');
+    expect(page.url()).not.toContain('?');
+  });
+
+  test('a carried request is consumed once, not resurrected by a reload', async ({ page }) => {
+    await gotoPage(page, '/agents');
+    await openGuide(page);
+    await ask(page, 'draft the release notes');
+    await page.locator('.ori-guide__action', { hasText: 'Workspace Manager' }).click();
+    await expect(page.locator('#homeAssistantInput')).toHaveValue('draft the release notes');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#homeAssistantInput')).toHaveValue('');
+  });
+});
+
 test.describe('Ori Guide dynamic destinations', () => {
   test('naming a real workspace offers to open that workspace', async ({ page, request }) => {
     const name = `PW Guide WS ${Date.now()}`;
