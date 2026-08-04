@@ -12,7 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
-// This file owns the `wt backlog` command surface: argument parsing, human
+// This file owns the `./scripts/backlog.sh` command surface: argument parsing, human
 // rendering, and the JSON contract below.
 //
 // The JSON is an Ori-owned envelope, not `gh` output passed through. Whatever
@@ -20,7 +20,7 @@ import (
 // contract keeps working — and the fields it does expose are the ones Ori can
 // promise, because Ori decoded and bounded every one of them.
 
-// backlogSchemaVersion is the version of every JSON payload `wt backlog`
+// backlogSchemaVersion is the version of every JSON payload `./scripts/backlog.sh`
 // emits. It starts at 1; any incompatible change to the shape below raises it,
 // so a consumer can tell which contract it is holding.
 const backlogSchemaVersion = 1
@@ -95,7 +95,7 @@ func parseBacklogArgs(args []string) (backlogArgs, error) {
 	case "view", "show":
 		parsed.command = "view"
 		if len(positional) == 0 {
-			return backlogArgs{}, errors.New("backlog: view needs an Issue number, for example: wt backlog view 292")
+			return backlogArgs{}, errors.New("backlog: view needs an Issue number, for example: ./scripts/backlog.sh view 292")
 		}
 		if len(positional) > 1 {
 			return backlogArgs{}, fmt.Errorf("backlog: view takes one Issue, but also got %q", positional[1])
@@ -109,7 +109,7 @@ func parseBacklogArgs(args []string) (backlogArgs, error) {
 		parsed.command = "add"
 		if len(positional) == 0 {
 			return backlogArgs{}, errors.New(
-				"backlog: add needs a quoted title, for example: wt backlog add \"Coordinate based map\"")
+				"backlog: add needs a quoted title, for example: ./scripts/backlog.sh add \"Coordinate based map\"")
 		}
 		if len(positional) > 1 {
 			// Almost always an unquoted title. Creating an Issue named after
@@ -153,7 +153,7 @@ func parseBacklogArgs(args []string) (backlogArgs, error) {
 	return parsed, nil
 }
 
-// backlog runs one `wt backlog` invocation.
+// backlog runs one `./scripts/backlog.sh` invocation.
 //
 // Exit codes are the contract scripts branch on: 0 when the requested
 // operation completed, 1 when GitHub could not answer, and 2 when the
@@ -252,7 +252,7 @@ func (a *App) backlogAdd(
 	return 0
 }
 
-// backlogClient builds the GitHub client for the checkout `wt backlog` was run
+// backlogClient builds the GitHub client for the checkout `./scripts/backlog.sh` was run
 // from.
 //
 // The bridge configuration is read for its bounds when it is present, but a
@@ -276,7 +276,7 @@ func (a *App) backlogClient(opts options) (*github.Client, error) {
 		// repository, so the backlog is the same from every checkout.
 		repoRoot, err = worktree.FindRepoRoot(cwd)
 		if err != nil {
-			return nil, fmt.Errorf("wt backlog must run inside a Git checkout: %w", err)
+			return nil, fmt.Errorf("./scripts/backlog.sh must run inside a Git checkout: %w", err)
 		}
 	}
 
@@ -301,7 +301,7 @@ func (a *App) backlogClient(opts options) (*github.Client, error) {
 // The shape is chosen for the job it does: this is the list somebody scans to
 // pick today's work, so it stays one line per Issue with the number first —
 // the number is what every later step is named after. Bodies are not here;
-// `wt backlog view` exists for the moment you want one.
+// `./scripts/backlog.sh view` exists for the moment you want one.
 func (a *App) renderBacklogList(list github.IssueList) {
 	a.renderBacklogListStyled(list, a.backlogStyle())
 }
@@ -322,7 +322,7 @@ func (a *App) renderBacklogListStyled(list github.IssueList, style backlogStyle)
 	if len(list.Issues) == 0 {
 		// The distinction matters: GitHub answered, and the answer was none.
 		// A failed query never reaches this branch — it exits 1 with a reason.
-		fmt.Fprintf(a.stdout, "\nGitHub returned no open Issues %s. Capture one with: wt backlog add \"<title>\"\n", scope)
+		fmt.Fprintf(a.stdout, "\nGitHub returned no open Issues %s. Capture one with: ./scripts/backlog.sh add \"<title>\"\n", scope)
 		return
 	}
 
@@ -382,7 +382,7 @@ func orPlaceholder(value, placeholder string) string {
 	return value
 }
 
-// backlogDetailPayload is the `wt backlog view --json` contract: the same core
+// backlogDetailPayload is the `./scripts/backlog.sh view --json` contract: the same core
 // identity as a list item, plus the fields that only exist for one Issue.
 type backlogDetailPayload struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -418,7 +418,7 @@ func newBacklogDetailPayload(repository github.Repository, detail github.IssueDe
 	}
 }
 
-// backlogCreatedPayload is the `wt backlog add --json` contract. It names what
+// backlogCreatedPayload is the `./scripts/backlog.sh add --json` contract. It names what
 // was created and where to find it, and nothing else: this command sets no
 // metadata, so there is none to report.
 type backlogCreatedPayload struct {
@@ -529,13 +529,13 @@ func (a *App) writeBacklogError(err error, asJSON bool) {
 		})
 		return
 	}
-	fmt.Fprintf(a.stderr, "wt backlog: %s\n", remoteErr.Detail)
+	fmt.Fprintf(a.stderr, "./scripts/backlog.sh: %s\n", remoteErr.Detail)
 	if recovery := remoteErr.Recovery(); recovery != "" {
 		fmt.Fprintf(a.stderr, "Recovery: %s\n", recovery)
 	}
 }
 
-// backlogListPayload is the `wt backlog --json` contract.
+// backlogListPayload is the `./scripts/backlog.sh --json` contract.
 //
 // The five facts around `issues` exist so a consumer never has to guess what it
 // is holding: which repository was read, whose Issues were selected, which
@@ -555,7 +555,7 @@ type backlogListPayload struct {
 }
 
 // backlogIssuePayload is one listed Issue. It carries no body: a backlog
-// collection stays bounded, and the body is available through `wt backlog
+// collection stays bounded, and the body is available through `./scripts/backlog.sh
 // view`.
 type backlogIssuePayload struct {
 	Number    int      `json:"number"`
