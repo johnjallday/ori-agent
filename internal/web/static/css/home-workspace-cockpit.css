@@ -339,7 +339,13 @@
   flex-wrap: wrap;
   gap: 6px;
   flex: 0 0 auto;
-  padding: 8px 12px;
+  /* The rail is the right-hand column and this footer is its last row, so at
+     shorter viewports its Tree button lands under the fixed Ori launcher —
+     visible, but unclickable (measured at 1280x800). Reserving room to the
+     RIGHT would wrap three buttons onto three lines in a ~270px rail, so the
+     row is lifted instead. Padding rather than margin, so the footer's own
+     surface fills the reserved space instead of leaving a hole in the rail. */
+  padding: 8px 12px calc(8px + var(--ori-launcher-clearance-y, 88px));
   border-top: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
 }
@@ -796,14 +802,16 @@ body.home-command-page {
   white-space: nowrap;
 }
 
+/* Row metadata: status stays an uppercase chip because it is a state label, but
+   at a size that does not need squinting. --hc-ink-faint at 9px was below the
+   AA floor for anyone reading it as information rather than decoration. */
 .cockpit-tree-kind,
 .cockpit-tree-status,
 .cockpit-tree-next {
   flex: 0 0 auto;
-  color: var(--hc-ink-faint);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9px;
-  letter-spacing: 0.4px;
+  color: var(--hc-ink-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -876,14 +884,18 @@ body.home-command-page {
   gap: 4px;
 }
 
+/* Tree is the hierarchy-management peer of Map, so its per-row actions get to
+   look like buttons rather than 9px monospace tokens — they are how a user
+   moves and removes real workspaces (PRD FR-9/FR-10). Sentence case, on the
+   shared step grid, at a size a pointer can actually hit. */
 .cockpit-tree-action {
-  padding: 2px 7px;
+  padding: 3px 9px;
   border: 1px solid var(--hc-line);
+  border-radius: var(--cozy-radius, 8px);
   background: var(--hc-panel-deep);
   color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9px;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -893,9 +905,18 @@ body.home-command-page {
   color: var(--hc-ink);
 }
 
+/* Delete reads as destructive before it is hovered, not only after. A control
+   that only announces itself on hover is no warning to a keyboard user
+   arrowing through the tree. */
+.cockpit-tree-action.is-danger {
+  border-color: color-mix(in srgb, var(--hc-alert) 45%, var(--hc-line));
+  color: var(--hc-alert);
+}
+
 .cockpit-tree-action.is-danger:hover,
 .cockpit-tree-action.is-danger:focus-visible {
   border-color: var(--hc-alert);
+  background: color-mix(in srgb, var(--hc-alert) 12%, var(--hc-panel-deep));
   color: var(--hc-alert);
 }
 

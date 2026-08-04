@@ -145,10 +145,13 @@ body.home-command-page .home-command-bridge * {
 .home-status-text,
 .home-row-meta,
 .home-section-empty,
+/* Empty-state sentences read as sentences. Set in tracked uppercase monospace
+   they read as machine output — "AWAITING FIRST OPERATION." is the console
+   voice, not the cozy one, and it is the rail's most-seen text because an empty
+   rail is what a new user sees first (PRD FR-1/FR-8). The words themselves are
+   unchanged; only their delivery is. */
 .home-section-placeholder {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 1.15px;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
 }
 
 .home-command-kicker {
@@ -393,15 +396,24 @@ body.home-command-page .home-command-bridge * {
 .home-section-title {
   margin: 0;
   color: var(--hc-ink);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 1.65px;
+  /* Loosened from 10px/1.65px: that tracking is what made the rail read as a
+     status console. Still a small uppercase label, just a legible one. */
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
 }
 
+/* A small moss tile instead of a "//" comment marker. Same job — mark where a
+   section starts — in the cozy vocabulary rather than the console one, and it
+   sits on the shared 4px step grid like every other pixel detail. */
 .home-section-title::before {
-  margin-right: 6px;
-  color: var(--hc-signal);
-  content: "//";
+  display: inline-block;
+  width: var(--cozy-step, 4px);
+  height: var(--cozy-step, 4px);
+  margin-right: 8px;
+  vertical-align: 0.12em;
+  background: var(--hc-signal);
+  content: "";
 }
 
 .home-section-link {
@@ -431,8 +443,11 @@ body.home-command-page .home-command-bridge * {
 .home-section-placeholder,
 .home-section-empty {
   padding: 8px 0;
-  color: var(--hc-ink-faint);
-  font-size: 9px;
+  color: var(--hc-ink-dim);
+  /* 9px was legible only because it was uppercase monospace. Now that these are
+     ordinary sentences they need an ordinary size, and the dimmer-not-faintest
+     ink keeps them above the AA floor. */
+  font-size: 12px;
   line-height: 1.55;
 }
 

@@ -441,6 +441,38 @@ test.describe('Workspace Manager keeps its own identity', () => {
     await expect(card).toBeVisible();
     // Two distinct surfaces, both present, not one pretending to be the other.
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
+
+    // The name has to be VISIBLE, not only in the accessible label: the guide
+    // launcher names itself on every page, so a user comparing the two can only
+    // tell which one does work if this one says so too (FR-27/FR-81–FR-83).
+    await expect(card.locator('.home-command-kicker')).toContainText('WORKSPACE MANAGER');
+    await expect(page.locator('.ori-guide__launcher-name')).toHaveText('Ask Ori');
+  });
+
+  // Fifth occurrence of this bug class in this feature, so it is asserted on
+  // Home too: the rail footer is the last row of the right-hand column, which
+  // is exactly where the fixed launcher floats (measured failing at 1280x800).
+  test('the Ori launcher never covers the rail footer actions', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoPage(page, '/');
+    await expect(page.locator('.cockpit-rail-footer')).toBeVisible();
+
+    const covered = await page.evaluate(() => {
+      const launcher = document.querySelector('.ori-guide__launcher')!.getBoundingClientRect();
+      return Array.from(document.querySelectorAll('.cockpit-rail-footer button'))
+        .filter(el => {
+          const r = el.getBoundingClientRect();
+          return !(
+            r.right < launcher.left ||
+            r.left > launcher.right ||
+            r.bottom < launcher.top ||
+            r.top > launcher.bottom
+          );
+        })
+        .map(el => (el.textContent || '').trim());
+    });
+
+    expect(covered, `covered by the launcher: ${covered.join(', ')}`).toEqual([]);
   });
 
   test('Cmd/Ctrl+J still focuses the work surface, not the guide', async ({ page }) => {

@@ -9,9 +9,14 @@
   -->
   <section id="homeAssistantCard" class="modern-card home-command-strip" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Workspace Manager">
     <div class="home-command-strip-main">
+      <!-- The strip names itself. It used to say "COMMAND", which is a mode, not
+           a who — leaving Workspace Manager identified only by the placeholder
+           and the visually-hidden label while Ori's guide launcher names itself
+           on every page. A user comparing the two surfaces has to be able to see
+           which one does work (FR-27/FR-81–FR-83). -->
       <div class="home-command-kicker">
         <span class="home-command-kicker-led" aria-hidden="true"></span>
-        {{if .Extra.IsFirstRun}}FIRST COMMAND{{else}}COMMAND{{end}}
+        WORKSPACE MANAGER{{if .Extra.IsFirstRun}} · FIRST COMMAND{{end}}
         <span class="home-command-shortcut" aria-hidden="true">⌘J</span>
       </div>
       <form id="homeAssistantForm" class="home-assistant-form home-command-form">
