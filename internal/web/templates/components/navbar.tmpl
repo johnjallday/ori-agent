@@ -159,3 +159,11 @@
 </nav>
 
 {{template "vault-modal.tmpl" .}}
+
+<!--
+  Ori Guide mounts here rather than in base.tmpl because the navbar is the one
+  component every authenticated page includes — standalone pages such as
+  /agents build their own shell and never render base.tmpl. Mounting here gives
+  exactly one guide instance per page, wherever the user is (PRD FR-20).
+-->
+{{template "ori-guide.tmpl" .}}

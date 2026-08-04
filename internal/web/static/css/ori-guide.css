@@ -10,6 +10,24 @@
  * stays visible; narrow layouts get a bottom sheet (FR-79).
  */
 
+/*
+ * How much bottom-right space the launcher occupies.
+ *
+ * The launcher is fixed and global, so any page-level bar anchored to the bottom
+ * of the viewport will otherwise have its right-hand controls sitting underneath
+ * it — visible, but unclickable. Surfaces with such a bar reserve this much
+ * room rather than each one guessing a magic number.
+ */
+:root {
+  --ori-launcher-clearance: 176px;
+}
+
+@media (max-width: 560px) {
+  :root {
+    --ori-launcher-clearance: 150px;
+  }
+}
+
 .ori-guide {
   --ori-paper: #f6ead6;
   --ori-paper-deep: #e8d6b4;

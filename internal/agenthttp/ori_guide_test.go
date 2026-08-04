@@ -153,12 +153,43 @@ func TestHandoffNeverClaimsTheWorkWasDone(t *testing.T) {
 // structural counterpart to the behavioural probes above (FR-39).
 func TestGuideHandlerHoldsNoMutatingDependency(t *testing.T) {
 	typ := reflect.TypeOf(GuideHandler{})
-	allowed := map[string]bool{"workspaceStore": true}
+	// workspaceStore is read-only name resolution; phraser is text-in/text-out
+	// (see the shape test below). Neither can act. Anything else added here
+	// needs the same justification before this list grows.
+	allowed := map[string]bool{"workspaceStore": true, "phraser": true}
 	for i := range typ.NumField() {
 		if !allowed[typ.Field(i).Name] {
 			t.Errorf("GuideHandler gained dependency %q — it must not be able to reach an "+
 				"agent store, LLM factory, task executor, or vault", typ.Field(i).Name)
 		}
+	}
+}
+
+// The phrasing seam is allowed to exist only because it cannot do anything but
+// return text. If it ever grows a second method, a tool argument, or a
+// non-string return, that reasoning stops holding (FR-46).
+func TestGuidePhraserCanOnlyReturnText(t *testing.T) {
+	typ := reflect.TypeOf((*GuidePhraser)(nil)).Elem()
+	if typ.NumMethod() != 1 {
+		t.Fatalf("GuidePhraser should expose exactly one method, has %d", typ.NumMethod())
+	}
+
+	m := typ.Method(0)
+	if m.Name != "Phrase" {
+		t.Fatalf("unexpected method %q", m.Name)
+	}
+	// (ctx, question, approved) -> (string, error)
+	if got := m.Type.NumIn(); got != 3 {
+		t.Fatalf("Phrase should take 3 arguments, takes %d", got)
+	}
+	for i := 1; i < m.Type.NumIn(); i++ {
+		if m.Type.In(i).Kind() != reflect.String {
+			t.Errorf("Phrase argument %d is %s; only strings may be handed to the phraser",
+				i, m.Type.In(i).Kind())
+		}
+	}
+	if m.Type.NumOut() != 2 || m.Type.Out(0).Kind() != reflect.String {
+		t.Fatal("Phrase must return (string, error) — anything else could carry an instruction")
 	}
 }
 

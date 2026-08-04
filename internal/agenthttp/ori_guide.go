@@ -102,6 +102,10 @@ type GuideHandler struct {
 	// mentioned to a real id so "open my Launch workspace" can be offered. It is
 	// never used to mutate.
 	workspaceStore workspace.Store
+	// phraser optionally restates an already-approved answer more naturally. It
+	// is text-in/text-out and runs after every decision has been made, so it can
+	// change how an answer reads but never what it says to do (FR-46).
+	phraser GuidePhraser
 }
 
 // NewGuideHandler builds the guide. It takes no agent store, no LLM factory, no
@@ -142,7 +146,16 @@ func (h *GuideHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	route := sanitizeGuideRoute(req.Route)
 
-	orihttp.WriteJSON(w, h.answer(question, route))
+	resp := h.answer(question, route)
+
+	// Phrasing runs last, on the finished response, and can only replace answer
+	// prose. Topic, actions, location, and suggestions are already decided and
+	// are not passed to the model (FR-46).
+	if resp.Status == "answered" {
+		resp.Answer = h.phraseAnswer(r.Context(), question, resp.Answer)
+	}
+
+	orihttp.WriteJSON(w, resp)
 }
 
 // sanitizeGuideRoute keeps the route a bounded, internal path. Anything that

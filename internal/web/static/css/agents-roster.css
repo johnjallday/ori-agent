@@ -1143,7 +1143,12 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 10px 12px;
+  /* The global Ori launcher is fixed to the bottom-right of the viewport. When
+     this bar reaches that far — which depends on viewport width and whether the
+     Inspector is open — its right-hand actions would sit underneath the
+     launcher and stop being clickable. Reserve the launcher's own declared
+     footprint instead of guessing. */
+  padding: 10px var(--ori-launcher-clearance, 12px) 10px 12px;
   border: 1px solid
     color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
   border-radius: 12px;

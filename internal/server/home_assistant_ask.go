@@ -352,6 +352,13 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	}
 	handler := agenthttp.NewHomeAssistantAskHandler(sources, llmFactory, systemModel)
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
+
+	// Ori Guide reuses the same system model, but only to reword an answer it
+	// has already decided. Wired here because this is where the system-model
+	// reader is resolved; the guide keeps working unchanged when it is absent.
+	if s.Handlers != nil && s.Handlers.OriGuide != nil && llmFactory != nil && systemModel != nil {
+		s.Handlers.OriGuide.SetPhraser(agenthttp.NewLLMGuidePhraser(llmFactory, systemModel))
+	}
 	if s.Storage != nil {
 		mutator := homeActionMutator{
 			workspaces: s.Storage.WorkspaceStore,

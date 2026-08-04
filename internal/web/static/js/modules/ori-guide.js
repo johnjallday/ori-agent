@@ -34,6 +34,8 @@
   var state = {
     open: false,
     pending: false,
+    // Monotonic request counter; only the newest reply is rendered.
+    seq: 0,
     lastTrigger: null,
     coachmarkEl: null,
     actions: [],
@@ -194,24 +196,38 @@
     els.reply.dataset.topic = String(resp.topic_key || '');
   }
 
-  function setPending(pending) {
+  // `silent` marks the request the panel fires for itself when it opens.
+  //
+  // That request must not disable the send control: a browser will not submit a
+  // form whose submit button is disabled, so a user who opens the guide and
+  // immediately types a question and presses Enter would have it silently
+  // swallowed. Only a request the user actually made shows a busy control.
+  function setPending(pending, silent) {
     state.pending = pending;
     var els = state.els;
     if (!els) return;
-    els.send.disabled = pending;
+    if (!silent) {
+      els.send.disabled = pending;
+    }
     els.panel.dataset.state = pending ? 'pending' : 'ready';
-    if (pending) {
+    if (pending && !silent) {
       els.reply.innerHTML = '<p class="ori-guide__answer is-pending">Looking…</p>';
     }
   }
 
   /* ---- requests ----------------------------------------------------------------- */
 
-  function ask(question) {
-    // Duplicate submits would double-render and could fight over focus; the
-    // send control is disabled for the same reason.
-    if (state.pending) return Promise.resolve();
-    setPending(true);
+  // A newer question always supersedes an older one.
+  //
+  // Dropping a request while another is in flight looked like duplicate-submit
+  // protection, but it silently discarded the user's actual question whenever
+  // they typed faster than the panel's own opening request returned. Sequencing
+  // instead means the latest question always wins and stale replies are
+  // ignored, which is the property that actually matters.
+  function ask(question, options) {
+    var silent = !!(options && options.silent);
+    var seq = ++state.seq;
+    setPending(true, silent);
 
     return fetch(ENDPOINT, {
       method: 'POST',
@@ -223,11 +239,13 @@
         return r.json();
       })
       .then(function (resp) {
-        setPending(false);
+        if (seq !== state.seq) return; // superseded
+        setPending(false, silent);
         render(resp);
       })
       .catch(function () {
-        setPending(false);
+        if (seq !== state.seq) return; // superseded
+        setPending(false, silent);
         // The guide failing must never block the page underneath it (FR-50).
         if (state.els) {
           state.els.reply.dataset.status = 'unavailable';
@@ -313,7 +331,8 @@
     els.panel.hidden = false;
     els.launcher.setAttribute('aria-expanded', 'true');
     els.input.value = '';
-    ask('');
+    // Silent: this is the panel greeting itself, not a question the user asked.
+    ask('', { silent: true });
     // Focus the input rather than the close button: the user opened this to ask
     // something.
     if (typeof els.input.focus === 'function') els.input.focus();

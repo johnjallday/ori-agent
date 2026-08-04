@@ -365,20 +365,86 @@ test('a failed guide request leaves the page usable and says so', async () => {
   );
 });
 
-test('a duplicate submit while a request is in flight is ignored', async () => {
+// A browser will not submit a form whose submit button is disabled. If the
+// panel's own opening request disabled it, a user who opens the guide and
+// immediately types a question and presses Enter has it silently swallowed.
+test('opening the guide never disables the send control', () => {
   const els = guideEls();
   const ctx = load({ elements: els });
-  let calls = 0;
-  ctx.sandbox.fetch = () => {
-    calls++;
-    return new ctx.sandbox.Promise(resolve =>
-      resolve({ ok: true, json: () => Promise.resolve({ status: 'answered', answer: 'ok' }) })
-    );
-  };
+  // A request that never resolves, so the pending state is observable.
+  ctx.sandbox.fetch = () => new ctx.sandbox.Promise(() => {});
 
-  const first = ctx.guide.ask('a');
-  ctx.guide.ask('b'); // must be dropped while the first is pending
+  ctx.guide.open(els.oriGuideLauncher);
+
+  assert.equal(
+    els.oriGuideSend.disabled,
+    false,
+    'the opening request must leave the send control usable'
+  );
+});
+
+test('a question the user asked does show a busy control', () => {
+  const els = guideEls();
+  const ctx = load({ elements: els });
+  ctx.sandbox.fetch = () => new ctx.sandbox.Promise(() => {});
+
+  ctx.guide.ask('what is a workspace');
+  assert.equal(els.oriGuideSend.disabled, true);
+});
+
+// The newest question wins. Opening the panel fires its own request, so a user
+// who types faster than that request returns must not have their actual
+// question silently dropped — which is exactly what an in-flight guard did.
+test('a newer question supersedes one still in flight', async () => {
+  const els = guideEls();
+  const ctx = load({ elements: els });
+
+  const resolvers = [];
+  ctx.sandbox.fetch = () =>
+    new ctx.sandbox.Promise(resolve => {
+      resolvers.push(resolve);
+    });
+
+  const first = ctx.guide.ask('stale question');
+  const second = ctx.guide.ask('real question');
+
+  // Resolve them out of order: the stale reply lands last and must be ignored.
+  resolvers[1]({
+    ok: true,
+    json: () => Promise.resolve({ status: 'answered', answer: 'REAL ANSWER' })
+  });
+  await second;
+  resolvers[0]({
+    ok: true,
+    json: () => Promise.resolve({ status: 'answered', answer: 'STALE ANSWER' })
+  });
   await first;
 
-  assert.equal(calls, 1);
+  assert.match(els.oriGuideReply.innerHTML, /REAL ANSWER/);
+  assert.doesNotMatch(els.oriGuideReply.innerHTML, /STALE ANSWER/);
+});
+
+test('a superseded failure does not overwrite a newer answer', async () => {
+  const els = guideEls();
+  const ctx = load({ elements: els });
+
+  const controls = [];
+  ctx.sandbox.fetch = () =>
+    new ctx.sandbox.Promise((resolve, reject) => {
+      controls.push({ resolve, reject });
+    });
+
+  const first = ctx.guide.ask('doomed');
+  const second = ctx.guide.ask('good');
+
+  controls[1].resolve({
+    ok: true,
+    json: () => Promise.resolve({ status: 'answered', answer: 'GOOD ANSWER' })
+  });
+  await second;
+  controls[0].reject(new Error('offline'));
+  await first;
+
+  assert.match(els.oriGuideReply.innerHTML, /GOOD ANSWER/);
+  assert.notEqual(els.oriGuideReply.dataset.status, 'unavailable');
 });
