@@ -68,6 +68,12 @@
   <link href="/css/tag-input.css" rel="stylesheet">
   <link href="/css/keyboard-navigation.css" rel="stylesheet">
   <link href="/css/claude-sync.css" rel="stylesheet">
+  <!--
+    Shared cozy tokens. Loaded before every sheet that consumes them, and before
+    the theme sheets so a page can still override. It only defines custom
+    properties, so pages outside the V1 surface list are unaffected (FR-2).
+  -->
+  <link href="/css/cozy-character.css" rel="stylesheet">
   <link href="/css/ori-guide.css" rel="stylesheet">
   <!--
     Ori Guide scripts load from the shared head so every page that renders the
