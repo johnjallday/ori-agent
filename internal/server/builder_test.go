@@ -263,7 +263,9 @@ func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *test
 		t.Fatalf("initializeStorage failed: %v", err)
 	}
 
-	ag, ok := builder.st.GetAgent("Ori")
+	// "Ori" now names the app guide; the working system assistant is Workspace
+	// Manager (see internal/agenthttp/system_assistant.go).
+	ag, ok := builder.st.GetAgent("Workspace Manager")
 	if !ok || ag == nil {
 		t.Fatalf("expected system assistant agent to be created")
 	}
@@ -274,7 +276,7 @@ func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *test
 		t.Fatalf("expected system assistant model sonnet, got %q", ag.Settings.Model)
 	}
 
-	if _, err := os.Stat(filepath.Join(tempDir, "agents", "Ori", "agent_settings.json")); err != nil {
-		t.Fatalf("expected persisted Ori agent settings: %v", err)
+	if _, err := os.Stat(filepath.Join(tempDir, "agents", "Workspace Manager", "agent_settings.json")); err != nil {
+		t.Fatalf("expected persisted system assistant settings: %v", err)
 	}
 }

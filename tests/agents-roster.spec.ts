@@ -436,10 +436,15 @@ test.describe('Agents roster', () => {
         })
       );
 
-      // No-eligible delete: select only Ori (protected) → Delete button disabled.
+      // No-eligible delete: select only an undeletable built-in → Delete button
+      // disabled. Uses the Claude Code CLI agent, which is always present.
+      // (This previously used the system assistant, which only exists once a
+      // system model is configured — so the case silently depended on server
+      // configuration. CLI agents are undeletable for the same user-visible
+      // reason, and exercise the same "nothing selected can be deleted" path.)
       await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
-      await page.locator('#rosterSearch').fill('Ori');
-      const ori = page.locator('.roster-card[data-name="Ori"]');
+      await page.locator('#rosterSearch').fill('Claude Code');
+      const ori = page.locator('.roster-card[data-name="Claude Code"]');
       await expect(ori).toHaveCount(1);
       await ori.locator('.roster-card__check').check();
       await page.locator('#bulkDelete').click();

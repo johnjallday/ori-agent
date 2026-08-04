@@ -121,6 +121,7 @@
       avatar: document.getElementById('stageAvatar'),
       name: document.getElementById('stageName'),
       klass: document.getElementById('stageClass'),
+      character: document.getElementById('stageCharacter'),
       favorite: document.getElementById('stageFavorite'),
       purpose: document.getElementById('stagePurpose'),
       vitals: document.getElementById('stageVitals'),
@@ -184,6 +185,21 @@
     // — it just stops re-running on every subsequent loadAgents() (e.g. the
     // Retry button), which was clobbering in-progress edits on each retry.
     applyUrlToState();
+
+    // Character art is an enhancement layered onto an already-rendered
+    // collection, never a precondition for it: the fetch is fired without being
+    // awaited, and portraits swap in when it lands. A catalog that fails or
+    // never arrives simply leaves every agent on its deterministic identity
+    // (FR-14/FR-101/FR-124).
+    // The cached view models hold only the catalog *id*, and avatarInput()
+    // looks the entry up fresh, so repainting needs no cache invalidation.
+    if (window.CharacterCatalog) {
+      window.CharacterCatalog.onChange(function () {
+        if (state.agents.length) renderRoster();
+        if (state.selected) renderStage(state.selected);
+      });
+      window.CharacterCatalog.load();
+    }
 
     els.search.addEventListener('input', onSearch);
     els.sort.addEventListener('change', onSort);
@@ -481,7 +497,14 @@
       tags: tags,
       favorite: !!md.favorite,
       avatarImage: String(md.avatar_image || '').trim(),
-      avatarColor: String(md.avatar_color || '').trim()
+      avatarColor: String(md.avatar_color || '').trim(),
+      // Identity is an explicit stored choice; an empty mode means the agent
+      // predates the character system and keeps the historical upload-first
+      // rule (FR-67/FR-69). The catalog id is read regardless of the active
+      // mode, so the Inspector can show what switching back would restore.
+      displayMode: String((md.character && md.character.display_mode) || '').trim(),
+      characterId: String((md.character && md.character.catalog_id) || '').trim(),
+      characterVoice: !!(md.character && md.character.voice_enabled)
     };
 
     vm.workspaceLabel = workspaceSummaryLabel(vm.workspaceCount);
@@ -1027,6 +1050,27 @@
     return li;
   }
 
+  // The card's character line, rendered below the role so the agent's real name
+  // and role always read first (FR-55). Omitted entirely when the agent has no
+  // curated character, so the deterministic-identity case gains no clutter.
+  //
+  // This is identity, not capability: it never states status, tools, or
+  // permissions, and it sits outside the portrait rather than on it (FR-96/FR-97).
+  function cardCharacterHTML(vm) {
+    if (!vm.characterId || !window.CharacterCatalog) return '';
+    var entry = window.CharacterCatalog.get(vm.characterId);
+    if (!entry) return '';
+    // Only label the character when it is the identity actually being shown;
+    // a retained-but-inactive choice would otherwise contradict the portrait.
+    if (vm.displayMode && vm.displayMode !== window.AgentAvatar.MODES.CHARACTER) return '';
+    return (
+      '<span class="agent-card__character">Character: ' +
+      esc(entry.name) +
+      (entry.archetype ? ' · ' + esc(entry.archetype) : '') +
+      '</span>'
+    );
+  }
+
   // Concise spoken summary for the open control (PRD FR84). The card's own text
   // carries the same facts visually; this keeps them in one short sentence
   // instead of making a screen reader walk every decorative span.
@@ -1069,6 +1113,7 @@
       classBits.join(' · ') +
       badge +
       '</span>' +
+      cardCharacterHTML(vm) +
       '</span>' +
       '</span>'
     );
@@ -1330,6 +1375,7 @@
     // Purpose and favorite repeat here so they stay visible on every tab, not
     // only while Overview happens to be open (PRD FR54). Sourced from the same
     // view model the card already renders, so the two can never disagree.
+    renderCharacterLabel(listItem);
     var heroVm = viewFor(listItem);
     els.favorite.hidden = !heroVm.favorite;
     els.purpose.textContent = heroVm.hasDescription ? heroVm.description : 'No description yet.';
@@ -3693,21 +3739,68 @@
   // renderer, so one input record always yields one identity treatment across
   // Gallery cards, List rows, and the Inspector hero (PRD FR66/FR69).
   function avatarMarkup(agent, className, id, size) {
+    return window.AgentAvatar.markup(avatarInput(agent), {
+      className: className,
+      id: id,
+      size: size || AVATAR_SIZE.card
+    });
+  }
+
+  // avatarInput is the one place an agent becomes identity-renderer input, so
+  // the card, the row, and the Inspector hero cannot drift apart (FR-99).
+  //
+  // The catalog lookup is synchronous and returns null until the catalog
+  // arrives, which the resolver treats as a missing character and falls back —
+  // that is what keeps names and status rendering immediately rather than
+  // waiting on portrait data (FR-101).
+  function avatarInput(agent) {
     var vm = viewFor(agent);
     var entry = vm.roleEntry;
-    return window.AgentAvatar.markup(
-      {
-        name: vm.name,
-        source: vm.source,
-        role: vm.role,
-        builtIn: vm.builtIn,
-        roleAccent: entry ? entry.accent_color : '',
-        roleEmblem: entry ? entry.emblem : '',
-        avatarImage: vm.avatarImage,
-        avatarColor: vm.avatarColor
-      },
-      { className: className, id: id, size: size || AVATAR_SIZE.card }
-    );
+    return {
+      name: vm.name,
+      source: vm.source,
+      role: vm.role,
+      builtIn: vm.builtIn,
+      roleAccent: entry ? entry.accent_color : '',
+      roleEmblem: entry ? entry.emblem : '',
+      avatarImage: vm.avatarImage,
+      avatarColor: vm.avatarColor,
+      displayMode: vm.displayMode,
+      character: vm.characterId && window.CharacterCatalog
+        ? window.CharacterCatalog.get(vm.characterId)
+        : null
+    };
+  }
+
+  // identityFor reports what an agent actually renders and why, so the
+  // Inspector can describe the current mode honestly and offer a re-selection
+  // when a chosen character has gone missing (FR-74/FR-91/FR-124).
+  function identityFor(agent) {
+    return window.AgentAvatar.resolve(avatarInput(agent));
+  }
+
+  // The hero's character line. The agent's own name stays primary above it;
+  // this is recognition support, never the identity itself (FR-55).
+  //
+  // A chosen-but-unavailable character says so rather than going quiet, so a
+  // withdrawn entry reads as a recoverable state instead of the agent having
+  // silently lost its identity (FR-74/FR-124).
+  function renderCharacterLabel(listItem) {
+    var host = els.character;
+    if (!host) return;
+
+    var res = identityFor(listItem);
+    var text = '';
+
+    if (res.mode === window.AgentAvatar.MODES.CHARACTER && res.character) {
+      text = 'Character: ' + res.character.name;
+      if (res.character.archetype) text += ' · ' + res.character.archetype;
+    } else if (res.reason === 'character-asset-missing' || res.reason === 'character-missing') {
+      text = 'Character art unavailable — showing the generated identity';
+    }
+
+    host.textContent = text;
+    host.hidden = text === '';
   }
 
   // Seed the Avatar color picker with the identity the agent already shows, so
@@ -3724,8 +3817,12 @@
   }
 
   // "Permanent residency" agents: the built-in CLI agents (Claude Code, Codex,
-  // Gemini CLI) and the Ori system assistant. They're always available and the
-  // server won't delete them.
+  // Gemini CLI) and the Workspace Manager system assistant. They're always
+  // available and the server won't delete them.
+  //
+  // The legacy names are still matched so an install that has not yet run the
+  // startup rename migration still marks the agent as permanent rather than
+  // offering a delete the server will refuse.
   function isPermanent(agent) {
     if (!agent) return false;
     var source = String(agent.source || '').toLowerCase();
@@ -3734,7 +3831,7 @@
     var name = String(agent.name || '')
       .trim()
       .toLowerCase();
-    return name === 'ori' || name === '__assistant__';
+    return name === 'workspace manager' || name === 'ori' || name === '__assistant__';
   }
 
   function healthKind(agent) {

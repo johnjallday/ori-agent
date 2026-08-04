@@ -622,6 +622,21 @@
   text-transform: uppercase;
 }
 
+/* Character identity sits below the role and reads quieter than it: the agent's
+   own name and role stay primary (PRD FR-55). Not uppercased, so it is visually
+   distinct from the operational role line above it. */
+.agent-card__character {
+  display: block;
+  min-width: 0;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted, #6b7280);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-card__badge {
   padding: 1px 6px;
   border: 1px solid var(--card-line);
@@ -1059,11 +1074,24 @@
   background: var(--card-soft);
 }
 
+/* A curated portrait carries its own framing and accent, so it gets a tinted
+   surround rather than the neutral one an uploaded photo needs. */
+.agent-avatar--character {
+  border: 1px solid var(--aa-accent, var(--card-line));
+  background: var(--card-soft);
+}
+
 .agent-avatar__img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* Character art is authored to fill its own frame; `contain` keeps the whole
+   silhouette visible instead of cropping the edges the way `cover` would. */
+.agent-avatar__portrait {
+  object-fit: contain;
 }
 
 /* ---- Empty state / link buttons ------------------------------------------- */
@@ -1633,6 +1661,7 @@ body.inspector-sheet-open {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
   grid-template-areas:
+    "actions actions"
     "avatar ident"
     "vitals vitals"
     "purpose purpose";
@@ -1646,12 +1675,17 @@ body.inspector-sheet-open {
   );
 }
 
+/* The actions take a row of their own rather than overlaying the hero's
+   top-right. The Inspector is a ~415px side panel at every viewport width, so
+   there was never room for a readable agent name and these buttons on one
+   line — the old absolute positioning only avoided a collision because the
+   identity block happened to be short enough to centre below it, which the
+   character line no longer guarantees. */
 .stage__actions {
-  position: absolute;
-  top: 16px;
-  right: 20px;
+  grid-area: actions;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1730,6 +1764,16 @@ body.inspector-sheet-open {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--card-muted);
+}
+
+/* Character identity, secondary to the agent's real name and role above it
+   (PRD FR-55). Lowercase and lighter than .stage__class so the two lines are
+   distinguishable without relying on colour alone (FR-118). */
+.stage__character {
+  margin-top: 4px;
+  color: var(--card-muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* Repeats the card's purpose so it stays visible on every Inspector tab, not
@@ -2339,10 +2383,6 @@ body.inspector-sheet-open {
   .stage__hero {
     grid-template-columns: 72px minmax(0, 1fr);
     padding: 18px 18px 16px;
-  }
-  .stage__actions {
-    top: 12px;
-    right: 14px;
   }
   .stage__panels {
     padding: 16px;

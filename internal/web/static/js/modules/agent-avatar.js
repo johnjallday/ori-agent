@@ -1,11 +1,26 @@
 /*
- * Avatar Identity v1 — the single frontend renderer for an agent's visual
- * identity (PRD FR66–FR78).
+ * Avatar Identity — the single frontend renderer for an agent's visual
+ * identity (PRD FR66–FR78, extended by cozy-character-experience FR-66/FR-67).
  *
- * Priority is always: a valid uploaded `metadata.avatar_image`, then a
- * deterministic fallback derived synchronously from data the dashboard list
- * response already carries (FR67/FR68). No network request, no generation step,
- * no new persisted seed, no per-agent image file (FR98).
+ * Priority is the agent's *explicit* display mode, then that mode's valid
+ * asset, then the deterministic fallback. The mode is a stored choice, never
+ * inferred from whichever field happens to be non-empty — that is what makes
+ * trying a curated character reversible instead of destructive (FR-67).
+ *
+ *   character -> catalog portrait -> deterministic fallback
+ *   uploaded  -> uploaded image   -> deterministic fallback
+ *   fallback  -> deterministic fallback
+ *
+ * Records with no stored mode are legacy and keep the historical rule (uploaded
+ * image if present, else fallback), so existing agents look exactly as they did
+ * (FR-69).
+ *
+ * The deterministic fallback is derived synchronously from data the dashboard
+ * list response already carries. No network request, no generation step, no new
+ * persisted seed, no per-agent image file (FR98). Curated character data is
+ * *passed in* by the caller rather than fetched here, so this module stays
+ * synchronous and a slow catalog can never delay rendering a name or status
+ * (FR-101).
  *
  * The fallback signature is a stable FNV-1a hash over the canonical agent name
  * plus its source, sliced into four independent dimensions — palette, motif,
@@ -213,7 +228,9 @@
     var name = String(input.name || '')
       .trim()
       .toLowerCase();
-    return name === 'ori' || name === '__assistant__';
+    // Legacy names stay recognized so an install that has not yet run the
+    // startup rename migration still renders the system treatment.
+    return name === 'workspace manager' || name === 'ori' || name === '__assistant__';
   }
 
   // signature is the deterministic description of one agent's fallback identity.
@@ -405,12 +422,135 @@
     );
   }
 
-  // markup is the one entry point every surface uses (FR66). An uploaded image
-  // always wins; everything else resolves to the deterministic identity (FR67).
-  function markup(input, options) {
+  /* ---- identity resolution -------------------------------------------------- */
+
+  var MODE_FALLBACK = 'fallback';
+  var MODE_UPLOADED = 'uploaded';
+  var MODE_CHARACTER = 'character';
+
+  function isValidMode(mode) {
+    return mode === MODE_FALLBACK || mode === MODE_UPLOADED || mode === MODE_CHARACTER;
+  }
+
+  // A catalog entry is only usable if it actually carries the asset we need.
+  // A withdrawn or half-populated entry resolves to the fallback rather than
+  // rendering a broken portrait (FR-74).
+  function characterPortrait(character) {
+    var assets = (character && character.assets) || {};
+    var portrait = String(assets.portrait || '').trim();
+    return portrait;
+  }
+
+  // resolve reports what will actually render and why.
+  //
+  // `requested` is what the agent asked for and `mode` is what it gets; when
+  // they differ, `reason` names the gap. Surfaces use that to explain the
+  // current state honestly and to offer a re-selection when a character has
+  // gone missing, instead of silently showing initials (FR-74/FR-124).
+  function resolve(input) {
+    var stored = String((input && input.displayMode) || '').trim();
     var image = String((input && input.avatarImage) || '').trim();
-    if (image) return imageHTML(Object.assign({}, input, { avatarImage: image }), options);
+    var character = (input && input.character) || null;
+
+    var requested;
+    if (isValidMode(stored)) {
+      requested = stored;
+    } else {
+      // Legacy record, or an unrecognized stored mode: fall back to the
+      // historical field-presence rule.
+      requested = image ? MODE_UPLOADED : MODE_FALLBACK;
+    }
+
+    var result = {
+      requested: requested,
+      mode: MODE_FALLBACK,
+      reason: isValidMode(stored) ? 'ok' : 'legacy',
+      character: null,
+      portrait: '',
+      avatarImage: ''
+    };
+
+    if (requested === MODE_CHARACTER) {
+      var portrait = characterPortrait(character);
+      if (portrait) {
+        result.mode = MODE_CHARACTER;
+        result.character = character;
+        result.portrait = portrait;
+      } else {
+        // The agent still *has* a character choice; the catalog just cannot
+        // supply it right now. Naming that separately from "never chose one"
+        // is what lets the Inspector offer a reselect action.
+        result.reason = character ? 'character-asset-missing' : 'character-missing';
+      }
+      return result;
+    }
+
+    if (requested === MODE_UPLOADED) {
+      if (image) {
+        result.mode = MODE_UPLOADED;
+        result.avatarImage = image;
+      } else {
+        result.reason = 'upload-missing';
+      }
+      return result;
+    }
+
+    return result;
+  }
+
+  // markup is the one entry point every surface uses (FR66), so Home, the
+  // Gallery, and the Inspector cannot disagree about what an agent looks like
+  // (FR-99).
+  function markup(input, options) {
+    var res = resolve(input);
+    if (res.mode === MODE_CHARACTER) {
+      return characterHTML(input, res, options);
+    }
+    if (res.mode === MODE_UPLOADED) {
+      return imageHTML(Object.assign({}, input, { avatarImage: res.avatarImage }), options);
+    }
     return fallbackHTML(input, options);
+  }
+
+  // characterHTML renders a curated portrait. The <img> keeps the same reserved
+  // box and lazy/async decoding as an uploaded avatar, so a slow or failed
+  // portrait cannot shift the layout or block the controls beside it
+  // (FR-101/FR-120–FR-123). A failure is caught by the same delegated listener
+  // that handles uploads and swaps in this agent's own fallback.
+  function characterHTML(input, res, options) {
+    var opts = options || {};
+    var size = Number(opts.size) > 0 ? Number(opts.size) : SIZES.md;
+    var cls =
+      'agent-avatar agent-avatar--character ' +
+      sizeClass(opts.size) +
+      (opts.className ? ' ' + opts.className : '');
+
+    var character = res.character || {};
+    var palette = character.palette || {};
+    var accent = normalizeHex(palette.accent) || normalizeHex(palette.base);
+    var style = accent ? ' style="--aa-accent:' + esc(accent) + '"' : '';
+
+    return (
+      '<span class="' +
+      esc(cls) +
+      '"' +
+      (opts.id ? ' id="' + esc(opts.id) + '"' : '') +
+      style +
+      ' data-aa-character="' +
+      esc(character.id || '') +
+      '"' +
+      seedAttrs(input) +
+      ' aria-hidden="true">' +
+      '<img class="agent-avatar__img agent-avatar__portrait" src="' +
+      esc(res.portrait) +
+      '" alt=""' +
+      ' width="' +
+      size +
+      '" height="' +
+      size +
+      '" loading="lazy" decoding="async">' +
+      '</span>'
+    );
   }
 
   // replaceWithFallback converts an already-rendered image avatar into this
@@ -421,8 +561,13 @@
     var sig = signature(inputFromElement(host));
     host.dataset.aaFallback = '1';
     // The size class is left untouched, so the replacement occupies exactly the
-    // box the image reserved and the collection does not reflow.
-    host.className = host.className.replace('agent-avatar--image', 'agent-avatar--fallback');
+    // box the image reserved and the collection does not reflow. Both the
+    // uploaded-image and curated-character variants degrade to the same
+    // deterministic identity (FR-14/FR-74).
+    host.className = host.className
+      .replace('agent-avatar--image', 'agent-avatar--fallback')
+      .replace('agent-avatar--character', 'agent-avatar--fallback');
+    if (typeof host.removeAttribute === 'function') host.removeAttribute('data-aa-character');
     host.setAttribute('style', styleFor(sig));
     host.setAttribute('data-aa-motif', sig.motif);
     host.setAttribute('data-aa-turn', String(sig.turn));
@@ -449,9 +594,16 @@
 
   var api = {
     markup: markup,
+    resolve: resolve,
     fallbackHTML: fallbackHTML,
     imageHTML: imageHTML,
+    characterHTML: characterHTML,
     signature: signature,
+    MODES: {
+      FALLBACK: MODE_FALLBACK,
+      UPLOADED: MODE_UPLOADED,
+      CHARACTER: MODE_CHARACTER
+    },
     initialsFor: initialsFor,
     replaceWithFallback: replaceWithFallback,
     installImageFallback: installImageFallback,

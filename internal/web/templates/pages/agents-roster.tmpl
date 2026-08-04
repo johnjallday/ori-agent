@@ -181,6 +181,10 @@
                     <h2 class="stage__name" id="stageName"></h2>
                     <span class="stage__favorite" id="stageFavorite" title="Favorite" aria-hidden="true" hidden>★</span>
                     <div class="stage__class" id="stageClass"></div>
+                    <!-- Character identity is secondary to the agent's real
+                         name and role, and sits outside the artwork so it can
+                         never be mistaken for a capability (FR-55/FR-96). -->
+                    <div class="stage__character" id="stageCharacter" hidden></div>
                   </div>
                   <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
                     <!-- vitals chips injected -->
@@ -300,6 +304,7 @@
   <!-- Shared deterministic avatar renderer (exposes window.AgentAvatar). Must load
        before the roster controller so first paint already uses one identity. -->
   <script defer src="/js/modules/agent-avatar.js"></script>
+  <script defer src="/js/modules/character-catalog.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 

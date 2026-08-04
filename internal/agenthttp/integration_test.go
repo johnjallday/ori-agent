@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -85,7 +86,23 @@ func (ts *TestServer) doRequest(t *testing.T, method, path string, body any) *ht
 		}
 	}
 
-	req := httptest.NewRequest(method, path, bytes.NewReader(reqBody))
+	// Agent names may legally contain spaces (validateAgentName allows them, so
+	// "Workspace Manager" and any user agent called "My Agent" are valid), and
+	// these test URLs are hand-assembled with the name interpolated raw. A raw
+	// space is not legal in a request line, so escape both halves here rather
+	// than at every call site.
+	reqTarget := path
+	if base, rawQuery, found := strings.Cut(reqTarget, "?"); found {
+		values, err := url.ParseQuery(rawQuery)
+		if err != nil {
+			t.Fatalf("invalid query in %q: %v", path, err)
+		}
+		reqTarget = (&url.URL{Path: base}).EscapedPath() + "?" + values.Encode()
+	} else {
+		reqTarget = (&url.URL{Path: reqTarget}).EscapedPath()
+	}
+
+	req := httptest.NewRequest(method, reqTarget, bytes.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 
 	rr := httptest.NewRecorder()

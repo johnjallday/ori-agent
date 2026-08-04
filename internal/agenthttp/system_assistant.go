@@ -10,9 +10,19 @@ import (
 )
 
 const (
-	systemAssistantAgentName       = "Ori"
-	systemAssistantAgentLegacyName = "__assistant__"
+	// systemAssistantAgentName is the working agent that routes, plans, and
+	// executes real work from Home.
+	//
+	// It was called "Ori" until the cozy-character-experience feature, which
+	// reserves that name for the app's setup-and-navigation guide. Keeping both
+	// would have put a working agent and a navigation-only guide under one name
+	// — exactly the distinction the guide exists to make (PRD FR-28/FR-81).
+	systemAssistantAgentName = "Workspace Manager"
 )
+
+// systemAssistantLegacyNames are previous names for the same agent, migrated
+// forward on startup in order. Existing installs have one of these on disk.
+var systemAssistantLegacyNames = []string{"Ori", "__assistant__"}
 
 var systemAssistantTags = []string{"system", "orchestrator", "assistant", "utility", "time", "weather", "facts"}
 
@@ -125,22 +135,29 @@ func ensureSystemAssistantAgentWithSystemModel(st store.Store, systemProvider, s
 	return st.SetAgent(systemAssistantAgentName, ag)
 }
 
+// migrateLegacySystemAssistantName moves an existing install's system assistant
+// to the current canonical name, preserving its configuration.
+//
+// If the canonical name is already taken it does nothing — including when the
+// user happens to have their own agent by that name, which must not be
+// overwritten. In that case the legacy record is left alone rather than
+// destroyed, so nothing is lost and the situation stays visible.
 func migrateLegacySystemAssistantName(st store.Store) error {
-	// Nothing to migrate if the current canonical name already exists.
 	if _, exists := st.GetAgent(systemAssistantAgentName); exists {
 		return nil
 	}
 
-	legacyAgent, exists := st.GetAgent(systemAssistantAgentLegacyName)
-	if !exists || legacyAgent == nil {
+	for _, legacy := range systemAssistantLegacyNames {
+		legacyAgent, exists := st.GetAgent(legacy)
+		if !exists || legacyAgent == nil {
+			continue
+		}
+		if err := st.SetAgent(systemAssistantAgentName, legacyAgent); err != nil {
+			return err
+		}
+		// Best-effort cleanup of the legacy record.
+		_ = st.DeleteAgent(legacy)
 		return nil
 	}
-
-	if err := st.SetAgent(systemAssistantAgentName, legacyAgent); err != nil {
-		return err
-	}
-
-	// Best-effort cleanup of the legacy record.
-	_ = st.DeleteAgent(systemAssistantAgentLegacyName)
 	return nil
 }
