@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
+	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -280,6 +281,13 @@ type ServerBuilder struct {
 	// followUpService is the structured follow-up domain service.
 	followUpService *followup.Service
 
+	// characterHandler serves the read-only curated character catalog.
+	characterHandler *characterhttp.Handler
+	// oriGuideHandler serves the setup-and-navigation guide. Built with the
+	// other handlers; its workspace store is attached in the later phase that
+	// creates it.
+	oriGuideHandler *agenthttp.GuideHandler
+
 	// Daily Brief configuration, generation, and scheduling
 	dailyBriefService          *dailybrief.Service
 	dailyBriefHandler          *dailybriefhttp.Handler
@@ -500,6 +508,8 @@ func (b *ServerBuilder) createDomainFacades() {
 		User:                  b.userHandler,
 		PersonalHQ:            b.personalHQHandler,
 		DailyBrief:            b.dailyBriefHandler,
+		Characters:            b.characterHandler,
+		OriGuide:              b.oriGuideHandler,
 		DownloadsJanitor:      b.downloadsJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		SetupWizard:           b.setupWizardHandler,

@@ -115,6 +115,10 @@ func registerStaticAssetRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/js/", s.serveStaticFile)
 	mux.HandleFunc("/icons/", s.serveStaticFile)
 	mux.HandleFunc("/fonts/", s.serveStaticFile)
+	// Character art for the curated identity catalog. Served from the same
+	// embedded tree as the rest of /static, so the catalog's repo-relative asset
+	// paths resolve without a second asset pipeline.
+	mux.HandleFunc("/characters/", s.serveStaticFile)
 	mux.HandleFunc("/chat-area.html", s.serveStaticFile)
 	mux.HandleFunc("/agents/", s.serveAgentFiles)
 
@@ -944,6 +948,25 @@ func registerSkillsRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		mux.HandleFunc("/api/skills", s.Handlers.Skills.List)
 		mux.HandleFunc("/api/skills/", s.Handlers.Skills.Handle)
+	}
+
+	// =============================================================================
+	// Character Catalog (read-only)
+	// =============================================================================
+	// One GET route and nothing else. Character assignment lives on the agent
+	// endpoints, which validate the ID against this same catalog (FR-71).
+	if s.Handlers.Characters != nil {
+		mux.HandleFunc("/api/characters", s.Handlers.Characters.ServeCatalog)
+	}
+
+	// =============================================================================
+	// Ori Guide (setup and navigation only)
+	// =============================================================================
+	// Separate from the Home work surface by construction: this handler's action
+	// type cannot express a mutation and it holds no dependency able to perform
+	// one. Work requests come back as a handoff, never as an execution.
+	if s.Handlers.OriGuide != nil {
+		mux.Handle("/api/ori-guide", s.Handlers.OriGuide)
 	}
 }
 

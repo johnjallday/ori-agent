@@ -68,6 +68,22 @@
   <link href="/css/tag-input.css" rel="stylesheet">
   <link href="/css/keyboard-navigation.css" rel="stylesheet">
   <link href="/css/claude-sync.css" rel="stylesheet">
+  <!--
+    Shared cozy tokens. Loaded before every sheet that consumes them, and before
+    the theme sheets so a page can still override. It only defines custom
+    properties, so pages outside the V1 surface list are unaffected (FR-2).
+  -->
+  <link href="/css/cozy-character.css" rel="stylesheet">
+  <link href="/css/ori-guide.css" rel="stylesheet">
+  <!--
+    Ori Guide scripts load from the shared head so every page that renders the
+    navbar also gets the controller. Coachmarks load first: the controller
+    consults that registry when validating an action, so the allowlist has to be
+    installed before it runs. Both are deferred, so they execute in order just
+    before DOMContentLoaded.
+  -->
+  <script defer src="/js/modules/ori-guide-coachmarks.js"></script>
+  <script defer src="/js/modules/ori-guide.js"></script>
   {{if eq .CurrentPage "templates"}}<link href="/css/templates.css" rel="stylesheet">{{end}}
   {{if eq .CurrentPage "vault"}}<link href="/css/vault-page.css" rel="stylesheet">{{end}}
   <!-- Shared tag input widget (deferred ES module; exposes window.OriTagInput) -->

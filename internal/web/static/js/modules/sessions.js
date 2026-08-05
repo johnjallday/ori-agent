@@ -2332,7 +2332,7 @@ const sessionManager = {
       agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || 'Ori');
+      window.refreshChatWebSearchToggle(agentName || 'Workspace Manager');
     }
 
     if (editAgentBtn) {

@@ -99,7 +99,7 @@ class CommandBar {
       });
 
       const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
-      const assistantAgent = agents.find(agent => agent.name === 'Ori')?.name || '';
+      const assistantAgent = agents.find(agent => agent.name === 'Workspace Manager')?.name || '';
       if (sessionAgent) {
         this.agentSelect.value = sessionAgent;
       } else if (assistantAgent) {

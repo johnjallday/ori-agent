@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Automation Specialist">
+  <!--
+    Automation Specialist idle: the lens aperture clicks, then the key turns once. Decorative
+    only — a fixed loop that never reports whether work is running (FR-72, FR-7).
+  -->
+  <style>
+    .tock-key { transform-origin: 34px 23px; animation: tock-turn 4s steps(4) infinite; }
+    .tock-iris { animation: tock-click 4s steps(1) infinite; }
+    @keyframes tock-turn { 0%,55% { transform: rotate(0deg); } 100% { transform: rotate(90deg); } }
+    @keyframes tock-click { 0%,88%,100% { r: 2.1px; } 92% { r: 1.2px; } }
+    @media (prefers-reduced-motion: reduce) {
+      .tock-key, .tock-iris { animation: none; transform: none; }
+    }
+  </style>
+  <circle cx="24" cy="24" r="24" fill="#f0e2cb"/>
+  <g stroke="#241505" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M17 44 q-2 -20 7 -20 q9 0 7 20 z" fill="#e7d9bd"/>
+    <path d="M19 33 h10" stroke-width="1.8"/>
+    <g class="tock-key">
+      <circle cx="34" cy="23" r="5.4" fill="none" stroke-width="2.6"/>
+      <path d="M29 23 h-5" stroke-width="2.6"/>
+    </g>
+    <circle cx="23" cy="16" r="9" fill="#e7d9bd"/>
+    <path d="M31 14 l9 3 l-9 3 z" fill="#a66d23"/>
+    <path d="M23 7 v-4" stroke-width="2.6"/>
+  </g>
+  <circle cx="23" cy="3" r="2.4" fill="#a66d23" stroke="#241505" stroke-width="2"/>
+  <circle cx="21" cy="15" r="4.3" fill="#f9efdd" stroke="#241505" stroke-width="2.2"/>
+  <circle class="tock-iris" cx="21" cy="15" r="2.1" fill="#241505"/>
+</svg>

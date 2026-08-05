@@ -11,34 +11,79 @@
  * deterministic avatar variables, which agent-avatar.js supplies per element.
  */
 
-.agents-roster-page {
+/*
+ * The page's own token names are kept and re-pointed at the shared cozy palette
+ * (cozy-character.css), the same way Home's --hc-* were. Every rule below
+ * already reads through these names, so warming the surface is a change of
+ * VALUES, not of structure — no layout, no selector, and no behaviour moves
+ * (PRD FR-1/FR-4).
+ *
+ * The result is that the Gallery, the Inspector, the picker, and the guide all
+ * sit on one palette instead of four that merely look similar.
+ */
+body.agents-roster-page {
   --collection-gap: 18px;
   --inspector-width: clamp(360px, 30vw, 420px);
-  --roster-radius: 14px;
-  /* Accent used for small text/links. Lightened on dark so the brand primary
-     (which may be dark) still clears AA contrast on near-black surfaces. */
-  --roster-accent: var(--primary-color, #4f46e5);
-  --card-line: var(--border-color, #e5e7eb);
-  --card-surface: var(--bg-primary, #fff);
-  --card-soft: var(--bg-secondary, #f9fafb);
-  /* Muted text one step stronger than --text-secondary, whose dark value
-     (#8A8A8A) only reaches 4.03:1 on --bg-tertiary. */
-  --card-muted: #5b6472;
+  --roster-radius: var(--cozy-radius-lg, 14px);
+  /* Moss is the page accent, matching Home's signal colour. Both themes are
+     defined in the shared layer, so this needs no per-theme override. */
+  --roster-accent: var(--cozy-moss, #3f6b45);
+  --card-line: var(--cozy-line, #e5e7eb);
+  --card-surface: var(--cozy-paper-raised, #fff);
+  --card-soft: var(--cozy-paper, #f9fafb);
+  --card-muted: var(--cozy-ink-dim, #5b6472);
+  /* Page-level surfaces the roster paints itself onto. */
+  --bg-primary: var(--cozy-paper-raised, #fff);
+  --bg-secondary: var(--cozy-paper, #f9fafb);
+  /* Left unmapped, this stayed the app's cool #c9ccd1 behind muted-ink pills
+     such as the progression slot count — 4.06:1, an axe violation. */
+  --bg-tertiary: var(--cozy-paper, #f3f4f6);
+  --text-primary: var(--cozy-ink, #111827);
+  --border-color: var(--cozy-line, #e5e7eb);
+  --roster-grid: rgb(90 74 46 / 8%);
+  --roster-grid-soft: rgb(90 74 46 / 4%);
+  /* Paper grid, same 24px rhythm and warm ink as Home (home-command.css), so
+     the two main surfaces read as one room.
+     !important is required, not decorative: ui-refresh.css paints `body` with
+     an !important cool-grey gradient, which silently beat a plain declaration
+     here — the page kept rendering on the old canvas while every token above
+     was already warm. */
+  background-color: var(--cozy-paper-deep) !important;
+  background-image:
+    linear-gradient(var(--roster-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--roster-grid-soft) 1px, transparent 1px) !important;
+  background-position: -1px -1px;
+  background-size:
+    24px 24px,
+    24px 24px;
 }
 
-[data-bs-theme="dark"] .agents-roster-page,
-.agents-roster-page[data-bs-theme="dark"] {
-  --roster-accent: color-mix(in srgb, var(--primary-color, #4f46e5) 38%, white);
-  --card-surface: var(--bg-primary, #1f2430);
-  --card-soft: rgba(255, 255, 255, 0.04);
-  --card-muted: #aab3c0;
+/* Dark is charcoal, not tinted brown — see cozy-character.css. Two things need
+   restating here: the brand accent (moss is tuned for text on paper, not for a
+   filled control) and the grid ink, which goes neutral with the surfaces. The
+   canvas has to be repeated too — ui-refresh.css overrides it again at
+   `[data-bs-theme="dark"] body`, so this selector matches that specificity and
+   loads after it. */
+[data-bs-theme="dark"] body.agents-roster-page {
+  --roster-accent: var(--cozy-moss-bright, #9ccb9f);
+  --roster-grid: rgb(214 219 226 / 7%);
+  --roster-grid-soft: rgb(214 219 226 / 4%);
+  background-color: var(--cozy-paper-deep) !important;
+  background-image:
+    linear-gradient(var(--roster-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--roster-grid-soft) 1px, transparent 1px) !important;
 }
 
 .roster-layout {
   display: flex;
   flex-direction: column;
   gap: var(--collection-gap);
-  padding: 20px;
+  /* Extra bottom room so the last control on the page can never come to rest
+     underneath the fixed Ori launcher. Scrolled to the end there is nowhere
+     further to go, so without this the final row's right-hand side is visible
+     but not clickable — the same failure the bulk bar's horizontal clearance
+     fixes. */
+  padding: 20px 20px calc(20px + var(--ori-launcher-clearance-y, 88px));
   max-width: 1600px;
   margin: 0 auto;
   min-width: 0;
@@ -412,7 +457,12 @@
 /* ---- Agent card ----------------------------------------------------------- */
 
 .roster-card {
-  --role-accent: var(--primary-color, #4f46e5);
+  /* Fallback for agents whose role has no catalog accent — chiefly the built-in
+     CLI agents. It resolves through --roster-accent rather than the raw brand
+     primary because the brand green is fixed across themes and gives only
+     2.39:1 on the dark paper surface, which axe flags as a serious contrast
+     violation on the role line (FR-119). --roster-accent is lifted per theme. */
+  --role-accent: var(--roster-accent, var(--primary-color, #4f46e5));
   position: relative;
   display: flex;
   min-width: 0;
@@ -622,6 +672,21 @@
   text-transform: uppercase;
 }
 
+/* Character identity sits below the role and reads quieter than it: the agent's
+   own name and role stay primary (PRD FR-55). Not uppercased, so it is visually
+   distinct from the operational role line above it. */
+.agent-card__character {
+  display: block;
+  min-width: 0;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--card-muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-card__badge {
   padding: 1px 6px;
   border: 1px solid var(--card-line);
@@ -650,8 +715,11 @@
 .agent-card__purpose.is-missing,
 .agent-card__model.is-missing,
 .agent-card__activity.is-missing {
+  /* The italics and the wording ("No description yet") already say this is
+     missing. The 0.85 opacity that used to sit here as well pushed the muted
+     ink to 4.42:1 on the warm card surface — a serious axe violation — for a
+     third cue nobody needed (FR-119). */
   font-style: italic;
-  opacity: 0.85;
 }
 
 .agent-card__section,
@@ -891,181 +959,6 @@
   }
 }
 
-/* ---- Avatar Identity v1 --------------------------------------------------- */
-
-/* Geometry is fixed per size so the grid never reflows while a custom image
-   decodes (FR97). Every colour arrives as a --aa-* custom property that
-   agent-avatar.js validated; nothing here reads agent data directly. */
-.agent-avatar {
-  --aa-size: 72px;
-  --aa-base: #263243;
-  --aa-deep: #0b0f14;
-  --aa-ink: #fff;
-  --aa-angle: 155deg;
-  --aa-motif-alpha: 0.18;
-  position: relative;
-  display: grid;
-  flex: 0 0 auto;
-  width: var(--aa-size);
-  height: var(--aa-size);
-  place-items: center;
-  overflow: hidden;
-  border-radius: 12px;
-  isolation: isolate;
-}
-
-/* Named sizes, so a denser view or a narrow breakpoint can resize the portrait
-   without the renderer having to re-emit it. */
-.agent-avatar--sm {
-  --aa-size: 54px;
-}
-
-.agent-avatar--md {
-  --aa-size: 72px;
-}
-
-.agent-avatar--lg {
-  --aa-size: 88px;
-}
-
-.agent-avatar--fallback {
-  border: 1px solid color-mix(in srgb, var(--aa-accent, var(--aa-base)) 55%, transparent);
-  background: linear-gradient(var(--aa-angle), var(--aa-base), var(--aa-deep));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-.agent-avatar__initials {
-  position: relative;
-  z-index: 2;
-  color: var(--aa-ink);
-  font-size: calc(var(--aa-size) * 0.31);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
-}
-
-/* Motifs are pure CSS keyed on a token the module owns, so the fallback needs
-   no image file and no remote request (FR98). */
-.agent-avatar__motif {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  opacity: var(--aa-motif-alpha);
-  pointer-events: none;
-}
-
-.agent-avatar[data-aa-turn="1"] .agent-avatar__motif {
-  transform: rotate(90deg);
-}
-
-.agent-avatar[data-aa-turn="2"] .agent-avatar__motif {
-  transform: rotate(180deg);
-}
-
-.agent-avatar[data-aa-turn="3"] .agent-avatar__motif {
-  transform: rotate(270deg);
-}
-
-.agent-avatar[data-aa-motif="rings"] .agent-avatar__motif {
-  background: repeating-radial-gradient(circle at 50% 50%, #fff 0 1px, transparent 1px 9px);
-}
-
-.agent-avatar[data-aa-motif="grid"] .agent-avatar__motif {
-  background:
-    repeating-linear-gradient(0deg, #fff 0 1px, transparent 1px 10px),
-    repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px);
-}
-
-.agent-avatar[data-aa-motif="bars"] .agent-avatar__motif {
-  background: repeating-linear-gradient(45deg, #fff 0 2px, transparent 2px 11px);
-}
-
-.agent-avatar[data-aa-motif="orbit"] .agent-avatar__motif {
-  background:
-    radial-gradient(circle at 78% 20%, #fff 0 22%, transparent 23%),
-    radial-gradient(circle at 20% 80%, #fff 0 14%, transparent 15%);
-}
-
-.agent-avatar[data-aa-motif="chevron"] .agent-avatar__motif {
-  background: repeating-conic-gradient(
-    from 45deg at 50% 50%,
-    #fff 0deg 12deg,
-    transparent 12deg 45deg
-  );
-}
-
-.agent-avatar[data-aa-motif="dots"] .agent-avatar__motif {
-  background: radial-gradient(circle, #fff 1.4px, transparent 1.5px);
-  background-size: 11px 11px;
-}
-
-.agent-avatar[data-aa-motif="prism"] .agent-avatar__motif {
-  background: conic-gradient(from 210deg at 30% 70%, #fff 0deg 55deg, transparent 55deg 360deg);
-}
-
-.agent-avatar[data-aa-motif="wave"] .agent-avatar__motif {
-  background: repeating-radial-gradient(circle at 15% 110%, transparent 0 12px, #fff 12px 13px);
-}
-
-/* Role emblem sits on the frame as an accent badge, never as the fill (FR71). */
-.agent-avatar__emblem {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  z-index: 3;
-  display: grid;
-  width: calc(var(--aa-size) * 0.28);
-  height: calc(var(--aa-size) * 0.28);
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--aa-accent, #fff) 70%, transparent);
-  border-radius: 6px;
-  background: rgba(6, 10, 12, 0.72);
-  color: var(--aa-accent, #fff);
-  font-size: calc(var(--aa-size) * 0.15);
-  line-height: 1;
-}
-
-/* Built-in identities read as system infrastructure: a bracketed frame instead
-   of the library card's soft ring (FR73). */
-.agent-avatar[data-aa-system="1"] {
-  border-radius: 6px;
-}
-
-.agent-avatar[data-aa-system="1"]::before,
-.agent-avatar[data-aa-system="1"]::after {
-  content: "";
-  position: absolute;
-  z-index: 3;
-  width: 9px;
-  height: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-}
-
-.agent-avatar[data-aa-system="1"]::before {
-  top: 4px;
-  left: 4px;
-  border-width: 1px 0 0 1px;
-}
-
-.agent-avatar[data-aa-system="1"]::after {
-  right: 4px;
-  bottom: 4px;
-  border-width: 0 1px 1px 0;
-}
-
-.agent-avatar--image {
-  border: 1px solid var(--card-line);
-  background: var(--card-soft);
-}
-
-.agent-avatar__img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
 /* ---- Empty state / link buttons ------------------------------------------- */
 
 .roster-empty {
@@ -1115,7 +1008,12 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 10px 12px;
+  /* The global Ori launcher is fixed to the bottom-right of the viewport. When
+     this bar reaches that far — which depends on viewport width and whether the
+     Inspector is open — its right-hand actions would sit underneath the
+     launcher and stop being clickable. Reserve the launcher's own declared
+     footprint instead of guessing. */
+  padding: 10px var(--ori-launcher-clearance, 12px) 10px 12px;
   border: 1px solid
     color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
   border-radius: 12px;
@@ -1633,6 +1531,7 @@ body.inspector-sheet-open {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
   grid-template-areas:
+    "actions actions"
     "avatar ident"
     "vitals vitals"
     "purpose purpose";
@@ -1646,12 +1545,17 @@ body.inspector-sheet-open {
   );
 }
 
+/* The actions take a row of their own rather than overlaying the hero's
+   top-right. The Inspector is a ~415px side panel at every viewport width, so
+   there was never room for a readable agent name and these buttons on one
+   line — the old absolute positioning only avoided a collision because the
+   identity block happened to be short enough to centre below it, which the
+   character line no longer guarantees. */
 .stage__actions {
-  position: absolute;
-  top: 16px;
-  right: 20px;
+  grid-area: actions;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1730,6 +1634,16 @@ body.inspector-sheet-open {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--card-muted);
+}
+
+/* Character identity, secondary to the agent's real name and role above it
+   (PRD FR-55). Lowercase and lighter than .stage__class so the two lines are
+   distinguishable without relying on colour alone (FR-118). */
+.stage__character {
+  margin-top: 4px;
+  color: var(--card-muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* Repeats the card's purpose so it stays visible on every Inspector tab, not
@@ -2317,7 +2231,9 @@ body.inspector-sheet-open {
 
 @media (max-width: 860px) {
   .roster-layout {
-    padding: 14px;
+    /* Narrow is where the launcher clearance matters most — the collection is a
+       single column, so the last card lands directly under it. */
+    padding: 14px 14px calc(14px + var(--ori-launcher-clearance-y, 88px));
     gap: 14px;
   }
   .collection-head {
@@ -2339,10 +2255,6 @@ body.inspector-sheet-open {
   .stage__hero {
     grid-template-columns: 72px minmax(0, 1fr);
     padding: 18px 18px 16px;
-  }
-  .stage__actions {
-    top: 12px;
-    right: 14px;
   }
   .stage__panels {
     padding: 16px;
@@ -2405,4 +2317,71 @@ body.inspector-sheet-open {
   .roster-card:hover {
     transform: none;
   }
+}
+
+/* ---- Cozy surface treatment ------------------------------------------------ */
+
+/*
+ * Re-pointing the token block above changed the page's COLOURS; this section
+ * changes its MATERIAL. Both are needed: a warm palette applied to floating
+ * rectangles with soft blur still reads as a dashboard.
+ *
+ * The treatment is deliberately narrow — corner rounding onto the shared 4px
+ * step grid, and a flat bottom edge in place of a blurred drop shadow, so a
+ * card reads as a stacked physical thing. Nothing here changes size, spacing,
+ * position, or any state class, so every focus/checked/attention/read-only cue
+ * defined earlier survives untouched (FR-1/FR-4, FR-41, FR-90).
+ *
+ * It lives at the end of the file rather than being threaded through each
+ * component so the cozy layer stays one reviewable block — and so reverting the
+ * look is a single deletion.
+ */
+
+/* Cards and the Inspector are already on --roster-radius, which the token block
+   above now derives from --cozy-radius-lg; only the smaller controls needed
+   moving onto the step grid. */
+.roster-stat,
+.collection-search input,
+.collection-select select,
+.collection-chip,
+.view-toggle,
+.bulk-bar {
+  border-radius: var(--cozy-radius);
+}
+
+/* The bulk bar is excluded from the flat bottom edge on purpose: it is sticky,
+   and its existing upward shadow is what says "this floats above the list you
+   are still scrolling". A bottom edge would flatten it into the content. */
+.roster-card,
+.roster-stat,
+.collection-search input,
+.collection-select select,
+.collection-chip,
+.view-toggle,
+.stage {
+  box-shadow: var(--cozy-shadow-sm);
+}
+
+/* Warm-toned rather than the slate-blue blur this replaced; the 1px rise
+   defined earlier still carries the actual hover feedback.
+   Focused and checked cards are excluded: their rings ARE box-shadows, and this
+   rule sits later in the file at equal specificity, so without the guard simply
+   hovering the focused card would erase the ring that says which agent the
+   Inspector is showing (FR-41/FR-95). */
+.roster-card:hover:not(.is-focused):not(.is-checked) {
+  box-shadow: var(--cozy-shadow);
+}
+
+.collection-head__new {
+  border-radius: var(--cozy-radius);
+  box-shadow: var(--cozy-shadow-sm);
+}
+
+/* Loading and empty states are surfaces too — left transparent, they were the
+   one place the page fell back to a bare dashed rectangle. The error variant is
+   excluded: its red-tinted fill is the state cue, and this rule would sit after
+   it in the cascade and quietly erase it. */
+.collection-state:not(.collection-state--error),
+.roster-empty {
+  background: var(--card-soft);
 }

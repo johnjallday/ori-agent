@@ -1,0 +1,347 @@
+/*
+ * Character picker — the chooser used by New Agent and the Inspector's
+ * Identity section (PRD FR-53/FR-59/FR-115–FR-119).
+ *
+ * A modal, because choosing is a focused decision that should not compete with
+ * the collection behind it. Selection is carried by an aria-checked radiogroup
+ * and a visible border, never by colour alone (FR-118).
+ */
+
+.char-picker__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: rgb(0 0 0 / 45%);
+}
+
+.char-picker {
+  position: fixed;
+  z-index: 1051;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 48px));
+  padding: 20px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 14px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #111827);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 32%);
+}
+
+.char-picker__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.char-picker__title {
+  flex: 1;
+  margin: 0;
+  font-size: 18px;
+}
+
+.char-picker__close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* States plainly that a character changes nothing operational, before the user
+   picks one (FR-73/FR-97). */
+.char-picker__lede {
+  margin: 6px 0 14px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+}
+
+.char-picker__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.char-picker__search {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 9px;
+  background: var(--bg-primary, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.char-picker__families {
+  display: flex;
+  gap: 6px;
+}
+
+.char-picker__family {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.char-picker__family.is-active {
+  border-color: var(--primary-color, #4f46e5);
+  background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent);
+  font-weight: 600;
+}
+
+.char-picker__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.char-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.char-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  background: var(--bg-primary, #fff);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.char-card:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 50%, var(--border-color, #e5e7eb));
+}
+
+/* Selection is a 2px border plus aria-checked, so it survives a colour-blind
+   reader and a high-contrast mode (FR-118). */
+.char-card.is-selected {
+  border: 2px solid var(--primary-color, #4f46e5);
+  padding: 9px;
+}
+
+.char-card:focus-visible,
+.char-picker__family:focus-visible,
+.char-picker__close:focus-visible {
+  outline: 3px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
+}
+
+.char-card__art {
+  flex: none;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.char-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.char-card__name {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.char-card__family {
+  color: var(--text-secondary, #6b7280);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.char-card__rec {
+  color: var(--primary-color, #4f46e5);
+  font-weight: 700;
+}
+
+.char-card__purpose {
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* ---- preview -------------------------------------------------------------- */
+
+.char-preview {
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  background: var(--bg-secondary, #f9fafb);
+}
+
+.char-preview__art {
+  display: block;
+  margin: 0 auto 10px;
+  object-fit: contain;
+}
+
+.char-preview__name {
+  margin: 0;
+  font-size: 15px;
+  text-align: center;
+}
+
+.char-preview__family {
+  margin: 2px 0 12px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.char-preview__facts {
+  margin: 0 0 12px;
+  font-size: 12px;
+}
+
+.char-preview__facts dt {
+  color: var(--text-secondary, #6b7280);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.char-preview__facts dd {
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+.char-preview__sample {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+/* The one line that keeps a prop from reading as a capability (FR-97). */
+.char-preview__note {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color, #e5e7eb);
+  color: var(--text-secondary, #6b7280);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.char-picker__empty,
+.char-preview__empty {
+  margin: 0;
+  padding: 20px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---- voice + actions ------------------------------------------------------- */
+
+.char-picker__voice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.char-picker__voice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.char-picker__voice-note {
+  color: var(--text-secondary, #6b7280);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.char-picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ---- Inspector identity section -------------------------------------------- */
+
+.identity-mode {
+  margin: 0 0 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.identity-explain,
+.identity-readonly {
+  margin: 0 0 8px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.identity-voice {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.identity-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.identity-choice__state {
+  color: var(--text-secondary, #6b7280);
+  font-size: 12.5px;
+}
+
+/* ---- narrow ----------------------------------------------------------------- */
+
+/* Below this the preview column has no room, so it stacks under the grid and
+   the whole sheet becomes full-height (FR-100). */
+@media (max-width: 720px) {
+  .char-picker {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+  }
+
+  .char-picker__main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .char-picker__actions {
+    flex-wrap: wrap;
+  }
+}

@@ -3,9 +3,15 @@
 <html lang="en">
 {{template "head.tmpl" .}}
 <link rel="stylesheet" href="/css/tag-input.css">
+<link rel="stylesheet" href="/css/agent-avatar.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
+<link rel="stylesheet" href="/css/character-picker.css">
 
-<body class="bg-light agents-roster-page" data-sidebar-default="hidden">
+<!-- Bootstrap's .bg-light was dropped from the markup so the page does not flash
+     the cool grey canvas before the theme script runs. It is not the whole fix:
+     the theme script re-adds .bg-light/.bg-dark at runtime, so the cozy canvas
+     in agents-roster.css has to out-specify it as well. -->
+<body class="agents-roster-page" data-sidebar-default="hidden">
   <a class="skip-link" href="#roster-main">Skip to Main Content</a>
 
   {{template "navbar.tmpl" .}}
@@ -181,6 +187,10 @@
                     <h2 class="stage__name" id="stageName"></h2>
                     <span class="stage__favorite" id="stageFavorite" title="Favorite" aria-hidden="true" hidden>★</span>
                     <div class="stage__class" id="stageClass"></div>
+                    <!-- Character identity is secondary to the agent's real
+                         name and role, and sits outside the artwork so it can
+                         never be mistaken for a capability (FR-55/FR-96). -->
+                    <div class="stage__character" id="stageCharacter" hidden></div>
                   </div>
                   <div class="stage__vitals" id="stageVitals" role="group" aria-label="Agent vitals">
                     <!-- vitals chips injected -->
@@ -286,6 +296,10 @@
     </main>
   </div>
 
+  <!-- Mount point for the character picker. It is built on open and torn down
+       on close, so there is never a hidden copy of it in the page. -->
+  <div id="charPickerHost"></div>
+
   {{template "theme-init.tmpl" .}}
   {{template "scripts-dx-utils.tmpl" .}}
   <script defer src="/js/app.js"></script>
@@ -300,6 +314,8 @@
   <!-- Shared deterministic avatar renderer (exposes window.AgentAvatar). Must load
        before the roster controller so first paint already uses one identity. -->
   <script defer src="/js/modules/agent-avatar.js"></script>
+  <script defer src="/js/modules/character-catalog.js"></script>
+  <script defer src="/js/modules/character-picker.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>
 

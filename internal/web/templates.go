@@ -82,6 +82,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/task-modal.tmpl",
 		"templates/components/modals.tmpl",
 		"templates/components/navbar.tmpl",
+		"templates/components/ori-guide.tmpl",
 		"templates/components/vault-modal.tmpl",
 		"templates/components/vault-settings-section.tmpl",
 		"templates/components/user-profile-form.tmpl",

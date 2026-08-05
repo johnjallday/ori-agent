@@ -1900,16 +1900,45 @@ test('persisted command-deck selection wins when the agent still exists and fall
   }
 });
 
-test('geometric agent character is deterministic and does not inject agent markup', () => {
+// The generated robot SVG this used to assert on is gone: Command view now
+// renders an agent through the SHARED identity resolver, so an agent's face is
+// the same here as on /agents (PRD FR-99). What still has to hold is that the
+// status tone stays on the frame and that a hostile agent name cannot inject
+// markup.
+test('the agent face carries the status tone and does not inject agent markup', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
+  commandView.page = {}; // no shared renderer available in this harness
   const agent = { key: '<img src=x>', name: '<img src=x>', tone: 'working' };
   const first = commandView.agentCharacterHTML(agent, 'stage');
   const second = commandView.agentCharacterHTML(agent, 'stage');
 
   assert.equal(first, second);
-  assert.match(first, /<svg viewBox="0 0 100 118"/);
   assert.match(first, /ws-cmd-character is-stage working/);
   assert.doesNotMatch(first, /<img/);
+});
+
+test('the agent face delegates to the shared identity renderer when it is present', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  const seen = [];
+  commandView.page = {
+    getAgentAvatarPresentation(name) {
+      seen.push(name);
+      return {
+        markup: className => `<span class="${className}" data-shared="1"></span>`,
+        initials: 'AT'
+      };
+    }
+  };
+
+  const html = commandView.agentCharacterHTML(
+    { key: 'atlas', name: 'Atlas', tone: 'idle' },
+    'roster'
+  );
+
+  assert.deepEqual([...seen], ['Atlas']);
+  assert.match(html, /data-shared="1"/);
+  // The frame classes are still applied, so geometry and tone survive.
+  assert.match(html, /ws-cmd-character is-roster idle/);
 });
 
 test('recent activity uses attributable persisted timestamps and orders newest first', () => {

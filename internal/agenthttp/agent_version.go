@@ -43,6 +43,15 @@ func agentConfigVersion(a *agent.Agent) string {
 		AvatarColor    string                     `json:"avatar_color"`
 		Favorite       bool                       `json:"favorite"`
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile"`
+		// Character is part of the editable definition, so a concurrent identity
+		// change is caught by the same stale-edit guard as a prompt change
+		// (PRD FR-92).
+		//
+		// Adding this field shifts every agent's version token once, on the
+		// build that introduces it. That is harmless: a token is only held
+		// across a single load-then-save cycle, and a token issued by the
+		// previous build is already invalid after a restart.
+		Character *types.AgentCharacterIdentity `json:"character"`
 	}
 	payload := struct {
 		Type     string            `json:"type"`
@@ -69,6 +78,7 @@ func agentConfigVersion(a *agent.Agent) string {
 			AvatarColor:    a.Metadata.AvatarColor,
 			Favorite:       a.Metadata.Favorite,
 			RoutingProfile: a.Metadata.RoutingProfile,
+			Character:      a.Metadata.Character,
 		}
 	}
 

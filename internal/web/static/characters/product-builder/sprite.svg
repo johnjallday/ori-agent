@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Product Builder">
+  <!-- Product Builder idle: adjusts one tool, then a small nod. Decorative only (FR-72). -->
+  <style>
+    .rivet-head { transform-origin: 24px 26px; animation: rivet-nod 3.4s ease-in-out infinite; }
+    @keyframes rivet-nod { 0%,66%,100% { transform: translateY(0); } 78% { transform: translateY(1.6px); } }
+    @media (prefers-reduced-motion: reduce) { .rivet-head { animation: none; } }
+  </style>
+  <circle cx="24" cy="24" r="24" fill="#e2ead4"/>
+  <g stroke="#12200a" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="12" y="28" width="24" height="18" rx="6" fill="#f5f2e0"/>
+    <rect x="10" y="33" width="28" height="6" rx="2" fill="#658c36"/>
+    <g class="rivet-head">
+      <rect x="13" y="10" width="22" height="19" rx="6" fill="#f5f2e0"/>
+      <circle cx="13" cy="14" r="3.6" fill="#f5f2e0"/>
+      <circle cx="35" cy="14" r="3.6" fill="#f5f2e0"/>
+    </g>
+  </g>
+  <g class="rivet-head">
+    <circle cx="19" cy="19" r="2.2" fill="#12200a"/>
+    <circle cx="29" cy="19" r="2.2" fill="#12200a"/>
+    <rect x="21" y="24" width="6" height="4" rx="1" fill="#fdfdf5" stroke="#12200a" stroke-width="1.6"/>
+  </g>
+</svg>

@@ -13,6 +13,7 @@ import (
 
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
+	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -494,6 +495,21 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.skillsManager.SetLoadoutResolver(newLoadoutResolverAdapter(b.st))
 	b.skillsHandler = skillshttp.New(b.skillsManager, b.st, b.llmFactory, b.configManager)
 	b.chatHandler.SetSkillsManager(b.skillsManager)
+
+	// Curated character catalog (read-only). The catalog is embedded and
+	// validated at load, so a failure here means the binary shipped a broken
+	// manifest. Log it and leave the handler nil rather than refusing to boot:
+	// characters are presentation, and every surface falls back to the
+	// deterministic avatar identity without them (FR-14/FR-74).
+	// Ori Guide. Its workspace store is attached in the workspace phase; nothing
+	// it does today needs one.
+	b.oriGuideHandler = agenthttp.NewGuideHandler()
+
+	if characterHandler, err := characterhttp.New(); err != nil {
+		logger.Error("Character catalog failed to load; portraits will fall back to generated identities", logger.Fields{"error": err})
+	} else {
+		b.characterHandler = characterHandler
+	}
 
 	// Plugin installer (Claude Code- and Codex-compatible bundles): wired over the
 	// MCP registry + the personal skills dir; installed plugins live under ./plugins.

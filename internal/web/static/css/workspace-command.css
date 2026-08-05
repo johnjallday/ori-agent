@@ -3408,54 +3408,42 @@ button.ws-cmd-rpg-class-card:focus-visible {
   top: auto;
   bottom: 6px;
 }
+/* The agent's face. The generated robot SVG this used to frame is gone — the
+   contents now come from the shared Avatar Identity renderer (agent-avatar.css)
+   so an agent looks the same here as on /agents. What remains here is the frame:
+   size, the accent ring, and the status tone.
+
+   The .ws-cmd-character-body / -head / -visor / -shoulders / -line / -emblem
+   rules were removed with the SVG they styled. */
 .ws-cmd-character {
-  --character-accent: hsl(var(--agent-character-hue) 64% 54%);
+  --character-accent: var(--ws-line-bright);
   position: relative;
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--character-accent) 60%, transparent);
+  border-radius: 10px;
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
 }
 .ws-cmd-character.is-roster {
+  --aa-size: 46px;
   width: 46px;
-  height: 58px;
+  height: 46px;
 }
 .ws-cmd-character.is-stage {
-  width: min(220px, 82%);
-  aspect-ratio: 100 / 118;
+  --aa-size: min(200px, 74%);
+  width: min(200px, 74%);
+  aspect-ratio: 1;
+  border-radius: 18px;
 }
-.ws-cmd-character svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.ws-cmd-character-body {
-  fill: color-mix(in srgb, var(--character-accent) 20%, #12171c);
-  stroke: color-mix(in srgb, var(--character-accent) 56%, var(--ws-line-bright));
-  stroke-width: 2;
-}
-.ws-cmd-character-head {
-  fill: color-mix(in srgb, var(--character-accent) 28%, #151a20);
-  stroke: var(--character-accent);
-  stroke-width: 2;
-}
-.ws-cmd-character-visor {
-  fill: color-mix(in srgb, var(--character-accent) 70%, white);
-  opacity: 0.9;
-  filter: drop-shadow(0 0 5px var(--character-accent));
-}
-.ws-cmd-character-shoulders,
-.ws-cmd-character-line {
-  fill: none;
-  stroke: color-mix(in srgb, var(--character-accent) 70%, var(--ws-line-bright));
-  stroke-width: 2;
-}
-.ws-cmd-character-line.is-soft {
-  opacity: 0.36;
-}
-.ws-cmd-character-emblem {
-  fill: var(--character-accent);
-  filter: drop-shadow(0 0 4px var(--character-accent));
+
+/* Shown when the shared renderer has not loaded. */
+.ws-cmd-character.is-initials {
+  background: color-mix(in srgb, var(--character-accent) 22%, #12171c);
+  color: var(--ws-line-bright);
+  font-family: var(--ws-font-mono);
+  font-weight: 700;
 }
 .ws-cmd-character.alert {
   --character-accent: var(--ws-alert);
@@ -4353,18 +4341,27 @@ button.ws-cmd-rpg-class-card:focus-visible {
   border: 1px solid var(--ws-line);
   background: rgba(0, 0, 0, 0.22);
 }
+/* The hexagon tile keeps its shape and size; what fills it now comes from the
+   shared Avatar Identity renderer, so the agent wears the same face here as on
+   its roster card and on /agents (PRD FR-99). --aa-size is overridden because
+   the renderer's own size steps start above this tile. */
 .ws-cmd-mrow-av {
+  --aa-size: 34px;
   width: 34px;
   height: 34px;
   flex: 0 0 auto;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+}
+
+/* Shown when the shared renderer has not loaded. */
+.ws-cmd-mrow-av.is-initials {
   display: grid;
   place-items: center;
   font-family: var(--ws-font-mono);
   font-weight: 700;
   font-size: 11px;
   color: #04110c;
-  background: hsl(var(--agent-avatar-hue, 160) 52% 48%);
-  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: hsl(160 52% 48%);
 }
 .ws-cmd-mrow-main {
   flex: 1 1 auto;
@@ -4799,11 +4796,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
     transform: translateY(-4px) scale(1.012);
   }
 }
-@keyframes ws-cmd-character-scan {
-  50% {
-    opacity: 0.58;
-  }
-}
 @media (prefers-reduced-motion: no-preference) {
   .ws-cmd-topbar {
     animation: ws-cmd-rise 0.35s ease both;
@@ -4829,9 +4821,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-agent-stage .ws-cmd-character.is-stage {
     animation: ws-cmd-character-breathe 3.8s ease-in-out infinite;
   }
-  .ws-cmd-character.working .ws-cmd-character-visor {
-    animation: ws-cmd-character-scan 1.25s ease-in-out infinite;
-  }
+  /* The visor scan went with the generated SVG. The frame's own breathe above
+     still carries "this agent is working", alongside the LED and status text. */
   .ws-cmd-modal-panel {
     animation: ws-cmd-rise 0.22s ease both;
   }

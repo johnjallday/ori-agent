@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Ori, a duck navigator with a broad bill and crown tuft, holding a folded map">
+  <!--
+    Ori — app guide. Hand-authored original artwork; see
+    docs/CHARACTER_ASSET_PROVENANCE.md#ori-guide.
+    Cream body over an amber ground, carried by a dark outline so the silhouette
+    survives both themes and small sizes.
+  -->
+  <defs>
+    <clipPath id="ori-frame"><rect x="0" y="0" width="160" height="160" rx="16"/></clipPath>
+  </defs>
+  <g clip-path="url(#ori-frame)">
+    <rect width="160" height="160" fill="#f0dcb8"/>
+    <circle cx="80" cy="74" r="54" fill="#f7e9cf"/>
+    <rect x="0" y="144" width="160" height="16" fill="#d9c197"/>
+
+    <g stroke="#3b2a12" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <!-- feet, drawn first so the body tucks over their tops -->
+      <path d="M64 126 v14 l-10 6 h22 z" fill="#bd7c24"/>
+      <path d="M98 126 v14 l-10 6 h22 z" fill="#bd7c24"/>
+
+      <!-- body -->
+      <ellipse cx="80" cy="106" rx="34" ry="28" fill="#fbf3e4"/>
+      <!-- wing -->
+      <path d="M56 100 q14 -6 22 10 q-12 12 -22 2 z" fill="#efe0c4"/>
+
+      <!-- neck -->
+      <path d="M68 84 q4 -14 20 -14 q16 0 12 16" fill="#fbf3e4"/>
+
+      <!-- head -->
+      <circle cx="82" cy="56" r="25" fill="#fbf3e4"/>
+
+      <!-- broad bill -->
+      <path d="M104 52 h22 q6 0 6 6 q0 6 -6 6 h-22 z" fill="#bd7c24"/>
+
+      <!-- crown tuft -->
+      <path d="M68 34 l4 -16 l8 12 l6 -16 l6 18 z" fill="#bd7c24"/>
+
+      <!-- folded map, held against the body -->
+      <path d="M92 108 l26 -8 l0 24 l-26 8 z" fill="#fdfaf2"/>
+    </g>
+
+    <!-- map detail: no outline, so it reads as printing rather than structure -->
+    <path d="M100 110 l0 24 M109 107 l0 24" stroke="#c9b896" stroke-width="2.5"/>
+    <path d="M96 122 q8 -7 14 -1" fill="none" stroke="#7ea36b" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- eye -->
+    <circle cx="90" cy="50" r="4.5" fill="#3b2a12"/>
+    <circle cx="91.5" cy="48.5" r="1.6" fill="#fbf3e4"/>
+  </g>
+</svg>

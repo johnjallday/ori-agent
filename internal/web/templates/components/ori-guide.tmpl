@@ -1,0 +1,87 @@
+{{define "ori-guide.tmpl"}}
+<!--
+  Ori Guide — the app's setup-and-navigation helper.
+
+  Deliberately separate from the Home command box, which is Workspace Manager
+  and is where real work goes. The boundary copy below is stated before the user
+  can type anything, so the difference is clear on first exposure rather than
+  discovered afterwards (PRD FR-22/FR-27).
+
+  The panel is non-modal on wide layouts so the destination Ori is describing
+  stays visible behind it (FR-79).
+-->
+<div class="ori-guide" id="oriGuideRoot">
+  <button
+    type="button"
+    class="ori-guide__launcher"
+    id="oriGuideLauncher"
+    aria-expanded="false"
+    aria-controls="oriGuidePanel"
+    aria-label="Ask Ori — app guide">
+    <img
+      class="ori-guide__sprite"
+      src="/characters/ori-guide/sprite.svg"
+      alt=""
+      width="32"
+      height="32"
+      decoding="async">
+    <span class="ori-guide__launcher-text">
+      <span class="ori-guide__launcher-name">Ask Ori</span>
+      <span class="ori-guide__launcher-role">App Guide</span>
+    </span>
+  </button>
+
+  <section
+    class="ori-guide__panel"
+    id="oriGuidePanel"
+    role="dialog"
+    aria-labelledby="oriGuideTitle"
+    data-state="ready"
+    hidden>
+    <header class="ori-guide__header">
+      <img
+        class="ori-guide__portrait"
+        src="/characters/ori-guide/static.svg"
+        alt=""
+        width="40"
+        height="40"
+        decoding="async">
+      <div class="ori-guide__ident">
+        <h2 class="ori-guide__title" id="oriGuideTitle">Ori</h2>
+        <p class="ori-guide__role">App Guide</p>
+      </div>
+      <button
+        type="button"
+        class="ori-guide__close"
+        id="oriGuideClose"
+        aria-label="Close Ori">&times;</button>
+    </header>
+
+    <p class="ori-guide__boundary">
+      I help you find your way around Ori and get set up. I am not a work agent —
+      your agents do the work, and I will hand a request to Workspace Manager
+      rather than run it myself.
+    </p>
+
+    <form class="ori-guide__form" id="oriGuideForm">
+      <label class="visually-hidden" for="oriGuideInput">Ask Ori where something is</label>
+      <input
+        type="text"
+        class="ori-guide__input"
+        id="oriGuideInput"
+        maxlength="400"
+        autocomplete="off"
+        placeholder="Where do I…?">
+      <button type="submit" class="ori-guide__send" id="oriGuideSend">Ask</button>
+    </form>
+
+    <!-- aria-live so an answer arriving without a focus change is still
+         announced (FR-116). -->
+    <div
+      class="ori-guide__reply"
+      id="oriGuideReply"
+      role="status"
+      aria-live="polite"></div>
+  </section>
+</div>
+{{end}}

@@ -148,9 +148,12 @@ func (h *Handler) GetWorkspaceAgentEffectivePrompt(w http.ResponseWriter, r *htt
 	}
 
 	basePrompt := ""
+	toneHint := ""
+	toneSource := ""
 	if h.agentStore != nil {
 		if ag, ok := h.agentStore.GetAgent(agentName); ok && ag != nil {
 			basePrompt = ag.Settings.SystemPrompt
+			toneHint, toneSource = characterToneFor(ag.Metadata)
 		}
 	}
 
@@ -168,15 +171,27 @@ func (h *Handler) GetWorkspaceAgentEffectivePrompt(w http.ResponseWriter, r *htt
 			effective = refinement
 		}
 	}
+	// The tone layer goes last, below the user's prompt and the workspace
+	// refinement, and is shown separately so a user can see exactly what it
+	// contributes and where it came from (FR-63).
+	if toneHint != "" {
+		if strings.TrimSpace(effective) != "" {
+			effective += "\n\n---\n" + toneHint
+		} else {
+			effective = toneHint
+		}
+	}
 
 	_ = orihttp.RespondSuccess(w, map[string]any{
-		"agent":               agentName,
-		"base_system_prompt":  basePrompt,
-		"role":                inst.Role,
-		"description":         inst.Description,
-		"custom_instructions": inst.CustomInstructions,
-		"refinement":          refinement,
-		"effective_prompt":    effective,
-		"note":                "Live workspace context (notes, memory, tools) is added at run time and not shown here.",
+		"agent":                 agentName,
+		"base_system_prompt":    basePrompt,
+		"role":                  inst.Role,
+		"description":           inst.Description,
+		"custom_instructions":   inst.CustomInstructions,
+		"refinement":            refinement,
+		"character_tone":        toneHint,
+		"character_tone_source": toneSource,
+		"effective_prompt":      effective,
+		"note":                  "Live workspace context (notes, memory, tools) is added at run time and not shown here.",
 	})
 }

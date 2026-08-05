@@ -5,6 +5,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
 	"github.com/johnjallday/ori-agent/internal/calendarhttp"
+	"github.com/johnjallday/ori-agent/internal/characterhttp"
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	"github.com/johnjallday/ori-agent/internal/cliagenthttp"
@@ -163,6 +164,14 @@ type HandlerFacade struct {
 	User        *userhttp.Handler
 	PersonalHQ  *personalhqhttp.Handler
 	DailyBrief  *dailybriefhttp.Handler
+	// OriGuide serves the setup-and-navigation guide. It is deliberately a
+	// separate handler from the Home work surface: its action type cannot
+	// express a mutation and it holds no dependency capable of performing one.
+	OriGuide *agenthttp.GuideHandler
+	// Characters serves the read-only curated character catalog. It holds no
+	// store and exposes no mutation route; identity assignment is validated by
+	// the agent endpoints against the same catalog.
+	Characters *characterhttp.Handler
 }
 
 // NewCoreSystemFacade creates a new core system facade

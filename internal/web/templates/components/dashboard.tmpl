@@ -1,19 +1,31 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
-  <section id="homeAssistantCard" class="modern-card home-command-strip" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Ask Ori">
+  <!--
+    Workspace Manager: the surface that plans, routes, and runs real work. It
+    was labelled "Ask Ori" until the cozy-character-experience feature, which
+    reserves the Ori name for the navigation guide. Element IDs are unchanged on
+    purpose — the rename is presentation, and every existing behaviour, handler,
+    and test binding still applies (PRD FR-81/FR-82).
+  -->
+  <section id="homeAssistantCard" class="modern-card home-command-strip" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Workspace Manager">
     <div class="home-command-strip-main">
+      <!-- The strip names itself. It used to say "COMMAND", which is a mode, not
+           a who — leaving Workspace Manager identified only by the placeholder
+           and the visually-hidden label while Ori's guide launcher names itself
+           on every page. A user comparing the two surfaces has to be able to see
+           which one does work (FR-27/FR-81–FR-83). -->
       <div class="home-command-kicker">
         <span class="home-command-kicker-led" aria-hidden="true"></span>
-        {{if .Extra.IsFirstRun}}FIRST COMMAND{{else}}COMMAND{{end}}
+        WORKSPACE MANAGER{{if .Extra.IsFirstRun}} · FIRST COMMAND{{end}}
         <span class="home-command-shortcut" aria-hidden="true">⌘J</span>
       </div>
       <form id="homeAssistantForm" class="home-assistant-form home-command-form">
         <span class="home-command-prompt" aria-hidden="true">&gt;</span>
-        <label for="homeAssistantInput" class="visually-hidden">Ask Ori</label>
+        <label for="homeAssistantInput" class="visually-hidden">Workspace Manager — describe work to run</label>
         <input id="homeAssistantInput" type="text" class="modern-input home-command-input" maxlength="800"
                name="home_assistant_prompt"
                autocomplete="off"
-               placeholder="{{if .Extra.IsFirstRun}}Plan a product launch…{{else}}Ask Ori to do something…{{end}}">
+               placeholder="{{if .Extra.IsFirstRun}}Plan a product launch…{{else}}Give Workspace Manager something to do…{{end}}">
         <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn home-command-execute">Ask</button>
       </form>
       <!-- Suggested prompt chips populate the input but never auto-submit. -->
@@ -43,6 +55,24 @@
           <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
         </div>
         <div class="cockpit-area-controls">
+          <!--
+            Ori in the cockpit (PRD FR-21). A second entry point to the *same*
+            guide: it drives the one controller and the one panel, so the two
+            can never disagree about open state. It is never used to represent
+            a running workspace agent (FR-78).
+
+            It sits in the header rather than floating over the map on purpose —
+            an absolutely-positioned character there covers the map's own empty
+            and error controls and silently eats their clicks.
+          -->
+          <button
+            type="button"
+            class="cockpit-map-ori"
+            id="oriGuideMapTrigger"
+            aria-label="Ask Ori — app guide">
+            <img src="/characters/ori-guide/sprite.svg" alt="" width="26" height="26" decoding="async">
+            <span class="cockpit-map-ori__label">Ask Ori</span>
+          </button>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
           <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
@@ -248,7 +278,7 @@
         <header class="cockpit-ask-head">
           <button type="button" class="cockpit-rail-back" data-cockpit-ask-back>
             <span aria-hidden="true">&#8592;</span> Back</button>
-          <h3 id="homeAssistantThinkingModalLabel" class="cockpit-rail-title">Ask Ori</h3>
+          <h3 id="homeAssistantThinkingModalLabel" class="cockpit-rail-title">Workspace Manager</h3>
           <div id="homeAssistantThinkingStatus" class="cockpit-ask-status" role="status" aria-live="polite">
             <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
             <span>Analyzing your request…</span>

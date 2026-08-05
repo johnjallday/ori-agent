@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Research Archivist: a wide-browed resident in a feather cape holding a pocket ledger">
+  <!-- Research Archivist. Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#research-archivist -->
+  <defs><clipPath id="sable-frame"><rect width="160" height="160" rx="16"/></clipPath></defs>
+  <g clip-path="url(#sable-frame)">
+    <rect width="160" height="160" fill="#dfe8d8"/>
+    <circle cx="80" cy="74" r="54" fill="#eef3e9"/>
+    <rect x="0" y="144" width="160" height="16" fill="#c3d0b8"/>
+
+    <g stroke="#0f1a0e" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M62 128 v12 l-9 6 h20 z" fill="#3d5c39"/>
+      <path d="M98 128 v12 l-9 6 h20 z" fill="#3d5c39"/>
+
+      <!-- body -->
+      <path d="M50 132 q0-42 30-42 q30 0 30 42 z" fill="#f3f0e2"/>
+      <!-- feather cape, layered over the shoulders -->
+      <path d="M48 104 q6-26 32-26 q26 0 32 26 q-14 8 -32 8 q-18 0 -32 -8 z" fill="#4f744a"/>
+      <path d="M56 100 q10 8 24 8 q14 0 24 -8" fill="none"/>
+
+      <!-- head: wide brow -->
+      <path d="M54 58 q0-24 26-24 q26 0 26 24 l0 10 q0 18 -26 18 q-26 0 -26 -18 z" fill="#f3f0e2"/>
+      <!-- brow band -->
+      <path d="M54 56 q26-12 52 0" fill="none" stroke-width="5"/>
+
+      <!-- pocket ledger -->
+      <path d="M92 100 l24 6 l0 28 l-24 -6 z" fill="#fdfaf2"/>
+    </g>
+
+    <path d="M99 108 l0 26 M107 110 l0 26" stroke="#b9c4ad" stroke-width="2.5"/>
+
+    <!-- reading lenses -->
+    <g stroke="#0f1a0e" stroke-width="3" fill="none">
+      <circle cx="70" cy="66" r="9"/>
+      <circle cx="92" cy="66" r="9"/>
+      <path d="M79 66 h4"/>
+    </g>
+    <circle cx="70" cy="66" r="3.4" fill="#0f1a0e"/>
+    <circle cx="92" cy="66" r="3.4" fill="#0f1a0e"/>
+  </g>
+</svg>

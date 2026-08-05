@@ -6,24 +6,35 @@
  * Chakra Petch / JetBrains Mono vocabulary and signal colors.
  */
 
+/*
+ * The cockpit's own token names are kept and re-pointed at the shared cozy
+ * palette (cozy-character.css). Every rule below and in
+ * home-workspace-cockpit.css already reads through --hc-*, so warming the
+ * surface is a change of VALUES, not of structure — no layout, no data path,
+ * and no behaviour moves (PRD FR-1/FR-4/FR-77).
+ *
+ * The direction: away from a tactical console and toward paper, moss, and
+ * wood, while keeping the operational contrast the map depends on.
+ */
 body.home-command-page {
-  --home-command-canvas: #0c0d10;
-  --hc-panel: #15181e;
-  --hc-panel-raised: #1a1e25;
-  --hc-panel-deep: #101217;
-  --hc-line: #2a2e38;
-  --hc-line-bright: #4a5160;
-  --hc-ink: #e4e9e7;
-  --hc-ink-dim: #a1a9b2;
-  --hc-ink-faint: #6e7783;
-  --hc-signal: #46d39a;
-  --hc-signal-deep: #0e4737;
-  --hc-amber: #e8b54b;
-  --hc-alert: #e2654d;
-  --hc-idle: #6f8695;
-  --hc-grid: rgba(133, 152, 165, 0.085);
-  --hc-grid-soft: rgba(133, 152, 165, 0.04);
-  --hc-shadow: 0 20px 38px -26px rgba(0, 0, 0, 0.9);
+  --home-command-canvas: var(--cozy-paper-deep);
+  --hc-panel: var(--cozy-paper);
+  --hc-panel-raised: var(--cozy-paper-raised);
+  --hc-panel-deep: var(--cozy-paper-deep);
+  --hc-line: var(--cozy-line);
+  --hc-line-bright: var(--cozy-line-strong);
+  --hc-ink: var(--cozy-ink);
+  --hc-ink-dim: var(--cozy-ink-dim);
+  --hc-ink-faint: var(--cozy-ink-faint);
+  --hc-signal: var(--cozy-moss);
+  --hc-signal-deep: var(--cozy-moss-soft);
+  --hc-amber: var(--cozy-amber-strong);
+  --hc-alert: var(--cozy-clay);
+  --hc-idle: var(--cozy-water);
+  /* A paper grid rather than a scanline grid: same 24px rhythm, warmer ink. */
+  --hc-grid: rgb(90 74 46 / 8%);
+  --hc-grid-soft: rgb(90 74 46 / 4%);
+  --hc-shadow: var(--cozy-shadow);
   background-color: var(--home-command-canvas) !important;
   background-image:
     linear-gradient(var(--hc-grid) 1px, transparent 1px),
@@ -34,24 +45,12 @@ body.home-command-page {
     24px 24px;
 }
 
-[data-bs-theme="light"] body.home-command-page {
-  --home-command-canvas: #edf2ed;
-  --hc-panel: rgba(250, 252, 248, 0.94);
-  --hc-panel-raised: #ffffff;
-  --hc-panel-deep: #e5ece5;
-  --hc-line: #c8d2ca;
-  --hc-line-bright: #90a096;
-  --hc-ink: #17231b;
-  --hc-ink-dim: #526058;
-  --hc-ink-faint: #718076;
-  --hc-signal: #1f7a54;
-  --hc-signal-deep: #d8eee1;
-  --hc-amber: #98690a;
-  --hc-alert: #ba4939;
-  --hc-idle: #54798d;
-  --hc-grid: rgba(34, 57, 43, 0.09);
-  --hc-grid-soft: rgba(34, 57, 43, 0.045);
-  --hc-shadow: 0 18px 30px -26px rgba(28, 48, 35, 0.55);
+/* Dark is charcoal, not tinted brown — see cozy-character.css. The shared
+   tokens carry that; only the grid ink needs its own value here, and it goes
+   neutral with them. */
+[data-bs-theme="dark"] body.home-command-page {
+  --hc-grid: rgb(214 219 226 / 7%);
+  --hc-grid-soft: rgb(214 219 226 / 3.5%);
 }
 
 body.home-command-page .home-command-main {
@@ -147,10 +146,13 @@ body.home-command-page .home-command-bridge * {
 .home-status-text,
 .home-row-meta,
 .home-section-empty,
+/* Empty-state sentences read as sentences. Set in tracked uppercase monospace
+   they read as machine output — "AWAITING FIRST OPERATION." is the console
+   voice, not the cozy one, and it is the rail's most-seen text because an empty
+   rail is what a new user sees first (PRD FR-1/FR-8). The words themselves are
+   unchanged; only their delivery is. */
 .home-section-placeholder {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 1.15px;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
 }
 
 .home-command-kicker {
@@ -395,15 +397,24 @@ body.home-command-page .home-command-bridge * {
 .home-section-title {
   margin: 0;
   color: var(--hc-ink);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 1.65px;
+  /* Loosened from 10px/1.65px: that tracking is what made the rail read as a
+     status console. Still a small uppercase label, just a legible one. */
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
 }
 
+/* A small moss tile instead of a "//" comment marker. Same job — mark where a
+   section starts — in the cozy vocabulary rather than the console one, and it
+   sits on the shared 4px step grid like every other pixel detail. */
 .home-section-title::before {
-  margin-right: 6px;
-  color: var(--hc-signal);
-  content: "//";
+  display: inline-block;
+  width: var(--cozy-step, 4px);
+  height: var(--cozy-step, 4px);
+  margin-right: 8px;
+  vertical-align: 0.12em;
+  background: var(--hc-signal);
+  content: "";
 }
 
 .home-section-link {
@@ -433,8 +444,11 @@ body.home-command-page .home-command-bridge * {
 .home-section-placeholder,
 .home-section-empty {
   padding: 8px 0;
-  color: var(--hc-ink-faint);
-  font-size: 9px;
+  color: var(--hc-ink-dim);
+  /* 9px was legible only because it was uppercase monospace. Now that these are
+     ordinary sentences they need an ordinary size, and the dimmer-not-faintest
+     ink keeps them above the AA floor. */
+  font-size: 12px;
   line-height: 1.55;
 }
 

@@ -399,8 +399,17 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 // isSystemAgentName mirrors agenthttp.isSystemAssistantAgent without taking
 // the import dependency. Update both in lockstep if the canonical name
 // changes.
+//
+// The legacy names are still recognized because a snapshot written before the
+// rename can outlive the migration of the agent store itself.
 func isSystemAgentName(name string) bool {
-	return strings.EqualFold(strings.TrimSpace(name), "Ori")
+	trimmed := strings.TrimSpace(name)
+	for _, known := range []string{"Workspace Manager", "Ori", "__assistant__"} {
+		if strings.EqualFold(trimmed, known) {
+			return true
+		}
+	}
+	return false
 }
 
 // agentDefinitionEquivalent reports whether two agents share the same core

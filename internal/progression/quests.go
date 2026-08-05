@@ -102,8 +102,11 @@ func BuiltinQuests() []Quest {
 		// ---- Tier 1 — First Contact ----
 		{
 			ID: "t1-first-message", Tier: 1,
-			Title: "Say hello to Ori",
-			Why:   "Send Ori a message on the home page — it's the fastest way to see what it can do.",
+			// "Ori" elsewhere in this file means the product; here it meant the
+			// assistant you message, which is now Workspace Manager. Naming the
+			// guide would send the user to the wrong box entirely.
+			Title: "Send your first request",
+			Why:   "Give Workspace Manager something to do from the home page — it's the fastest way to see what Ori can do.",
 			Match: onEvent(ws.EventMessageSent),
 			// Any workspace implies the app has been used; grandfather first contact.
 			Satisfied: func(s Snapshot) bool { return s.ChatMessages > 0 || s.Workspaces > 0 },

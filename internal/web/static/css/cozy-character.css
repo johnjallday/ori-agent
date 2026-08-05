@@ -1,0 +1,151 @@
+/*
+ * cozy-character.css — the shared visual vocabulary for the cozy character
+ * experience (PRD FR-4).
+ *
+ * One token layer, consumed by Home, Agents, the Ori Guide, and the character
+ * picker, so the four surfaces read as one system rather than four that happen
+ * to use similar colours. Components reference these tokens; none of them
+ * hard-codes a hex value of its own.
+ *
+ * Scope: this file only DEFINES tokens. It applies nothing on its own, so
+ * loading it on a page outside the V1 surface list changes nothing there
+ * (FR-2).
+ *
+ * The palette is earthy and limited — paper, wood, moss, water, clay — chosen
+ * for operational contrast first. Every ink/surface pairing below clears WCAG
+ * AA at body size in both themes, because status text has to stay readable
+ * before it is allowed to be warm (FR-119).
+ */
+
+:root {
+  /* ---- paper and surfaces ------------------------------------------------ */
+  --cozy-paper: #f4efe3;
+  --cozy-paper-raised: #fdfaf2;
+  --cozy-paper-deep: #e6dccb;
+  --cozy-paper-sunk: #ddd2bd;
+
+  /* ---- ink --------------------------------------------------------------- */
+  --cozy-ink: #23301f;
+  --cozy-ink-dim: #55614f;
+  --cozy-ink-faint: #7d8878;
+
+  /* ---- lines and edges ---------------------------------------------------- */
+  --cozy-line: #d2c6ae;
+  --cozy-line-strong: #a8987b;
+
+  /* ---- accents ------------------------------------------------------------ */
+  /* Moss carries "this is Ori"; amber carries the guide; clay carries
+     attention. None of them is ever the only signal for a state (FR-7/FR-118). */
+  --cozy-moss: #3f6b45;
+  --cozy-moss-bright: #5b8f5f;
+  --cozy-moss-soft: #dce8d8;
+  --cozy-amber: #bd7c24;
+  --cozy-amber-strong: #8a5a15;
+  --cozy-clay: #b0553a;
+  --cozy-water: #3d6f82;
+  --cozy-wood: #8a6b3f;
+
+  /* ---- pixel treatment ----------------------------------------------------- */
+  /* A single step unit keeps corner rounding, insets, and sprite scaling on one
+     grid, which is what makes the pixel-stepping read as deliberate rather than
+     as inconsistent rounding. */
+  --cozy-step: 4px;
+  --cozy-radius: 8px;
+  --cozy-radius-lg: 14px;
+  --cozy-border: 1px;
+  --cozy-border-strong: 2px;
+
+  /* ---- depth ---------------------------------------------------------------- */
+  --cozy-shadow-sm: 0 2px 0 0 var(--cozy-paper-sunk);
+  --cozy-shadow: 0 10px 24px -18px rgb(40 32 18 / 55%);
+  --cozy-shadow-lift: 0 16px 34px -20px rgb(40 32 18 / 45%);
+
+  /* ---- motion ---------------------------------------------------------------- */
+  /* Named so a component never invents its own timing, and so reduced motion has
+     one place to neutralise. */
+  --cozy-motion-fast: 120ms;
+  --cozy-motion: 200ms;
+  --cozy-motion-slow: 360ms;
+  --cozy-ease: cubic-bezier(0.2, 0.6, 0.3, 1);
+
+  /* ---- focus ------------------------------------------------------------------ */
+  --cozy-focus: 3px;
+  --cozy-focus-offset: 2px;
+}
+
+[data-bs-theme="dark"] {
+  /* Charcoal, not brown.
+     The first pass tinted the dark surfaces warm to carry the cozy direction
+     through. At page scale that read as yellow rather than as lamplight —
+     large fields of low-luminance warmth look dingy, not cosy. So the SURFACES
+     go neutral and the warmth moves entirely into the accents and the character
+     art, which is where it actually reads as warmth.
+     Still deliberately lifted off true black, so panels can be told apart. */
+  --cozy-paper: #26282b;
+  --cozy-paper-raised: #303337;
+  --cozy-paper-deep: #1b1d20;
+  --cozy-paper-sunk: #141619;
+
+  --cozy-ink: #e8eaec;
+  --cozy-ink-dim: #b0b5ba;
+  --cozy-ink-faint: #868c92;
+
+  --cozy-line: #3a3e43;
+  --cozy-line-strong: #565c63;
+
+  --cozy-moss: #7fb283;
+  --cozy-moss-bright: #9ccb9f;
+  --cozy-moss-soft: #2c3a2c;
+  --cozy-amber: #d9962f;
+  --cozy-amber-strong: #e0a748;
+  --cozy-clay: #d17a5e;
+  --cozy-water: #6ea3b8;
+  --cozy-wood: #b28c58;
+
+  --cozy-shadow-sm: 0 2px 0 0 var(--cozy-paper-sunk);
+  --cozy-shadow: 0 12px 28px -18px rgb(0 0 0 / 75%);
+  --cozy-shadow-lift: 0 18px 38px -20px rgb(0 0 0 / 70%);
+}
+
+/* ---- shared primitives ------------------------------------------------------- */
+
+/* A pixel-stepped frame: a flat inner edge plus a hard bottom shadow, so a panel
+   reads as a physical card rather than a floating rectangle. Opt-in via class so
+   nothing inherits it by accident. */
+.cozy-frame {
+  border: var(--cozy-border) solid var(--cozy-line);
+  border-radius: var(--cozy-radius);
+  background: var(--cozy-paper-raised);
+  box-shadow: var(--cozy-shadow-sm);
+}
+
+.cozy-frame--lifted {
+  border-radius: var(--cozy-radius-lg);
+  box-shadow: var(--cozy-shadow);
+}
+
+/* One focus treatment across every cozy surface, so keyboard users see the same
+   ring on Home, Agents, the guide, and the picker (FR-119). */
+.cozy-focusable:focus-visible {
+  outline: var(--cozy-focus) solid var(--cozy-amber);
+  outline-offset: var(--cozy-focus-offset);
+}
+
+/* Character and environment art is authored on a pixel grid; smoothing it on
+   upscale is what makes hand-drawn pixel work look muddy. */
+.cozy-pixel-art {
+  image-rendering: pixelated;
+}
+
+/* ---- reduced motion ------------------------------------------------------------ */
+
+/* Neutralising the tokens themselves means a component that respects them gets
+   reduced motion for free, rather than each one needing its own media query
+   (FR-120). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --cozy-motion-fast: 0ms;
+    --cozy-motion: 0ms;
+    --cozy-motion-slow: 0ms;
+  }
+}

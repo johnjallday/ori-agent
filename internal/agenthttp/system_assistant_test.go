@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestDashboardUpdateAgentStatusBlocksDisablingSystemAssistant(t *testing.T) 
 
 	req := httptest.NewRequest(
 		http.MethodPost,
-		"/api/agents/"+systemAssistantAgentName+"/status",
+		"/api/agents/"+url.PathEscape(systemAssistantAgentName)+"/status",
 		bytes.NewBufferString(`{"status":"disabled"}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
@@ -104,7 +105,7 @@ func TestDashboardUpdateAgentStatusAllowsReenablingSystemAssistant(t *testing.T)
 	// Re-enabling (status active) must not be blocked by the disable guard.
 	req := httptest.NewRequest(
 		http.MethodPost,
-		"/api/agents/"+systemAssistantAgentName+"/status",
+		"/api/agents/"+url.PathEscape(systemAssistantAgentName)+"/status",
 		bytes.NewBufferString(`{"status":"active"}`),
 	)
 	req.Header.Set("Content-Type", "application/json")

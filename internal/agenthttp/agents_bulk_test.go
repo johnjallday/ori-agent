@@ -124,7 +124,10 @@ func TestBulkDeleteMixedPartialSuccess(t *testing.T) {
 		[]string{"Loose1", "Loose2", "Attached"},
 		map[string][]string{"ws-a": {"Attached"}},
 	)
-	body := `{"agent_names":["Loose1","Attached","Ori","Missing","Loose2"],"operation":"delete"}`
+	// The system assistant is the protected agent; referenced through the
+	// constant so a future rename does not silently turn this case into a
+	// "not found" assertion that still passes.
+	body := `{"agent_names":["Loose1","Attached","` + systemAssistantAgentName + `","Missing","Loose2"],"operation":"delete"}`
 	resp := postBulk(t, h, body)
 
 	if resp.Summary.Requested != 5 {
@@ -143,8 +146,8 @@ func TestBulkDeleteMixedPartialSuccess(t *testing.T) {
 	if r, _ := resultFor(resp, "Attached"); r.ReasonCode != reasonAttachedAgent {
 		t.Errorf("Attached reason=%s, want %s", r.ReasonCode, reasonAttachedAgent)
 	}
-	if r, _ := resultFor(resp, "Ori"); r.ReasonCode != reasonProtectedAgent {
-		t.Errorf("Ori reason=%s, want %s", r.ReasonCode, reasonProtectedAgent)
+	if r, _ := resultFor(resp, systemAssistantAgentName); r.ReasonCode != reasonProtectedAgent {
+		t.Errorf("%s reason=%s, want %s", systemAssistantAgentName, r.ReasonCode, reasonProtectedAgent)
 	}
 	if r, _ := resultFor(resp, "Missing"); r.ReasonCode != reasonAgentNotFound {
 		t.Errorf("Missing reason=%s, want %s", r.ReasonCode, reasonAgentNotFound)

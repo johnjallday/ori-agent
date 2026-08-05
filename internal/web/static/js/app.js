@@ -136,7 +136,9 @@ function sanitizeHistory(messages) {
 // ---- Chat Persistence (localStorage) ----
 
 function getDefaultAssistantAgentName() {
-  return 'Ori';
+  // The working system assistant. "Ori" now names the app guide, which is a
+  // character identity rather than an agent record.
+  return 'Workspace Manager';
 }
 
 function getActiveChatStorageKey() {

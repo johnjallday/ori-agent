@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Team Caretaker">
+  <!-- Reduced-motion variant of sprite.svg: sprout upright, no sway (FR-120). -->
+  <circle cx="24" cy="24" r="24" fill="#e6e9d0"/>
+  <g stroke="#171e07" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
+    <rect x="11" y="26" width="26" height="20" rx="8" fill="#f4f1df"/>
+    <path d="M13 32 q11 -5 22 0 l0 7 q-11 4 -22 0 z" fill="#7d8f3c"/>
+    <rect x="14" y="11" width="20" height="16" rx="7" fill="#f4f1df"/>
+    <path d="M24 11 v-5" fill="none" stroke-width="2.4"/>
+    <path d="M24 8 q-6 -1 -5 -5 q5 -1 5 5 z" fill="#7fae4a"/>
+    <path d="M24 9 q6 -1 5 -5 q-5 -1 -5 5 z" fill="#5f8f33"/>
+  </g>
+  <path d="M18 18 q2 -2 4 0" fill="none" stroke="#171e07" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M26 18 q2 -2 4 0" fill="none" stroke="#171e07" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M21 23 q3 2.5 6 0" fill="none" stroke="#171e07" stroke-width="2" stroke-linecap="round"/>
+</svg>

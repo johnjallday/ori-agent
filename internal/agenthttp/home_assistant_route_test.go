@@ -1015,7 +1015,7 @@ func TestHomeAssistantRouteHandler_DoesNotCreateSystemAssistantFilesByDefault(t 
 
 func TestHomeAssistantRouteHandler_DoesNotMigrateLegacyAssistantNameByRoute(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	if err := st.CreateAgent(systemAssistantAgentLegacyName, &store.CreateAgentConfig{
+	if err := st.CreateAgent(systemAssistantLegacyNames[0], &store.CreateAgentConfig{
 		Type:        "general",
 		Model:       "gpt-5-nano",
 		LLMProvider: "openai",
@@ -1032,7 +1032,7 @@ func TestHomeAssistantRouteHandler_DoesNotMigrateLegacyAssistantNameByRoute(t *t
 	if _, ok := st.GetAgent(systemAssistantAgentName); ok {
 		t.Fatalf("expected assistant %q NOT to exist yet", systemAssistantAgentName)
 	}
-	if _, ok := st.GetAgent(systemAssistantAgentLegacyName); !ok {
-		t.Fatalf("expected legacy assistant %q to still exist", systemAssistantAgentLegacyName)
+	if _, ok := st.GetAgent(systemAssistantLegacyNames[0]); !ok {
+		t.Fatalf("expected legacy assistant %q to still exist", systemAssistantLegacyNames[0])
 	}
 }

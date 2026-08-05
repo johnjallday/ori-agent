@@ -672,17 +672,65 @@ test('workspace detail derives roster status from all assigned tasks and subtask
   assert.equal(page.getAgentRosterStatus('Manager').label, 'Idle');
 });
 
-test('workspace detail generates stable deterministic agent avatars', () => {
+// Avatars are no longer derived from a private hue hash here: the page resolves
+// them through the SHARED identity renderer so an agent looks the same on this
+// page as on /agents (PRD FR-99). Without that renderer loaded, the page still
+// has to produce readable initials rather than an empty box.
+test('workspace detail falls back to initials when the shared renderer is absent', () => {
   const page = new WorkspaceDetailPage('workspace-1');
 
   const first = page.getAgentAvatarPresentation('Trip Planning Manager');
-  const second = page.getAgentAvatarPresentation('Trip Planning Manager');
   const other = page.getAgentAvatarPresentation('Trip Planning Writer');
 
   assert.equal(first.initials, 'TM');
-  assert.equal(first.hue, second.hue);
-  assert.equal(first.style, second.style);
-  assert.notEqual(first.hue, other.hue);
+  assert.equal(other.initials, 'TW');
+  assert.equal(first.markup('any-class'), '');
+  assert.match(page.renderAgentAvatarHTML(first), /workspace-detail-agent-avatar is-initials/);
+  assert.match(page.renderAgentAvatarHTML(first), />TM</);
+});
+
+test('workspace detail renders an agent through the shared identity renderer', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  const seen = [];
+  globalThis.window.AgentAvatar = {
+    markup(input, options) {
+      seen.push({ input, options });
+      return `<span class="${options.className}" data-shared="1"></span>`;
+    }
+  };
+  globalThis.window.CharacterCatalog = {
+    get: id => (id === 'research-archivist' ? { id, name: 'Research Archivist' } : null)
+  };
+  page.agentIndex = new Map([
+    [
+      'trip planning manager',
+      {
+        name: 'Trip Planning Manager',
+        source: 'user',
+        role: 'orchestrator',
+        characterId: 'research-archivist',
+        displayMode: 'character',
+        avatarImage: '',
+        avatarColor: ''
+      }
+    ]
+  ]);
+
+  try {
+    const avatar = page.getAgentAvatarPresentation('Trip Planning Manager');
+    const html = page.renderAgentAvatarHTML(avatar);
+
+    assert.equal(seen.length, 1);
+    // The chosen character is what reaches the renderer, not just the name.
+    assert.equal(seen[0].input.character.id, 'research-archivist');
+    assert.equal(seen[0].input.displayMode, 'character');
+    assert.match(html, /data-shared="1"/);
+    // Geometry stays the page's own.
+    assert.match(html, /workspace-detail-agent-avatar/);
+  } finally {
+    delete globalThis.window.AgentAvatar;
+    delete globalThis.window.CharacterCatalog;
+  }
 });
 
 test('workspace detail skill summary uses workspace-effective skills', () => {
