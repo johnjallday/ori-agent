@@ -516,7 +516,7 @@ func TestIssueViewShowsOneIssueInFull(t *testing.T) {
 	}
 	if strings.Join(remote.calls[1], " ") !=
 		"issue view 292 --repo johnjallday/ori-agent --json "+
-			"number,title,author,labels,url,createdAt,updatedAt,state,stateReason,closedAt,body" {
+			"number,title,author,labels,url,createdAt,updatedAt,state,stateReason,closedAt,body,comments" {
 		t.Fatalf("view args = %v", remote.calls[1])
 	}
 }
@@ -566,6 +566,141 @@ func TestIssueViewJSONCarriesTheDetailFields(t *testing.T) {
 	if payload.Title == "" || payload.Author == "" || payload.URL == "" ||
 		payload.CreatedAt == "" || payload.UpdatedAt == "" || payload.Labels == nil {
 		t.Fatalf("payload = %+v, want the shared identity fields present", payload)
+	}
+}
+
+// issueWithComments builds a `gh issue view --json` fixture carrying comments,
+// so the spec-selection rules can be exercised without a network.
+func issueWithComments(comments string) string {
+	return `{"number":292,"title":"Coordinate based map","author":{"login":"johnjallday"},
+		"labels":[],"url":"https://github.com/johnjallday/ori-agent/issues/292",
+		"createdAt":"2026-08-02T23:06:49Z","updatedAt":"2026-08-05T09:09:13Z",
+		"state":"OPEN","body":"place buildings at coordinates",
+		"comments":[` + comments + `]}`
+}
+
+func TestIssueViewShowsTheGroomingAgentsSpec(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: issueWithComments(
+		`{"body":"<!-- ori-backlog-spec -->\n\n**What this means concretely**\n\ncomputeMapLayout is deterministic.",
+		  "createdAt":"2026-08-05T09:09:13Z","updatedAt":"2026-08-05T09:09:13Z"}`)}
+	application, stdout, stderr, base := newIssueApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "292")); exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Agent spec") {
+		t.Fatalf("view = %q, want the spec section", output)
+	}
+	if !strings.Contains(output, "computeMapLayout is deterministic.") {
+		t.Fatalf("view = %q, want the spec body", output)
+	}
+	// The marker is machinery, not content: it identifies the comment and then
+	// has no business on the reader's screen.
+	if strings.Contains(output, "<!-- ori-backlog-spec -->") {
+		t.Fatalf("view = %q, want the marker stripped", output)
+	}
+	// The Issue's own words still come first and are unchanged.
+	if !strings.Contains(output, "place buildings at coordinates") {
+		t.Fatalf("view = %q, want the Issue body kept", output)
+	}
+}
+
+// TestIssueViewIgnoresACommentThatMerelyQuotesTheMarker guards the obvious
+// spoof: anyone can paste the marker into a comment, and only a first-line
+// match may count.
+func TestIssueViewIgnoresACommentThatMerelyQuotesTheMarker(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: issueWithComments(
+		`{"body":"I think the agent uses <!-- ori-backlog-spec --> as its marker",
+		  "createdAt":"2026-08-05T09:00:00Z","updatedAt":"2026-08-05T09:00:00Z"}`)}
+	application, stdout, _, base := newIssueApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "292")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	if strings.Contains(stdout.String(), "Agent spec") {
+		t.Fatalf("a comment quoting the marker was treated as a spec: %q", stdout.String())
+	}
+}
+
+func TestIssueViewSaysNothingWhenAnIssueIsNotGroomed(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: issueWithComments(
+		`{"body":"any luck with this?","createdAt":"2026-08-04T09:00:00Z","updatedAt":"2026-08-04T09:00:00Z"}`)}
+	application, stdout, _, base := newIssueApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "292")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	// No placeholder: "not groomed yet" under every ungroomed Issue is noise on
+	// the common case, and the board already says it more clearly.
+	if strings.Contains(stdout.String(), "Agent spec") {
+		t.Fatalf("an ungroomed Issue printed a spec section: %q", stdout.String())
+	}
+	// An ordinary comment is not shown either — view is the Issue and its spec,
+	// not a discussion reader.
+	if strings.Contains(stdout.String(), "any luck with this?") {
+		t.Fatalf("view leaked general discussion: %q", stdout.String())
+	}
+}
+
+func TestIssueViewPrefersTheNewestSpecAndSaysThereWereSeveral(t *testing.T) {
+	t.Parallel()
+	remote := &fakeGitHub{issues: issueWithComments(
+		`{"body":"<!-- ori-backlog-spec -->\nstale research",
+		  "createdAt":"2026-08-03T09:00:00Z","updatedAt":"2026-08-03T09:00:00Z"},
+		 {"body":"<!-- ori-backlog-spec -->\ncurrent research",
+		  "createdAt":"2026-08-05T09:00:00Z","updatedAt":"2026-08-05T09:00:00Z"}`)}
+	application, stdout, _, base := newIssueApp(t, remote)
+
+	if exit := application.Run(context.Background(), append(base, "view", "292")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "current research") || strings.Contains(output, "stale research") {
+		t.Fatalf("view = %q, want only the most recent spec", output)
+	}
+	// The agent edits its comment in place, so duplicates mean something
+	// upstream misbehaved; the reader is told rather than left to assume the
+	// one shown is the only one.
+	if !strings.Contains(output, "several spec comments found") {
+		t.Fatalf("view = %q, want the duplicates noted", output)
+	}
+}
+
+func TestIssueViewJSONCarriesTheSpecOnlyWhenThereIsOne(t *testing.T) {
+	t.Parallel()
+	groomed := &fakeGitHub{issues: issueWithComments(
+		`{"body":"<!-- ori-backlog-spec -->\nthe research",
+		  "createdAt":"2026-08-05T09:00:00Z","updatedAt":"2026-08-05T09:00:00Z"}`)}
+	application, stdout, _, base := newIssueApp(t, groomed)
+	if exit := application.Run(context.Background(), append(base, "view", "292", "--json")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	var payload issueDetailPayload
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("stdout = %q: %v", stdout.String(), err)
+	}
+	if payload.Spec != "the research" {
+		t.Fatalf("spec = %q, want the marker stripped and the body kept", payload.Spec)
+	}
+	// Adding an optional field must not move the version a consumer branches on.
+	if payload.SchemaVersion != issueSchemaVersion {
+		t.Fatalf("schema_version = %d, want it unchanged at %d", payload.SchemaVersion, issueSchemaVersion)
+	}
+
+	// An ungroomed Issue omits the key entirely rather than carrying an empty
+	// string, so `spec in payload` is a usable test.
+	bare := &fakeGitHub{issues: issueWithComments("")}
+	plainApp, plainOut, _, plainBase := newIssueApp(t, bare)
+	if exit := plainApp.Run(context.Background(), append(plainBase, "view", "292", "--json")); exit != 0 {
+		t.Fatalf("exit = %d, want 0", exit)
+	}
+	if strings.Contains(plainOut.String(), `"spec"`) {
+		t.Fatalf("ungroomed payload = %s, want no spec key", plainOut.String())
 	}
 }
 

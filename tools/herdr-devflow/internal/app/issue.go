@@ -332,9 +332,31 @@ func (a *App) renderIssueDetail(detail github.IssueDetail) {
 		// Said explicitly, because a blank space below the header reads like
 		// the command failed to print something.
 		fmt.Fprintf(a.stdout, "%s(this Issue has no description)%s\n", style.dim, style.reset)
+	} else {
+		fmt.Fprintln(a.stdout, detail.Body)
+	}
+	a.renderIssueSpec(detail, style)
+}
+
+// renderIssueSpec writes the grooming agent's research below the Issue.
+//
+// Nothing is printed when there is none. A placeholder would put "not groomed
+// yet" under every Issue in the backlog, which is noise on the common case and
+// tells the reader something the board already says more clearly.
+func (a *App) renderIssueSpec(detail github.IssueDetail, style listStyle) {
+	if strings.TrimSpace(detail.Spec) == "" {
 		return
 	}
-	fmt.Fprintln(a.stdout, detail.Body)
+	fmt.Fprintf(a.stdout, "\n%s── Agent spec ──%s\n", style.dim, style.reset)
+	if detail.SpecDuplicates {
+		// The agent edits its comment in place, so more than one means something
+		// upstream misbehaved. Saying so beats silently picking one.
+		fmt.Fprintf(a.stdout,
+			"%s(several spec comments found; showing the most recently updated)%s\n",
+			style.dim, style.reset)
+	}
+	fmt.Fprintln(a.stdout)
+	fmt.Fprintln(a.stdout, detail.Spec)
 }
 
 // issueDetailPayload is the `./scripts/issue.sh view --json` contract: the same
@@ -347,6 +369,11 @@ type issueDetailPayload struct {
 	StateReason string `json:"state_reason,omitempty"`
 	ClosedAt    string `json:"closed_at,omitempty"`
 	Body        string `json:"body"`
+	// Spec is the grooming agent's research, with its marker line removed, and
+	// is omitted entirely when the Issue has not been groomed. Adding an
+	// optional field does not break a consumer of the existing shape, so the
+	// schema version does not move.
+	Spec string `json:"spec,omitempty"`
 }
 
 func newIssueDetailPayload(repository github.Repository, detail github.IssueDetail) issueDetailPayload {
@@ -370,6 +397,7 @@ func newIssueDetailPayload(repository github.Repository, detail github.IssueDeta
 		StateReason: detail.StateReason,
 		ClosedAt:    ghTimestamp(detail.ClosedAt),
 		Body:        detail.Body,
+		Spec:        detail.Spec,
 	}
 }
 
