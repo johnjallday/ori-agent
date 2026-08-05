@@ -362,6 +362,49 @@ func TestVoiceCanBeToggledWithoutRestatingTheCharacter(t *testing.T) {
 }
 
 // A PATCH that says nothing about the character must leave it untouched.
+// A round trip through the in-memory value is not the same as a round trip
+// through the disk. This repo has a standing bug class where a field lives only
+// in the folder store and a fresh read silently drops it, so the identity is
+// checked against a store built anew from the same files.
+func TestACharacterSurvivesAStoreReload(t *testing.T) {
+	dir := t.TempDir()
+	index := filepath.Join(dir, "agents_index.json")
+	settings := types.Settings{Model: "gpt-4o-mini", Temperature: 1.0}
+
+	st, err := store.NewFileStore(index, settings)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := st.CreateAgent("Solo", &store.CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	h := New(st)
+	id := firstWorkingID(t)
+
+	if rec := patchAgent(t, h, "Solo",
+		`{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`); rec.Code != http.StatusOK {
+		t.Fatalf("setup failed: %d %s", rec.Code, rec.Body.String())
+	}
+
+	reloaded, err := store.NewFileStore(index, settings)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	ag, ok := reloaded.GetAgent("Solo")
+	if !ok {
+		t.Fatal("agent missing after reload")
+	}
+	if got := ag.Metadata.CharacterCatalogID(); got != id {
+		t.Errorf("catalog id lost on reload: %q", got)
+	}
+	if got := ag.Metadata.ResolveDisplayMode(); got != types.DisplayModeCharacter {
+		t.Errorf("display mode lost on reload: %q", got)
+	}
+	if !ag.Metadata.IsCharacterVoiceEnabled() {
+		t.Error("voice opt-in lost on reload")
+	}
+}
+
 /* ---- no bulk path may set a character ------------------------------------- */
 
 // Character choice is deliberately one-agent-at-a-time: assigning the same

@@ -279,7 +279,13 @@ test.describe('Home First Run', () => {
         body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
       });
     });
-    await page.route(/\/api\/agents\?name=Ori$/, async route => {
+    // The system assistant is created on demand, so Home's "does it exist yet"
+    // probe 404s on a fresh install and the browser logs it. Stubbed so this
+    // test can assert on real console errors.
+    // Matches the new name and the legacy one: the cozy-character-experience
+    // feature renamed the agent to Workspace Manager, freeing "Ori" for the
+    // navigation guide.
+    await page.route(/\/api\/agents\?name=(Ori|Workspace(%20|\+| )Manager)$/, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

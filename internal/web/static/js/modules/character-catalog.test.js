@@ -118,15 +118,27 @@ test('the guide identity is reachable on its own, and reported as reserved', () 
 test('a reduced-motion viewer gets the static sprite, not a frozen animation', () => {
   const cat = ready();
   const archivist = cat.get('research-archivist');
-  assert.equal(cat.assetFor(archivist, 'sprite', false), '/characters/research-archivist/sprite.svg');
-  assert.equal(cat.assetFor(archivist, 'sprite', true), '/characters/research-archivist/static.svg');
+  assert.equal(
+    cat.assetFor(archivist, 'sprite', false),
+    '/characters/research-archivist/sprite.svg'
+  );
+  assert.equal(
+    cat.assetFor(archivist, 'sprite', true),
+    '/characters/research-archivist/static.svg'
+  );
 });
 
 test('portraits need no motion variant', () => {
   const cat = ready();
   const archivist = cat.get('research-archivist');
-  assert.equal(cat.assetFor(archivist, 'portrait', true), '/characters/research-archivist/portrait.svg');
-  assert.equal(cat.assetFor(archivist, 'portrait', false), '/characters/research-archivist/portrait.svg');
+  assert.equal(
+    cat.assetFor(archivist, 'portrait', true),
+    '/characters/research-archivist/portrait.svg'
+  );
+  assert.equal(
+    cat.assetFor(archivist, 'portrait', false),
+    '/characters/research-archivist/portrait.svg'
+  );
 });
 
 test('assetFor degrades safely for a missing character or variant', () => {

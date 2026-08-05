@@ -36,7 +36,7 @@ function character(overrides = {}) {
   return {
     id: 'research-archivist',
     name: 'Research Archivist',
-        palette: { base: '#4f744a', accent: '#4f744a', ink: '#0f1a0e' },
+    palette: { base: '#4f744a', accent: '#4f744a', ink: '#0f1a0e' },
     assets: {
       portrait: '/characters/research-archivist/portrait.svg',
       sprite: '/characters/research-archivist/sprite.svg',
@@ -222,7 +222,9 @@ test('the same agent resolves identically at every size and on every surface', (
 
   // Home and the Gallery differ only in size, never in identity.
   for (const size of [54, 72, 88]) {
-    assert.ok(AgentAvatar.markup(input, { size }).includes('/characters/research-archivist/portrait.svg'));
+    assert.ok(
+      AgentAvatar.markup(input, { size }).includes('/characters/research-archivist/portrait.svg')
+    );
   }
 });
 

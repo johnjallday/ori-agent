@@ -26,9 +26,16 @@ const CHARACTER_IDS = [
   'insight-researcher'
 ];
 
+// Set PERF_PLAIN_IDENTITIES=1 to build the pre-feature fixture instead: 100
+// agents on the deterministic fallback, with no portraits to fetch. That is the
+// before-side of the interactive-readiness comparison, and keeping it in the
+// same file means the two runs differ only in the fixture (Success Metric 10).
+const PLAIN_IDENTITIES = process.env.PERF_PLAIN_IDENTITIES === '1';
+
 // Every third agent gets a portrait, every seventh an uploaded avatar; the rest
 // stay on the deterministic fallback.
 function identityFor(i: number) {
+  if (PLAIN_IDENTITIES) return {};
   if (i % 7 === 3) {
     return {
       avatar_image:
@@ -223,11 +230,12 @@ test.describe('Agents collection performance (100 agents)', () => {
 
       // A failed portrait degrades to the deterministic fallback in place; it
       // never leaves a broken-image glyph and never blocks the row (FR-74).
-      const brokenImages = await page.locator('.agent-avatar__portrait').evaluateAll(imgs =>
-        imgs.filter(img => {
-          const i = img as HTMLImageElement;
-          return i.complete && i.naturalWidth === 0;
-        }).length
+      const brokenImages = await page.locator('.agent-avatar__portrait').evaluateAll(
+        imgs =>
+          imgs.filter(img => {
+            const i = img as HTMLImageElement;
+            return i.complete && i.naturalWidth === 0;
+          }).length
       );
       expect(brokenImages, 'a failed portrait must be replaced, not left broken').toBe(0);
 
