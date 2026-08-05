@@ -43,9 +43,9 @@ func (f *fakeGitHub) run(_ context.Context, args ...string) ([]byte, error) {
 	return []byte(f.issues), nil
 }
 
-// newBacklogApp builds an App whose GitHub access is the supplied fixture and
+// newIssueApp builds an App whose GitHub access is the supplied fixture and
 // whose checkout is a bare temporary repository.
-func newBacklogApp(t *testing.T, remote *fakeGitHub) (*App, *bytes.Buffer, *bytes.Buffer, []string) {
+func newIssueApp(t *testing.T, remote *fakeGitHub) (*App, *bytes.Buffer, *bytes.Buffer, []string) {
 	t.Helper()
 	repo := t.TempDir()
 	if err := os.Mkdir(filepath.Join(repo, ".git"), 0700); err != nil {
@@ -59,23 +59,23 @@ func newBacklogApp(t *testing.T, remote *fakeGitHub) (*App, *bytes.Buffer, *byte
 		LookupEnv:    func(string) (string, bool) { return "", false },
 		GitHubRunner: remote.run,
 	})
-	base := []string{"--repo-root", repo, "--home", filepath.Join(t.TempDir(), "runtime"), "backlog"}
+	base := []string{"--repo-root", repo, "--home", filepath.Join(t.TempDir(), "runtime"), "issue"}
 	return application, stdout, stderr, base
 }
 
-func TestParseBacklogArgsAcceptsEverySupportedListSpelling(t *testing.T) {
+func TestParseIssueArgsAcceptsEverySupportedListSpelling(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
 		nil,
 		{"list"},
 		{"ls"},
 	} {
-		parsed, err := parseBacklogArgs(args)
+		parsed, err := parseIssueArgs(args)
 		if err != nil {
-			t.Fatalf("parseBacklogArgs(%v): %v", args, err)
+			t.Fatalf("parseIssueArgs(%v): %v", args, err)
 		}
 		if parsed.command != "list" || parsed.scope != github.ScopeMe || parsed.json {
-			t.Fatalf("parseBacklogArgs(%v) = %+v, want a default author-scoped list", args, parsed)
+			t.Fatalf("parseIssueArgs(%v) = %+v, want a default author-scoped list", args, parsed)
 		}
 	}
 
@@ -86,9 +86,9 @@ func TestParseBacklogArgsAcceptsEverySupportedListSpelling(t *testing.T) {
 		{"list", "--all"},
 		{"--all", "list"},
 	} {
-		parsed, err := parseBacklogArgs(args)
+		parsed, err := parseIssueArgs(args)
 		if err != nil || parsed.scope != github.ScopeAll || parsed.command != "list" {
-			t.Fatalf("parseBacklogArgs(%v) = %+v, %v; want an all-author list", args, parsed, err)
+			t.Fatalf("parseIssueArgs(%v) = %+v, %v; want an all-author list", args, parsed, err)
 		}
 	}
 	for _, args := range [][]string{
@@ -96,14 +96,14 @@ func TestParseBacklogArgsAcceptsEverySupportedListSpelling(t *testing.T) {
 		{"list", "--json"},
 		{"--json", "list", "--all"},
 	} {
-		parsed, err := parseBacklogArgs(args)
+		parsed, err := parseIssueArgs(args)
 		if err != nil || !parsed.json {
-			t.Fatalf("parseBacklogArgs(%v) = %+v, %v; want JSON output", args, parsed, err)
+			t.Fatalf("parseIssueArgs(%v) = %+v, %v; want JSON output", args, parsed, err)
 		}
 	}
 }
 
-func TestParseBacklogArgsRejectsAmbiguousInvocations(t *testing.T) {
+func TestParseIssueArgsRejectsAmbiguousInvocations(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
 		{"list", "extra"},
@@ -116,32 +116,32 @@ func TestParseBacklogArgsRejectsAmbiguousInvocations(t *testing.T) {
 		{"drop"},
 		{"select"},
 	} {
-		if parsed, err := parseBacklogArgs(args); err == nil {
-			t.Fatalf("parseBacklogArgs(%v) = %+v, want a usage error", args, parsed)
+		if parsed, err := parseIssueArgs(args); err == nil {
+			t.Fatalf("parseIssueArgs(%v) = %+v, want a usage error", args, parsed)
 		}
 	}
 }
 
-func TestParseBacklogArgsExplainsTheRemovedFileCommands(t *testing.T) {
+func TestParseIssueArgsExplainsTheRemovedFileCommands(t *testing.T) {
 	t.Parallel()
 	for command, want := range map[string]string{
 		"sync":  "read live",
 		"prune": "history",
 	} {
-		_, err := parseBacklogArgs([]string{command})
+		_, err := parseIssueArgs([]string{command})
 		if err == nil {
-			t.Fatalf("parseBacklogArgs(%q) was accepted", command)
+			t.Fatalf("parseIssueArgs(%q) was accepted", command)
 		}
 		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("parseBacklogArgs(%q) error = %q, want it to explain the replacement", command, err)
+			t.Fatalf("parseIssueArgs(%q) error = %q, want it to explain the replacement", command, err)
 		}
 	}
 }
 
-func TestBacklogRejectsInvalidArgumentsBeforeTouchingGitHub(t *testing.T) {
+func TestIssueRejectsInvalidArgumentsBeforeTouchingGitHub(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	exit := application.Run(context.Background(), append(base, "--nope"))
 
@@ -156,7 +156,7 @@ func TestBacklogRejectsInvalidArgumentsBeforeTouchingGitHub(t *testing.T) {
 	}
 }
 
-func TestBacklogListsTheAuthenticatedUsersOpenIssues(t *testing.T) {
+func TestIssueListsTheAuthenticatedUsersOpenIssues(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `[
 		{"number":293,"title":"Skin Makeover","author":{"login":"johnjallday"},"labels":[],
@@ -167,7 +167,7 @@ func TestBacklogListsTheAuthenticatedUsersOpenIssues(t *testing.T) {
 		 "url":"https://github.com/johnjallday/ori-agent/issues/292",
 		 "createdAt":"2026-08-02T23:06:49Z","updatedAt":"2026-08-02T23:06:49Z"}
 	]`}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), base); exit != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
@@ -194,13 +194,13 @@ func TestBacklogListsTheAuthenticatedUsersOpenIssues(t *testing.T) {
 	}
 }
 
-func TestBacklogAllScopeWidensOnlyTheAuthor(t *testing.T) {
+func TestIssueAllScopeWidensOnlyTheAuthor(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `[{"number":10,"title":"from a collaborator",
 		"author":{"login":"someone-else"},"labels":[],
 		"url":"https://github.com/johnjallday/ori-agent/issues/10",
 		"updatedAt":"2026-08-01T10:00:00Z"}]`}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), append(base, "--all")); exit != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
@@ -217,10 +217,10 @@ func TestBacklogAllScopeWidensOnlyTheAuthor(t *testing.T) {
 	}
 }
 
-func TestBacklogSaysNothingMatchedWithoutSoundingBroken(t *testing.T) {
+func TestIssueSaysNothingMatchedWithoutSoundingBroken(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: "[]"}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	// An empty backlog is a successful answer, so it exits 0 — a script must
 	// not treat "no ideas today" as a failure.
@@ -231,12 +231,12 @@ func TestBacklogSaysNothingMatchedWithoutSoundingBroken(t *testing.T) {
 	if !strings.Contains(output, "0 open Issues") || !strings.Contains(output, "GitHub returned no open Issues") {
 		t.Fatalf("listing = %q, want it to say GitHub answered with nothing", output)
 	}
-	if !strings.Contains(output, "./scripts/backlog.sh add") {
+	if !strings.Contains(output, "./scripts/issue.sh add") {
 		t.Fatalf("listing = %q, want the empty state to say how to fill it", output)
 	}
 }
 
-func TestBacklogReportsTruncationRatherThanImplyingCompleteness(t *testing.T) {
+func TestIssueReportsTruncationRatherThanImplyingCompleteness(t *testing.T) {
 	t.Parallel()
 	var rows []string
 	for number := 1; number <= github.DefaultIssueLimit; number++ {
@@ -246,7 +246,7 @@ func TestBacklogReportsTruncationRatherThanImplyingCompleteness(t *testing.T) {
 			  "updatedAt":"2026-08-02T10:00:00Z"}`, number, number, number))
 	}
 	remote := &fakeGitHub{issues: "[" + strings.Join(rows, ",") + "]"}
-	application, stdout, _, base := newBacklogApp(t, remote)
+	application, stdout, _, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), base); exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
@@ -256,11 +256,11 @@ func TestBacklogReportsTruncationRatherThanImplyingCompleteness(t *testing.T) {
 	}
 
 	// The JSON form says the same thing in its own contract.
-	jsonApp, jsonOut, _, jsonBase := newBacklogApp(t, &fakeGitHub{issues: remote.issues})
+	jsonApp, jsonOut, _, jsonBase := newIssueApp(t, &fakeGitHub{issues: remote.issues})
 	if exit := jsonApp.Run(context.Background(), append(jsonBase, "--json")); exit != 0 {
 		t.Fatalf("json exit = %d, want 0", exit)
 	}
-	var payload backlogListPayload
+	var payload issueListPayload
 	if err := json.Unmarshal(jsonOut.Bytes(), &payload); err != nil {
 		t.Fatalf("json = %q: %v", jsonOut.String(), err)
 	}
@@ -270,24 +270,24 @@ func TestBacklogReportsTruncationRatherThanImplyingCompleteness(t *testing.T) {
 	}
 }
 
-func TestBacklogJSONIsTheOwnedEnvelopeNotRawCLIOutput(t *testing.T) {
+func TestIssueJSONIsTheOwnedEnvelopeNotRawCLIOutput(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `[{"number":292,"title":"Coordinate based map",
 		"author":{"login":"johnjallday"},"labels":[],
 		"url":"https://github.com/johnjallday/ori-agent/issues/292",
 		"createdAt":"2026-08-02T23:06:49Z","updatedAt":"2026-08-02T23:06:49Z",
 		"assignees":[{"login":"johnjallday"}],"body":"a description gh never sent"}]`}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), append(base, "--json")); exit != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
 	}
 
-	var payload backlogListPayload
+	var payload issueListPayload
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("stdout = %q is not the envelope: %v", stdout.String(), err)
 	}
-	if payload.SchemaVersion != backlogSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
+	if payload.SchemaVersion != issueSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
 		payload.AuthorScope != "me" || payload.State != "open" || !payload.Complete {
 		t.Fatalf("payload = %+v, want the schema-versioned envelope", payload)
 	}
@@ -302,18 +302,18 @@ func TestBacklogJSONIsTheOwnedEnvelopeNotRawCLIOutput(t *testing.T) {
 		}
 	}
 	// Human prose belongs to the human surface, not to the machine one.
-	if strings.Contains(stdout.String(), "Ori backlog") {
+	if strings.Contains(stdout.String(), "Ori Issues") {
 		t.Fatalf("JSON output contained the human header: %s", stdout.String())
 	}
 }
 
-func TestBacklogOutputIsPlainTextWhenItIsNotATerminal(t *testing.T) {
+func TestIssueOutputIsPlainTextWhenItIsNotATerminal(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `[{"number":292,"title":"Coordinate based map",
 		"author":{"login":"johnjallday"},"labels":[{"name":"idea"}],
 		"url":"https://github.com/johnjallday/ori-agent/issues/292",
 		"updatedAt":"2026-08-02T23:06:49Z"}]`}
-	application, stdout, _, base := newBacklogApp(t, remote)
+	application, stdout, _, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), base); exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
@@ -325,7 +325,7 @@ func TestBacklogOutputIsPlainTextWhenItIsNotATerminal(t *testing.T) {
 	}
 }
 
-func TestBacklogColorIsDecorationOnlyAndNeverChangesTheReading(t *testing.T) {
+func TestIssueColorIsDecorationOnlyAndNeverChangesTheReading(t *testing.T) {
 	t.Parallel()
 	list := github.IssueList{
 		Repository: github.Repository{Owner: "johnjallday", Name: "ori-agent"},
@@ -342,9 +342,9 @@ func TestBacklogColorIsDecorationOnlyAndNeverChangesTheReading(t *testing.T) {
 
 	var plain, colored bytes.Buffer
 	plainApp := New(Dependencies{Stdout: &plain, LookupEnv: func(string) (string, bool) { return "", false }})
-	plainApp.renderBacklogListStyled(list, backlogStyle{})
+	plainApp.renderIssueListStyled(list, listStyle{})
 	coloredApp := New(Dependencies{Stdout: &colored, LookupEnv: func(string) (string, bool) { return "", false }})
-	coloredApp.renderBacklogListStyled(list, backlogStyle{
+	coloredApp.renderIssueListStyled(list, listStyle{
 		bold: "\x1b[1m", dim: "\x1b[2m", cyan: "\x1b[36m", reset: "\x1b[0m",
 	})
 
@@ -365,10 +365,10 @@ func TestBacklogColorIsDecorationOnlyAndNeverChangesTheReading(t *testing.T) {
 	}
 }
 
-func TestBacklogFailsLoudlyRatherThanShowingAnEmptyBacklog(t *testing.T) {
+func TestIssueFailsLoudlyRatherThanShowingAnEmptyBacklog(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{failure: errNoNetwork{}}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	exit := application.Run(context.Background(), base)
 
@@ -386,7 +386,7 @@ func TestBacklogFailsLoudlyRatherThanShowingAnEmptyBacklog(t *testing.T) {
 	}
 
 	// The JSON form reports the same failure in the machine contract.
-	jsonApp, jsonOut, _, jsonBase := newBacklogApp(t, &fakeGitHub{failure: errNoNetwork{}})
+	jsonApp, jsonOut, _, jsonBase := newIssueApp(t, &fakeGitHub{failure: errNoNetwork{}})
 	if exit := jsonApp.Run(context.Background(), append(jsonBase, "--json")); exit != 1 {
 		t.Fatalf("json exit = %d, want 1", exit)
 	}
@@ -401,7 +401,7 @@ func TestBacklogFailsLoudlyRatherThanShowingAnEmptyBacklog(t *testing.T) {
 	if err := json.Unmarshal(jsonOut.Bytes(), &envelope); err != nil {
 		t.Fatalf("json = %q: %v", jsonOut.String(), err)
 	}
-	if envelope.Error.Code == "" || envelope.Error.Recovery == "" || envelope.SchemaVersion != backlogSchemaVersion {
+	if envelope.Error.Code == "" || envelope.Error.Recovery == "" || envelope.SchemaVersion != issueSchemaVersion {
 		t.Fatalf("error envelope = %+v, want a classified, versioned failure", envelope)
 	}
 	if strings.Contains(jsonOut.String(), `"issues"`) {
@@ -414,7 +414,7 @@ type errNoNetwork struct{}
 
 func (errNoNetwork) Error() string { return "gh could not be started" }
 
-func TestParseBacklogArgsReadsViewAndAddExactly(t *testing.T) {
+func TestParseIssueArgsReadsViewAndAddExactly(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
 		{"view", "292"},
@@ -422,15 +422,15 @@ func TestParseBacklogArgsReadsViewAndAddExactly(t *testing.T) {
 		{"view", "https://github.com/johnjallday/ori-agent/issues/292"},
 		{"show", "292"},
 	} {
-		parsed, err := parseBacklogArgs(args)
+		parsed, err := parseIssueArgs(args)
 		if err != nil || parsed.command != "view" || parsed.number != 292 {
-			t.Fatalf("parseBacklogArgs(%v) = %+v, %v", args, parsed, err)
+			t.Fatalf("parseIssueArgs(%v) = %+v, %v", args, parsed, err)
 		}
 	}
 
-	parsed, err := parseBacklogArgs([]string{"add", "  Coordinate based map  ", "--body", "why it matters"})
+	parsed, err := parseIssueArgs([]string{"add", "  Coordinate based map  ", "--body", "why it matters"})
 	if err != nil {
-		t.Fatalf("parseBacklogArgs(add): %v", err)
+		t.Fatalf("parseIssueArgs(add): %v", err)
 	}
 	if parsed.command != "add" || parsed.title != "Coordinate based map" || parsed.body != "why it matters" {
 		t.Fatalf("parsed = %+v, want a trimmed title and its body", parsed)
@@ -438,11 +438,11 @@ func TestParseBacklogArgsReadsViewAndAddExactly(t *testing.T) {
 
 	// A body may legitimately begin with a dash, so the value after --body is
 	// taken as written rather than mistaken for a flag.
-	dashed, err := parseBacklogArgs([]string{"add", "a title", "--body", "--not-a-flag"})
+	dashed, err := parseIssueArgs([]string{"add", "a title", "--body", "--not-a-flag"})
 	if err != nil || dashed.body != "--not-a-flag" {
 		t.Fatalf("parsed = %+v, %v; want the body taken verbatim", dashed, err)
 	}
-	joined, err := parseBacklogArgs([]string{"add", "a title", "--body=inline text"})
+	joined, err := parseIssueArgs([]string{"add", "a title", "--body=inline text"})
 	if err != nil || joined.body != "inline text" {
 		t.Fatalf("parsed = %+v, %v; want --body= accepted", joined, err)
 	}
@@ -452,14 +452,14 @@ func TestParseBacklogArgsReadsViewAndAddExactly(t *testing.T) {
 		{"view", "292", "--json"},
 		{"--json", "view", "292"},
 	} {
-		parsed, err := parseBacklogArgs(args)
+		parsed, err := parseIssueArgs(args)
 		if err != nil || !parsed.json || parsed.number != 292 {
-			t.Fatalf("parseBacklogArgs(%v) = %+v, %v", args, parsed, err)
+			t.Fatalf("parseIssueArgs(%v) = %+v, %v", args, parsed, err)
 		}
 	}
 }
 
-func TestParseBacklogArgsRefusesUnsafeOrAmbiguousViewAndAdd(t *testing.T) {
+func TestParseIssueArgsRefusesUnsafeOrAmbiguousViewAndAdd(t *testing.T) {
 	t.Parallel()
 	cases := map[string][]string{
 		"view without a number":      {"view"},
@@ -482,14 +482,14 @@ func TestParseBacklogArgsRefusesUnsafeOrAmbiguousViewAndAdd(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			if parsed, err := parseBacklogArgs(args); err == nil {
-				t.Fatalf("parseBacklogArgs(%v) = %+v, want a usage error", args, parsed)
+			if parsed, err := parseIssueArgs(args); err == nil {
+				t.Fatalf("parseIssueArgs(%v) = %+v, want a usage error", args, parsed)
 			}
 		})
 	}
 }
 
-func TestBacklogViewShowsOneIssueInFull(t *testing.T) {
+func TestIssueViewShowsOneIssueInFull(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `{
 		"number":292,"title":"Coordinate based map","author":{"login":"johnjallday"},
@@ -498,7 +498,7 @@ func TestBacklogViewShowsOneIssueInFull(t *testing.T) {
 		"state":"OPEN","stateReason":"","closedAt":"",
 		"body":"Show stations at real coordinates.\n\n- [ ] pick a projection"
 	}`}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), append(base, "view", "292")); exit != 0 {
 		t.Fatalf("exit = %d, want 0; stderr=%q", exit, stderr.String())
@@ -521,12 +521,12 @@ func TestBacklogViewShowsOneIssueInFull(t *testing.T) {
 	}
 }
 
-func TestBacklogViewSaysSoWhenThereIsNoDescription(t *testing.T) {
+func TestIssueViewSaysSoWhenThereIsNoDescription(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `{"number":293,"title":"Skin Makeover",
 		"author":{"login":"johnjallday"},"labels":[],
 		"url":"https://github.com/johnjallday/ori-agent/issues/293","state":"OPEN","body":""}`}
-	application, stdout, _, base := newBacklogApp(t, remote)
+	application, stdout, _, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), append(base, "view", "293")); exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
@@ -538,7 +538,7 @@ func TestBacklogViewSaysSoWhenThereIsNoDescription(t *testing.T) {
 	}
 }
 
-func TestBacklogViewJSONCarriesTheDetailFields(t *testing.T) {
+func TestIssueViewJSONCarriesTheDetailFields(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: `{"number":270,"title":"Downloads Janitor",
 		"author":{"login":"johnjallday"},"labels":[],
@@ -546,17 +546,17 @@ func TestBacklogViewJSONCarriesTheDetailFields(t *testing.T) {
 		"createdAt":"2026-07-20T10:00:00Z","updatedAt":"2026-07-26T10:00:00Z",
 		"state":"CLOSED","stateReason":"COMPLETED","closedAt":"2026-07-26T10:00:00Z",
 		"body":"shipped"}`}
-	application, stdout, _, base := newBacklogApp(t, remote)
+	application, stdout, _, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), append(base, "view", "270", "--json")); exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
 	}
 
-	var payload backlogDetailPayload
+	var payload issueDetailPayload
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("stdout = %q: %v", stdout.String(), err)
 	}
-	if payload.SchemaVersion != backlogSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
+	if payload.SchemaVersion != issueSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
 		payload.Number != 270 || payload.State != "closed" || payload.StateReason != "COMPLETED" ||
 		payload.ClosedAt != "2026-07-26T10:00:00Z" || payload.Body != "shipped" {
 		t.Fatalf("payload = %+v", payload)
@@ -569,10 +569,10 @@ func TestBacklogViewJSONCarriesTheDetailFields(t *testing.T) {
 	}
 }
 
-func TestBacklogViewRefusesAnotherRepositorysIssueURL(t *testing.T) {
+func TestIssueViewRefusesAnotherRepositorysIssueURL(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{}
-	application, _, stderr, base := newBacklogApp(t, remote)
+	application, _, stderr, base := newIssueApp(t, remote)
 
 	exit := application.Run(context.Background(),
 		append(base, "view", "https://github.com/other/project/issues/292"))
@@ -592,10 +592,10 @@ func TestBacklogViewRefusesAnotherRepositorysIssueURL(t *testing.T) {
 	}
 }
 
-func TestBacklogAddCreatesOneIssueAndReportsIt(t *testing.T) {
+func TestIssueAddCreatesOneIssueAndReportsIt(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: "https://github.com/johnjallday/ori-agent/issues/294\n"}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 
 	exit := application.Run(context.Background(),
 		append(base, "add", "Coordinate based map", "--body", "Show stations at real coordinates."))
@@ -625,32 +625,32 @@ func TestBacklogAddCreatesOneIssueAndReportsIt(t *testing.T) {
 	}
 }
 
-func TestBacklogAddJSONIsSchemaVersionedAndMinimal(t *testing.T) {
+func TestIssueAddJSONIsSchemaVersionedAndMinimal(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{issues: "https://github.com/johnjallday/ori-agent/issues/295\n"}
-	application, stdout, _, base := newBacklogApp(t, remote)
+	application, stdout, _, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(), append(base, "add", "Just a title", "--json")); exit != 0 {
 		t.Fatalf("exit = %d, want 0", exit)
 	}
 
-	var payload backlogCreatedPayload
+	var payload issueCreatedPayload
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("stdout = %q: %v", stdout.String(), err)
 	}
-	if payload.SchemaVersion != backlogSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
+	if payload.SchemaVersion != issueSchemaVersion || payload.Repository != "johnjallday/ori-agent" ||
 		payload.Number != 295 || payload.Title != "Just a title" || payload.State != "open" ||
 		payload.URL != "https://github.com/johnjallday/ori-agent/issues/295" {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
 
-func TestBacklogAddPassesHostileTitlesAndBodiesThroughAsData(t *testing.T) {
+func TestIssueAddPassesHostileTitlesAndBodiesThroughAsData(t *testing.T) {
 	t.Parallel()
 	title := `$(rm -rf /); echo "pwned" | tee /tmp/x && :`
 	body := "line one\n\n```sh\nrm -rf /\n```\n\nSee https://example.test/a?b=c&d=e"
 	remote := &fakeGitHub{issues: "https://github.com/johnjallday/ori-agent/issues/296\n"}
-	application, stdout, _, base := newBacklogApp(t, remote)
+	application, stdout, _, base := newIssueApp(t, remote)
 
 	if exit := application.Run(context.Background(),
 		append(base, "add", title, "--body", body)); exit != 0 {
@@ -671,10 +671,10 @@ func TestBacklogAddPassesHostileTitlesAndBodiesThroughAsData(t *testing.T) {
 	}
 }
 
-func TestBacklogAddFailureLeavesNothingBehind(t *testing.T) {
+func TestIssueAddFailureLeavesNothingBehind(t *testing.T) {
 	t.Parallel()
 	remote := &fakeGitHub{failure: errNoNetwork{}}
-	application, stdout, stderr, base := newBacklogApp(t, remote)
+	application, stdout, stderr, base := newIssueApp(t, remote)
 	repo := repoRootFromArgs(t, base)
 	before := readDirNames(t, repo)
 
@@ -730,14 +730,14 @@ func readDirNames(t *testing.T, dir string) []string {
 	return names
 }
 
-// TestBacklogListPayloadIsAStableSchemaVersionOneEnvelope pins the JSON
+// TestIssueListPayloadIsAStableSchemaVersionOneEnvelope pins the JSON
 // contract itself, separately from any command that emits it.
 //
 // A published contract is only useful if it is the same shape every time, so
 // the two states that most often break a consumer are asserted directly: an
 // Issue with no labels and a backlog with no Issues must both encode as empty
 // arrays rather than as `null`.
-func TestBacklogListPayloadIsAStableSchemaVersionOneEnvelope(t *testing.T) {
+func TestIssueListPayloadIsAStableSchemaVersionOneEnvelope(t *testing.T) {
 	t.Parallel()
 	created := time.Date(2026, 8, 2, 23, 6, 49, 0, time.UTC)
 	updated := time.Date(2026, 8, 2, 23, 40, 0, 0, time.UTC)
@@ -757,7 +757,7 @@ func TestBacklogListPayloadIsAStableSchemaVersionOneEnvelope(t *testing.T) {
 		}},
 	}
 
-	encoded, err := json.Marshal(newBacklogListPayload(list))
+	encoded, err := json.Marshal(newIssueListPayload(list))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -767,7 +767,7 @@ func TestBacklogListPayloadIsAStableSchemaVersionOneEnvelope(t *testing.T) {
 	}
 
 	for key, want := range map[string]any{
-		"schema_version": float64(backlogSchemaVersion),
+		"schema_version": float64(issueSchemaVersion),
 		"repository":     "johnjallday/ori-agent",
 		"author_scope":   "me",
 		"state":          "open",
@@ -813,7 +813,7 @@ func TestBacklogListPayloadIsAStableSchemaVersionOneEnvelope(t *testing.T) {
 
 	// An empty backlog is a successful result with an empty array, not a null
 	// and not a missing key.
-	empty, err := json.Marshal(newBacklogListPayload(github.IssueList{
+	empty, err := json.Marshal(newIssueListPayload(github.IssueList{
 		Repository: github.Repository{Owner: "johnjallday", Name: "ori-agent"},
 		Scope:      github.ScopeAll,
 		State:      github.StateOpen,

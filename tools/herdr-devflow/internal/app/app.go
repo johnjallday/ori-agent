@@ -275,6 +275,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.goAgent(ctx, opts, commandArgs)
 	case "feature-overview":
 		return a.overview(ctx, opts, commandArgs)
+	case "issue":
+		return a.issue(ctx, opts, commandArgs)
 	case "backlog":
 		return a.backlog(ctx, opts, commandArgs)
 	case "target":
