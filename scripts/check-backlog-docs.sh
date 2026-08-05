@@ -28,7 +28,7 @@ typeset -a historical
 historical=(
   "docs/feature-discovery/reports/"   # dated discovery reports, written at the time
   "scripts/check-backlog-docs.sh"     # this file
-  "scripts/wt-backlog.test.sh"        # asserts the file, its commands, and `wt backlog` are gone
+  "scripts/issue-cli.test.sh"         # asserts the file, its commands, and `wt backlog` are gone
   "scripts/wt-herd.test.sh"           # asserts no backlog commit is ever created
   "tools/herdr-devflow/internal/overview/types.go"        # schema-version note
   "tools/herdr-devflow/internal/overview/sanitize_test.go" # writes one, proves it is ignored

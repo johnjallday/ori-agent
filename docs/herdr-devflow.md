@@ -447,17 +447,34 @@ feature/delivery snapshot used by `wt status`. It may therefore include saved
 binding diagnostics and feature history that the deliberately smaller
 `wt herd status` live roster omits.
 
-## Backlog
+## Issues and the backlog
+
+Two commands, each named for what it reads. Issues are the record; the board is
+the ordered, groomed view of them.
 
 ~~~bash
-./scripts/backlog.sh                       # open Issues in this repository that you authored
-./scripts/backlog.sh --all                 # every author's open Issues in this repository
-./scripts/backlog.sh view <number>         # one Issue in full, including its body
-./scripts/backlog.sh add "<title>" [--body "<text>"]
-./scripts/backlog.sh --json                # any of the above, as a schema-versioned envelope
+./scripts/issue.sh                       # open Issues in this repository that you authored
+./scripts/issue.sh --all                 # every author's open Issues in this repository
+./scripts/issue.sh view <number>         # one Issue in full, with the agent's spec comment
+./scripts/issue.sh add "<title>" [--body "<text>"]
+./scripts/issue.sh --json                # any of the above, as a schema-versioned envelope
+
+./scripts/backlog.sh                     # the linked project board's Ready column, ranked
+./scripts/backlog.sh --json              # the same, as its own schema-versioned envelope
 ~~~
 
-The backlog is its own executable rather than a `wt` subcommand: `wt` is a shell
+`./scripts/issue.sh view` prints the grooming agent's research — what the Issue
+concretely means, its scope boundary, the files it touches, and the questions a
+PRD must answer — from a marked comment below the body. The Issue's own text is
+never edited by anything automated.
+
+`./scripts/backlog.sh` reads whichever ProjectV2 is linked to this repository,
+so exactly one must be; several linked boards is an error naming all of them
+rather than a guess. `Ready` means buildable, not approved. It is read-only:
+ranking belongs to the grooming agent and lifecycle to GitHub's own project
+workflows.
+
+Both are their own executables rather than `wt` subcommands: `wt` is a shell
 function that must be sourced, which puts it out of reach of anything that is not
 an interactive zsh — an agent, a script, a Makefile. It reaches the same Go
 helper the bridge commands use, but it needs no Herdr: a missing, stopped, or
@@ -528,7 +545,8 @@ while that worktree exists, and the archived copy in `dev` after `wt done`.
 There is no backlog source. The repository's backlog is GitHub Issues, and an
 Issue nobody has planned yet has no PRD, no branch, and no worktree — it would
 be a row describing nothing. `wt status` describes selected and executing work;
-`./scripts/backlog.sh` reads the ideas that have not been selected.
+`./scripts/issue.sh` reads every captured idea, and `./scripts/backlog.sh` reads
+the groomed subset of them that is ready to start.
 
 ### Phases
 
