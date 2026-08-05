@@ -58,15 +58,16 @@ body.agents-roster-page {
     24px 24px;
 }
 
-/* Dark is dusk on the same materials. Two things need restating here: the brand
-   accent (moss is tuned for text on paper, not for a filled control) and the
-   grid ink. The canvas has to be repeated too — ui-refresh.css overrides it
-   again at `[data-bs-theme="dark"] body`, so this selector matches that
-   specificity and loads after it. */
+/* Dark is charcoal, not tinted brown — see cozy-character.css. Two things need
+   restating here: the brand accent (moss is tuned for text on paper, not for a
+   filled control) and the grid ink, which goes neutral with the surfaces. The
+   canvas has to be repeated too — ui-refresh.css overrides it again at
+   `[data-bs-theme="dark"] body`, so this selector matches that specificity and
+   loads after it. */
 [data-bs-theme="dark"] body.agents-roster-page {
   --roster-accent: var(--cozy-moss-bright, #9ccb9f);
-  --roster-grid: rgb(214 196 160 / 7%);
-  --roster-grid-soft: rgb(214 196 160 / 4%);
+  --roster-grid: rgb(214 219 226 / 7%);
+  --roster-grid-soft: rgb(214 219 226 / 4%);
   background-color: var(--cozy-paper-deep) !important;
   background-image:
     linear-gradient(var(--roster-grid) 1px, transparent 1px),
@@ -958,193 +959,6 @@ body.agents-roster-page {
   }
 }
 
-/* ---- Avatar Identity v1 --------------------------------------------------- */
-
-/* Geometry is fixed per size so the grid never reflows while a custom image
-   decodes (FR97). Every colour arrives as a --aa-* custom property that
-   agent-avatar.js validated; nothing here reads agent data directly. */
-.agent-avatar {
-  --aa-size: 72px;
-  --aa-base: #263243;
-  --aa-deep: #0b0f14;
-  --aa-ink: #fff;
-  --aa-angle: 155deg;
-  --aa-motif-alpha: 0.18;
-  position: relative;
-  display: grid;
-  flex: 0 0 auto;
-  width: var(--aa-size);
-  height: var(--aa-size);
-  place-items: center;
-  overflow: hidden;
-  border-radius: 12px;
-  isolation: isolate;
-}
-
-/* Named sizes, so a denser view or a narrow breakpoint can resize the portrait
-   without the renderer having to re-emit it. */
-.agent-avatar--sm {
-  --aa-size: 54px;
-}
-
-.agent-avatar--md {
-  --aa-size: 72px;
-}
-
-.agent-avatar--lg {
-  --aa-size: 88px;
-}
-
-.agent-avatar--fallback {
-  border: 1px solid color-mix(in srgb, var(--aa-accent, var(--aa-base)) 55%, transparent);
-  background: linear-gradient(var(--aa-angle), var(--aa-base), var(--aa-deep));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-.agent-avatar__initials {
-  position: relative;
-  z-index: 2;
-  color: var(--aa-ink);
-  font-size: calc(var(--aa-size) * 0.31);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
-}
-
-/* Motifs are pure CSS keyed on a token the module owns, so the fallback needs
-   no image file and no remote request (FR98). */
-.agent-avatar__motif {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  opacity: var(--aa-motif-alpha);
-  pointer-events: none;
-}
-
-.agent-avatar[data-aa-turn="1"] .agent-avatar__motif {
-  transform: rotate(90deg);
-}
-
-.agent-avatar[data-aa-turn="2"] .agent-avatar__motif {
-  transform: rotate(180deg);
-}
-
-.agent-avatar[data-aa-turn="3"] .agent-avatar__motif {
-  transform: rotate(270deg);
-}
-
-.agent-avatar[data-aa-motif="rings"] .agent-avatar__motif {
-  background: repeating-radial-gradient(circle at 50% 50%, #fff 0 1px, transparent 1px 9px);
-}
-
-.agent-avatar[data-aa-motif="grid"] .agent-avatar__motif {
-  background:
-    repeating-linear-gradient(0deg, #fff 0 1px, transparent 1px 10px),
-    repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px);
-}
-
-.agent-avatar[data-aa-motif="bars"] .agent-avatar__motif {
-  background: repeating-linear-gradient(45deg, #fff 0 2px, transparent 2px 11px);
-}
-
-.agent-avatar[data-aa-motif="orbit"] .agent-avatar__motif {
-  background:
-    radial-gradient(circle at 78% 20%, #fff 0 22%, transparent 23%),
-    radial-gradient(circle at 20% 80%, #fff 0 14%, transparent 15%);
-}
-
-.agent-avatar[data-aa-motif="chevron"] .agent-avatar__motif {
-  background: repeating-conic-gradient(
-    from 45deg at 50% 50%,
-    #fff 0deg 12deg,
-    transparent 12deg 45deg
-  );
-}
-
-.agent-avatar[data-aa-motif="dots"] .agent-avatar__motif {
-  background: radial-gradient(circle, #fff 1.4px, transparent 1.5px);
-  background-size: 11px 11px;
-}
-
-.agent-avatar[data-aa-motif="prism"] .agent-avatar__motif {
-  background: conic-gradient(from 210deg at 30% 70%, #fff 0deg 55deg, transparent 55deg 360deg);
-}
-
-.agent-avatar[data-aa-motif="wave"] .agent-avatar__motif {
-  background: repeating-radial-gradient(circle at 15% 110%, transparent 0 12px, #fff 12px 13px);
-}
-
-/* Role emblem sits on the frame as an accent badge, never as the fill (FR71). */
-.agent-avatar__emblem {
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  z-index: 3;
-  display: grid;
-  width: calc(var(--aa-size) * 0.28);
-  height: calc(var(--aa-size) * 0.28);
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--aa-accent, #fff) 70%, transparent);
-  border-radius: 6px;
-  background: rgba(6, 10, 12, 0.72);
-  color: var(--aa-accent, #fff);
-  font-size: calc(var(--aa-size) * 0.15);
-  line-height: 1;
-}
-
-/* Built-in identities read as system infrastructure: a bracketed frame instead
-   of the library card's soft ring (FR73). */
-.agent-avatar[data-aa-system="1"] {
-  border-radius: 6px;
-}
-
-.agent-avatar[data-aa-system="1"]::before,
-.agent-avatar[data-aa-system="1"]::after {
-  content: "";
-  position: absolute;
-  z-index: 3;
-  width: 9px;
-  height: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.45);
-}
-
-.agent-avatar[data-aa-system="1"]::before {
-  top: 4px;
-  left: 4px;
-  border-width: 1px 0 0 1px;
-}
-
-.agent-avatar[data-aa-system="1"]::after {
-  right: 4px;
-  bottom: 4px;
-  border-width: 0 1px 1px 0;
-}
-
-.agent-avatar--image {
-  border: 1px solid var(--card-line);
-  background: var(--card-soft);
-}
-
-/* A curated portrait carries its own framing and accent, so it gets a tinted
-   surround rather than the neutral one an uploaded photo needs. */
-.agent-avatar--character {
-  border: 1px solid var(--aa-accent, var(--card-line));
-  background: var(--card-soft);
-}
-
-.agent-avatar__img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-/* Character art is authored to fill its own frame; `contain` keeps the whole
-   silhouette visible instead of cropping the edges the way `cover` would. */
-.agent-avatar__portrait {
-  object-fit: contain;
-}
 
 /* ---- Empty state / link buttons ------------------------------------------- */
 

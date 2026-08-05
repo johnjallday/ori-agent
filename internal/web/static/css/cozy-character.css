@@ -74,21 +74,24 @@
 }
 
 [data-bs-theme="dark"] {
-  /* Dusk rather than a tinted black: the cozy direction survives into dark mode
-     as lamplight on the same materials, not as a different product.
-     Deliberately lifted off true black — at very low luminance a warm hue stops
-     reading as warm at all, and the surface just looks like a console again. */
-  --cozy-paper: #2a241c;
-  --cozy-paper-raised: #342d23;
-  --cozy-paper-deep: #1e1912;
-  --cozy-paper-sunk: #17130d;
+  /* Charcoal, not brown.
+     The first pass tinted the dark surfaces warm to carry the cozy direction
+     through. At page scale that read as yellow rather than as lamplight —
+     large fields of low-luminance warmth look dingy, not cosy. So the SURFACES
+     go neutral and the warmth moves entirely into the accents and the character
+     art, which is where it actually reads as warmth.
+     Still deliberately lifted off true black, so panels can be told apart. */
+  --cozy-paper: #26282b;
+  --cozy-paper-raised: #303337;
+  --cozy-paper-deep: #1b1d20;
+  --cozy-paper-sunk: #141619;
 
-  --cozy-ink: #f0e8d8;
-  --cozy-ink-dim: #b8ae9c;
-  --cozy-ink-faint: #8b8273;
+  --cozy-ink: #e8eaec;
+  --cozy-ink-dim: #b0b5ba;
+  --cozy-ink-faint: #868c92;
 
-  --cozy-line: #453c2e;
-  --cozy-line-strong: #6b5e49;
+  --cozy-line: #3a3e43;
+  --cozy-line-strong: #565c63;
 
   --cozy-moss: #7fb283;
   --cozy-moss-bright: #9ccb9f;

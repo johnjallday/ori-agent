@@ -45,11 +45,12 @@ body.home-command-page {
     24px 24px;
 }
 
-/* Dark is dusk on the same materials, not a different product. The shared
-   tokens already carry that; only the grid ink needs its own value. */
+/* Dark is charcoal, not tinted brown — see cozy-character.css. The shared
+   tokens carry that; only the grid ink needs its own value here, and it goes
+   neutral with them. */
 [data-bs-theme="dark"] body.home-command-page {
-  --hc-grid: rgb(214 196 160 / 7%);
-  --hc-grid-soft: rgb(214 196 160 / 3.5%);
+  --hc-grid: rgb(214 219 226 / 7%);
+  --hc-grid-soft: rgb(214 219 226 / 3.5%);
 }
 
 body.home-command-page .home-command-main {

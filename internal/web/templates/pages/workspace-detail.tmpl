@@ -2,6 +2,9 @@
 <!DOCTYPE html>
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
+<!-- Agents on this page render through the shared Avatar Identity resolver, so
+     an agent's face is the same here as on /agents and Home (PRD FR-99). -->
+<link rel="stylesheet" href="/css/agent-avatar.css">
 
 <body class="bg-light">
   {{template "navbar.tmpl" .}}
@@ -3975,17 +3978,26 @@
       outline-offset: 3px;
     }
 
+    /* The avatar box. Its contents now come from the shared Avatar Identity
+       renderer (agent-avatar.css), which brings its own colours, motif, and
+       image/portrait handling — so this rule owns geometry only, and overrides
+       --aa-size to keep the 44px box the layout was built around. */
     .workspace-detail-agent-avatar {
+      --aa-size: 44px;
       width: 44px;
       height: 44px;
       border-radius: 8px;
+      flex-shrink: 0;
+    }
+
+    /* Used when the shared renderer has not loaded, and for the Unassigned
+       bucket, which is not an agent and so has no identity to resolve. */
+    .workspace-detail-agent-avatar.is-initials {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
-      border: 1px solid hsla(var(--agent-avatar-hue, 205), 70%, 34%, 0.35);
-      background:
-        linear-gradient(135deg, hsla(var(--agent-avatar-hue, 205), 72%, 42%, 0.88), hsla(var(--agent-avatar-hue, 205), 74%, 28%, 0.94));
+      border: 1px solid rgba(100, 116, 139, 0.35);
+      background: linear-gradient(135deg, rgba(100, 116, 139, 0.88), rgba(51, 65, 85, 0.94));
       color: #fff;
       font-size: 0.8rem;
       font-weight: 800;
@@ -3994,10 +4006,7 @@
     }
 
     .workspace-detail-agent-card.is-leader .workspace-detail-agent-avatar {
-      border-color: rgba(245, 158, 11, 0.7);
-      box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        0 0 0 2px rgba(245, 158, 11, 0.12);
+      box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45);
     }
 
     .workspace-detail-agent-identity-copy {
@@ -5265,6 +5274,7 @@
       }
 
       .workspace-detail-agent-avatar {
+        --aa-size: 40px;
         width: 40px;
         height: 40px;
       }
@@ -8857,6 +8867,10 @@
   <script defer src="/js/modules/form-validation.js"></script>
   <script defer src="/js/file-manager.js"></script>
   <script defer src="/js/app.js"></script>
+  <!-- The shared identity renderer and its catalog. Both are classic deferred
+       scripts, so they are ready before workspace-detail.js renders an agent. -->
+  <script defer src="/js/modules/agent-avatar.js"></script>
+  <script defer src="/js/modules/character-catalog.js"></script>
   <script defer src="/js/modules/workspace-realtime.js"></script>
 
   <!-- Workspace Hub Modules (for task/session/file/note management) -->

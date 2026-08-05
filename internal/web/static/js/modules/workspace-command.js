@@ -1961,7 +1961,7 @@ export class WorkspaceCommandView {
         const keeper = page.isWorkspaceEntryAgent ? page.isWorkspaceEntryAgent(name) : false;
         const avatar = page.getAgentAvatarPresentation
           ? page.getAgentAvatarPresentation(name)
-          : { initials: name.slice(0, 2).toUpperCase(), style: '' };
+          : { initials: name.slice(0, 2).toUpperCase() };
         const status = page.getAgentRosterStatus
           ? page.getAgentRosterStatus(name)
           : { key: 'idle', label: 'Idle' };
@@ -1997,13 +1997,17 @@ export class WorkspaceCommandView {
             '" title="Remove agent" aria-label="Remove ' +
             escapeHtml(name) +
             '">✕</button>';
+        // Same shared identity as the roster card behind this modal, rendered
+        // into this row's own hexagon tile. Falls back to initials when the
+        // shared renderer has not loaded.
+        const avatarHTML =
+          (avatar.markup && avatar.markup('ws-cmd-mrow-av')) ||
+          '<span class="ws-cmd-mrow-av is-initials">' +
+            escapeHtml(avatar.initials || 'A') +
+            '</span>';
         return (
           '<div class="ws-cmd-mrow">' +
-          '<span class="ws-cmd-mrow-av" style="' +
-          escapeHtml(avatar.style || '') +
-          '">' +
-          escapeHtml(avatar.initials) +
-          '</span>' +
+          avatarHTML +
           '<div class="ws-cmd-mrow-main">' +
           '<div class="ws-cmd-mrow-name"><span class="ws-cmd-led ' +
           tone +
@@ -2554,50 +2558,44 @@ export class WorkspaceCommandView {
     };
   }
 
+  // An agent's face in Command view.
+  //
+  // This used to be a procedurally generated robot SVG keyed on a hash of the
+  // agent's name — a THIRD private avatar, alongside the roster card's hue tile
+  // and the Agents page's real one. The result was that a character a user
+  // deliberately chose was invisible on the page where they actually work with
+  // that agent, and the same agent had a different face on every surface.
+  //
+  // It now renders through the shared Avatar Identity resolver, so an uploaded
+  // avatar, a curated character, or the deterministic fallback all appear here
+  // exactly as they do on /agents and Home (PRD FR-99).
+  //
+  // The status tone class is still applied to the frame: operational state
+  // stays on the frame and the LED beside it, never baked into the art (FR-96).
   agentCharacterHTML(agent, variant = 'roster') {
     if (!agent) return '';
-    const key = String(agent.key || agent.name || 'agent');
-    let hash = 0;
-    for (let index = 0; index < key.length; index += 1) {
-      hash = (hash * 33 + key.charCodeAt(index)) >>> 0;
-    }
-    const hue = hash % 360;
-    const visor = 28 + (hash % 3) * 5;
-    const antenna =
-      hash % 2 === 0
-        ? '<path d="M50 24V12M50 12L57 7" class="ws-cmd-character-line"/>'
-        : '<path d="M50 24V10M44 8H56" class="ws-cmd-character-line"/>';
-    const emblem =
-      hash % 3 === 0
-        ? '<path d="M50 63L57 70L50 77L43 70Z" class="ws-cmd-character-emblem"/>'
-        : hash % 3 === 1
-          ? '<circle cx="50" cy="69" r="7" class="ws-cmd-character-emblem"/>'
-          : '<path d="M42 75L50 61L58 75Z" class="ws-cmd-character-emblem"/>';
+    const page = this.page || {};
     const variantClass = variant === 'stage' ? ' is-stage' : ' is-roster';
+    const className = 'ws-cmd-character' + variantClass + ' ' + escapeHtml(agent.tone || 'idle');
 
+    const avatar = page.getAgentAvatarPresentation
+      ? page.getAgentAvatarPresentation(agent.name)
+      : null;
+    const html = avatar && avatar.markup ? avatar.markup(className) : '';
+    if (html) return html;
+
+    // The shared renderer is a deferred script. If it has not loaded, the
+    // roster still needs a face rather than an empty slot.
+    const initials =
+      (avatar && avatar.initials) ||
+      String(agent.name || 'A')
+        .slice(0, 2)
+        .toUpperCase();
     return (
-      '<span class="ws-cmd-character' +
-      variantClass +
-      ' ' +
-      escapeHtml(agent.tone || 'idle') +
-      '" style="--agent-character-hue:' +
-      hue +
-      '" aria-hidden="true">' +
-      '<svg viewBox="0 0 100 118" focusable="false">' +
-      '<path d="M18 92L28 56L38 47H62L72 56L82 92L69 108H31Z" class="ws-cmd-character-body"/>' +
-      '<path d="M32 30L42 21H58L68 30V49L59 58H41L32 49Z" class="ws-cmd-character-head"/>' +
-      '<path d="M' +
-      visor +
-      ' 34H' +
-      (100 - visor) +
-      'V45H' +
-      visor +
-      'Z" class="ws-cmd-character-visor"/>' +
-      '<path d="M18 92L5 83L12 66L28 59M82 92L95 83L88 66L72 59" class="ws-cmd-character-shoulders"/>' +
-      antenna +
-      emblem +
-      '<path d="M28 91H72" class="ws-cmd-character-line is-soft"/>' +
-      '</svg>' +
+      '<span class="' +
+      className +
+      ' is-initials" aria-hidden="true">' +
+      escapeHtml(initials) +
       '</span>'
     );
   }

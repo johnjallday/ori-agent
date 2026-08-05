@@ -320,6 +320,7 @@ export class WorkspaceDetailPage {
     this.setupPageDragAndDrop();
     await this.loadWorkspace();
     this.consumeProjectOpenFailureNotice();
+    this.watchCharacterCatalog();
     await this.loadAgentCatalog();
     await this.loadWorkspaceAgentSnapshots();
     await Promise.all([
@@ -3587,7 +3588,7 @@ export class WorkspaceDetailPage {
                  title="${this.escapeAttribute(title)}"
                  aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
                  aria-describedby="${summaryId}">
-              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              ${this.renderAgentAvatarHTML(avatar)}
               <span class="workspace-detail-agent-identity-copy">
                 <span class="workspace-detail-agent-name">${safeName}</span>
                 <span class="workspace-detail-agent-subtitle">${this.escapeHtml(subtitle)}</span>
@@ -3606,7 +3607,7 @@ export class WorkspaceDetailPage {
                aria-label="${this.escapeAttribute(target.ariaLabel || title)}"
                aria-describedby="${summaryId}"
                onclick="event.stopPropagation();">
-              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              ${this.renderAgentAvatarHTML(avatar)}
               <span class="workspace-detail-agent-identity-copy">
                 <span class="workspace-detail-agent-name">${safeName}</span>
                 <span class="workspace-detail-agent-subtitle">${this.escapeHtml(subtitle)}</span>
@@ -3841,34 +3842,89 @@ export class WorkspaceDetailPage {
     };
   }
 
+  // Resolves an agent's identity through the SHARED renderer, so an agent that
+  // shows a curated character on /agents shows the same one here (PRD FR-99).
+  //
+  // This page used to derive its own avatar from a private hue hash of the
+  // agent's name, which meant one agent had two different faces depending on
+  // where you looked at it — and a character a user deliberately chose was
+  // invisible on the page where they actually work with that agent.
+  //
+  // Returns a `markup(className)` function rather than finished HTML: the two
+  // surfaces that show an agent here have different geometry (a 44px rounded
+  // card tile, a 34px hexagon in the Command modal), and each should keep its
+  // own. Only the identity is shared.
   getAgentAvatarPresentation(agentName) {
     const normalizedName = String(agentName || '').trim();
-    const key = this.normalizeAgentName(normalizedName);
-    const words = normalizedName
+    const initials = this.buildAgentInitials(normalizedName);
+    const label = `${normalizedName || 'Agent'} avatar`;
+
+    // The renderer is a deferred script; if it somehow has not loaded, callers
+    // still get initials rather than an empty box.
+    if (!window.AgentAvatar) {
+      return { markup: () => '', initials, label };
+    }
+
+    const profile = this.getAgentProfile(normalizedName);
+    const characterId = profile?.characterId || '';
+    const input = {
+      name: normalizedName,
+      source: profile?.source || 'user',
+      role: profile?.role || '',
+      avatarImage: profile?.avatarImage || '',
+      avatarColor: profile?.avatarColor || '',
+      displayMode: profile?.displayMode || '',
+      character:
+        characterId && window.CharacterCatalog ? window.CharacterCatalog.get(characterId) : null
+    };
+
+    return {
+      // `size` only picks the renderer's size class; the caller's own class
+      // overrides --aa-size, so the box stays exactly what the layout expects.
+      markup: className => window.AgentAvatar.markup(input, { size: 54, className }),
+      initials,
+      label
+    };
+  }
+
+  // The character catalog loads without blocking the page, so the first render
+  // of an agent card can happen before it arrives. Re-render once it does,
+  // otherwise a chosen character would stay invisible here until some unrelated
+  // event happened to redraw the roster.
+  watchCharacterCatalog() {
+    if (!window.CharacterCatalog || typeof window.CharacterCatalog.onChange !== 'function') return;
+    window.CharacterCatalog.onChange(() => this.renderAgentGroups());
+    // The module does not fetch on its own — each page asks for it, so a page
+    // that shows no agents pays nothing. Without this the catalog stays empty
+    // and every character silently renders as the generated fallback.
+    window.CharacterCatalog.load();
+  }
+
+  buildAgentInitials(agentName) {
+    const words = String(agentName || '')
       .split(/[\s._-]+/)
       .map(part => part.trim())
       .filter(Boolean);
-    const initials =
+    return (
       (words.length > 1
         ? `${words[0][0]}${words[words.length - 1][0]}`
         : words[0]?.slice(0, 2) || 'A'
       )
         .toUpperCase()
         .replace(/[^A-Z0-9]/g, '')
-        .slice(0, 2) || 'A';
+        .slice(0, 2) || 'A'
+    );
+  }
 
-    let hash = 0;
-    for (let index = 0; index < key.length; index += 1) {
-      hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
-    }
-
-    const hue = hash % 360;
-    return {
-      initials,
-      hue,
-      style: `--agent-avatar-hue: ${hue};`,
-      label: `${normalizedName || 'Agent'} avatar`
-    };
+  // One place that turns a presentation into markup, so the three card layouts
+  // cannot drift apart. Falls back to the initials tile when the shared
+  // renderer is unavailable or the row is not a real agent (unassigned tasks).
+  renderAgentAvatarHTML(avatar) {
+    const html = avatar?.markup ? avatar.markup('workspace-detail-agent-avatar') : '';
+    if (html) return html;
+    return `<span class="workspace-detail-agent-avatar is-initials" aria-hidden="true">${this.escapeHtml(
+      avatar?.initials || 'A'
+    )}</span>`;
   }
 
   getAgentModelPresentation(profile) {
@@ -4060,8 +4116,10 @@ export class WorkspaceDetailPage {
         const status = group.isUnassigned
           ? { key: 'idle', label: 'Unassigned', detail: 'Tasks awaiting assignment' }
           : this.getAgentRosterStatus(group.name);
+        // Unassigned is a bucket, not an agent, so it deliberately keeps the
+        // plain initials tile rather than being given an identity.
         const avatar = group.isUnassigned
-          ? { initials: '?', style: '--agent-avatar-hue: 210;', label: 'Unassigned tasks' }
+          ? { initials: '?', label: 'Unassigned tasks' }
           : this.getAgentAvatarPresentation(group.name);
         const summaryId = `agent-card-summary-${String(group.key || 'agent').replace(/[^a-z0-9_-]+/gi, '-')}`;
         const cardSummary = group.isUnassigned
@@ -4137,7 +4195,7 @@ export class WorkspaceDetailPage {
         const detailLink = group.isUnassigned
           ? `
             <div class="workspace-detail-agent-identity-link is-static">
-              <span class="workspace-detail-agent-avatar" style="${avatar.style}" aria-hidden="true">${this.escapeHtml(avatar.initials)}</span>
+              ${this.renderAgentAvatarHTML(avatar)}
               <span class="workspace-detail-agent-identity-copy">
                 <span class="workspace-detail-agent-name">${this.escapeHtml(group.name)}</span>
                 <span class="workspace-detail-agent-subtitle">Awaiting assignment</span>
@@ -11992,7 +12050,14 @@ export class WorkspaceDetailPage {
           level: Number.isFinite(Number(agent?.evolution?.level))
             ? Math.max(0, Math.floor(Number(agent.evolution.level)))
             : 0,
-          stage: String(agent?.evolution?.stage || '').trim()
+          stage: String(agent?.evolution?.stage || '').trim(),
+          // Identity, carried so this page can render the SAME avatar the
+          // Agents collection does rather than deriving its own (FR-99). The
+          // list endpoint already returns these; they were simply dropped here.
+          avatarImage: String(agent?.metadata?.avatar_image || '').trim(),
+          avatarColor: String(agent?.metadata?.avatar_color || '').trim(),
+          displayMode: String(agent?.metadata?.character?.display_mode || '').trim(),
+          characterId: String(agent?.metadata?.character?.catalog_id || '').trim()
         };
 
         nextCatalog.push(profile);
