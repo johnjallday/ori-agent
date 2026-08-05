@@ -288,6 +288,94 @@ test.describe('Coordinate Workspace Map', () => {
     expect(positionsAfter, 'no stray position record').toBe(positionsBefore);
   });
 
+  test('dragging a building saves once and survives a reload (FR-63 – FR-70)', async ({ page }) => {
+    const id = await ensureWorkspace(page);
+    await savePosition(page, id, 342, 190);
+    await openMap(page);
+    await page.click('[data-map-reset-view]');
+
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/workspace-map/layout') && request.method() === 'PATCH') {
+        writes.push(request.postData() || '');
+      }
+    });
+
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
+    const box = (await tile.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    // Several move events, one drop.
+    await page.mouse.move(box.x + box.width / 2 + 140, box.y + box.height / 2 + 90, { steps: 15 });
+    const duringDrag = writes.filter(body => body.includes('set_positions')).length;
+    expect(duringDrag, 'pointer movement performs zero writes (metric 7)').toBe(0);
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+
+    expect(
+      writes.filter(body => body.includes('set_positions')).length,
+      'one completed drop, at most one update'
+    ).toBe(1);
+
+    const moved = await anchors(page);
+    const movedAnchor = moved.find(a => a.id === id)!;
+    expect(movedAnchor.x !== 342 || movedAnchor.y !== 190, 'the building actually moved').toBe(
+      true
+    );
+
+    await page.reload();
+    await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).waitFor();
+    await page.waitForTimeout(300);
+    const afterReload = (await anchors(page)).find(a => a.id === id)!;
+    expect(afterReload).toEqual(movedAnchor);
+  });
+
+  test('a failed move visibly returns the building to where it was (FR-71, metric 6)', async ({
+    page
+  }) => {
+    const id = await ensureWorkspace(page);
+    await savePosition(page, id, 266, 152);
+    await openMap(page);
+    await page.click('[data-map-reset-view]');
+
+    await page.route(LAYOUT_API, async route => {
+      if (route.request().method() === 'PATCH') {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      await route.fallback();
+    });
+
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
+    const box = (await tile.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 60, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+
+    // The browser re-serializes an inline style set from JS with spaces, so the
+    // pattern has to tolerate both spellings.
+    await expect(tile).toHaveAttribute('style', /left:\s*266px;\s*top:\s*152px/);
+    await expect(tile).toHaveClass(/is-unsaved/);
+  });
+
+  test('a selected building can be moved by keyboard alone (FR-77 – FR-79)', async ({ page }) => {
+    const id = await ensureWorkspace(page);
+    await savePosition(page, id, 380, 228);
+    await openMap(page);
+
+    await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).click();
+    await page.click('[data-map-move]');
+    await page.locator('.ws-map-canvas').press('ArrowRight');
+    await page.locator('.ws-map-canvas').press('ArrowDown');
+    await page.locator('.ws-map-canvas').press('Enter');
+    await page.waitForTimeout(800);
+
+    const layout = await (await page.request.get('/api/workspace-map/layout')).json();
+    expect(layout.layout.positions[id]).toEqual({ x: 418, y: 266 });
+  });
+
   test('an unavailable layout still renders a navigable read-only map (FR-105)', async ({
     page
   }) => {

@@ -532,7 +532,10 @@
   padding: 0;
   border: 0;
   background: none;
-  cursor: pointer;
+  /* Buildings are grabbable; empty world space is pannable. Two different cues
+     for two different kinds of movement (#292 design §6). */
+  cursor: grab;
+  touch-action: none;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -542,6 +545,28 @@
 }
 .ws-map-tile:hover {
   transform: translateY(-4px);
+}
+/* Drag and unsaved states carry a shape and an outline, never colour alone
+   (FR-120). */
+.ws-map-tile.is-dragging {
+  z-index: 9;
+  cursor: grabbing;
+  transform: translateY(-6px);
+  outline: 2px dashed var(--ws-faction);
+  outline-offset: 4px;
+  transition: none;
+}
+.ws-map-tile.is-unsaved {
+  outline: 2px dotted var(--ws-danger, #d9534f);
+  outline-offset: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-tile,
+  .ws-map-tile:hover,
+  .ws-map-tile.is-dragging {
+    transition: none;
+    transform: none;
+  }
 }
 .ws-map-tile:focus-visible {
   outline: 2px solid var(--ws-faction);

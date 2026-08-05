@@ -1196,12 +1196,47 @@ test('the camera cannot be panned outside the navigable world (FR-11)', () => {
 // canvas records its listeners so pointer and wheel gestures can be replayed
 // without a browser, and the world layer records the transform that was applied
 // to it.
-function createCameraHarness({ width = 1000, height = 600 } = {}) {
+function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
   const listeners = {};
   const styleProps = {};
   const classes = new Set();
   const world = { style: { transform: '' } };
   const controls = {};
+
+  // Building stubs, rich enough for the drag state machine: their own listener
+  // table, class list, and inline position.
+  const tileEls = tiles.map(id => {
+    const own = {};
+    const tileClasses = new Set(['ws-map-tile']);
+    const el = {
+      style: { left: '', top: '' },
+      classList: {
+        add: c => tileClasses.add(c),
+        remove: c => tileClasses.delete(c),
+        contains: c => tileClasses.has(c),
+        toggle: (c, on) => (on ? tileClasses.add(c) : tileClasses.delete(c))
+      },
+      getAttribute: name => (name === 'data-ws-id' ? id : null),
+      setAttribute: () => {},
+      addEventListener: (type, fn) => {
+        (own[type] = own[type] || []).push(fn);
+      },
+      setPointerCapture: () => {},
+      releasePointerCapture: () => {},
+      hasPointerCapture: () => true,
+      focus: () => {
+        el.focused = true;
+      },
+      focused: false,
+      id,
+      fire: (type, event = {}) => (own[type] || []).forEach(fn => fn(event)),
+      at: () => ({
+        x: Number(el.style.left.replace('px', '')),
+        y: Number(el.style.top.replace('px', ''))
+      })
+    };
+    return el;
+  });
 
   const canvas = {
     clientWidth: width,
@@ -1247,10 +1282,12 @@ function createCameraHarness({ width = 1000, height = 600 } = {}) {
     clientHeight: height,
     hidden: false,
     isConnected: true,
-    querySelectorAll: () => [],
+    querySelectorAll: sel => (sel.includes('ws-map-tile') ? tileEls : []),
     querySelector: sel => {
       if (sel.includes('ws-map-canvas') || sel.includes('ws-map-viewport')) return canvas;
       if (sel.includes('ws-map-world')) return world;
+      const tileMatch = sel.match(/ws-map-tile\[data-ws-id="([^"]+)"\]/);
+      if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
       if (sel.includes('data-map-')) return control(sel);
       return null;
     }
@@ -1274,6 +1311,7 @@ function createCameraHarness({ width = 1000, height = 600 } = {}) {
     styleProps,
     classes,
     control,
+    tile: id => tileEls.find(el => el.id === id),
     fire: (type, event) => (listeners[type] || []).forEach(fn => fn(event)),
     hasListener: type => !!(listeners[type] && listeners[type].length)
   };
@@ -1676,6 +1714,257 @@ test('a failed initial position keeps the workspace and offers a real retry (FR-
     attempts[1].operations[0].positions['ws-new'],
     'the retry re-sends the original candidate'
   );
+});
+
+// ---------------------------------------------------------------------------
+// Moving buildings (#292 FR-63 – FR-80)
+//
+// A drag is a state machine over a threshold. Below it, every existing meaning
+// of a press survives; above it, exactly one save happens and only on drop.
+// ---------------------------------------------------------------------------
+
+function dragHarness({ positions, patchResponse } = {}) {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patches.push(body);
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      const set = body.operations.find(op => op.op === 'set_positions');
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: {
+              schema_version: 1,
+              revision: 12,
+              positions: (set && set.positions) || {},
+              snap_to_grid: true
+            }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: positions || { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 228 } }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  return { map, harness, patches };
+}
+
+const tilePointer = (x, y, extra = {}) => ({
+  button: 0,
+  pointerId: 7,
+  clientX: x,
+  clientY: y,
+  target: { closest: () => null },
+  preventDefault() {},
+  stopPropagation() {},
+  stopImmediatePropagation() {},
+  ...extra
+});
+
+async function mountedDrag(options) {
+  const ctx = dragHarness(options);
+  mountWithCamera(ctx.map, ctx.harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+  return ctx;
+}
+
+test('a press below the threshold is still a click, not a move (FR-64)', async () => {
+  const { harness, patches } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(102, 101));
+  tile.fire('pointerup', tilePointer(102, 101));
+
+  assert.equal(patches.length, 0, 'a click must not save a position');
+  assert.equal(tile.classList.contains('is-dragging'), false);
+});
+
+test('pointer movement moves only the dragged building, and writes nothing (FR-65, FR-69, FR-122)', async () => {
+  const { harness, patches } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+  const other = harness.tile('ws-2');
+  other.style.left = '760px';
+  other.style.top = '228px';
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  for (let i = 1; i <= 20; i += 1) tile.fire('pointermove', tilePointer(100 + i * 6, 100 + i * 3));
+
+  assert.equal(patches.length, 0, 'pointer movement performs zero network writes');
+  assert.ok(tile.classList.contains('is-dragging'));
+  assert.notEqual(tile.style.left, '', 'the dragged building followed the pointer');
+  assert.equal(other.style.left, '760px', 'no unrelated building moved (FR-74)');
+});
+
+test('a completed drop sends exactly one position update (FR-69, FR-70)', async () => {
+  const { map, harness, patches } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(180, 140));
+  tile.fire('pointerup', tilePointer(180, 140));
+  await flush();
+
+  const saves = patches.filter(p => p.operations[0].op === 'set_positions');
+  assert.equal(saves.length, 1, 'one drop, one update');
+  const committed = saves[0].operations[0].positions['ws-1'];
+  assert.ok(committed, 'the moved building is what was saved');
+  // The server's answer becomes the local committed position.
+  const state = map.getLayoutState();
+  assert.equal(state.positions['ws-1'].x, committed.x);
+  assert.equal(state.positions['ws-1'].y, committed.y);
+});
+
+test('a drop snaps to the shared grid unless Option/Alt is held (FR-67)', async () => {
+  const { harness, patches } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(151, 133));
+  tile.fire('pointerup', tilePointer(151, 133));
+  await flush();
+  const snapped = patches[0].operations[0].positions['ws-1'];
+  assert.equal(snapped.x % 38, 0, 'x landed on the grid');
+  assert.equal(snapped.y % 38, 0, 'y landed on the grid');
+
+  tile.fire('pointerdown', tilePointer(100, 100, { altKey: true }));
+  tile.fire('pointermove', tilePointer(151, 133, { altKey: true }));
+  tile.fire('pointerup', tilePointer(151, 133, { altKey: true }));
+  await flush();
+  const free = patches[1].operations[0].positions['ws-1'];
+  assert.ok(free.x % 38 !== 0 || free.y % 38 !== 0, 'Alt produced a free coordinate');
+});
+
+test('a drop onto an occupied anchor resolves to the nearest free one (FR-72)', async () => {
+  // ws-1 is dragged exactly onto ws-2's committed anchor.
+  const { harness, patches } = await mountedDrag({
+    positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 456, y: 228 } }
+  });
+  const tile = harness.tile('ws-1');
+  const other = harness.tile('ws-2');
+  other.style.left = '456px';
+  other.style.top = '228px';
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(176, 100));
+  tile.fire('pointerup', tilePointer(176, 100));
+  await flush();
+
+  const committed = patches[0].operations[0].positions['ws-1'];
+  assert.notDeepEqual({ ...committed }, { x: 456, y: 228 }, 'two buildings cannot share an anchor');
+  assert.equal(other.style.left, '456px', 'the resident building did not move to make room');
+});
+
+test('a failed save puts the building back and offers a retry (FR-71)', async () => {
+  const { map, harness, patches } = await mountedDrag({ patchResponse: 'fail' });
+  const tile = harness.tile('ws-1');
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(300, 300));
+  tile.fire('pointerup', tilePointer(300, 300));
+  await flush();
+
+  assert.deepEqual({ ...tile.at() }, { x: 380, y: 228 }, 'restored to the committed position');
+  assert.ok(tile.classList.contains('is-unsaved'), 'the unsaved state is visible, not silent');
+  assert.ok(tile.focused, 'focus stays on the building');
+
+  await map.retryPlacement('ws-1');
+  assert.equal(patches.length, 2, 'the retry is a real second attempt');
+});
+
+test('the click after a drag is suppressed, but an ordinary click is not (FR-66, FR-80)', async () => {
+  const { harness } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+  let prevented = 0;
+  const clickEvent = () => ({
+    preventDefault: () => (prevented += 1),
+    stopPropagation() {},
+    stopImmediatePropagation() {}
+  });
+
+  // A plain click passes straight through to the existing select/open handler.
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointerup', tilePointer(100, 100));
+  tile.fire('click', clickEvent());
+  assert.equal(prevented, 0, 'a click that was never a drag must keep its meaning');
+
+  // A click synthesised after a real drag is swallowed exactly once.
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(220, 180));
+  tile.fire('pointerup', tilePointer(220, 180));
+  tile.fire('click', clickEvent());
+  assert.equal(prevented, 1, 'the drop did not re-select or open the workspace');
+  tile.fire('click', clickEvent());
+  assert.equal(prevented, 1, 'only the one synthesised click is suppressed');
+});
+
+test('bulk-selection gestures never start a spatial move (FR-75, FR-76)', async () => {
+  const { harness, patches } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+
+  // The corner checkbox.
+  const onCheckbox = { target: { closest: sel => (sel.includes('data-ws-check') ? {} : null) } };
+  tile.fire('pointerdown', tilePointer(100, 100, onCheckbox));
+  tile.fire('pointermove', tilePointer(300, 300, onCheckbox));
+  tile.fire('pointerup', tilePointer(300, 300, onCheckbox));
+  assert.equal(patches.length, 0);
+  assert.equal(tile.classList.contains('is-dragging'), false);
+
+  // A modifier-click.
+  tile.fire('pointerdown', tilePointer(100, 100, { metaKey: true }));
+  tile.fire('pointermove', tilePointer(300, 300, { metaKey: true }));
+  tile.fire('pointerup', tilePointer(300, 300, { metaKey: true }));
+  assert.equal(patches.length, 0);
+});
+
+test('Escape during a drag restores the committed position without saving (FR-79)', async () => {
+  const { harness, patches } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(400, 400));
+  tile.fire('keydown', { key: 'Escape' });
+
+  assert.deepEqual({ ...tile.at() }, { x: 380, y: 228 });
+  assert.equal(patches.length, 0, 'a cancelled move saves nothing');
+});
+
+test('a selected workspace can be moved by keyboard alone (FR-77 – FR-79)', async () => {
+  const { map, harness, patches } = await mountedDrag();
+  map.setSelectedId(null, [], 'ws-1');
+
+  harness.control('[data-map-move]').click();
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  harness.fire('keydown', keyEvent('ArrowDown'));
+  assert.equal(patches.length, 0, 'stepping around does not save');
+
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  const saves = patches.filter(p => p.operations[0].op === 'set_positions');
+  assert.equal(saves.length, 1, 'Enter commits once');
+  assert.deepEqual({ ...saves[0].operations[0].positions['ws-1'] }, { x: 380 + 38, y: 228 + 38 });
+});
+
+test('Escape during a keyboard move restores and saves nothing (FR-79)', async () => {
+  const { map, harness, patches } = await mountedDrag();
+  map.setSelectedId(null, [], 'ws-1');
+
+  harness.control('[data-map-move]').click();
+  harness.fire('keydown', keyEvent('ArrowLeft'));
+  harness.fire('keydown', keyEvent('Escape'));
+  await flush();
+
+  assert.equal(patches.length, 0);
+  assert.deepEqual({ ...harness.tile('ws-1').at() }, { x: 380, y: 228 });
 });
 
 test('merely reading the map never writes a coordinate (FR-23)', async () => {

@@ -1460,6 +1460,9 @@
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-ctl--build" data-map-build' +
       (readOnly ? ' disabled' : '') +
       '>⊕ Build workspace</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
+      (readOnly ? ' disabled' : '') +
+      '>Move selected</button>' +
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
       (snapOn ? 'true' : 'false') +
       '"' +
@@ -2508,14 +2511,23 @@
       resetView(container);
       announce(container, 'View reset. Workspace positions are unchanged');
     });
+    on('[data-map-move]', function () {
+      startKeyboardMove(container);
+      var canvasEl = container.querySelector('[data-ws-map-viewport]');
+      if (canvasEl && canvasEl.focus) canvasEl.focus();
+    });
 
     if (!canvas || typeof canvas.addEventListener !== 'function') return;
     // Keyboard equivalents for every camera gesture, so navigating the map
     // never requires a pointer (FR-115).
     canvas.addEventListener('keydown', function (event) {
-      // Build mode owns the arrow keys while it is active: they move the
-      // candidate site, not the camera (FR-60).
+      // Build mode and keyboard Move own the arrow keys while either is active:
+      // they move the candidate, not the camera (FR-60, FR-78).
       if (buildState.active) return;
+      if (handleMoveKey(container, event)) {
+        if (event.preventDefault) event.preventDefault();
+        return;
+      }
       var step = (event.shiftKey ? 4 : 1) * (SNAP_STEP * 2);
       var handled = true;
       switch (event.key) {
@@ -2584,6 +2596,321 @@
       },
       container
     );
+  }
+
+  // ---------- moving buildings ----------
+  //
+  // A drag is a state machine, not a click handler. It only becomes a drag once
+  // the pointer has travelled past a threshold, so every existing meaning of a
+  // press — select, open, check for a bulk action — survives untouched
+  // (FR-63, FR-64).
+
+  var dragState = null;
+  // Set for one click after a drag so the click the browser synthesises on
+  // pointerup cannot re-select or open the workspace that was just dropped
+  // (FR-66).
+  var suppressClickFor = null;
+  // The record to put focus back on after the re-render that follows a
+  // committed move (FR-117).
+  var pendingFocusId = '';
+
+  /** The anchor a node is currently committed to, saved or automatic. */
+  function committedAnchor(id) {
+    var saved = layoutState.positions[id];
+    if (saved) return { x: saved.x, y: saved.y };
+    if (!lastWorldLayout) return null;
+    var found = null;
+    lastWorldLayout.nodes.forEach(function (node) {
+      if (node.id === id) found = { x: node.x, y: node.y };
+    });
+    if (found) return found;
+    lastWorldLayout.districts.forEach(function (district) {
+      if (district.id === id) found = { x: district.anchorX, y: district.anchorY };
+    });
+    return found;
+  }
+
+  /**
+   * Resolve where a drop may actually land.
+   *
+   * Two buildings may not be committed to the same anchor (FR-72). When the
+   * requested point is taken, the nearest free anchor is chosen by walking a
+   * deterministic ring of snap-step offsets — nearest first, and in a fixed
+   * order at equal distance, so the same drop always resolves the same way. No
+   * other building is moved to make room (FR-74).
+   */
+  function resolveDropAnchor(id, point) {
+    var taken = Object.create(null);
+    function claim(nodeId, anchor) {
+      if (!anchor || nodeId === id) return;
+      taken[anchorKey(anchor)] = true;
+    }
+    Object.keys(layoutState.positions).forEach(function (nodeId) {
+      claim(nodeId, layoutState.positions[nodeId]);
+    });
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        claim(node.id, node);
+      });
+    }
+    if (!taken[anchorKey(point)]) return { x: point.x, y: point.y, resolved: false };
+
+    var step = layoutState.snapToGrid ? SNAP_STEP : Math.round(CELL_W / 4);
+    for (var ring = 1; ring <= 12; ring++) {
+      for (var dy = -ring; dy <= ring; dy++) {
+        for (var dx = -ring; dx <= ring; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+          var candidate = { x: point.x + dx * step, y: point.y + dy * step };
+          if (
+            !taken[anchorKey(candidate)] &&
+            isSafeCoordinate(candidate.x) &&
+            isSafeCoordinate(candidate.y)
+          ) {
+            return { x: candidate.x, y: candidate.y, resolved: true };
+          }
+        }
+      }
+    }
+    return { x: point.x, y: point.y, resolved: false };
+  }
+
+  function placeElement(el, point) {
+    if (!el || !el.style) return;
+    el.style.left = point.x + 'px';
+    el.style.top = point.y + 'px';
+  }
+
+  /**
+   * Commit a moved node.
+   *
+   * One drop is at most one request (FR-69), sent only after the gesture ends.
+   * The server's answer — not the browser's optimism — becomes the committed
+   * position (FR-70); if it refuses or never arrives, the building goes back
+   * where it was, keeps focus and selection, and says so with a retry
+   * (FR-71).
+   */
+  function commitMove(container, id, el, point, previous) {
+    var positions = {};
+    positions[id] = { x: point.x, y: point.y };
+    return patchLayout([{ op: 'set_positions', positions: positions }])
+      .then(function (result) {
+        var committed = (result && result.positions && result.positions[id]) || point;
+        placeElement(el, committed);
+        pendingFocusId = id;
+        announce(container, 'Moved to ' + formatCoordinate(committed));
+        settleLayout();
+        return true;
+      })
+      .catch(function () {
+        placeElement(el, previous);
+        if (el && el.classList) el.classList.add('is-unsaved');
+        rememberFailedPlacement(id, point);
+        if (el && el.focus) el.focus();
+        announce(
+          container,
+          'That move could not be saved. The workspace is back at ' +
+            formatCoordinate(previous) +
+            '. Use Retry position to try again.'
+        );
+        return false;
+      });
+  }
+
+  function bindTileDrag(container) {
+    var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
+    Array.prototype.forEach.call(tiles, function (el) {
+      if (!el || typeof el.addEventListener !== 'function') return;
+
+      el.addEventListener('pointerdown', function (event) {
+        if (layoutState.status !== 'ready') return;
+        if (event.button != null && event.button !== 0) return;
+        // The checkbox and modifier-clicks belong to bulk selection, and must
+        // never start a spatial move (FR-76).
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+        if (event.target && event.target.closest && event.target.closest('[data-ws-check]')) return;
+        var id = el.getAttribute('data-ws-id');
+        var origin = committedAnchor(id);
+        if (!id || !origin) return;
+        dragState = {
+          id: id,
+          el: el,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          origin: origin,
+          candidate: origin,
+          moved: false
+        };
+        if (el.setPointerCapture) el.setPointerCapture(event.pointerId);
+      });
+
+      el.addEventListener('pointermove', function (event) {
+        if (!dragState || dragState.el !== el || event.pointerId !== dragState.pointerId) return;
+        var dx = event.clientX - dragState.startX;
+        var dy = event.clientY - dragState.startY;
+        if (!dragState.moved) {
+          if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+          dragState.moved = true;
+          if (el.classList) el.classList.add('is-dragging');
+          announce(container, 'Moving. Release to drop, or press Escape to cancel.');
+        }
+        if (event.preventDefault) event.preventDefault();
+        // Screen movement becomes world movement through the current camera, so
+        // a drag tracks the pointer at any zoom (FR-67).
+        var moved = {
+          x: dragState.origin.x + dx / camera.zoom,
+          y: dragState.origin.y + dy / camera.zoom
+        };
+        dragState.candidate = snapPoint(moved, !!event.altKey);
+        // Only the dragged element is touched: no re-render, no request
+        // (FR-65, FR-69, FR-122).
+        placeElement(el, dragState.candidate);
+        setDragReadout(container, dragState.candidate);
+      });
+
+      function finish(event, cancelled) {
+        if (!dragState || dragState.el !== el) return;
+        if (event && event.pointerId != null && event.pointerId !== dragState.pointerId) return;
+        var state = dragState;
+        dragState = null;
+        if (
+          el.releasePointerCapture &&
+          el.hasPointerCapture &&
+          el.hasPointerCapture(state.pointerId)
+        ) {
+          el.releasePointerCapture(state.pointerId);
+        }
+        if (el.classList) el.classList.remove('is-dragging');
+        setDragReadout(container, null);
+        if (!state.moved) return;
+        // A gesture that became a drag must not also read as a click (FR-66).
+        suppressClickFor = state.id;
+        if (cancelled) {
+          placeElement(el, state.origin);
+          announce(container, 'Move cancelled. The workspace is back where it was.');
+          return;
+        }
+        var target = resolveDropAnchor(state.id, state.candidate);
+        if (target.resolved) {
+          placeElement(el, target);
+          announce(container, 'That spot was taken; moved to the nearest free one.');
+        }
+        commitMove(container, state.id, el, target, state.origin);
+      }
+
+      el.addEventListener('pointerup', function (event) {
+        finish(event, false);
+      });
+      el.addEventListener('pointercancel', function (event) {
+        finish(event, true);
+      });
+      el.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && dragState && dragState.el === el) finish(null, true);
+      });
+      // Runs before the selection handler bound in bindTiles, so a drop is
+      // swallowed rather than re-selecting or opening the workspace.
+      el.addEventListener(
+        'click',
+        function (event) {
+          if (suppressClickFor !== el.getAttribute('data-ws-id')) return;
+          suppressClickFor = null;
+          if (event.preventDefault) event.preventDefault();
+          if (event.stopPropagation) event.stopPropagation();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        },
+        true
+      );
+    });
+  }
+
+  function setDragReadout(container, point) {
+    var readout = container.querySelector('[data-map-build-coords]');
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (!readout || !banner) return;
+    if (!point) {
+      if (!buildState.active) banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    readout.textContent = candidateLabel(point);
+  }
+
+  // ---------- keyboard move ----------
+  //
+  // The same commit contract as a drag, reachable without a pointer (FR-77).
+
+  var moveState = null;
+
+  function startKeyboardMove(container) {
+    if (layoutState.status !== 'ready') {
+      announce(container, 'Positions cannot be saved right now, so moving is unavailable');
+      return;
+    }
+    var anchor = selectedNodeAnchor();
+    if (!selectedId || !anchor) {
+      announce(container, 'Select a workspace or group first');
+      return;
+    }
+    var el = container.querySelector('.ws-map-tile[data-ws-id="' + selectedId + '"]');
+    moveState = { id: selectedId, el: el, origin: anchor, candidate: anchor };
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner) banner.hidden = false;
+    setDragReadout(container, anchor);
+    announce(
+      container,
+      'Moving from ' + formatCoordinate(anchor) + '. Arrow keys move, Enter saves, Escape cancels.'
+    );
+  }
+
+  function endKeyboardMove(container, commit) {
+    if (!moveState) return;
+    var state = moveState;
+    moveState = null;
+    setDragReadout(container, null);
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner && !buildState.active) banner.hidden = true;
+    if (!commit) {
+      placeElement(state.el, state.origin);
+      announce(container, 'Move cancelled. The workspace is back where it was.');
+      return;
+    }
+    var target = resolveDropAnchor(state.id, state.candidate);
+    commitMove(container, state.id, state.el, target, state.origin);
+  }
+
+  function handleMoveKey(container, event) {
+    if (!moveState) return false;
+    var step = layoutState.snapToGrid ? SNAP_STEP : 1;
+    if (event.shiftKey) step *= 10;
+    var candidate = moveState.candidate;
+    var next = null;
+    switch (event.key) {
+      case 'ArrowLeft':
+        next = { x: candidate.x - step, y: candidate.y };
+        break;
+      case 'ArrowRight':
+        next = { x: candidate.x + step, y: candidate.y };
+        break;
+      case 'ArrowUp':
+        next = { x: candidate.x, y: candidate.y - step };
+        break;
+      case 'ArrowDown':
+        next = { x: candidate.x, y: candidate.y + step };
+        break;
+      case 'Enter':
+        endKeyboardMove(container, true);
+        return true;
+      case 'Escape':
+        endKeyboardMove(container, false);
+        return true;
+      default:
+        return false;
+    }
+    moveState.candidate = next;
+    placeElement(moveState.el, next);
+    setDragReadout(container, next);
+    announce(container, 'Candidate ' + candidateLabel(next));
+    return true;
   }
 
   // ---------- build mode ----------
@@ -2718,6 +3045,11 @@
     buildState.pending = null;
     if (!workspaceId) return Promise.resolve(false);
     if (!point) return Promise.resolve(false);
+    // Two buildings may not be committed to the same anchor, and a snapped
+    // build click lands on the grid exactly like a snapped drop does — so
+    // placement resolves collisions through the same rule (FR-72).
+    var target = resolveDropAnchor(workspaceId, point);
+    point = { x: target.x, y: target.y };
     var positions = {};
     positions[workspaceId] = { x: point.x, y: point.y };
     return patchLayout([{ op: 'set_positions', positions: positions }])
@@ -2947,9 +3279,17 @@
     bindViewportWheel(container);
     bindCameraControls(container);
     bindBuildMode(container);
+    bindTileDrag(container);
     // A re-render (a refresh landing mid-placement) rebuilt the banner and the
     // marker, so restore what the user was in the middle of.
     if (buildState.active) restoreBuildMode(container);
+    // Focus returns to the record it was on before a committed move or a
+    // refresh re-rendered the map (FR-117).
+    if (pendingFocusId) {
+      var refocus = container.querySelector('.ws-map-tile[data-ws-id="' + pendingFocusId + '"]');
+      pendingFocusId = '';
+      if (refocus && refocus.focus) refocus.focus();
+    }
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
