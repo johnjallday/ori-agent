@@ -359,7 +359,25 @@ type IssueDetail struct {
 	// and nothing in it is fetched, downloaded, or followed.
 	Body     string
 	ClosedAt time.Time
+	// Spec is the grooming agent's research on this Issue: what it concretely
+	// means, its scope boundary, the files it touches, and the questions a PRD
+	// would have to answer. It lives as a marked comment rather than in the
+	// body, because the body is the author's own words and nothing automated
+	// may edit them. Empty when the Issue has not been groomed.
+	Spec string
+	// SpecDuplicates is true when more than one marked comment was found, which
+	// should not happen — the agent edits its comment in place. Reported rather
+	// than hidden, because the reader is seeing only one of them.
+	SpecDuplicates bool
 }
+
+// SpecCommentMarker is the literal first line of the grooming agent's comment.
+//
+// An HTML comment is invisible in GitHub's rendered view, so the marker costs
+// the reader nothing while giving both the agent and this tool an exact handle.
+// Matching on the first line only is deliberate: anyone can quote this string
+// mid-comment, and a quoted mention must not be mistaken for the real thing.
+const SpecCommentMarker = "<!-- ori-backlog-spec -->"
 
 // CreatedIssue is the result of one creation: enough to name what was made and
 // go look at it.
@@ -374,7 +392,7 @@ type CreatedIssue struct {
 // issueDetailFields are the exact fields the detail view renders.
 var issueDetailFields = strings.Join([]string{
 	"number", "title", "author", "labels", "url", "createdAt", "updatedAt",
-	"state", "stateReason", "closedAt", "body",
+	"state", "stateReason", "closedAt", "body", "comments",
 }, ",")
 
 // ViewIssue reads one Issue of the resolved repository.
@@ -429,7 +447,41 @@ func decodeIssueDetail(output []byte, repository Repository, number int) (IssueD
 		Body:        boundedBody(raw.Body),
 		ClosedAt:    parseTimestamp(raw.ClosedAt),
 	}
+	detail.Spec, detail.SpecDuplicates = selectSpecComment(raw.Comments)
 	return detail, nil
+}
+
+// selectSpecComment finds the grooming agent's comment and returns it with the
+// marker line removed.
+//
+// The newest wins when several are found. The agent is supposed to edit its
+// comment in place, so duplicates mean something went wrong upstream — and of
+// the two plausible readings of "wrong", showing the most recent research is
+// the one that helps.
+func selectSpecComment(comments []rawIssueComment) (string, bool) {
+	var chosen string
+	var chosenAt time.Time
+	var found int
+
+	for _, comment := range comments {
+		body, ok := strings.CutPrefix(comment.Body, SpecCommentMarker)
+		if !ok {
+			// Not a prefix match, so a comment merely quoting the marker
+			// somewhere in its text is correctly ignored.
+			continue
+		}
+		found++
+		// The comment may have been edited after it was written, so the update
+		// time is what "most recent" means here.
+		at := parseTimestamp(comment.UpdatedAt)
+		if at.IsZero() {
+			at = parseTimestamp(comment.CreatedAt)
+		}
+		if chosen == "" || at.After(chosenAt) {
+			chosen, chosenAt = boundedBody(strings.TrimLeft(body, "\r\n")), at
+		}
+	}
+	return chosen, found > 1
 }
 
 // belongsTo reports whether a canonical Issue URL names this repository. An
@@ -471,10 +523,21 @@ func boundedBody(value string) string {
 
 type rawIssueDetail struct {
 	rawIssue
-	State       string `json:"state"`
-	StateReason string `json:"stateReason"`
-	ClosedAt    string `json:"closedAt"`
-	Body        string `json:"body"`
+	State       string            `json:"state"`
+	StateReason string            `json:"stateReason"`
+	ClosedAt    string            `json:"closedAt"`
+	Body        string            `json:"body"`
+	Comments    []rawIssueComment `json:"comments"`
+}
+
+// rawIssueComment carries only what selecting the spec comment needs. Author is
+// deliberately absent: the marker identifies the comment, not the account that
+// posted it, so the tool keeps working when the agent runs as a different
+// identity than it did last week.
+type rawIssueComment struct {
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 // CreateIssue creates one Issue in the resolved repository.

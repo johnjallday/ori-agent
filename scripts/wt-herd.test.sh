@@ -656,36 +656,55 @@ for herdr_free_command in pr merge demo backlog cd ls; do
   fi
 done
 
-# The backlog left this dispatcher for scripts/backlog.sh, but the property that
-# assertion protected did not: reading GitHub Issues must never need a running
-# Herdr. The entrypoint calls the shared Go helper — that is how it reaches
-# GitHub — and the only thing it may ask the helper for is `backlog`. A bridge
+# The backlog left this dispatcher for two executables, but the property that
+# assertion protected did not: reading GitHub Issues or the board must never
+# need a running Herdr. Both entrypoints reach GitHub through the shared Go
+# helper, and each may ask it for exactly one subcommand — its own. A bridge
 # subcommand appearing there would put a live Herdr between a developer and
 # their own backlog.
-backlog_entrypoint="$repo_root/scripts/backlog.sh"
-if [[ ! -f "$backlog_entrypoint" ]]; then
-  print -r -- "scripts/backlog.sh is missing; the backlog has no entrypoint" >&2
+#
+# The helper invocation itself now lives in the sourced bootstrap, so that is
+# where the routing is asserted; the entrypoints are checked for which
+# subcommand they name.
+devflow_bootstrap="$repo_root/scripts/lib/devflow-bootstrap.sh"
+if [[ ! -f "$devflow_bootstrap" ]]; then
+  print -r -- "scripts/lib/devflow-bootstrap.sh is missing; the entrypoints share no resolution" >&2
   exit 1
 fi
-helper_calls="$(rg -- '--repo-root' "$backlog_entrypoint" || true)"
+helper_calls="$(rg -- '--repo-root' "$devflow_bootstrap" || true)"
 if [[ -z "$helper_calls" ]]; then
-  print -r -- "backlog.sh no longer routes its listing through the devflow helper" >&2
+  print -r -- "the bootstrap no longer routes through the devflow helper" >&2
   exit 1
 fi
-for helper_call in ${(f)helper_calls}; do
-  if ! print -r -- "$helper_call" | rg -q 'backlog "\$@"$'; then
-    print -r -- "backlog.sh asks the helper for something other than the backlog: $helper_call" >&2
+
+typeset -A backlog_entrypoints
+backlog_entrypoints=(
+  "$repo_root/scripts/issue.sh"   "issue"
+  "$repo_root/scripts/backlog.sh" "backlog"
+)
+for entrypoint subcommand in "${(@kv)backlog_entrypoints}"; do
+  name="${entrypoint:t}"
+  if [[ ! -f "$entrypoint" ]]; then
+    print -r -- "scripts/$name is missing" >&2
+    exit 1
+  fi
+  if ! rg -q "devflow_exec $subcommand \"\\\$@\"" "$entrypoint"; then
+    print -r -- "$name does not ask the helper for '$subcommand'" >&2
+    exit 1
+  fi
+  for bridge_command in handoff retry setup doctor cleanup target status overview prompt; do
+    if rg -q -- "devflow_exec $bridge_command" "$entrypoint"; then
+      print -r -- "$name asked the helper for the Herdr command '$bridge_command'" >&2
+      exit 1
+    fi
+  done
+  if rg -q "wt_herd" "$entrypoint"; then
+    print -r -- "$name reaches for the Herdr bridge" >&2
     exit 1
   fi
 done
-for bridge_command in handoff retry setup doctor cleanup target status overview add prompt; do
-  if print -r -- "$helper_calls" | rg -q -- "$bridge_command"; then
-    print -r -- "backlog.sh asked the helper for the Herdr command '$bridge_command'" >&2
-    exit 1
-  fi
-done
-if rg -q "wt_herd" "$backlog_entrypoint"; then
-  print -r -- "backlog.sh reaches for the Herdr bridge" >&2
+if rg -q "wt_herd" "$devflow_bootstrap"; then
+  print -r -- "the bootstrap reaches for the Herdr bridge" >&2
   exit 1
 fi
 

@@ -1,10 +1,15 @@
 #!/bin/zsh
 set -euo pipefail
 
-# ./scripts/backlog.sh reads and writes GitHub Issues. There is no backlog file,
+# ./scripts/issue.sh reads and writes GitHub Issues. There is no backlog file,
 # so there is nothing here about dates, retention windows, or scoped commits:
 # this suite checks the command, and it checks that the command touches no Git
 # state at all.
+#
+# The board half of the split — ./scripts/backlog.sh, which reads the linked
+# project's Ready column — is covered by Go tests against a stubbed runner. What
+# is only testable here is the shell boundary: how the helper is found, and
+# whether an argument survives crossing it intact.
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/ori-wt-backlog.XXXXXX")"
@@ -32,7 +37,7 @@ fi
 
 # The entrypoint is an executable that anyone — including an agent that cannot
 # source a zsh function — can call as a single token.
-if [[ ! -x "$repo_root/scripts/backlog.sh" ]]; then
+if [[ ! -x "$repo_root/scripts/issue.sh" ]]; then
   print -r -- "scripts/backlog.sh is not executable" >&2
   exit 1
 fi
@@ -123,10 +128,15 @@ gh_source="$gh_root/source"
 git init -q -b main "$gh_source"
 git -C "$gh_source" config user.name "Ori Backlog Test"
 git -C "$gh_source" config user.email "ori-backlog@example.test"
-mkdir -p "$gh_source/scripts"
+mkdir -p "$gh_source/scripts/lib"
+cp "$repo_root/scripts/issue.sh" "$gh_source/scripts/issue.sh"
 cp "$repo_root/scripts/backlog.sh" "$gh_source/scripts/backlog.sh"
-git -C "$gh_source" add scripts/backlog.sh
-git -C "$gh_source" commit -q -m "test: seed backlog entrypoint"
+# Both entrypoints source their repo-root and helper resolution from one shared
+# file, so a fixture seeding only the entrypoint would fail before reaching
+# anything this suite is about.
+cp "$repo_root/scripts/lib/devflow-bootstrap.sh" "$gh_source/scripts/lib/devflow-bootstrap.sh"
+git -C "$gh_source" add scripts/issue.sh scripts/backlog.sh scripts/lib/devflow-bootstrap.sh
+git -C "$gh_source" commit -q -m "test: seed the Issue and board entrypoints"
 git -C "$gh_source" worktree add -q -b dev "$gh_root/dev-checkout"
 git -C "$gh_source" worktree add -q -b feature/backlog "$gh_root/feature-checkout"
 
@@ -145,7 +155,7 @@ gh_checkouts=("$gh_source" "$gh_root/dev-checkout" "$gh_root/feature-checkout")
 : > "$gh_calls"
 for removed_command in sync prune; do
   removed_status=0
-  ( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh "$removed_command" ) \
+  ( cd "$gh_root/feature-checkout" && ./scripts/issue.sh "$removed_command" ) \
     > "$fixture_root/removed-$removed_command" 2>&1 || removed_status=$?
   if [[ "$removed_status" != "2" ]]; then
     print -r -- "backlog.sh $removed_command exited $removed_status, want 2" >&2
@@ -158,7 +168,7 @@ done
 # local one is what this feature removed.
 for absent_command in promote doing ship drop close select project; do
   absent_status=0
-  ( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh "$absent_command" ) \
+  ( cd "$gh_root/feature-checkout" && ./scripts/issue.sh "$absent_command" ) \
     > /dev/null 2>&1 || absent_status=$?
   if [[ "$absent_status" != "2" ]]; then
     print -r -- "backlog.sh $absent_command exited $absent_status, want 2" >&2
@@ -174,15 +184,15 @@ fi
 for checkout in "${gh_checkouts[@]}"; do
   name="${checkout:t}"
   : > "$gh_calls"
-  ( cd "$checkout" && ./scripts/backlog.sh ) > "$gh_root/$name-bare"
-  ( cd "$checkout" && ./scripts/backlog.sh list ) > "$gh_root/$name-named"
-  ( cd "$checkout" && ./scripts/backlog.sh ls ) > "$gh_root/$name-alias"
+  ( cd "$checkout" && ./scripts/issue.sh ) > "$gh_root/$name-bare"
+  ( cd "$checkout" && ./scripts/issue.sh list ) > "$gh_root/$name-named"
+  ( cd "$checkout" && ./scripts/issue.sh ls ) > "$gh_root/$name-alias"
   if ! cmp -s "$gh_root/$name-bare" "$gh_root/$name-named" \
     || ! cmp -s "$gh_root/$name-bare" "$gh_root/$name-alias"; then
     print -r -- "the list spellings disagreed in $name" >&2
     exit 1
   fi
-  rg -q -- "Ori backlog" "$gh_root/$name-bare"
+  rg -q -- "Ori Issues" "$gh_root/$name-bare"
   rg -q -- "#293" "$gh_root/$name-bare"
   rg -q -- "Coordinate based map" "$gh_root/$name-bare"
   # Redirected output is data, not decoration: no escape sequences may reach a
@@ -197,7 +207,7 @@ done
 # return one set of Issues. Only the observation time may differ.
 for checkout in "${gh_checkouts[@]}"; do
   name="${checkout:t}"
-  ( cd "$checkout" && ./scripts/backlog.sh --json ) | rg -v "observed_at" > "$gh_root/$name-json"
+  ( cd "$checkout" && ./scripts/issue.sh --json ) | rg -v "observed_at" > "$gh_root/$name-json"
 done
 if ! cmp -s "$gh_root/source-json" "$gh_root/dev-checkout-json" \
   || ! cmp -s "$gh_root/source-json" "$gh_root/feature-checkout-json"; then
@@ -218,7 +228,7 @@ fi
 # The default listing asks GitHub for this repository's open Issues by the
 # authenticated user, and nothing else.
 : > "$gh_calls"
-( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ) > /dev/null
+( cd "$gh_root/feature-checkout" && ./scripts/issue.sh ) > /dev/null
 rg -q -- "repo view --json owner,name" "$gh_calls"
 rg -q -- "issue list --repo johnjallday/ori-agent --state open" "$gh_calls"
 rg -q -- "--author @me" "$gh_calls"
@@ -231,7 +241,7 @@ done
 
 # --all removes the author filter and nothing else.
 : > "$gh_calls"
-( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh --all ) > "$gh_root/all-output"
+( cd "$gh_root/feature-checkout" && ./scripts/issue.sh --all ) > "$gh_root/all-output"
 rg -q -- "issue list --repo johnjallday/ori-agent --state open" "$gh_calls"
 rg -q -- "by all authors" "$gh_root/all-output"
 if rg -q -- "--author" "$gh_calls"; then
@@ -249,7 +259,7 @@ done
 : > "$gh_calls"
 for invalid_args in "definitely-not-a-subcommand" "--nope" "list extra"; do
   invalid_status=0
-  ( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ${=invalid_args} ) \
+  ( cd "$gh_root/feature-checkout" && ./scripts/issue.sh ${=invalid_args} ) \
     > "$gh_root/invalid-output" 2>&1 || invalid_status=$?
   if [[ "$invalid_status" != "2" ]]; then
     print -r -- "backlog.sh $invalid_args exited $invalid_status, want 2" >&2
@@ -264,7 +274,7 @@ fi
 # A failed query is a failure, not an empty backlog.
 : > "$gh_calls"
 failed_status=0
-( export GH_FAIL=1; cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ) \
+( export GH_FAIL=1; cd "$gh_root/feature-checkout" && ./scripts/issue.sh ) \
   > "$gh_root/failed-output" 2>&1 || failed_status=$?
 [[ "$failed_status" == "1" ]]
 if rg -q -- "0 open Issues" "$gh_root/failed-output"; then
@@ -277,7 +287,7 @@ rg -q -- "Recovery:" "$gh_root/failed-output"
 
 # `view` reads one Issue in full, including the body the listing withholds.
 : > "$gh_calls"
-( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh view 292 ) > "$gh_root/view-output"
+( cd "$gh_root/feature-checkout" && ./scripts/issue.sh view 292 ) > "$gh_root/view-output"
 rg -q -- "issue view 292 --repo johnjallday/ori-agent" "$gh_calls"
 rg -q -- "#292" "$gh_root/view-output"
 rg -q -- "Coordinate based map" "$gh_root/view-output"
@@ -295,7 +305,7 @@ done
 # create an Issue named after its first word — or run the rest.
 hostile_title='$(touch /tmp/ori-backlog-should-not-exist); rm -rf . && echo "pwned" | cat'
 : > "$gh_calls"
-( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh add "$hostile_title" --body "a body with 'quotes' and \$vars" ) \
+( cd "$gh_root/feature-checkout" && ./scripts/issue.sh add "$hostile_title" --body "a body with 'quotes' and \$vars" ) \
   > "$gh_root/add-output"
 rg -q -- "issue create --repo johnjallday/ori-agent" "$gh_calls"
 rg -q -- "#294" "$gh_root/add-output"
@@ -325,7 +335,7 @@ done
 # A failed creation is a failure, and it leaves nothing local behind.
 : > "$gh_calls"
 add_failure_status=0
-( export GH_FAIL=1; cd "$gh_root/feature-checkout" && ./scripts/backlog.sh add "an idea that will not land" ) \
+( export GH_FAIL=1; cd "$gh_root/feature-checkout" && ./scripts/issue.sh add "an idea that will not land" ) \
   > "$gh_root/add-failed-output" 2>&1 || add_failure_status=$?
 [[ "$add_failure_status" == "1" ]]
 if rg -q -- "#" "$gh_root/add-failed-output"; then
@@ -338,7 +348,7 @@ fi
 : > "$gh_calls"
 for invalid_args in "view" "view 0" "view 292 293" "add" "add title --all" "view 292 --all"; do
   invalid_status=0
-  ( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ${=invalid_args} ) > /dev/null 2>&1 || invalid_status=$?
+  ( cd "$gh_root/feature-checkout" && ./scripts/issue.sh ${=invalid_args} ) > /dev/null 2>&1 || invalid_status=$?
   if [[ "$invalid_status" != "2" ]]; then
     print -r -- "backlog.sh $invalid_args exited $invalid_status, want 2" >&2
     exit 1
@@ -358,9 +368,9 @@ fi
 
 for checkout in "${gh_checkouts[@]}"; do
   name="${checkout:t}"
-  ( cd "$checkout" && ./scripts/backlog.sh view 292 --json ) > "$gh_root/$name-view-json"
-  ( cd "$checkout" && ./scripts/backlog.sh add "one idea" --json ) > "$gh_root/$name-add-json"
-  ( cd "$checkout" && ./scripts/backlog.sh --all --json ) | rg -v "observed_at" > "$gh_root/$name-all-json"
+  ( cd "$checkout" && ./scripts/issue.sh view 292 --json ) > "$gh_root/$name-view-json"
+  ( cd "$checkout" && ./scripts/issue.sh add "one idea" --json ) > "$gh_root/$name-add-json"
+  ( cd "$checkout" && ./scripts/issue.sh --all --json ) | rg -v "observed_at" > "$gh_root/$name-all-json"
 done
 for form in view-json add-json all-json; do
   if ! cmp -s "$gh_root/source-$form" "$gh_root/dev-checkout-$form" \
@@ -388,7 +398,7 @@ cat > "$gh_root/hostile-issues.json" <<'JSON'
    "createdAt":"2026-08-01T10:00:00Z","updatedAt":"2026-08-01T10:00:00Z"}
 ]
 JSON
-( export GH_ISSUES="$gh_root/hostile-issues.json"; cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ) \
+( export GH_ISSUES="$gh_root/hostile-issues.json"; cd "$gh_root/feature-checkout" && ./scripts/issue.sh ) \
   > "$gh_root/hostile-output"
 rg -q -- "9001" "$gh_root/hostile-output"
 if rg -q -- $'\033' "$gh_root/hostile-output"; then
@@ -419,7 +429,7 @@ for failure_text in \
   failure_status=0
   ( export GH_FAILURE_TEXT="$failure_text"
     cp "$fake_bin/gh-failing" "$fake_bin/gh"
-    cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ) \
+    cd "$gh_root/feature-checkout" && ./scripts/issue.sh ) \
     > "$gh_root/failure-output" 2>&1 || failure_status=$?
   if [[ "$failure_status" != "1" ]]; then
     print -r -- "'$failure_text' exited $failure_status, want 1" >&2
@@ -436,7 +446,7 @@ cp "$fake_bin/gh-working" "$fake_bin/gh"
 
 # A working GitHub after a run of failures is an ordinary listing again: no
 # state was carried forward, because there is no state to carry.
-( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ) > "$gh_root/recovered-output"
+( cd "$gh_root/feature-checkout" && ./scripts/issue.sh ) > "$gh_root/recovered-output"
 rg -q -- "2 open Issues" "$gh_root/recovered-output"
 
 # --- how the helper is found --------------------------------------------------
@@ -466,33 +476,42 @@ chmod +x "$resolution_root/explicit" "$resolution_root/installed" "$resolution_r
 # $HERDR_DEVFLOW_BINARY wins over every later candidate, including `go run`, and
 # the arguments cross the boundary verbatim: one parser owns the invocation.
 resolution_output="$( cd "$gh_root/feature-checkout" \
-  && HERDR_DEVFLOW_BINARY="$resolution_root/explicit" ./scripts/backlog.sh list --json )"
+  && HERDR_DEVFLOW_BINARY="$resolution_root/explicit" ./scripts/issue.sh list --json )"
 if ! print -r -- "$resolution_output" \
-  | rg -q '^EXPLICIT --repo-root .*/feature-checkout backlog list --json$'; then
+  | rg -q '^EXPLICIT --repo-root .*/feature-checkout issue list --json$'; then
   print -r -- "HERDR_DEVFLOW_BINARY was not preferred, or the arguments were rewritten: $resolution_output" >&2
   exit 1
 fi
 
 # The installed runtime binary comes next: $HERDR_DEVFLOW_HOME is the runtime
 # root and the helper sits at <root>/bin/herdr-devflow, exactly where the Go code
-# puts it. A checkout-local bin/ exists here to prove it does not win.
+# puts it.
+#
+# The checkout's own bin/ is asserted to OUTRANK it. Only somebody working on
+# the helper has both, and for them the global install is by definition the
+# older of the two — so preferring it makes a freshly built subcommand report
+# itself as unknown, which reads as a bug in the feature rather than a stale
+# binary answering for it.
 mkdir -p "$gh_root/installed-runtime/bin" "$gh_root/feature-checkout/bin"
 cp "$resolution_root/installed" "$gh_root/installed-runtime/bin/herdr-devflow"
 cp "$resolution_root/repo-bin" "$gh_root/feature-checkout/bin/herdr-devflow"
 resolution_output="$( cd "$gh_root/feature-checkout" \
-  && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/installed-runtime" ./scripts/backlog.sh list )"
-if ! print -r -- "$resolution_output" | rg -q '^INSTALLED '; then
-  print -r -- "the installed runtime binary was not preferred: $resolution_output" >&2
+  && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/installed-runtime" ./scripts/issue.sh list )"
+if ! print -r -- "$resolution_output" | rg -q '^REPO-BIN '; then
+  print -r -- "the checkout's own bin/ did not outrank the installed helper: $resolution_output" >&2
   exit 1
 fi
 
-# A checkout-local bin/herdr-devflow is the third candidate.
+# With no checkout-local build, the installed runtime binary answers.
+rm -f "$gh_root/feature-checkout/bin/herdr-devflow"
 resolution_output="$( cd "$gh_root/feature-checkout" \
-  && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/nothing-installed" ./scripts/backlog.sh list )"
-if ! print -r -- "$resolution_output" | rg -q '^REPO-BIN '; then
-  print -r -- "\$repo_root/bin/herdr-devflow was not used: $resolution_output" >&2
+  && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/installed-runtime" ./scripts/issue.sh list )"
+if ! print -r -- "$resolution_output" | rg -q '^INSTALLED '; then
+  print -r -- "the installed runtime binary was not used as the fallback: $resolution_output" >&2
   exit 1
 fi
+# Left removed on purpose: the platform-derivation check below also needs the
+# installed helper to answer, which it cannot do while a checkout build outranks it.
 
 # Without $HERDR_DEVFLOW_HOME the runtime root comes from the platform's user
 # config directory. Getting the Linux spelling wrong degrades silently to a
@@ -508,7 +527,7 @@ chmod +x "$linux_bin/uname"
 cp "$resolution_root/installed" "$gh_root/xdg/herdr/ori-devflow/bin/herdr-devflow"
 resolution_output="$( cd "$gh_root/feature-checkout" \
   && PATH="$linux_bin:$PATH" XDG_CONFIG_HOME="$gh_root/xdg" \
-     env -u HERDR_DEVFLOW_BINARY -u HERDR_DEVFLOW_HOME ./scripts/backlog.sh list )"
+     env -u HERDR_DEVFLOW_BINARY -u HERDR_DEVFLOW_HOME ./scripts/issue.sh list )"
 if ! print -r -- "$resolution_output" | rg -q '^INSTALLED '; then
   print -r -- "the Linux user-config derivation did not find the installed helper: $resolution_output" >&2
   exit 1
@@ -574,4 +593,28 @@ done
 wt help > "$fixture_root/help-output" 2>&1
 rg -q "wt status" "$fixture_root/help-output"
 
-print -r -- "backlog.sh tests passed"
+# --- the board entrypoint, at the shell boundary ------------------------------
+#
+# backlog.sh's behaviour is covered by Go tests; what only exists out here is
+# that the retired Issue spellings reach a rejection through the same shell,
+# and that reaching one costs no GitHub call.
+
+: > "$gh_calls"
+for retired_args in "list" "view 292" "add a-title" "--all"; do
+  retired_status=0
+  ( cd "$gh_root/feature-checkout" && ./scripts/backlog.sh ${=retired_args} ) \
+    > "$gh_root/retired-output" 2>&1 || retired_status=$?
+  if [[ "$retired_status" != "2" ]]; then
+    print -r -- "backlog.sh $retired_args exited $retired_status, want 2" >&2
+    exit 1
+  fi
+  # Each one was a working command days ago, so the rejection names where it
+  # went rather than claiming it never existed.
+  rg -q -- "./scripts/issue.sh" "$gh_root/retired-output"
+done
+if [[ -s "$gh_calls" ]]; then
+  print -r -- "a retired backlog.sh invocation still queried GitHub: $(<"$gh_calls")" >&2
+  exit 1
+fi
+
+print -r -- "issue.sh tests passed"

@@ -54,9 +54,11 @@ John's own captured ideas — the highest-signal source. Read them fresh at the 
 run:
 
 ```bash
-./scripts/backlog.sh --json          # open Issues in this repository authored by the current gh user
-./scripts/backlog.sh view <number>   # one Issue's full body, when the title is not enough
+./scripts/issue.sh --json          # open Issues in this repository authored by the current gh user
+./scripts/issue.sh view <number>   # one Issue's full body, when the title is not enough
 ```
+
+**Read Issues, not the board.** `./scripts/backlog.sh` reads the project board's `Ready` column — only the Issues a grooming agent has already researched. Discovery scores *every* open Issue, including the ones nobody has looked at yet, which are exactly the ones most likely to be missed. Using the board here would narrow this source silently and produce a shortlist that looks complete while omitting the newest ideas.
 
 Treat **every** open Issue as a candidate and score it with the same rubric. An Issue counts
 even when it has no label, no milestone, no assignee, no Project, and no acceptance criteria —
