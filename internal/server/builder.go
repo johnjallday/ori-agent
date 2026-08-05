@@ -77,6 +77,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/workspacemap"
+	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -318,6 +320,14 @@ type ServerBuilder struct {
 	workspaceCapabilityRegistry *workspacecapability.Registry
 	workspaceCapabilityService  *workspacecapability.Service
 	workspaceCapabilityHandler  *workspacecapabilityhttp.Handler
+
+	// Coordinate-based Workspace Map: the current user's layout storage, the
+	// ownership/lifecycle service over it, and its HTTP handler. Kept entirely
+	// separate from the per-workspace CanvasLayout served by
+	// /api/workspaces/{id}/layout (#292 FR-5, FR-104).
+	workspaceMapStore   *workspacemap.SQLiteStore
+	workspaceMapService *workspacemap.Service
+	workspaceMapHandler *workspacemaphttp.Handler
 }
 
 // NewServerBuilder creates a new ServerBuilder instance with an empty Server.
@@ -512,6 +522,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		OriGuide:              b.oriGuideHandler,
 		DownloadsJanitor:      b.downloadsJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
+		WorkspaceMap:          b.workspaceMapHandler,
 		SetupWizard:           b.setupWizardHandler,
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,

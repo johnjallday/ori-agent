@@ -104,24 +104,196 @@ test('a member whose parent is missing degrades to a standalone tile', () => {
   assert.equal(layout.tiles[0].groupId, '');
 });
 
-test('computeMaxCols derives the column count from the theatre width', () => {
-  const { computeMaxCols } = loadOriWorkspaceMap();
-  // cells are 176px wide with 26px padding each side (52 total)
-  assert.equal(computeMaxCols(1200), 5); // capped at the desktop max
-  assert.equal(computeMaxCols(930), 4); // (930-52)/176 = 4.98 -> 4
-  assert.equal(computeMaxCols(700), 3);
-  assert.equal(computeMaxCols(400), 1);
-  assert.equal(computeMaxCols(100), 1); // never below one column
-  assert.equal(computeMaxCols(0), 5); // unmeasurable (hidden) -> default
+// ---------------------------------------------------------------------------
+// Coordinate engine (#292 FR-1 – FR-30, FR-123)
+//
+// These replace the old responsive-grid assertions. The map no longer has a
+// column count: it has world coordinates, saved anchors win over automatic
+// ones, and nothing about placement may depend on how wide the window is.
+// ---------------------------------------------------------------------------
+
+function loadWorldLayout() {
+  return loadOriWorkspaceMap().computeWorldLayout;
+}
+
+function anchorsById(layout) {
+  const map = {};
+  layout.nodes.forEach(n => {
+    map[n.id] = { x: n.x, y: n.y };
+  });
+  return map;
+}
+
+test('a saved coordinate always wins over automatic placement (FR-17)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout([{ id: 'a' }, { id: 'b' }], {
+    positions: { a: { x: 5000, y: -2400 } }
+  });
+  const anchors = anchorsById(layout);
+  assert.deepEqual(anchors.a, { x: 5000, y: -2400 });
+  assert.ok(anchors.b, 'the unplaced workspace still gets an anchor');
+  assert.notDeepEqual(anchors.b, anchors.a);
 });
 
-test('narrow column counts wrap tiles into extra rows instead of overflowing', () => {
-  const computeLayout = loadComputeLayout();
-  const five = Array.from({ length: 5 }, (_, i) => ({ id: 'w' + i }));
-  const layout = computeLayout(five, { maxCols: 2 });
-  assert.equal(layout.tiles.length, 5);
-  layout.tiles.forEach(t => assert.ok(t.col < 2, 'col stays inside the 2-wide grid'));
-  assert.ok(layout.rows >= 3, '5 tiles at 2 cols need at least 3 rows');
+test('automatic placement is identical regardless of API order (FR-19)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }];
+  const forward = computeWorldLayout(wss);
+  const reversed = computeWorldLayout([...wss].reverse());
+  assert.deepEqual(anchorsById(forward), anchorsById(reversed));
+});
+
+test('automatic placement is identical regardless of viewport width (FR-13, FR-19)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = Array.from({ length: 9 }, (_, i) => ({ id: 'w' + i }));
+  const wide = computeWorldLayout(wss, { viewport: { width: 1600, height: 900 } });
+  const narrow = computeWorldLayout(wss, { viewport: { width: 380, height: 640 } });
+  assert.deepEqual(anchorsById(wide), anchorsById(narrow));
+});
+
+test('no two records share an anchor, saved or automatic (FR-20)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = Array.from({ length: 14 }, (_, i) => ({ id: 'w' + i }));
+  // Deliberately save one workspace onto the exact cell another would take.
+  const seeded = computeWorldLayout(wss);
+  const collidingPoint = anchorsById(seeded).w3;
+  const layout = computeWorldLayout(wss, { positions: { w9: collidingPoint } });
+
+  const seen = new Set();
+  layout.nodes.forEach(n => {
+    const key = n.x + ',' + n.y;
+    assert.ok(!seen.has(key), 'two buildings at ' + key);
+    seen.add(key);
+  });
+  assert.deepEqual(anchorsById(layout).w9, collidingPoint, 'the saved anchor is the one kept');
+});
+
+test('a corrupt or out-of-range saved anchor degrades that record only (FR-22)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout([{ id: 'good' }, { id: 'bad' }, { id: 'wild' }], {
+    positions: {
+      good: { x: 400, y: 400 },
+      bad: { x: 'over there', y: null },
+      wild: { x: 9e9, y: 0 }
+    }
+  });
+  const anchors = anchorsById(layout);
+  assert.deepEqual(anchors.good, { x: 400, y: 400 });
+  assert.ok(anchors.bad && Number.isFinite(anchors.bad.x), 'bad anchor falls back, stays drawn');
+  assert.ok(anchors.wild && anchors.wild.x < 1e6, 'out-of-range anchor falls back into safe space');
+});
+
+test('a coordinate for a record that is not on the map is ignored, not drawn (FR-26)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout([{ id: 'a' }], {
+    positions: { a: { x: 100, y: 100 }, 'trashed-ws': { x: 900, y: 900 } }
+  });
+  assert.equal(layout.nodes.length, 1);
+  assert.deepEqual(anchorsById(layout).a, { x: 100, y: 100 });
+});
+
+test('a restored record returns to its retained coordinate (FR-27)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const positions = { a: { x: 100, y: 100 }, b: { x: 764, y: 342 } };
+  const whileTrashed = computeWorldLayout([{ id: 'a' }], { positions });
+  const afterRestore = computeWorldLayout([{ id: 'a' }, { id: 'b' }], { positions });
+  assert.deepEqual(anchorsById(whileTrashed).a, { x: 100, y: 100 });
+  assert.deepEqual(anchorsById(afterRestore).b, { x: 764, y: 342 });
+  assert.deepEqual(
+    anchorsById(afterRestore).a,
+    { x: 100, y: 100 },
+    'restoring a sibling must not disturb anyone else'
+  );
+});
+
+test('a record created outside the map appears near existing content, not at a distant origin (FR-24)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const placed = { a: { x: 4000, y: 4000 }, b: { x: 4176, y: 4000 } };
+  const layout = computeWorldLayout([{ id: 'a' }, { id: 'b' }, { id: 'newcomer' }], {
+    positions: placed
+  });
+  const anchors = anchorsById(layout);
+  assert.ok(
+    anchors.newcomer.y > 4000 && anchors.newcomer.y < 4600,
+    'the new workspace lands just below the arranged cluster, not back at the origin'
+  );
+  assert.ok(anchors.newcomer.x >= 4000 && anchors.newcomer.x < 5000);
+});
+
+test('a legacy map with no saved anchors keeps the classic corner origin (FR-18)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout([{ id: 'a' }, { id: 'b' }]);
+  const anchors = anchorsById(layout);
+  const xs = Object.values(anchors).map(a => a.x);
+  const ys = Object.values(anchors).map(a => a.y);
+  assert.equal(Math.min(...xs), 26, 'first column sits at the classic 26px pad');
+  assert.equal(Math.min(...ys), 26);
+});
+
+test('the reserved Personal HQ site gets an anchor but is never a persisted workspace (FR-30)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const withSite = computeWorldLayout([{ id: 'a' }], { hqSite: true });
+  const withoutSite = computeWorldLayout([{ id: 'a' }], { hqSite: false });
+  assert.ok(withSite.hqSite && Number.isFinite(withSite.hqSite.x));
+  assert.equal(withoutSite.hqSite, null);
+  assert.ok(
+    !withSite.nodes.some(n => n.id === '__personal_hq_site__'),
+    'the site is not a workspace node'
+  );
+
+  // A layout record that tries to persist the reserved id is ignored outright.
+  const spoofed = computeWorldLayout([{ id: 'a' }], {
+    hqSite: true,
+    positions: { __personal_hq_site__: { x: 12, y: 12 } }
+  });
+  assert.notDeepEqual({ x: spoofed.hqSite.x, y: spoofed.hqSite.y }, { x: 12, y: 12 });
+});
+
+test('districts are elastic presentation around member anchors and never rewrite them (FR-84)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = [
+    { id: 'g', kind: 'group', name: 'Marketing' },
+    { id: 'm1', parent_id: 'g' },
+    { id: 'm2', parent_id: 'g' }
+  ];
+  const far = { x: 3000, y: 2000 };
+  const layout = computeWorldLayout(wss, { positions: { m2: far } });
+  const anchors = anchorsById(layout);
+  assert.deepEqual(anchors.m2, far, 'the moved child keeps its exact coordinate');
+
+  const district = layout.districts.find(d => d.id === 'g');
+  assert.ok(district, 'the group still renders as a district');
+  assert.ok(
+    district.x <= far.x && district.y <= far.y,
+    'the outline grew around the child rather than pulling it back'
+  );
+  assert.ok(district.width >= 3000 - district.x, 'outline spans to the moved child');
+});
+
+test('an empty group still renders as a selectable minimum-size district (FR-83)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout([{ id: 'g', kind: 'group', name: 'Empty' }]);
+  assert.equal(layout.districts.length, 1);
+  const district = layout.districts[0];
+  assert.ok(district.width > 0 && district.height > 0);
+  assert.equal(layout.nodes.length, 0, 'a group is a district, never a building tile');
+});
+
+test('content bounds grow around placed content with a viewport of margin (FR-10, FR-11)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const viewport = { width: 1000, height: 700 };
+  const near = computeWorldLayout([{ id: 'a' }], { viewport });
+  const far = computeWorldLayout([{ id: 'a' }], {
+    positions: { a: { x: 9000, y: 9000 } },
+    viewport
+  });
+
+  assert.ok(far.bounds.maxX > near.bounds.maxX, 'the world grew to include the moved building');
+  assert.ok(
+    far.world.width >= far.bounds.maxX - far.bounds.minX + viewport.width * 2,
+    'at least one viewport of margin on each side'
+  );
+  assert.ok(far.world.originX <= far.bounds.minX - viewport.width);
 });
 
 test('computeStats sums enriched agent/task counts and counts groups', () => {
@@ -190,12 +362,13 @@ test('hqOverviewHTML offers setup actions, hides Not now after skip, and offers 
   assert.doesNotMatch(repair, /data-hq-action="skip"/);
 });
 
-test('nextFreeMapCell finds the first open cell without colliding with real workspaces', () => {
-  const { nextFreeMapCell } = loadOriWorkspaceMap();
-  const occupied = { '0,0': true, '1,0': true, '0,1': true };
-  const cell = nextFreeMapCell(occupied, 2);
-  assert.equal(cell.col, 1);
-  assert.equal(cell.row, 1);
+test('the New Workspace pad gets its own anchor after every real and reserved site', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout([{ id: 'a' }, { id: 'b' }], { hqSite: true });
+  const taken = new Set(layout.nodes.map(n => n.x + ',' + n.y));
+  taken.add(layout.hqSite.x + ',' + layout.hqSite.y);
+  assert.ok(layout.pad && Number.isFinite(layout.pad.x));
+  assert.ok(!taken.has(layout.pad.x + ',' + layout.pad.y), 'the pad never sits under a building');
 });
 
 test('tileHTML meta line reflects enriched agent/task counts with correct pluralization', () => {
@@ -788,4 +961,157 @@ test('tiles are spaced so a row cannot collide with the row below it', () => {
   if (Number.isFinite(pitch) && pitch > 0) {
     assert.ok(pitch >= 160, `row pitch ${pitch}px must clear the ~155px tile height`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Shared layout lifecycle (#292 FR-4, FR-16, FR-23, FR-105)
+//
+// One layout, loaded once, rendered identically by the Home cockpit and the
+// /workspaces launcher. A response that arrives after the map went away is
+// dropped rather than painted over whatever is there now.
+// ---------------------------------------------------------------------------
+
+function loadMapWithFetch(fetchImpl) {
+  const window = { addEventListener() {} };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: { getElementById: () => null },
+      setTimeout,
+      clearTimeout,
+      fetch: fetchImpl
+    },
+    { filename: 'workspace-map.js' }
+  );
+  return window.OriWorkspaceMap;
+}
+
+function jsonResponse(layout) {
+  return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, layout }) });
+}
+
+const flush = async () => {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+};
+
+function leftTopOf(html, wsId) {
+  const tile = html.split('data-ws-id="' + wsId + '"')[1] || '';
+  const match = tile.match(/style="left:(-?\d+(?:\.\d+)?)px;top:(-?\d+(?:\.\d+)?)px/);
+  return match ? { left: Number(match[1]), top: Number(match[2]) } : null;
+}
+
+test('the map paints saved coordinates once the layout resolves (FR-16, FR-17)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      revision: 3,
+      snap_to_grid: true,
+      positions: { 'ws-1': { x: 1200, y: 900 }, 'ws-2': { x: 1200, y: 1200 } }
+    })
+  );
+  const { container } = createMapHarness({ tiles: ['ws-1', 'ws-2'] });
+  const workspaces = [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ];
+
+  map.mount(container, { workspaces, hideChrome: true, selectOnly: true, noAutoSelect: true });
+  // Before the layout resolves the world is held back rather than shown at
+  // fallback positions it is about to abandon.
+  assert.match(container.innerHTML, /is-settling/);
+  assert.match(container.innerHTML, /aria-busy="true"/);
+
+  await flush();
+  assert.doesNotMatch(container.innerHTML, /is-settling/);
+  assert.equal(map.getLayoutState().status, 'ready');
+  assert.equal(map.getLayoutState().revision, 3);
+
+  // Both saved anchors keep their exact 300-unit vertical offset on screen.
+  const one = leftTopOf(container.innerHTML, 'ws-1');
+  const two = leftTopOf(container.innerHTML, 'ws-2');
+  assert.ok(one && two);
+  assert.equal(two.top - one.top, 300);
+  assert.equal(two.left, one.left);
+});
+
+test('Home and the /workspaces launcher render one shared layout (FR-4)', async () => {
+  const layoutRequests = [];
+  const map = loadMapWithFetch(url => {
+    if (String(url).includes('/api/workspace-map/layout')) layoutRequests.push(url);
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      positions: { 'ws-1': { x: 500, y: 400 } }
+    });
+  });
+  const workspaces = [{ id: 'ws-1', name: 'Alpha' }];
+
+  const home = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(home.container, { workspaces, hideChrome: true, selectOnly: true, noAutoSelect: true });
+  await flush();
+
+  const launcher = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(launcher.container, { workspaces });
+  await flush();
+
+  assert.equal(layoutRequests.length, 1, 'the layout is fetched once and shared, not per surface');
+  assert.deepEqual(
+    leftTopOf(home.container.innerHTML, 'ws-1'),
+    leftTopOf(launcher.container.innerHTML, 'ws-1')
+  );
+});
+
+test('a layout response that lands after unmount is dropped (FR-16)', async () => {
+  let resolveFetch;
+  const map = loadMapWithFetch(
+    () =>
+      new Promise(resolve => {
+        resolveFetch = resolve;
+      })
+  );
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, { workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  assert.notEqual(container.innerHTML, '');
+
+  map.unmount(container);
+  assert.equal(container.innerHTML, '');
+
+  resolveFetch({ ok: true, json: () => Promise.resolve({ layout: { positions: {} } }) });
+  await flush();
+  assert.equal(container.innerHTML, '', 'a stale response must not repaint a map that went away');
+});
+
+test('an unavailable layout still draws a usable map, marked read-only (FR-105)', async () => {
+  const map = loadMapWithFetch(() => Promise.resolve({ ok: false, status: 503 }));
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, { workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  await flush();
+
+  assert.equal(map.getLayoutState().status, 'unavailable');
+  assert.equal(map.getLayoutState().readOnly, true);
+  assert.match(container.innerHTML, /is-readonly/);
+  assert.doesNotMatch(container.innerHTML, /is-settling/);
+  // The buildings are still drawn and still reachable.
+  assert.match(container.innerHTML, /data-ws-id="ws-1"/);
+});
+
+test('merely reading the map never writes a coordinate (FR-23)', async () => {
+  const calls = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (String(url).includes('/api/workspace-map/layout')) {
+      calls.push({ url, method: (init && init.method) || 'GET' });
+    }
+    return jsonResponse({ schema_version: 1, revision: 0, positions: {} });
+  });
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, { workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  await flush();
+  map.mount(container, { workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  await flush();
+
+  assert.ok(
+    calls.every(c => c.method === 'GET'),
+    'viewing fallback placement must not write: ' + JSON.stringify(calls)
+  );
 });

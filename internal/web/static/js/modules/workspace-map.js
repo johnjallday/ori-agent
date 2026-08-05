@@ -13,6 +13,14 @@
 (function () {
   'use strict';
 
+  // ---------- world coordinates ----------
+  //
+  // Everything the map draws is anchored in WORLD space: viewport-independent
+  // logical units, not CSS pixels, not percentages of the current container, and
+  // not grid column numbers (#292 FR-2). One world unit happens to equal one CSS
+  // pixel at 100% zoom, which is what keeps the art, the spacing, and the
+  // background grid identical to the pre-coordinate map — but nothing here reads
+  // the container's width, so a resize can never move a building (FR-13).
   var CELL_W = 176;
   // Tiles measure ~155px tall (status flag, structure, name, ops mode, meta).
   // CELL_H was 150, so every row's meta line collided with the status flag of
@@ -20,8 +28,143 @@
   // operational signals are unambiguous (PRD FR30).
   var CELL_H = 170;
   var PAD = 26;
-  var MAX_COLS = 5;
+  // FALLBACK_COLS replaces the old responsive `maxCols`. Automatic placement now
+  // uses one fixed world-space rule so the same unplaced workspaces land on the
+  // same logical coordinates on Home and on /workspaces, at any window size
+  // (FR-19, FR-21).
+  var FALLBACK_COLS = 5;
+  // The district outline is drawn around its members with this much slack, and a
+  // group's own anchor sits at the outline's corner rather than on a member's
+  // cell — otherwise an empty group and its first member would want the same
+  // point (FR-82, FR-84).
+  var DISTRICT_PAD_X = 12;
+  var DISTRICT_PAD_Y = 6;
+  // Safe world bounds, mirroring internal/workspacemap/model.go. A coordinate
+  // outside them is treated as unreadable and the record falls back to
+  // automatic placement rather than being drawn somewhere impossible (FR-12).
+  var MIN_COORD = -1000000;
+  var MAX_COORD = 1000000;
+  // Fallback margin used when the real viewport size is not known yet, so world
+  // sizing stays deterministic in tests and during the first paint (FR-11).
+  var DEFAULT_VIEWPORT = { width: 1100, height: 620 };
   var HQ_SITE_ID = '__personal_hq_site__';
+
+  // ---------- current user's coordinate layout ----------
+  //
+  // One layout, shared by the Map on Home and the Map on /workspaces (FR-4).
+  // It lives at module scope rather than per-mount because both surfaces load
+  // the same script and must not each hold their own idea of where a building
+  // is. The server record is authoritative: localStorage caches nothing
+  // canonical here (FR-103).
+  var LAYOUT_ENDPOINT = '/api/workspace-map/layout';
+  var LAYOUT_LOAD_TIMEOUT_MS = 2500;
+
+  var layoutState = {
+    // idle → loading → ready | unavailable. "unavailable" is the honest
+    // read-only state: deterministic fallback placement is still drawn and
+    // still navigable, but nothing can be saved (FR-105).
+    status: 'idle',
+    positions: Object.create(null),
+    viewport: null,
+    snapToGrid: true,
+    revision: 0,
+    schemaVersion: 1
+  };
+  // Bumped for every layout request. A response whose sequence no longer
+  // matches is a stale answer to a question nobody is asking any more, and is
+  // dropped rather than painted over the current world.
+  var layoutRequestSeq = 0;
+
+  function isSafeCoordinate(value) {
+    return typeof value === 'number' && isFinite(value) && value >= MIN_COORD && value <= MAX_COORD;
+  }
+
+  function safePoint(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var x = Number(raw.x);
+    var y = Number(raw.y);
+    if (!isSafeCoordinate(x) || !isSafeCoordinate(y)) return null;
+    return { x: x, y: y };
+  }
+
+  function safeViewport(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var center = safePoint({ x: raw.center_x, y: raw.center_y });
+    var zoom = Number(raw.zoom);
+    if (!center || !isFinite(zoom) || zoom <= 0) return null;
+    return { centerX: center.x, centerY: center.y, zoom: zoom };
+  }
+
+  // applyLayoutPayload degrades per field, never wholesale: one unreadable
+  // anchor costs that building its saved spot and nothing else, and an
+  // unreadable camera opens on the default view without hiding valid buildings
+  // (FR-22, FR-45).
+  function applyLayoutPayload(payload) {
+    var positions = Object.create(null);
+    var raw = (payload && payload.positions) || {};
+    Object.keys(raw).forEach(function (id) {
+      if (!id || id === HQ_SITE_ID) return;
+      var point = safePoint(raw[id]);
+      if (point) positions[id] = point;
+    });
+    layoutState.positions = positions;
+    layoutState.viewport = safeViewport(payload && payload.viewport);
+    layoutState.snapToGrid =
+      payload && typeof payload.snap_to_grid === 'boolean' ? payload.snap_to_grid : true;
+    layoutState.revision = Number((payload && payload.revision) || 0) || 0;
+    layoutState.schemaVersion = Number((payload && payload.schema_version) || 1) || 1;
+  }
+
+  // ensureLayoutLoaded fetches the layout once per page. Both Map surfaces call
+  // it, and whichever mounts first pays for it; the second reuses the result,
+  // which is what makes the two surfaces agree by construction rather than by
+  // coincidence (FR-4, FR-16).
+  function ensureLayoutLoaded() {
+    if (layoutState.status !== 'idle') return;
+    if (typeof fetch !== 'function') {
+      layoutState.status = 'unavailable';
+      return;
+    }
+    layoutState.status = 'loading';
+    var seq = ++layoutRequestSeq;
+    // A request that never answers must not leave the world hidden forever.
+    // After the deadline the map settles into its honest read-only state:
+    // deterministic placement, navigable, nothing saveable (FR-105).
+    if (typeof setTimeout === 'function') {
+      var deadline = setTimeout(function () {
+        if (seq !== layoutRequestSeq || layoutState.status !== 'loading') return;
+        layoutState.status = 'unavailable';
+        settleLayout();
+      }, LAYOUT_LOAD_TIMEOUT_MS);
+      if (deadline && typeof deadline.unref === 'function') deadline.unref();
+    }
+    fetch(LAYOUT_ENDPOINT, { headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        if (!response || !response.ok) throw new Error('layout unavailable');
+        return response.json();
+      })
+      .then(function (data) {
+        if (seq !== layoutRequestSeq) return;
+        applyLayoutPayload(data && data.layout);
+        layoutState.status = 'ready';
+        settleLayout();
+      })
+      .catch(function () {
+        if (seq !== layoutRequestSeq) return;
+        layoutState.status = 'unavailable';
+        settleLayout();
+      });
+  }
+
+  // settleLayout repaints the surface that is still mounted once the layout
+  // resolves. It is the only place a load result reaches the DOM, so a response
+  // arriving after the user switched to Tree, navigated away, or remounted is
+  // simply dropped.
+  function settleLayout() {
+    if (!lastMount || !lastMount.container) return;
+    if (lastMount.container.isConnected === false) return;
+    mount(lastMount.container, lastMount.state);
+  }
 
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
@@ -244,14 +387,20 @@
   }
 
   /**
-   * Pure, stable, no-overlap layout. Returns grid-cell coordinates so rendering
-   * can convert them to pixels. Groups cluster into rectangular districts; only
-   * top-level groups form districts (nesting capped — deeper members flatten).
+   * Pure, stable, no-overlap arrangement in grid cells.
+   *
+   * This is no longer the map's layout — it is the *seed* for automatic
+   * placement (FR-21). It decides the order and relative arrangement of records
+   * that have never been placed by hand; computeWorldLayout turns those cells
+   * into world coordinates and lets any saved anchor override them. The cell
+   * ordering is keyed by a hash of each immutable ID, so it does not depend on
+   * the order the API returned records in (FR-19).
+   *
    * @returns {{tiles: Array, districts: Array, cols: number, rows: number}}
    */
   function computeMapLayout(workspaces, options) {
     var opts = options || {};
-    var maxCols = Math.max(1, opts.maxCols || MAX_COLS);
+    var maxCols = Math.max(1, opts.maxCols || FALLBACK_COLS);
     var list = (Array.isArray(workspaces) ? workspaces : []).filter(function (w) {
       return w && w.id;
     });
@@ -346,6 +495,288 @@
       districts: districts,
       cols: Math.max(1, Math.min(maxCols, usedCols)),
       rows: Math.max(1, totalRows)
+    };
+  }
+
+  // ---------- world placement ----------
+
+  // Anchors are compared on a rounded key so "the same point" means the same
+  // thing to the uniqueness check as it does to the eye. Exact float equality
+  // would let two buildings sit a millionth of a unit apart and both claim to be
+  // unique (FR-20).
+  function anchorKey(point) {
+    return Math.round(point.x * 2) / 2 + ',' + Math.round(point.y * 2) / 2;
+  }
+
+  /**
+   * FallbackGrid hands out automatic anchors.
+   *
+   * It walks a fixed-width grid of world cells in a deterministic order and
+   * skips any cell already claimed, so two records can never be handed the same
+   * anchor and no building is ever placed under another one's hit target
+   * (FR-20). The grid can be based anywhere: placing new records relative to the
+   * content that already exists is what keeps an externally created workspace
+   * visible instead of stranding it at a distant origin the user panned away
+   * from years ago (FR-24).
+   */
+  function createFallbackGrid(origin) {
+    var claimed = Object.create(null);
+    var cursor = 0;
+    function claim(point) {
+      claimed[anchorKey(point)] = true;
+      return point;
+    }
+    return {
+      claim: claim,
+      // cell translates a seed cell from computeMapLayout into world space. The
+      // whole seeded arrangement moves with the origin, so its relative shape —
+      // which records sit beside which — is preserved wherever it is based.
+      cell: function (col, row, base) {
+        var from = base || origin;
+        return { x: from.x + col * CELL_W, y: from.y + row * CELL_H };
+      },
+      // next returns the next unclaimed cell, scanning row by row from the
+      // grid's base. The cursor only moves forward, so assigning N records
+      // costs one pass rather than N scans.
+      next: function () {
+        for (;;) {
+          var col = cursor % FALLBACK_COLS;
+          var row = Math.floor(cursor / FALLBACK_COLS);
+          cursor += 1;
+          var point = { x: origin.x + col * CELL_W, y: origin.y + row * CELL_H };
+          if (!claimed[anchorKey(point)]) return claim(point);
+        }
+      },
+      // place takes the record's preferred point, or the next free cell when
+      // something already occupies it.
+      place: function (point) {
+        return claimed[anchorKey(point)] ? this.next() : claim(point);
+      }
+    };
+  }
+
+  // fallbackOrigin decides where automatic placement starts.
+  //
+  // With no saved anchors at all — a legacy map opened for the first time — it
+  // is the classic (PAD, PAD) corner, so nothing appears to have moved (FR-18).
+  // Once the user has placed anything, new records appear one row below their
+  // arranged content instead of back at an origin they may have panned far away
+  // from (FR-24).
+  function fallbackOrigin(savedAnchors) {
+    var ids = Object.keys(savedAnchors);
+    if (!ids.length) return { x: PAD, y: PAD };
+    var minX = Infinity;
+    var maxY = -Infinity;
+    ids.forEach(function (id) {
+      var point = savedAnchors[id];
+      if (point.x < minX) minX = point.x;
+      if (point.y > maxY) maxY = point.y;
+    });
+    return { x: minX, y: maxY + CELL_H };
+  }
+
+  // groupAffinityOrigin places an unplaced member beneath the cluster its group
+  // already occupies, so a workspace created into a moved district joins that
+  // district rather than appearing across the world from it (FR-24).
+  function groupAffinityOrigin(groupId, placedByGroup) {
+    var cluster = placedByGroup[groupId];
+    if (!cluster) return null;
+    return { x: cluster.minX, y: cluster.maxY + CELL_H };
+  }
+
+  /**
+   * Resolve every record's world anchor: saved coordinates win, everything else
+   * gets a deterministic automatic one (FR-17, FR-18).
+   *
+   * Pure and viewport-independent by construction — nothing in here reads a
+   * container size, a breakpoint, or the order the API happened to return
+   * records in, which is what lets a resize, a filter, a Map/Tree switch, or a
+   * data refresh leave every coordinate exactly where it was (FR-13, FR-19).
+   *
+   * @param {Array} workspaces enriched workspace summaries
+   * @param {object} [options] { positions, viewport, hqSite }
+   */
+  function computeWorldLayout(workspaces, options) {
+    var opts = options || {};
+    var savedInput = opts.positions || {};
+    var viewport = opts.viewport || DEFAULT_VIEWPORT;
+    var grid = computeMapLayout(workspaces, { maxCols: FALLBACK_COLS });
+
+    // 1. Keep only saved anchors that are safe numbers AND belong to a record
+    //    this map is actually drawing. A coordinate for a trashed or deleted
+    //    workspace stays in the layout record for restore, but it must not
+    //    influence anything drawn now (FR-26).
+    var present = Object.create(null);
+    grid.tiles.forEach(function (tile) {
+      present[tile.id] = true;
+    });
+    grid.districts.forEach(function (district) {
+      present[district.id] = true;
+    });
+    var saved = Object.create(null);
+    Object.keys(savedInput).forEach(function (id) {
+      if (!present[id]) return;
+      var point = safePoint(savedInput[id]);
+      if (point) saved[id] = point;
+    });
+
+    var placer = createFallbackGrid(fallbackOrigin(saved));
+    // Saved anchors are claimed before any automatic one is handed out, so
+    // automatic placement can never land on top of a building the user placed.
+    Object.keys(saved).forEach(function (id) {
+      placer.claim(saved[id]);
+    });
+
+    // 2. Group anchors first: a member's automatic placement may want to sit
+    //    near its district, which needs the district's anchor to exist.
+    var districtAnchors = Object.create(null);
+    grid.districts.forEach(function (district) {
+      var anchor = saved[district.id];
+      if (!anchor) {
+        // The group's own anchor is the outline's corner, deliberately offset
+        // from its first member's cell — otherwise an empty group and that
+        // member would compete for the same point (FR-82).
+        var cell = placer.cell(district.col, district.row);
+        anchor = placer.place({ x: cell.x - DISTRICT_PAD_X, y: cell.y - DISTRICT_PAD_Y });
+      }
+      districtAnchors[district.id] = anchor;
+    });
+
+    // 3. Buildings. Saved wins; otherwise the seeded cell if it is free, else
+    //    the next free cell in the deterministic scan.
+    var placedByGroup = Object.create(null);
+    function recordCluster(groupId, anchor) {
+      if (!groupId) return;
+      var cluster = placedByGroup[groupId];
+      if (!cluster) {
+        placedByGroup[groupId] = { minX: anchor.x, maxY: anchor.y };
+        return;
+      }
+      if (anchor.x < cluster.minX) cluster.minX = anchor.x;
+      if (anchor.y > cluster.maxY) cluster.maxY = anchor.y;
+    }
+    grid.tiles.forEach(function (tile) {
+      if (saved[tile.id]) recordCluster(tile.groupId, saved[tile.id]);
+    });
+
+    var nodes = grid.tiles.map(function (tile) {
+      var anchor = saved[tile.id];
+      var isSaved = !!anchor;
+      if (!anchor) {
+        // A member of a group whose cluster already sits somewhere joins that
+        // cluster; everything else takes its seeded cell in the fallback grid.
+        var affinity = tile.groupId ? groupAffinityOrigin(tile.groupId, placedByGroup) : null;
+        anchor = placer.place(
+          affinity ? placer.cell(0, 0, affinity) : placer.cell(tile.col, tile.row)
+        );
+        recordCluster(tile.groupId, anchor);
+      }
+      return {
+        id: tile.id,
+        kind: 'workspace',
+        ws: tile.ws,
+        groupId: tile.groupId,
+        x: anchor.x,
+        y: anchor.y,
+        saved: isSaved
+      };
+    });
+
+    // 4. District outlines are elastic presentation derived from the anchors
+    //    above. They never rewrite a member's coordinate; a member dragged past
+    //    the old edge simply makes the outline grow (FR-84).
+    var membersByGroup = Object.create(null);
+    nodes.forEach(function (node) {
+      if (!node.groupId) return;
+      (membersByGroup[node.groupId] = membersByGroup[node.groupId] || []).push(node);
+    });
+    var districts = grid.districts.map(function (district) {
+      var anchor = districtAnchors[district.id];
+      var members = membersByGroup[district.id] || [];
+      var minX = anchor.x;
+      var minY = anchor.y;
+      var maxX = anchor.x + CELL_W - 8;
+      var maxY = anchor.y + CELL_H - 10;
+      members.forEach(function (member) {
+        var left = member.x - DISTRICT_PAD_X;
+        var top = member.y - DISTRICT_PAD_Y;
+        if (left < minX) minX = left;
+        if (top < minY) minY = top;
+        if (member.x + CELL_W - 8 > maxX) maxX = member.x + CELL_W - 8;
+        if (member.y + CELL_H - 10 > maxY) maxY = member.y + CELL_H - 10;
+      });
+      return {
+        id: district.id,
+        ws: district.ws,
+        anchorX: anchor.x,
+        anchorY: anchor.y,
+        x: minX,
+        y: minY,
+        width: Math.max(CELL_W - 8, maxX - minX),
+        height: Math.max(CELL_H - 10, maxY - minY),
+        saved: !!saved[district.id]
+      };
+    });
+
+    // 5. The reserved Personal HQ site and the New Workspace pad get stable
+    //    automatic anchors from the same scan, but they are never persisted:
+    //    neither is a workspace, so neither may occupy a workspace ID in the
+    //    saved layout (FR-30).
+    var hqSite = opts.hqSite ? placer.next() : null;
+    var pad = placer.next();
+
+    var bounds = worldBounds(nodes, districts, hqSite, pad);
+    return {
+      nodes: nodes,
+      districts: districts,
+      hqSite: hqSite,
+      pad: pad,
+      bounds: bounds,
+      world: expandWorld(bounds, viewport)
+    };
+  }
+
+  // worldBounds is the tight box around everything currently drawn. It grows
+  // automatically as content is placed further out, and it never adjusts a
+  // coordinate to fit (FR-10).
+  function worldBounds(nodes, districts, hqSite, pad) {
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    function include(x, y, w, h) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + w > maxX) maxX = x + w;
+      if (y + h > maxY) maxY = y + h;
+    }
+    nodes.forEach(function (node) {
+      include(node.x, node.y, CELL_W, CELL_H);
+    });
+    districts.forEach(function (district) {
+      include(district.x, district.y, district.width, district.height);
+    });
+    if (hqSite) include(hqSite.x, hqSite.y, CELL_W, CELL_H);
+    if (pad) include(pad.x, pad.y, CELL_W, CELL_H);
+    if (minX === Infinity) {
+      return { minX: 0, minY: 0, maxX: CELL_W, maxY: CELL_H };
+    }
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+  }
+
+  // expandWorld adds at least one viewport of navigable margin around the
+  // outermost content, so there is always somewhere to pan to and somewhere to
+  // build near an edge (FR-11).
+  function expandWorld(bounds, viewport) {
+    var marginX = Math.max(CELL_W, (viewport && viewport.width) || DEFAULT_VIEWPORT.width);
+    var marginY = Math.max(CELL_H, (viewport && viewport.height) || DEFAULT_VIEWPORT.height);
+    var originX = bounds.minX - marginX;
+    var originY = bounds.minY - marginY;
+    return {
+      originX: originX,
+      originY: originY,
+      width: bounds.maxX - bounds.minX + marginX * 2,
+      height: bounds.maxY - bounds.minY + marginY * 2
     };
   }
 
@@ -486,8 +917,11 @@
     var selected = isSel ? ' is-selected' : '';
     var isMulti = !!multiSelected[ws.id];
     var multiCls = isMulti ? ' is-multi' : '';
-    var left = PAD + tile.col * CELL_W;
-    var top = PAD + tile.row * CELL_H;
+    // Layer coordinates: the node's world anchor with the world layer's origin
+    // already subtracted by canvasHTML. The building itself knows only where it
+    // sits in the world; nothing here reads the container (FR-2).
+    var left = Number(tile.left) || 0;
+    var top = Number(tile.top) || 0;
     var meta =
       agents +
       (agents === 1 ? ' agent' : ' agents') +
@@ -562,8 +996,8 @@
 
   function hqSiteHTML(cell, selectedId, index, view) {
     var isSelected = selectedId === HQ_SITE_ID;
-    var left = PAD + cell.col * CELL_W;
-    var top = PAD + cell.row * CELL_H;
+    var left = Number(cell && cell.left) || 0;
+    var top = Number(cell && cell.top) || 0;
     var status = view.statusLabel || 'Not created';
     return (
       '<button type="button" class="ws-map-tile ws-map-hq-site' +
@@ -602,10 +1036,14 @@
     // A selected GROUP must keep its highlight across a re-mount, not only
     // until the next applySelection call (PRD FR58).
     var isSel = !!selectedId && ws.id === selectedId;
-    var left = PAD + d.col * CELL_W - 12;
-    var top = PAD + d.row * CELL_H - 6;
-    var width = d.w * CELL_W - 8;
-    var height = d.h * CELL_H - 10;
+    // Elastic bounds computed by computeWorldLayout from the group's anchor and
+    // its members' anchors. The outline is presentation only — it grows around
+    // a member that moved and never claims that geometry changed membership
+    // (FR-84, FR-8).
+    var left = Number(d.left) || 0;
+    var top = Number(d.top) || 0;
+    var width = Number(d.width) || CELL_W;
+    var height = Number(d.height) || CELL_H;
     var label = (ws.name || 'Group') + ' group';
     return (
       '<div class="ws-map-district" role="group" aria-label="' +
@@ -640,9 +1078,7 @@
     );
   }
 
-  function padHTML(col, row) {
-    var left = PAD + col * CELL_W;
-    var top = PAD + row * CELL_H;
+  function padHTML(left, top) {
     return (
       '<button type="button" class="ws-map-pad" data-ws-map-create ' +
       'style="left:' +
@@ -655,70 +1091,81 @@
     );
   }
 
-  function occupiedMapCells(layout) {
-    var occupied = Object.create(null);
-    layout.tiles.forEach(function (tile) {
-      occupied[tile.col + ',' + tile.row] = true;
-    });
-    layout.districts.forEach(function (district) {
-      for (var row = district.row; row < district.row + district.h; row++) {
-        for (var col = district.col; col < district.col + district.w; col++) {
-          occupied[col + ',' + row] = true;
-        }
-      }
-    });
-    return occupied;
-  }
-
-  function nextFreeMapCell(occupied, cols) {
-    var maxCols = Math.max(1, cols || MAX_COLS);
-    for (var row = 0; ; row++) {
-      for (var col = 0; col < maxCols; col++) {
-        if (!occupied[col + ',' + row]) return { col: col, row: row };
-      }
-    }
-  }
-
-  function canvasHTML(workspaces, selectedId, maxCols) {
-    var cols = Math.max(1, maxCols || MAX_COLS);
-    var layout = computeMapLayout(workspaces, { maxCols: cols });
-    var parts = [];
-    layout.districts.forEach(function (d) {
-      parts.push(districtHTML(d, selectedId));
-    });
-    layout.tiles.forEach(function (t, i) {
-      parts.push(tileHTML(t, selectedId, i));
-    });
-
-    var occupied = occupiedMapCells(layout);
-    var lastRow = 0;
-    Object.keys(occupied).forEach(function (key) {
-      var row = Number(key.split(',')[1]);
-      if (row > lastRow) lastRow = row;
-    });
-
+  /**
+   * Draw the world.
+   *
+   * The canvas is the viewport; the layer inside it holds every building at its
+   * world anchor with the layer's origin subtracted. Keeping that one
+   * subtraction in a single place is what lets the same anchors be rendered by
+   * a scrolled layer today and by a panned/zoomed camera later without touching
+   * a single node coordinate.
+   */
+  function canvasHTML(workspaces, selectedId, options) {
+    var opts = options || {};
     var site = hqSiteView(hqStatus);
-    if (site.show) {
-      var hqCell = nextFreeMapCell(occupied, cols);
-      occupied[hqCell.col + ',' + hqCell.row] = true;
-      if (hqCell.row > lastRow) lastRow = hqCell.row;
-      parts.push(hqSiteHTML(hqCell, selectedId, layout.tiles.length, site));
+    var layout = computeWorldLayout(workspaces, {
+      positions: layoutState.positions,
+      viewport: opts.viewport,
+      hqSite: site.show
+    });
+    // The layer is drawn around the content itself, one pad in from the
+    // outermost building. The much larger navigable world computed alongside it
+    // (content plus a viewport of margin, FR-11) is what the camera will be
+    // allowed to roam over; drawing that whole expanse now would be a mostly
+    // empty layer with the content parked off-screen in the middle of it.
+    var origin = { x: layout.bounds.minX - PAD, y: layout.bounds.minY - PAD };
+    var layerWidth = layout.bounds.maxX - layout.bounds.minX + PAD * 2;
+    var layerHeight = layout.bounds.maxY - layout.bounds.minY + PAD * 2;
+    function toLayer(point) {
+      return { left: point.x - origin.x, top: point.y - origin.y };
     }
 
+    var parts = [];
+    layout.districts.forEach(function (district) {
+      var placed = toLayer(district);
+      parts.push(
+        districtHTML(
+          {
+            ws: district.ws,
+            left: placed.left,
+            top: placed.top,
+            width: district.width,
+            height: district.height
+          },
+          selectedId
+        )
+      );
+    });
+    layout.nodes.forEach(function (node, index) {
+      var placed = toLayer(node);
+      parts.push(tileHTML({ ws: node.ws, left: placed.left, top: placed.top }, selectedId, index));
+    });
+    if (layout.hqSite) {
+      parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
+    }
     // Keep the ordinary create affordance after all real and reserved sites.
-    var padCell = nextFreeMapCell(occupied, cols);
-    if (padCell.row > lastRow) lastRow = padCell.row;
-    parts.push(padHTML(padCell.col, padCell.row));
+    var pad = toLayer(layout.pad);
+    parts.push(padHTML(pad.left, pad.top));
 
-    var height = PAD * 2 + (lastRow + 1) * CELL_H;
+    var settling = layoutState.status === 'loading' ? ' is-settling' : '';
+    var readOnly = layoutState.status === 'unavailable' ? ' is-readonly' : '';
     return {
       html:
-        '<div class="ws-map-canvas" role="group" aria-label="Workspaces map" style="height:' +
-        height +
+        '<div class="ws-map-canvas' +
+        settling +
+        readOnly +
+        '" role="group" aria-label="Workspaces map"' +
+        (settling ? ' aria-busy="true"' : '') +
+        '>' +
+        '<div class="ws-map-world" style="width:' +
+        Math.round(layerWidth) +
+        'px;height:' +
+        Math.round(layerHeight) +
         'px">' +
         parts.join('') +
-        '</div>',
-      empty: layout.tiles.length === 0
+        '</div></div>',
+      empty: layout.nodes.length === 0,
+      layout: layout
     };
   }
 
@@ -1066,11 +1513,11 @@
     );
   }
 
-  function shellHTML(stats, workspaces, selectedId, maxCols, options) {
+  function shellHTML(stats, workspaces, selectedId, viewport, options) {
     var site = hqSiteView(hqStatus);
     var canvas =
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show
-        ? canvasHTML(workspaces, selectedId, maxCols).html
+        ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
         : emptyCanvasHTML();
     // Cockpit mode: the workspace-area header and the persistent context rail
     // already own the title, the stat readout, New Workspace, and the selected
@@ -1138,47 +1585,25 @@
     );
   }
 
-  // ---------- responsive columns ----------
-
-  // Grid column count from the theatre's usable width, capped at MAX_COLS so
-  // wide screens keep the compact command-table look. Unknown/zero width
-  // (e.g. measured while hidden) falls back to the cap. The theatre clips
-  // overflow, so tiles MUST wrap into rows that fit — a fixed column count
-  // cuts tiles off on narrow windows with no way to scroll to them.
-  function computeMaxCols(theatreWidth) {
-    if (!theatreWidth || theatreWidth <= 0) return MAX_COLS;
-    return Math.max(1, Math.min(MAX_COLS, Math.floor((theatreWidth - PAD * 2) / CELL_W)));
-  }
-
-  function measureMaxCols(container) {
+  // ---------- viewport measurement ----------
+  //
+  // The container's size is used for exactly one thing: how much navigable
+  // margin to leave around the content (FR-11). It never decides where a
+  // building goes, which is why a resize cannot move one (FR-13). The old
+  // responsive column count that used to reflow the whole map on every
+  // breakpoint is gone.
+  function measureViewport(container) {
     var width = (container && container.clientWidth) || 0;
-    if (width <= 0) return MAX_COLS;
-    // Beside the theatre sits the 338px overview column + 18px grid gap,
-    // except in the stacked narrow layout where the theatre spans full width —
-    // and except in cockpit mode, where the overview column does not exist at
-    // all (the persistent context rail replaces it), so reserving its width
-    // would cost the map a whole column for nothing.
+    var height = (container && container.clientHeight) || 0;
+    if (width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
+    // Beside the theatre sits the 338px overview column + 18px grid gap, except
+    // in the stacked narrow layout and in cockpit mode, where the theatre spans
+    // the full width.
     var theatre = hideChromeMode || isNarrowViewport() ? width : width - 338 - 18;
-    return computeMaxCols(theatre);
+    return { width: Math.max(CELL_W, theatre), height: Math.max(CELL_H, height) };
   }
 
-  // Re-lay-out when a window resize changes how many columns fit. mount() is
-  // idempotent and preserves the selection, so a plain re-mount is safe.
   var lastMount = null; // { container, state }
-  var lastMaxCols = 0;
-  var resizeTimer = null;
-  var resizeBound = false;
-  function handleResize() {
-    if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {
-      resizeTimer = null;
-      if (!lastMount || !lastMount.container) return;
-      if (!lastMount.container.isConnected || lastMount.container.hidden) return;
-      if (measureMaxCols(lastMount.container) !== lastMaxCols) {
-        mount(lastMount.container, lastMount.state);
-      }
-    }, 150);
-  }
 
   // Reuse the page's existing create flow for every create affordance, rather
   // than opening a second Create Workspace path (PRD FR105). The cockpit's
@@ -1533,6 +1958,11 @@
    */
   function mount(container, state) {
     if (!container) return;
+    // Start the layout load before anything is drawn so the first settled paint
+    // shows saved coordinates rather than fallback placement that then jumps
+    // (FR-16). Whichever surface mounts first pays for the request; the other
+    // reuses the same module-level result (FR-4).
+    ensureLayoutLoaded();
     // Read the cockpit mode flags before any HTML is built — the exported
     // builders below consult them.
     selectOnlyMode = !!(state && state.selectOnly);
@@ -1576,15 +2006,14 @@
       if (!findWs(workspaces, id)) delete multiSelected[id];
     });
 
-    var maxCols = measureMaxCols(container);
+    var viewport = measureViewport(container);
     lastMount = { container: container, state: state };
-    lastMaxCols = maxCols;
 
     container.innerHTML = shellHTML(
       computeStats(workspaces),
       workspaces,
       selectedId,
-      maxCols,
+      viewport,
       state
     );
     bindCreate(container);
@@ -1595,17 +2024,17 @@
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
     bindSelBar(container);
-
-    if (!resizeBound && typeof window.addEventListener === 'function') {
-      window.addEventListener('resize', handleResize);
-      resizeBound = true;
-    }
+    // No resize listener: world coordinates are viewport-independent, so a
+    // resize changes only how much of the world is visible — never where a
+    // building is (FR-13, FR-46).
   }
 
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
     container.innerHTML = '';
+    // Clearing lastMount is what makes a layout response still in flight a
+    // no-op when it lands: settleLayout has nothing to repaint.
     lastMount = null;
     multiSelected = Object.create(null);
   }
@@ -1636,16 +2065,37 @@
       applySelection(container, workspaces || [], id || '', options);
     },
     computeLayout: computeMapLayout,
+    // The coordinate engine: saved anchors, deterministic fallback placement,
+    // elastic districts, content bounds, and world sizing, all pure so they can
+    // be asserted without a browser (FR-123).
+    computeWorldLayout: computeWorldLayout,
     computeStats: computeStats,
-    computeMaxCols: computeMaxCols,
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,
     hqOverviewHTML: hqOverviewHTML,
-    nextFreeMapCell: nextFreeMapCell,
     setHQStatus: setHQStatus,
+    // The one reconciled layout state both surfaces read. Exposed so Home and
+    // the /workspaces launcher can reflect "positions cannot be saved right
+    // now" without each keeping its own copy (FR-4, FR-105).
+    getLayoutState: function () {
+      return {
+        status: layoutState.status,
+        revision: layoutState.revision,
+        snapToGrid: layoutState.snapToGrid,
+        readOnly: layoutState.status !== 'ready',
+        positions: Object.assign(Object.create(null), layoutState.positions),
+        viewport: layoutState.viewport ? Object.assign({}, layoutState.viewport) : null
+      };
+    },
+    // Test-only seam for the persisted layout, so coordinate behavior can be
+    // asserted without a network round-trip.
+    _setLayoutForTest: function (payload, status) {
+      applyLayoutPayload(payload || {});
+      layoutState.status = status || 'ready';
+    },
     // Test-only seam for the lazily-read setup status, so the overview's setup
     // row can be asserted without a network round-trip.
     _setSetupStatusForTest: function (workspaceId, status) {

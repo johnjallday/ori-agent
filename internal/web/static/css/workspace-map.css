@@ -301,11 +301,35 @@
 .ws-map-compass b {
   color: var(--ws-faction);
 }
-/* canvas holds absolutely-positioned tiles + districts */
+/* The canvas is the map's viewport onto the world; .ws-map-world inside it is
+   the layer every building is positioned in. Buildings carry WORLD coordinates
+   (logical units), and the layer carries the offset between world space and the
+   screen — so a window resize changes what is visible and never where anything
+   is (#292 FR-2, FR-13, FR-31). */
 .ws-map-canvas {
   position: relative;
   z-index: 5;
   width: 100%;
+  /* Content is laid out at a fixed world rhythm rather than reflowed to fit, so
+     a narrow window must be able to reach the rest of it. */
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ws-map-world {
+  position: relative;
+}
+/* While the saved layout is still loading, the world is held back rather than
+   painted at fallback positions and then jumped to saved ones (FR-16). */
+.ws-map-canvas.is-settling .ws-map-world {
+  opacity: 0;
+}
+.ws-map-canvas .ws-map-world {
+  transition: opacity 0.12s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-canvas .ws-map-world {
+    transition: none;
+  }
 }
 .ws-map-canvas--empty {
   display: grid;

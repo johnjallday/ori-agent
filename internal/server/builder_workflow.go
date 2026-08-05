@@ -319,6 +319,9 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// runtimes, and the wizard registers their adapters.
 	b.wireWorkspaceCapabilities()
 	b.wireSetupWizard()
+	// The coordinate map resolves node ownership through the composed workspace
+	// store, so it wires here for the same reason (#292 FR-99).
+	b.wireWorkspaceMap()
 
 	// Same reason: the mailbox read/link/send runtime depends on the workspace
 	// store, so it is wired here rather than in initializeHandlers (Phase 17).
